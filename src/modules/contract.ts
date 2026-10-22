@@ -802,14 +802,14 @@ export interface ModuleAlarmContext {
     elementKind: string,
     payload: Readonly<Record<string, unknown>>,
   ) => Promise<void>;
-  /** Sends scheduled automated output through the shared channel limit with an occurrence claim. */
+  /** Sends scheduled output with an occurrence claim; automated output uses the shared channel limit by default. */
   sendChat: (
     text: string,
     idempotencyKey: string,
     attributions?: readonly string[],
     stillValid?: () => Promise<boolean>,
     target?: ChatOutputTarget,
-    options?: { replyToMessageId?: string; sourceBroadcasterUserId?: string },
+    options?: { replyToMessageId?: string; sourceBroadcasterUserId?: string; automated?: boolean },
   ) => Promise<{
     sent: boolean;
     reason: string | null;
@@ -1076,7 +1076,7 @@ export interface ModulePointsAccess {
     join: (roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown) => Promise<PointJoinResult>;
     answer: (roundId: string, operationId: string, accountId: string, login: string, graceS: number, messageAt: number) => Promise<PointRoundAnswerResult>;
     resolve: (roundId: string, settlement: { kind: string; params: unknown }) => Promise<PointsApplyResult>;
-    accept: (roundId: string, operationId: string, accountId: string, login: string) => Promise<PointsApplyResult>;
+    accept: (roundId: string, operationId: string, accountId: string, login: string, replyToMessageId?: string) => Promise<PointsApplyResult>;
     cancel: (roundId: string) => Promise<number>;
     cancelOpenRounds: (revision: number) => Promise<number>;
     setGate: (closed: boolean, revision: number, lastDisabledRevision?: number | null) => Promise<{ applied: boolean }>;
@@ -1821,6 +1821,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   chatCommands?: readonly ModuleChatCommandDeclaration[];
   /** Effective command tokens for settings-configurable command modules. */
   chatCommandNames?: (settings: unknown) => readonly string[];
+  /** Root settings fields that store the configurable command tokens for SQL write guards. */
+  chatCommandSettingsFields?: readonly string[];
   /** The module is always enabled for every released channel and cannot be disabled. */
   mandatory?: boolean;
   /** Localized explanation shown when this module cannot be disabled. */
@@ -1934,6 +1936,7 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     target?: ChatOutputTarget;
     replyToMessageId?: string;
     sourceBroadcasterUserId?: string;
+    automated?: boolean;
   } | null>;
   formatPointRoundAnnouncement?: (
     context: ModuleAlarmContext,
@@ -1944,7 +1947,10 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     target?: ChatOutputTarget;
     replyToMessageId?: string;
     sourceBroadcasterUserId?: string;
+    automated?: boolean;
   } | null>;
+  /** Retries this module's result after shared automated-output limit rejections until delivered. */
+  retryPointRoundRateLimitedResults?: boolean;
   /** Hourly module-owned cleanup run by the host through the registry. */
   scheduledMaintenance?: (db: D1Database, now: string) => Promise<void>;
   /** Generic event-time sources that scheduled modules may select. */

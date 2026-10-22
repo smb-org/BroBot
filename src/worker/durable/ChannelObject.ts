@@ -2805,7 +2805,8 @@ export class ChannelObject extends DurableObject<Env> {
         const claimBeforePost = async (): Promise<boolean | "rate_limited"> => {
           if (!await validateOutput()) return false;
           return await claimModuleAlarmSend(this.ctx.storage, idempotencyKey, Date.now(),
-            /^round:[^:]+:resolve$/u.test(idempotencyKey) ? POINTS_ANNOUNCE_AMBIGUOUS_MS : undefined);
+            /^round:[^:]+:resolve$/u.test(idempotencyKey) ? POINTS_ANNOUNCE_AMBIGUOUS_MS : undefined,
+            { automated: options?.automated !== false });
         };
         const afterPost = async (delivery: "sent" | "rejected" | "ambiguous" | "not_attempted"): Promise<void> => {
           if (delivery !== "not_attempted") await finishModuleAlarmSend(this.ctx.storage, idempotencyKey, delivery, Date.now());
@@ -3313,8 +3314,8 @@ export class ChannelObject extends DurableObject<Env> {
         answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
           this.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
         resolve: (roundId, settlement) => this.resolveGameRound(moduleId, roundId, settlement),
-        accept: (roundId, operationId, accountId, login) =>
-          this.acceptGameRound(moduleId, roundId, operationId, accountId, login),
+        accept: (roundId, operationId, accountId, login, replyToMessageId) =>
+          this.acceptGameRound(moduleId, roundId, operationId, accountId, login, replyToMessageId),
         cancel: (roundId) => this.cancelGameRound(moduleId, roundId),
         cancelOpenRounds: (revision) => this.cancelOpenGameRounds(moduleId, revision),
         setGate: (closed, revision, lastDisabledRevision) =>
@@ -3757,13 +3758,16 @@ export class ChannelObject extends DurableObject<Env> {
     operationId: string,
     accountId: string,
     login: string,
+    replyToMessageId?: string,
   ): Promise<PointsApplyResult> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
     assertPointAccountId(accountId);
     await this.reconcilePointModuleActivation(moduleId, true);
-    const requestHash = await pointPayloadHash({ moduleId, roundId, operationId, kind: "duel_accept", accountId, login });
+    const requestHash = await pointPayloadHash({
+      moduleId, roundId, operationId, kind: "duel_accept", accountId, login, replyToMessageId: replyToMessageId ?? null,
+    });
     const settlement = { kind: "duel", params: { mode: "accept" } };
     const resolveOperationId = `round:${roundId}:resolve`;
     const resolveHash = await pointPayloadHash({ moduleId, operationId: resolveOperationId, kind: "resolve", roundId, settlement });
@@ -3782,6 +3786,7 @@ export class ChannelObject extends DurableObject<Env> {
           Date.now(),
           new Date().toISOString(),
           POINT_SETTLEMENTS,
+          replyToMessageId,
         );
         if (MODULES.find((module) => module.id === moduleId)?.formatPointRoundResult === undefined) {
           recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
@@ -4240,6 +4245,7 @@ export class ChannelObject extends DurableObject<Env> {
       {
         ...(formatted?.replyToMessageId === undefined ? {} : { replyToMessageId: formatted.replyToMessageId }),
         ...(formatted?.sourceBroadcasterUserId === undefined ? {} : { sourceBroadcasterUserId: formatted.sourceBroadcasterUserId }),
+        ...(formatted?.automated === undefined ? {} : { automated: formatted.automated }),
       },
     );
     const sendReturnedAt = Date.now();
@@ -4252,6 +4258,8 @@ export class ChannelObject extends DurableObject<Env> {
 
   private async deliverPointRoundResult(roundId: string): Promise<void> {
     const initialRound = pointRoundRow(this.ctx.storage.sql, roundId);
+    const initialModule = MODULES.find((candidate) => candidate.id === initialRound?.module_id);
+    const retryRateLimited = initialModule?.retryPointRoundRateLimitedResults === true;
     if (initialRound?.state === "resolved" && initialRound.resolve_delivery_state === "sending") {
       const claim = await readModuleAlarmSendClaim(this.ctx.storage, `round:${roundId}:resolve`);
       const now = Date.now();
@@ -4389,6 +4397,7 @@ export class ChannelObject extends DurableObject<Env> {
         {
           ...(formatted.replyToMessageId === undefined ? {} : { replyToMessageId: formatted.replyToMessageId }),
           ...(formatted.sourceBroadcasterUserId === undefined ? {} : { sourceBroadcasterUserId: formatted.sourceBroadcasterUserId }),
+          ...(formatted.automated === undefined ? {} : { automated: formatted.automated }),
         },
       );
     } catch (error) {
@@ -4417,7 +4426,7 @@ export class ChannelObject extends DurableObject<Env> {
     const permanentlySuppressed = delivery.reason === "module_disabled";
     const deliveryStatus = permanentlySuppressed ? "suppressed" : pointRoundDeliveryOutcome(delivery);
     this.ctx.storage.transactionSync(() => {
-      const state = recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, deliveryStatus);
+      const state = recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, deliveryStatus, retryRateLimited);
       if (state === "pending") this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now() + POINTS_ANNOUNCE_RETRY_MS);
       else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
     });

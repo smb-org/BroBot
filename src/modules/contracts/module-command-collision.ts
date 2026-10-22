@@ -6,8 +6,92 @@ export interface ModuleCommandCollisionOptions {
   includeCustomCommands?: boolean;
 }
 
+export interface CommandCollisionWriteGuard {
+  sql: string;
+  values: readonly unknown[];
+}
+
 const normalizedTokens = (tokens: readonly string[]): string[] =>
   tokens.map((token) => token.trim().toLocaleLowerCase("en-US")).filter((token) => token.length > 0);
+
+export const combineCommandCollisionWriteGuards = (
+  ...guards: readonly CommandCollisionWriteGuard[]
+): CommandCollisionWriteGuard => ({
+  sql: guards.map((guard) => guard.sql).filter((sql) => sql.length > 0).join(" "),
+  values: guards.flatMap((guard) => guard.values),
+});
+
+/** Adds the other active modules' command tokens to the mutation's own SQL predicate. */
+export const moduleCommandCollisionWriteGuard = (
+  channelId: string,
+  candidateTokens: readonly string[],
+  modules: readonly BotModule[],
+  options: Pick<ModuleCommandCollisionOptions, "excludeModuleId"> = {},
+): CommandCollisionWriteGuard => {
+  const candidates = normalizedTokens(candidateTokens);
+  if (candidates.length === 0) return { sql: "", values: [] };
+  const candidateJson = JSON.stringify(candidates);
+  const conditions: string[] = [];
+  const values: unknown[] = [channelId, options.excludeModuleId ?? ""];
+  for (const module of modules) {
+    if (module.id === options.excludeModuleId) continue;
+    const predicates: string[] = [];
+    const predicateValues: unknown[] = [];
+    const staticTokens = normalizedTokens((module.chatCommands ?? []).map(({ name }) => name));
+    if (staticTokens.length > 0) {
+      predicates.push(`EXISTS (
+        SELECT 1 FROM json_each(?) AS candidate
+         WHERE candidate.value IN (${staticTokens.map(() => "?").join(", ")})
+      )`);
+      predicateValues.push(candidateJson, ...staticTokens);
+    }
+    for (const field of module.chatCommandSettingsFields ?? []) {
+      if (!/^[A-Za-z][A-Za-z0-9_]*$/u.test(field)) continue;
+      predicates.push(`EXISTS (
+        SELECT 1 FROM json_each(?) AS candidate
+         WHERE candidate.value = lower(json_extract(
+           CASE WHEN json_valid(active.settings) THEN active.settings ELSE '{}' END,
+           '$.${field}'
+         ))
+      )`);
+      predicateValues.push(candidateJson);
+    }
+    if (predicates.length === 0) continue;
+    conditions.push(`(active.module_id = ? AND (${predicates.join(" OR ")}))`);
+    values.push(module.id, ...predicateValues);
+  }
+  if (conditions.length === 0) return { sql: "", values: [] };
+  return {
+    sql: `AND NOT EXISTS (
+      SELECT 1 FROM channel_modules AS active
+       WHERE active.channel_id = ? AND active.enabled = 1 AND active.module_id <> ?
+         AND (${conditions.join(" OR ")})
+    )`,
+    values,
+  };
+};
+
+/** Adds enabled custom command names and aliases to the mutation's SQL predicate. */
+export const textCommandCollisionWriteGuard = (
+  channelId: string,
+  candidateTokens: readonly string[],
+): CommandCollisionWriteGuard => {
+  const candidates = normalizedTokens(candidateTokens);
+  if (candidates.length === 0) return { sql: "", values: [] };
+  const candidateJson = JSON.stringify(candidates);
+  return {
+    sql: `AND NOT EXISTS (
+      SELECT 1 FROM text_commands AS existing
+       WHERE existing.channel_id = ? AND existing.enabled = 1
+         AND ('!' || lower(existing.command_name) IN (SELECT value FROM json_each(?))
+           OR EXISTS (
+             SELECT 1 FROM json_each(CASE WHEN json_valid(existing.aliases_json) THEN existing.aliases_json ELSE '[]' END) AS alias
+              WHERE '!' || lower(alias.value) IN (SELECT value FROM json_each(?))
+           ))
+    )`,
+    values: [channelId, candidateJson, candidateJson],
+  };
+};
 
 export const effectiveModuleCommandTokens = (module: BotModule, settings: unknown): string[] => {
   const configured = module.chatCommandNames?.(settings) ?? [];

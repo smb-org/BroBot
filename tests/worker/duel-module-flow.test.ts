@@ -137,7 +137,7 @@ describe("duel module worker flow", () => {
     await forcePointAlarm(object, challenge.roundId);
     expect(sendChat).toHaveBeenCalledOnce();
     expect(sendChat.mock.calls[0]?.[0]).toContain("challenges @moonmoss to a 100 point duel");
-    expect(sendChat.mock.calls[0]?.[5]).toMatchObject({ replyToMessageId: "fictional-challenge" });
+    expect(sendChat.mock.calls[0]?.[5]).toMatchObject({ replyToMessageId: "fictional-challenge", automated: false });
 
     await processDuelMessage(eventFor(channelId, "!yes", "viewer_ben", "moonmoss", "fictional-accept"), contextFor(points));
     await forcePointAlarm(object, challenge.roundId);
@@ -150,6 +150,55 @@ describe("duel module worker flow", () => {
     expect(sendChat).toHaveBeenCalledTimes(2);
     expect(sendChat.mock.calls[1]?.[0]).toContain("wins +100 points;");
     expect(sendChat.mock.calls[1]?.[0]).toContain("loses −100 points");
+    expect(sendChat.mock.calls[1]?.[5]).toMatchObject({ replyToMessageId: "fictional-accept", automated: false });
+  });
+
+  it("keeps a house result pending through repeated limiter rejections until delivery", async () => {
+    const channelId = `duel-house-result-limiter-${crypto.randomUUID()}`;
+    const { object, points } = await setup(channelId);
+    await addBalance(points, "viewer_anna", "frostfern");
+    let resultAttempts = 0;
+    const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>()
+      .mockImplementation((_text, _key, _attributions, _valid, _target, options) => {
+        if (options?.automated !== false && resultAttempts < 7) {
+          resultAttempts += 1;
+          return Promise.resolve({ sent: false, retryable: true, reason: "rate_limited", delivery: "rate_limited" });
+        }
+        if (options?.automated !== false) resultAttempts += 1;
+        return Promise.resolve({ sent: true, retryable: false, reason: null, delivery: "delivered" });
+      });
+    await runPointObject(object, (target) => {
+      const runtime = target as unknown as { moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext };
+      const original = runtime.moduleAlarmContext.bind(target);
+      vi.spyOn(runtime, "moduleAlarmContext").mockImplementation((...args) => ({ ...original(...args), sendChat }));
+    });
+
+    await processDuelMessage(eventFor(channelId, "!duel 100", "viewer_anna", "frostfern", "fictional-house-limiter"), contextFor(points));
+    const round = (await points.rounds.listOpen())[0];
+    if (round === undefined) throw new Error("challenge_not_open");
+    await forcePointAlarm(object, round.roundId);
+    await expireRound(object, round.roundId);
+
+    for (let attempt = 1; attempt < 8; attempt += 1) {
+      await forcePointAlarm(object, round.roundId);
+    }
+
+    const state = await runPointObject(object, (_target, durableState) => ({
+      round: durableState.storage.sql.exec<{ state: string; resolve_delivery_state: string; resolve_delivery_attempts: number }>(
+        "SELECT state, resolve_delivery_state, resolve_delivery_attempts FROM game_rounds WHERE round_id = ?", round.roundId,
+      ).one(),
+      resolutionCount: durableState.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM point_operations WHERE operation_id = ?", `round:${round.roundId}:resolve`,
+      ).one().count,
+    }));
+
+    expect(state.round.state).toBe("resolved");
+    expect(state.round.resolve_delivery_state).toBe("delivered");
+    expect(state.round.resolve_delivery_attempts).toBe(1);
+    expect(state.resolutionCount).toBe(1);
+    expect(resultAttempts).toBe(8);
+    expect(sendChat).toHaveBeenCalledTimes(9);
+    expect(sendChat.mock.calls.at(-1)?.[5]).not.toHaveProperty("automated", false);
   });
 
   it("refunds an expired targeted challenge without a result line [protects=targeted expiry restores the exact challenger balance silently; fails_when=the targeted expiry creates a result line or leaves escrow funded; no_claim=the challenge line is the only chat send and alarm transport is mocked]", async () => {
@@ -359,7 +408,9 @@ describe("duel module worker flow", () => {
       },
     } as unknown as ModulePointsAccess;
     await processDuelMessage(eventFor("fictional_channel", "!yes", "viewer_ben", "moonmoss", "fictional-targeted-accept"), contextFor(points));
-    expect(points.rounds.accept).toHaveBeenCalledWith("fictional-targeted-new", "msg:fictional-targeted-accept", "viewer_ben", "moonmoss");
+    expect(points.rounds.accept).toHaveBeenCalledWith(
+      "fictional-targeted-new", "msg:fictional-targeted-accept", "viewer_ben", "moonmoss", "fictional-targeted-accept",
+    );
   });
 
   it("skips other viewers' targeted rounds and accepts the oldest eligible open duel [protects=targeted invitations for others are skipped while public challenges retain oldest-first selection; fails_when=the speaker steals another target's invitation or accepts a newer public round; no_claim=listOpen ordering comes from the worker fixture, not SQLite collation]", async () => {
@@ -374,7 +425,9 @@ describe("duel module worker flow", () => {
       },
     } as unknown as ModulePointsAccess;
     await processDuelMessage(eventFor("fictional_channel", "!yes", "viewer_ben", "moonmoss", "fictional-public-accept"), contextFor(points));
-    expect(points.rounds.accept).toHaveBeenCalledWith("fictional-public-old", "msg:fictional-public-accept", "viewer_ben", "moonmoss");
+    expect(points.rounds.accept).toHaveBeenCalledWith(
+      "fictional-public-old", "msg:fictional-public-accept", "viewer_ben", "moonmoss", "fictional-public-accept",
+    );
   });
 
   it("throttles errors and claims challenge cooldown only after successful escrow [protects=failed challenges leave no challenge cooldown and a viewer gets at most one error reply per minute; fails_when=a failed stake consumes cooldown or a second throttled error emits; no_claim=the 60-second interval uses the real points Durable Object game_cooldowns table]", async () => {

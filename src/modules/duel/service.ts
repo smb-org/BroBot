@@ -147,8 +147,8 @@ export const processDuelMessage = async (
   const candidate = await openCandidates(context, accountId, now);
   if (candidate === null) return throttledError(context, event.settings, accountId, messageId, "noOpenChallenge");
   try {
-    const accepted = await context.points.rounds.accept(candidate.roundId, `msg:${messageId}`, accountId, login);
-    return accepted.replayed ? { actions: [], diagnostics: [] } : { actions: [], diagnostics: [] };
+    await context.points.rounds.accept(candidate.roundId, `msg:${messageId}`, accountId, login, messageId);
+    return { actions: [], diagnostics: [] };
   } catch (error) {
     const code = error instanceof Error ? error.message : "unknown";
     if (code === "round_closed" || code === "not_eligible" || code === "operation_conflict") return { actions: [], diagnostics: [] };

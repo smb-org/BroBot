@@ -66,6 +66,7 @@ export interface DuelRoundData {
   chatTarget: ChatOutputTarget | null;
   sourceBroadcasterUserId: string | null;
   challengeMessageId: string;
+  acceptMessageId?: string;
   fightText: string;
   botFightText: string;
   texts: DuelTexts;

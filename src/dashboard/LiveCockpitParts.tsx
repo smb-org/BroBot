@@ -63,7 +63,6 @@ export const LiveCockpitTiles = ({
   onRefresh: () => void;
 }): ReactElement => {
   const labels = dashboardTexts().liveCockpit;
-  const running = snapshots.find((snapshot) => snapshot.kind === "vote" || snapshot.kind === "votekick");
   const upcoming = snapshots
     .filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "upcoming" }> => snapshot.kind === "upcoming" && Date.parse(snapshot.at) > now)
     .sort((left, right) => Date.parse(left.at) - Date.parse(right.at))
@@ -71,6 +70,7 @@ export const LiveCockpitTiles = ({
   const recentVotekicks = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "votekick_recent" }> => snapshot.kind === "votekick_recent");
   const duels = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "duel" }> => snapshot.kind === "duel");
   const visibleDuels = duels.slice(0, 3);
+  const running = snapshots.find((snapshot) => snapshot.kind === "vote" || snapshot.kind === "votekick");
   const [busy, setBusy] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; target: string } | null>(null);
   const [cancelError, setCancelError] = useState<string | undefined>();
@@ -249,7 +249,7 @@ export const LiveCockpitTiles = ({
           onConfirm={() => { void doCancelDuel(); }} onCancel={() => { if (!busy) setDuelCancelTarget(null); }}
           pending={busy} danger {...(duelCancelError === undefined ? {} : { error: duelCancelError })} />
       </>}
-      {running === undefined ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noActionRunning}</p> : running.kind === "vote"
+      {running === undefined && duels.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noActionRunning}</p> : running === undefined ? null : running.kind === "vote"
         ? <div className="live-vote-tile" data-testid="live-vote-tile">
           <header className="live-vote-tile__header">
             <div><span>{labels.voteType}</span><h3>{running.title?.trim() || labels.voteType}</h3></div>

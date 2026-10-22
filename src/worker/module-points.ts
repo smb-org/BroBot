@@ -73,7 +73,8 @@ export const modulePoints = (
       answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
         object.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
       resolve: (roundId, settlement) => object.resolveGameRound(moduleId, roundId, settlement),
-      accept: (roundId, operationId, accountId, login) => object.acceptGameRound(moduleId, roundId, operationId, accountId, login),
+      accept: (roundId, operationId, accountId, login, replyToMessageId) =>
+        object.acceptGameRound(moduleId, roundId, operationId, accountId, login, replyToMessageId),
       cancel: (roundId) => object.cancelGameRound(moduleId, roundId),
       cancelOpenRounds: (revision) => object.cancelOpenGameRounds(moduleId, revision),
       setGate: (closed, revision, lastDisabledRevision) => object.setGameModuleGate(moduleId, closed, revision, lastDisabledRevision),

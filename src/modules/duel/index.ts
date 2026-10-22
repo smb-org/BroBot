@@ -14,6 +14,7 @@ const roundData = (value: unknown): DuelRoundData | null => {
       !(data.targetLogin === null || typeof data.targetLogin === "string") || !Number.isSafeInteger(data.stake) ||
       typeof data.acceptCommand !== "string" || (data.language !== "de" && data.language !== "en") ||
       typeof data.challengeMessageId !== "string" || typeof data.fightText !== "string" || typeof data.botFightText !== "string" ||
+      (data.acceptMessageId !== undefined && typeof data.acceptMessageId !== "string") ||
       typeof data.botEnabled !== "boolean" || record(data.texts) === null) return null;
   return data as unknown as DuelRoundData;
 };
@@ -30,6 +31,7 @@ const formatAnnouncement = async (
     ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
     ...(data.chatTarget === null ? {} : { target: data.chatTarget }),
     replyToMessageId: data.challengeMessageId,
+    automated: false,
     ...(data.sourceBroadcasterUserId === null ? {} : { sourceBroadcasterUserId: data.sourceBroadcasterUserId }),
   };
 };
@@ -50,7 +52,7 @@ const formatResult = async (context: ModuleAlarmContext, round: ModulePointRound
     text: rendered.text,
     ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
     ...(data.chatTarget === null ? {} : { target: data.chatTarget }),
-    replyToMessageId: data.challengeMessageId,
+    ...(data.acceptMessageId === undefined ? {} : { replyToMessageId: data.acceptMessageId, automated: false }),
     ...(data.sourceBroadcasterUserId === null ? {} : { sourceBroadcasterUserId: data.sourceBroadcasterUserId }),
   };
 };
@@ -77,10 +79,12 @@ export const duelModule: BotModule<typeof duelSettingsSchema> = {
   eventSubTypes: ["channel.chat.message"],
   dryRunSilentReason: "round_answers",
   pointRoundCancellationNotice: false,
+  retryPointRoundRateLimitedResults: true,
   chatCommandNames: (settings) => {
     const parsed = duelSettingsSchema.safeParse(settings);
     return parsed.success ? [parsed.data.challengeCommand, parsed.data.acceptCommand] : [];
   },
+  chatCommandSettingsFields: ["challengeCommand", "acceptCommand"],
   formatPointRoundAnnouncement: formatAnnouncement,
   formatPointRoundResult: formatResult,
   handleEvent: processDuelMessage,

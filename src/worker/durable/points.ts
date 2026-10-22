@@ -1473,6 +1473,7 @@ export const acceptPointRoundSync = (
   nowMs: number,
   now: string,
   settlements: ReadonlyMap<string, PointSettlement>,
+  acceptMessageId?: string,
 ): PointApplyInternalResult => {
   assertPointRoundId(roundId);
   assertPointAccountId(accountId);
@@ -1494,6 +1495,11 @@ export const acceptPointRoundSync = (
       !Number.isSafeInteger(stake) || (stake as number) < 1 || login.length === 0) throw new Error("invalid_round_data");
   if (accountId === challengerId || (targetId !== null && accountId !== targetId)) throw new Error("not_eligible");
   if (pointKindFor(accountId) !== "viewer") throw new Error("invalid_stake");
+  if (acceptMessageId !== undefined) {
+    if (acceptMessageId.length === 0 || acceptMessageId.length > 256) throw new Error("invalid_operation_id");
+    data.acceptMessageId = acceptMessageId;
+    sql.exec("UPDATE game_rounds SET data_json = ? WHERE round_id = ? AND state = 'open'", JSON.stringify(data), roundId);
+  }
   const participant = sql.exec<{ account_id: string }>(
     "SELECT account_id FROM game_round_participants WHERE round_id = ? AND account_id = ?",
     roundId,
@@ -1953,11 +1959,22 @@ export function recordPointRoundResolutionDeliverySync(
   sql: PointsSql,
   roundId: string,
   status: PointRoundDeliveryStatus | "suppressed",
+  retryRateLimited = false,
 ): RoundRow["resolve_delivery_state"] | null {
   const round = pointRoundRow(sql, roundId);
   if (round === null || round.state !== "resolved") return null;
   if (round.resolve_delivery_state === "suppressed") return "suppressed";
-  const disposition = status === "suppressed" ? "park" : pointRoundDeliveryDisposition(status, round.resolve_delivery_attempts);
+  if (status === "rate_limited" && retryRateLimited) {
+    sql.exec(
+      `UPDATE game_rounds
+          SET resolve_delivery_state = 'pending', resolve_delivery_attempts = MAX(0, resolve_delivery_attempts - 1)
+        WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state != 'suppressed'`,
+      roundId,
+    );
+    return "pending";
+  }
+  const disposition = status === "suppressed" ? "park"
+    : pointRoundDeliveryDisposition(status, round.resolve_delivery_attempts);
   const state = status === "suppressed"
     ? "suppressed"
     : disposition === "retry" ? "pending"

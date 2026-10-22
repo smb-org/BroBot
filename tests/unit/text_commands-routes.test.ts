@@ -1016,4 +1016,76 @@ describe("Text commands panel", () => {
     await expect(database.prepare("SELECT enabled FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'duel'").first())
       .resolves.toEqual({ enabled: 0 });
   });
+
+  it("keeps malformed legacy module settings from breaking atomic command writes", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES ('kanal-a', 'duel', 1, ?, 1)",
+    ).bind("{malformed").run();
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "arena", text: "A custom reply", cooldownSeconds: 0,
+      }),
+      environmentFor(database),
+    );
+
+    expect(response.status).toBe(201);
+  });
+
+  it("reserves module and custom command names atomically across their concurrent writes", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertEnabledDuel();
+
+    const originalBatch = database.batch.bind(database);
+    let batchCount = 0;
+    let releaseBatches!: () => void;
+    const bothBatchesReady = new Promise<void>((resolve) => { releaseBatches = resolve; });
+    const interleavedDatabase = new Proxy(database, {
+      get(target, property) {
+        if (property === "batch") {
+          return async (statements: Parameters<TestD1Database["batch"]>[0]) => {
+            batchCount += 1;
+            if (batchCount === 2) releaseBatches();
+            await bothBatchesReady;
+            return originalBatch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        if (typeof value === "function") return value.bind(target) as unknown;
+        return value;
+      },
+    });
+    const environment = { ...environmentFor(database), DB: interleavedDatabase as unknown as D1Database } as Env;
+    const settings = { ...duelSettingsForLanguage("en"), challengeCommand: "!arena" };
+    const [moduleResponse, commandResponse] = await Promise.all([
+      panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/kanal-a/modules/duel/settings", "PATCH", { revision: 1, settings }),
+        environment,
+      ),
+      panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+          name: "arena", text: "A custom reply", cooldownSeconds: 0,
+        }),
+        environment,
+      ),
+    ]);
+
+    const storedSettings = await database.prepare(
+      "SELECT settings FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'duel'",
+    ).first<{ settings: string }>();
+    const storedCommand = await database.prepare(
+      "SELECT command_name FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'arena'",
+    ).first<{ command_name: string }>();
+    const moduleClaimsArena = storedSettings !== null &&
+      (JSON.parse(storedSettings.settings) as { challengeCommand: string }).challengeCommand === "!arena";
+
+    expect(moduleClaimsArena && storedCommand !== null).toBe(false);
+    expect([moduleResponse.status, commandResponse.status].filter((status) => status === 200 || status === 201)).toHaveLength(1);
+    expect([moduleResponse.status, commandResponse.status]).toContain(409);
+  });
 });
