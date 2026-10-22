@@ -1393,14 +1393,17 @@ export class ChannelObject extends DurableObject<Env> {
       const channelId = this.ownChannelId();
       if (channelId === null) return { result: { result: "denied" }, mirrorChanged: false, auditOperationId: null };
       const authorization = authorizeModuleMutation(channelId, actor, new Date().toISOString());
-      const authorized = await this.env.DB.prepare(
-        `SELECT 1 AS skip_authorized FROM channels WHERE channel_id = ? ${authorization.sql}`,
-      ).bind(channelId, ...authorization.values).first<{ skip_authorized: number }>();
-      if (authorized === null) return { result: { result: "denied" }, mirrorChanged: false, auditOperationId: null };
-      const timerModule = await this.env.DB.prepare(
-        "SELECT enabled AS timers_module_enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'timers'",
-      ).bind(channelId).first<{ timers_module_enabled: number }>();
-      if (timerModule?.timers_module_enabled !== 1) {
+      const authorizationAndModule = await this.env.DB.prepare(
+        `SELECT timer_module.enabled AS timers_module_enabled
+           FROM channels
+           LEFT JOIN channel_modules AS timer_module
+             ON timer_module.channel_id = channels.channel_id AND timer_module.module_id = 'timers'
+          WHERE channels.channel_id = ? ${authorization.sql}`,
+      ).bind(channelId, ...authorization.values).first<{ timers_module_enabled: number | null }>();
+      if (authorizationAndModule === null) {
+        return { result: { result: "denied" }, mirrorChanged: false, auditOperationId: null };
+      }
+      if (authorizationAndModule.timers_module_enabled !== 1) {
         return { result: { result: "nothing_planned" }, mirrorChanged: false, auditOperationId: null };
       }
 
@@ -1691,7 +1694,8 @@ export class ChannelObject extends DurableObject<Env> {
         const sameIdentity = plan.identity === null
           ? entry.plannedOccurrence === null
           : sameTimerAlarmIdentity(entry.plannedOccurrence?.identity, plan.identity);
-        if (!configChanged && sameIdentity && entry.refreshAt === plan.refreshAt) continue;
+        const refreshEffectivePlan = relevantInputChanged && skippedOccurrenceIsPlanned;
+        if (!configChanged && sameIdentity && entry.refreshAt === plan.refreshAt && !refreshEffectivePlan) continue;
         this.setTimerPlanSync(entry, plan, state.stream, inputs);
         this.persistTimerScheduleSync(state, config.id, entry);
         changedTimerIds.push(config.id);

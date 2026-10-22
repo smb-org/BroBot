@@ -5,6 +5,7 @@ import type {
   ModuleAlarmDefinition,
   ModuleAlarmIdentity,
   ModuleExternalFetchBudget,
+  ResolvedModuleEventTime,
 } from "../../src/modules/contract";
 import { MODULES } from "../../src/modules/registry";
 import {
@@ -15,6 +16,7 @@ import {
   TIMER_DURABLE_STATE_KEY,
   type DurableTimerConfig,
   type DurableTimerState,
+  type TimerScheduleInputs,
 } from "../../src/modules/timers/durable";
 import { timerOccurrenceKey } from "../../src/modules/timers/domain";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
@@ -31,6 +33,9 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
   failNextMirrorWrite: () => void;
   failNextAuditWrite: () => void;
   setSkipAuthorizationAllowed: (allowed: boolean) => void;
+  skipAccessCheckQueries: () => readonly string[];
+  pauseNextTimerModuleCheck: () => { started: Promise<void>; release: () => void };
+  revokeAfterNextTimerModuleCheck: () => void;
   setTimerModuleEnabled: (enabled: boolean) => void;
   auditOperationIds: Set<string>;
   setLegacyTimerActivityBaseline: (
@@ -40,6 +45,7 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
     nextRunStreamId?: string | null,
   ) => void;
   setTimeZone: (timeZone: string) => void;
+  setTimerScheduleInputs: (timeZone: string, eventTimes: readonly ResolvedModuleEventTime[]) => void;
   setCommittedStream: (stream: DurableTimerState["stream"]) => void;
   pauseNextTimeZoneRead: () => { started: Promise<void>; release: () => void };
   pauseTimerConfigRead: () => { started: Promise<void>; release: () => void };
@@ -56,6 +62,10 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
   let auditWriteFailures = 0;
   let skipAuthorizationAllowed = true;
   let timerModuleEnabled = true;
+  const skipAccessCheckQueries: string[] = [];
+  let skipModuleCheckGate: { wait: Promise<void>; markStarted: () => void } | null = null;
+  let revokeAfterModuleCheck = false;
+  let transactionSyncHook: (() => void) | null = null;
   const auditOperationIds = new Set<string>();
   let timeZone = "Europe/Berlin";
   let committedStream: DurableTimerState["stream"] | null = null;
@@ -137,7 +147,12 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
     delete: remove,
     list,
     transaction,
-    transactionSync: <Result>(closure: () => Result): Result => closure(),
+    transactionSync: <Result>(closure: () => Result): Result => {
+      const hook = transactionSyncHook;
+      transactionSyncHook = null;
+      hook?.();
+      return closure();
+    },
     kv: {
       get: (key: string): unknown => values.get(key),
       put: (key: string, value: unknown): void => { values.set(key, value); },
@@ -225,10 +240,24 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
     },
     first: () => {
       if (/SELECT 1 AS skip_authorized FROM channels/iu.test(query)) {
+        skipAccessCheckQueries.push(query);
         return Promise.resolve(skipAuthorizationAllowed ? { skip_authorized: 1 } : null);
       }
-      if (/FROM channel_modules/iu.test(query) && /timers_module_enabled/iu.test(query)) {
-        return Promise.resolve({ timers_module_enabled: timerModuleEnabled ? 1 : 0 });
+      if (/channel_modules/iu.test(query) && /timers_module_enabled/iu.test(query)) {
+        skipAccessCheckQueries.push(query);
+        const readModuleState = () => {
+          if (/FROM channels/iu.test(query) && !skipAuthorizationAllowed) return null;
+          if (revokeAfterModuleCheck) {
+            revokeAfterModuleCheck = false;
+            transactionSyncHook = () => { skipAuthorizationAllowed = false; };
+          }
+          return { timers_module_enabled: timerModuleEnabled ? 1 : 0 };
+        };
+        const gate = skipModuleCheckGate;
+        if (gate === null) return Promise.resolve(readModuleState());
+        skipModuleCheckGate = null;
+        gate.markStarted();
+        return gate.wait.then(readModuleState);
       }
       if (/FROM channel_stream_state/iu.test(query)) {
         const stream = committedStream ?? stateOf(values).stream;
@@ -276,6 +305,14 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
   Reflect.set(object, "timerScheduleReconciliationQueue", Promise.resolve());
   Reflect.set(object, "timerScheduleInitialization", null);
   Reflect.set(object, "timerOccurrenceQueues", new Map());
+  let scheduleInputsOverride: Pick<TimerScheduleInputs, "timeZone" | "eventTimes"> | null = null;
+  const originalTimerScheduleInputs = Reflect.get(object, "timerScheduleInputs") as (
+    configs: readonly DurableTimerConfig[], at: number,
+  ) => Promise<TimerScheduleInputs>;
+  Reflect.set(object, "timerScheduleInputs", async (configs: readonly DurableTimerConfig[], at: number) =>
+    scheduleInputsOverride === null
+      ? await originalTimerScheduleInputs.call(object, configs, at)
+      : { now: at, ...scheduleInputsOverride });
   const schedule = emptyDurableTimerState();
   schedule.initialized = true;
   schedule.stream = stream;
@@ -290,12 +327,25 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
     failNextMirrorWrite: () => { mirrorWriteFailures += 1; },
     failNextAuditWrite: () => { auditWriteFailures += 1; },
     setSkipAuthorizationAllowed: (allowed) => { skipAuthorizationAllowed = allowed; },
+    skipAccessCheckQueries: () => [...skipAccessCheckQueries],
+    pauseNextTimerModuleCheck: () => {
+      let releaseCheck!: () => void;
+      let markStarted!: () => void;
+      const wait = new Promise<void>((resolve) => { releaseCheck = resolve; });
+      const started = new Promise<void>((resolve) => { markStarted = resolve; });
+      skipModuleCheckGate = { wait, markStarted };
+      return { started, release: releaseCheck };
+    },
+    revokeAfterNextTimerModuleCheck: () => { revokeAfterModuleCheck = true; },
     setTimerModuleEnabled: (enabled) => { timerModuleEnabled = enabled; },
     auditOperationIds,
     setLegacyTimerActivityBaseline: (timerId, count, streamId, nextRunStreamId = streamId) => {
       legacyActivityBaselines.set(timerId, { count, streamId, nextRunStreamId });
     },
     setTimeZone: (nextTimeZone) => { timeZone = nextTimeZone; },
+    setTimerScheduleInputs: (nextTimeZone, eventTimes) => {
+      scheduleInputsOverride = { timeZone: nextTimeZone, eventTimes };
+    },
     setCommittedStream: (stream) => { committedStream = stream; },
     pauseNextTimeZoneRead: () => {
       let releaseRead!: () => void;
@@ -338,6 +388,12 @@ const timerConfig = (id: string, trigger: DurableTimerConfig["trigger"]): Durabl
   chatTarget: "all_chats",
   trigger,
   revision: 1,
+});
+
+const resolvedEventTime = (id: string, at: number): ResolvedModuleEventTime => ({
+  id,
+  label: { de: "Event", en: "Event" },
+  at: new Date(at).toISOString(),
 });
 
 const stateOf = (values: Map<string, unknown>): DurableTimerState => {
@@ -1136,6 +1192,73 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     expect(harness.mirrors.get(config.id)?.nextRunAt).toBe(new Date(expectedNext).toISOString());
   });
 
+  it("recomputes and publishes the effective occurrence when event times change around a skipped occurrence", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const harness = channelObjectFor({ state: "offline", streamId: null, startedAt: null, generation: 1 });
+    const config = timerConfig("skip-event-time-change", {
+      type: "before_event", sourceId: "schedule.release", minutes: 1,
+    });
+    const firstEvent = resolvedEventTime("schedule.release", start + 10 * 60_000);
+    const initialEvents = [firstEvent, resolvedEventTime("schedule.release", start + 20 * 60_000)];
+    harness.setDatabaseConfig(config);
+    harness.setTimerScheduleInputs("Europe/Berlin", initialEvents);
+    await harness.object.upsertTimerConfig(config);
+    const initialOccurrence = dueOccurrence(harness.values, config.id);
+    expect(initialOccurrence.identity.deadline).toBe(start + 9 * 60_000);
+    const actor = { userId: "operator-user", sessionId: "operator-session" };
+    const scheduler = harness.object as unknown as {
+      skipNextTimerOccurrence(timerId: string, revision: number, actor: { userId: string; sessionId: string }): Promise<{ result: string }>;
+    };
+    await scheduler.skipNextTimerOccurrence(config.id, config.revision, actor);
+    const publishTimerResources = vi.fn().mockResolvedValue(undefined);
+    Reflect.set(harness.object, "notifyCommittedPanelResources", publishTimerResources);
+
+    harness.setTimerScheduleInputs("Europe/Berlin", [firstEvent,
+      resolvedEventTime("schedule.release", start + 30 * 60_000)]);
+    await harness.object.reconcileTimerSchedules("event_times");
+
+    const entry = stateOf(harness.values).timers[config.id];
+    expect(entry?.skippedOccurrence?.identity.deadline).toBe(initialOccurrence.identity.deadline);
+    expect(entry?.effectiveNextOccurrence?.identity.deadline).toBe(start + 29 * 60_000);
+    expect(harness.mirrors.get(config.id)?.nextRunAt).toBe(new Date(start + 29 * 60_000).toISOString());
+    expect(publishTimerResources).toHaveBeenCalledOnce();
+  });
+
+  it("recomputes and publishes the effective occurrence when timezone-resolved events change", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const harness = channelObjectFor({ state: "offline", streamId: null, startedAt: null, generation: 1 });
+    const config = timerConfig("skip-timezone-event-change", {
+      type: "before_event", sourceId: "sun.sunset", minutes: 1,
+    });
+    const firstEvent = resolvedEventTime("sun.sunset", start + 10 * 60_000);
+    const initialEvents = [firstEvent, resolvedEventTime("sun.sunset", start + 20 * 60_000)];
+    harness.setDatabaseConfig(config);
+    harness.setTimerScheduleInputs("Europe/Berlin", initialEvents);
+    await harness.object.upsertTimerConfig(config);
+    const initialOccurrence = dueOccurrence(harness.values, config.id);
+    const actor = { userId: "operator-user", sessionId: "operator-session" };
+    const scheduler = harness.object as unknown as {
+      skipNextTimerOccurrence(timerId: string, revision: number, actor: { userId: string; sessionId: string }): Promise<{ result: string }>;
+    };
+    await scheduler.skipNextTimerOccurrence(config.id, config.revision, actor);
+    const publishTimerResources = vi.fn().mockResolvedValue(undefined);
+    Reflect.set(harness.object, "notifyCommittedPanelResources", publishTimerResources);
+
+    harness.setTimerScheduleInputs("UTC", [firstEvent,
+      resolvedEventTime("sun.sunset", start + 35 * 60_000)]);
+    await harness.object.reconcileTimerSchedules("channel_time_zone");
+
+    const entry = stateOf(harness.values).timers[config.id];
+    expect(entry?.skippedOccurrence?.identity.deadline).toBe(initialOccurrence.identity.deadline);
+    expect(entry?.effectiveNextOccurrence?.identity.deadline).toBe(start + 34 * 60_000);
+    expect(harness.mirrors.get(config.id)?.nextRunAt).toBe(new Date(start + 34 * 60_000).toISOString());
+    expect(publishTimerResources).toHaveBeenCalledOnce();
+  });
+
   it("does not lose time_of_day or before_event plans when stream state changes", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-10-12T12:00:00.000Z");
@@ -1646,5 +1769,53 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     await expect(skipping).resolves.toEqual({ result: "nothing_planned" });
     expect(stateOf(harness.values).timers[config.id]?.skippedOccurrence ?? null).toBeNull();
     expect(Object.values(stateOf(harness.values).pendingSkipAudits ?? {})).toHaveLength(0);
+  });
+
+  it("rejects a skip when access is revoked while the final authorization check is in flight", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const harness = channelObjectFor({ state: "online", streamId: "stream-1", startedAt: new Date(start).toISOString(), generation: 1 });
+    const config = timerConfig("skip-revoked-during-final-check", { type: "interval", live: { minutes: 10 } });
+    await harness.object.upsertTimerConfig(config);
+    const check = harness.pauseNextTimerModuleCheck();
+    const scheduler = harness.object as unknown as {
+      skipNextTimerOccurrence(timerId: string, revision: number, actor: { userId: string; sessionId: string }): Promise<{ result: string }>;
+    };
+    const skipping = scheduler.skipNextTimerOccurrence(config.id, config.revision, {
+      userId: "operator-user", sessionId: "operator-session",
+    });
+    await check.started;
+
+    harness.setSkipAuthorizationAllowed(false);
+    check.release();
+
+    await expect(skipping).resolves.toEqual({ result: "denied" });
+    expect(stateOf(harness.values).timers[config.id]?.skippedOccurrence ?? null).toBeNull();
+    expect(Object.values(stateOf(harness.values).pendingSkipAudits ?? {})).toHaveLength(0);
+  });
+
+  it("uses one final check as the skip boundary when access is revoked afterward", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const harness = channelObjectFor({ state: "online", streamId: "stream-1", startedAt: new Date(start).toISOString(), generation: 1 });
+    const config = timerConfig("skip-revoked-after-final-check", { type: "interval", live: { minutes: 10 } });
+    await harness.object.upsertTimerConfig(config);
+    harness.revokeAfterNextTimerModuleCheck();
+    const scheduler = harness.object as unknown as {
+      skipNextTimerOccurrence(timerId: string, revision: number, actor: { userId: string; sessionId: string }): Promise<{ result: string }>;
+    };
+
+    await expect(scheduler.skipNextTimerOccurrence(config.id, config.revision, {
+      userId: "operator-user", sessionId: "operator-session",
+    })).resolves.toMatchObject({ result: "skipped" });
+
+    const [finalCheck] = harness.skipAccessCheckQueries();
+    expect(harness.skipAccessCheckQueries()).toHaveLength(1);
+    expect(finalCheck).toContain("actor_session.revoked_at IS NULL");
+    expect(finalCheck).toContain("actor.channel_id = ?");
+    expect(finalCheck).toContain("timer_module.enabled AS timers_module_enabled");
+    expect(stateOf(harness.values).timers[config.id]?.skippedOccurrence).toBeDefined();
   });
 });
