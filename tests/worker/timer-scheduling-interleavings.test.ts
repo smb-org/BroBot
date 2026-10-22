@@ -410,6 +410,31 @@ const dueOccurrence = (values: Map<string, unknown>, timerId: string) => {
   if (occurrence === null || occurrence === undefined) throw new Error(`Timer ${timerId} has no planned occurrence.`);
   return occurrence;
 };
+const expectFollowingOccurrenceToRequireFreshActivity = async (
+  harness: Pick<ReturnType<typeof channelObjectFor>, "object" | "values">,
+  timerId: string,
+  revision: number,
+  start: number,
+): Promise<void> => {
+  const entry = stateOf(harness.values).timers[timerId];
+  expect(entry?.activityBaselines.live).toBe(5);
+  expect(entry?.lastRunAt).toBe(new Date(start + 10 * 60_000).toISOString());
+  const sends: string[] = [];
+  const context = timerAlarmContext((_text, idempotencyKey) => {
+    sends.push(idempotencyKey);
+    return Promise.resolve({ sent: true, reason: null, retryable: false });
+  });
+  const skipped = dueOccurrence(harness.values, timerId);
+  vi.setSystemTime(skipped.identity.deadline);
+  await harness.object.runTimerOccurrence(context, `timer:${timerId}`, skipped.identity.deadline,
+    revision, skipped.identity, skipped.sequence);
+  const following = dueOccurrence(harness.values, timerId);
+  expect(following.identity.deadline).toBe(start + 30 * 60_000);
+  vi.setSystemTime(following.identity.deadline);
+  await harness.object.runTimerOccurrence(context, `timer:${timerId}`, following.identity.deadline,
+    revision, following.identity, following.sequence);
+  expect(sends).toEqual([]);
+};
 
 const alarmTableKey = "channel:alarm_schedule";
 const plannedCount = (values: Map<string, unknown>): number =>
@@ -1792,9 +1817,12 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     const start = Date.parse("2026-10-12T12:00:00.000Z");
     vi.setSystemTime(start);
     const harness = channelObjectFor(onlineStream("stream-1", 1, start));
-    const config = timerConfig("skip-renamed-during-send", { type: "interval", live: { minutes: 10 } });
+    const config = timerConfig("skip-renamed-during-send", {
+      type: "interval", live: { minutes: 10, minimumMessages: 5 },
+    });
     harness.setDatabaseConfig(config);
     await harness.object.upsertTimerConfig(config);
+    for (let message = 0; message < 5; message += 1) await harness.object.recordChatActivity();
     const first = dueOccurrence(harness.values, config.id);
     vi.setSystemTime(first.identity.deadline);
     const sendEntered = deferred();
@@ -1851,6 +1879,7 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     expect(dueOccurrence(harness.values, config.id).identity.deadline).toBe(start + 20 * 60_000);
     expect(stateOf(harness.values).timers[config.id]?.skippedOccurrence?.identity.deadline)
       .toBe(start + 20 * 60_000);
+    if (sent) await expectFollowingOccurrenceToRequireFreshActivity(harness, config.id, renamed.revision, start);
   });
 
   it("advances past a persisted sent receipt when restarting before occurrence completion", async () => {
@@ -1859,9 +1888,12 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     vi.setSystemTime(start);
     const stream = onlineStream("stream-1", 1, start);
     const original = channelObjectFor(stream);
-    const config = timerConfig("skip-restart-after-send", { type: "interval", live: { minutes: 10 } });
+    const config = timerConfig("skip-restart-after-send", {
+      type: "interval", live: { minutes: 10, minimumMessages: 5 },
+    });
     original.setDatabaseConfig(config);
     await original.object.upsertTimerConfig(config);
+    for (let message = 0; message < 5; message += 1) await original.object.recordChatActivity();
     const first = dueOccurrence(original.values, config.id);
     vi.setSystemTime(first.identity.deadline);
     const receiptPersisted = deferred();
@@ -1910,6 +1942,7 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     expect(dueOccurrence(restarted.values, config.id).identity.deadline).toBe(start + 20 * 60_000);
     expect(stateOf(restarted.values).timers[config.id]?.skippedOccurrence?.identity.deadline)
       .toBe(start + 20 * 60_000);
+    await expectFollowingOccurrenceToRequireFreshActivity(restarted, config.id, config.revision, start);
   });
 
   it("rechecks the actor after a queued send and leaves the occurrence untouched when access was revoked", async () => {

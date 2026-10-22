@@ -1020,6 +1020,8 @@ export class ChannelObject extends DurableObject<Env> {
     inputs: TimerScheduleInputs,
   ): void {
     const skippedOccurrence = entry.skippedOccurrence;
+    const previousPlannedOccurrence = entry.plannedOccurrence;
+    const inFlightClaim = entry.inFlightClaim;
     const skipAuditOperationId = entry.skipAuditOperationId ?? null;
     const skipReceipts = timerSkipReceiptsForSchedule(entry, inputs.now, stream);
     if (skippedOccurrence !== null && skippedOccurrence !== undefined &&
@@ -1044,7 +1046,10 @@ export class ChannelObject extends DurableObject<Env> {
     entry.plannedOccurrence = plan.identity === null
       ? null
       : { identity: plan.identity, sequence: entry.planSequence } satisfies TimerOccurrence;
-    entry.inFlightClaim = null;
+    if (!sameTimerScheduledOccurrence(inFlightClaim?.occurrence, previousPlannedOccurrence) ||
+        !sameTimerScheduledOccurrence(inFlightClaim?.occurrence, entry.plannedOccurrence)) {
+      entry.inFlightClaim = null;
+    }
     entry.skipReceipts = timerSkipReceiptsForSchedule(entry, inputs.now, stream);
     const plannedOccurrence = entry.plannedOccurrence;
     const matchingSkipReceipt = plannedOccurrence === null
@@ -1382,7 +1387,9 @@ export class ChannelObject extends DurableObject<Env> {
           } else {
             entry.plannedOccurrence = persistedOccurrence;
             entry.planSequence = persistedOccurrence.sequence;
-            entry.inFlightClaim = null;
+            if (!sameTimerScheduledOccurrence(entry.inFlightClaim?.occurrence, persistedOccurrence)) {
+              entry.inFlightClaim = null;
+            }
             entry.refreshAt = null;
             entry.mirrorSequence += 1;
           }
@@ -1460,6 +1467,34 @@ export class ChannelObject extends DurableObject<Env> {
           const sendClaim = await readModuleAlarmSendClaim(this.ctx.storage, timerSkipReceiptKey(occurrence));
           if (this.timerScheduleInputGeneration !== inputGeneration) continue;
           if (sendClaim !== null) {
+            if (sendClaim.status === "sent") {
+              const completionClaim = this.ctx.storage.transactionSync(() => {
+                const state = this.timerScheduleStateSync();
+                const entry = state.timers[timerId];
+                const consumedOccurrence = entry?.plannedOccurrence;
+                if (entry === undefined || consumedOccurrence === null || consumedOccurrence === undefined ||
+                    !sameTimerScheduledOccurrence(consumedOccurrence, occurrence)) return null;
+                const retainedClaim = entry.inFlightClaim;
+                const activityClaim = retainedClaim !== null &&
+                  sameTimerScheduledOccurrence(retainedClaim.occurrence, consumedOccurrence)
+                  ? retainedClaim
+                  : {
+                    occurrence: consumedOccurrence,
+                    token: crypto.randomUUID(),
+                    activityCount: state.activityCounts[consumedOccurrence.identity.state === "offline" ? "offline" : "live"],
+                  };
+                if (retainedClaim !== activityClaim) entry.inFlightClaim = activityClaim;
+                return {
+                  config: entry.config,
+                  occurrence: consumedOccurrence,
+                  token: activityClaim.token,
+                  activityCount: activityClaim.activityCount,
+                };
+              });
+              if (completionClaim === null) continue;
+              await this.finishTimerOccurrence(timerId, completionClaim, true, inputs);
+              continue;
+            }
             const reconciled = this.ctx.storage.transactionSync(() => {
               if (this.timerScheduleInputGeneration !== inputGeneration) return false;
               const state = this.timerScheduleStateSync();
@@ -1468,7 +1503,6 @@ export class ChannelObject extends DurableObject<Env> {
               if (entry === undefined || consumedOccurrence === null || consumedOccurrence === undefined ||
                   !sameTimerScheduledOccurrence(consumedOccurrence, occurrence)) return false;
               const now = Date.now();
-              if (sendClaim.status === "sent") entry.lastRunAt = new Date(now).toISOString();
               if (entry.config.trigger.type === "stream_start") {
                 entry.completedStreamId = consumedOccurrence.identity.streamId;
               }
@@ -2167,8 +2201,8 @@ export class ChannelObject extends DurableObject<Env> {
       const entry = state.timers[timerId];
       if (entry === undefined || entry.config.revision !== claim.config.revision ||
           entry.inFlightClaim?.token !== claim.token ||
-          !sameTimerOccurrence(entry.inFlightClaim.occurrence, claim.occurrence) ||
-          !sameTimerOccurrence(entry.plannedOccurrence, claim.occurrence)) return false;
+          !sameTimerScheduledOccurrence(entry.inFlightClaim.occurrence, claim.occurrence) ||
+          !sameTimerScheduledOccurrence(entry.plannedOccurrence, claim.occurrence)) return false;
       const trigger = entry.config.trigger;
       if (sent && trigger.type === "interval" &&
           (claim.occurrence.identity.state === "live" || claim.occurrence.identity.state === "offline")) {
