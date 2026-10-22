@@ -95,7 +95,14 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --user 1001
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -104,24 +111,6 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Playwright-Version ermitteln
-        id: pw-version
-        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
-      # Playwright-Tests laufen headless (kein `headless: false` in
-      # playwright.config.ts), deshalb reicht die schlanke Headless-Shell statt
-      # des vollen Chromium-Browsers — kleinerer Download, weniger OS-Pakete.
-      - name: Playwright-Browser-Cache
-        id: playwright-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-shell-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
-      - name: Playwright-Browser installieren
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: pnpm exec playwright install --with-deps --only-shell chromium
-      - name: Playwright-OS-Abhängigkeiten installieren
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: pnpm exec playwright install-deps chromium-headless-shell
       - name: Lokale Testkonfiguration erzeugen
         run: |
           key() { openssl rand -base64 32 | tr '+/' '-_' | tr -d '='; }
@@ -131,12 +120,12 @@ jobs:
               -e "s|^SESSION_COOKIE_KEYS=.*|SESSION_COOKIE_KEYS={\"active\":{\"id\":\"ci-cookie-v1\",\"key\":\"$(key)\"},\"retired\":[]}|" \
               -e "s|^OVERLAY_TOKEN_PEPPER=.*|OVERLAY_TOKEN_PEPPER=$(key)|" \
               .dev.vars.example > .dev.vars
-      - run: pnpm run test:e2e
+      - run: pnpm run test:e2e --shard=${{ matrix.shard }}/3
       - name: Browser-Artefakte hochladen
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             playwright-report
             test-results

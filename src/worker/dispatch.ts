@@ -333,6 +333,7 @@ export const needsActiveChatterTracking = (
 const commandRouteMatchesModule = (
   module: BotModule,
   event: Pick<ModuleEvent, "payload" | "subscriptionType">,
+  settings?: unknown,
 ): boolean => {
   if (event.subscriptionType !== "channel.chat.message") return false;
   const message = event.payload.message;
@@ -342,7 +343,9 @@ const commandRouteMatchesModule = (
   const commandName = text.trim().split(/\s+/u, 1)[0]?.toLowerCase();
   if (commandName === undefined || !commandName.startsWith("!")) return false;
   if (module.id === "text_commands") return true;
-  return module.chatCommands?.some((command) => command.name.toLowerCase() === commandName) === true;
+  const configured = module.chatCommandNames?.(settings) ?? [];
+  return module.chatCommands?.some((command) => command.name.toLowerCase() === commandName) === true ||
+    configured.some((name) => name.toLowerCase() === commandName);
 };
 
 // The `ursache`/`typ`/`meldung` detail keys below stay: they land in
@@ -1039,7 +1042,7 @@ export const dispatchEventSubNotification = async (
   for (const { module, settings } of matches) {
     const diagnostics: ModuleDiagnostic[] = [];
     let result: ModuleResult | null = null;
-    const isCommandResponseHandler = commandRouteMatchesModule(module, event);
+    let isCommandResponseHandler = false;
 
     try {
       const activation = dispatchState.activations.find((candidate) => candidate.moduleId === module.id);
@@ -1048,6 +1051,7 @@ export const dispatchEventSubNotification = async (
         await points.rounds.setGate(!activation.enabled, activation.revision, activation.lastDisabledRevision);
       }
       const validatedSettings: unknown = module.settingsSchema.parse(JSON.parse(settings));
+      isCommandResponseHandler = commandRouteMatchesModule(module, event, validatedSettings);
       const moduleEvent: ModuleEvent = {
         channelId: event.channelId,
         subscriptionType: event.subscriptionType,
@@ -1106,6 +1110,10 @@ export const dispatchEventSubNotification = async (
             botUserId,
             lookupUserByLogin: async (login) => {
               const user = await fetchTwitchUserByLogin(fetcher, environment as unknown as Env, login, "app");
+              return user === null ? null : { userId: user.userId, login: user.login, displayName: user.displayName };
+            },
+            lookupUserByLoginWithBotToken: async (login) => {
+              const user = await fetchTwitchUserByLogin(fetcher, environment as unknown as Env, login, "bot");
               return user === null ? null : { userId: user.userId, login: user.login, displayName: user.displayName };
             },
             isChannelModerator: (userId) => isTwitchChannelModerator(environment, event.channelId, userId, fetcher),

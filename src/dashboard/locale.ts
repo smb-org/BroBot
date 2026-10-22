@@ -1412,6 +1412,17 @@ export interface DashboardTexts {
     liveDataLoading: string;
     liveDataUnavailable: string;
     noActionRunning: string;
+    duels: string;
+    duelOpen: string;
+    duelChallenge: (challenger: string, target: string | null) => string;
+    duelStake: (stake: string) => string;
+    duelEndsAt: (time: string) => string;
+    duelMore: (count: string) => string;
+    duelCancel: string;
+    duelCancelTitle: string;
+    duelCancelDescription: string;
+    duelCanceled: string;
+    duelCancelFailed: string;
     voteType: string;
     votekickType: string;
     voteEndsIn: (time: string) => string;
@@ -1865,6 +1876,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "blitz_round.question.updated": ({ actor, object }) => `${actor} änderte die Blitzfrage ${object}`,
         "blitz_round.question.deleted": ({ actor, object }) => `${actor} löschte die Blitzfrage ${object}`,
         "blitz_round.started": ({ actor, object }) => `${actor} startete die Blitzrunde ${object}`,
+        "duel.round.cancelled": ({ actor, object }) => `${actor} brach das Duell ${object} ab und erstattete die Einsätze`,
         "text_library.block.created": ({ actor, object }) => `${actor} erstellte den Textbaustein ${object}`,
         "text_library.block.updated": ({ actor, object }) => `${actor} änderte den Textbaustein ${object}`,
         "text_library.block.renamed": ({ actor, from, to, object }) => `${actor} benannte den Textbaustein ${from ?? object} in ${to ?? object} um`,
@@ -2049,6 +2061,17 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       liveDataLoading: "Live-Daten werden geladen.",
       liveDataUnavailable: "Live-Daten sind gerade nicht verfügbar.",
       noActionRunning: "Noch keine Aktion läuft.",
+      duels: "Offene Duelle",
+      duelOpen: "Offen",
+      duelChallenge: (challenger, target) => target === null ? `${challenger} gegen den Chat` : `${challenger} gegen ${target}`,
+      duelStake: (stake) => `Einsatz ${stake} Punkte`,
+      duelEndsAt: (time) => `Endet ${time}`,
+      duelMore: (count) => `+${count} weitere`,
+      duelCancel: "Runde abbrechen",
+      duelCancelTitle: "Runde abbrechen?",
+      duelCancelDescription: "Einsätze werden erstattet.",
+      duelCanceled: "Einsätze erstattet.",
+      duelCancelFailed: "Duell konnte nicht abgebrochen werden.",
       voteType: "Abstimmung",
       votekickType: "Votekick",
       voteEndsIn: (time) => `noch ${time}`,
@@ -2492,6 +2515,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         "blitz_round.question.updated": ({ actor, object }) => `${actor} updated Blitz question ${object}`,
         "blitz_round.question.deleted": ({ actor, object }) => `${actor} deleted Blitz question ${object}`,
         "blitz_round.started": ({ actor, object }) => `${actor} started Blitz Round ${object}`,
+        "duel.round.cancelled": ({ actor, object }) => `${actor} cancelled duel ${object} and refunded its stakes`,
         "text_library.block.created": ({ actor, object }) => `${actor} created text block ${object}`,
         "text_library.block.updated": ({ actor, object }) => `${actor} updated text block ${object}`,
         "text_library.block.renamed": ({ actor, from, to, object }) => `${actor} renamed text block ${from ?? object} to ${to ?? object}`,
@@ -2673,6 +2697,17 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       liveDataLoading: "Loading live data.",
       liveDataUnavailable: "Live data is unavailable right now.",
       noActionRunning: "No action is running.",
+      duels: "Open duels",
+      duelOpen: "Open",
+      duelChallenge: (challenger, target) => target === null ? `${challenger} vs. chat` : `${challenger} vs. ${target}`,
+      duelStake: (stake) => `Stake ${stake} points`,
+      duelEndsAt: (time) => `Closes ${time}`,
+      duelMore: (count) => `+${count} more`,
+      duelCancel: "Cancel round",
+      duelCancelTitle: "Cancel round?",
+      duelCancelDescription: "Stakes will be refunded.",
+      duelCanceled: "Stakes refunded.",
+      duelCancelFailed: "The duel could not be cancelled.",
       voteType: "Vote",
       votekickType: "Votekick",
       voteEndsIn: (time) => `${time} left`,
@@ -3724,6 +3759,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "blitz_round.question.updated": "Blitzfrage geändert",
     "blitz_round.question.deleted": "Blitzfrage gelöscht",
     "blitz_round.started": "Blitzrunde gestartet",
+    "duel.round.cancelled": "Duell abgebrochen und Einsätze erstattet",
     "text_library.block.created": "Textbaustein erstellt",
     "text_library.block.updated": "Textbaustein aktualisiert",
     "text_library.block.renamed": "Textbaustein umbenannt",
@@ -3798,6 +3834,7 @@ const auditActionTexts: LocaleCatalog<Record<AuditAction, string>> = {
     "blitz_round.question.updated": "Blitz question updated",
     "blitz_round.question.deleted": "Blitz question deleted",
     "blitz_round.started": "Blitz Round started",
+    "duel.round.cancelled": "Duel cancelled and stakes refunded",
     "text_library.block.created": "Text block created",
     "text_library.block.updated": "Text block updated",
     "text_library.block.renamed": "Text block renamed",

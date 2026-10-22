@@ -18,6 +18,7 @@ import type {
 } from "../repository";
 import { cooldownRemaining, initialTextCommandRevision } from "../domain";
 import { textBlockWriteGuard } from "../../contracts/text-block-write-guard";
+import type { CommandCollisionWriteGuard } from "../../contracts/module-command-collision";
 
 const MODULE_ID = "text_commands";
 const extraTemplateKeys = ["offlineText", "notFollowingText", "unavailableText", "usageText"] as const;
@@ -340,7 +341,12 @@ export const createTextCommandRepository = (
     return row === null ? null : mapTextCommand(row);
   },
 
-  async create(input: NewTextCommand, actor: TextCommandActor, expectedGraphRevision?: number): Promise<TextCommandMutationResult> {
+  async create(
+    input: NewTextCommand,
+    actor: TextCommandActor,
+    expectedGraphRevision?: number,
+    commandCollisionGuard?: CommandCollisionWriteGuard,
+  ): Promise<TextCommandMutationResult> {
     if (await this.find(input.channelId, input.name) !== null) return failed("already_exists");
     const authorization = authorizeMutation(input.channelId, actor, input.now);
     const minimumTier = input.minimumTier ?? "everyone";
@@ -379,6 +385,7 @@ export const createTextCommandRepository = (
                AND (existing_alias.alias = ? OR existing_alias.alias IN (SELECT value FROM json_each(?)))
           )
           ${blockGuard.sql}
+          ${commandCollisionGuard?.sql ?? ""}
           ${authorization.sql}`,
     ).bind(
       input.channelId,
@@ -415,6 +422,7 @@ export const createTextCommandRepository = (
       input.name,
       aliasesJson,
       ...blockGuard.values,
+      ...(commandCollisionGuard?.values ?? []),
       ...authorization.values,
     );
     const after: TextCommand = {
@@ -457,7 +465,11 @@ export const createTextCommandRepository = (
     return conflict === null ? failed("not_authorized") : failed("alias_conflict", conflict);
   },
 
-  async change(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult> {
+  async change(
+    input: TextCommandChange,
+    actor: TextCommandActor,
+    commandCollisionGuard?: CommandCollisionWriteGuard,
+  ): Promise<TextCommandMutationResult> {
     const before = await this.find(input.channelId, input.name);
     if (before === null) return failed("not_found");
     const expectedRevision = input.expectedRevision ?? before.revision;
@@ -482,6 +494,7 @@ export const createTextCommandRepository = (
         `UPDATE text_commands
             SET enabled = ?, updated_at = ?, revision = revision + 1
           WHERE channel_id = ? AND command_name = ? AND revision = ?
+            ${commandCollisionGuard?.sql ?? ""}
             ${authorization.sql}`,
       ).bind(
         input.enabled ? 1 : 0,
@@ -489,6 +502,7 @@ export const createTextCommandRepository = (
         input.channelId,
         input.name,
         expectedRevision,
+        ...(commandCollisionGuard?.values ?? []),
         ...authorization.values,
       )
       : db.prepare(
@@ -515,6 +529,7 @@ export const createTextCommandRepository = (
                  AND (existing_alias.alias = ? OR existing_alias.alias IN (SELECT value FROM json_each(?)))
             )
             ${blockGuard.sql}
+            ${commandCollisionGuard?.sql ?? ""}
             ${authorization.sql}`,
       ).bind(
         input.newName,
@@ -554,6 +569,7 @@ export const createTextCommandRepository = (
         input.newName,
         JSON.stringify(input.aliases),
         ...blockGuard.values,
+        ...(commandCollisionGuard?.values ?? []),
         ...authorization.values,
       );
     const after: TextCommand = input.onlyToggle === true

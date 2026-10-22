@@ -126,11 +126,11 @@ export const StateRow = ({ label, tone, word, detail, action, icon }: {
   );
 };
 
-const LockedModuleStatus = ({ status, reason, showReason = false }: { status: string; reason: string; showReason?: boolean }): ReactElement => (
-  <span className="module-locked-status" aria-label={`${status}: ${reason}`} aria-description={reason} title={reason}>
+/** `reasonShownNearby`: the row already renders the reason as a note, so the accessible name stays the status alone (no double announcement). */
+const LockedModuleStatus = ({ status, reason, reasonShownNearby = false }: { status: string; reason: string; reasonShownNearby?: boolean }): ReactElement => (
+  <span className="module-locked-status" aria-label={reasonShownNearby ? status : `${status}: ${reason}`} aria-description={reasonShownNearby ? undefined : reason} title={reason}>
     <Icon name="lock" size={16} className="module-locked-status__icon" />
     <span>{status}</span>
-    {showReason ? <span className="module-locked-status__reason" role="note">{reason}</span> : null}
   </span>
 );
 
@@ -323,7 +323,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       subtitle={page.subtitle}
       {...(page.meta === undefined ? {} : { meta: page.meta })}
       icon={page.icon}
-      {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : {})}
+      {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
       active={page.active}
       onToggle={page.onToggle}
       switchDisabled={page.switchDisabled}
@@ -837,7 +837,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     subtitle={page.subtitle}
     {...(page.meta === undefined ? {} : { meta: page.meta })}
     icon={page.icon}
-    {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : {})}
+    {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
     active={page.active}
     onToggle={page.onToggle}
     switchDisabled={page.switchDisabled || pending || urlRemovalPending}
@@ -1096,7 +1096,7 @@ const ModuleWorkspaceRow = ({
   const state = permissionsMissing ? labels.disabled : statusWord(effectiveEnabled);
   const route: DashboardRoute = { kind: "module", channelId, moduleId };
   const dependencyReason = mandatory ? null : moduleDependencyLockReason(moduleId, !rawEnabled, modules);
-  const lockedReason = mandatory ? undefined : dependencyReason ?? (manageable ? undefined : texts.module.managementLocked);
+  const lockedReason = mandatory ? mandatoryReason : dependencyReason ?? (manageable ? undefined : texts.module.managementLocked);
   const reserveDependencyReason = moduleParticipatesInDependency(moduleId);
 
   return (
@@ -1110,7 +1110,7 @@ const ModuleWorkspaceRow = ({
         {lockedReason === undefined && !reserveDependencyReason ? null : <span className="module-workspace__lock-reason"><LockedReason id={`module-lock-${moduleId}`} {...(lockedReason === undefined ? {} : { reason: lockedReason })} /></span>}
       </>}
       status={mandatory
-        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} showReason />
+        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} reasonShownNearby />
         : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
       action={mandatory ? null : <div className="module-switch-control">
         <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || dependencyReason !== null || busy} onCheckedChange={onToggle} />

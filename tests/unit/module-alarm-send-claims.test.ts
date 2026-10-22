@@ -58,4 +58,18 @@ describe("module alarm send claims", () => {
     expect(await claimModuleAlarmSend(storage, "second", 19_999)).toBe("rate_limited");
     expect(await claimModuleAlarmSend(storage, "second", 20_000)).toBe(true);
   });
+
+  it("claims eight direct replies without spending the automated allowance and never reclaims them", async () => {
+    const storage = storageFor();
+    const firstAttempts = await Promise.all(Array.from({ length: 8 }, (_, index) =>
+      claimModuleAlarmSend(storage, `duel:${String(index)}`, 10_000, undefined, { automated: false }),
+    ));
+    const retries = await Promise.all(Array.from({ length: 8 }, (_, index) =>
+      claimModuleAlarmSend(storage, `duel:${String(index)}`, 10_001, undefined, { automated: false }),
+    ));
+
+    expect(firstAttempts).toEqual(Array.from({ length: 8 }, () => true));
+    expect(retries).toEqual(Array.from({ length: 8 }, () => false));
+    expect(await claimAutomatedChatOutput(storage, 10_002)).toBe(true);
+  });
 });

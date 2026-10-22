@@ -930,11 +930,12 @@ interface ChannelOverviewRouteProperties {
   overview: PanelChannelOverview;
   modules: PanelModuleState[];
   modulesLoaded: boolean;
+  viewerUserId: string | null;
   onNavigate: (route: DashboardRoute) => void;
 }
 
-const ChannelOverviewRoute = ({ overview, modules, modulesLoaded, onNavigate }: ChannelOverviewRouteProperties): ReactElement =>
-  <LiveCockpit overview={overview} modules={modules} modulesLoaded={modulesLoaded} onNavigate={onNavigate} />;
+const ChannelOverviewRoute = ({ overview, modules, modulesLoaded, viewerUserId, onNavigate }: ChannelOverviewRouteProperties): ReactElement =>
+  <LiveCockpit overview={overview} modules={modules} modulesLoaded={modulesLoaded} viewerUserId={viewerUserId} onNavigate={onNavigate} />;
 
 interface SystemPageProperties {
   channelId: string;
@@ -1386,6 +1387,9 @@ export const DashboardApp = (): ReactElement => {
   const paletteControls = overviewForHeader !== null && overviewForHeader.channelId === paletteChannel?.channelId
     ? overviewForHeader.controls
     : paletteChannel?.controls;
+  const paletteBotConnected = overviewForHeader !== null && overviewForHeader.channelId === paletteChannel?.channelId
+    ? overviewForHeader.bot?.status === "connected"
+    : paletteChannel?.bot?.status === "connected";
   const dashboardMode = dashboardModeForRoute(route);
   const selectPalette = (nextPalette: Palette): void => {
     setPalette(nextPalette);
@@ -1563,6 +1567,7 @@ export const DashboardApp = (): ReactElement => {
           overview={overview.data}
           modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []}
           modulesLoaded={overviewModulesLoaded}
+          viewerUserId={viewerUserId}
           onNavigate={navigate}
         /> : null}</UiLoadState> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "location-weather" && selectedChannel !== null
@@ -1639,6 +1644,7 @@ export const DashboardApp = (): ReactElement => {
           route={route}
           isPlatformAdmin={isPlatform}
           {...(channels.status === "success" ? { botSignedIn } : {})}
+          botConnected={paletteBotConnected}
           streamState={paletteStreamState}
           {...(paletteControls === undefined ? {} : { channelControls: paletteControls })}
           onRefreshChannelState={refreshChannelState}

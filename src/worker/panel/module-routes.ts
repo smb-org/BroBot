@@ -12,12 +12,20 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import type { ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
+import type { HelixResult, ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
+import {
+  combineCommandCollisionWriteGuards,
+  effectiveModuleCommandTokens,
+  findModuleCommandCollision,
+  moduleCommandCollisionWriteGuard,
+  textCommandCollisionWriteGuard,
+} from "../../modules/contracts/module-command-collision";
 import { BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET } from "../../modules/belabox/contracts";
 import { validateBelaboxStatsUrl } from "../../modules/belabox/domain/stats-url";
 import { resetSampleAfterStatsUrlChangeBestEffort } from "../../modules/belabox/routes";
 import type { PanelModuleState } from "../../panel-contract";
+import type { StreamMarkerResult } from "../../contracts/quick-actions";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { moduleBroadcasterScopeState } from "../module-scopes";
 import { getPanelModuleStates } from "./module-repository";
@@ -102,6 +110,19 @@ const runPostCommitStep = async (moduleId: string, step: string, action: () => P
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const moduleCommandCollision = async (
+  db: D1Database,
+  channelId: string,
+  moduleId: string,
+  candidateSettings: unknown,
+): Promise<string | null> => {
+  const module = MODULES.find((candidate) => candidate.id === moduleId);
+  if (module === undefined) return null;
+  return findModuleCommandCollision(db, channelId, effectiveModuleCommandTokens(module, candidateSettings), MODULES, {
+    excludeModuleId: moduleId,
+  });
+};
 
 const validBoxArtTemplate = (value: unknown): value is string => {
   if (typeof value !== "string" || value.length > 500) return false;
@@ -468,6 +489,7 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
 
 moduleRouter.use("/api/channels/:channelId/games", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/broadcast", requireChannelAuthorization());
+moduleRouter.use("/api/channels/:channelId/broadcast/*", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/template-variables", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/template-preview", requireChannelAuthorization());
 
@@ -655,6 +677,106 @@ moduleRouter.patch("/api/channels/:channelId/broadcast", async (context) => {
   return context.body(null, 204);
 });
 
+moduleRouter.get("/api/channels/:channelId/broadcast/markers/availability", async (context) => {
+  const identity = await getLoginIdentity(context.env.DB, context.req.param("channelId"));
+  return context.json({ manageScopeAvailable: loginIdentityHasBroadcastScope(identity) });
+});
+
+moduleRouter.post("/api/channels/:channelId/broadcast/markers", async (context) => {
+  const channelId = context.req.param("channelId");
+  const actor = context.get("actor");
+  const managementStillAuthorized = async (): Promise<boolean> => {
+    const authorization = context.get("authorizeManagementMutation")(channelId, actor, nowIso());
+    const authorized = await context.env.DB.prepare(
+      `SELECT channel_id FROM channels WHERE channel_id = ? ${authorization.sql}`,
+    ).bind(channelId, ...authorization.values).first<{ channel_id: string }>();
+    return authorized !== null;
+  };
+  if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+
+  let identity = await getLoginIdentity(context.env.DB, channelId);
+  const grantHref = `/auth/channels/${encodeURIComponent(channelId)}/broadcaster-scopes/broadcast`;
+  if (identity === null || identity.status !== "connected") {
+    return context.json({ result: "failed" } satisfies StreamMarkerResult);
+  }
+  if (!loginIdentityHasBroadcastScope(identity)) {
+    return context.json({ result: "scope_missing", error: "broadcast_scope_missing", grantHref } satisfies StreamMarkerResult);
+  }
+
+  let accessToken: string | null;
+  try {
+    accessToken = await decryptLoginIdentityAccessToken(identity, context.env);
+  } catch {
+    return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+  }
+  if (accessToken === null) return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+
+  if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+  const createMarker = (token: string): Promise<HelixResult<{ data?: unknown }>> =>
+    context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{ data?: unknown }>({
+      url: "https://api.twitch.tv/helix/streams/markers",
+      accessToken: token,
+      clientId: context.env.TWITCH_CLIENT_ID,
+      method: "POST",
+      body: { user_id: channelId, description: "BroBot marker" },
+    }));
+  let result: HelixResult<{ data?: unknown }>;
+  try {
+    result = await createMarker(accessToken);
+  } catch {
+    return context.json({ result: "failed" } satisfies StreamMarkerResult);
+  }
+
+  if (!result.ok && result.status === 401) {
+    let refreshedIdentity: LoginIdentityRecord | null;
+    try {
+      refreshedIdentity = await refreshLoginIdentityTokens(context.env, identity, nowIso());
+    } catch {
+      return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    }
+    if (refreshedIdentity === null || refreshedIdentity.status !== "connected") {
+      return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    }
+    identity = refreshedIdentity;
+    if (!loginIdentityHasBroadcastScope(identity)) {
+      return context.json({ result: "scope_missing", error: "broadcast_scope_missing", grantHref } satisfies StreamMarkerResult);
+    }
+    let refreshedToken: string | null;
+    try {
+      refreshedToken = await decryptLoginIdentityAccessToken(identity, context.env);
+    } catch {
+      return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    }
+    if (refreshedToken === null) return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+    try {
+      result = await createMarker(refreshedToken);
+    } catch {
+      return context.json({ result: "failed" } satisfies StreamMarkerResult);
+    }
+  }
+
+  if (!result.ok) {
+    if (result.status === 404) return context.json({ result: "offline" } satisfies StreamMarkerResult);
+    if (result.status === 401) return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    if (result.status === 403) return context.json({ result: "not_broadcaster" } satisfies StreamMarkerResult);
+    if (result.status === 429) {
+      const retryAfter = result.retryAfter == null
+        ? 1
+        : Math.max(1, Math.ceil((result.retryAfter - Date.now()) / 1_000));
+      return context.json({ result: "rate_limited", retryAfter } satisfies StreamMarkerResult);
+    }
+    return context.json({ result: "failed" } satisfies StreamMarkerResult);
+  }
+
+  const rows = isRecord(result.data) ? result.data.data : undefined;
+  const marker: unknown = Array.isArray(rows) ? (rows as unknown[])[0] : undefined;
+  if (!isRecord(marker) || typeof marker.position_seconds !== "number" || !Number.isFinite(marker.position_seconds) || marker.position_seconds < 0) {
+    return context.json({ result: "failed" } satisfies StreamMarkerResult);
+  }
+  return context.json({ result: "created", positionSeconds: marker.position_seconds } satisfies StreamMarkerResult);
+});
+
 moduleRouter.get("/api/channels/:channelId/template-variables", async (context) => {
   const channelId = context.req.param("channelId");
   const [moduleVariables, channelVariables] = await Promise.all([
@@ -807,6 +929,13 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   }
   const semanticError = module.validateSettings?.(settings.data);
   if (semanticError !== undefined && semanticError !== null) return context.json({ error: semanticError }, 400);
+  const commandCollision = await moduleCommandCollision(context.env.DB, channelId, module.id, settings.data);
+  if (commandCollision !== null) return context.json({ error: "module_command_collision", command: commandCollision }, 409);
+  const commandTokens = effectiveModuleCommandTokens(module, settings.data);
+  const commandWriteGuard = combineCommandCollisionWriteGuards(
+    moduleCommandCollisionWriteGuard(channelId, commandTokens, MODULES, { excludeModuleId: module.id }),
+    textCommandCollisionWriteGuard(channelId, commandTokens),
+  );
   if (module.id === "clips") {
     let rawStoredSettings: unknown;
     try {
@@ -872,8 +1001,11 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     expectedRevision,
     blockGuard.references.length === 0 ? undefined : blockGuard,
     module.id === "clips",
+    commandWriteGuard,
   );
   if (!changed) {
+    const collision = await moduleCommandCollision(context.env.DB, channelId, module.id, settings.data);
+    if (collision !== null) return context.json({ error: "module_command_collision", command: collision }, 409);
     const current = await getChannelModuleForChannel(context.env.DB, channelId, module.id);
     let currentSettings: unknown = null;
     if (current !== null) {
@@ -937,6 +1069,40 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
+  const initialize = enabled && existing?.initialized !== true;
+  const reusedTextCommandName = initialize && module.onEnableCommandTokens?.includes("!befehle") === true
+    ? "befehle"
+    : undefined;
+  const collisionOptions = {
+    excludeModuleId: module.id,
+    ...(reusedTextCommandName === undefined ? {} : { excludeTextCommandName: reusedTextCommandName }),
+  };
+  let activationCommandTokens: string[] = [];
+  if (enabled) {
+    let currentSettings: unknown = JSON.parse(defaultSettingsJson) as unknown;
+    if (existing !== null) {
+      try {
+        currentSettings = JSON.parse(existing.settings) as unknown;
+      } catch {
+        currentSettings = null;
+      }
+    }
+    const parsedSettings = module.settingsSchema.safeParse(currentSettings);
+    if (parsedSettings.success) {
+      activationCommandTokens = [
+        ...effectiveModuleCommandTokens(module, parsedSettings.data),
+        ...(existing?.initialized === true ? [] : module.onEnableCommandTokens ?? []),
+      ];
+      const commandCollision = await findModuleCommandCollision(
+        context.env.DB,
+        channelId,
+        activationCommandTokens,
+        MODULES,
+        collisionOptions,
+      );
+      if (commandCollision !== null) return context.json({ error: "module_command_collision", command: commandCollision }, 409);
+    }
+  }
   const requiredModules = enabled ? module.requiresModules ?? [] : [];
   const dependentModules = !enabled
     ? MODULES.filter((candidate) => candidate.requiresModules?.includes(moduleId)).map((candidate) => candidate.id)
@@ -959,9 +1125,15 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
         values: [channelId, ...dependentModules],
       }
       : undefined;
+  const commandWriteGuard = enabled
+    ? combineCommandCollisionWriteGuards(
+      moduleCommandCollisionWriteGuard(channelId, activationCommandTokens, MODULES, { excludeModuleId: module.id }),
+      textCommandCollisionWriteGuard(channelId, activationCommandTokens, collisionOptions),
+    )
+    : { sql: "", values: [] };
+  const atomicStateGuard = combineCommandCollisionWriteGuards(stateGuard ?? { sql: "", values: [] }, commandWriteGuard);
   const retryingPostCommit = existing !== null && existing.enabled === enabled && expectedRevision !== undefined &&
     Number(expectedRevision) + 1 === existing.revision;
-  const initialize = enabled && existing?.initialized !== true;
   let dependentMutations: readonly D1PreparedStatement[] = [];
   if (initialize && module.onEnable !== undefined) {
     dependentMutations = await module.onEnable({
@@ -984,7 +1156,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       action,
       now,
       dependentMutations,
-      stateGuard,
+      atomicStateGuard,
     );
   } else if (existing !== null) {
     if (retryingPostCommit) revision = existing.revision;
@@ -1000,7 +1172,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
         dependentMutations,
         expectedRevision === undefined ? existing.revision : Number(expectedRevision),
         initialize,
-        stateGuard,
+        atomicStateGuard,
       );
       revision = activation?.revision ?? null;
       lastDisabledRevision = activation?.lastDisabledRevision ?? null;
@@ -1009,6 +1181,16 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     return context.json({ error: "module_changed_concurrently" }, 409);
   }
   if (revision === null) {
+    if (enabled) {
+      const collision = await findModuleCommandCollision(
+        context.env.DB,
+        channelId,
+        activationCommandTokens,
+        MODULES,
+        collisionOptions,
+      );
+      if (collision !== null) return context.json({ error: "module_command_collision", command: collision }, 409);
+    }
     if (enabled && requiredModules.length > 0) {
       const placeholders = requiredModules.map(() => "?").join(", ");
       const enabledCount = await context.env.DB.prepare(

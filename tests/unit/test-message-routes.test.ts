@@ -1,0 +1,361 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { sendChatMessage as SendChatMessage } from "../../src/worker/chat";
+
+interface ChatModule {
+  sendChatMessage: typeof SendChatMessage;
+}
+
+const mocks = vi.hoisted(() => ({ sendChatMessage: vi.fn<typeof SendChatMessage>() }));
+vi.mock("../../src/worker/chat", () => ({ sendChatMessage: mocks.sendChatMessage }));
+
+import { createCsrfToken } from "../../src/worker/auth/csrf";
+import { createSessionCookie } from "../../src/worker/auth/session";
+import { panelRouter } from "../../src/worker/panel/routes";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
+import { TestD1Database } from "./test-d1";
+
+const environmentKeys = {
+  SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
+  SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
+};
+
+let database: TestD1Database;
+let lastAttemptByChannel: Map<string, number>;
+let identityPrepared: boolean;
+type TestMessageClaim = { allowed: true } | { allowed: false; retryAfter: number };
+
+const environmentFor = (claimOverride?: (channelId: string, now: number) => Promise<TestMessageClaim>): Env => ({
+  DB: database as unknown as D1Database,
+  TWITCH_CLIENT_ID: "client-id",
+  TWITCH_CLIENT_SECRET: "client-secret",
+  CHANNEL: {
+    idFromName: (channelId: string) => channelId,
+    get: (channelId: string) => ({
+      recordBotChatMessage: (): Promise<void> => Promise.resolve(),
+      claimTestMessageSend: (now: number): Promise<TestMessageClaim> => {
+        if (claimOverride !== undefined) return claimOverride(channelId, now);
+        const previous = lastAttemptByChannel.get(channelId);
+        if (previous !== undefined && now - previous < 30_000) {
+          return Promise.resolve({ allowed: false, retryAfter: Math.max(1, Math.ceil((previous + 30_000 - now) / 1_000)) });
+        }
+        lastAttemptByChannel.set(channelId, now);
+        return Promise.resolve({ allowed: true });
+      },
+      releaseTestMessageSend: (claimedAt: number): Promise<boolean> => {
+        if (lastAttemptByChannel.get(channelId) !== claimedAt) return Promise.resolve(false);
+        lastAttemptByChannel.delete(channelId);
+        return Promise.resolve(true);
+      },
+    }),
+  },
+  ...environmentKeys,
+} as unknown as Env);
+
+const requestFor = async (userId: string, channelId: string): Promise<Request> => {
+  const cookie = await createSessionCookie(
+    { sessionId: `session-${userId}` },
+    environmentKeys.SESSION_COOKIE_KEYS,
+    environmentKeys.SESSION_ENCRYPTION_KEYS,
+  );
+  const csrf = await createCsrfToken(`session-${userId}`, environmentKeys.SESSION_COOKIE_KEYS, new Date().toISOString());
+  return new Request(`https://brobot.example/api/channels/${channelId}/quick-actions/test-message`, {
+    method: "POST",
+    headers: new Headers({
+      Cookie: `__Host-brobot_session=${cookie}; __Host-brobot_csrf=${csrf}`,
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrf,
+    }),
+  });
+};
+
+const send = async (userId: string, channelId: string, environment = environmentFor()): Promise<Response> => panelRouter.fetch(
+  await requestFor(userId, channelId),
+  environment,
+);
+
+const chatResult = (overrides: Partial<{
+  sent: boolean;
+  truncated: boolean;
+  delivery: "sent" | "rejected" | "ambiguous" | "not_attempted";
+  reason: string | null;
+  detail: Readonly<Record<string, string | number | boolean | null>>;
+}> = {}) => ({
+  sent: true,
+  truncated: false,
+  delivery: "sent" as const,
+  reason: null,
+  detail: {},
+  ...overrides,
+});
+
+beforeEach(() => {
+  database = new TestD1Database();
+  lastAttemptByChannel = new Map();
+  identityPrepared = false;
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-21T10:00:00.000Z"));
+  vi.mocked(mocks.sendChatMessage).mockReset();
+  vi.mocked(mocks.sendChatMessage).mockImplementation(async (...args) => {
+    expect(lastAttemptByChannel.has(args[1])).toBe(true);
+    const stillValid = await args[5]?.();
+    if (stillValid === false) return chatResult({
+      sent: false,
+      delivery: "not_attempted",
+      reason: "stale_before_send",
+    });
+    return chatResult();
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  database.close();
+});
+
+const prepareChannel = async (channelId: string, language: "de" | "en" = "en"): Promise<void> => {
+  await insertChannel(database, channelId);
+  await database.prepare("UPDATE channels SET language = ? WHERE channel_id = ?").bind(language, channelId).run();
+  if (!identityPrepared) {
+    await insertLoginIdentityAndSession(database, "operator-a");
+    identityPrepared = true;
+  }
+  await insertMember(database, channelId, "operator-a", "operator");
+};
+
+describe("quick action test-message route", () => {
+  it("returns sent when Twitch accepts the message", async () => {
+    await prepareChannel("channel-a", "en");
+
+    const response = await send("operator-a", "channel-a");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ result: "sent" });
+    expect(mocks.sendChatMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      "channel-a",
+      "This is a test message from BroBot.",
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(lastAttemptByChannel.has("channel-a")).toBe(true);
+  });
+
+  it("returns dropped when Twitch does not send the message", async () => {
+    await prepareChannel("channel-a");
+    vi.mocked(mocks.sendChatMessage).mockResolvedValue(chatResult({
+      sent: false,
+      delivery: "rejected",
+      reason: "automod_held",
+    }));
+
+    const response = await send("operator-a", "channel-a");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ result: "dropped", reason: "automod_held" });
+  });
+
+  it("returns identity_missing when no bot identity is configured", async () => {
+    await prepareChannel("channel-a");
+    vi.mocked(mocks.sendChatMessage).mockResolvedValue(chatResult({
+      sent: false,
+      delivery: "not_attempted",
+      reason: "bot_identity_missing",
+    }));
+
+    const response = await send("operator-a", "channel-a");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ result: "identity_missing" });
+    expect(lastAttemptByChannel.has("channel-a")).toBe(false);
+  });
+
+  it("rate limits a second send for the same channel within 30 seconds", async () => {
+    await prepareChannel("channel-a");
+
+    const first = await send("operator-a", "channel-a");
+    const second = await send("operator-a", "channel-a");
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    await expect(second.json()).resolves.toEqual({ result: "rate_limited", retryAfter: 30 });
+    expect(mocks.sendChatMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the later upstream retry deadline after a Twitch rate-limit rejection", async () => {
+    await prepareChannel("channel-a");
+    vi.mocked(mocks.sendChatMessage).mockImplementationOnce(() => Promise.resolve(chatResult({
+        sent: false,
+        delivery: "rejected",
+        reason: "rate_limited",
+        detail: { retryAfter: Date.now() + 120_000 },
+      })));
+
+    const response = await send("operator-a", "channel-a");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ result: "rate_limited", retryAfter: 120 });
+  });
+
+  it("rejects a caller who does not have the minimum channel role", async () => {
+    await prepareChannel("channel-a");
+    await insertLoginIdentityAndSession(database, "outsider");
+
+    const response = await send("outsider", "channel-a");
+
+    expect(response.status).toBe(403);
+    expect(mocks.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("rechecks membership after the app-token lookup without consuming the cooldown", async () => {
+    await prepareChannel("channel-a");
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-a', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+
+    const { sendChatMessage: productionSendChatMessage } = await vi.importActual<ChatModule>("../../src/worker/chat");
+    vi.mocked(mocks.sendChatMessage).mockImplementation((...args) => productionSendChatMessage(...args));
+
+    let resolveTokenResponse: ((response: Response) => void) | undefined;
+    let markTokenRequested: (() => void) | undefined;
+    const tokenResponse = new Promise<Response>((resolve) => { resolveTokenResponse = resolve; });
+    const tokenRequested = new Promise<void>((resolve) => { markTokenRequested = resolve; });
+    const requestedUrls: string[] = [];
+    let firstTokenRequest = true;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = input instanceof Request ? input.url : String(input);
+      requestedUrls.push(url);
+      if (url === "https://id.twitch.tv/oauth2/token") {
+        if (firstTokenRequest) {
+          firstTokenRequest = false;
+          markTokenRequested?.();
+          return await tokenResponse;
+        }
+        return new Response(JSON.stringify({ access_token: "app-token", expires_in: 3600 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "message-a" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
+
+    const pendingResponse = send("operator-a", "channel-a");
+    await tokenRequested;
+    await database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?").bind("channel-a", "operator-a").run();
+    resolveTokenResponse?.(new Response(JSON.stringify({ access_token: "app-token", expires_in: 3600 }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+
+    const response = await pendingResponse;
+
+    expect(response.status).toBe(403);
+    expect(lastAttemptByChannel.has("channel-a")).toBe(false);
+    expect(requestedUrls).toEqual(["https://id.twitch.tv/oauth2/token"]);
+
+    await insertMember(database, "channel-a", "operator-a", "operator");
+    const retry = await send("operator-a", "channel-a");
+
+    expect(retry.status).toBe(200);
+    await expect(retry.json()).resolves.toEqual({ result: "sent" });
+    expect(lastAttemptByChannel.has("channel-a")).toBe(true);
+    expect(requestedUrls).toContain("https://api.twitch.tv/helix/chat/messages");
+  });
+
+  it("rechecks membership after a delayed cooldown claim and releases the unused reservation", async () => {
+    await prepareChannel("channel-a");
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-a', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+
+    const { sendChatMessage: productionSendChatMessage } = await vi.importActual<ChatModule>("../../src/worker/chat");
+    vi.mocked(mocks.sendChatMessage).mockImplementation((...args) => productionSendChatMessage(...args));
+
+    let resolveClaim: (() => void) | undefined;
+    let markClaimStarted: (() => void) | undefined;
+    const claimGate = new Promise<void>((resolve) => { resolveClaim = resolve; });
+    const claimStarted = new Promise<void>((resolve) => { markClaimStarted = resolve; });
+    const requestedUrls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = input instanceof Request ? input.url : String(input);
+      requestedUrls.push(url);
+      if (url === "https://id.twitch.tv/oauth2/token") {
+        return Promise.resolve(new Response(JSON.stringify({ access_token: "app-token", expires_in: 3600 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "message-a" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+
+    const delayedClaimEnvironment = environmentFor(async (channelId, now) => {
+      markClaimStarted?.();
+      await claimGate;
+      lastAttemptByChannel.set(channelId, now);
+      return { allowed: true };
+    });
+    const pendingResponse = send("operator-a", "channel-a", delayedClaimEnvironment);
+    await claimStarted;
+    await database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?").bind("channel-a", "operator-a").run();
+    resolveClaim?.();
+
+    const response = await pendingResponse;
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "test_message_denied" });
+    expect(lastAttemptByChannel.has("channel-a")).toBe(false);
+    expect(requestedUrls).toEqual(["https://id.twitch.tv/oauth2/token"]);
+
+    await insertMember(database, "channel-a", "operator-a", "operator");
+    const retry = await send("operator-a", "channel-a");
+
+    expect(retry.status).toBe(200);
+    await expect(retry.json()).resolves.toEqual({ result: "sent" });
+    expect(requestedUrls).toContain("https://api.twitch.tv/helix/chat/messages");
+  });
+
+  it("denies the send and releases the cooldown when the final membership check throws", async () => {
+    await prepareChannel("channel-a");
+    const originalPrepare = database.prepare.bind(database);
+    const prepareSpy = vi.spyOn(database, "prepare").mockImplementation((sql) => {
+      if (sql.startsWith("SELECT channel_id FROM channels")) throw new Error("temporary database read failure");
+      return originalPrepare(sql);
+    });
+
+    const response = await send("operator-a", "channel-a");
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "test_message_denied" });
+    expect(lastAttemptByChannel.has("channel-a")).toBe(false);
+    expect(mocks.sendChatMessage).toHaveBeenCalledOnce();
+    prepareSpy.mockRestore();
+  });
+
+  it("keeps the rate limit isolated between channels", async () => {
+    await prepareChannel("channel-a", "de");
+    await prepareChannel("channel-b", "en");
+
+    const first = await send("operator-a", "channel-a");
+    const second = await send("operator-a", "channel-b");
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    await expect(first.json()).resolves.toEqual({ result: "sent" });
+    await expect(second.json()).resolves.toEqual({ result: "sent" });
+    expect(mocks.sendChatMessage).toHaveBeenCalledTimes(2);
+  });
+});

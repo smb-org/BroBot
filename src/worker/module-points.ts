@@ -27,11 +27,15 @@ export const modulePoints = (
       claimCooldown: () => unavailable(),
       rounds: {
         open: () => unavailable(),
+        openWithStake: () => unavailable(),
         active: () => unavailable(),
+        listOpen: () => unavailable(),
         markAnnounced: () => unavailable(),
         join: () => unavailable(),
         answer: () => unavailable(),
         resolve: () => unavailable(),
+        accept: () => unavailable(),
+        cancel: () => unavailable(),
         cancelOpenRounds: () => unavailable(),
         setGate: () => unavailable(),
       },
@@ -59,13 +63,19 @@ export const modulePoints = (
     claimCooldown: (key, seconds) => object.claimPointCooldown(moduleId, key, seconds),
     rounds: {
       open: (roundId, data) => object.openGameRound(moduleId, roundId, data),
+      openWithStake: (roundId, data, operationId, accountId, login, stake, cooldown) =>
+        object.openGameRoundWithStake(moduleId, roundId, data, operationId, accountId, login, stake, cooldown),
       active: () => object.activeGameRound(moduleId),
+      listOpen: () => object.listOpenGameRounds(moduleId),
       markAnnounced: (roundId, deadlineAt, alarmKey) => object.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
       join: (roundId, operationId, accountId, login, stake, data) =>
         object.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
       answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
         object.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
       resolve: (roundId, settlement) => object.resolveGameRound(moduleId, roundId, settlement),
+      accept: (roundId, operationId, accountId, login, replyToMessageId) =>
+        object.acceptGameRound(moduleId, roundId, operationId, accountId, login, replyToMessageId),
+      cancel: (roundId) => object.cancelGameRound(moduleId, roundId),
       cancelOpenRounds: (revision) => object.cancelOpenGameRounds(moduleId, revision),
       setGate: (closed, revision, lastDisabledRevision) => object.setGameModuleGate(moduleId, closed, revision, lastDisabledRevision),
     },

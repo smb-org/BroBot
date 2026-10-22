@@ -55,10 +55,11 @@ const streamStateLabel = (state: ChannelStreamState | null | undefined): string 
   return state === "online" ? texts.live : state === "offline" ? texts.offline : texts.unknown;
 };
 
-export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
+export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, onNavigate }: {
   overview: PanelChannelOverview;
   modules: readonly PanelModuleState[];
   modulesLoaded: boolean;
+  viewerUserId: string | null;
   onNavigate: (route: DashboardRoute) => void;
 }): ReactElement => {
   const texts = dashboardTexts();
@@ -278,7 +279,9 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
     <div className="live-cockpit__wall">
       <ImmediateActions
         channelId={overview.channelId}
+        viewerUserId={viewerUserId}
         streamState={streamState}
+        botConnected={botConnected}
         role={overview.role}
         modules={modules}
         modulesLoaded={modulesLoaded}
@@ -301,7 +304,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, onNavigate }: {
             recordBelaboxObservation(overview.channelId, (previous) => failedBelaboxObservation(observedAt, previous));
           }
         }}
-        onFeedbackMessage={(text, link) => { showFooterMessage({ text, ...(link === undefined ? {} : { link }) }); }}
+        onFeedbackMessage={(text, link, tone) => { showFooterMessage({ text, ...(link === undefined ? {} : { link }), ...(tone === "info" ? { tone: "warning" } : {}) }); }}
       />
       <LiveCockpitTiles
         key={overview.channelId}
