@@ -979,8 +979,17 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     }
     const parsedSettings = module.settingsSchema.safeParse(currentSettings);
     if (parsedSettings.success) {
-      activationCommandTokens = effectiveModuleCommandTokens(module, parsedSettings.data);
-      const commandCollision = await moduleCommandCollision(context.env.DB, channelId, module.id, parsedSettings.data);
+      activationCommandTokens = [
+        ...effectiveModuleCommandTokens(module, parsedSettings.data),
+        ...(existing?.initialized === true ? [] : module.onEnableCommandTokens ?? []),
+      ];
+      const commandCollision = await findModuleCommandCollision(
+        context.env.DB,
+        channelId,
+        activationCommandTokens,
+        MODULES,
+        { excludeModuleId: module.id },
+      );
       if (commandCollision !== null) return context.json({ error: "module_command_collision", command: commandCollision }, 409);
     }
   }

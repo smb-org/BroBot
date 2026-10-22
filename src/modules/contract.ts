@@ -1823,6 +1823,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   chatCommandNames?: (settings: unknown) => readonly string[];
   /** Root settings fields that store the configurable command tokens for SQL write guards. */
   chatCommandSettingsFields?: readonly string[];
+  /** Command tokens inserted by onEnable and included in activation collision guards. */
+  onEnableCommandTokens?: readonly string[];
   /** The module is always enabled for every released channel and cannot be disabled. */
   mandatory?: boolean;
   /** Localized explanation shown when this module cannot be disabled. */

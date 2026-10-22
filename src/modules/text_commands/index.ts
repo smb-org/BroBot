@@ -241,6 +241,7 @@ export const textCommandModule: BotModule<typeof settingsSchema> = {
   variableReferences,
   settingsSchema,
   defaultSettings: {},
+  onEnableCommandTokens: ["!befehle"],
   eventSubTypes: ["channel.chat.message"],
   actions: [
     {

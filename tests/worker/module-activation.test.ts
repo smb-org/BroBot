@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
+import { duelSettingsForLanguage } from "../../src/modules/duel/contracts";
 import { notifyModuleScheduleInputsChanged, reconcileChannelTimerSchedules } from "../../src/worker/module-schedules";
 import { panelRouter } from "../../src/worker/panel/routes";
 
@@ -61,7 +62,7 @@ const insertChannel = async (channelId: string): Promise<void> => {
   ).bind(channelId, channelId, channelId, now, now).run();
 };
 
-const activationRequest = async (channelId: string): Promise<Request> => {
+const activationRequest = async (channelId: string, moduleId = "points"): Promise<Request> => {
   const sessionId = `session-${channelId}`;
   const userId = `user-${channelId}`;
   const now = new Date().toISOString();
@@ -85,7 +86,7 @@ const activationRequest = async (channelId: string): Promise<Request> => {
     testTokenEncryptionKeys,
   );
   const csrf = await createCsrfToken(sessionId, testSessionCookieKeys, now);
-  return new Request(`https://brobot.example/api/channels/${channelId}/modules/points`, {
+  return new Request(`https://brobot.example/api/channels/${channelId}/modules/${moduleId}`, {
     method: "PATCH",
     headers: {
       Cookie: `__Host-brobot_session=${cookie}; __Host-brobot_csrf=${csrf}`,
@@ -111,6 +112,29 @@ describe("module activation schedule RPCs", () => {
     await expect(database.prepare(
       "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'points'",
     ).bind(channelId).first()).resolves.toEqual({ enabled: 1 });
+  });
+
+  it("rejects Text Commands activation when its built-in list command collides with an enabled module [protects=activation's atomic collision guard includes the built-in !befehle row inserted by onEnable; fails_when=Text Commands returns 200 and creates !befehle beside an enabled duel using that token; no_claim=the real panel router uses fixed cookie and token key rings and D1-backed module state]", async () => {
+    const channelId = `module-activation-command-collision-${crypto.randomUUID()}`;
+    await insertChannel(channelId);
+    const duelSettings = { ...duelSettingsForLanguage("en"), challengeCommand: "!befehle" };
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'duel', 1, ?, 1)",
+    ).bind(channelId, JSON.stringify(duelSettings)).run();
+
+    const response = await panelRouter.fetch(await activationRequest(channelId, "text_commands"), testEnvironment);
+    const body = await response.json<{ error?: string; command?: string }>();
+    const module = await database.prepare(
+      "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'text_commands'",
+    ).bind(channelId).first<{ enabled: number }>();
+    const command = await database.prepare(
+      "SELECT command_name FROM text_commands WHERE channel_id = ? AND command_name = 'befehle'",
+    ).bind(channelId).first<{ command_name: string }>();
+
+    expect(response.status).toBe(409);
+    expect(body).toEqual({ error: "module_command_collision", command: "!befehle" });
+    expect(module).toBeNull();
+    expect(command).toBeNull();
   });
 
   it("notifies schedules through a real ChannelObject stub (protects=the schedule-input helper invokes the ChannelObject RPC without a remote call method; fails_when=the helper rejects with the Durable Object call TypeError; no_claim=how a schedule is rendered after its inputs change)", async () => {
