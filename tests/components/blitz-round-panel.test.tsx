@@ -12,6 +12,8 @@ import { renderWithQuery } from "../query-test-utils";
 const initialSettings: BlitzRoundSettings = {
   prize: 50,
   answerTimeSeconds: 60,
+  autoStart: false,
+  autoStartIntervalMinutes: 15,
   chatTarget: null,
   startText: "Blitz round! {blitz.type}: {blitz.prompt}",
   solvedText: "Correct: {blitz.answer} · {blitz.winners}",
@@ -1547,5 +1549,37 @@ describe("Blitz Round collection panel", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
     await waitFor(() => expect(api.getSettings().prize).toBe(75));
     await waitFor(() => expect(document.querySelector(".ui-save-bar__status")).toHaveTextContent("Saved"));
+  });
+
+  it("validates automatic start settings and saves the switch and interval explicitly", async () => {
+    const api = installPanelFetch([sampleQuestion]);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.click(screen.getByRole("button", { name: /^Settings$/u }));
+    await screen.findByText("Round settings", { exact: true });
+
+    const toggle = screen.getByRole("switch", { name: "Start automatically" });
+    const interval = screen.getByRole("spinbutton", { name: "Interval" });
+    const intervalField = interval.closest(".unit-input");
+    const hintSlot = intervalField?.querySelector(".unit-input__description");
+    const errorSlot = intervalField?.querySelector(".unit-input__error");
+    expect((interval as HTMLInputElement).value).toBe("15");
+    expect(interval).toBeDisabled();
+    expect(screen.getByText("Time from resolution, activation, or settings changes.")).toBeInTheDocument();
+    expect(hintSlot).toHaveTextContent("Time from resolution, activation, or settings changes.");
+    expect(errorSlot).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(interval).toBeEnabled();
+
+    fireEvent.change(interval, { target: { value: "14" } });
+    expect(screen.getByText("Whole minutes: 15–240.")).toBeInTheDocument();
+    expect(intervalField?.querySelector(".unit-input__error")).toBe(errorSlot);
+    expect(api.getSettings().autoStart).toBe(false);
+    expect(api.getSettings().autoStartIntervalMinutes).toBe(15);
+
+    fireEvent.change(interval, { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    await waitFor(() => expect(api.getSettings()).toMatchObject({ autoStart: true, autoStartIntervalMinutes: 30 }));
   });
 });

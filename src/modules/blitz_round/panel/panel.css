@@ -264,6 +264,41 @@
   grid-column: 1 / -1;
 }
 
+.blitz-panel__auto-start {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.45fr);
+  align-items: start;
+  gap: 16px;
+  height: 148px;
+  min-height: 148px;
+}
+
+.blitz-panel__auto-start > .ui-switch-section,
+.blitz-panel__auto-start > .unit-input {
+  margin: 0;
+}
+
+.blitz-panel__auto-start > .ui-switch-section {
+  height: 88px;
+  min-height: 88px;
+}
+
+.blitz-panel__auto-start > .unit-input {
+  height: 148px;
+  min-height: 148px;
+}
+
+.blitz-panel__auto-start .unit-input__description {
+  height: 54px;
+  min-height: 54px;
+  overflow: hidden;
+}
+
+.blitz-panel__auto-start .unit-input__error {
+  height: 18px;
+  min-height: 18px;
+}
+
 .collection-page[data-single-column="true"] .blitz-panel__editor,
 .collection-page[data-single-column="true"] .blitz-panel__settings-form {
   padding-bottom: 80px;
@@ -284,6 +319,13 @@
 
   .blitz-panel__settings-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .blitz-panel__auto-start {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    height: 244px;
+    min-height: 244px;
   }
 
   .blitz-panel__settings-grid > :last-child {

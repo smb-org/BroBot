@@ -56,6 +56,12 @@ export interface BlitzTexts {
   settings: string;
   questions: string;
   settingsSection: string;
+  autoStart: string;
+  autoStartHint: string;
+  autoStartInterval: string;
+  autoStartIntervalHint: string;
+  autoStartIntervalError: string;
+  minutesUnit: string;
   prize: string;
   answerTime: string;
   chatTarget: string;
@@ -162,6 +168,12 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     settings: "Einstellungen",
     questions: "Fragen",
     settingsSection: "Rundeneinstellungen",
+    autoStart: "Automatisch starten",
+    autoStartHint: "Blitzrunden starten automatisch, solange der Kanal live ist.",
+    autoStartInterval: "Intervall",
+    autoStartIntervalHint: "Zeit ab Auflösung, Aktivierung oder Einstellungsänderung.",
+    autoStartIntervalError: "Ganze Minuten: 15–240.",
+    minutesUnit: "Minuten",
     prize: "Preisgeld",
     answerTime: "Antwortzeit",
     chatTarget: "Chat-Ziel",
@@ -271,6 +283,12 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     settings: "Settings",
     questions: "Questions",
     settingsSection: "Round settings",
+    autoStart: "Start automatically",
+    autoStartHint: "Blitz rounds start automatically while the channel is live.",
+    autoStartInterval: "Interval",
+    autoStartIntervalHint: "Time from resolution, activation, or settings changes.",
+    autoStartIntervalError: "Whole minutes: 15–240.",
+    minutesUnit: "minutes",
     prize: "Prize",
     answerTime: "Answer time",
     chatTarget: "Chat target",
@@ -333,6 +351,8 @@ export const formatBlitzResolutionLine = (input: {
 export const blitzRoundDefaultsForLanguage = (language: "de" | "en"): BlitzRoundSettings => {
   const labels = catalog[language];
   return blitzRoundSettingsSchema.parse({
+    autoStart: false,
+    autoStartIntervalMinutes: 15,
     startText: labels.startTextDefault,
     solvedText: labels.solvedTextDefault,
     timeoutText: labels.timeoutTextDefault,

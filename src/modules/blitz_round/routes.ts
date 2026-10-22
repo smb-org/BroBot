@@ -5,7 +5,7 @@ import type { ModuleRouteEnvironment } from "../contract";
 import { BLITZ_QUESTION_MAXIMUM_COUNT, BLITZ_ROUND_MODULE_ID } from "./contracts";
 import { validateBlitzQuestion } from "./domain/questions";
 import { blitzQuestionColumns, blitzQuestionSearchText, createBlitzQuestionRepository, mapBlitzQuestionRow, type BlitzQuestionRow } from "./adapters/d1";
-import { loadEnabledBlitzSettings, openBlitzRound } from "./service";
+import { loadBlitzAutoStartBaseline, loadEnabledBlitzSettings, openBlitzRound } from "./service";
 
 type BlitzRouteContext = Context<ModuleRouteEnvironment>;
 
@@ -146,6 +146,7 @@ blitzRoundRoutes.post("/start", async (context) => {
   try {
     const opened = await openBlitzRound({
       channelId,
+      autoStartBaseline: await loadBlitzAutoStartBaseline(context.env.DB, channelId),
       startedBy: context.get("actor").userId,
       settings,
       language,

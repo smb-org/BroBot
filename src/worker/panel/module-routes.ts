@@ -1235,7 +1235,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       module.settingsChangedAlarm.handlerKey,
       module.settingsChangedAlarm.alarmKey,
     );
-  } else if (enabled && existing?.enabled !== true) {
+  } else if ((existing?.enabled === true) !== enabled) {
     await runPostCommitStep(module.id, "schedule_notification", () =>
       notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "activation"));
   }

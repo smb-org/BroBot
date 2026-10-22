@@ -1429,7 +1429,7 @@ describe("Module management in the panel", () => {
     expect(list.modules).toContainEqual(expect.objectContaining({ id: "clips", enabled: false }));
   });
 
-  it("replans schedule inputs only when a module actually transitions into being enabled", async () => {
+  it("replans schedule inputs when a module transitions between enabled and disabled", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "broadcaster");
@@ -1462,7 +1462,7 @@ describe("Module management in the panel", () => {
       environment,
     );
     expect(disable.status).toBe(200);
-    expect(notifyScheduleInputsChanged).not.toHaveBeenCalled();
+    expect(notifyScheduleInputsChanged).toHaveBeenCalledExactlyOnceWith("activation");
   });
 
   it(`keeps a committed module activation successful when schedule notification fails (${dependencyTestCard("the committed module response survives a post-commit schedule notification failure and logs its module and step", "a schedule RPC rejection changes a completed module mutation into an API error or disappears without an error log", "a route-level schedule RPC rejection is injected after the real SQLite mutation")})`, async () => {

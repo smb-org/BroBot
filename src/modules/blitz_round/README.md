@@ -28,6 +28,16 @@ core for durable game state. It requires the points module.
   chat sends are deduplicated. An uncertain result send can retry after the
   existing send uncertainty window; the ledger operation cannot repeat.
 - Disabling cancels active rounds without refund operations for zero stakes.
+- Optional automatic start uses one channel-scoped Durable Object record and alarm.
+  Its baseline combines the Blitz activation and settings revisions. Settings and
+  activation changes establish a fresh interval; another module's activation
+  leaves the persisted deadline intact. Offline time pauses the remaining live
+  interval, unknown stream state has no deadline, and late alarms skip missed
+  starts. Opening any Blitz round clears the start deadline until that round is
+  resolved. Resolution notifications carry the stored round baseline and are
+  replay-safe; a watchdog recovers an interrupted notification without a
+  catch-up start. Scheduler callbacks and round lifecycle notifications share
+  the ChannelObject module lifecycle mutation queue.
 
 ## Pool and panel
 

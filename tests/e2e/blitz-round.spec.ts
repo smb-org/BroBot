@@ -26,11 +26,31 @@ const routeJson = async (page: Page, path: string, value: unknown, method = "GET
 };
 
 const setupPanelRoutes = async (page: Page, initial: BlitzQuestion[], language: "de" | "en" = "en") => {
-  const settings = blitzRoundDefaultsForLanguage(language);
+  let settings = blitzRoundDefaultsForLanguage(language);
+  let settingsRevision = 1;
   let questions = [...initial];
   let sequence = 0;
   await routeJson(page, "/api/csrf", { token: "fictional-csrf-token" });
-  await routeJson(page, "/api/channels/fictional_channel/modules/blitz_round/settings", { settings, revision: 1 });
+  await page.route("**/api/channels/fictional_channel/modules/blitz_round/settings", async (route) => {
+    if (route.request().method() === "GET") {
+      const pageLanguage = new URL(page.url()).searchParams.get("lang");
+      settings = blitzRoundDefaultsForLanguage(pageLanguage === "de" || pageLanguage === "en" ? pageLanguage : language);
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ settings, revision: settingsRevision }) });
+      return;
+    }
+    if (route.request().method() === "PATCH") {
+      const input = route.request().postDataJSON() as { revision: number; settings: typeof settings };
+      if (input.revision !== settingsRevision) {
+        await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "module_settings_changed_concurrently" }) });
+        return;
+      }
+      settings = input.settings;
+      settingsRevision += 1;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ settings, revision: settingsRevision }) });
+      return;
+    }
+    await route.fallback();
+  });
   await page.route("**/api/channels/fictional_channel/modules/blitz_round/questions**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -73,8 +93,8 @@ const setupPanelRoutes = async (page: Page, initial: BlitzQuestion[], language: 
   return { getQuestions: () => questions, setQuestions: (value: BlitzQuestion[]) => { questions = [...value]; } };
 };
 
-const gotoPanel = async (page: Page): Promise<void> => {
-  await page.goto("/tests/e2e/blitz-round-fixture.html?lang=en");
+const gotoPanel = async (page: Page, language: "de" | "en" = "en"): Promise<void> => {
+  await page.goto(`/tests/e2e/blitz-round-fixture.html?lang=${language}`);
   await expect(page.locator(".collection-page")).toBeVisible();
 };
 
@@ -150,6 +170,35 @@ test("pool CRUD keeps collection geometry steady [protects=question creation, ed
     const geometryAfter = await collection.boundingBox();
     expect(geometryAfter?.x).toBe(geometryBefore?.x);
     expect(geometryAfter?.width).toBe(geometryBefore?.width);
+  }
+});
+
+test("automatic start settings retain their layout in German and English at desktop and 390 px [protects=the Blitz automatic-start switch, bounded interval, and reserved feedback area stay usable in both locales and viewport sizes; fails_when=validation changes the panel geometry, hides the interval control, or causes horizontal overflow; no_claim=uses mocked settings and does not verify server scheduling or production authentication]", async ({ page }) => {
+  await setupPanelRoutes(page, [question("fictional-auto-start-question", "Which star is nearest?")]);
+
+  for (const language of ["de", "en"] as const) {
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      await gotoPanel(page, language);
+      // At 390 px the panel is master-detail: open the entry to reach the detail header's Settings button.
+      await page.getByRole("button", { name: /Which star is nearest/ }).click();
+      await page.getByRole("button", { name: language === "de" ? "Einstellungen" : "Settings", exact: true }).click();
+      const toggle = page.getByRole("switch", { name: blitzTexts(language).autoStart, exact: true });
+      const interval = page.getByRole("spinbutton", { name: blitzTexts(language).autoStartInterval, exact: true });
+      await expect(toggle).toBeVisible();
+      await expect(interval).toBeVisible();
+
+      const settingsArea = page.locator(".blitz-panel__auto-start");
+      const feedbackBelow = page.locator(".blitz-panel__auto-start + *");
+      const areaBefore = await settingsArea.boundingBox();
+      const belowBefore = await feedbackBelow.boundingBox();
+      await toggle.click();
+      await interval.fill("14");
+      await expect(page.getByText(blitzTexts(language).autoStartIntervalError, { exact: true })).toBeVisible();
+      expect(await settingsArea.boundingBox()).toEqual(areaBefore);
+      expect((await feedbackBelow.boundingBox())?.y).toBe(belowBefore?.y);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    }
   }
 });
 
