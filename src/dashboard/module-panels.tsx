@@ -548,7 +548,6 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   const templateVariableOptions: Readonly<Partial<Record<string, readonly TemplateTextFieldVariable[]>>> = templateMetadata;
   const slotRate = module.id === "emote_slots" ? calculateSlotPayoutRateForDraft(currentValue) : null;
   const settingsEditor = (sectionId: string, fieldErrors: Readonly<Record<string, string>>): ReactElement => (
-    <>
     <SettingsEditor
       key={sectionId}
       spec={spec}
@@ -583,7 +582,6 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       } : {})}
       onIssuesChange={reportTemplateIssues}
     />
-    </>
   );
   const readOnly = page === undefined && !canManageContent ? {
     ...(module.id === "chat_voting" ? {} : { reason: copy.readOnlyReason }),

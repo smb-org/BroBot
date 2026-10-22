@@ -25,7 +25,7 @@ interface Controls {
   releaseSnooze: () => void;
 }
 
-const installMocks = async (page: Page, role: "manager" | "operator"): Promise<Controls> => {
+const installMocks = async (page: Page, role: "manager" | "operator", duels: readonly Record<string, unknown>[] = []): Promise<Controls> => {
   let raidState: "ready" | "empty" | "error" = "ready";
   let raidGate: Promise<void> = Promise.resolve();
   let releaseRaid = (): void => undefined;
@@ -34,7 +34,12 @@ const installMocks = async (page: Page, role: "manager" | "operator"): Promise<C
   let snoozeGate: Promise<void> = Promise.resolve();
   let releaseSnooze = (): void => undefined;
 
-  await installLiveCockpitMocks(page, { channelId, role, modules });
+  await installLiveCockpitMocks(page, {
+    channelId,
+    role,
+    modules: duels.length === 0 ? modules : [...modules, { id: "duel", enabled: true, settings: "{}" }],
+    duels,
+  });
   await page.route(`**/api/channels/${channelId}/**`, async (route: Route) => {
     const path = new URL(route.request().url()).pathname.slice(`/api/channels/${channelId}`.length);
     const method = route.request().method();
@@ -63,7 +68,23 @@ const installMocks = async (page: Page, role: "manager" | "operator"): Promise<C
     }
     if (path === "/modules/chat_voting/current") {
       const vote = lock === "chat_vote"
-        ? { id: "vote-509", status: "open", title: "Was spielen wir als Nächstes?", closesAt: new Date(now + 90_000).toISOString() }
+        ? {
+          id: "vote-509",
+          channelId,
+          kind: "options",
+          optionCount: 2,
+          labels: ["Abenteuer", "Strategie"],
+          answerColors: [],
+          status: "open",
+          title: "Was spielen wir als Nächstes?",
+          openedAt: new Date(now - 60_000).toISOString(),
+          closesAt: new Date(now + 90_000).toISOString(),
+          requestedDurationSeconds: 120,
+          closedAt: null,
+          closeReason: "timer",
+          counts: [3, 1],
+          voterCount: 4,
+        }
         : null;
       return route.fulfill(json({ vote, counts: vote === null ? null : [3, 1], revision: 1, terms: null, moreTerms: null, hasOpenBallot: vote !== null, defaultDurationSeconds: 120 }));
     }
@@ -103,10 +124,17 @@ const installMocks = async (page: Page, role: "manager" | "operator"): Promise<C
   };
 };
 
-const open = async (page: Page, viewport: { width: number; height: number }, path: string, prepare?: (controls: Controls) => void, role: "manager" | "operator" = "manager"): Promise<Controls> => {
+const open = async (
+  page: Page,
+  viewport: { width: number; height: number },
+  path: string,
+  prepare?: (controls: Controls) => void,
+  role: "manager" | "operator" = "manager",
+  duels: readonly Record<string, unknown>[] = [],
+): Promise<Controls> => {
   await page.unrouteAll({ behavior: "wait" });
   await page.setViewportSize(viewport);
-  const controls = await installMocks(page, role);
+  const controls = await installMocks(page, role, duels);
   prepare?.(controls);
   await page.goto(`/channels/${channelId}${path}`);
   return controls;
@@ -336,5 +364,52 @@ for (const viewport of viewports) {
       await expect(page.locator(".live-cockpit-ads-tile")).toHaveAttribute("data-state", "upcoming");
       await expect(page.locator(".live-cockpit-next-tile .live-cockpit-next-item")).toHaveCount(0);
     });
+  });
+}
+
+for (const width of [1280, 1440, 1920]) {
+  test(`cockpit: running content stays inside its tile at ${String(width)}px`, async ({ page }) => {
+    const voteNow = Date.now();
+    const duel = {
+      id: "duel-509-geometry",
+      kind: "duel",
+      challenger: "spielende_katze",
+      target: "rasender_fuchs",
+      stake: 1_250,
+      closesAt: new Date(voteNow + 75_000).toISOString(),
+    };
+    await open(page, { width, height: 1080 }, "", (next) => {
+      next.setLock("chat_vote");
+      next.setAds("upcoming");
+    }, "manager", [duel]);
+    const tile = page.locator(".live-cockpit-running-tile");
+    await expect(tile.getByTestId("live-vote-tile")).toBeVisible();
+    await expect(tile.getByTestId("live-duel-tile")).toBeVisible();
+    await expect(page.locator(".live-cockpit-ads-tile")).toHaveAttribute("data-state", "upcoming");
+
+    const overflow = await tile.evaluate((element) => {
+      const tileRect = element.getBoundingClientRect();
+      const violations: string[] = [];
+      const contains = (rect: DOMRect): boolean => rect.left >= tileRect.left - 0.5 &&
+        rect.top >= tileRect.top - 0.5 && rect.right <= tileRect.right + 0.5 && rect.bottom <= tileRect.bottom + 0.5;
+      for (const [index, button] of [...element.querySelectorAll("button")].entries()) {
+        if (!contains(button.getBoundingClientRect())) violations.push(`button ${String(index)}`);
+      }
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node !== null) {
+        if (node.textContent?.trim()) {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          for (const [index, rect] of [...range.getClientRects()].entries()) {
+            if (rect.width > 0 && rect.height > 0 && !contains(rect)) violations.push(`text ${JSON.stringify(node.textContent.trim())} fragment ${String(index)}`);
+          }
+        }
+        node = walker.nextNode();
+      }
+      return violations;
+    });
+    expect(overflow).toEqual([]);
+    await expectNoHorizontalScroll(page);
   });
 }

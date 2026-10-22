@@ -306,20 +306,22 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
         }}
         onFeedbackMessage={(text, link, tone) => { showFooterMessage({ text, ...(link === undefined ? {} : { link }), ...(tone === "info" ? { tone: "warning" } : {}) }); }}
       />
-      <LiveCockpitTiles
-        key={overview.channelId}
-        channelId={overview.channelId}
-        role={overview.role}
-        snapshots={liveQuery.data?.snapshots ?? []}
-        failedModules={liveQuery.data?.failedModules ?? []}
-        adsEnabled={moduleState.get("ads") === true}
-        loading={liveQuery.isPending}
-        failed={liveQuery.data?.failed ?? liveQuery.isError}
-        now={now}
-        timeZone={timeZone}
-        onMessage={(text, tone) => { showFooterMessage({ text, ...(tone === undefined ? {} : { tone }) }); }}
-        onRefresh={refreshLiveData}
-      />
+      <div className="live-cockpit__running-area">
+        <LiveCockpitTiles
+          key={overview.channelId}
+          channelId={overview.channelId}
+          role={overview.role}
+          snapshots={liveQuery.data?.snapshots ?? []}
+          failedModules={liveQuery.data?.failedModules ?? []}
+          adsEnabled={moduleState.get("ads") === true}
+          loading={liveQuery.isPending}
+          failed={liveQuery.data?.failed ?? liveQuery.isError}
+          now={now}
+          timeZone={timeZone}
+          onMessage={(text, tone) => { showFooterMessage({ text, ...(tone === undefined ? {} : { tone }) }); }}
+          onRefresh={refreshLiveData}
+        />
+      </div>
       <LiveCockpitEventFeed channelId={overview.channelId} role={overview.role} now={now} timeZone={timeZone} eventQuery={eventsQuery}
         streamState={overview.streamState} raidEnabled={modules.some((module) => module.id === "raid" && module.enabled)}
         onMessage={(text) => { showFooterMessage({ text }); }} />

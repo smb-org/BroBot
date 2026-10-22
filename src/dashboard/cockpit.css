@@ -51,6 +51,7 @@
   .live-cockpit__warning-summary .live-cockpit__location-action:active:not(:disabled) { border-color: var(--color-gold-press); background: var(--color-gold-press); }
   .live-cockpit__warning-details { display: grid; gap: var(--s3); }
   .live-cockpit__wall { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, .92fr); gap: var(--s3); min-width: 0; min-height: 0; overflow: hidden; }
+  .live-cockpit__running-area { grid-column: 2; min-width: 0; min-height: 0; container: live-cockpit-running / inline-size; }
   .live-cockpit-actions { display: flex; grid-column: 1; flex-direction: column; min-width: 0; min-height: 0; padding: var(--s3); border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface); }
   .live-cockpit-actions__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-height: 62px; margin-bottom: var(--s3); padding: 0 var(--s1) var(--s3); border-bottom: 1px solid var(--line); }
   .live-cockpit-actions__heading > div:first-child { min-width: 0; }
@@ -79,12 +80,19 @@
   .live-action__result-link { position: absolute; z-index: 1; right: var(--s2); bottom: var(--s2); left: var(--s2); display: flex; align-items: center; justify-content: center; gap: var(--s1); min-width: 0; overflow: hidden; color: var(--brand-text); font-size: 11px; line-height: 14px; text-decoration: underline; text-overflow: ellipsis; white-space: nowrap; }
   .live-action__result-message { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .live-cockpit__running { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); min-width: 0; min-height: 0; overflow: hidden; }
+  .live-cockpit__running-area > .live-cockpit__running { height: 100%; }
   .live-cockpit-reserve { display: flex; flex-direction: column; justify-content: flex-start; min-width: 0; min-height: 0; overflow: hidden; padding: var(--s4); border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface); }
   .live-cockpit-reserve h2 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
   .live-cockpit-reserve p { max-width: 34ch; margin: var(--s2) 0 0; color: var(--text-3); font-size: 12px; line-height: 1.45; }
   .live-cockpit-running-tile { grid-column: 1; grid-row: 1; gap: var(--s2); }
   .live-cockpit-ads-tile { grid-column: 2; grid-row: 1; }
   .live-cockpit-next-tile { grid-column: 1 / -1; grid-row: 2; }
+  @container live-cockpit-running (max-width: 520px) {
+    .live-cockpit__running { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1.15fr) 188px minmax(0, .85fr); }
+    .live-cockpit-running-tile { grid-column: 1; grid-row: 1; }
+    .live-cockpit-ads-tile { grid-column: 1; grid-row: 2; height: 188px; min-height: 188px; }
+    .live-cockpit-next-tile { grid-column: 1; grid-row: 3; }
+  }
   .live-cockpit-duels__list { display: grid; gap: var(--s1); min-width: 0; min-height: 0; max-height: 144px; overflow: auto; scrollbar-gutter: stable; }
   .live-cockpit-duels__list h3 { margin: 0; color: var(--text-2); font-size: 11px; font-weight: 600; }
   .live-cockpit-duels__item { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: var(--s2); min-width: 0; min-height: 32px; padding: var(--s1) 0; border-bottom: 1px solid var(--line); }
@@ -226,6 +234,7 @@
     .live-cockpit-broadcast__reason-slot { height: auto; min-height: 16px; max-height: none; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
     .live-cockpit-header__indicators { justify-content: flex-start; gap: var(--s3); }
     .live-cockpit__wall { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+    .live-cockpit__running-area { grid-column: 1; }
     .live-cockpit-header__status { grid-column: 1; grid-row: 3; grid-template-rows: auto 44px; gap: var(--s3); min-height: 0; }
     .live-cockpit__warning-slot { grid-column: 1; height: 44px; min-height: 44px; justify-content: flex-start; }
     .live-cockpit__warning-slot[data-warning-count="0"] { display: flex; visibility: hidden; }
