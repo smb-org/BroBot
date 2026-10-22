@@ -322,7 +322,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       subtitle={page.subtitle}
       {...(page.meta === undefined ? {} : { meta: page.meta })}
       icon={page.icon}
-      {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : {})}
+      {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
       active={page.active}
       onToggle={page.onToggle}
       switchDisabled={page.switchDisabled}
@@ -807,7 +807,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     subtitle={page.subtitle}
     {...(page.meta === undefined ? {} : { meta: page.meta })}
     icon={page.icon}
-    {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : {})}
+    {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
     active={page.active}
     onToggle={page.onToggle}
     switchDisabled={page.switchDisabled || pending || urlRemovalPending}

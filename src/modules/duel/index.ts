@@ -76,6 +76,7 @@ export const duelModule: BotModule<typeof duelSettingsSchema> = {
   routes: duelRoutes,
   eventSubTypes: ["channel.chat.message"],
   dryRunSilentReason: "round_answers",
+  pointRoundCancellationNotice: false,
   chatCommandNames: (settings) => {
     const parsed = duelSettingsSchema.safeParse(settings);
     return parsed.success ? [parsed.data.challengeCommand, parsed.data.acceptCommand] : [];

@@ -1,3 +1,18 @@
+@layer components.module {
+.settings-page--duel .settings-page__columns { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: max-content max-content; overflow-y: auto; align-content: start; }
+.settings-page--duel .settings-page__column { overflow: visible; }
+.settings-page--duel .settings-page__column:first-child { grid-column: 1 / -1; }
+.settings-page--duel .settings-page__column-stack { display: flex; min-width: 0; flex-direction: column; gap: 24px; }
+@media (min-width: 1750px) {
+  .settings-page--duel .settings-page__columns { grid-template-columns: minmax(640px, 1.4fr) minmax(0, 1fr) minmax(0, 1.1fr); grid-template-rows: minmax(0, 1fr); }
+  .settings-page--duel .settings-page__column { overflow-y: auto; }
+  .settings-page--duel .settings-page__column:first-child { grid-column: auto; }
+}
+@media (max-width: 1020px) {
+  .settings-page--duel .settings-page__columns { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; }
+  .settings-page--duel .settings-page__column:first-child { grid-column: auto; }
+}
+}
 .duel-settings-editor__text-groups { display: grid; gap: var(--s6); }
 .duel-settings-editor__text-group { display: grid; gap: var(--s3); }
 .duel-settings-editor__text-field { display: grid; gap: var(--s1); min-width: 0; color: var(--text); font-size: var(--text-sm); }

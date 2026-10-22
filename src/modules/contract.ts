@@ -1922,6 +1922,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   alarms?: readonly ModuleAlarmDefinition[];
   /** Reconciles accepted start metadata, even if the round was cancelled before announcement. */
   onPointRoundOpened?: (context: ModuleAlarmContext, round: ModulePointRoundAnnouncement) => Promise<void>;
+  /** Whether cancelling funded rounds queues the shared refund notice. Defaults to true. */
+  pointRoundCancellationNotice?: boolean;
   /** Formats the persisted result of a resolved points round for retryable chat delivery. */
   formatPointRoundResult?: (
     context: ModuleAlarmContext,

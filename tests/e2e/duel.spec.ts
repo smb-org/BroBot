@@ -119,6 +119,59 @@ test("a settings save error changes no geometry outside the reserved status area
   }
 });
 
+test("duel settings use the outer page scroll at 1440x900 so long fields stay reachable", async ({ page }) => {
+  const settings = duelSettingsForLanguage("en");
+  await installLiveCockpitMocks(page, {
+    channelId,
+    modules: [{ id: "points", enabled: true, settings: "{}" }, { id: "duel", enabled: true, settings: JSON.stringify(settings) }],
+  });
+  await installDuelSettingsApi(page, settings);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/channels/${channelId}/modules/duel?lang=en`);
+  await expect(page.locator(".settings-page__columns")).toBeVisible();
+  await page.getByLabel("Cooldown in seconds").waitFor();
+
+  const layout = await page.evaluate(() => {
+    const columns = document.querySelector<HTMLElement>(".settings-page__columns");
+    const innerScrollColumns = [...document.querySelectorAll<HTMLElement>(".settings-page__column")]
+      .filter((column) => column.scrollHeight > column.clientHeight + 1);
+    return {
+      outerScrollHeight: columns?.scrollHeight ?? 0,
+      outerClientHeight: columns?.clientHeight ?? 0,
+      innerScrollColumns: innerScrollColumns.length,
+    };
+  });
+  expect(layout.outerScrollHeight).toBeGreaterThan(layout.outerClientHeight);
+  expect(layout.innerScrollColumns).toBe(0);
+
+  const cooldownHint = page.getByText("Applies after a successful challenge only.");
+  await cooldownHint.scrollIntoViewIfNeeded();
+  await expect(cooldownHint).toBeInViewport();
+  const firstFightText = page.getByRole("textbox", { name: "Fight text 1" });
+  await firstFightText.scrollIntoViewIfNeeded();
+  await expect(firstFightText).toBeInViewport();
+});
+
+test("operators see Duel cancellation disabled with the manager-only reason", async ({ page }) => {
+  await installLiveCockpitMocks(page, {
+    channelId,
+    role: "operator",
+    modules: [
+      { id: "points", enabled: true, settings: "{}" },
+      { id: "duel", enabled: true, settings: JSON.stringify(duelSettingsForLanguage("en")) },
+    ],
+    duels: [{ kind: "duel", id: "fictional_operator_duel", challenger: "frostfern", target: null, stake: 100, closesAt: new Date(Date.now() + 60_000).toISOString() }],
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/channels/${channelId}`);
+
+  const tile = page.getByTestId("live-duel-tile");
+  await expect(tile).toBeVisible();
+  const cancel = tile.getByRole("button", { name: "Cancel round" });
+  await expect(cancel).toBeDisabled();
+  await expect(cancel).toHaveAttribute("title", "Only managers and broadcasters may run this action.");
+});
+
 test("the cockpit lists an open duel and confirms cancellation before sending the refund request [protects=the duel tile shows its players and stake and cancellation is confirmed then removes the tile; fails_when=the tile is missing, cancellation sends before confirmation, or the duel remains after success; no_claim=the cockpit API fixture removes the tile and the worker refund is covered by the Durable Object suite]", async ({ page }) => {
   const duel = {
     kind: "duel",
@@ -143,7 +196,10 @@ test("the cockpit lists an open duel and confirms cancellation before sending th
   const tile = page.getByTestId("live-duel-tile");
   await expect(tile).toContainText("frostfern vs. moonmoss");
   await expect(tile).toContainText("Stake 100 points");
-  await tile.getByRole("button", { name: "Cancel round" }).click();
+  const cancelButton = tile.getByRole("button", { name: "Cancel round" });
+  await expect(cancelButton).toHaveAttribute("data-variant", "danger-outline");
+  await expect.poll(() => cancelButton.evaluate((button) => getComputedStyle(button).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  await cancelButton.click();
   const dialog = page.getByRole("dialog", { name: "Cancel round?" });
   await expect(dialog).toContainText("Stakes will be refunded.");
   expect(cancelRequests).toEqual([]);

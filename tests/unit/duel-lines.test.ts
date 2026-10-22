@@ -60,4 +60,19 @@ describe("duel round chat line budget", () => {
     expect(botExpired?.text).toContain("BroBot wins +100 points; frostfern loses −100 points");
     expect(silentExpiry).toBeNull();
   });
+
+  it.each([
+    ["de", "🧹"],
+    ["en", "janitor"],
+  ] as const)("gives the bot result its own recognizable default in %s", (language, opponentCue) => {
+    const { result, botResult } = duelSettingsForLanguage(language).texts;
+    const placeholders = (template: string): string[] => [...template.matchAll(/\{([a-zA-Z0-9_]+)\}/gu)]
+      .map((match) => match[1] ?? "")
+      .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+
+    expect(botResult).not.toBe(result);
+    expect(botResult).toContain(opponentCue);
+    expect(placeholders(botResult)).toEqual(["fight", "loser", "loss", "net", "winner"]);
+    expect(placeholders(botResult)).toEqual(placeholders(result));
+  });
 });

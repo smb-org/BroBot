@@ -197,9 +197,9 @@ describe("duel module worker flow", () => {
     expect(sendChat.mock.calls[1]?.[0]).toContain("loses −100 points");
   });
 
-  it("refunds every open stake when duel is disabled [protects=module cancellation refunds each escrow and releases every challenger lock; fails_when=any balance changes or lock survives; no_claim=the settings PATCH route is outside this DO refund test]", async () => {
+  it("refunds every open stake silently when duel is disabled [protects=module cancellation refunds each escrow, releases every challenger lock, and queues no chat notice; fails_when=any balance changes, lock survives, or cancellation notice is sent; no_claim=the settings PATCH route is outside this DO refund test]", async () => {
     const channelId = `duel-disable-${crypto.randomUUID()}`;
-    const { points } = await setup(channelId);
+    const { object, points } = await setup(channelId);
     await addBalance(points, "viewer_anna", "frostfern");
     await addBalance(points, "viewer_ben", "moonmoss");
     await processDuelMessage(eventFor(channelId, "!duel 100", "viewer_anna", "frostfern", "fictional-disable-a"), contextFor(points));
@@ -212,6 +212,38 @@ describe("duel module worker flow", () => {
       "SELECT COUNT(*) AS count FROM game_round_locks WHERE module_id = 'duel'",
     ).one().count);
     expect(locks).toBe(0);
+    const notices = await runPointObject(object, (_target, durableState) => durableState.storage.sql.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM game_round_cancellation_notices WHERE module_id = 'duel'",
+    ).one().count);
+    expect(notices).toBe(0);
+  });
+
+  it("keeps Blitz cancellation refund notices enabled [protects=funded Blitz round cancellation still refunds and sends its cancellation notice; fails_when=the refund or the existing cancellation notice is lost; no_claim=the Durable Object chat sender is stubbed with fixed point-worker keys]", async () => {
+    const channelId = `blitz-cancel-notice-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await testEnvironment.DB.prepare("UPDATE channels SET language = 'en' WHERE channel_id = ?").bind(channelId).run();
+    await testEnvironment.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'blitz_round', 1, ?, 1)",
+    ).bind(channelId, JSON.stringify({ prize: 50, answerTimeSeconds: 60, chatTarget: null, startText: "Open", solvedText: "Solved", timeoutText: "Timeout" })).run();
+    const object = pointObject(channelId);
+    await object.touchPointAccount("blitz_round", "viewer_anna", "frostfern", 500);
+    await expect(object.pointBalance("blitz_round", "viewer_anna")).resolves.toBe(500);
+    await object.openGameRoundWithStake("blitz_round", "blitz-funded-cancel", {
+      durationS: 60,
+      announceText: "Open",
+      answer: "CLOUD",
+      settlement: { kind: "blitz", params: { prize: 50 } },
+    }, "msg:blitz-funded-cancel", "viewer_anna", "frostfern", 100);
+    await expect(object.pointBalance("blitz_round", "viewer_anna")).resolves.toBe(400);
+
+    await object.setGameModuleGate("blitz_round", true, 2, 1);
+    await expect(object.cancelOpenGameRounds("blitz_round", 2)).resolves.toBe(1);
+
+    await expect(object.pointBalance("blitz_round", "viewer_anna")).resolves.toBe(500);
+    const notices = await runPointObject(object, (_target, durableState) => durableState.storage.sql.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM game_round_cancellation_notices WHERE module_id = 'blitz_round' AND revision = 2",
+    ).one().count);
+    expect(notices).toBe(1);
   });
 
   it("keeps open-round locks isolated by channel [protects=one channel's challenger lock cannot block an identical account in another channel; fails_when=the second channel receives round_locked or sees the first round; no_claim=the test uses separate channel Durable Objects and a shared fake sender]", async () => {

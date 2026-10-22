@@ -973,6 +973,7 @@ export const setGameModuleGateSync = (
   lastDisabledRevision: number | null = null,
   onRoundCancelled?: (roundId: string) => void,
   onRoundSuppressed?: (roundId: string) => void,
+  queueCancellationNotice = true,
 ): { applied: boolean } => {
   if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("invalid_revision");
   if (lastDisabledRevision !== null && (!Number.isSafeInteger(lastDisabledRevision) || lastDisabledRevision < 1)) {
@@ -1020,6 +1021,7 @@ export const setGameModuleGateSync = (
         roundIds,
         cancellationRevision,
         onRoundCancelled,
+        queueCancellationNotice,
       );
     }
   }
@@ -1715,6 +1717,7 @@ export const cancelPointRoundsSync = (
   roundIds?: readonly string[],
   expectedGateRevision?: number,
   onRoundCancelled?: (roundId: string) => void,
+  queueCancellationNotice = true,
 ): number => {
   if (expectedGateRevision !== undefined) {
     const gate = sql.exec<{ revision: number; closed: number }>(
@@ -1756,7 +1759,7 @@ export const cancelPointRoundsSync = (
     cancelledCount += 1;
   }
   if (expectedGateRevision !== undefined) {
-    if (refundedStake) {
+    if (refundedStake && queueCancellationNotice) {
       sql.exec(
         `INSERT INTO game_round_cancellation_notices (module_id, revision, created_at)
          VALUES (?, ?, ?) ON CONFLICT(module_id, revision) DO NOTHING`,

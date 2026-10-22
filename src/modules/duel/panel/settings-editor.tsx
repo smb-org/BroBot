@@ -81,8 +81,8 @@ const textLibraryField = {
 const spec: SettingsEditorSpec<DuelSettings> = {
   sections: [
     { id: "commands", icon: "tabMessages", fields: [
-      { kind: "text", key: "challengeCommand", prefix: "!", maxLength: 25 },
-      { kind: "text", key: "acceptCommand", prefix: "!", maxLength: 25 },
+      { kind: "text", key: "challengeCommand", maxLength: 25 },
+      { kind: "text", key: "acceptCommand", maxLength: 25 },
     ] },
     { id: "stakes", icon: "tabSettings", fields: [
       { kind: "number", key: "minStake", min: 1, max: 100_000, step: 1 },

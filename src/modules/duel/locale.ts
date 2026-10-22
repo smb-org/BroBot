@@ -18,7 +18,7 @@ export const duelCatalog = {
     challengeOpen: "⚔️ {challenger} fordert den Chat zu einem Duell um {stake} Punkte heraus! Mit {acceptCommand} annehmen.",
     challengeTargeted: "⚔️ {challenger} fordert @{target} zu einem Duell um {stake} Punkte heraus! Mit {acceptCommand} annehmen.",
     result: "{fight} {winner} gewinnt {net} Punkte; {loser} verliert {loss} Punkte!",
-    botResult: "{fight} {winner} gewinnt {net} Punkte; {loser} verliert {loss} Punkte!",
+    botResult: "🧹 Niemand wollte – der Hausmeister krempelt die Ärmel hoch! {fight} {winner} gewinnt {net} Punkte; {loser} verliert {loss} Punkte!",
     fightVariants: [
       "Die Klingen kreuzen sich im Sternenlicht.",
       "Ein schneller Ausweichschritt entscheidet den Kampf.",
@@ -61,7 +61,7 @@ export const duelCatalog = {
     challengeOpen: "⚔️ {challenger} challenges chat to a {stake} point duel! Type {acceptCommand} to accept.",
     challengeTargeted: "⚔️ {challenger} challenges @{target} to a {stake} point duel! Type {acceptCommand} to accept.",
     result: "{fight} {winner} wins {net} points; {loser} loses {loss} points!",
-    botResult: "{fight} {winner} wins {net} points; {loser} loses {loss} points!",
+    botResult: "🧹 Nobody stepped up, so the janitor rolls up their sleeves! {fight} {winner} wins {net} points; {loser} loses {loss} points!",
     fightVariants: [
       "Blades cross beneath the starlight.",
       "A quick dodge decides the fight.",

@@ -3869,6 +3869,8 @@ export class ChannelObject extends DurableObject<Env> {
         },
         roundIds,
         expectedGateRevision,
+        undefined,
+        MODULES.find((module) => module.id === moduleId)?.pointRoundCancellationNotice !== false,
       );
       if (count > 0) {
         for (const roundId of roundIds) {
@@ -3947,7 +3949,7 @@ export class ChannelObject extends DurableObject<Env> {
         } else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       }, (roundId) => {
         this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
-      });
+      }, MODULES.find((module) => module.id === moduleId)?.pointRoundCancellationNotice !== false);
       if (!closed && cancellationRevision !== null) this.ensurePointCancellationNoticeAlarmsSync();
       return applied;
     });
@@ -3965,6 +3967,18 @@ export class ChannelObject extends DurableObject<Env> {
     const notices = pendingPointRoundCancellationNotices(this.ctx.storage.sql);
     for (const notice of notices) {
       const key = pointCancellationNoticeAlarmKey(notice.moduleId, notice.revision);
+      if (MODULES.find((module) => module.id === notice.moduleId)?.pointRoundCancellationNotice === false) {
+        this.ctx.storage.transactionSync(() => {
+          completePointRoundCancellationNoticeSync(
+            this.ctx.storage.sql,
+            notice.moduleId,
+            notice.revision,
+            new Date().toISOString(),
+          );
+          this.clearPointRoundAlarmSync(key);
+        });
+        continue;
+      }
       const sendOccurrenceKey = `points:cancellation:${notice.moduleId}:${String(notice.revision)}`;
       try {
         const channel = await this.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")

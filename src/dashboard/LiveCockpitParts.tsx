@@ -80,6 +80,7 @@ export const LiveCockpitTiles = ({
   const [duelCancelError, setDuelCancelError] = useState<string | undefined>();
   const [snoozeFeedback, setSnoozeFeedback] = useState<{ itemId: string; text: string } | null>(null);
   const roleCanManage = hasRequiredChannelRole(role, "operator");
+  const roleCanManageDuel = canManage(role);
   const roleCanSnooze = canManage(role);
 
   useEffect(() => {
@@ -177,7 +178,7 @@ export const LiveCockpitTiles = ({
   };
 
   const doCancelDuel = async (): Promise<void> => {
-    if (duelCancelTarget === null || busy || !roleCanManage) return;
+    if (duelCancelTarget === null || busy || !roleCanManageDuel) return;
     setBusy(true);
     setDuelCancelError(undefined);
     try {
@@ -228,10 +229,17 @@ export const LiveCockpitTiles = ({
             <strong>{labels.duelChallenge(duel.challenger, duel.target)}</strong>
             <small>{labels.duelStake(formatNumber(duel.stake))} · {labels.voteEndsIn(remainingLabel(duel.closesAt, now))}</small>
           </div>
-          <Button size="compact" variant="neutral" danger disabled={busy || !roleCanManage}
+          <Button size="compact" variant="subtle" danger="subtle" disabled={busy || !roleCanManageDuel}
+            {...(!roleCanManageDuel ? {
+              title: dashboardTexts().streamManager.managerOnly,
+              describedBy: `duel-cancel-reason-${duel.id}`,
+            } : {})}
             onClick={() => { setDuelCancelTarget({ id: duel.id }); setDuelCancelError(undefined); }}>
             {labels.duelCancel}
           </Button>
+          {!roleCanManageDuel ? <span id={`duel-cancel-reason-${duel.id}`} className="sr-only">
+            {dashboardTexts().streamManager.managerOnly}
+          </span> : null}
         </article>)}
         </div>
         {duels.length > visibleDuels.length ? <p className="live-cockpit-duels__more">{labels.duelMore(formatNumber(duels.length - visibleDuels.length))}</p> : null}

@@ -14,6 +14,7 @@ import {
 import { canManage, type AuditAction } from "../../contracts/values";
 import type { ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
+import { effectiveModuleCommandTokens, findModuleCommandCollision } from "../../modules/contracts/module-command-collision";
 import { BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET } from "../../modules/belabox/contracts";
 import { validateBelaboxStatsUrl } from "../../modules/belabox/domain/stats-url";
 import { resetSampleAfterStatsUrlChangeBestEffort } from "../../modules/belabox/routes";
@@ -103,48 +104,17 @@ const runPostCommitStep = async (moduleId: string, step: string, action: () => P
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const effectiveCommandTokens = (moduleId: string, settings: unknown): string[] => {
-  const module = MODULES.find((candidate) => candidate.id === moduleId);
-  if (module === undefined) return [];
-  const configured = module.chatCommandNames?.(settings) ?? [];
-  return [...(module.chatCommands ?? []).map((command) => command.name), ...configured]
-    .map((name) => name.trim().toLocaleLowerCase("en-US"));
-};
-
 const moduleCommandCollision = async (
   db: D1Database,
   channelId: string,
   moduleId: string,
   candidateSettings: unknown,
 ): Promise<string | null> => {
-  const candidate = new Set(effectiveCommandTokens(moduleId, candidateSettings));
-  if (candidate.size === 0) return null;
-  const active = await db.prepare(
-    "SELECT module_id, settings FROM channel_modules WHERE channel_id = ? AND enabled = 1 AND module_id <> ?",
-  ).bind(channelId, moduleId).all<{ module_id: string; settings: string }>();
-  for (const row of active.results) {
-    const other = MODULES.find((entry) => entry.id === row.module_id);
-    if (other === undefined) continue;
-    try {
-      const parsed = other.settingsSchema.safeParse(JSON.parse(row.settings) as unknown);
-      if (!parsed.success) continue;
-      const collision = effectiveCommandTokens(other.id, parsed.data).find((name) => candidate.has(name));
-      if (collision !== undefined) return collision;
-    } catch { /* Invalid legacy settings do not claim a command token. */ }
-  }
-  const customCommands = await db.prepare(
-    "SELECT command_name, aliases_json FROM text_commands WHERE channel_id = ? AND enabled = 1 ORDER BY command_name",
-  ).bind(channelId).all<{ command_name: string; aliases_json: string }>();
-  for (const row of customCommands.results) {
-    let names = [`!${row.command_name}`];
-    try {
-      const aliases: unknown = JSON.parse(row.aliases_json);
-      if (Array.isArray(aliases)) names = [...names, ...aliases.filter((alias): alias is string => typeof alias === "string").map((alias) => `!${alias}`)];
-    } catch { /* Keep the command name if legacy aliases are malformed. */ }
-    const collision = names.map((name) => name.toLocaleLowerCase("en-US")).find((name) => candidate.has(name));
-    if (collision !== undefined) return collision;
-  }
-  return null;
+  const module = MODULES.find((candidate) => candidate.id === moduleId);
+  if (module === undefined) return null;
+  return findModuleCommandCollision(db, channelId, effectiveModuleCommandTokens(module, candidateSettings), MODULES, {
+    excludeModuleId: moduleId,
+  });
 };
 
 const validBoxArtTemplate = (value: unknown): value is string => {
