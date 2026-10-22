@@ -1,0 +1,17 @@
+.duel-settings-editor__text-groups { display: grid; gap: var(--s6); }
+.duel-settings-editor__text-group { display: grid; gap: var(--s3); }
+.duel-settings-editor__text-field { display: grid; gap: var(--s1); min-width: 0; color: var(--text); font-size: var(--text-sm); }
+.duel-settings-editor__text-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 3.5rem;
+  resize: vertical;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-control);
+  background: var(--surface-well);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.45;
+}
+.duel-settings-editor__text-field textarea:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }

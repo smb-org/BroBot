@@ -96,6 +96,7 @@ interface PointRoundOpenData {
   announceText?: string;
   announce_text?: string;
   settlement?: { kind: string; params: unknown };
+  lockKeys?: string[];
   [key: string]: unknown;
 }
 
@@ -263,6 +264,12 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
     stake INTEGER NOT NULL,
     data_json TEXT NOT NULL,
     PRIMARY KEY (round_id, account_id)
+  )`);
+  sql.exec(`CREATE TABLE IF NOT EXISTS game_round_locks (
+    module_id TEXT NOT NULL,
+    lock_key TEXT NOT NULL,
+    round_id TEXT NOT NULL,
+    PRIMARY KEY (module_id, lock_key)
   )`);
   sql.exec(`CREATE TABLE IF NOT EXISTS game_round_answers (
     operation_id TEXT PRIMARY KEY,
@@ -1108,7 +1115,13 @@ export const pointCooldownRemainingSync = (sql: PointsSql, moduleId: string, key
   return Number.isFinite(deadline) && deadline > now ? Math.ceil((deadline - now) / 1_000) : 0;
 };
 
-const parseRoundOpenData = (value: unknown): { data: unknown; durationS: number; announceText: string; settlement: { kind: string; params: unknown } } => {
+const parseRoundOpenData = (value: unknown): {
+  data: unknown;
+  durationS: number;
+  announceText: string;
+  settlement: { kind: string; params: unknown };
+  lockKeys?: string[];
+} => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("invalid_round");
   const data = value as PointRoundOpenData;
   const durationS = data.durationS ?? data.duration_s;
@@ -1122,7 +1135,20 @@ const parseRoundOpenData = (value: unknown): { data: unknown; durationS: number;
       (rawSettlement as { kind: string }).kind.length === 0) {
     throw new Error("settlement_unknown");
   }
-  return { data, durationS: durationS as number, announceText, settlement: rawSettlement as { kind: string; params: unknown } };
+  let lockKeys: string[] | undefined;
+  if (data.lockKeys !== undefined) {
+    if (!Array.isArray(data.lockKeys) || data.lockKeys.length === 0 || data.lockKeys.length > 4 ||
+        data.lockKeys.some((key) => typeof key !== "string" || !/^[a-z]+:[A-Za-z0-9_]{1,64}$/.test(key)) ||
+        new Set(data.lockKeys).size !== data.lockKeys.length) throw new Error("invalid_round_data");
+    lockKeys = data.lockKeys;
+  }
+  return {
+    data,
+    durationS: durationS as number,
+    announceText,
+    settlement: rawSettlement as { kind: string; params: unknown },
+    ...(lockKeys === undefined ? {} : { lockKeys }),
+  };
 };
 
 export const pointRoundAlarmKey = (roundId: string): string => `${POINTS_ROUND_ALARM_PREFIX}${roundId}`;
@@ -1191,13 +1217,24 @@ export const openPointRoundSync = (
     if (previous.module_id !== moduleId || previous.data_json !== dataJson) throw new Error("round_conflict");
     return { opened: false, alarmKey: previous.alarm_key ?? pointRoundAlarmKey(roundId) };
   }
-  const active = sql.exec<{ round_id: string }>(
-    `SELECT round_id FROM game_rounds
-      WHERE module_id = ? AND state IN ('announcing', 'open')
-      ORDER BY created_at, round_id LIMIT 1`,
-    moduleId,
-  ).toArray()[0];
-  if (active !== undefined) throw new Error("round_active");
+  if (parsed.lockKeys === undefined) {
+    const active = sql.exec<{ round_id: string }>(
+      `SELECT round_id FROM game_rounds
+        WHERE module_id = ? AND state IN ('announcing', 'open')
+        ORDER BY created_at, round_id LIMIT 1`,
+      moduleId,
+    ).toArray()[0];
+    if (active !== undefined) throw new Error("round_active");
+  } else {
+    for (const lockKey of parsed.lockKeys) {
+      const lock = sql.exec<{ round_id: string }>(
+        "SELECT round_id FROM game_round_locks WHERE module_id = ? AND lock_key = ?",
+        moduleId,
+        lockKey,
+      ).toArray()[0];
+      if (lock !== undefined) throw new Error("round_locked");
+    }
+  }
   const alarmKey = pointRoundAlarmKey(roundId);
   sql.exec(
     `INSERT INTO game_rounds
@@ -1213,8 +1250,33 @@ export const openPointRoundSync = (
     parsed.durationS,
     parsed.announceText,
   );
+  for (const lockKey of parsed.lockKeys ?? []) {
+    sql.exec("INSERT INTO game_round_locks (module_id, lock_key, round_id) VALUES (?, ?, ?)", moduleId, lockKey, roundId);
+  }
   return { opened: true, alarmKey };
 };
+
+export const listOpenPointRoundsSync = (sql: PointsSql, moduleId: string): Array<{
+  roundId: string;
+  state: "announcing" | "open";
+  data: unknown;
+  deadlineAt: number | null;
+}> => sql.exec<{
+  round_id: string;
+  state: "announcing" | "open";
+  deadline_at: number | null;
+  data_json: string;
+}>(
+  `SELECT round_id, state, deadline_at, data_json FROM game_rounds
+    WHERE module_id = ? AND state IN ('announcing', 'open')
+    ORDER BY created_at, round_id LIMIT 50`,
+  moduleId,
+).toArray().map((round) => ({
+  roundId: round.round_id,
+  state: round.state,
+  data: JSON.parse(round.data_json) as unknown,
+  deadlineAt: round.deadline_at,
+}));
 
 export const markPointRoundAnnouncedSync = (
   sql: PointsSql,
@@ -1337,6 +1399,128 @@ export const joinPointRoundSync = (
     jsonValue(data),
   );
   return { status: "joined", replayed: false };
+};
+
+export const openPointRoundWithStakeSync = (
+  sql: PointsSql,
+  moduleId: string,
+  roundId: string,
+  value: unknown,
+  operationId: string,
+  accountId: string,
+  login: string,
+  stake: number,
+  cooldown: { key: string; seconds: number } | undefined,
+  requestHash: string,
+  nowMs: number,
+  now: string,
+  settlements: ReadonlyMap<string, PointSettlement>,
+): { roundId: string; replayed: boolean; alarmKey: string } => {
+  assertPointAccountId(accountId);
+  if (pointKindFor(accountId) !== "viewer" || login.length === 0 || !Number.isSafeInteger(stake) || stake < 1) {
+    throw new Error("invalid_stake");
+  }
+  const previous = operationSync(sql, operationId);
+  if (previous !== null) {
+    if (previous.payload_hash !== requestHash) throw new Error("operation_conflict");
+    const result = JSON.parse(previous.result_json) as { roundId?: unknown };
+    if (typeof result.roundId !== "string") throw new Error("operation_conflict");
+    const round = pointRoundRow(sql, result.roundId);
+    if (round === null || round.module_id !== moduleId) throw new Error("operation_conflict");
+    return { roundId: result.roundId, replayed: true, alarmKey: round.alarm_key ?? pointRoundAlarmKey(result.roundId) };
+  }
+  checkModuleGateSync(sql, moduleId);
+  if (cooldown !== undefined && !claimPointCooldownSync(sql, moduleId, cooldown.key, cooldown.seconds, nowMs)) {
+    throw new Error("cooldown");
+  }
+  const parsed = parseRoundOpenData(value);
+  if (parsed.lockKeys !== undefined) {
+    const count = sql.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM game_rounds WHERE module_id = ? AND state IN ('announcing', 'open')",
+      moduleId,
+    ).one().count;
+    if (count >= 50) throw new Error("round_limit");
+  }
+  const opened = openPointRoundSync(sql, moduleId, roundId, value, now, settlements);
+  const result = { roundId };
+  applyPointOperationSync(sql, moduleId, operationId, "stake", [
+    { accountId, delta: -stake, login },
+    { accountId: `__escrow:${roundId}`, delta: stake },
+  ], result, requestHash, now);
+  sql.exec(
+    `INSERT INTO game_round_participants (round_id, account_id, login, stake, data_json)
+     VALUES (?, ?, ?, ?, ?)`,
+    roundId,
+    accountId,
+    login,
+    stake,
+    jsonValue({ role: "challenger" }),
+  );
+  return { roundId, replayed: false, alarmKey: opened.alarmKey };
+};
+
+export const acceptPointRoundSync = (
+  sql: PointsSql,
+  moduleId: string,
+  roundId: string,
+  operationId: string,
+  accountId: string,
+  login: string,
+  requestHash: string,
+  resolveHash: string,
+  nowMs: number,
+  now: string,
+  settlements: ReadonlyMap<string, PointSettlement>,
+): PointApplyInternalResult => {
+  assertPointRoundId(roundId);
+  assertPointAccountId(accountId);
+  const previous = operationSync(sql, operationId);
+  if (previous !== null) {
+    if (previous.payload_hash !== requestHash) throw new Error("operation_conflict");
+    return resolvePointRoundSync(sql, moduleId, roundId, { kind: "duel", params: { mode: "accept" } }, settlements, resolveHash, now);
+  }
+  checkModuleGateSync(sql, moduleId);
+  const round = pointRoundRow(sql, roundId);
+  if (round === null || round.module_id !== moduleId || round.state !== "open" || round.deadline_at === null || round.deadline_at <= nowMs) {
+    throw new Error("round_closed");
+  }
+  const data = JSON.parse(round.data_json) as Record<string, unknown>;
+  const challengerId = data.challengerId;
+  const targetId = data.targetId;
+  const stake = data.stake;
+  if (typeof challengerId !== "string" || (targetId !== null && typeof targetId !== "string") ||
+      !Number.isSafeInteger(stake) || (stake as number) < 1 || login.length === 0) throw new Error("invalid_round_data");
+  if (accountId === challengerId || (targetId !== null && accountId !== targetId)) throw new Error("not_eligible");
+  if (pointKindFor(accountId) !== "viewer") throw new Error("invalid_stake");
+  const participant = sql.exec<{ account_id: string }>(
+    "SELECT account_id FROM game_round_participants WHERE round_id = ? AND account_id = ?",
+    roundId,
+    accountId,
+  ).toArray()[0];
+  if (participant !== undefined) throw new Error("not_eligible");
+  applyPointOperationSync(sql, moduleId, operationId, "stake", [
+    { accountId, delta: -(stake as number), login },
+    { accountId: `__escrow:${roundId}`, delta: stake as number },
+  ], { roundId, accountId, stake }, requestHash, now);
+  sql.exec(
+    `INSERT INTO game_round_participants (round_id, account_id, login, stake, data_json)
+     VALUES (?, ?, ?, ?, ?)`,
+    roundId,
+    accountId,
+    login,
+    stake,
+    jsonValue({ role: "acceptor" }),
+  );
+  const resolved = resolvePointRoundSync(
+    sql,
+    moduleId,
+    roundId,
+    { kind: "duel", params: { mode: "accept" } },
+    settlements,
+    resolveHash,
+    now,
+  );
+  return resolved;
 };
 
 export const answerPointRoundSync = (
@@ -1519,6 +1703,7 @@ export const resolvePointRoundSync = (
     roundId,
     moduleId,
   );
+  sql.exec("DELETE FROM game_round_locks WHERE module_id = ? AND round_id = ?", moduleId, roundId);
   return applied;
 };
 
@@ -1566,6 +1751,7 @@ export const cancelPointRoundsSync = (
     }
     refundedStake ||= refunds.length > 0;
     sql.exec("UPDATE game_rounds SET state = 'cancelled' WHERE round_id = ? AND module_id = ?", roundId, moduleId);
+    sql.exec("DELETE FROM game_round_locks WHERE module_id = ? AND round_id = ?", moduleId, roundId);
     onRoundCancelled?.(roundId);
     cancelledCount += 1;
   }

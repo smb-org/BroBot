@@ -6,6 +6,7 @@ import type { PanelEventEntry } from "../panel-contract";
 import { MODULES } from "../modules/registry";
 import type { ModuleLiveTileSnapshot } from "../modules/contract";
 import { cancelVotekick, liftVotekickTimeout } from "../modules/votekick/panel/service";
+import { cancelDuelRound } from "../modules/duel/panel/service";
 import { approveChatVotingTerm, closeChatVoting, extendChatVoting } from "../modules/chat_voting/panel/service";
 import { snoozeAds } from "../modules/ads/panel/service";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber, immediateActionUnavailableReasonText } from "./locale";
@@ -68,11 +69,15 @@ export const LiveCockpitTiles = ({
     .sort((left, right) => Date.parse(left.at) - Date.parse(right.at))
     .slice(0, 12);
   const recentVotekicks = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "votekick_recent" }> => snapshot.kind === "votekick_recent");
+  const duels = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "duel" }> => snapshot.kind === "duel");
+  const visibleDuels = duels.slice(0, 3);
   const [busy, setBusy] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; target: string } | null>(null);
   const [cancelError, setCancelError] = useState<string | undefined>();
   const [liftTarget, setLiftTarget] = useState<{ id: string; target: string } | null>(null);
   const [liftError, setLiftError] = useState<string | undefined>();
+  const [duelCancelTarget, setDuelCancelTarget] = useState<{ id: string } | null>(null);
+  const [duelCancelError, setDuelCancelError] = useState<string | undefined>();
   const [snoozeFeedback, setSnoozeFeedback] = useState<{ itemId: string; text: string } | null>(null);
   const roleCanManage = hasRequiredChannelRole(role, "operator");
   const roleCanSnooze = canManage(role);
@@ -171,6 +176,22 @@ export const LiveCockpitTiles = ({
     }
   };
 
+  const doCancelDuel = async (): Promise<void> => {
+    if (duelCancelTarget === null || busy || !roleCanManage) return;
+    setBusy(true);
+    setDuelCancelError(undefined);
+    try {
+      await cancelDuelRound(channelId, duelCancelTarget.id);
+      setDuelCancelTarget(null);
+      onMessage(labels.duelCanceled);
+      onRefresh();
+    } catch {
+      setDuelCancelError(labels.duelCancelFailed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const doSnoozeAd = async (itemId: string, canSnooze: boolean): Promise<void> => {
     if (busy) return;
     if (!roleCanSnooze || !canSnooze) {
@@ -198,6 +219,28 @@ export const LiveCockpitTiles = ({
   return <div className="live-cockpit__running">
     <section className="live-cockpit-reserve live-cockpit-running-tile" data-slot="running-now" aria-label={labels.runningNow}>
       <h2>{labels.runningNow}</h2>
+      {duels.length === 0 ? null : <>
+        <div className="live-cockpit-duels__list" data-testid="live-duel-tiles">
+        <h3>{labels.duels}</h3>
+        {visibleDuels.map((duel) => <article className="live-cockpit-duels__item" key={duel.id} data-testid="live-duel-tile">
+          <span className="live-cockpit-duels__icon"><Icon name="duel" size={16} /></span>
+          <div className="live-cockpit-duels__copy">
+            <strong>{labels.duelChallenge(duel.challenger, duel.target)}</strong>
+            <small>{labels.duelStake(formatNumber(duel.stake))} · {labels.voteEndsIn(remainingLabel(duel.closesAt, now))}</small>
+          </div>
+          <Button size="compact" variant="neutral" danger disabled={busy || !roleCanManage}
+            onClick={() => { setDuelCancelTarget({ id: duel.id }); setDuelCancelError(undefined); }}>
+            {labels.duelCancel}
+          </Button>
+        </article>)}
+        </div>
+        {duels.length > visibleDuels.length ? <p className="live-cockpit-duels__more">{labels.duelMore(formatNumber(duels.length - visibleDuels.length))}</p> : null}
+        <ConfirmDialog opened={duelCancelTarget !== null} title={labels.duelCancelTitle}
+          description={labels.duelCancelDescription}
+          confirmLabel={labels.duelCancel} cancelLabel={dashboardCommonTexts().cancel}
+          onConfirm={() => { void doCancelDuel(); }} onCancel={() => { if (!busy) setDuelCancelTarget(null); }}
+          pending={busy} danger {...(duelCancelError === undefined ? {} : { error: duelCancelError })} />
+      </>}
       {running === undefined ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noActionRunning}</p> : running.kind === "vote"
         ? <div className="live-vote-tile" data-testid="live-vote-tile">
           <header className="live-vote-tile__header">

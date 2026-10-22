@@ -103,6 +103,50 @@ const runPostCommitStep = async (moduleId: string, step: string, action: () => P
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const effectiveCommandTokens = (moduleId: string, settings: unknown): string[] => {
+  const module = MODULES.find((candidate) => candidate.id === moduleId);
+  if (module === undefined) return [];
+  const configured = module.chatCommandNames?.(settings) ?? [];
+  return [...(module.chatCommands ?? []).map((command) => command.name), ...configured]
+    .map((name) => name.trim().toLocaleLowerCase("en-US"));
+};
+
+const moduleCommandCollision = async (
+  db: D1Database,
+  channelId: string,
+  moduleId: string,
+  candidateSettings: unknown,
+): Promise<string | null> => {
+  const candidate = new Set(effectiveCommandTokens(moduleId, candidateSettings));
+  if (candidate.size === 0) return null;
+  const active = await db.prepare(
+    "SELECT module_id, settings FROM channel_modules WHERE channel_id = ? AND enabled = 1 AND module_id <> ?",
+  ).bind(channelId, moduleId).all<{ module_id: string; settings: string }>();
+  for (const row of active.results) {
+    const other = MODULES.find((entry) => entry.id === row.module_id);
+    if (other === undefined) continue;
+    try {
+      const parsed = other.settingsSchema.safeParse(JSON.parse(row.settings) as unknown);
+      if (!parsed.success) continue;
+      const collision = effectiveCommandTokens(other.id, parsed.data).find((name) => candidate.has(name));
+      if (collision !== undefined) return collision;
+    } catch { /* Invalid legacy settings do not claim a command token. */ }
+  }
+  const customCommands = await db.prepare(
+    "SELECT command_name, aliases_json FROM text_commands WHERE channel_id = ? AND enabled = 1 ORDER BY command_name",
+  ).bind(channelId).all<{ command_name: string; aliases_json: string }>();
+  for (const row of customCommands.results) {
+    let names = [`!${row.command_name}`];
+    try {
+      const aliases: unknown = JSON.parse(row.aliases_json);
+      if (Array.isArray(aliases)) names = [...names, ...aliases.filter((alias): alias is string => typeof alias === "string").map((alias) => `!${alias}`)];
+    } catch { /* Keep the command name if legacy aliases are malformed. */ }
+    const collision = names.map((name) => name.toLocaleLowerCase("en-US")).find((name) => candidate.has(name));
+    if (collision !== undefined) return collision;
+  }
+  return null;
+};
+
 const validBoxArtTemplate = (value: unknown): value is string => {
   if (typeof value !== "string" || value.length > 500) return false;
   try {
@@ -807,6 +851,8 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   }
   const semanticError = module.validateSettings?.(settings.data);
   if (semanticError !== undefined && semanticError !== null) return context.json({ error: semanticError }, 400);
+  const commandCollision = await moduleCommandCollision(context.env.DB, channelId, module.id, settings.data);
+  if (commandCollision !== null) return context.json({ error: "module_command_collision", command: commandCollision }, 409);
   if (module.id === "clips") {
     let rawStoredSettings: unknown;
     try {
@@ -937,6 +983,21 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
+  if (enabled) {
+    let currentSettings: unknown = JSON.parse(defaultSettingsJson) as unknown;
+    if (existing !== null) {
+      try {
+        currentSettings = JSON.parse(existing.settings) as unknown;
+      } catch {
+        currentSettings = null;
+      }
+    }
+    const parsedSettings = module.settingsSchema.safeParse(currentSettings);
+    if (parsedSettings.success) {
+      const commandCollision = await moduleCommandCollision(context.env.DB, channelId, module.id, parsedSettings.data);
+      if (commandCollision !== null) return context.json({ error: "module_command_collision", command: commandCollision }, 409);
+    }
+  }
   const requiredModules = enabled ? module.requiresModules ?? [] : [];
   const dependentModules = !enabled
     ? MODULES.filter((candidate) => candidate.requiresModules?.includes(moduleId)).map((candidate) => candidate.id)

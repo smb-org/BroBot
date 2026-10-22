@@ -215,7 +215,7 @@ Schriften: **Archivo** (UI) und **IBM Plex Mono** (Zahlen), selbst gehostet.
 - **Rahmen:** 1px Haarlinie; kräftige Rahmen nur an Eingaben (`linie-control`). Leerzustände gestrichelt.
 - **Schatten:** nur auf schwebenden Ebenen (Dialog, Popover, Menü, Toast); im Fluss keine. Tiefe entsteht durch Flächenstufen.
 - **Bewegung:** kurze Übergänge (≤ 160ms), unter `prefers-reduced-motion` aus. Kein Schimmer, keine animierten Skelette.
-- **Symbole:** Icons come from `lucide-react` through `src/dashboard/ui/Icon.tsx`, with consistent stroke weight. Emoji may appear as game content (reel symbols and chat previews), never as interface chrome.
+- **Symbole:** Icons come from `lucide-react` through `src/dashboard/ui/Icon.tsx`, with consistent stroke weight. The duel module uses the `Sword` glyph for its `duel` icon kind. Emoji may appear as game content (reel symbols and chat previews), never as interface chrome.
 - **Dichte:** Controls 32px hoch, auch `UnitInput`; Abstand zwischen Abschnitten 20px, innerhalb eines Abschnitts 12px. Vorlagen-Textfelder haben zwei Zeilen, FAQ-Antworten und Textbausteine drei. Chatvorschauen zeigen zwei reservierte Zeilen. Vorlagenfeld und Vorschau stehen in Timer, Textbefehlen, FAQ, Textbausteinen, Raid, Werbung, Votekick und BELABOX nebeneinander. Einrichtungsseiten gruppieren Felder nicht in eigene Rahmen.
 
 ## 9. Layout und Navigation
