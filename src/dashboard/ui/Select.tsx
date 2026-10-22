@@ -1,6 +1,6 @@
 import { Combobox } from "@base-ui/react/combobox";
 import { Check, ChevronDown } from "lucide-react";
-import { useId, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 
 import { useDisabledFieldReason } from "./DisabledFieldReason";
 import { TruncatedText } from "./TruncatedText";
@@ -26,6 +26,8 @@ export interface SelectProps {
   placeholder?: string;
   disabled?: boolean;
   compact?: boolean;
+  /** Opens the option list after the complete field, including its hint and error text. */
+  dropdownBelowField?: boolean;
   busy?: boolean;
   searchable?: boolean;
   searchValue?: string;
@@ -44,9 +46,10 @@ const optionContents = (option: SelectOption): ReactNode => (
   </span>
 );
 
-export function Select({ label, ariaLabel, hint, error, value, onChange, options, placeholder, disabled = false, compact = false, busy = false, searchable = false, searchValue, onSearchChange, required = false, name, id, title, describedBy }: SelectProps) {
+export function Select({ label, ariaLabel, hint, error, value, onChange, options, placeholder, disabled = false, compact = false, dropdownBelowField = false, busy = false, searchable = false, searchValue, onSearchChange, required = false, name, id, title, describedBy }: SelectProps) {
   const generatedId = useId();
   const controlId = id ?? generatedId;
+  const fieldRef = useRef<HTMLDivElement>(null);
   const [internalSearch, setInternalSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchInputActive, setSearchInputActive] = useState(false);
@@ -74,7 +77,7 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
     </SelectGroup>;
   };
 
-  return <div data-ui="" className={`ui-select${compact ? " ui-select--compact" : ""}`}>
+  return <div ref={fieldRef} data-ui="" className={`ui-select${compact ? " ui-select--compact" : ""}`}>
     {label === undefined ? null : <label className="ui-field__label" htmlFor={controlId}>{label}</label>}
     {searchable ? <Combobox.Root
       autoHighlight
@@ -130,7 +133,8 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
       <SelectTrigger id={controlId} aria-label={label === undefined ? ariaLabel : undefined} aria-describedby={describedByIds} aria-invalid={error === undefined || error.length === 0 ? undefined : true} aria-busy={busy} title={title} className="ui-select__trigger">
         <SelectValue placeholder={placeholder} className="ui-select__value" />
       </SelectTrigger>
-      <SelectContent className="ui-select__dropdown">
+      <SelectContent className="ui-select__dropdown" anchor={dropdownBelowField ? fieldRef : undefined}
+        alignItemWithTrigger={dropdownBelowField ? false : undefined}>
         {options.filter((option) => option.group === undefined).map((option) => <SelectItem key={option.value} value={option.value}>{optionContents(option)}</SelectItem>)}
         {groups.map(group)}
       </SelectContent>

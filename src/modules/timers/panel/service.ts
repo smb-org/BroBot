@@ -3,6 +3,7 @@ import { isEventTemplateVariableAvailable } from "../../../contracts/event-templ
 import type { TemplateTextFieldVariable } from "../../../dashboard/ui";
 import type { ModuleLanguage, TemplateVariable } from "../../contract";
 import type { Timer, TimerMutationInput } from "../contracts";
+import type { SkipTimerOccurrenceResult } from "../contracts";
 
 interface TimerEventTimeSource {
   id: string;
@@ -62,6 +63,9 @@ export const loadUpcomingTimers = async (channelId: string, signal?: AbortSignal
   const response = await fetch(`${basePath(channelId)}/timers`, signal === undefined ? {} : { signal });
   return (await readJson<{ timers: Timer[] }>(response)).timers;
 };
+
+export const skipNextTimerOccurrence = (channelId: string, timerId: string): Promise<SkipTimerOccurrenceResult> =>
+  mutate<SkipTimerOccurrenceResult>(channelId, "/quick-actions/skip-next", "POST", { timerId });
 
 const mutate = async <Value,>(channelId: string, path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown): Promise<Value> => {
   const token = await csrf();

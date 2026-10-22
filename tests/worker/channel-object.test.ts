@@ -415,6 +415,7 @@ const objectFor = (
   (object as unknown as { pointRoundRecoveryInitialization: Promise<void> | null }).pointRoundRecoveryInitialization = null;
   (object as unknown as { timerScheduleInitialization: Promise<void> | null }).timerScheduleInitialization = Promise.resolve();
   (object as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
+  (object as unknown as { timerOccurrenceQueues: Map<string, Promise<void>> }).timerOccurrenceQueues = new Map();
   return object;
 };
 

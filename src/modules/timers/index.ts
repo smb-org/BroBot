@@ -3,12 +3,14 @@ import { z } from "zod";
 import { columnVariableReferences } from "../contract";
 import type {
   BotModule,
+  ModuleImmediateActionCondition,
   ModuleScheduleInputChangeReason,
   ModuleTemplateUsageSource,
 } from "../contract";
 import { timersModuleCatalog } from "./contracts/catalog";
 import { timerRoutes } from "./routes";
 import { validateTimerTemplateMutation } from "./service";
+import { timersQuickActionTexts } from "./panel/quick-action-locale";
 
 const settingsSchema = z.object({});
 const TIMER_MODULE_ID = "timers";
@@ -31,6 +33,40 @@ const timerVariableReferences = columnVariableReferences({
   textColumn: "message_text",
   maxTextLength: 500,
 });
+
+const timerHasPlannedOccurrence: ModuleImmediateActionCondition = {
+  check: async ({ channelId, signal }) => {
+    const timers = await (await import("./panel/service")).loadUpcomingTimers(channelId, signal);
+    const planned = timers.some((timer) => timer.enabled && timer.nextRunAt !== null && Number.isFinite(Date.parse(timer.nextRunAt)));
+    return { reason: planned ? null : timersQuickActionTexts.noPlanned };
+  },
+};
+
+const skipTimerAction: NonNullable<BotModule["actions"]>[number] = {
+  id: "skip-next-timer-message",
+  name: timersQuickActionTexts.name,
+  icon: "timer",
+  conditions: ["moduleEnabled", timerHasPlannedOccurrence],
+  requiredRole: "operator",
+  content: { presentation: "popover", requiresReadiness: true, load: () => import("./panel/quick-action-content") },
+  errorMessage: timersQuickActionTexts.error,
+  execute: async ({ channelId, language, formData }) => {
+    const timerId = formData.get("timerId");
+    if (typeof timerId !== "string" || timerId.length === 0) {
+      return { tone: "error", message: timersQuickActionTexts.error };
+    }
+    const result = await (await import("./panel/service")).skipNextTimerOccurrence(channelId, timerId);
+    if (result.result === "skipped") {
+      const nextTime = result.nextOccurrenceAt === null
+        ? null
+        : new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "short" }).format(new Date(result.nextOccurrenceAt));
+      return { tone: "success", message: timersQuickActionTexts.success(nextTime) };
+    }
+    if (result.result === "already_skipped") return { tone: "info", message: timersQuickActionTexts.alreadySkipped };
+    if (result.result === "nothing_planned") return { tone: "info", message: timersQuickActionTexts.nothingPlanned };
+    return { tone: "error", message: timersQuickActionTexts.notFound };
+  },
+};
 
 export const timersModule: BotModule<typeof settingsSchema> = {
   id: TIMER_MODULE_ID,
@@ -67,6 +103,7 @@ export const timersModule: BotModule<typeof settingsSchema> = {
     },
   },
   eventSubTypes: ["channel.chat.message"],
+  actions: [skipTimerAction],
   dryRunSilentReason: "activity_tracking",
   alarms: [{
     key: "run",

@@ -18,4 +18,8 @@ describe("immediate action availability", () => {
   it("allows an action with no declared availability requirements", () => {
     expect(evaluateImmediateActionAvailability([], undefined)).toEqual({ enabled: true, reason: null });
   });
+
+  it("returns a catalogue reason when an action requires its module to be enabled", () => {
+    expect(evaluateImmediateActionAvailability(["moduleEnabled"], undefined, false)).toEqual({ enabled: false, reason: "module_disabled" });
+  });
 });
