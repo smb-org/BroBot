@@ -2,6 +2,7 @@ import { evictDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { ModuleAlarmContext, ModuleAlarmPlan } from "../../src/modules/contract";
 import { createBlitzQuestionRepository } from "../../src/modules/blitz_round/adapters/d1";
+import { reconcileBlitzAutoStart } from "../../src/modules/blitz_round/auto-start";
 import { blitzRoundDefaultsForLanguage } from "../../src/modules/blitz_round/locale";
 import { loadBlitzAutoStartBaseline, openBlitzRound, processBlitzMessage } from "../../src/modules/blitz_round/service";
 import { modulePoints } from "../../src/worker/module-points";
@@ -324,7 +325,7 @@ describe("blitz answers in the channel Durable Object", () => {
     expect(audits?.count).toBe(1);
   });
 
-  it("serializes a settings save with round resolution without restoring the old interval", async () => {
+  it("keeps the committed interval when a resolution resumes after reading stale settings", async () => {
     const channelId = `blitz-settings-resolution-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     const worker = env as unknown as { DB: D1Database; CHANNEL: Env["CHANNEL"] };
@@ -336,23 +337,60 @@ describe("blitz answers in the channel Durable Object", () => {
     const repository = createBlitzQuestionRepository(worker.DB);
     await repository.create(channelId, { kind: "quiz", prompt: "Which star is nearest?", answers: ["Sun"], enabled: true }, new Date().toISOString());
     const object = blitzObject(pointObject(channelId));
-    const runAlarm = (moduleId: string, handlerKey: string, alarmKey: string): Promise<unknown> =>
-      (object as unknown as { runModuleAlarm: (moduleId: string, handlerKey: string, alarmKey: string) => Promise<unknown> })
-        .runModuleAlarm(moduleId, handlerKey, alarmKey);
     const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({ sent: true, retryable: false, reason: null, delivery: "delivered" }));
-    await runPointObject(object, (target) => { stubPointRoundChat(target, sendChat); });
+    let releaseResolution!: () => void;
+    let resolutionReadConfig!: () => void;
+    const resolutionGate = new Promise<void>((resolve) => { releaseResolution = resolve; });
+    const resolutionEntered = new Promise<void>((resolve) => { resolutionReadConfig = resolve; });
+    let pauseResolution = false;
+    await runPointObject(object, (target) => {
+      stubPointRoundChat(target, sendChat);
+      const runtime = target as unknown as { moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext };
+      const original = runtime.moduleAlarmContext.bind(runtime);
+      vi.spyOn(runtime, "moduleAlarmContext").mockImplementation((...args) => {
+        const context = original(...args);
+        const registration = args[1] as { key?: string } | undefined;
+        if (!pauseResolution || args[0] !== "blitz_round" || registration?.key !== "auto-start") return context;
+        pauseResolution = false;
+        let firstStreamRead = true;
+        return {
+          ...context,
+          streamState: async () => {
+            if (firstStreamRead) {
+              firstStreamRead = false;
+              resolutionReadConfig();
+              await resolutionGate;
+            }
+            return context.streamState();
+          },
+        };
+      });
+    });
     const points = modulePoints(worker.CHANNEL, channelId, "blitz_round");
     const opened = await openBlitzRound({ channelId, autoStartBaseline: await loadBlitzAutoStartBaseline(worker.DB, channelId),
       repository, points, settings, language: "en" });
     await forcePointAlarm(object, opened.roundId);
     const savedSettings = { ...settings, autoStartIntervalMinutes: 30 };
-    await worker.DB.prepare("UPDATE channel_modules SET settings = ?, revision = revision + 1, settings_revision = settings_revision + 1 WHERE channel_id = ? AND module_id = 'blitz_round'")
-      .bind(JSON.stringify(savedSettings), channelId).run();
-
-    await Promise.all([
-      runAlarm("blitz_round", "auto-start", "settings-changed"),
-      points.rounds.resolve(opened.roundId, { kind: "blitz", params: { prize: 50 } }),
-    ]);
+    const registration = blitzRoundModule.alarms?.[0];
+    if (registration === undefined) throw new Error("The Blitz automatic-start alarm is not registered.");
+    await runPointObject(object, async (target, durableState) => {
+      const runtime = target as unknown as {
+        moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext;
+        resolveGameRound: (moduleId: string, roundId: string, settlement: { kind: string; params: unknown }) => Promise<unknown>;
+      };
+      pauseResolution = true;
+      const pendingResolution = runtime.resolveGameRound("blitz_round", opened.roundId, { kind: "blitz", params: { prize: 50 } });
+      await resolutionEntered;
+      const context = runtime.moduleAlarmContext("blitz_round", registration, undefined);
+      await context.DB.prepare("UPDATE channel_modules SET settings = ?, revision = revision + 1, settings_revision = settings_revision + 1 WHERE channel_id = ? AND module_id = 'blitz_round'")
+        .bind(JSON.stringify(savedSettings), channelId).run();
+      await reconcileBlitzAutoStart(context, "settings");
+      releaseResolution();
+      await pendingResolution;
+      return durableState.storage.get<{ baseline: string; intervalMinutes: number; awaitingRoundId: string | null; deadlineAt: number }>(
+        "module:blitz_round:storage:auto-start-state",
+      );
+    });
 
     const state = await runPointObject(object, (_target, durableState) =>
       durableState.storage.get<{ baseline: string; intervalMinutes: number; awaitingRoundId: string | null; deadlineAt: number }>(

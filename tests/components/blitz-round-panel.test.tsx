@@ -1582,4 +1582,62 @@ describe("Blitz Round collection panel", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
     await waitFor(() => expect(api.getSettings()).toMatchObject({ autoStart: true, autoStartIntervalMinutes: 30 }));
   });
+
+  it("places the automatic-start switch beside its label and pairs the interval with the existing settings fields", async () => {
+    installPanelFetch([sampleQuestion]);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.click(screen.getByRole("button", { name: /^Settings$/u }));
+    await screen.findByText("Round settings", { exact: true });
+
+    const toggle = screen.getByRole("switch", { name: "Start automatically" });
+    const interval = screen.getByRole("spinbutton", { name: "Interval" });
+    const switchRow = toggle.closest(".ui-switch-row");
+    expect(switchRow).toHaveClass("ui-switch-row--inline");
+    expect(switchRow?.querySelector(".ui-switch-row__copy")?.nextElementSibling).toBe(toggle);
+    expect(interval.closest(".blitz-panel__auto-start")?.querySelector(".ui-field-pair")).toBeInTheDocument();
+  });
+
+  it("keeps the automatic-start hint visible when the switch is on and off", async () => {
+    installPanelFetch([sampleQuestion]);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.click(screen.getByRole("button", { name: /^Settings$/u }));
+    await screen.findByText("Round settings", { exact: true });
+
+    const hint = "Automatic starts pause while the channel is offline.";
+    const toggle = screen.getByRole("switch", { name: "Start automatically" });
+    expect(screen.getByText(hint, { exact: true })).toBeVisible();
+    fireEvent.click(toggle);
+    expect(screen.getByText(hint, { exact: true })).toBeVisible();
+  });
+
+  it("shows a validation status before a settings save is attempted", async () => {
+    installPanelFetch([sampleQuestion]);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.click(screen.getByRole("button", { name: /^Settings$/u }));
+    await screen.findByText("Round settings", { exact: true });
+    fireEvent.click(screen.getByRole("switch", { name: "Start automatically" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Interval" }), { target: { value: "14" } });
+
+    const saveStatus = document.querySelector(".page-header__save .ui-save-bar__status");
+    expect(saveStatus).toHaveTextContent("Please check the highlighted fields.");
+    expect(saveStatus).not.toHaveTextContent("The settings could not be saved.");
+  });
+
+  it("renders one back action and a wrapping chat-target control in settings", async () => {
+    installPanelFetch([sampleQuestion]);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.click(screen.getByRole("button", { name: /^Settings$/u }));
+    await screen.findByText("Round settings", { exact: true });
+
+    expect(screen.getAllByRole("button", { name: "Back to questions" })).toHaveLength(1);
+    expect(screen.getByRole("group", { name: "Chat target" })).toHaveClass("segment-choice--wrap");
+  });
 });

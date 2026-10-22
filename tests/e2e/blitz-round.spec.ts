@@ -185,14 +185,37 @@ test("automatic start settings retain their layout in German and English at desk
       await page.getByRole("button", { name: language === "de" ? "Einstellungen" : "Settings", exact: true }).click();
       const toggle = page.getByRole("switch", { name: blitzTexts(language).autoStart, exact: true });
       const interval = page.getByRole("spinbutton", { name: blitzTexts(language).autoStartInterval, exact: true });
+      const answerTime = page.getByRole("spinbutton", { name: blitzTexts(language).answerTime, exact: true });
       await expect(toggle).toBeVisible();
       await expect(interval).toBeVisible();
+      const autoStartHint = blitzTexts(language).autoStartHint;
+      await expect(page.getByText(autoStartHint, { exact: true })).toBeVisible();
+      const toggleBounds = await toggle.boundingBox();
+      const toggleLabelBounds = await page.getByText(blitzTexts(language).autoStart, { exact: true }).boundingBox();
+      expect(toggleBounds).not.toBeNull();
+      expect(toggleLabelBounds).not.toBeNull();
+      expect((toggleBounds?.x ?? 0) - ((toggleLabelBounds?.x ?? 0) + (toggleLabelBounds?.width ?? 0))).toBeGreaterThanOrEqual(0);
+      expect((toggleBounds?.x ?? 0) - ((toggleLabelBounds?.x ?? 0) + (toggleLabelBounds?.width ?? 0))).toBeLessThan(20);
+
+      if (viewport.width > 768) {
+        const answerTimeBounds = await answerTime.boundingBox();
+        const intervalBounds = await interval.boundingBox();
+        expect(intervalBounds?.x).toBe(answerTimeBounds?.x);
+      }
+
+      if (viewport.width === 390) {
+        await expect(page.getByRole("button", { name: blitzTexts(language).back, exact: true })).toHaveCount(1);
+        const chatTarget = page.getByRole("group", { name: blitzTexts(language).chatTarget, exact: true });
+        await expect(chatTarget).toBeVisible();
+        expect(await chatTarget.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      }
 
       const settingsArea = page.locator(".blitz-panel__auto-start");
       const feedbackBelow = page.locator(".blitz-panel__auto-start + *");
       const areaBefore = await settingsArea.boundingBox();
       const belowBefore = await feedbackBelow.boundingBox();
       await toggle.click();
+      await expect(page.getByText(autoStartHint, { exact: true })).toBeVisible();
       await interval.fill("14");
       await expect(page.getByText(blitzTexts(language).autoStartIntervalError, { exact: true })).toBeVisible();
       expect(await settingsArea.boundingBox()).toEqual(areaBefore);

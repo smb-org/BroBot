@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Re
 import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardCommonTexts } from "../../../dashboard/locale";
 import {
-  Badge, Button, ChipsInput, CollectionPage, ConfirmDialog, Field, Icon, PageHeader,
-  registerDashboardNavigationGuard, SegmentChoice, SwitchSection, TemplateTextField, UnitInput, useDraft, useDraftGuard,
+  Badge, Button, ChipsInput, CollectionPage, ConfirmDialog, Field, FieldPair, Icon, PageHeader,
+  registerDashboardNavigationGuard, SegmentChoice, SwitchRow, SwitchSection, TemplateTextField, UnitInput, useDraft, useDraftGuard,
 } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import { validateBlitzQuestion } from "../domain/questions";
@@ -548,8 +548,16 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       list={list}
       detail={detail}
       detailOpen={detailOpen}
-      backLabel={labels.back}
-      onCloseDetail={() => { cancelPendingDeleteSelection(); requestSwitch(() => { setDetailOpen(false); }); }}
+      {...(showSettings && settingsQuery.data !== undefined ? {} : { backLabel: labels.back })}
+      reserveDetailBack={showSettings}
+      onCloseDetail={() => {
+        if (showSettings) {
+          closeSettings();
+          return;
+        }
+        cancelPendingDeleteSelection();
+        requestSwitch(() => { setDetailOpen(false); });
+      }}
     />
     <ConfirmDialog
       opened={deleteIntent?.opened === true && deleteQuestion !== null}
@@ -928,7 +936,8 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
     ...(serverConflict ? { conflict: { message: labels.settingsConflict, reloadLabel: labels.reloadSettings, onReload: reloadCurrent } } : {}),
     ...(error === undefined ? {} : { error }),
     invalid: !valid,
-    invalidMessage: labels.settingsError,
+    invalidMessage: labels.settingsInvalid,
+    invalidStatus: labels.settingsInvalid,
     onSave: () => { void save(); },
     onDiscard: reset,
     saveLabel: labels.save,
@@ -944,6 +953,35 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
     registerSwitch(guardSwitch);
     return () => { registerSwitch(null); };
   }, [guardSwitch, registerSwitch]);
+  const autoStartFields = [
+    <SwitchRow
+      key="auto-start-switch"
+      label={labels.autoStart}
+      checked={draft.value.autoStart}
+      onChange={(autoStart) => { draft.setValue((current) => ({ ...current, autoStart })); }}
+      hint={labels.autoStartHint}
+      disabled={!canManage}
+      pending={saving}
+      layout="inline"
+    />,
+    <UnitInput
+      key="auto-start-interval"
+      label={labels.autoStartInterval}
+      value={autoStartInterval}
+      onChange={(value) => {
+        setAutoStartInterval(value);
+        if (typeof value === "number") draft.setValue((current) => ({ ...current, autoStartIntervalMinutes: value }));
+      }}
+      min={15}
+      max={240}
+      unit={labels.minutesUnit}
+      hint={labels.autoStartIntervalHint}
+      {...(validInterval ? {} : { error: labels.autoStartIntervalError })}
+      disabled={!canManage || saving || !draft.value.autoStart}
+      required
+      clampOnBlur={false}
+    />,
+  ] as const;
 
   return <div className="blitz-panel__detail blitz-panel__settings">
     <PageHeader kind="blitz" className="page-header--editor" title={labels.settingsSection} pageActions={<Button variant="neutral" icon="collapse" onClick={() => { guard.guardSwitch(onBack); }}>{labels.back}</Button>} save={saveProps} />
@@ -963,33 +1001,11 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
           disabled={!canManage || saving}
           onChange={(value) => { draft.setValue((current) => ({ ...current, chatTarget: value === "channel_default" ? null : value })); }}
           reserveError
+          wrap
         />
       </div>
       <div className="blitz-panel__auto-start">
-        <SwitchSection
-          title={labels.autoStart}
-          checked={draft.value.autoStart}
-          onChange={(autoStart) => { draft.setValue((current) => ({ ...current, autoStart })); }}
-          hint={labels.autoStartHint}
-          disabled={!canManage}
-          pending={saving}
-        />
-        <UnitInput
-          label={labels.autoStartInterval}
-          value={autoStartInterval}
-          onChange={(value) => {
-            setAutoStartInterval(value);
-            if (typeof value === "number") draft.setValue((current) => ({ ...current, autoStartIntervalMinutes: value }));
-          }}
-          min={15}
-          max={240}
-          unit={labels.minutesUnit}
-          hint={labels.autoStartIntervalHint}
-          {...(validInterval ? {} : { error: labels.autoStartIntervalError })}
-          disabled={!canManage || saving || !draft.value.autoStart}
-          required
-          clampOnBlur={false}
-        />
+        <FieldPair>{autoStartFields}</FieldPair>
       </div>
       <TemplateSetting language={language} label={labels.startText} value={draft.value.startText} onChange={(startText) => { draft.setValue((current) => ({ ...current, startText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
       <TemplateSetting language={language} label={labels.solvedText} value={draft.value.solvedText} onChange={(solvedText) => { draft.setValue((current) => ({ ...current, solvedText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />

@@ -14,9 +14,10 @@ export interface SegmentChoiceProps<T extends string = string> {
   warning?: string;
   error?: string;
   reserveError?: boolean;
+  wrap?: boolean;
 }
 
-export function SegmentChoice<T extends string>({ label, hint, value, onChange, options, size = "form", name, disabled = false, warning, error, reserveError = false }: SegmentChoiceProps<T>) {
+export function SegmentChoice<T extends string>({ label, hint, value, onChange, options, size = "form", name, disabled = false, warning, error, reserveError = false, wrap = false }: SegmentChoiceProps<T>) {
   const id = useId();
   const hintId = `${id}-hint`;
   const warningId = `${id}-warning`;
@@ -39,7 +40,7 @@ export function SegmentChoice<T extends string>({ label, hint, value, onChange, 
 
   return <div data-ui="" className={`segment-choice-field segment-choice-field--${size}`}>
     <span className="segment-choice-field__label" id={`${id}-label`}>{label}</span>
-    <div data-ui="" className="segment-choice" role="group" aria-labelledby={`${id}-label`} aria-describedby={describedBy} aria-invalid={hasError ? true : undefined} onKeyDown={handleKeyDown}>
+    <div data-ui="" className={`segment-choice${wrap ? " segment-choice--wrap" : ""}`} role="group" aria-labelledby={`${id}-label`} aria-describedby={describedBy} aria-invalid={hasError ? true : undefined} onKeyDown={handleKeyDown}>
       {options.map((option) => <button
         key={option.value}
         type="button"

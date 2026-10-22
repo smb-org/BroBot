@@ -10,9 +10,11 @@ import {
 import { openBlitzRound } from "./service";
 
 const BLITZ_AUTO_START_ALARM_KEY = "auto-start";
+const BLITZ_AUTO_START_RECOVERY_ALARM_KEY = "settings-changed";
 const BLITZ_AUTO_START_STATE_KEY = "auto-start-state";
 const BLITZ_AUTO_START_WATCHDOG_MS = 60_000;
 const BLITZ_AUTO_START_GRACE_MS = 60_000;
+const BLITZ_AUTO_START_RECOVERY_DELAY_MS = 5_000;
 
 const MINUTE_MS = 60_000;
 
@@ -159,13 +161,18 @@ const persistAndArm = async (context: ModuleAlarmContext, state: BlitzAutoStartS
     await context.clear(BLITZ_AUTO_START_ALARM_KEY);
     return;
   }
-  await context.schedule(
-    BLITZ_AUTO_START_ALARM_KEY,
-    identity.deadline,
-    identity.revision,
-    identity.generation,
-    identity,
-  );
+  try {
+    await context.schedule(
+      BLITZ_AUTO_START_ALARM_KEY,
+      identity.deadline,
+      identity.revision,
+      identity.generation,
+      identity,
+    );
+  } catch {
+    // The settings-changed occurrence is a host-retried reconciliation alarm.
+    await context.schedule(BLITZ_AUTO_START_RECOVERY_ALARM_KEY, Date.now() + BLITZ_AUTO_START_RECOVERY_DELAY_MS);
+  }
 };
 
 const clearState = async (context: ModuleAlarmContext): Promise<void> => {
@@ -184,10 +191,8 @@ const prepareCurrentState = (
   now: number,
 ): BlitzAutoStartState => {
   if (state === null || state.baseline !== config.baseline) {
-    const waitingRoundId = active?.roundId ?? state?.awaitingRoundId ?? null;
-    const waitingBaseline = active === null ? state?.awaitingRoundBaseline ?? null : baselineFromRoundData(active.data);
-    return stateForBaseline(config, stream, now,
-      waitingRoundId === null ? null : { roundId: waitingRoundId, data: active?.data }, waitingBaseline);
+    const currentBaselineRound = active !== null && baselineFromRoundData(active.data) === config.baseline ? active : null;
+    return stateForBaseline(config, stream, now, currentBaselineRound);
   }
 
   if (active !== null) {
@@ -270,7 +275,14 @@ const handleOpenedRound = async (
   round: RoundReference,
 ): Promise<void> => {
   const now = Date.now();
-  const [state, stream] = await Promise.all([readState(context), context.streamState()]);
+  const [state, stream, active] = await Promise.all([
+    readState(context),
+    context.streamState(),
+    context.points.rounds.active(),
+  ]);
+  const callbackBaseline = baselineFromRoundData(round.data);
+  if (active === null || active.roundId !== round.roundId ||
+      callbackBaseline !== config.baseline || baselineFromRoundData(active.data) !== callbackBaseline) return;
   if (state?.awaitingRoundId === round.roundId) {
     const next = prepareCurrentState(config, state, round, stream, now);
     const identity = expectedAlarmIdentity(next);
@@ -344,16 +356,20 @@ export const onBlitzPointRoundResolved = async (
   }
   const state = await readState(context);
   if (state === null || state.awaitingRoundId !== round.roundId) return;
-  const openedBaseline = baselineFromRoundData(round.data) ?? state.awaitingRoundBaseline;
   const stream = await context.streamState();
   const now = Date.now();
-  const current = state.baseline === config.baseline ? state : {
-    ...stateForBaseline(config, stream, now, { roundId: state.awaitingRoundId, data: round.data },
-      state.awaitingRoundBaseline),
-    remainingMs: intervalFor(config.settings.autoStartIntervalMinutes),
-    deadlineAt: null,
-  };
-  await persistAndArm(context, finishAwaitedRound(current, config, stream, now, openedBaseline));
+  const [currentConfig, currentState] = await Promise.all([readConfig(context), readState(context)]);
+  if (!enabledConfig(currentConfig)) {
+    await clearState(context);
+    return;
+  }
+  if (currentState === null || currentState.awaitingRoundId !== round.roundId) return;
+  if (currentState.baseline !== currentConfig.baseline) {
+    await reconcileBlitzAutoStart(context, "settings");
+    return;
+  }
+  const openedBaseline = baselineFromRoundData(round.data) ?? currentState.awaitingRoundBaseline;
+  await persistAndArm(context, finishAwaitedRound(currentState, currentConfig, stream, now, openedBaseline));
 };
 
 const dueIdentityMatches = (context: ModuleAlarmContext, state: BlitzAutoStartState): boolean => {

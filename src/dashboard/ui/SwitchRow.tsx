@@ -14,9 +14,10 @@ export interface SwitchRowProps {
   disabled?: boolean;
   pending?: boolean;
   lockedReason?: string;
+  layout?: "split" | "inline";
 }
 
-export function SwitchRow({ label, ariaLabel, description, hint, checked, onChange, invalid = false, disabled = false, pending = false, lockedReason }: SwitchRowProps) {
+export function SwitchRow({ label, ariaLabel, description, hint, checked, onChange, invalid = false, disabled = false, pending = false, lockedReason, layout = "split" }: SwitchRowProps) {
   const id = useId();
   const labelId = `${id}-label`;
   const descriptionId = `${id}-description`;
@@ -25,7 +26,7 @@ export function SwitchRow({ label, ariaLabel, description, hint, checked, onChan
   const blocked = disabled || pending || lockedReason !== undefined;
   const describedBy = [description === undefined ? null : descriptionId, hint === undefined ? null : hintId, lockedReason === undefined ? null : reasonId].filter((part): part is string => part !== null).join(" ") || undefined;
 
-  return <div data-ui="" className="ui-switch-row" aria-busy={pending}>
+  return <div data-ui="" className={`ui-switch-row${layout === "inline" ? " ui-switch-row--inline" : ""}`} aria-busy={pending}>
     <span className="ui-switch-row__copy">
       <strong id={labelId}>{label}</strong>
       {description === undefined ? null : <small id={descriptionId}>{description}</small>}
