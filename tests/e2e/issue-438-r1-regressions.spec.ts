@@ -18,6 +18,7 @@ const members = [
 const inviteUser = { userId: "invitee-438", login: "lena_luchs", displayName: "Lena Luchs", profileImageUrl: null };
 const viewports = [
   { width: 1920, height: 1080 },
+  { width: 1440, height: 900 },
   { width: 1280, height: 800 },
   { width: 390, height: 844 },
 ] as const;
@@ -264,7 +265,7 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
       const description = row?.querySelector(".list-row__description")?.getBoundingClientRect();
       const status = node.getBoundingClientRect();
       if (row === null || description === undefined || row.scrollWidth > row.clientWidth) return false;
-      return narrow ? status.y >= description.bottom - 1 : status.x >= description.right - 1;
+      return narrow ? status.y >= description.bottom - 1 && Math.abs(status.x - description.x) <= 1 : status.x >= description.right - 1;
     }), viewport.width <= 640)).toBe(true);
     if (viewport.width > 640) {
       const ledBox = await box(page.locator(".module-workspace__group .list-row .status-led").first());

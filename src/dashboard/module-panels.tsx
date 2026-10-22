@@ -125,8 +125,9 @@ export const StateRow = ({ label, tone, word, detail, action, icon }: {
   );
 };
 
-const LockedModuleStatus = ({ status, reason }: { status: string; reason: string }): ReactElement => (
-  <span className="module-locked-status" aria-label={`${status}: ${reason}`} aria-description={reason} title={reason}>
+/** `reasonShownNearby`: the row already renders the reason as a note, so the accessible name stays the status alone (no double announcement). */
+const LockedModuleStatus = ({ status, reason, reasonShownNearby = false }: { status: string; reason: string; reasonShownNearby?: boolean }): ReactElement => (
+  <span className="module-locked-status" aria-label={reasonShownNearby ? status : `${status}: ${reason}`} aria-description={reasonShownNearby ? undefined : reason} title={reason}>
     <Icon name="lock" size={16} className="module-locked-status__icon" />
     <span>{status}</span>
   </span>
@@ -1071,7 +1072,7 @@ const ModuleWorkspaceRow = ({
         {lockedReason === undefined && !reserveDependencyReason ? null : <span className="module-workspace__lock-reason"><LockedReason id={`module-lock-${moduleId}`} {...(lockedReason === undefined ? {} : { reason: lockedReason })} /></span>}
       </>}
       status={mandatory
-        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} />
+        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} reasonShownNearby />
         : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
       action={mandatory ? null : <div className="module-switch-control">
         <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || dependencyReason !== null || busy} onCheckedChange={onToggle} />
