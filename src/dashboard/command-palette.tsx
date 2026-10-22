@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from "react";
 
 import { MODULES } from "../modules/registry";
 import type { TextCommand } from "../modules/text_commands/contracts";
@@ -21,6 +21,7 @@ import { dashboardNavigationGroups } from "./nav-pages";
 import { dashboardRoutePath, dashboardRouteRequiresBot, type DashboardRoute } from "./router";
 import { readRecentTargets, rememberRecentTarget, RECENT_TARGET_LIMIT } from "./command-palette-recents";
 import { FormDialog, notify, Select, CommandPalette, type CommandPaletteItem } from "./ui";
+import { dismissToast } from "./ui/toast-store";
 
 const SHOUTOUT_KEYWORD = "shoutout";
 const streamMarkerGrantHref = (channelId: string): string =>
@@ -113,11 +114,48 @@ interface CounterPickerState {
   variableName: string | null;
 }
 
+interface MarkerActionScope {
+  channelId: string | null;
+  controller: AbortController;
+  toastIds: Set<number>;
+}
+
+interface MarkerActionScopeStore {
+  getSnapshot: () => MarkerActionScope | null;
+  subscribe: (listener: () => void) => () => void;
+  set: (scope: MarkerActionScope) => void;
+}
+
+const createMarkerActionScopeStore = (): MarkerActionScopeStore => {
+  let currentScope: MarkerActionScope | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => currentScope,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    set: (scope) => {
+      if (currentScope === scope) return;
+      currentScope = scope;
+      for (const listener of listeners) listener();
+    },
+  };
+};
+
 /** Cmd/Ctrl+K finds navigation, text commands, variables, and channel actions. */
 export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, botConnected, streamState, channelControls, onRefreshChannelState, onToggleModule, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelCommandPaletteProperties): ReactElement => {
   const texts = dashboardTexts();
-  const markerActionScope = useMemo(() => ({ channelId, controller: new AbortController() }), [channelId]);
-  useLayoutEffect(() => () => { markerActionScope.controller.abort(); }, [markerActionScope]);
+  const markerActionScopeStore = useMemo(() => createMarkerActionScopeStore(), []);
+  const markerActionScope = useSyncExternalStore(markerActionScopeStore.subscribe, markerActionScopeStore.getSnapshot, markerActionScopeStore.getSnapshot);
+  useLayoutEffect(() => {
+    const scope = { channelId, controller: new AbortController(), toastIds: new Set<number>() };
+    markerActionScopeStore.set(scope);
+    return () => {
+      scope.controller.abort();
+      for (const toastId of scope.toastIds) dismissToast(toastId);
+    };
+  }, [channelId, markerActionScopeStore]);
   const manageable = ownRole !== null && canManage(ownRole);
   const markerAction = MODULES.find((module) => module.id === "channel_events")?.actions?.find((action) => action.id === "set-stream-marker");
   const markerModuleEnabled = modules.some((module) => module.id === "channel_events" && module.enabled);
@@ -317,6 +355,30 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
           ? streamMarkerActionTexts.scopeMissing[language]
           : streamMarkerActionTexts.scopeOwnerOnly[language];
   const marker = moduleImmediateActionAvailability("channel_events", "set-stream-marker", modules, streamState, ownRole, markerReason);
+  const triggerStreamMarker = useCallback((): void => {
+    const scope = markerActionScope;
+    if (channelId === null || markerAction === undefined || marker.disabledReason !== null || scope === null || scope.channelId !== channelId) return;
+    void markerAction.execute({ channelId, viewerUserId, language, formData: new FormData() }).then((result) => {
+      if (scope.controller.signal.aborted) return;
+      const resultLink = result?.link;
+      const toastId = notify({
+        tone: result?.tone ?? "success",
+        message: result?.message?.[language] ?? texts.streamManager.actionSucceeded(markerAction.name[language]),
+        scope: channelId,
+        ...(resultLink === undefined ? {} : {
+          action: {
+            label: resultLink.label[language],
+            onClick: () => { window.location.assign(resultLink.href); },
+          },
+        }),
+      });
+      scope.toastIds.add(toastId);
+    }).catch(() => {
+      if (scope.controller.signal.aborted) return;
+      const toastId = notify({ tone: "error", message: markerAction.errorMessage?.[language] ?? texts.streamManager.actionFailed });
+      scope.toastIds.add(toastId);
+    });
+  }, [channelId, language, marker.disabledReason, markerAction, markerActionScope, texts, viewerUserId]);
   const actionItems = useMemo<CommandPaletteItem[]>(() => {
     if (channelId === null) return [];
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
@@ -468,27 +530,7 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         icon: markerAction.icon,
         disabled: marker.disabledReason !== null,
         ...(marker.disabledReason === null ? {} : { disabledReason: marker.disabledReason }),
-        onTrigger: () => {
-          if (marker.disabledReason !== null) return;
-          void markerAction.execute({ channelId, viewerUserId, language, formData: new FormData() }).then((result) => {
-            if (markerActionScope.controller.signal.aborted || markerActionScope.channelId !== channelId) return;
-            const resultLink = result?.link;
-            notify({
-              tone: result?.tone ?? "success",
-              message: result?.message?.[language] ?? texts.streamManager.actionSucceeded(markerAction.name[language]),
-              scope: channelId,
-              ...(resultLink === undefined ? {} : {
-                action: {
-                  label: resultLink.label[language],
-                  onClick: () => { window.location.assign(resultLink.href); },
-                },
-              }),
-            });
-          }).catch(() => {
-            if (markerActionScope.controller.signal.aborted || markerActionScope.channelId !== channelId) return;
-            notify({ tone: "error", message: markerAction.errorMessage?.[language] ?? texts.streamManager.actionFailed });
-          });
-        },
+        onTrigger: triggerStreamMarker,
       });
       if (markerScopeLoaded && !markerScopeFailed && !markerScopeAvailable && marker.disabledReason === markerReason &&
           viewerUserId === channelId && ownRole !== null && hasRequiredChannelRole(ownRole, markerAction.requiredRole)) {
@@ -503,7 +545,7 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
       }
     }
     return items;
-  }, [texts, manageable, adsEnabled, channelId, viewerUserId, markerActionScope, channelControls, ownRole, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl, botConnected, counterAction, counterAvailability, counterActionAvailable, numericVariables, language, runCounterAction, testMessageAction, marker, markerAction, markerReason, markerScopeAvailable, markerScopeFailed, markerScopeLoaded]);
+  }, [texts, manageable, adsEnabled, channelId, viewerUserId, channelControls, ownRole, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl, botConnected, counterAction, counterAvailability, counterActionAvailable, numericVariables, language, runCounterAction, testMessageAction, marker, markerAction, markerReason, markerScopeAvailable, markerScopeFailed, markerScopeLoaded, triggerStreamMarker]);
 
   const targetItems = navigationItems;
   const recentItems = recentTargetPaths.flatMap((path, index) => {

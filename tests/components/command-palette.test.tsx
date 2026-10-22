@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { StrictMode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { changeChannelVariableValue, createStreamMarker, fetchStreamMarkerAvailability, fetchChannelVariables, setChannelControl } from "../../src/dashboard/api";
@@ -9,7 +9,7 @@ import { dashboardTexts } from "../../src/dashboard/locale";
 import { ChannelCommandPalette } from "../../src/dashboard/command-palette";
 import { CommandPalette } from "../../src/dashboard/ui/CommandPalette";
 import { UiProvider, type CommandPaletteItem } from "../../src/dashboard/ui";
-import { toastsSnapshot } from "../../src/dashboard/ui/toast-store";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { DashboardRoute } from "../../src/dashboard/router";
 
 vi.mock("../../src/dashboard/api", async (importOriginal) => ({
@@ -552,6 +552,57 @@ describe("cmdk command palette", () => {
 
     await waitFor(() => expect(createStreamMarker).toHaveBeenCalledWith("kanal-a"));
     await waitFor(() => expect(toastsSnapshot().at(-1)?.message).toMatch(/Stream marker set at 5:23|Stream-Marker bei 5:23 gesetzt/u));
+  });
+
+  it("dismisses a published marker grant toast when the palette switches channels", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(createStreamMarker).mockResolvedValue({
+      result: "scope_missing",
+      error: "broadcast_scope_missing",
+      grantHref: "/auth/channels/kanal-a/broadcaster-scopes/broadcast",
+    });
+    const palette = (channelId: string) => <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+      key={channelId}
+      open onOpenChange={vi.fn()} channelId={channelId} viewerUserId={channelId} ownRole="manager" streamState="online"
+      modules={[{ id: "channel_events", enabled: true, settings: "{}" }]}
+      onToggleModule={() => Promise.resolve()} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()}
+    /></UiProvider></QueryClientProvider>;
+    const view = render(palette("kanal-a"));
+
+    await waitFor(() => expect(fetchStreamMarkerAvailability).toHaveBeenCalledWith("kanal-a", expect.any(AbortSignal)));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "stream marker" } });
+    const marker = await screen.findByRole("option", { name: /Set stream marker|Stream-Marker setzen/u });
+    await waitFor(() => expect(marker.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(marker);
+
+    const grantMessage = /broadcast permission is missing|Broadcaster-Berechtigung fehlt/u;
+    await waitFor(() => expect(toastsSnapshot().some(({ message }) => grantMessage.test(message))).toBe(true));
+    view.rerender(palette("kanal-b"));
+
+    expect(toastsSnapshot().some(({ message }) => grantMessage.test(message))).toBe(false);
+  });
+
+  it("shows stream marker feedback when rendered under StrictMode", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const existingToastIds = new Set(toastsSnapshot().map(({ id }) => id));
+    vi.mocked(createStreamMarker).mockResolvedValue({ result: "created", positionSeconds: 323 });
+    render(<StrictMode><QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+      open onOpenChange={vi.fn()} channelId="kanal-a" ownRole="manager" streamState="online"
+      modules={[{ id: "channel_events", enabled: true, settings: "{}" }]}
+      onToggleModule={() => Promise.resolve()} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()}
+    /></UiProvider></QueryClientProvider></StrictMode>);
+
+    await waitFor(() => expect(fetchStreamMarkerAvailability).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "stream marker" } });
+    const marker = await screen.findByRole("option", { name: /Set stream marker|Stream-Marker setzen/u });
+    await waitFor(() => expect(marker.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(marker);
+
+    const createdMessage = /Stream marker set at 5:23|Stream-Marker bei 5:23 gesetzt/u;
+    await waitFor(() => expect(toastsSnapshot().some(({ id, message }) => !existingToastIds.has(id) && createdMessage.test(message))).toBe(true));
+    for (const toast of toastsSnapshot()) {
+      if (!existingToastIds.has(toast.id) && createdMessage.test(toast.message)) dismissToast(toast.id);
+    }
   });
 
   it("drops a delayed marker grant toast after switching palette channels", async () => {
