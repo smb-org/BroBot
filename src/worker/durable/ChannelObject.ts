@@ -286,6 +286,28 @@ const streamStartIdempotencyKey = (timerId: string, streamId: string): string =>
   `${timerId}:stream_start:${encodeURIComponent(streamId)}`;
 const timerSkipReceiptKey = (occurrence: TimerOccurrence): string =>
   timerOccurrenceKey(occurrence.identity.timerId, occurrence.identity.deadline, occurrence.identity.streamId ?? undefined);
+const TIMER_SKIP_RECEIPT_RETENTION_MS = 24 * 60 * 60_000;
+const timerSkipReceiptsForSchedule = (
+  entry: DurableTimerEntry,
+  now: number,
+  stream: DurableTimerStream,
+): NonNullable<DurableTimerEntry["skipReceipts"]> => {
+  const currentOccurrences = [entry.plannedOccurrence, entry.inFlightClaim?.occurrence];
+  const activeReceiptKeys = new Set(currentOccurrences
+    .filter((occurrence): occurrence is TimerOccurrence => occurrence !== null && occurrence !== undefined)
+    .filter((occurrence) => occurrence.identity.triggerType !== "stream_start" || stream.state === "unknown" ||
+      stream.state === "online" && stream.streamId === occurrence.identity.streamId &&
+      stream.generation === occurrence.identity.generation)
+    .map(timerSkipReceiptKey));
+  const endedStreamStartReceiptKeys = new Set(currentOccurrences
+    .filter((occurrence): occurrence is TimerOccurrence => occurrence !== null && occurrence !== undefined)
+    .filter((occurrence) => occurrence.identity.triggerType === "stream_start" && stream.state !== "unknown" &&
+      (stream.state !== "online" || stream.streamId !== occurrence.identity.streamId ||
+        stream.generation !== occurrence.identity.generation))
+    .map(timerSkipReceiptKey));
+  return (entry.skipReceipts ?? []).filter((receipt) => !endedStreamStartReceiptKeys.has(receipt.occurrenceKey) &&
+    (activeReceiptKeys.has(receipt.occurrenceKey) || receipt.deadline + TIMER_SKIP_RECEIPT_RETENTION_MS >= now));
+};
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
@@ -988,10 +1010,12 @@ export class ChannelObject extends DurableObject<Env> {
   ): void {
     const skippedOccurrence = entry.skippedOccurrence;
     const skipAuditOperationId = entry.skipAuditOperationId ?? null;
-    const skipReceipts = (entry.skipReceipts ?? []).filter(({ deadline }) => deadline >= inputs.now);
+    const skipReceipts = timerSkipReceiptsForSchedule(entry, inputs.now, stream);
     if (skippedOccurrence !== null && skippedOccurrence !== undefined &&
         sameTimerScheduledOccurrence(skippedOccurrence, entry.plannedOccurrence) &&
-        skippedOccurrence.identity.deadline >= inputs.now) {
+        (skippedOccurrence.identity.triggerType !== "stream_start" || stream.state === "unknown" ||
+          stream.state === "online" && stream.streamId === skippedOccurrence.identity.streamId &&
+          stream.generation === skippedOccurrence.identity.generation)) {
       const occurrenceKey = timerSkipReceiptKey(skippedOccurrence);
       const receipt = skipReceipts.find((candidate) => candidate.occurrenceKey === occurrenceKey);
       if (receipt === undefined) {
@@ -1010,10 +1034,11 @@ export class ChannelObject extends DurableObject<Env> {
       ? null
       : { identity: plan.identity, sequence: entry.planSequence } satisfies TimerOccurrence;
     entry.inFlightClaim = null;
+    entry.skipReceipts = timerSkipReceiptsForSchedule(entry, inputs.now, stream);
     const plannedOccurrence = entry.plannedOccurrence;
     const matchingSkipReceipt = plannedOccurrence === null
       ? undefined
-      : skipReceipts.find(({ occurrenceKey }) => occurrenceKey === timerSkipReceiptKey(plannedOccurrence));
+      : entry.skipReceipts.find(({ occurrenceKey }) => occurrenceKey === timerSkipReceiptKey(plannedOccurrence));
     const keepsSkippedOccurrence = matchingSkipReceipt !== undefined;
     entry.skippedOccurrence = keepsSkippedOccurrence ? plannedOccurrence : null;
     if (matchingSkipReceipt !== undefined && plannedOccurrence !== null) {
@@ -1450,7 +1475,7 @@ export class ChannelObject extends DurableObject<Env> {
 
           const now = Date.now();
           const occurrenceKey = timerSkipReceiptKey(occurrence);
-          const skipReceipts = (entry.skipReceipts ?? []).filter(({ deadline }) => deadline >= now);
+          const skipReceipts = timerSkipReceiptsForSchedule(entry, now, state.stream);
           entry.skipReceipts = skipReceipts;
           const receipt = skipReceipts.find((candidate) => candidate.occurrenceKey === occurrenceKey);
           const alreadySkipped = sameTimerScheduledOccurrence(entry.skippedOccurrence, occurrence) || receipt !== undefined;

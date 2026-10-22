@@ -23,7 +23,7 @@ import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { claimModuleAlarmSend, type ClaimStorage } from "../../src/worker/durable/module-alarm-send-claims";
 import type { sendChatMessage } from "../../src/worker/chat";
 
-const channelObjectFor = (stream: DurableTimerState["stream"]): {
+const channelObjectFor = (stream: DurableTimerState["stream"], initialValues?: Map<string, unknown>): {
   object: ChannelObject;
   values: Map<string, unknown>;
   mirrors: Map<string, { nextRunAt: string | null; nextRunState: string | null; sequence: number }>;
@@ -51,7 +51,7 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
   pauseTimerConfigRead: () => { started: Promise<void>; release: () => void };
   pauseDispatchStateRead: (skipReads?: number) => { started: Promise<void>; release: () => void };
 } => {
-  const values = new Map<string, unknown>();
+  const values = new Map(initialValues);
   const mirrors = new Map<string, { nextRunAt: string | null; nextRunState: string | null; sequence: number }>();
   let transactionQueue = Promise.resolve();
   let alarmAt: number | null = null;
@@ -314,10 +314,12 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
     scheduleInputsOverride === null
       ? await originalTimerScheduleInputs.call(object, configs, at)
       : { now: at, ...scheduleInputsOverride });
-  const schedule = emptyDurableTimerState();
-  schedule.initialized = true;
-  schedule.stream = stream;
-  values.set(TIMER_DURABLE_STATE_KEY, schedule);
+  if (!values.has(TIMER_DURABLE_STATE_KEY)) {
+    const schedule = emptyDurableTimerState();
+    schedule.initialized = true;
+    schedule.stream = stream;
+    values.set(TIMER_DURABLE_STATE_KEY, schedule);
+  }
   return {
     object,
     values,
@@ -1480,6 +1482,107 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     } else {
       expect(stateOf(harness.values).timers[config.id]?.plannedOccurrence ?? null).toBeNull();
     }
+  });
+
+  it.each([
+    {
+      name: "interval",
+      trigger: { type: "interval", live: { minutes: 10 } } satisfies DurableTimerConfig["trigger"],
+      now: Date.parse("2026-10-12T12:00:00.000Z"),
+      stream: onlineStream("stream-1", 1, Date.parse("2026-10-12T12:00:00.000Z")),
+      expectedDeadline: Date.parse("2026-10-12T12:10:00.000Z"),
+    },
+    {
+      name: "stream-start",
+      trigger: { type: "stream_start", minutes: 1 } satisfies DurableTimerConfig["trigger"],
+      now: Date.parse("2026-10-12T12:00:00.000Z"),
+      stream: onlineStream("stream-1", 1, Date.parse("2026-10-12T11:59:30.000Z")),
+      expectedDeadline: Date.parse("2026-10-12T12:00:30.000Z"),
+    },
+    {
+      name: "daily",
+      trigger: { type: "time_of_day", time: "14:10", weekdays: [], alsoOffline: true } satisfies DurableTimerConfig["trigger"],
+      now: Date.parse("2026-10-13T10:00:00.000Z"),
+      stream: { state: "offline", streamId: null, startedAt: null, generation: 1 } as const,
+      expectedDeadline: Date.parse("2026-10-13T12:10:00.000Z"),
+    },
+  ])("keeps a post-deadline $name skip through restart and rename reconciliation", async ({
+    name,
+    trigger,
+    now,
+    stream,
+    expectedDeadline,
+  }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const original = channelObjectFor(stream);
+    const config = timerConfig(`skip-post-deadline-${name}`, trigger);
+    original.setDatabaseConfig(config);
+    await original.object.upsertTimerConfig(config);
+    const actor = { userId: "operator-user", sessionId: "operator-session" };
+    const scheduler = original.object as unknown as {
+      skipNextTimerOccurrence(timerId: string, revision: number, actor: { userId: string; sessionId: string }): Promise<{ result: string }>;
+    };
+    await expect(scheduler.skipNextTimerOccurrence(config.id, config.revision, actor))
+      .resolves.toMatchObject({ result: "skipped" });
+
+    const occurrence = dueOccurrence(original.values, config.id);
+    expect(occurrence.identity.deadline).toBe(expectedDeadline);
+    vi.setSystemTime(expectedDeadline + 1);
+
+    const restartedValues = new Map(structuredClone([...original.values]));
+    const restarted = channelObjectFor(stream, restartedValues);
+    const renamed = { ...config, name: "Renamed reminder", revision: config.revision + 1 };
+    restarted.setDatabaseConfig(renamed);
+    await restarted.object.reconcileTimerSchedules("activation");
+
+    const reconciledOccurrence = dueOccurrence(restarted.values, config.id);
+    expect(reconciledOccurrence.identity.deadline).toBe(expectedDeadline);
+    expect(stateOf(restarted.values).timers[config.id]?.skippedOccurrence).toBeDefined();
+    const sends: string[] = [];
+    await restarted.object.runTimerOccurrence(
+      timerAlarmContext((_text, key) => {
+        sends.push(key);
+        return Promise.resolve({ sent: true, reason: null, retryable: false });
+      }),
+      `timer:${config.id}`,
+      reconciledOccurrence.identity.deadline,
+      renamed.revision,
+      reconciledOccurrence.identity,
+      reconciledOccurrence.sequence,
+    );
+
+    expect(sends).toEqual([]);
+    expect(stateOf(restarted.values).timers[config.id]?.skipReceipts).toEqual([]);
+    if (trigger.type === "interval") {
+      expect(dueOccurrence(restarted.values, config.id).identity.deadline).toBeGreaterThan(expectedDeadline);
+    } else if (trigger.type === "time_of_day") {
+      // A daily timer continues with the same time on the next day.
+      expect(dueOccurrence(restarted.values, config.id).identity.deadline).toBe(expectedDeadline + 24 * 60 * 60_000);
+    } else {
+      expect(stateOf(restarted.values).timers[config.id]?.plannedOccurrence ?? null).toBeNull();
+    }
+  });
+
+  it("removes a skipped stream-start receipt when its stream ends before the alarm runs", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const harness = channelObjectFor(onlineStream("stream-1", 1, start - 30_000));
+    const config = timerConfig("skip-ended-stream", { type: "stream_start", minutes: 1 });
+    const scheduler = harness.object as unknown as {
+      skipNextTimerOccurrence(timerId: string, revision: number, actor: { userId: string; sessionId: string }): Promise<{ result: string }>;
+    };
+    await harness.object.upsertTimerConfig(config);
+    await expect(scheduler.skipNextTimerOccurrence(config.id, config.revision, {
+      userId: "operator-user", sessionId: "operator-session",
+    })).resolves.toMatchObject({ result: "skipped" });
+    expect(stateOf(harness.values).timers[config.id]?.skipReceipts).toHaveLength(1);
+
+    await harness.object.transitionTimerStream({ state: "offline", streamId: null, startedAt: null, generation: 2 });
+
+    expect(stateOf(harness.values).timers[config.id]?.skipReceipts).toEqual([]);
+    expect(stateOf(harness.values).timers[config.id]?.skippedOccurrence ?? null).toBeNull();
   });
 
   it("mirrors the next effective occurrence and publishes the timer resource after a skip", async () => {
