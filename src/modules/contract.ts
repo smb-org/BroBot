@@ -1490,10 +1490,11 @@ export interface ModulePanelProperties {
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
 
-type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "counter" | "test-message" | "timer";
+type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "counter" | "test-message" | "marker" | "timer";
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
+  link?: { href: string; label: Readonly<Record<ModuleLanguage, string>> };
   /** Used for short countdowns such as an open voting round. */
   until?: number;
   /** Snapshot identity that must accompany any later mutation from this action. */
@@ -1502,6 +1503,7 @@ type ModuleImmediateActionAvailability = {
 
 interface ModuleImmediateActionConditionContext {
   channelId: string;
+  viewerUserId?: string | null;
   streamState: ChannelStreamState | null | undefined;
   botConnected?: boolean | null | undefined;
   language: ModuleLanguage;
@@ -1521,6 +1523,7 @@ export interface ModuleImmediateActionContentProperties {
 
 interface ModuleImmediateActionExecutionProperties extends ModuleImmediateActionContentProperties {
   formData: FormData;
+  viewerUserId?: string | null;
   pollId?: string;
 }
 
@@ -1528,6 +1531,8 @@ export interface ModuleImmediateActionResult {
   message?: Readonly<Record<ModuleLanguage, string>>;
   tone?: "success" | "info" | "error";
   link?: { href: string; label: Readonly<Record<ModuleLanguage, string>> };
+  /** The cockpit drops this feedback once a later availability check confirms the action again (for example after a permission grant). */
+  supersededByAvailability?: boolean;
   belaboxSample?: { connected: boolean; bitrateKbps: number; sampledAt: number };
 }
 

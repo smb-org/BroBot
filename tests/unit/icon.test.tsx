@@ -22,6 +22,7 @@ const iconNames: Readonly<Record<IconName, true>> = {
   blitz: true,
   counter: true,
   "test-message": true,
+  marker: true,
   add: true,
   remove: true,
   close: true,

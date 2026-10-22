@@ -8,10 +8,14 @@ const setupQuickActionCockpit = async (
   page: Page,
   onVariableAvailabilityChange: (available: boolean) => void,
   deferCounterLoad = false,
+  includeStreamMarker = false,
+  streamState = "online",
+  viewerUserId = "viewer-510",
   includeTimers = false,
 ) => {
   const modules = [
     { id: "text_commands", enabled: true, settings: "{}" },
+    ...(includeStreamMarker ? [{ id: "channel_events", enabled: true, settings: "{}" }] : []),
     ...(includeTimers ? [{ id: "timers", enabled: true, settings: "{}" }] : []),
   ];
   const channel = {
@@ -20,7 +24,7 @@ const setupQuickActionCockpit = async (
     displayName: "Demo Kanal",
     language: "de",
     role: "manager",
-    streamState: "online",
+    streamState,
     streamStartedAt: new Date(Date.now() - 60_000).toISOString(),
     broadcasterConnection: "connected",
     channelBotConsent: "granted",
@@ -45,6 +49,7 @@ const setupQuickActionCockpit = async (
   let counterLoadPending = false;
   let releaseCounterLoad: (() => void) | undefined;
   let timerSkipCalls = 0;
+  let markerRouteCalls = 0;
   const json = (value: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
 
   await page.route("**/api/**", async (route) => {
@@ -54,7 +59,7 @@ const setupQuickActionCockpit = async (
       return;
     }
     if (pathname === "/api/channels") {
-      await route.fulfill(json({ channels: [channel], bot: channel.bot, viewerUserId: "viewer-510" }));
+      await route.fulfill(json({ channels: [channel], bot: channel.bot, viewerUserId }));
       return;
     }
     if (pathname === `/api/channels/${channelId}/overview`) {
@@ -87,6 +92,16 @@ const setupQuickActionCockpit = async (
       const available = await page.evaluate(() => document.documentElement.dataset.counterVariables !== "off");
       onVariableAvailabilityChange(available);
       await route.fulfill(json({ variables: available ? [{ ...variable, value: score }] : [], count: available ? 1 : 0, maximum: 50 }));
+      return;
+    }
+    if (pathname === `/api/channels/${channelId}/broadcast/markers/availability` && route.request().method() === "GET") {
+      const scopeAvailable = await page.evaluate(() => document.documentElement.dataset.markerScope !== "missing");
+      await route.fulfill(json({ manageScopeAvailable: scopeAvailable }));
+      return;
+    }
+    if (pathname === `/api/channels/${channelId}/broadcast/markers` && route.request().method() === "POST") {
+      markerRouteCalls += 1;
+      await route.fulfill(json({ result: "created", positionSeconds: 323 }));
       return;
     }
     if (pathname === `/api/channels/${channelId}/modules/text_commands/commands`) {
@@ -131,10 +146,15 @@ const setupQuickActionCockpit = async (
     valueRouteCalls: () => valueRouteCalls,
     counterLoadIsPending: () => counterLoadPending,
     releaseCounterLoad: () => { releaseCounterLoad?.(); },
+    markerRouteCalls: () => markerRouteCalls,
     hideVariables: async () => page.evaluate(() => { document.documentElement.dataset.counterVariables = "off"; }),
     showVariables: async () => page.evaluate(() => { delete document.documentElement.dataset.counterVariables; }),
     hideTimerOccurrences: async () => page.evaluate(() => { document.documentElement.dataset.timerOccurrences = "off"; }),
     timerSkipCalls: () => timerSkipCalls,
+    setMarkerScopeAvailable: async (available: boolean) => page.evaluate((value) => {
+      if (value) delete document.documentElement.dataset.markerScope;
+      else document.documentElement.dataset.markerScope = "missing";
+    }, available),
   };
 };
 
@@ -278,7 +298,7 @@ test("keeps Counter Run disabled and guarded while its variable request is pendi
 });
 
 test("skips a chosen timer at desktop and mobile widths without moving the action grid", async ({ page }, testInfo) => {
-  const actions = await setupQuickActionCockpit(page, () => {}, false, true);
+  const actions = await setupQuickActionCockpit(page, () => {}, false, false, "online", "viewer-510", true);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${channelId}`);
 
@@ -335,4 +355,63 @@ test("skips a chosen timer at desktop and mobile widths without moving the actio
   await expect(page.getByText("Kein Timer hat einen geplanten nächsten Lauf.").first()).toBeVisible();
   await expect.poll(() => actionGridBox(page)).toEqual(mobileGrid);
   expect(desktopGrid.width).toBeGreaterThan(0);
+});
+
+test("shows the stream marker at desktop and mobile widths and keeps the grid fixed after feedback and scope changes", async ({ page }, testInfo) => {
+  const actions = await setupQuickActionCockpit(page, () => {}, false, true, "online", channelId);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${channelId}`);
+
+  const marker = page.getByRole("button", { name: "Stream-Marker setzen" });
+  await expect(marker).toBeVisible();
+  await expect(marker).toBeEnabled();
+  const desktopGrid = await actionGridBox(page);
+  await page.screenshot({ path: testInfo.outputPath("cockpit-marker-1920.png"), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(marker).toBeVisible();
+  const mobileGrid = await actionGridBox(page);
+  await page.screenshot({ path: testInfo.outputPath("cockpit-marker-390.png"), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  await marker.click();
+  await expect(page.getByText("Stream-Marker bei 5:23 gesetzt.").first()).toBeVisible();
+  expect(actions.markerRouteCalls()).toBe(1);
+  await expect.poll(() => actionGridBox(page)).toEqual(mobileGrid);
+
+  await actions.setMarkerScopeAvailable(false);
+  await expect(marker).toBeDisabled({ timeout: 8_000 });
+  await expect(page.getByText("Broadcaster-Berechtigung fehlt.").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: /Berechtigung erteilen/u })).toHaveAttribute(
+    "href", "/auth/channels/issue-510-quick-actions/broadcaster-scopes/broadcast",
+  );
+  await expect.poll(() => actionGridBox(page)).toEqual(mobileGrid);
+  expect(desktopGrid.width).toBeGreaterThan(0);
+});
+
+test("keeps an offline stream marker visible and disabled with its reason", async ({ page }) => {
+  await setupQuickActionCockpit(page, () => {}, false, true, "offline");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/channels/${channelId}`);
+
+  const marker = page.getByRole("button", { name: "Stream-Marker setzen" });
+  await expect(marker).toBeVisible();
+  await expect(marker).toBeDisabled();
+  await expect(page.getByText("Der Stream ist offline.").first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("shows the owner-only scope reason without a grant link to a manager who is not the channel owner", async ({ page }) => {
+  const actions = await setupQuickActionCockpit(page, () => {}, false, true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/channels/${channelId}`);
+
+  const marker = page.getByRole("button", { name: "Stream-Marker setzen" });
+  await expect(marker).toBeVisible();
+  await actions.setMarkerScopeAvailable(false);
+  await expect(marker).toBeDisabled({ timeout: 8_000 });
+  await expect(page.getByText("Nur der Kanalinhaber kann diese Berechtigung erteilen.").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: /Berechtigung erteilen/u })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

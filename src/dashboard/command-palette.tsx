@@ -1,17 +1,18 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from "react";
 
 import { MODULES } from "../modules/registry";
 import type { TextCommand } from "../modules/text_commands/contracts";
 import { readLastCounterVariable } from "../modules/text_commands/panel/counter-selection";
 import { textCommandQuickActionTexts } from "../modules/text_commands/panel/quick-action-locale";
+import { streamMarkerActionTexts } from "../modules/channel_events/panel/quick-action-locale";
 import { loadTextCommands } from "../modules/text_commands/panel/service";
 import type { Timer } from "../modules/timers/contracts";
 import { loadUpcomingTimers } from "../modules/timers/panel/service";
 import { timersQuickActionTexts } from "../modules/timers/panel/quick-action-locale";
 import { canManage, hasRequiredChannelRole, type ChannelRole } from "../contracts/values";
 import type { PanelChannelControls, PanelModuleState } from "../panel-contract";
-import { PanelApiError, createClip, fetchChannelVariables, sendManualShoutout, setChannelControl, startCommercial, type PanelChannelVariable } from "./api";
+import { PanelApiError, createClip, fetchStreamMarkerAvailability, fetchChannelVariables, sendManualShoutout, setChannelControl, startCommercial, type PanelChannelVariable } from "./api";
 import { dispatchDashboardAuthenticationRequired } from "./data/events";
 import { queryKeys } from "./data/keys";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
@@ -23,8 +24,11 @@ import { dashboardNavigationGroups } from "./nav-pages";
 import { dashboardRoutePath, dashboardRouteRequiresBot, type DashboardRoute } from "./router";
 import { readRecentTargets, rememberRecentTarget, RECENT_TARGET_LIMIT } from "./command-palette-recents";
 import { FormDialog, notify, Select, CommandPalette, type CommandPaletteItem } from "./ui";
+import { dismissToast } from "./ui/toast-store";
 
 const SHOUTOUT_KEYWORD = "shoutout";
+const streamMarkerGrantHref = (channelId: string): string =>
+  `/auth/channels/${encodeURIComponent(channelId)}/broadcaster-scopes/broadcast`;
 
 const botBlocksRoute = (route: DashboardRoute, botSignedIn: boolean | undefined): boolean =>
   botSignedIn === false && dashboardRouteRequiresBot(route);
@@ -124,10 +128,51 @@ const timersWithPlannedOccurrence = (timers: readonly Timer[]): Timer[] => timer
 const formatTimerNextRun = (at: string, language: "de" | "en"): string =>
   new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "short" }).format(new Date(at));
 
+interface MarkerActionScope {
+  channelId: string | null;
+  controller: AbortController;
+  toastIds: Set<number>;
+}
+
+interface MarkerActionScopeStore {
+  getSnapshot: () => MarkerActionScope | null;
+  subscribe: (listener: () => void) => () => void;
+  set: (scope: MarkerActionScope) => void;
+}
+
+const createMarkerActionScopeStore = (): MarkerActionScopeStore => {
+  let currentScope: MarkerActionScope | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => currentScope,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    set: (scope) => {
+      if (currentScope === scope) return;
+      currentScope = scope;
+      for (const listener of listeners) listener();
+    },
+  };
+};
+
 /** Cmd/Ctrl+K finds navigation, text commands, variables, and channel actions. */
 export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, botConnected, streamState, channelControls, onRefreshChannelState, onToggleModule, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelCommandPaletteProperties): ReactElement => {
   const texts = dashboardTexts();
+  const markerActionScopeStore = useMemo(() => createMarkerActionScopeStore(), []);
+  const markerActionScope = useSyncExternalStore(markerActionScopeStore.subscribe, markerActionScopeStore.getSnapshot, markerActionScopeStore.getSnapshot);
+  useLayoutEffect(() => {
+    const scope = { channelId, controller: new AbortController(), toastIds: new Set<number>() };
+    markerActionScopeStore.set(scope);
+    return () => {
+      scope.controller.abort();
+      for (const toastId of scope.toastIds) dismissToast(toastId);
+    };
+  }, [channelId, markerActionScopeStore]);
   const manageable = ownRole !== null && canManage(ownRole);
+  const markerAction = MODULES.find((module) => module.id === "channel_events")?.actions?.find((action) => action.id === "set-stream-marker");
+  const markerModuleEnabled = modules.some((module) => module.id === "channel_events" && module.enabled);
   const [commandState, setCommandState] = useState<{ channelId: string | null; value: TextCommand[] }>({ channelId, value: [] });
   const [paletteSession, setPaletteSession] = useState({ open, cycle: 0 });
   if (paletteSession.open !== open) {
@@ -139,6 +184,7 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
   const timersModuleEnabled = modules.find((candidate) => candidate.id === "timers")?.enabled === true;
   const [variableState, setVariableState] = useState<ChannelCommandData<readonly PanelChannelVariable[]>>({ channelId, value: [], loaded: false, failed: false, openCycle: 0 });
   const [timerState, setTimerState] = useState<ChannelCommandData<readonly Timer[]>>({ channelId, value: [], loaded: false, failed: false, openCycle: 0 });
+  const [markerScopeState, setMarkerScopeState] = useState<ChannelCommandData<boolean>>({ channelId, value: false, loaded: false, failed: false, openCycle: 0 });
   const [counterPicker, setCounterPicker] = useState<CounterPickerState | null>(null);
   const [timerPicker, setTimerPicker] = useState<TimerPickerState | null>(null);
   const [query, setQuery] = useState("");
@@ -147,6 +193,10 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
   const variables = useMemo(() => variablesMatchOpenCycle ? variableState.value : [], [variableState.value, variablesMatchOpenCycle]);
   const variablesLoaded = variablesMatchOpenCycle && variableState.loaded;
   const variablesFailed = variablesMatchOpenCycle && variableState.failed;
+  const markerScopeMatchesOpenCycle = markerScopeState.channelId === channelId && markerScopeState.openCycle === openCycle;
+  const markerScopeLoaded = markerScopeMatchesOpenCycle && markerScopeState.loaded;
+  const markerScopeFailed = markerScopeMatchesOpenCycle && markerScopeState.failed;
+  const markerScopeAvailable = markerScopeLoaded && !markerScopeFailed && markerScopeState.value;
   const currentTargetPath = route === undefined ? null : recentTargetPathForRoute(route, channelId);
   const recentTargetPaths = useMemo(() => {
     const stored = readRecentTargets(viewerUserId, channelId ?? "");
@@ -183,11 +233,19 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         if (active) setTimerState({ channelId, value: [], loaded: true, failed: true, openCycle });
       });
     }
+    if (markerModuleEnabled && markerAction !== undefined && streamState === "online" &&
+        ownRole !== null && hasRequiredChannelRole(ownRole, markerAction.requiredRole)) {
+      void fetchStreamMarkerAvailability(channelId, controller.signal).then((availability) => {
+        if (active) setMarkerScopeState({ channelId, value: availability.manageScopeAvailable, loaded: true, failed: false, openCycle });
+      }).catch(() => {
+        if (active) setMarkerScopeState({ channelId, value: false, loaded: true, failed: true, openCycle });
+      });
+    }
     return () => {
       active = false;
       controller.abort();
     };
-  }, [channelId, open, openCycle, timersModuleEnabled]);
+  }, [channelId, markerAction, markerModuleEnabled, open, openCycle, ownRole, streamState, timersModuleEnabled]);
 
   const navigationItems = useMemo<CommandPaletteItem[]>(() => dashboardNavigationGroups(
     { isPlatformAdmin },
@@ -342,6 +400,40 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
       notify({ tone: "error", message: timerAction.errorMessage?.[language] ?? texts.streamManager.actionFailed });
     });
   }, [channelId, language, plannedTimers, texts, timerAction, timerActionAvailable]);
+  const markerReason = !markerScopeLoaded
+    ? texts.streamManager.actionLoading
+    : markerScopeFailed
+      ? streamMarkerActionTexts.scopeCheckFailed[language]
+      : markerScopeAvailable
+        ? null
+        : viewerUserId === channelId
+          ? streamMarkerActionTexts.scopeMissing[language]
+          : streamMarkerActionTexts.scopeOwnerOnly[language];
+  const marker = moduleImmediateActionAvailability("channel_events", "set-stream-marker", modules, streamState, ownRole, markerReason);
+  const triggerStreamMarker = useCallback((): void => {
+    const scope = markerActionScope;
+    if (channelId === null || markerAction === undefined || marker.disabledReason !== null || scope === null || scope.channelId !== channelId) return;
+    void markerAction.execute({ channelId, viewerUserId, language, formData: new FormData() }).then((result) => {
+      if (scope.controller.signal.aborted) return;
+      const resultLink = result?.link;
+      const toastId = notify({
+        tone: result?.tone ?? "success",
+        message: result?.message?.[language] ?? texts.streamManager.actionSucceeded(markerAction.name[language]),
+        scope: channelId,
+        ...(resultLink === undefined ? {} : {
+          action: {
+            label: resultLink.label[language],
+            onClick: () => { window.location.assign(resultLink.href); },
+          },
+        }),
+      });
+      scope.toastIds.add(toastId);
+    }).catch(() => {
+      if (scope.controller.signal.aborted) return;
+      const toastId = notify({ tone: "error", message: markerAction.errorMessage?.[language] ?? texts.streamManager.actionFailed });
+      scope.toastIds.add(toastId);
+    });
+  }, [channelId, language, marker.disabledReason, markerAction, markerActionScope, texts, viewerUserId]);
   const actionItems = useMemo<CommandPaletteItem[]>(() => {
     if (channelId === null) return [];
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
@@ -499,8 +591,31 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         },
       });
     }
+    if (marker.offered && markerAction !== undefined) {
+      items.push({
+        id: "action:set-stream-marker",
+        label: markerAction.name[language],
+        group: texts.commandPalette.groupActions,
+        keywords: ["stream marker", "marker", "stream-markierung", "marker setzen"],
+        icon: markerAction.icon,
+        disabled: marker.disabledReason !== null,
+        ...(marker.disabledReason === null ? {} : { disabledReason: marker.disabledReason }),
+        onTrigger: triggerStreamMarker,
+      });
+      if (markerScopeLoaded && !markerScopeFailed && !markerScopeAvailable && marker.disabledReason === markerReason &&
+          viewerUserId === channelId && ownRole !== null && hasRequiredChannelRole(ownRole, markerAction.requiredRole)) {
+        items.push({
+          id: "action:stream-marker-grant",
+          label: streamMarkerActionTexts.scopeGrant[language],
+          group: texts.commandPalette.groupActions,
+          keywords: ["stream marker", "broadcast permission", "broadcaster berechtigung", "grant scope"],
+          icon: "external",
+          onTrigger: () => { window.location.assign(streamMarkerGrantHref(channelId)); },
+        });
+      }
+    }
     return items;
-  }, [texts, manageable, adsEnabled, channelId, channelControls, ownRole, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl, botConnected, counterAction, counterAvailability, counterActionAvailable, numericVariables, language, runCounterAction, testMessageAction, timerAction, timerActionAvailable, timerAvailability]);
+  }, [texts, manageable, adsEnabled, channelId, viewerUserId, channelControls, ownRole, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl, botConnected, counterAction, counterAvailability, counterActionAvailable, numericVariables, language, runCounterAction, testMessageAction, timerAction, timerActionAvailable, timerAvailability, marker, markerAction, markerReason, markerScopeAvailable, markerScopeFailed, markerScopeLoaded, triggerStreamMarker]);
 
   const targetItems = navigationItems;
   const recentItems = recentTargetPaths.flatMap((path, index) => {
