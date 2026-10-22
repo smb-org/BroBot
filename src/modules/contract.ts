@@ -1490,10 +1490,11 @@ export interface ModulePanelProperties {
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
 
-type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "counter" | "test-message";
+type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "counter" | "test-message" | "marker";
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
+  link?: { href: string; label: Readonly<Record<ModuleLanguage, string>> };
   /** Used for short countdowns such as an open voting round. */
   until?: number;
   /** Snapshot identity that must accompany any later mutation from this action. */

@@ -105,7 +105,7 @@ bleibt davon unabhängig Betriebsvoraussetzung (siehe Abschnitt 9).
 
 **Bewusst nicht:** `channel:read:stream_key`, `channel:edit:commercial`, `channel:manage:raids`, `channel:manage:schedule`, `channel:manage:videos`, `channel:*:vips`, `channel:read:charity`, `channel:read:editors`, `channel:manage:extensions`, `channel:manage:moderators`, `channel:moderate`, Guest Star.
 
-**Zurückgestellt, nicht verworfen:** `channel:manage:broadcast` für einen Stream-Marker beim Clip-Auslöser (#11), `channel:read:goals` und `channel:read:hype_train` für Overlay-Anzeigen, sobald die Strecke aus #7 steht. Alle drei erst mit einem konkreten Modul.
+**Jetzt in Verwendung:** `channel:manage:broadcast` wird für Stream-Marker bei Bedarf pro Kanal angefordert. `channel:read:goals` und `channel:read:hype_train` bleiben für Overlay-Anzeigen zurückgestellt, bis die Strecke aus #7 steht.
 
 **Nachziehen statt vorhalten:** `channel:manage:clips` beziehungsweise `editor:manage:clips` für VOD-Clips. Die stehen in #11 ausdrücklich außerhalb des Epics.
 
@@ -148,7 +148,7 @@ Die Verbindung ist kein Schalter für Auswertungsqualität, sondern für **Modul
 
 Außer #8 hängt kein Pflichtmodul daran. Die Verbindung entsteht, wenn jemand eines dieser Module einschaltet. In Phase 1 sowie für #9, #10, #11, #12 und #13 entsteht sie nicht.
 
-**Bewusst nicht als Modul vorgesehen**, obwohl technisch möglich: Stream-Key lesen, VODs löschen, Sendeplan pflegen, Moderatoren verwalten, Werbung auslösen, Raids starten. Der Stream-Marker beim Clip-Auslöser (`channel:manage:broadcast`) ist ein Kandidat für #11, aber kein eigenes Modul; Goals und Hype Train im Overlay warten, bis die Strecke aus #7 steht.
+**Bewusst nicht als Modul vorgesehen**, obwohl technisch möglich: Stream-Key lesen, VODs löschen, Sendeplan pflegen, Moderatoren verwalten, Werbung auslösen und Raids starten. Goals und Hype Train im Overlay warten, bis die Strecke aus #7 steht.
 
 ---
 

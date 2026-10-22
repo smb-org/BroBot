@@ -18,6 +18,7 @@ interface ActionConditionState {
   channelId: string;
   loading: boolean;
   reason: Readonly<Record<"de" | "en", string>> | null;
+  link: { href: string; label: string } | null;
   until: number | null;
   pollId: string | null;
   stale: boolean;
@@ -69,6 +70,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, 
     channelId,
     loading: shouldCheckConditions,
     reason: null,
+    link: null,
     until: null,
     pollId: null,
     stale: false,
@@ -77,6 +79,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, 
     channelId,
     loading: shouldCheckConditions,
     reason: null,
+    link: null,
     until: null,
     pollId: null,
     stale: false,
@@ -104,6 +107,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, 
           channelId,
           loading: false,
           reason: null,
+          link: null,
           until: null,
           pollId: current.channelId === channelId ? current.pollId : null,
           stale: true,
@@ -112,7 +116,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, 
       }, 10_000);
       setConditionState((current) => current.channelId === channelId
         ? { ...current, loading: current.reason === null && !current.stale }
-        : { channelId, loading: true, reason: null, until: null, pollId: null, stale: false });
+        : { channelId, loading: true, reason: null, link: null, until: null, pollId: null, stale: false });
       try {
         let pollId: string | null = null;
         for (const condition of customConditions) {
@@ -120,13 +124,21 @@ const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, 
           if (!active || controller.signal.aborted) return;
           pollId = result.pollId ?? pollId;
           if (result.reason !== null) {
-            setConditionState({ channelId, loading: false, reason: result.reason, until: result.until ?? null, pollId, stale: false });
+            setConditionState({
+              channelId,
+              loading: false,
+              reason: result.reason,
+              link: result.link === undefined ? null : { href: result.link.href, label: result.link.label[language] },
+              until: result.until ?? null,
+              pollId,
+              stale: false,
+            });
             onAvailabilityStateChange(actionKey, false);
             return;
           }
         }
         if (active) {
-          setConditionState({ channelId, loading: false, reason: null, until: null, pollId, stale: false });
+          setConditionState({ channelId, loading: false, reason: null, link: null, until: null, pollId, stale: false });
           onAvailabilityStateChange(actionKey, false);
         }
       } catch {
@@ -135,6 +147,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, 
           channelId,
           loading: false,
           reason: null,
+          link: null,
           until: null,
           pollId: current.channelId === channelId ? current.pollId : null,
           stale: true,
@@ -178,13 +191,14 @@ const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, 
 
   return <ActionFrame action={action} moduleId={moduleId} channelId={channelId} language={language} pollId={activeConditionState.pollId}
     disabled={lockReason !== null} reason={lockReason} availabilityStale={activeConditionState.stale}
+    availabilityLink={shouldCheckConditions && activeConditionState.reason !== null ? activeConditionState.link : null}
     {...(onFeedbackMessage === undefined ? {} : { onFeedbackMessage })}
     {...(onActionStart === undefined ? {} : { onActionStart })}
     {...(onActionResult === undefined ? {} : { onActionResult })}
     {...(onActionFailure === undefined ? {} : { onActionFailure })} />;
 };
 
-const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, reason, availabilityStale, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
+const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, reason, availabilityStale, availabilityLink, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
@@ -193,6 +207,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
   disabled: boolean;
   reason: string | null;
   availabilityStale: boolean;
+  availabilityLink: { href: string; label: string } | null;
   onActionStart?: (moduleId: string, actionId: string) => number;
   onActionResult?: (moduleId: string, result: ModuleImmediateActionResult, observedAt: number) => void;
   onActionFailure?: (moduleId: string, actionId: string, observedAt: number) => void;
@@ -328,9 +343,13 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
   };
 
   const reasonLine = reason ?? (availabilityStale ? texts.streamManager.actionAvailabilityStale : error !== null ? feedbackMessage(error) : result?.message ?? "\u00a0");
-  const resultLink = result?.href === undefined || result.linkLabel === undefined
+  const actionResultLink = result?.href === undefined || result.linkLabel === undefined
     ? null
     : { href: result.href, label: result.linkLabel, message: result.message };
+  const resultLink = actionResultLink ?? (availabilityLink === null ? null : {
+    ...availabilityLink,
+    message: reason ?? "",
+  });
   const hasResultLink = resultLink !== null;
   const popoverTitleId = `${reasonId}-popover-title`;
   const availabilityWarning = availabilityStale || reason === texts.streamManager.actionAvailabilityFailed;
@@ -419,7 +438,9 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
 
   return <div className="live-action">
     <button {...triggerProps} className={triggerClassName} type="button" onClick={() => { void run(new FormData()); }}>{buttonContents}</button>
-    {resultLink === null ? null : <a className="live-action__result-link" href={resultLink.href} target="_blank" rel="noreferrer" aria-label={`${resultLink.message} ${resultLink.label}`}>
+    {resultLink === null ? null : <a className="live-action__result-link" href={resultLink.href}
+      {...(actionResultLink === null ? {} : { target: "_blank", rel: "noreferrer" })}
+      aria-label={`${resultLink.message} ${resultLink.label}`}>
       <span className="live-action__result-message">{resultLink.message}</span>
       <span>{resultLink.label}</span>
     </a>}

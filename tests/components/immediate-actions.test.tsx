@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImmediateActions } from "../../src/dashboard/ImmediateActions";
-import { changeChannelVariableValue, fetchChannelOverview, fetchChannelVariables, sendTestMessage, type PanelChannelVariable } from "../../src/dashboard/api";
+import { changeChannelVariableValue, createStreamMarker, fetchStreamMarkerAvailability, fetchChannelOverview, fetchChannelVariables, sendTestMessage, type PanelChannelVariable } from "../../src/dashboard/api";
 import { dashboardTexts } from "../../src/dashboard/locale";
 import { loadTextCommandData } from "../../src/modules/text_commands/panel/service";
 import { textCommandQuickActionTexts } from "../../src/modules/text_commands/panel/quick-action-locale";
@@ -12,6 +12,8 @@ import { clickSelectOption } from "../query-test-utils";
 vi.mock("../../src/dashboard/api", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
   changeChannelVariableValue: vi.fn(),
+  createStreamMarker: vi.fn(),
+  fetchStreamMarkerAvailability: vi.fn(),
   fetchChannelOverview: vi.fn(),
   fetchChannelVariables: vi.fn(),
   sendTestMessage: vi.fn(),
@@ -35,6 +37,8 @@ afterEach(() => {
 beforeEach(() => {
   setChannelVariables([{ channelId: "channel-a", name: "score", value: 4, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [] }]);
   vi.mocked(changeChannelVariableValue).mockReset();
+  vi.mocked(createStreamMarker).mockReset();
+  vi.mocked(fetchStreamMarkerAvailability).mockReset().mockResolvedValue({ manageScopeAvailable: true });
   vi.mocked(sendTestMessage).mockReset();
 });
 
@@ -213,5 +217,102 @@ describe("cockpit action role mirror", () => {
     fireEvent.click(action);
 
     await waitFor(() => expect(onFeedbackMessage).toHaveBeenCalledWith("Erneut in 27 s", undefined, "info"));
+  });
+
+  it("disables stream markers with a linked scope grant reason", async () => {
+    vi.mocked(fetchStreamMarkerAvailability).mockResolvedValue({ manageScopeAvailable: false });
+
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="manager"
+      modules={[{ id: "channel_events", enabled: true }]} /></UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(true));
+    expect(screen.getByText(/broadcast permission is missing|Broadcaster-Berechtigung fehlt/u)).not.toBeNull();
+    const grantLink = screen.getByRole("link", { name: /Grant permission|Berechtigung erteilen/u });
+    expect(grantLink.getAttribute("href")).toBe("/auth/channels/channel-a/broadcaster-scopes/broadcast");
+  });
+
+  it("disables stream markers with the offline reason", async () => {
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="offline" role="manager"
+      modules={[{ id: "channel_events", enabled: true }]} /></UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
+    expect((action as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/stream is offline|Stream ist offline/u)).not.toBeNull();
+    expect(fetchStreamMarkerAvailability).not.toHaveBeenCalled();
+  });
+
+  it("shows the typed stream marker position in its feedback", async () => {
+    vi.mocked(createStreamMarker).mockResolvedValue({ result: "created", positionSeconds: 323 });
+    const onFeedbackMessage = vi.fn();
+
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="manager"
+      modules={[{ id: "channel_events", enabled: true }]} onFeedbackMessage={onFeedbackMessage} /></UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(action);
+
+    await waitFor(() => expect(createStreamMarker).toHaveBeenCalledWith("channel-a"));
+    expect(await screen.findByText(/Stream marker set at 5:23|Stream-Marker bei 5:23 gesetzt/u)).not.toBeNull();
+    expect(onFeedbackMessage).toHaveBeenCalledWith(expect.stringMatching(/5:23/u), undefined, "success");
+  });
+
+  it.each([
+    {
+      result: { result: "scope_missing", error: "broadcast_scope_missing", grantHref: "/auth/channels/channel-a/broadcaster-scopes/broadcast" } as const,
+      message: /Broadcaster-Berechtigung fehlt/u,
+      tone: "error" as const,
+    },
+    { result: { result: "offline" } as const, message: /Der Stream ist offline/u, tone: "error" as const },
+    { result: { result: "rate_limited", retryAfter: 21 } as const, message: /Erneut in 21 s/u, tone: "info" as const },
+    { result: { result: "token_expired" } as const, message: /Twitch-Zugang abgelaufen/u, tone: "error" as const },
+    { result: { result: "failed" } as const, message: /Stream-Marker konnte nicht gesetzt werden/u, tone: "error" as const },
+  ])("maps the typed $result.result stream marker response to short feedback", async ({ result, message, tone }) => {
+    vi.mocked(createStreamMarker).mockResolvedValue(result);
+    const onFeedbackMessage = vi.fn();
+
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="manager"
+      modules={[{ id: "channel_events", enabled: true }]} onFeedbackMessage={onFeedbackMessage} /></UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(action);
+
+    expect(await screen.findByText(message)).not.toBeNull();
+    expect(onFeedbackMessage).toHaveBeenCalledWith(
+      expect.stringMatching(message),
+      result.result === "scope_missing" ? { href: result.grantHref, label: "Berechtigung erteilen" } : undefined,
+      tone,
+    );
+  });
+
+  it("ignores a late stream marker scope response from the previous channel", async () => {
+    let resolveChannelA: ((value: Awaited<ReturnType<typeof fetchStreamMarkerAvailability>>) => void) | undefined;
+    let resolveChannelB: ((value: Awaited<ReturnType<typeof fetchStreamMarkerAvailability>>) => void) | undefined;
+    vi.mocked(fetchStreamMarkerAvailability).mockImplementation((channelId) => new Promise((resolve) => {
+      if (channelId === "channel-a") resolveChannelA = resolve;
+      else resolveChannelB = resolve;
+    }));
+    const actions = (channelId: string) => <UiProvider><ImmediateActions channelId={channelId} streamState="online" role="manager"
+      modules={[{ id: "channel_events", enabled: true }]} /></UiProvider>;
+    const view = render(actions("channel-a"));
+    await waitFor(() => expect(resolveChannelA).toBeTypeOf("function"));
+    view.rerender(actions("channel-b"));
+    await waitFor(() => expect(resolveChannelB).toBeTypeOf("function"));
+
+    await act(async () => {
+      resolveChannelB?.({ manageScopeAvailable: true });
+      await Promise.resolve();
+    });
+    const marker = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
+    await waitFor(() => expect((marker as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => {
+      resolveChannelA?.({ manageScopeAvailable: false });
+      await Promise.resolve();
+    });
+
+    expect((marker as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole("link", { name: /Grant permission|Berechtigung erteilen/u })).toBeNull();
   });
 });

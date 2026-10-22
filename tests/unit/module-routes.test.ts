@@ -9,7 +9,7 @@ import { belaboxDefaultAlertTexts } from "../../src/modules/belabox/contracts/al
 import { textCommandModule } from "../../src/modules/text_commands";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
-import { TestD1Database, type TestPreparedStatement } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 // This suite supplies small module doubles to keep route activation checks
 // focused on persistence and authorization, independent of product modules.
@@ -479,6 +479,198 @@ describe("Module management in the panel", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: "broadcast_scope_missing" });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "created",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ data: [{ id: "marker-1", created_at: "2026-10-22T12:00:00Z", position_seconds: 323 }] }), { status: 200 }),
+      expected: { result: "created", positionSeconds: 323 },
+    },
+    {
+      name: "scope missing when Twitch rejects the broadcaster token",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ message: "Missing scope" }), { status: 403 }),
+      expected: { result: "scope_missing", error: "broadcast_scope_missing", grantHref: "/auth/channels/kanal-a/broadcaster-scopes/broadcast" },
+    },
+    {
+      name: "offline",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ message: "Broadcaster is not live" }), { status: 404 }),
+      expected: { result: "offline" },
+    },
+    {
+      name: "invalid Helix request",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ message: "Invalid request" }), { status: 400 }),
+      expected: { result: "failed" },
+    },
+    {
+      name: "rate limited",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ message: "Rate limited" }), { status: 429, headers: { "Retry-After": "30" } }),
+      expected: { result: "rate_limited", retryAfter: 30 },
+    },
+    {
+      name: "token expired",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ message: "Invalid access token" }), { status: 401 }),
+      expected: { result: "token_expired" },
+    },
+    {
+      name: "other Helix failures",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ message: "Unavailable" }), { status: 503 }),
+      expected: { result: "failed" },
+    },
+  ])("maps stream marker result: $name", async ({ scopes, response: helixResponse, expected }) => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, scopes);
+    const twitchFetch = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(helixResponse()));
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(expected);
+    if (scopes.length === 0) {
+      expect(twitchFetch).not.toHaveBeenCalled();
+    } else {
+      expect(twitchFetch).toHaveBeenCalledOnce();
+      const [input, init] = twitchFetch.mock.calls[0] ?? [];
+      const url = urlForFetchInput(input);
+      expect(url.pathname).toBe("/helix/streams/markers");
+      expect(url.searchParams.get("user_id")).toBe("kanal-a");
+      expect(init?.method).toBe("POST");
+      expect(init?.body).toBe(JSON.stringify({ description: "BroBot marker" }));
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer channel-token");
+    }
+  });
+
+  it("returns the broadcast scope grant target before calling Helix when the scope is absent", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, []);
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      result: "scope_missing",
+      error: "broadcast_scope_missing",
+      grantHref: "/auth/channels/kanal-a/broadcaster-scopes/broadcast",
+    });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { scopes: ["channel:manage:broadcast"], available: true },
+    { scopes: [], available: false },
+  ])("reads stream marker scope availability from the channel broadcaster identity", async ({ scopes, available }) => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBroadcastIdentity(database, scopes);
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers/availability"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ manageScopeAvailable: available });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it("denies an operator before calling Helix to create a stream marker", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "broadcast_manage_denied" });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it("rechecks management authorization immediately before calling Helix", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+    environment.DB = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("SELECT channel_id FROM channels WHERE channel_id = ?"),
+      async () => {
+        await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
+      },
+    );
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "broadcast_manage_denied" });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it("denies a non-member before calling Helix to create a stream marker", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "channel_access_denied" });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps stream marker creation scoped to the route channel", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-b", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "channel_access_denied" });
     expect(twitchFetch).not.toHaveBeenCalled();
   });
 
