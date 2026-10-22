@@ -174,6 +174,43 @@ describe("Helix chat", () => {
     }
   });
 
+  it("does not strand a persistent claim when stillValid rejects a send before retry", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedBot(database);
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        data: [{ is_sent: true, message_id: "nachricht-1" }],
+      }), { status: 200 }));
+      let claimed = false;
+      const claimBeforePost = vi.fn(() => {
+        if (claimed) return Promise.resolve(false);
+        claimed = true;
+        return Promise.resolve(true);
+      });
+      const stillValid = vi.fn()
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
+
+      await expect(sendChatMessage(
+        environment(database), "kanal-a", "hallo", undefined, fetcher,
+        stillValid, claimBeforePost,
+      )).resolves.toMatchObject({ sent: false, reason: "stale_before_send" });
+      expect(claimed).toBe(false);
+      expect(claimBeforePost).not.toHaveBeenCalled();
+      expect(fetcher).not.toHaveBeenCalled();
+
+      await expect(sendChatMessage(
+        environment(database), "kanal-a", "hallo", undefined, fetcher,
+        stillValid, claimBeforePost,
+      )).resolves.toMatchObject({ sent: true, reason: null });
+      expect(claimed).toBe(true);
+      expect(claimBeforePost).toHaveBeenCalledOnce();
+      expect(fetcher).toHaveBeenCalledOnce();
+    } finally {
+      database.close();
+    }
+  });
+
   it("still distinguishes a network error from a timeout", async () => {
     const database = new TestD1Database();
     try {

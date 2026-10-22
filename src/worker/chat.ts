@@ -116,8 +116,9 @@ export const sendChatMessage = async (
   fetcher: typeof fetch = fetch,
   /**
    * Re-checked immediately before the Helix POST, after the identity and
-   * token awaits above and after any pre-POST claim. Lets a caller like the
-   * ad prewarning (whose text can go stale while this function is still
+   * token awaits above -- the only two awaits between a caller's own
+   * decision and the actual network call. Lets a caller like the ad
+   * prewarning (whose text can go stale while this function is still
    * awaiting bot identity/token) bail out right before sending instead of
    * announcing an outcome it already knows is wrong.
    * ponytail: the one window this can't close is the POST's own network
@@ -159,6 +160,10 @@ export const sendChatMessage = async (
     return { sent: false, truncated: preparedText.truncated, delivery: "not_attempted", reason: "app_token_unavailable", detail: textDetail };
   }
 
+  if (stillValid !== undefined && !(await stillValid())) {
+    return { sent: false, truncated: preparedText.truncated, delivery: "not_attempted", reason: "stale_before_send", detail: textDetail };
+  }
+
   if (claimBeforePost !== undefined) {
     const claim = await claimBeforePost();
     if (claim !== true) {
@@ -170,10 +175,6 @@ export const sendChatMessage = async (
         detail: textDetail,
       };
     }
-  }
-
-  if (stillValid !== undefined && !(await stillValid())) {
-    return { sent: false, truncated: preparedText.truncated, delivery: "not_attempted", reason: "stale_before_send", detail: textDetail };
   }
 
   const payload: Record<string, string | boolean> = {

@@ -97,11 +97,12 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-10-21T10:00:00.000Z"));
   vi.mocked(mocks.sendChatMessage).mockReset();
   vi.mocked(mocks.sendChatMessage).mockImplementation(async (...args) => {
-    const claim = await args[6]?.();
-    if (claim === "rate_limited") return chatResult({
+    expect(lastAttemptByChannel.has(args[1])).toBe(true);
+    const stillValid = await args[5]?.();
+    if (stillValid === false) return chatResult({
       sent: false,
       delivery: "not_attempted",
-      reason: "rate_limited",
+      reason: "stale_before_send",
     });
     return chatResult();
   });
@@ -138,8 +139,8 @@ describe("quick action test-message route", () => {
       undefined,
       expect.any(Function),
       expect.any(Function),
-      expect.any(Function),
     );
+    expect(lastAttemptByChannel.has("channel-a")).toBe(true);
   });
 
   it("returns dropped when Twitch does not send the message", async () => {
@@ -168,6 +169,7 @@ describe("quick action test-message route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ result: "identity_missing" });
+    expect(lastAttemptByChannel.has("channel-a")).toBe(false);
   });
 
   it("rate limits a second send for the same channel within 30 seconds", async () => {
@@ -179,20 +181,17 @@ describe("quick action test-message route", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     await expect(second.json()).resolves.toEqual({ result: "rate_limited", retryAfter: 30 });
-    expect(mocks.sendChatMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.sendChatMessage).toHaveBeenCalledTimes(1);
   });
 
   it("returns the later upstream retry deadline after a Twitch rate-limit rejection", async () => {
     await prepareChannel("channel-a");
-    vi.mocked(mocks.sendChatMessage).mockImplementationOnce(async (...args) => {
-      await args[6]?.();
-      return chatResult({
+    vi.mocked(mocks.sendChatMessage).mockImplementationOnce(() => Promise.resolve(chatResult({
         sent: false,
         delivery: "rejected",
         reason: "rate_limited",
         detail: { retryAfter: Date.now() + 120_000 },
-      });
-    });
+      })));
 
     const response = await send("operator-a", "channel-a");
 
@@ -327,6 +326,23 @@ describe("quick action test-message route", () => {
     expect(retry.status).toBe(200);
     await expect(retry.json()).resolves.toEqual({ result: "sent" });
     expect(requestedUrls).toContain("https://api.twitch.tv/helix/chat/messages");
+  });
+
+  it("denies the send and releases the cooldown when the final membership check throws", async () => {
+    await prepareChannel("channel-a");
+    const originalPrepare = database.prepare.bind(database);
+    const prepareSpy = vi.spyOn(database, "prepare").mockImplementation((sql) => {
+      if (sql.startsWith("SELECT channel_id FROM channels")) throw new Error("temporary database read failure");
+      return originalPrepare(sql);
+    });
+
+    const response = await send("operator-a", "channel-a");
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "test_message_denied" });
+    expect(lastAttemptByChannel.has("channel-a")).toBe(false);
+    expect(mocks.sendChatMessage).toHaveBeenCalledOnce();
+    prepareSpy.mockRestore();
   });
 
   it("keeps the rate limit isolated between channels", async () => {

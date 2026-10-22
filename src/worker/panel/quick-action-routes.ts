@@ -26,18 +26,26 @@ quickActionRouter.post(
 
     const language = channel.language === "en" ? "en" : "de";
     const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-    let localCooldownUntil = 0;
-    const reservation: { claimedAt: number | null } = { claimedAt: null };
+    const claimAt = Date.now();
+    const claim = await channelObject.claimTestMessageSend(claimAt);
+    if (!claim.allowed) {
+      return context.json({ result: "rate_limited", retryAfter: claim.retryAfter } satisfies TestMessageResult);
+    }
+    const localCooldownUntil = claimAt + 30_000;
     const stillValid = async (): Promise<boolean> => {
-      const currentAuthorization = context.get("authorizeMutation")(
-        channelId,
-        context.get("actor"),
-        new Date().toISOString(),
-      );
-      const currentMember = await context.env.DB.prepare(
-        `SELECT channel_id FROM channels WHERE channel_id = ? ${currentAuthorization.sql}`,
-      ).bind(channelId, ...currentAuthorization.values).first<{ channel_id: string }>();
-      return currentMember !== null;
+      try {
+        const currentAuthorization = context.get("authorizeMutation")(
+          channelId,
+          context.get("actor"),
+          new Date().toISOString(),
+        );
+        const currentMember = await context.env.DB.prepare(
+          `SELECT channel_id FROM channels WHERE channel_id = ? ${currentAuthorization.sql}`,
+        ).bind(channelId, ...currentAuthorization.values).first<{ channel_id: string }>();
+        return currentMember !== null;
+      } catch {
+        return false;
+      }
     };
     const result = await sendChatMessage(
       context.env,
@@ -46,22 +54,14 @@ quickActionRouter.post(
       undefined,
       fetch,
       stillValid,
-      async () => {
-        const claimAt = Date.now();
-        const claim = await channelObject.claimTestMessageSend(claimAt);
-        if (claim.allowed) {
-          reservation.claimedAt = claimAt;
-          localCooldownUntil = claimAt + 30_000;
-          return true;
-        }
-        localCooldownUntil = claimAt + claim.retryAfter * 1_000;
-        return "rate_limited";
-      },
     );
 
     if (result.reason === "stale_before_send") {
-      if (reservation.claimedAt !== null) await channelObject.releaseTestMessageSend(reservation.claimedAt);
+      await channelObject.releaseTestMessageSend(claimAt);
       return context.json({ error: "test_message_denied" }, 403);
+    }
+    if (!result.sent && result.delivery === "not_attempted") {
+      await channelObject.releaseTestMessageSend(claimAt);
     }
 
     let response: TestMessageResult;
@@ -73,8 +73,8 @@ quickActionRouter.post(
       const upstreamRemaining = typeof upstreamDeadline === "number" && Number.isFinite(upstreamDeadline)
         ? Math.max(0, Math.ceil((upstreamDeadline - Date.now()) / 1_000))
         : 0;
-      // The pre-send local reservation remains active after a definite Twitch
-      // rejection; use the later deadline so retries do not hit either limit.
+      // Keep the pre-send reservation after a Twitch rejection; use the later
+      // deadline so retries do not hit either limit.
       const retryAfter = Math.max(localRemaining, upstreamRemaining);
       response = { result: "rate_limited", retryAfter };
     }
