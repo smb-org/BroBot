@@ -37,7 +37,7 @@ export type EventTone = (typeof EVENT_TONES)[number];
 export type ChannelStreamState = "online" | "offline";
 
 /** Stable catalogue keys for immediate actions that cannot currently run. */
-export type ImmediateActionUnavailableReason = "stream_offline" | "stream_state_unknown";
+export type ImmediateActionUnavailableReason = "stream_offline" | "stream_state_unknown" | "module_disabled";
 
 /** Durations accepted when a channel member enables an operational brake. */
 export const CHANNEL_CONTROL_DURATIONS = ["15m", "1h", "until_stream_end", "unlimited"] as const;
@@ -332,6 +332,7 @@ export const AUDIT_ACTIONS = [
   "timers.timer.removed",
   "timers.timer.enabled",
   "timers.timer.disabled",
+  "timers.timer.skipped",
   "api_source.source_created",
   "api_source.source_changed",
   "api_source.source_deleted",

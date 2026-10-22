@@ -6,6 +6,8 @@ import { changeChannelVariableValue, createStreamMarker, fetchStreamMarkerAvaila
 import { dashboardTexts } from "../../src/dashboard/locale";
 import { loadTextCommandData } from "../../src/modules/text_commands/panel/service";
 import { textCommandQuickActionTexts } from "../../src/modules/text_commands/panel/quick-action-locale";
+import { loadUpcomingTimers, skipNextTimerOccurrence } from "../../src/modules/timers/panel/service";
+import type { Timer } from "../../src/modules/timers/contracts";
 import { UiProvider } from "../../src/dashboard/ui";
 import { clickSelectOption } from "../query-test-utils";
 
@@ -24,9 +26,30 @@ vi.mock("../../src/modules/text_commands/panel/service", async (importOriginal) 
   loadTextCommandData: vi.fn(),
 }));
 
+vi.mock("../../src/modules/timers/panel/service", async (importOriginal) => ({
+  ...await importOriginal<Record<string, unknown>>(),
+  loadUpcomingTimers: vi.fn(),
+  skipNextTimerOccurrence: vi.fn(),
+}));
+
 const setChannelVariables = (variables: readonly PanelChannelVariable[]): void => {
   vi.mocked(fetchChannelVariables).mockResolvedValue({ count: variables.length, maximum: 50, variables });
   vi.mocked(loadTextCommandData).mockResolvedValue({ commands: [], variables: [...variables] });
+};
+
+const plannedTimer: Timer = {
+  id: "timer-1",
+  name: "Welcome",
+  enabled: true,
+  messageText: "Welcome back!",
+  chatTarget: "all_chats",
+  trigger: { type: "interval", live: { minutes: 10 } },
+  revision: 3,
+  nextRunAt: "2026-10-13T12:10:00.000Z",
+  nextRunState: "live",
+  lastRunAt: null,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
 afterEach(() => {
@@ -40,6 +63,9 @@ beforeEach(() => {
   vi.mocked(createStreamMarker).mockReset();
   vi.mocked(fetchStreamMarkerAvailability).mockReset().mockResolvedValue({ manageScopeAvailable: true });
   vi.mocked(sendTestMessage).mockReset();
+  vi.mocked(loadUpcomingTimers).mockClear();
+  vi.mocked(loadUpcomingTimers).mockResolvedValue([plannedTimer]);
+  vi.mocked(skipNextTimerOccurrence).mockReset();
 });
 
 describe("cockpit action role mirror", () => {
@@ -217,6 +243,76 @@ describe("cockpit action role mirror", () => {
     fireEvent.click(action);
 
     await waitFor(() => expect(onFeedbackMessage).toHaveBeenCalledWith("Erneut in 27 s", undefined, "info"));
+  });
+
+  it("disables timer skipping with an inline reason when no occurrence is planned", async () => {
+    vi.mocked(loadUpcomingTimers).mockResolvedValue([]);
+    render(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
+      modules={[{ id: "timers", enabled: true }]} />
+    </UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Timer überspringen|Skip next timer message/u });
+    await screen.findByText(/Kein Timer.*geplant|No timer.*planned/u);
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(true));
+  });
+
+  it("keeps timer skipping visible with a module-off reason", async () => {
+    render(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
+      modules={[{ id: "timers", enabled: false }]} />
+    </UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Timer überspringen|Skip next timer message/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(true));
+    expect(screen.getByText(dashboardTexts().streamManager.availabilityReasons.module_disabled)).not.toBeNull();
+    expect(loadUpcomingTimers).not.toHaveBeenCalled();
+  });
+
+  it("requires a chosen timer and maps the skipped result to concise feedback", async () => {
+    vi.mocked(skipNextTimerOccurrence).mockResolvedValue({
+      result: "skipped",
+      skippedOccurrenceAt: "2026-10-13T12:10:00.000Z",
+      nextOccurrenceAt: "2026-10-13T12:20:00.000Z",
+    });
+    const onFeedbackMessage = vi.fn();
+    render(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
+      modules={[{ id: "timers", enabled: true }]} onFeedbackMessage={onFeedbackMessage} />
+    </UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Timer überspringen|Skip next timer message/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(action);
+    const timerSelect = await screen.findByRole("combobox", { name: /Timer/u });
+    await waitFor(() => expect((timerSelect as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByRole("button", { name: dashboardTexts().streamManager.actionRun }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(timerSelect);
+    clickSelectOption(await screen.findByRole("option", { name: /Welcome/u, hidden: true }));
+    const run = screen.getByRole("button", { name: dashboardTexts().streamManager.actionRun });
+    await waitFor(() => expect((run as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(run);
+
+    await waitFor(() => expect(skipNextTimerOccurrence).toHaveBeenCalledWith("channel-a", "timer-1"));
+    expect(await screen.findByText(/Übersprungen.*12:20|Skipped.*12:20/u)).not.toBeNull();
+    expect(onFeedbackMessage).toHaveBeenCalledWith(expect.stringMatching(/Übersprungen.*12:20|Skipped.*12:20/u), undefined, "success");
+  });
+
+  it("maps an already-skipped result to a short informational message", async () => {
+    vi.mocked(skipNextTimerOccurrence).mockResolvedValue({ result: "already_skipped" });
+    const onFeedbackMessage = vi.fn();
+    render(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
+      modules={[{ id: "timers", enabled: true }]} onFeedbackMessage={onFeedbackMessage} />
+    </UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Timer überspringen|Skip next timer message/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(action);
+    const timerSelect = await screen.findByRole("combobox", { name: /Timer/u });
+    await waitFor(() => expect((timerSelect as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(timerSelect);
+    clickSelectOption(await screen.findByRole("option", { name: /Welcome/u, hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: dashboardTexts().streamManager.actionRun }));
+
+    expect(await screen.findByText("Der nächste Lauf ist bereits übersprungen.")).not.toBeNull();
+    expect(onFeedbackMessage).toHaveBeenCalledWith("Der nächste Lauf ist bereits übersprungen.", undefined, "info");
   });
 
   it("disables stream markers with a linked scope grant reason", async () => {

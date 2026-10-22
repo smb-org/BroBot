@@ -30,6 +30,11 @@ describe("dashboard locale", () => {
     expect(roleLabel("operator")).toBe("Bediener");
   });
 
+  it("uses generic module-disabled availability copy in both languages", () => {
+    expect(dashboardTexts("de").streamManager.availabilityReasons.module_disabled).toBe("Das Modul ist deaktiviert.");
+    expect(dashboardTexts("en").streamManager.availabilityReasons.module_disabled).toBe("The module is disabled.");
+  });
+
   it("uses singular and plural counts for channel events and audit entries in both catalogs", () => {
     expect(dashboardTexts("de").events.count("1")).toBe("1 Eintrag");
     expect(dashboardTexts("de").events.count("2")).toBe("2 Einträge");

@@ -11,6 +11,7 @@ import { CommandPalette } from "../../src/dashboard/ui/CommandPalette";
 import { UiProvider, type CommandPaletteItem } from "../../src/dashboard/ui";
 import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { DashboardRoute } from "../../src/dashboard/router";
+import { loadUpcomingTimers } from "../../src/modules/timers/panel/service";
 
 vi.mock("../../src/dashboard/api", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
@@ -19,6 +20,12 @@ vi.mock("../../src/dashboard/api", async (importOriginal) => ({
   fetchStreamMarkerAvailability: vi.fn(),
   fetchChannelVariables: vi.fn(),
   setChannelControl: vi.fn(),
+}));
+
+vi.mock("../../src/modules/timers/panel/service", async (importOriginal) => ({
+  ...await importOriginal<Record<string, unknown>>(),
+  loadUpcomingTimers: vi.fn(),
+  skipNextTimerOccurrence: vi.fn(),
 }));
 
 afterEach(() => {
@@ -31,6 +38,8 @@ beforeEach(() => {
   vi.mocked(fetchChannelVariables).mockResolvedValue({ count: 0, maximum: 50, variables: [] });
   vi.mocked(fetchStreamMarkerAvailability).mockReset().mockResolvedValue({ manageScopeAvailable: true });
   vi.mocked(changeChannelVariableValue).mockReset();
+  vi.mocked(loadUpcomingTimers).mockClear();
+  vi.mocked(loadUpcomingTimers).mockResolvedValue([]);
   vi.mocked(createStreamMarker).mockReset();
 });
 
@@ -268,6 +277,53 @@ describe("cmdk command palette", () => {
     const messageDescriptionId = message.getAttribute("aria-describedby");
     expect(messageDescriptionId).not.toBeNull();
     expect(document.getElementById(messageDescriptionId ?? "")?.textContent).toMatch(/bot is not connected|Bot ist nicht verbunden/u);
+  });
+
+  it("shows timer skipping disabled in the palette when no next occurrence is planned", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(loadUpcomingTimers).mockResolvedValue([]);
+    render(
+      <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+        open
+        onOpenChange={vi.fn()}
+        channelId="kanal-a"
+        ownRole="operator"
+        modules={[{ id: "timers", enabled: true, settings: "{}" }]}
+        onToggleModule={() => Promise.resolve()}
+        onNavigate={vi.fn()}
+        onOpenCommand={vi.fn()}
+        onOpenVariable={vi.fn()}
+      /></UiProvider></QueryClientProvider>,
+    );
+
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "timer skip" } });
+    const timerAction = await screen.findByRole("option", { name: /Skip next timer message|Timer überspringen/u });
+    await waitFor(() => expect(timerAction.getAttribute("aria-disabled")).toBe("true"));
+    expect(timerAction.querySelector(".command-palette__inline-reason")?.textContent).toMatch(/No timer.*planned|Kein Timer.*geplant/u);
+  });
+
+  it("keeps timer skipping visible and disabled when the timers module is off", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+        open
+        onOpenChange={vi.fn()}
+        channelId="kanal-a"
+        ownRole="operator"
+        modules={[{ id: "timers", enabled: false, settings: "{}" }]}
+        onToggleModule={() => Promise.resolve()}
+        onNavigate={vi.fn()}
+        onOpenCommand={vi.fn()}
+        onOpenVariable={vi.fn()}
+      /></UiProvider></QueryClientProvider>,
+    );
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "timer skip" } });
+    const timerAction = await screen.findByRole("option", { name: /Skip next timer message|Timer überspringen/u });
+    await waitFor(() => expect(timerAction.getAttribute("aria-disabled")).toBe("true"));
+    expect(timerAction.querySelector(".command-palette__inline-reason")?.textContent).toMatch(/module.*disabled|Modul.*deaktiviert/u);
+    expect(loadUpcomingTimers).not.toHaveBeenCalled();
   });
 
   it("shows counter loading status inline without adding a second row", async () => {

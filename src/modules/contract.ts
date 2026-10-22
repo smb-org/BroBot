@@ -1505,7 +1505,7 @@ export interface ModulePanelProperties {
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
 
-type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "duel" | "counter" | "test-message" | "marker";
+type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "duel" | "counter" | "test-message" | "marker" | "timer";
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
@@ -1525,7 +1525,7 @@ interface ModuleImmediateActionConditionContext {
   signal: AbortSignal;
 }
 
-export type ModuleImmediateActionCondition = "streamLive" | {
+export type ModuleImmediateActionCondition = "streamLive" | "moduleEnabled" | {
   check: (context: ModuleImmediateActionConditionContext) => Promise<ModuleImmediateActionAvailability>;
 };
 

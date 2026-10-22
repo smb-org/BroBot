@@ -34,6 +34,7 @@ import {
   emptyDurableTimerState,
   makeTimerPlan,
   sameStreamStartedAt,
+  sameTimerScheduledOccurrence,
   sameTimerOccurrence,
   TIMER_ALARM_PREFIX,
   TIMER_ACTIVITY_COUNTS_KEY,
@@ -45,12 +46,16 @@ import {
   type DurableTimerStream,
   type TimerOccurrence,
   type TimerPlan,
+  type TimerSkipAuditIntent,
   type TimerScheduleInputs,
   TIMER_OCCURRENCE_GRACE_MS,
 } from "../../modules/timers/durable";
 import { sameTimerAlarmIdentity } from "../../modules/timers/identity";
 import { acceptsTimerAlarmClear, acceptsTimerAlarmSet } from "../../modules/timers/identity";
+import { authorizeModuleMutation } from "../module-authorization";
+import type { ActorContext } from "../db/guards";
 import type { TimerIntervalState } from "../../modules/timers/contracts";
+import type { SkipTimerOccurrenceResult } from "../../modules/timers/contracts";
 import { mapTimerRow, type TimerRow } from "../../modules/timers/service";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_MODULE_ID } from "../../modules/chat_voting/contracts";
 import { reconcileLegacyChatVoteResultDeliveries as reconcileLegacyChatVoteResultDeliveriesInD1 } from "../../modules/chat_voting/result-delivery-reconciliation";
@@ -263,6 +268,12 @@ const POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY = "points:activation_reconcil
 const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
+const MAX_TIMER_SKIP_PREPARATION_ATTEMPTS = 3;
+type TimerSkipOperationOutcome = {
+  result: SkipTimerOccurrenceResult;
+  mirrorChanged: boolean;
+  auditOperationId: string | null;
+};
 const POINTS_ANNOUNCEMENT_REGISTRATION: ModuleAlarmDefinition = {
   key: "points_announce",
   retryDelaysMs: [POINTS_ANNOUNCE_RETRY_MS],
@@ -276,6 +287,41 @@ const LEGACY_TIMER_CLAIMS_IMPORTED_KEY = "timers:legacy_claims_imported";
 
 const streamStartIdempotencyKey = (timerId: string, streamId: string): string =>
   `${timerId}:stream_start:${encodeURIComponent(streamId)}`;
+const isStreamStartTimerSkipReceipt = (timerId: string, occurrenceKey: string): boolean =>
+  occurrenceKey.startsWith(`${timerId}:stream_start:`);
+const timerSkipReceiptKey = (occurrence: TimerOccurrence): string => occurrence.identity.triggerType === "stream_start" &&
+  occurrence.identity.streamId !== null
+  ? streamStartIdempotencyKey(occurrence.identity.timerId, occurrence.identity.streamId)
+  : timerOccurrenceKey(occurrence.identity.timerId, occurrence.identity.deadline, occurrence.identity.streamId ?? undefined);
+const TIMER_SKIP_RECEIPT_RETENTION_MS = 24 * 60 * 60_000;
+const timerSkipReceiptsForSchedule = (
+  entry: DurableTimerEntry,
+  now: number,
+  stream: DurableTimerStream,
+): NonNullable<DurableTimerEntry["skipReceipts"]> => {
+  const currentOccurrences = [entry.plannedOccurrence, entry.inFlightClaim?.occurrence];
+  const activeReceiptKeys = new Set(currentOccurrences
+    .filter((occurrence): occurrence is TimerOccurrence => occurrence !== null && occurrence !== undefined)
+    .filter((occurrence) => occurrence.identity.triggerType !== "stream_start" || stream.state === "unknown" ||
+      stream.state === "online" && stream.streamId === occurrence.identity.streamId &&
+      stream.generation === occurrence.identity.generation)
+    .map(timerSkipReceiptKey));
+  const endedStreamStartReceiptKeys = new Set(currentOccurrences
+    .filter((occurrence): occurrence is TimerOccurrence => occurrence !== null && occurrence !== undefined)
+    .filter((occurrence) => occurrence.identity.triggerType === "stream_start" && stream.state !== "unknown" &&
+      (stream.state !== "online" || stream.streamId !== occurrence.identity.streamId ||
+        stream.generation !== occurrence.identity.generation))
+    .map(timerSkipReceiptKey));
+  return (entry.skipReceipts ?? []).filter((receipt) => {
+    if (endedStreamStartReceiptKeys.has(receipt.occurrenceKey)) return false;
+    if (isStreamStartTimerSkipReceipt(entry.config.id, receipt.occurrenceKey)) {
+      return stream.state === "unknown" || stream.state === "online" && stream.streamId !== null &&
+        receipt.occurrenceKey === streamStartIdempotencyKey(entry.config.id, stream.streamId);
+    }
+    return activeReceiptKeys.has(receipt.occurrenceKey) ||
+      receipt.deadline + TIMER_SKIP_RECEIPT_RETENTION_MS >= now;
+  });
+};
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
@@ -690,7 +736,9 @@ export class ChannelObject extends DurableObject<Env> {
   private belaboxPollQueue: Promise<void> = Promise.resolve();
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
+  private timerScheduleInputGeneration = 0;
   private timerScheduleInitialization: Promise<void> | null = null;
+  private timerOccurrenceQueues = new Map<string, Promise<void>>();
   private activeChatterSchemaReady = false;
   private pointsSchemaReady = false;
   private pointsInitialized = false;
@@ -863,6 +911,7 @@ export class ChannelObject extends DurableObject<Env> {
     const saved = this.ctx.storage.kv.get<DurableTimerState>(TIMER_DURABLE_STATE_KEY);
     const state = saved ?? emptyDurableTimerState();
     state.activityCounts = this.timerActivityCountsSync(saved?.initialized === true ? saved.activityCounts : undefined);
+    state.pendingSkipAudits ??= {};
     return state;
   }
 
@@ -967,12 +1016,62 @@ export class ChannelObject extends DurableObject<Env> {
     this.writeTimerAlarmEntriesSync(timerId, entry);
   }
 
-  private setTimerPlanSync(entry: DurableTimerEntry, plan: TimerPlan): void {
+  private setTimerPlanSync(
+    entry: DurableTimerEntry,
+    plan: TimerPlan,
+    stream: DurableTimerStream,
+    inputs: TimerScheduleInputs,
+  ): void {
+    const skippedOccurrence = entry.skippedOccurrence;
+    const previousPlannedOccurrence = entry.plannedOccurrence;
+    const inFlightClaim = entry.inFlightClaim;
+    const skipAuditOperationId = entry.skipAuditOperationId ?? null;
+    const skipReceipts = timerSkipReceiptsForSchedule(entry, inputs.now, stream);
+    if (skippedOccurrence !== null && skippedOccurrence !== undefined &&
+        sameTimerScheduledOccurrence(skippedOccurrence, entry.plannedOccurrence) &&
+        (skippedOccurrence.identity.triggerType !== "stream_start" || stream.state === "unknown" ||
+          stream.state === "online" && stream.streamId === skippedOccurrence.identity.streamId &&
+          stream.generation === skippedOccurrence.identity.generation)) {
+      const occurrenceKey = timerSkipReceiptKey(skippedOccurrence);
+      const receipt = skipReceipts.find((candidate) => candidate.occurrenceKey === occurrenceKey);
+      if (receipt === undefined) {
+        skipReceipts.push({
+          occurrenceKey,
+          deadline: skippedOccurrence.identity.deadline,
+          auditOperationId: skipAuditOperationId,
+        });
+      } else if (receipt.auditOperationId === null && skipAuditOperationId !== null) {
+        receipt.auditOperationId = skipAuditOperationId;
+      }
+    }
+    entry.skipReceipts = skipReceipts;
     entry.planSequence += 1;
     entry.plannedOccurrence = plan.identity === null
       ? null
       : { identity: plan.identity, sequence: entry.planSequence } satisfies TimerOccurrence;
-    entry.inFlightClaim = null;
+    if (!sameTimerScheduledOccurrence(inFlightClaim?.occurrence, previousPlannedOccurrence) ||
+        !sameTimerScheduledOccurrence(inFlightClaim?.occurrence, entry.plannedOccurrence)) {
+      entry.inFlightClaim = null;
+    }
+    entry.skipReceipts = timerSkipReceiptsForSchedule(entry, inputs.now, stream);
+    const plannedOccurrence = entry.plannedOccurrence;
+    const matchingSkipReceipt = plannedOccurrence === null
+      ? undefined
+      : entry.skipReceipts.find(({ occurrenceKey }) => occurrenceKey === timerSkipReceiptKey(plannedOccurrence));
+    const keepsSkippedOccurrence = matchingSkipReceipt !== undefined;
+    entry.skippedOccurrence = keepsSkippedOccurrence ? plannedOccurrence : null;
+    if (matchingSkipReceipt !== undefined && plannedOccurrence !== null) {
+      const effectivePlan = makeTimerPlan(entry.config, stream, plannedOccurrence, {
+        ...inputs,
+        now: Math.max(inputs.now, plannedOccurrence.identity.deadline),
+      }, "after_occurrence", entry.completedStreamId);
+      entry.effectiveNextOccurrence = effectivePlan.identity === null
+        ? null
+        : { identity: effectivePlan.identity, sequence: entry.planSequence + 1 } satisfies TimerOccurrence;
+    } else {
+      entry.effectiveNextOccurrence = null;
+    }
+    entry.skipAuditOperationId = matchingSkipReceipt?.auditOperationId ?? null;
     entry.refreshAt = plan.refreshAt;
     entry.mirrorSequence += 1;
   }
@@ -981,6 +1080,8 @@ export class ChannelObject extends DurableObject<Env> {
     return {
       config,
       plannedOccurrence: null,
+      skippedOccurrence: null,
+      skipReceipts: [],
       inFlightClaim: null,
       planSequence: 0,
       mirrorSequence: 0,
@@ -1284,11 +1385,14 @@ export class ChannelObject extends DurableObject<Env> {
             ? existingOccurrence
             : this.previousTimerOccurrenceFromAlarm(config, state.stream, inputs, legacyBaseline?.nextRunStreamId);
           if (persistedOccurrence === null) {
-            this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, null, inputs, "reset", entry.completedStreamId));
+            this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, null, inputs, "reset", entry.completedStreamId),
+              state.stream, inputs);
           } else {
             entry.plannedOccurrence = persistedOccurrence;
             entry.planSequence = persistedOccurrence.sequence;
-            entry.inFlightClaim = null;
+            if (!sameTimerScheduledOccurrence(entry.inFlightClaim?.occurrence, persistedOccurrence)) {
+              entry.inFlightClaim = null;
+            }
             entry.refreshAt = null;
             entry.mirrorSequence += 1;
           }
@@ -1300,6 +1404,10 @@ export class ChannelObject extends DurableObject<Env> {
         this.ctx.storage.kv.put(LEGACY_TIMER_CLAIMS_IMPORTED_KEY, true);
     });
     await Promise.all(changedTimerIds.map((timerId) => this.writeTimerMirror(timerId)));
+    if (changedTimerIds.some((timerId) => {
+      const entry = this.timerScheduleStateSync().timers[timerId];
+      return entry !== undefined && sameTimerScheduledOccurrence(entry.skippedOccurrence, entry.plannedOccurrence);
+    })) await this.notifyCommittedPanelResources();
     await this.scheduleEarliestAlarm();
   }
 
@@ -1321,13 +1429,288 @@ export class ChannelObject extends DurableObject<Env> {
       if (triggerChanged && (previousTriggerType === "interval" || config.trigger.type === "interval")) {
         entry.activityBaselines = { ...state.activityCounts };
       }
-      this.setTimerPlanSync(entry, makeTimerPlan(config, state.stream, current?.plannedOccurrence ?? null, inputs,
-        triggerChanged ? "reset" : "preserve_cadence", entry.completedStreamId));
+      const skippedOccurrenceIsPlanned = sameTimerScheduledOccurrence(current?.skippedOccurrence, current?.plannedOccurrence);
+      const preserveSkippedOccurrence = skippedOccurrenceIsPlanned && previousTriggerType === config.trigger.type;
+      this.setTimerPlanSync(entry,
+        makeTimerPlan(config, state.stream, current?.plannedOccurrence ?? null, inputs,
+          triggerChanged && !preserveSkippedOccurrence ? "reset" : "preserve_cadence", entry.completedStreamId),
+      state.stream, inputs);
       this.persistTimerScheduleSync(state, config.id, entry);
       return true;
     });
-    if (changed) await this.writeTimerMirror(config.id);
+    if (changed) {
+      await this.writeTimerMirror(config.id);
+      const entry = this.timerScheduleStateSync().timers[config.id];
+      if (entry !== undefined && sameTimerScheduledOccurrence(entry.skippedOccurrence, entry.plannedOccurrence)) {
+        await this.notifyCommittedPanelResources();
+      }
+    }
     await this.scheduleEarliestAlarm();
+  }
+
+  /** Serializes an operator skip against the full alarm send path for this timer. */
+  public async skipNextTimerOccurrence(
+    timerId: string,
+    expectedRevision: number,
+    actor: ActorContext,
+  ): Promise<SkipTimerOccurrenceResult> {
+    const outcome = await this.withTimerOccurrenceOperation<TimerSkipOperationOutcome>(timerId, async () => {
+      await this.ensurePointRoundRecovery();
+      await this.ensureTimerSchedulesInitialized();
+      const channelId = this.ownChannelId();
+      if (channelId === null) return { result: { result: "denied" }, mirrorChanged: false, auditOperationId: null };
+
+      for (let attempt = 0; attempt < MAX_TIMER_SKIP_PREPARATION_ATTEMPTS; attempt += 1) {
+        await this.refreshTimerOccurrenceSnapshot(timerId);
+        const current = this.timerScheduleStateSync().timers[timerId];
+        const inputGeneration = this.timerScheduleInputGeneration;
+        const inputs = current === undefined ? null : await this.timerScheduleInputs([current.config], Date.now());
+        const occurrence = current?.plannedOccurrence;
+        if (inputs !== null && occurrence !== null && occurrence !== undefined) {
+          const sendClaim = await readModuleAlarmSendClaim(this.ctx.storage, timerSkipReceiptKey(occurrence));
+          if (this.timerScheduleInputGeneration !== inputGeneration) continue;
+          if (sendClaim !== null) {
+            if (sendClaim.status === "sent") {
+              const completionClaim = this.ctx.storage.transactionSync(() => {
+                const state = this.timerScheduleStateSync();
+                const entry = state.timers[timerId];
+                const consumedOccurrence = entry?.plannedOccurrence;
+                if (entry === undefined || consumedOccurrence === null || consumedOccurrence === undefined ||
+                    !sameTimerScheduledOccurrence(consumedOccurrence, occurrence)) return null;
+                const retainedClaim = entry.inFlightClaim;
+                const activityClaim = retainedClaim !== null &&
+                  sameTimerScheduledOccurrence(retainedClaim.occurrence, consumedOccurrence)
+                  ? retainedClaim
+                  : {
+                    occurrence: consumedOccurrence,
+                    token: crypto.randomUUID(),
+                    activityCount: state.activityCounts[consumedOccurrence.identity.state === "offline" ? "offline" : "live"],
+                  };
+                if (retainedClaim !== activityClaim) entry.inFlightClaim = activityClaim;
+                return {
+                  config: entry.config,
+                  occurrence: consumedOccurrence,
+                  token: activityClaim.token,
+                  activityCount: activityClaim.activityCount,
+                };
+              });
+              if (completionClaim === null) continue;
+              await this.finishTimerOccurrence(timerId, completionClaim, true, inputs);
+              continue;
+            }
+            const reconciled = this.ctx.storage.transactionSync(() => {
+              if (this.timerScheduleInputGeneration !== inputGeneration) return false;
+              const state = this.timerScheduleStateSync();
+              const entry = state.timers[timerId];
+              const consumedOccurrence = entry?.plannedOccurrence;
+              if (entry === undefined || consumedOccurrence === null || consumedOccurrence === undefined ||
+                  !sameTimerScheduledOccurrence(consumedOccurrence, occurrence)) return false;
+              const now = Date.now();
+              if (entry.config.trigger.type === "stream_start") {
+                entry.completedStreamId = consumedOccurrence.identity.streamId;
+              }
+              const nextInputs = {
+                ...inputs,
+                now: Math.max(now, consumedOccurrence.identity.deadline),
+              };
+              const nextPlan = makeTimerPlan(entry.config, state.stream, consumedOccurrence, nextInputs,
+                "after_occurrence", entry.completedStreamId ?? null);
+              this.setTimerPlanSync(entry, nextPlan, state.stream, nextInputs);
+              this.persistTimerScheduleSync(state, timerId, entry);
+              return true;
+            });
+            if (!reconciled) continue;
+            await this.writeTimerMirror(timerId);
+            await this.scheduleEarliestAlarm();
+            continue;
+          }
+        }
+        const authorization = authorizeModuleMutation(channelId, actor, new Date().toISOString());
+        const authorizationAndModule = await this.env.DB.prepare(
+          `SELECT timer_module.enabled AS timers_module_enabled
+             FROM channels
+             LEFT JOIN channel_modules AS timer_module
+               ON timer_module.channel_id = channels.channel_id AND timer_module.module_id = 'timers'
+            WHERE channels.channel_id = ? ${authorization.sql}`,
+        ).bind(channelId, ...authorization.values).first<{ timers_module_enabled: number | null }>();
+        if (this.timerScheduleInputGeneration !== inputGeneration) continue;
+        if (authorizationAndModule === null) {
+          return { result: { result: "denied" }, mirrorChanged: false, auditOperationId: null };
+        }
+        if (authorizationAndModule.timers_module_enabled !== 1) {
+          return { result: { result: "nothing_planned" }, mirrorChanged: false, auditOperationId: null };
+        }
+
+        const committed = this.ctx.storage.transactionSync(():
+          TimerSkipOperationOutcome | { retryScheduleInputs: true } => {
+          if (this.timerScheduleInputGeneration !== inputGeneration) return { retryScheduleInputs: true };
+          const state = this.timerScheduleStateSync();
+          const entry = state.timers[timerId];
+          if (entry === undefined || entry.config.revision !== expectedRevision || inputs === null) {
+            return { result: { result: "not_found" }, mirrorChanged: false, auditOperationId: null };
+          }
+          const occurrence = entry.plannedOccurrence;
+          if (!entry.config.enabled || occurrence === null) {
+            return { result: { result: "nothing_planned" }, mirrorChanged: false, auditOperationId: null };
+          }
+
+          const now = Date.now();
+          const occurrenceKey = timerSkipReceiptKey(occurrence);
+          const skipReceipts = timerSkipReceiptsForSchedule(entry, now, state.stream);
+          entry.skipReceipts = skipReceipts;
+          const receipt = skipReceipts.find((candidate) => candidate.occurrenceKey === occurrenceKey);
+          const alreadySkipped = sameTimerScheduledOccurrence(entry.skippedOccurrence, occurrence) || receipt !== undefined;
+          const skipAuditOperationId = entry.skipAuditOperationId ?? receipt?.auditOperationId ?? null;
+          if (alreadySkipped && skipAuditOperationId !== null) {
+            const pendingAuditId = state.pendingSkipAudits?.[skipAuditOperationId] === undefined
+              ? null
+              : skipAuditOperationId;
+            return { result: { result: "already_skipped" }, mirrorChanged: false, auditOperationId: pendingAuditId };
+          }
+
+          const nextPlan = makeTimerPlan(
+            entry.config,
+            state.stream,
+            occurrence,
+            { ...inputs, now: Math.max(now, occurrence.identity.deadline) },
+            "after_occurrence",
+            entry.config.trigger.type === "stream_start" ? occurrence.identity.streamId : entry.completedStreamId ?? null,
+          );
+          const nextOccurrenceAt = nextPlan.identity === null ? null : new Date(nextPlan.identity.deadline).toISOString();
+          const operationId = crypto.randomUUID();
+          const changedAt = new Date().toISOString();
+          const intent: TimerSkipAuditIntent = {
+            operationId,
+            actorUserId: actor.userId,
+            changedAt,
+            timerId,
+            timerName: entry.config.name,
+            timerRevision: entry.config.revision,
+            skippedOccurrenceAt: new Date(occurrence.identity.deadline).toISOString(),
+            nextOccurrenceAt,
+            retryAttempt: 0,
+          };
+          state.pendingSkipAudits ??= {};
+          state.pendingSkipAudits[operationId] = intent;
+          if (receipt === undefined) {
+            skipReceipts.push({ occurrenceKey, deadline: occurrence.identity.deadline, auditOperationId: operationId });
+          } else {
+            receipt.auditOperationId = operationId;
+          }
+          entry.skipReceipts = skipReceipts;
+          entry.skippedOccurrence = occurrence;
+          entry.effectiveNextOccurrence = nextPlan.identity === null
+            ? null
+            : { identity: nextPlan.identity, sequence: entry.planSequence + 1 };
+          entry.planSequence += 1;
+          entry.skipAuditOperationId = operationId;
+          entry.mirrorSequence += 1;
+          this.writeTimerSkipAuditAlarmSync(operationId, intent.retryAttempt, now + TIMER_MIRROR_RETRY_DELAY_MS);
+          this.writeTimerDurableStateSync(state);
+          return {
+            result: alreadySkipped
+              ? { result: "already_skipped" }
+              : { result: "skipped", skippedOccurrenceAt: intent.skippedOccurrenceAt, nextOccurrenceAt },
+            mirrorChanged: true,
+            auditOperationId: operationId,
+          };
+        });
+        if ("retryScheduleInputs" in committed) continue;
+        return committed;
+      }
+
+      return { result: { result: "nothing_planned" }, mirrorChanged: false, auditOperationId: null };
+    });
+
+    const { result, mirrorChanged, auditOperationId } = outcome;
+    if (result.result === "denied") return result;
+    if (mirrorChanged) {
+      await this.writeTimerMirror(timerId);
+      await this.notifyCommittedPanelResources();
+    }
+    if (auditOperationId !== null) await this.deliverTimerSkipAudit(auditOperationId);
+    await this.scheduleEarliestAlarm();
+    return result;
+  }
+
+  private writeTimerSkipAuditAlarmSync(operationId: string, retryAttempt: number, deadline: number): void {
+    const table = this.timerAlarmScheduleSync();
+    const key = `${TIMER_ALARM_PREFIX}audit:${operationId}:${String(retryAttempt)}`;
+    table[key] = {
+      deadline,
+      handler: TIMER_OCCURRENCE_HANDLER,
+      revision: (table[key]?.revision ?? 0) + 1,
+    };
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private clearTimerSkipAuditAlarmsSync(operationId: string): void {
+    const table = this.timerAlarmScheduleSync();
+    const prefix = `${TIMER_ALARM_PREFIX}audit:${operationId}:`;
+    let changed = false;
+    for (const key of Object.keys(table)) {
+      if (!key.startsWith(prefix)) continue;
+      Reflect.deleteProperty(table, key);
+      changed = true;
+    }
+    if (changed) this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private async deliverTimerSkipAudit(operationId: string): Promise<void> {
+    const intent = this.timerScheduleStateSync().pendingSkipAudits?.[operationId];
+    if (intent === undefined) return;
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    try {
+      await writeModuleAudit(this.env.DB, intent.actorUserId, intent.changedAt, {
+        channelId,
+        moduleId: "timers",
+        action: "timers.timer.skipped",
+        before: { timerId: intent.timerId, name: intent.timerName, revision: intent.timerRevision },
+        after: {
+          timerId: intent.timerId,
+          skippedOccurrenceAt: intent.skippedOccurrenceAt,
+          nextOccurrenceAt: intent.nextOccurrenceAt,
+        },
+      }, "member", { operationId, actorUserId: intent.actorUserId });
+    } catch (error: unknown) {
+      console.warn("Timer skip audit delivery failed and will be retried.", operationId, error);
+      this.ctx.storage.transactionSync(() => {
+        const state = this.timerScheduleStateSync();
+        const current = state.pendingSkipAudits?.[operationId];
+        if (current === undefined) return;
+        current.retryAttempt += 1;
+        this.clearTimerSkipAuditAlarmsSync(operationId);
+        this.writeTimerSkipAuditAlarmSync(operationId, current.retryAttempt,
+          Date.now() + TIMER_MIRROR_RETRY_DELAY_MS);
+        this.writeTimerDurableStateSync(state);
+      });
+      await this.scheduleEarliestAlarm();
+      return;
+    }
+
+    this.ctx.storage.transactionSync(() => {
+      const state = this.timerScheduleStateSync();
+      if (state.pendingSkipAudits?.[operationId] === undefined) return;
+      Reflect.deleteProperty(state.pendingSkipAudits, operationId);
+      this.writeTimerDurableStateSync(state);
+      this.clearTimerSkipAuditAlarmsSync(operationId);
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async withTimerOccurrenceOperation<Result>(timerId: string, operation: () => Promise<Result>): Promise<Result> {
+    const previous = this.timerOccurrenceQueues.get(timerId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    this.timerOccurrenceQueues.set(timerId, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.timerOccurrenceQueues.get(timerId) === current) this.timerOccurrenceQueues.delete(timerId);
+    }
   }
 
   /** Removes a committed D1 timer and fences any config snapshot read before its delete. */
@@ -1362,6 +1745,7 @@ export class ChannelObject extends DurableObject<Env> {
       const streamChanged = stream.generation > state.stream.generation || stream.state !== state.stream.state ||
         stream.streamId !== state.stream.streamId || !sameStreamStartedAt(stream.startedAt, state.stream.startedAt);
       if (!streamChanged) return;
+      this.timerScheduleInputGeneration += 1;
       state.stream = stream;
       if (stream.state === "online") state.activityCounts.live = 0;
       if (stream.state === "offline") state.activityCounts.offline = 0;
@@ -1369,14 +1753,19 @@ export class ChannelObject extends DurableObject<Env> {
       for (const [timerId, entry] of Object.entries(state.timers)) {
         if (entry.config.trigger.type !== "interval" && entry.config.trigger.type !== "stream_start") continue;
         if (entry.config.trigger.type === "interval") entry.activityBaselines = { ...state.activityCounts };
-        this.setTimerPlanSync(entry, makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, inputs, "reset",
-          entry.completedStreamId));
+        this.setTimerPlanSync(entry,
+          makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, inputs, "reset", entry.completedStreamId),
+        state.stream, inputs);
         this.writeTimerAlarmEntriesSync(timerId, entry);
         changedTimerIds.push(timerId);
       }
       this.writeTimerDurableStateSync(state);
     });
     await Promise.all(changedTimerIds.map((timerId) => this.writeTimerMirror(timerId)));
+    if (changedTimerIds.some((timerId) => {
+      const entry = this.timerScheduleStateSync().timers[timerId];
+      return entry !== undefined && sameTimerScheduledOccurrence(entry.skippedOccurrence, entry.plannedOccurrence);
+    })) await this.notifyCommittedPanelResources();
     await this.scheduleEarliestAlarm();
   }
 
@@ -1409,6 +1798,7 @@ export class ChannelObject extends DurableObject<Env> {
     const inputs = await this.timerScheduleInputs(configs, Date.now());
     const changedTimerIds: string[] = [];
     this.ctx.storage.transactionSync(() => {
+      this.timerScheduleInputGeneration += 1;
       const state = this.timerScheduleStateSync();
       let streamChanged = false;
       if (databaseStream.generation >= state.stream.generation) {
@@ -1420,14 +1810,17 @@ export class ChannelObject extends DurableObject<Env> {
         if (streamChanged && databaseStream.state === "offline") state.activityCounts.offline = 0;
       }
       if (streamChanged) {
+        const transitionInputs: TimerScheduleInputs = {
+          now: inputs.now,
+          timeZone: inputs.timeZone,
+          eventTimes: [],
+        };
         for (const [timerId, entry] of Object.entries(state.timers)) {
           if (entry.config.trigger.type !== "interval" && entry.config.trigger.type !== "stream_start") continue;
           if (entry.config.trigger.type === "interval") entry.activityBaselines = { ...state.activityCounts };
-          this.setTimerPlanSync(entry, makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, {
-            now: inputs.now,
-            timeZone: inputs.timeZone,
-            eventTimes: [],
-          }, "reset", entry.completedStreamId));
+          this.setTimerPlanSync(entry,
+            makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, transitionInputs,
+              "reset", entry.completedStreamId), state.stream, transitionInputs);
           this.persistTimerScheduleSync(state, timerId, entry);
           changedTimerIds.push(timerId);
         }
@@ -1441,6 +1834,8 @@ export class ChannelObject extends DurableObject<Env> {
         const previousTriggerType = current?.config.trigger.type;
         const triggerChanged = current === undefined || JSON.stringify(current.config.trigger) !== JSON.stringify(config.trigger);
         entry.config = config;
+        const skippedOccurrenceIsPlanned = sameTimerScheduledOccurrence(current?.skippedOccurrence, current?.plannedOccurrence);
+        const preserveSkippedOccurrence = skippedOccurrenceIsPlanned && previousTriggerType === config.trigger.type;
         const relevantInputChanged = (reason === "channel_time_zone" &&
           (config.trigger.type === "time_of_day" || config.trigger.type === "before_event")) ||
           (reason === "event_times" && config.trigger.type === "before_event");
@@ -1449,12 +1844,14 @@ export class ChannelObject extends DurableObject<Env> {
           entry.activityBaselines = { ...state.activityCounts };
         }
         const plan = makeTimerPlan(config, state.stream, entry.plannedOccurrence, inputs,
-          triggerChanged || relevantInputChanged ? "reset" : "preserve_cadence", entry.completedStreamId);
+          (triggerChanged || relevantInputChanged) && !preserveSkippedOccurrence ? "reset" : "preserve_cadence",
+          entry.completedStreamId);
         const sameIdentity = plan.identity === null
           ? entry.plannedOccurrence === null
           : sameTimerAlarmIdentity(entry.plannedOccurrence?.identity, plan.identity);
-        if (!configChanged && sameIdentity && entry.refreshAt === plan.refreshAt) continue;
-        this.setTimerPlanSync(entry, plan);
+        const refreshEffectivePlan = relevantInputChanged && skippedOccurrenceIsPlanned;
+        if (!configChanged && sameIdentity && entry.refreshAt === plan.refreshAt && !refreshEffectivePlan) continue;
+        this.setTimerPlanSync(entry, plan, state.stream, inputs);
         this.persistTimerScheduleSync(state, config.id, entry);
         changedTimerIds.push(config.id);
       }
@@ -1477,6 +1874,10 @@ export class ChannelObject extends DurableObject<Env> {
       this.timerScheduleStateSync().timers[timerId] === undefined
         ? this.clearTimerMirrorRetryAlarms(timerId)
         : this.writeTimerMirror(timerId)));
+    if (changedTimerIds.some((timerId) => {
+      const entry = this.timerScheduleStateSync().timers[timerId];
+      return entry !== undefined && sameTimerScheduledOccurrence(entry.skippedOccurrence, entry.plannedOccurrence);
+    })) await this.notifyCommittedPanelResources();
     await this.scheduleEarliestAlarm();
   }
 
@@ -1502,7 +1903,8 @@ export class ChannelObject extends DurableObject<Env> {
     if (channelId === null) return;
     const entry = this.timerScheduleStateSync().timers[timerId];
     if (entry === undefined) return;
-    const occurrence = entry.plannedOccurrence?.identity;
+    const skippedOccurrenceIsPlanned = sameTimerScheduledOccurrence(entry.skippedOccurrence, entry.plannedOccurrence);
+    const occurrence = (skippedOccurrenceIsPlanned ? entry.effectiveNextOccurrence : entry.plannedOccurrence)?.identity;
     try {
       await this.env.DB.prepare(
         `UPDATE timers
@@ -1608,11 +2010,17 @@ export class ChannelObject extends DurableObject<Env> {
         ? entry.plannedOccurrence === null
         : sameTimerAlarmIdentity(entry.plannedOccurrence?.identity, plan.identity);
       if (sameIdentity && entry.refreshAt === plan.refreshAt) return false;
-      this.setTimerPlanSync(entry, plan);
+      this.setTimerPlanSync(entry, plan, state.stream, inputs);
       this.persistTimerScheduleSync(state, timerId, entry);
       return true;
     });
-    if (changed) await this.writeTimerMirror(timerId);
+    if (changed) {
+      await this.writeTimerMirror(timerId);
+      const entry = this.timerScheduleStateSync().timers[timerId];
+      if (entry !== undefined && sameTimerScheduledOccurrence(entry.skippedOccurrence, entry.plannedOccurrence)) {
+        await this.notifyCommittedPanelResources();
+      }
+    }
     await this.scheduleEarliestAlarm();
   }
 
@@ -1624,10 +2032,37 @@ export class ChannelObject extends DurableObject<Env> {
     identity?: ModuleAlarmIdentity | null,
     planSequence?: number,
   ): Promise<"retain" | undefined> {
+    if (key.startsWith("mirror:")) return await this.runTimerOccurrenceSerial(context, key, deadline, ownerRevision, identity, planSequence);
+    const refreshMarker = ":refresh:";
+    const refreshAt = key.indexOf(refreshMarker);
+    const timerId = key.startsWith("timer:")
+      ? key.slice("timer:".length, refreshAt < 0 ? undefined : refreshAt)
+      : "";
+    if (timerId.length === 0) return await this.runTimerOccurrenceSerial(context, key, deadline, ownerRevision, identity, planSequence);
+    return await this.withTimerOccurrenceOperation(timerId,
+      () => this.runTimerOccurrenceSerial(context, key, deadline, ownerRevision, identity, planSequence));
+  }
+
+  private async runTimerOccurrenceSerial(
+    context: ModuleAlarmContext,
+    key: string,
+    deadline: number,
+    ownerRevision?: number,
+    identity?: ModuleAlarmIdentity | null,
+    planSequence?: number,
+  ): Promise<"retain" | undefined> {
     await this.ensurePointRoundRecovery();
+    if (key.startsWith("audit:")) {
+      const operationId = key.slice("audit:".length).split(":")[0] ?? "";
+      if (operationId.length > 0) await this.deliverTimerSkipAudit(operationId);
+      return;
+    }
     if (key.startsWith("mirror:")) {
       const timerId = key.slice("mirror:".length).split(":")[0] ?? "";
-      if (timerId.length > 0) await this.writeTimerMirror(timerId);
+      if (timerId.length > 0) {
+        await this.writeTimerMirror(timerId);
+        await this.notifyCommittedPanelResources();
+      }
       return;
     }
     const refreshMarker = ":refresh:";
@@ -1649,6 +2084,7 @@ export class ChannelObject extends DurableObject<Env> {
       occurrence: TimerOccurrence;
       token: string;
       activityCount: number;
+      skipped: boolean;
     } | null => {
       const state = this.timerScheduleStateSync();
       const entry = state.timers[timerId];
@@ -1661,14 +2097,19 @@ export class ChannelObject extends DurableObject<Env> {
       const token = crypto.randomUUID();
       const streamState = identity.state === "live" ? "live" : identity.state === "offline" ? "offline" : null;
       const activityCount = streamState === null ? 0 : state.activityCounts[streamState];
+      const skipped = sameTimerScheduledOccurrence(entry.skippedOccurrence, occurrence);
       entry.inFlightClaim = { occurrence, token, activityCount };
       this.writeTimerDurableStateSync(state);
-      return { config: entry.config, occurrence, token, activityCount };
+      return { config: entry.config, occurrence, token, activityCount, skipped };
     });
     if (claimed === null) return;
 
     const planInputs = await this.timerScheduleInputs([claimed.config], Date.now());
     if (!this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence)) return;
+    if (claimed.skipped) {
+      await this.finishTimerOccurrence(timerId, claimed, false, planInputs);
+      return;
+    }
     const now = Date.now();
     const trigger = claimed.config.trigger;
     const intervalState: TimerIntervalState | null = trigger.type === "interval" &&
@@ -1763,19 +2204,25 @@ export class ChannelObject extends DurableObject<Env> {
       const entry = state.timers[timerId];
       if (entry === undefined || entry.config.revision !== claim.config.revision ||
           entry.inFlightClaim?.token !== claim.token ||
-          !sameTimerOccurrence(entry.inFlightClaim.occurrence, claim.occurrence) ||
-          !sameTimerOccurrence(entry.plannedOccurrence, claim.occurrence)) return false;
+          !sameTimerScheduledOccurrence(entry.inFlightClaim.occurrence, claim.occurrence) ||
+          !sameTimerScheduledOccurrence(entry.plannedOccurrence, claim.occurrence)) return false;
       const trigger = entry.config.trigger;
       if (sent && trigger.type === "interval" &&
           (claim.occurrence.identity.state === "live" || claim.occurrence.identity.state === "offline")) {
         entry.activityBaselines[claim.occurrence.identity.state] = claim.activityCount;
       }
       if (sent) entry.lastRunAt = new Date(now).toISOString();
+      if (sameTimerScheduledOccurrence(entry.skippedOccurrence, claim.occurrence)) {
+        const occurrenceKey = timerSkipReceiptKey(claim.occurrence);
+        entry.skipReceipts = (entry.skipReceipts ?? []).filter((receipt) => receipt.occurrenceKey !== occurrenceKey);
+        entry.skippedOccurrence = null;
+        entry.skipAuditOperationId = null;
+      }
       const nextInputs = { ...inputs, now };
       if (trigger.type === "stream_start") entry.completedStreamId = claim.occurrence.identity.streamId;
       const plan = makeTimerPlan(entry.config, state.stream, entry.plannedOccurrence, nextInputs,
         "after_occurrence", entry.completedStreamId);
-      this.setTimerPlanSync(entry, plan);
+      this.setTimerPlanSync(entry, plan, state.stream, nextInputs);
       this.persistTimerScheduleSync(state, timerId, entry);
       return true;
     });

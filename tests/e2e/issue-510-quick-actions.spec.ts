@@ -11,10 +11,12 @@ const setupQuickActionCockpit = async (
   includeStreamMarker = false,
   streamState = "online",
   viewerUserId = "viewer-510",
+  includeTimers = false,
 ) => {
   const modules = [
     { id: "text_commands", enabled: true, settings: "{}" },
     ...(includeStreamMarker ? [{ id: "channel_events", enabled: true, settings: "{}" }] : []),
+    ...(includeTimers ? [{ id: "timers", enabled: true, settings: "{}" }] : []),
   ];
   const channel = {
     channelId,
@@ -46,6 +48,7 @@ const setupQuickActionCockpit = async (
   let valueRouteCalls = 0;
   let counterLoadPending = false;
   let releaseCounterLoad: (() => void) | undefined;
+  let timerSkipCalls = 0;
   let markerRouteCalls = 0;
   const json = (value: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
 
@@ -60,7 +63,7 @@ const setupQuickActionCockpit = async (
       return;
     }
     if (pathname === `/api/channels/${channelId}/overview`) {
-      await route.fulfill(json({ ...channel, viewerCount: 42, activeModules: [{ moduleId: "text_commands", settings: "{}" }] }));
+      await route.fulfill(json({ ...channel, viewerCount: 42, activeModules: modules.map(({ id, settings }) => ({ moduleId: id, settings })) }));
       return;
     }
     if (pathname === `/api/channels/${channelId}/modules`) {
@@ -112,6 +115,19 @@ const setupQuickActionCockpit = async (
       await route.fulfill(json({ commands: [], variables: available ? [{ name: "score", value: score, description: "Score" }] : [] }));
       return;
     }
+    if (pathname === `/api/channels/${channelId}/modules/timers/timers` && route.request().method() === "GET") {
+      const available = await page.evaluate(() => document.documentElement.dataset.timerOccurrences !== "off");
+      await route.fulfill(json({ timers: available ? [{ id: "timer-510", name: "Welcome reminder", enabled: true,
+        messageText: "Welcome", chatTarget: "all_chats", trigger: { type: "interval", live: { minutes: 10 } }, revision: 1,
+        nextRunAt: new Date(Date.now() + 10 * 60_000).toISOString(), nextRunState: "live", lastRunAt: null,
+        createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }] : [] }));
+      return;
+    }
+    if (pathname === `/api/channels/${channelId}/modules/timers/quick-actions/skip-next` && route.request().method() === "POST") {
+      timerSkipCalls += 1;
+      await route.fulfill(json({ result: "skipped", skippedOccurrenceAt: new Date().toISOString(), nextOccurrenceAt: new Date(Date.now() + 20 * 60_000).toISOString() }));
+      return;
+    }
     if (pathname === `/api/channels/${channelId}/variables/score/value` &&route.request().method() === "POST") {
       valueRouteCalls += 1;
       const body = route.request().postDataJSON() as { operation: string; amount: number };
@@ -133,6 +149,8 @@ const setupQuickActionCockpit = async (
     markerRouteCalls: () => markerRouteCalls,
     hideVariables: async () => page.evaluate(() => { document.documentElement.dataset.counterVariables = "off"; }),
     showVariables: async () => page.evaluate(() => { delete document.documentElement.dataset.counterVariables; }),
+    hideTimerOccurrences: async () => page.evaluate(() => { document.documentElement.dataset.timerOccurrences = "off"; }),
+    timerSkipCalls: () => timerSkipCalls,
     setMarkerScopeAvailable: async (available: boolean) => page.evaluate((value) => {
       if (value) delete document.documentElement.dataset.markerScope;
       else document.documentElement.dataset.markerScope = "missing";
@@ -277,6 +295,66 @@ test("keeps Counter Run disabled and guarded while its variable request is pendi
   await runButton.click();
   await expect(page.getByText("Neuer Wert: 5").first()).toBeVisible();
   expect(actions.valueRouteCalls()).toBe(1);
+});
+
+test("skips a chosen timer at desktop and mobile widths without moving the action grid", async ({ page }, testInfo) => {
+  const actions = await setupQuickActionCockpit(page, () => {}, false, false, "online", "viewer-510", true);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${channelId}`);
+
+  const skipTimer = page.getByRole("button", { name: "Timer überspringen" });
+  await expect(skipTimer).toBeEnabled();
+  const desktopGrid = await actionGridBox(page);
+  await page.screenshot({ path: testInfo.outputPath("timer-quick-action-1920.png"), fullPage: true });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(skipTimer).toBeVisible();
+  const mobileGrid = await actionGridBox(page);
+  await page.screenshot({ path: testInfo.outputPath("timer-quick-action-390.png"), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  await skipTimer.click();
+  const popover = page.getByRole("dialog", { name: "Timer überspringen" });
+  await expect(popover).toBeVisible();
+  const timerSelect = popover.getByRole("combobox", { name: "Timer" });
+  await timerSelect.click();
+  const timerOptions = page.locator(".ui-select__dropdown");
+  await expect(timerOptions).toBeVisible();
+  const timerHint = popover.getByText("Wähle den Timer aus, dessen nächste Nachricht entfallen soll.");
+  const hintBounds = await timerHint.boundingBox();
+  const optionsBounds = await timerOptions.boundingBox();
+  expect(hintBounds).not.toBeNull();
+  expect(optionsBounds).not.toBeNull();
+  expect(optionsBounds?.y).toBeGreaterThanOrEqual((hintBounds?.y ?? 0) + (hintBounds?.height ?? 0));
+  await page.screenshot({ path: testInfo.outputPath("timer-quick-action-picker-390.png"), fullPage: true });
+  await page.getByRole("option", { name: /Welcome reminder/u }).click();
+  await popover.getByRole("button", { name: "Ausführen" }).click();
+  await expect(page.getByText(/Übersprungen.*Nächster Lauf/u).first()).toBeVisible();
+  expect(actions.timerSkipCalls()).toBe(1);
+  await expect.poll(() => actionGridBox(page)).toEqual(mobileGrid);
+
+  await page.keyboard.press(await page.evaluate(() => /Mac|iPhone|iPad|iPod/u.test(navigator.platform || navigator.userAgent) ? "Meta+k" : "Control+k"));
+  const palette = page.locator(".command-palette");
+  await expect(palette).toBeVisible();
+  await palette.locator('[data-command-palette-item-id="action:skip-next-timer-message"]').click();
+  const paletteDialog = page.getByRole("dialog", { name: "Timer überspringen" });
+  await expect(paletteDialog).toBeVisible();
+  const paletteTimerSelect = paletteDialog.getByRole("combobox", { name: "Timer" });
+  await paletteTimerSelect.click();
+  await expect(timerOptions).toBeVisible();
+  const paletteHintBounds = await paletteDialog.locator(".ui-select__description").boundingBox();
+  const paletteOptionsBounds = await timerOptions.boundingBox();
+  expect(paletteHintBounds).not.toBeNull();
+  expect(paletteOptionsBounds).not.toBeNull();
+  expect(paletteOptionsBounds?.y).toBeGreaterThanOrEqual((paletteHintBounds?.y ?? 0) + (paletteHintBounds?.height ?? 0));
+  await page.keyboard.press("Escape");
+  await paletteDialog.getByRole("button", { name: "Abbrechen" }).click();
+
+  await actions.hideTimerOccurrences();
+  await expect(skipTimer).toBeDisabled({ timeout: 8_000 });
+  await expect(page.getByText("Kein Timer hat einen geplanten nächsten Lauf.").first()).toBeVisible();
+  await expect.poll(() => actionGridBox(page)).toEqual(mobileGrid);
+  expect(desktopGrid.width).toBeGreaterThan(0);
 });
 
 test("shows the stream marker at desktop and mobile widths and keeps the grid fixed after feedback and scope changes", async ({ page }, testInfo) => {
