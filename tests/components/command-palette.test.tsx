@@ -195,6 +195,33 @@ describe("cmdk command palette", () => {
     expect(setChannelControl).toHaveBeenCalledWith("kanal-a", "pause", null);
   });
 
+  it("shows a load failure instead of the empty-variables reason when the variable fetch is rejected", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(fetchChannelVariables).mockRejectedValue(new Error("503"));
+    render(
+      <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+        open
+        onOpenChange={vi.fn()}
+        channelId="kanal-a"
+        ownRole="operator"
+        streamState="online"
+        botConnected
+        modules={[{ id: "text_commands", enabled: true, settings: "{}" }]}
+        onToggleModule={() => Promise.resolve()}
+        onNavigate={vi.fn()}
+        onOpenCommand={vi.fn()}
+        onOpenVariable={vi.fn()}
+      /></UiProvider></QueryClientProvider>,
+    );
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "counter" } });
+    const counter = await screen.findByRole("option", { name: /Counter \+1|Zähler \+1/u });
+    await waitFor(() => expect(counter.getAttribute("aria-disabled")).toBe("true"));
+    const reason = counter.querySelector<HTMLElement>(".command-palette__inline-reason");
+    await waitFor(() => expect(reason?.textContent).toMatch(/could not be loaded|konnten nicht geladen werden/u));
+    expect(reason?.textContent).not.toMatch(/No numeric channel variables|Keine numerischen Kanalvariablen/u);
+  });
+
   it("shows declared quick actions as disabled with their variable and bot availability reasons", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     vi.mocked(fetchChannelVariables).mockResolvedValue({ count: 0, maximum: 50, variables: [] });

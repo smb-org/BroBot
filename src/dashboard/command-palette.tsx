@@ -101,6 +101,7 @@ interface ChannelCommandData<T> {
   channelId: string | null;
   value: T;
   loaded: boolean;
+  failed: boolean;
   openCycle: number;
 }
 
@@ -121,13 +122,14 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
   const openCycle = paletteSession.open === open
     ? paletteSession.cycle
     : paletteSession.cycle + (open ? 1 : 0);
-  const [variableState, setVariableState] = useState<ChannelCommandData<readonly PanelChannelVariable[]>>({ channelId, value: [], loaded: false, openCycle: 0 });
+  const [variableState, setVariableState] = useState<ChannelCommandData<readonly PanelChannelVariable[]>>({ channelId, value: [], loaded: false, failed: false, openCycle: 0 });
   const [counterPicker, setCounterPicker] = useState<CounterPickerState | null>(null);
   const [query, setQuery] = useState("");
   const commands = useMemo(() => commandState.channelId === channelId ? commandState.value : [], [channelId, commandState]);
   const variablesMatchOpenCycle = variableState.channelId === channelId && variableState.openCycle === openCycle;
   const variables = useMemo(() => variablesMatchOpenCycle ? variableState.value : [], [variableState.value, variablesMatchOpenCycle]);
   const variablesLoaded = variablesMatchOpenCycle && variableState.loaded;
+  const variablesFailed = variablesMatchOpenCycle && variableState.failed;
   const currentTargetPath = route === undefined ? null : recentTargetPathForRoute(route, channelId);
   const recentTargetPaths = useMemo(() => {
     const stored = readRecentTargets(viewerUserId, channelId ?? "");
@@ -153,9 +155,9 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
       if (active) setCommandState({ channelId, value: [] });
     });
     void fetchChannelVariables(channelId, controller.signal).then(({ variables: value }) => {
-      if (active) setVariableState({ channelId, value, loaded: true, openCycle });
+      if (active) setVariableState({ channelId, value, loaded: true, failed: false, openCycle });
     }).catch(() => {
-      if (active) setVariableState({ channelId, value: [], loaded: true, openCycle });
+      if (active) setVariableState({ channelId, value: [], loaded: true, failed: true, openCycle });
     });
     return () => {
       active = false;
@@ -265,9 +267,11 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
   const numericVariables = variables.filter((variable) => Number.isFinite(variable.value));
   const counterReason = !variablesLoaded
     ? texts.streamManager.actionLoading
-    : numericVariables.length > 0
-      ? null
-      : textCommandQuickActionTexts.counter.noVariables[language];
+    : variablesFailed
+      ? textCommandQuickActionTexts.counter.loadFailed[language]
+      : numericVariables.length > 0
+        ? null
+        : textCommandQuickActionTexts.counter.noVariables[language];
   const counterAvailability = moduleImmediateActionAvailability("text_commands", "counter-plus-one", modules, streamState, ownRole, counterReason);
   const counterActionAvailable = counterAvailability.offered && counterAvailability.disabledReason === null;
   const runCounterAction = useCallback((variableName: string): void => {
