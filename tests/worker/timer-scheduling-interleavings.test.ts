@@ -1784,6 +1784,134 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     expect(dueOccurrence(harness.values, config.id).identity.deadline).toBe(start + 30 * 60_000);
   });
 
+  it.each([
+    { receiptStatus: "sent", sent: true },
+    { receiptStatus: "sending", sent: false },
+  ] as const)("advances past a renamed occurrence when its in-flight send is $receiptStatus", async ({ receiptStatus, sent }) => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const harness = channelObjectFor(onlineStream("stream-1", 1, start));
+    const config = timerConfig("skip-renamed-during-send", { type: "interval", live: { minutes: 10 } });
+    harness.setDatabaseConfig(config);
+    await harness.object.upsertTimerConfig(config);
+    const first = dueOccurrence(harness.values, config.id);
+    vi.setSystemTime(first.identity.deadline);
+    const sendEntered = deferred();
+    const releaseSend = deferred();
+    const firing = harness.object.runTimerOccurrence(
+      timerAlarmContext(async (_text, idempotencyKey) => {
+        harness.values.set("module_alarm:send_claims", {
+          [idempotencyKey]: { status: "sending", at: Date.now() },
+        });
+        sendEntered.resolve();
+        await releaseSend.promise;
+        if (receiptStatus === "sent") {
+          harness.values.set("module_alarm:send_claims", {
+            [idempotencyKey]: { status: "sent", at: Date.now() },
+          });
+        }
+        return {
+          sent,
+          reason: sent ? null : "timeout",
+          retryable: false,
+          delivery: sent ? "delivered" : "ambiguous",
+        };
+      }),
+      `timer:${config.id}`,
+      first.identity.deadline,
+      config.revision,
+      first.identity,
+      first.sequence,
+    );
+    await sendEntered.promise;
+
+    const renamed = { ...config, name: "Renamed reminder", revision: config.revision + 1 };
+    harness.setDatabaseConfig(renamed);
+    await harness.object.upsertTimerConfig(renamed);
+    const scheduler = harness.object as unknown as {
+      skipNextTimerOccurrence(
+        timerId: string,
+        revision: number,
+        actor: { userId: string; sessionId: string },
+      ): Promise<{ result: string; skippedOccurrenceAt?: string; nextOccurrenceAt?: string | null }>;
+    };
+    const skipping = scheduler.skipNextTimerOccurrence(config.id, renamed.revision, {
+      userId: "operator-user",
+      sessionId: "operator-session",
+    });
+
+    releaseSend.resolve();
+    await firing;
+    await expect(skipping).resolves.toEqual({
+      result: "skipped",
+      skippedOccurrenceAt: new Date(start + 20 * 60_000).toISOString(),
+      nextOccurrenceAt: new Date(start + 30 * 60_000).toISOString(),
+    });
+    expect(dueOccurrence(harness.values, config.id).identity.deadline).toBe(start + 20 * 60_000);
+    expect(stateOf(harness.values).timers[config.id]?.skippedOccurrence?.identity.deadline)
+      .toBe(start + 20 * 60_000);
+  });
+
+  it("advances past a persisted sent receipt when restarting before occurrence completion", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-10-12T12:00:00.000Z");
+    vi.setSystemTime(start);
+    const stream = onlineStream("stream-1", 1, start);
+    const original = channelObjectFor(stream);
+    const config = timerConfig("skip-restart-after-send", { type: "interval", live: { minutes: 10 } });
+    original.setDatabaseConfig(config);
+    await original.object.upsertTimerConfig(config);
+    const first = dueOccurrence(original.values, config.id);
+    vi.setSystemTime(first.identity.deadline);
+    const receiptPersisted = deferred();
+    const releaseCompletion = deferred();
+    const firing = original.object.runTimerOccurrence(
+      timerAlarmContext(async (_text, idempotencyKey) => {
+        original.values.set("module_alarm:send_claims", {
+          [idempotencyKey]: { status: "sending", at: Date.now() },
+        });
+        original.values.set("module_alarm:send_claims", {
+          [idempotencyKey]: { status: "sent", at: Date.now() },
+        });
+        receiptPersisted.resolve();
+        await releaseCompletion.promise;
+        return { sent: true, reason: null, retryable: false, delivery: "delivered" };
+      }),
+      `timer:${config.id}`,
+      first.identity.deadline,
+      config.revision,
+      first.identity,
+      first.sequence,
+    );
+    await receiptPersisted.promise;
+
+    const restarted = channelObjectFor(stream, new Map(structuredClone([...original.values])));
+    restarted.setDatabaseConfig(config);
+    await restarted.object.reconcileTimerSchedules("activation");
+    const scheduler = restarted.object as unknown as {
+      skipNextTimerOccurrence(
+        timerId: string,
+        revision: number,
+        actor: { userId: string; sessionId: string },
+      ): Promise<{ result: string; skippedOccurrenceAt?: string; nextOccurrenceAt?: string | null }>;
+    };
+    await expect(scheduler.skipNextTimerOccurrence(config.id, config.revision, {
+      userId: "operator-user",
+      sessionId: "operator-session",
+    })).resolves.toEqual({
+      result: "skipped",
+      skippedOccurrenceAt: new Date(start + 20 * 60_000).toISOString(),
+      nextOccurrenceAt: new Date(start + 30 * 60_000).toISOString(),
+    });
+
+    releaseCompletion.resolve();
+    await firing;
+    expect(dueOccurrence(restarted.values, config.id).identity.deadline).toBe(start + 20 * 60_000);
+    expect(stateOf(restarted.values).timers[config.id]?.skippedOccurrence?.identity.deadline)
+      .toBe(start + 20 * 60_000);
+  });
+
   it("rechecks the actor after a queued send and leaves the occurrence untouched when access was revoked", async () => {
     vi.useFakeTimers();
     const start = Date.parse("2026-10-12T12:00:00.000Z");

@@ -1455,6 +1455,39 @@ export class ChannelObject extends DurableObject<Env> {
         const current = this.timerScheduleStateSync().timers[timerId];
         const inputGeneration = this.timerScheduleInputGeneration;
         const inputs = current === undefined ? null : await this.timerScheduleInputs([current.config], Date.now());
+        const occurrence = current?.plannedOccurrence;
+        if (inputs !== null && occurrence !== null && occurrence !== undefined) {
+          const sendClaim = await readModuleAlarmSendClaim(this.ctx.storage, timerSkipReceiptKey(occurrence));
+          if (this.timerScheduleInputGeneration !== inputGeneration) continue;
+          if (sendClaim !== null) {
+            const reconciled = this.ctx.storage.transactionSync(() => {
+              if (this.timerScheduleInputGeneration !== inputGeneration) return false;
+              const state = this.timerScheduleStateSync();
+              const entry = state.timers[timerId];
+              const consumedOccurrence = entry?.plannedOccurrence;
+              if (entry === undefined || consumedOccurrence === null || consumedOccurrence === undefined ||
+                  !sameTimerScheduledOccurrence(consumedOccurrence, occurrence)) return false;
+              const now = Date.now();
+              if (sendClaim.status === "sent") entry.lastRunAt = new Date(now).toISOString();
+              if (entry.config.trigger.type === "stream_start") {
+                entry.completedStreamId = consumedOccurrence.identity.streamId;
+              }
+              const nextInputs = {
+                ...inputs,
+                now: Math.max(now, consumedOccurrence.identity.deadline),
+              };
+              const nextPlan = makeTimerPlan(entry.config, state.stream, consumedOccurrence, nextInputs,
+                "after_occurrence", entry.completedStreamId ?? null);
+              this.setTimerPlanSync(entry, nextPlan, state.stream, nextInputs);
+              this.persistTimerScheduleSync(state, timerId, entry);
+              return true;
+            });
+            if (!reconciled) continue;
+            await this.writeTimerMirror(timerId);
+            await this.scheduleEarliestAlarm();
+            continue;
+          }
+        }
         const authorization = authorizeModuleMutation(channelId, actor, new Date().toISOString());
         const authorizationAndModule = await this.env.DB.prepare(
           `SELECT timer_module.enabled AS timers_module_enabled
