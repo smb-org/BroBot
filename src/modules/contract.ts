@@ -1531,6 +1531,8 @@ export interface ModuleImmediateActionResult {
   message?: Readonly<Record<ModuleLanguage, string>>;
   tone?: "success" | "info" | "error";
   link?: { href: string; label: Readonly<Record<ModuleLanguage, string>> };
+  /** The cockpit drops this feedback once a later availability check confirms the action again (for example after a permission grant). */
+  supersededByAvailability?: boolean;
   belaboxSample?: { connected: boolean; bitrateKbps: number; sampledAt: number };
 }
 

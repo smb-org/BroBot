@@ -29,7 +29,7 @@ interface ActionFeedback {
   href?: string;
   linkLabel?: string;
   until?: number;
-  /** Availability generation at the time of an error result that carries a link; a later confirmation supersedes it. */
+  /** Availability generation at the time of a result marked as superseded by availability; a later confirmation supersedes it. */
   supersededByConfirmationAfter?: number;
 }
 
@@ -234,7 +234,7 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
   const [feedbackNow, setFeedbackNow] = useState(() => Date.now());
   const mounted = useRef(true);
   const confirmationsRef = useRef(availabilityConfirmations);
-  // A linked error result (for example a missing permission) is superseded once a later availability check confirms the action again.
+  // A result marked as superseded by availability (for example a missing permission) is dropped once a later availability check confirms the action again.
   const result = savedResult?.supersededByConfirmationAfter !== undefined && availabilityConfirmations > savedResult.supersededByConfirmationAfter
     ? null
     : savedResult;
@@ -337,7 +337,7 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
       setResult({
         message: actionResult?.message?.[language] ?? texts.streamManager.actionSucceeded(action.name[language]),
         ...(actionResult?.link === undefined ? {} : { href: actionResult.link.href, linkLabel: actionResult.link.label[language] }),
-        ...(actionResult?.link !== undefined && actionResult.tone === "error" ? { supersededByConfirmationAfter: confirmationsRef.current } : {}),
+        ...(actionResult?.supersededByAvailability === true ? { supersededByConfirmationAfter: confirmationsRef.current } : {}),
       });
       onFeedbackMessage?.(
         actionResult?.message?.[language] ?? texts.streamManager.actionSucceeded(action.name[language]),

@@ -56,6 +56,7 @@ const streamMarkerAction = async (channelId: string, viewerUserId: string | null
     return {
       message: (viewerUserId === channelId ? streamMarkerActionTexts.scopeMissing : streamMarkerActionTexts.scopeOwnerOnly),
       tone: "error" as const,
+      supersededByAvailability: true,
       ...(viewerUserId === channelId ? { link: { href: result.grantHref, label: streamMarkerActionTexts.scopeGrant } } : {}),
     };
   }

@@ -277,7 +277,10 @@ describe("cockpit action role mirror", () => {
     expect(onFeedbackMessage).toHaveBeenCalledWith(expect.stringMatching(/5:23/u), undefined, "success");
   });
 
-  it("clears a saved scope_missing result once a later availability check confirms the granted permission", async () => {
+  it.each([
+    { who: "channel owner", viewerUserId: "channel-a", feedback: /Broadcaster-Berechtigung fehlt|broadcast permission is missing/u, hasLink: true },
+    { who: "non-owner manager", viewerUserId: "manager-1", feedback: /Nur der Kanalinhaber kann diese Berechtigung erteilen|only the channel owner can grant this permission/u, hasLink: false },
+  ])("clears a saved scope_missing result for the $who once a later availability check confirms the granted permission", async ({ viewerUserId, feedback, hasLink }) => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     try {
       vi.mocked(createStreamMarker).mockResolvedValue({
@@ -285,22 +288,24 @@ describe("cockpit action role mirror", () => {
         error: "broadcast_scope_missing",
         grantHref: "/auth/channels/channel-a/broadcaster-scopes/broadcast",
       });
-      render(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId="channel-a" streamState="online" role="manager"
+      render(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId={viewerUserId} streamState="online" role="manager"
         modules={[{ id: "channel_events", enabled: true }]} /></UiProvider>);
 
       const marker = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
       await waitFor(() => expect((marker as HTMLButtonElement).disabled).toBe(false));
       fireEvent.click(marker);
-      expect(await screen.findByRole("link", { name: /Berechtigung erteilen/u })).not.toBeNull();
+      await waitFor(() => expect(screen.getAllByText(feedback)).not.toHaveLength(0));
+      expect(screen.queryAllByRole("link", { name: /Grant permission|Berechtigung erteilen/u }).length > 0).toBe(hasLink);
 
       vi.mocked(fetchStreamMarkerAvailability).mockResolvedValue({ manageScopeAvailable: false });
       await act(async () => { vi.advanceTimersByTime(4_000); await Promise.resolve(); });
       await waitFor(() => expect((marker as HTMLButtonElement).disabled).toBe(true));
-      expect(screen.getByRole("link", { name: /Berechtigung erteilen/u })).not.toBeNull();
+      expect(screen.getAllByText(feedback)).not.toHaveLength(0);
 
       vi.mocked(fetchStreamMarkerAvailability).mockResolvedValue({ manageScopeAvailable: true });
       await act(async () => { vi.advanceTimersByTime(4_000); await Promise.resolve(); });
       await waitFor(() => expect((marker as HTMLButtonElement).disabled).toBe(false));
+      expect(screen.queryByText(feedback)).toBeNull();
       expect(screen.queryByRole("link", { name: /Grant permission|Berechtigung erteilen/u })).toBeNull();
     } finally {
       vi.useRealTimers();
