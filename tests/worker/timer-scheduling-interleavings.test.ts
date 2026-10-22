@@ -1991,12 +1991,12 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
   });
 
   it.each([{ restart: false }, { restart: true }])(
-    "keeps a skipped stream-start timer suppressed after post-deadline re-enable (restart=$restart)",
+    "keeps a skipped stream-start timer suppressed after a delayed re-enable (restart=$restart)",
     async ({ restart }) => {
       vi.useFakeTimers();
       const start = Date.parse("2026-10-12T12:00:00.000Z");
       vi.setSystemTime(start);
-      const stream = onlineStream("stream-1", 1, start - 30_000);
+      const stream = onlineStream("stream-1", 1, start);
       const original = channelObjectFor(stream);
       const config = timerConfig(`skip-post-deadline-enable-${String(restart)}`, { type: "stream_start", minutes: 1 });
       original.setDatabaseConfig(config);
@@ -2009,16 +2009,24 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
       await expect(scheduler.skipNextTimerOccurrence(config.id, config.revision, actor))
         .resolves.toMatchObject({ result: "skipped" });
       const skippedOccurrence = dueOccurrence(original.values, config.id);
-      expect(skippedOccurrence.identity.deadline).toBe(start + 30_000);
+      expect(skippedOccurrence.identity.deadline).toBe(start + 60_000);
 
       const disabled = { ...config, enabled: false, revision: config.revision + 1 };
       original.setDatabaseConfig(disabled);
       await original.object.upsertTimerConfig(disabled);
+      const disabledWithLongDelay = {
+        ...disabled,
+        trigger: { type: "stream_start", minutes: 1_440 } as const,
+        revision: config.revision + 2,
+      };
+      original.setDatabaseConfig(disabledWithLongDelay);
+      await original.object.upsertTimerConfig(disabledWithLongDelay);
       expect(Date.now()).toBeLessThan(skippedOccurrence.identity.deadline);
+      expect(stateOf(original.values).timers[config.id]?.skipReceipts).toHaveLength(1);
 
-      const reenabledAt = skippedOccurrence.identity.deadline + 1_000;
+      const reenabledAt = start + 24 * 60 * 60_000 + 2 * 60_000;
       vi.setSystemTime(reenabledAt);
-      const reenabled = { ...config, revision: config.revision + 2 };
+      const reenabled = { ...disabledWithLongDelay, enabled: true, revision: config.revision + 3 };
       const harness = restart
         ? channelObjectFor(stream, new Map(structuredClone([...original.values])))
         : original;

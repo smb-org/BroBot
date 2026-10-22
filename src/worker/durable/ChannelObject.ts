@@ -284,6 +284,8 @@ const LEGACY_TIMER_CLAIMS_IMPORTED_KEY = "timers:legacy_claims_imported";
 
 const streamStartIdempotencyKey = (timerId: string, streamId: string): string =>
   `${timerId}:stream_start:${encodeURIComponent(streamId)}`;
+const isStreamStartTimerSkipReceipt = (timerId: string, occurrenceKey: string): boolean =>
+  occurrenceKey.startsWith(`${timerId}:stream_start:`);
 const timerSkipReceiptKey = (occurrence: TimerOccurrence): string => occurrence.identity.triggerType === "stream_start" &&
   occurrence.identity.streamId !== null
   ? streamStartIdempotencyKey(occurrence.identity.timerId, occurrence.identity.streamId)
@@ -307,8 +309,15 @@ const timerSkipReceiptsForSchedule = (
       (stream.state !== "online" || stream.streamId !== occurrence.identity.streamId ||
         stream.generation !== occurrence.identity.generation))
     .map(timerSkipReceiptKey));
-  return (entry.skipReceipts ?? []).filter((receipt) => !endedStreamStartReceiptKeys.has(receipt.occurrenceKey) &&
-    (activeReceiptKeys.has(receipt.occurrenceKey) || receipt.deadline + TIMER_SKIP_RECEIPT_RETENTION_MS >= now));
+  return (entry.skipReceipts ?? []).filter((receipt) => {
+    if (endedStreamStartReceiptKeys.has(receipt.occurrenceKey)) return false;
+    if (isStreamStartTimerSkipReceipt(entry.config.id, receipt.occurrenceKey)) {
+      return stream.state === "unknown" || stream.state === "online" && stream.streamId !== null &&
+        receipt.occurrenceKey === streamStartIdempotencyKey(entry.config.id, stream.streamId);
+    }
+    return activeReceiptKeys.has(receipt.occurrenceKey) ||
+      receipt.deadline + TIMER_SKIP_RECEIPT_RETENTION_MS >= now;
+  });
 };
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
