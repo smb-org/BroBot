@@ -51,7 +51,7 @@ const catalog = (language: DashboardLanguage): SettingsEditorCatalog => {
       commands: de ? "Befehle" : "Commands",
       stakes: de ? "Einsätze" : "Stakes",
       rules: de ? "Rundenregeln" : "Round rules",
-      chat: de ? "Chat" : "Chat",
+      chat: "Chat",
       texts: de ? "Chat-Texte" : "Chat texts",
     },
     fields: {
