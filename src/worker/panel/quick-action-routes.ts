@@ -27,13 +27,24 @@ quickActionRouter.post(
     const language = channel.language === "en" ? "en" : "de";
     const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
     let localCooldownUntil = 0;
+    const stillValid = async (): Promise<boolean> => {
+      const currentAuthorization = context.get("authorizeMutation")(
+        channelId,
+        context.get("actor"),
+        new Date().toISOString(),
+      );
+      const currentMember = await context.env.DB.prepare(
+        `SELECT channel_id FROM channels WHERE channel_id = ? ${currentAuthorization.sql}`,
+      ).bind(channelId, ...currentAuthorization.values).first<{ channel_id: string }>();
+      return currentMember !== null;
+    };
     const result = await sendChatMessage(
       context.env,
       channelId,
       textCommandQuickActionTexts.testMessage.chatText[language],
       undefined,
       fetch,
-      undefined,
+      stillValid,
       async () => {
         const claimAt = Date.now();
         const claim = await channelObject.claimTestMessageSend(claimAt);
@@ -45,6 +56,8 @@ quickActionRouter.post(
         return "rate_limited";
       },
     );
+
+    if (result.reason === "stale_before_send") return context.json({ error: "test_message_denied" }, 403);
 
     let response: TestMessageResult;
     if (result.sent) response = { result: "sent" };

@@ -611,6 +611,7 @@ pre {
 .command-palette__item-copy { display: grid; flex: 1; min-width: 0; gap: 2px; }
 .command-palette__item-main { overflow: hidden; color: inherit; font-size: 13px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .command-palette__item-description { overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.command-palette__inline-reason { flex: 0 1 auto; min-width: 0; max-width: 40%; overflow: hidden; color: var(--text-3); font-size: 11px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .command-palette__state { flex: none; color: var(--text-3); font-size: 11px; }
 .command-palette__arrow { flex: none; color: var(--brand-text); font-size: 14px; }
 .command-palette__list [cmdk-empty] { padding: 20px 12px; color: var(--text-3); font-size: 13px; text-align: center; }

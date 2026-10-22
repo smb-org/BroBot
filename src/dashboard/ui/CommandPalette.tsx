@@ -8,6 +8,7 @@ export interface CommandPaletteItem {
   label: string;
   recentTargetPath?: string;
   description?: string;
+  inlineReason?: string;
   group?: string;
   stateLabel?: string;
   keywords?: readonly string[];
@@ -176,6 +177,7 @@ export function CommandPalette({
                       <span className="command-palette__item-main">{item.label}</span>
                       {descriptionText === undefined ? null : <span className="command-palette__item-description">{descriptionText}</span>}
                     </span>
+                    {item.inlineReason === undefined ? null : <span className="command-palette__inline-reason" title={item.inlineReason}>{item.inlineReason}</span>}
                     {item.stateLabel === undefined ? null : <span className="command-palette__state">{item.stateLabel}</span>}
                     <span aria-hidden="true" className="command-palette__arrow">↵</span>
                   </Command.Item>

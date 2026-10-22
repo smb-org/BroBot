@@ -124,6 +124,7 @@ const sourceFiles = (directory: string): string[] => readdirSync(directory, { wi
 // Only `placeholders` is built at runtime and has no production literal.
 const sqlGetFixtures = new Map<string, string>([
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
+  ["currentAuthorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
   ["referenceQuery.sql", apiSourceReferenceQuery("channel-id", "sunset").sql],
   ["CHAT_VOTE_RESULT_TEXT_REFERENCE_EXISTS_SQL", CHAT_VOTE_RESULT_TEXT_REFERENCE_EXISTS_SQL],
   ["CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL", CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL],
