@@ -157,6 +157,8 @@
   .live-action-frame__load-error { display: grid; gap: var(--s2); color: var(--error); }
   .live-action-frame__load-error p { margin: 0; }
   .live-action-content__status { margin: 0; color: var(--text-2); }
+  .live-action-content--counter__select-skeleton { cursor: default; }
+  .live-action-content--counter__select-skeleton > span { display: block; width: 68%; height: var(--s2); border-radius: var(--radius-control); background: var(--color-border-strong); }
   .live-action-content__template-slot { display: grid; align-items: center; min-height: 68px; }
   .live-action-content__vote-options { display: grid; gap: var(--s2); }
   .live-action-content__vote-options > .ui-button { justify-self: start; width: max-content; max-width: 100%; }

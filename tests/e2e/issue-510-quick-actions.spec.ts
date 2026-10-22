@@ -114,6 +114,7 @@ const setupQuickActionCockpit = async (
     counterLoadIsPending: () => counterLoadPending,
     releaseCounterLoad: () => { releaseCounterLoad?.(); },
     hideVariables: async () => page.evaluate(() => { document.documentElement.dataset.counterVariables = "off"; }),
+    showVariables: async () => page.evaluate(() => { delete document.documentElement.dataset.counterVariables; }),
   };
 };
 
@@ -122,6 +123,61 @@ const actionGridBox = async (page: Page) => {
   expect(bounds).not.toBeNull();
   return { x: bounds?.x, y: bounds?.y, width: bounds?.width, height: bounds?.height };
 };
+
+test("keeps command palette action rows fixed at desktop and mobile widths", async ({ page }) => {
+  const actions = await setupQuickActionCockpit(page, () => {});
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${channelId}`);
+
+  const openPalette = async () => {
+    await page.keyboard.press(await page.evaluate(() => /Mac|iPhone|iPad|iPod/u.test(navigator.platform || navigator.userAgent) ? "Meta+k" : "Control+k"));
+    const palette = page.locator(".command-palette");
+    await expect(palette).toBeVisible();
+    return palette;
+  };
+  const measureRows = async (palette: ReturnType<typeof page.locator>, expectedHeight: number) => {
+    const rows = palette.locator('[data-command-palette-item-id^="action:"]');
+    await expect(rows).toHaveCount(6);
+    const heights = await rows.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height));
+    expect(heights.every((height) => height === expectedHeight)).toBe(true);
+    return heights;
+  };
+  const expectLongTitlesToFit = async (palette: ReturnType<typeof page.locator>) => {
+    for (const itemId of ["action:channel-mute", "action:channel-pause"]) {
+      const title = palette.locator(`[data-command-palette-item-id="${itemId}"] .command-palette__item-main`);
+      expect(await title.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    }
+  };
+
+  let palette = await openPalette();
+  const desktopAvailableHeights = await measureRows(palette, 42);
+  await page.keyboard.press("Escape");
+  await actions.hideVariables();
+  palette = await openPalette();
+  const desktopDisabledCounter = palette.locator('[data-command-palette-item-id="action:counter-plus-one"]');
+  await expect(desktopDisabledCounter).toHaveAttribute("aria-disabled", "true");
+  const desktopReasonId = await desktopDisabledCounter.getAttribute("aria-describedby");
+  expect(desktopReasonId).not.toBeNull();
+  await expect(palette.locator(`[id="${desktopReasonId ?? "missing-description"}"]`)).toHaveText("Keine numerischen Kanalvariablen verfügbar.");
+  expect(await measureRows(palette, 42)).toEqual(desktopAvailableHeights);
+  await page.keyboard.press("Escape");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await actions.showVariables();
+  palette = await openPalette();
+  const mobileAvailableHeights = await measureRows(palette, 58);
+  await expectLongTitlesToFit(palette);
+  await page.keyboard.press("Escape");
+  await actions.hideVariables();
+  palette = await openPalette();
+  const mobileDisabledCounter = palette.locator('[data-command-palette-item-id="action:counter-plus-one"]');
+  await expect(mobileDisabledCounter).toHaveAttribute("aria-disabled", "true");
+  const mobileReasonId = await mobileDisabledCounter.getAttribute("aria-describedby");
+  expect(mobileReasonId).not.toBeNull();
+  await expect(palette.locator(`[id="${mobileReasonId ?? "missing-description"}"]`)).toHaveText("Keine numerischen Kanalvariablen verfügbar.");
+  expect(await measureRows(palette, 58)).toEqual(mobileAvailableHeights);
+  await expectLongTitlesToFit(palette);
+});
 
 test("shows both quick actions at desktop and mobile widths and keeps the grid fixed", async ({ page }, testInfo) => {
   const availabilityChanges: boolean[] = [];
@@ -178,6 +234,9 @@ test("keeps Counter Run disabled and guarded while its variable request is pendi
   await expect(runButton).toBeDisabled();
   await expect.poll(() => actions.counterLoadIsPending()).toBe(true);
   await expect(runButton).toHaveAttribute("title", "Variablen werden geladen …");
+  const loadingHeight = (await page.locator(".live-action-frame-popover").boundingBox())?.height;
+  await expect(popover.getByText("Kanalvariable", { exact: true })).toBeVisible();
+  await expect(popover.locator(".live-action-content--counter__select-skeleton")).toBeVisible();
 
   const readinessDescriptionId = await runButton.getAttribute("aria-describedby");
   expect(readinessDescriptionId).not.toBeNull();
@@ -189,6 +248,10 @@ test("keeps Counter Run disabled and guarded while its variable request is pendi
 
   actions.releaseCounterLoad();
   await expect(runButton).toBeEnabled();
+  await expect(popover.getByRole("combobox", { name: "Kanalvariable" })).toBeVisible();
+  const loadedHeight = (await page.locator(".live-action-frame-popover").boundingBox())?.height;
+  expect(loadingHeight).not.toBeUndefined();
+  expect(loadedHeight).toBe(loadingHeight);
   await runButton.click();
   await expect(page.getByText("Neuer Wert: 5").first()).toBeVisible();
   expect(actions.valueRouteCalls()).toBe(1);

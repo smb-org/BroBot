@@ -616,6 +616,15 @@ pre {
 .command-palette__list [cmdk-empty] { padding: 20px 12px; color: var(--text-3); font-size: 13px; text-align: center; }
 .command-palette__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; padding: 0 12px; border-top: 1px solid var(--line); color: var(--text-3); font-size: 11px; }
 .command-palette__footer span { display: flex; align-items: center; gap: 5px; }
+@media (max-width: 639px) {
+  .command-palette__list [cmdk-item] { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; grid-template-rows: repeat(2, minmax(0, 1fr)); box-sizing: border-box; height: 58px; min-height: 58px; gap: 0 10px; padding: 5px 9px; }
+  .command-palette__item-icon { grid-column: 1; grid-row: 1 / 3; }
+  .command-palette__item-copy { grid-column: 2; grid-row: 1; flex: initial; }
+  .command-palette__item-main { min-width: 0; flex: 1 1 auto; }
+  .command-palette__inline-reason { grid-column: 2 / -1; grid-row: 2; display: flex; align-items: center; max-width: none; text-align: left; }
+  .command-palette__state { grid-column: 3; grid-row: 1; }
+  .command-palette__arrow { grid-column: 4; grid-row: 1; }
+}
 .inspector-section__heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); min-height: 24px; margin-bottom: 14px; }
 .inspector-section__heading h2, .inspector-section__heading h3 { margin: 0; color: var(--text); font-size: 13px; font-weight: 600; }
 .inspector-close { width: 44px; height: 44px; min-height: 44px; flex: none; padding: 10px; }

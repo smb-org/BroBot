@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 
 import type { ModuleImmediateActionContentProperties } from "../../contract";
-import { LoadStateLines, Select } from "../../../dashboard/ui";
+import { Select } from "../../../dashboard/ui";
 import { readLastCounterVariable, rememberLastCounterVariable } from "./counter-selection";
 import { textCommandQuickActionTexts } from "./quick-action-locale";
 import { loadTextCommandData, type TextCommandChannelVariable } from "./service";
@@ -57,7 +57,12 @@ export default function CounterActionContent({ channelId, language, onReadinessC
 
   return <div className="live-action-content live-action-content--counter" aria-busy={variables === null}>
     {variables === null
-      ? <LoadStateLines rows={1} height={48} />
+      ? <div className="ui-select live-action-content--counter__loading">
+        <span className="ui-field__label">{texts.variableLabel[language]}</span>
+        <div aria-hidden="true" className="ui-select__trigger live-action-content--counter__select-skeleton"><span /></div>
+        <span aria-hidden="true" className="ui-select__description" />
+        <span aria-hidden="true" className="ui-field-error ui-select__error"><span /></span>
+      </div>
       : variablesState.failed
         ? <p className="live-action-content__status" role="status">{texts.loadFailed[language]}</p>
         : numericVariables?.length === 0

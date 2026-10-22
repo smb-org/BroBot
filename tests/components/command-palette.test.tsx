@@ -65,6 +65,46 @@ describe("cmdk command palette", () => {
     expect(onTrigger).toHaveBeenCalledOnce();
   });
 
+  it("keeps a reserved reason line for rows without a description and exposes label plus state accessibly", () => {
+    const items: CommandPaletteItem[] = [
+      {
+        id: "mute-channel",
+        label: "Kanal stummschalten",
+        description: "Bleibt aktiv, bis du es aufhebst.",
+        stateLabel: "Inaktiv",
+        onTrigger: vi.fn(),
+      },
+      {
+        id: "pause-automations",
+        label: "Automatische Aktionen pausieren",
+        stateLabel: "Inaktiv",
+        onTrigger: vi.fn(),
+      },
+    ];
+    render(
+      <UiProvider><CommandPalette
+        items={items}
+        open
+        onOpenChange={vi.fn()}
+        emptyMessage={texts.empty}
+        title={texts.title}
+        description={texts.description}
+        placeholder={texts.placeholder}
+        navigateHint={texts.navigateHint}
+        openHint={texts.openHint}
+      /></UiProvider>,
+    );
+
+    const describedRow = screen.getByRole("option", { name: "Kanal stummschalten Inaktiv" });
+    const emptyReasonRow = screen.getByRole("option", { name: "Automatische Aktionen pausieren Inaktiv" });
+    const describedReasonId = describedRow.getAttribute("aria-describedby");
+    expect(describedReasonId).not.toBeNull();
+    expect(document.getElementById(describedReasonId ?? "")?.textContent).toBe("Bleibt aktiv, bis du es aufhebst.");
+    expect(describedRow.querySelector(".command-palette__inline-reason")?.textContent).toBe("Bleibt aktiv, bis du es aufhebst.");
+    expect(emptyReasonRow.querySelector(".command-palette__inline-reason")?.textContent).toBe("");
+    expect(emptyReasonRow.getAttribute("aria-describedby")).toBeNull();
+  });
+
   it("restores focus to the control that opened it after Escape", async () => {
     const item: CommandPaletteItem = { id: "members", label: "Members", group: "Administration", onTrigger: vi.fn() };
     const Harness = () => {
@@ -226,7 +266,7 @@ describe("cmdk command palette", () => {
 
     await waitFor(() => expect(counter.getAttribute("aria-disabled")).not.toBe("true"));
     expect(counter.querySelector(".command-palette__item-description")).toBeNull();
-    expect(counter.querySelector(".command-palette__inline-reason")).toBeNull();
+    expect(counter.querySelector(".command-palette__inline-reason")?.textContent).toBe("");
   });
 
   it("waits for a fresh counter-variable list after reopening the palette", async () => {

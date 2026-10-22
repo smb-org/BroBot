@@ -105,6 +105,9 @@ describe("cockpit action role mirror", () => {
     fireEvent.click(action);
     const runButton = await screen.findByRole("button", { name: dashboardTexts().streamManager.actionRun });
     await waitFor(() => expect(document.querySelector(".live-action-content--counter[aria-busy='true']")).not.toBeNull());
+    const loadingCounterContent = document.querySelector<HTMLElement>(".live-action-content--counter[aria-busy='true']");
+    expect(loadingCounterContent?.querySelector(".ui-field__label")?.textContent).toMatch(/Channel variable|Kanalvariable/u);
+    expect(loadingCounterContent?.querySelector(".live-action-content--counter__select-skeleton")).not.toBeNull();
 
     expect((runButton as HTMLButtonElement).disabled).toBe(true);
     expect(runButton.getAttribute("title")).toMatch(/Loading variables|Variablen werden geladen/u);
@@ -114,6 +117,9 @@ describe("cockpit action role mirror", () => {
 
     resolveCounterData?.({ commands: [], variables: [{ name: "score", value: 4, description: "Score" }] });
     await waitFor(() => expect((runButton as HTMLButtonElement).disabled).toBe(false));
+    const loadedCounterContent = document.querySelector<HTMLElement>(".live-action-content--counter[aria-busy='false']");
+    expect(loadedCounterContent?.querySelector(".ui-field__label")?.textContent).toMatch(/Channel variable|Kanalvariable/u);
+    expect(loadedCounterContent?.querySelector(".live-action-content--counter__select-skeleton")).toBeNull();
     fireEvent.click(runButton);
 
     await waitFor(() => expect(changeChannelVariableValue).toHaveBeenCalledWith("channel-a", "score", "add", 1));

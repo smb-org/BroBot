@@ -181,7 +181,7 @@ export function CommandPalette({
                     <span className="command-palette__item-copy">
                       <span className="command-palette__item-main">{item.label}</span>
                     </span>
-                    {descriptionText === undefined ? null : <span aria-hidden="true" className="command-palette__inline-reason" title={descriptionText}>{descriptionText}</span>}
+                    <span aria-hidden="true" className="command-palette__inline-reason" title={descriptionText}>{descriptionText ?? ""}</span>
                     {descriptionText === undefined ? null : <span className="sr-only" id={descriptionId}>{descriptionText}</span>}
                     {item.stateLabel === undefined ? null : <span className="command-palette__state">{item.stateLabel}</span>}
                     <span aria-hidden="true" className="command-palette__arrow">↵</span>
