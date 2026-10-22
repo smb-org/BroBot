@@ -23,8 +23,9 @@ const environmentKeys = {
 let database: TestD1Database;
 let lastAttemptByChannel: Map<string, number>;
 let identityPrepared: boolean;
+type TestMessageClaim = { allowed: true } | { allowed: false; retryAfter: number };
 
-const environmentFor = (): Env => ({
+const environmentFor = (claimOverride?: (channelId: string, now: number) => Promise<TestMessageClaim>): Env => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
@@ -32,13 +33,19 @@ const environmentFor = (): Env => ({
     idFromName: (channelId: string) => channelId,
     get: (channelId: string) => ({
       recordBotChatMessage: (): Promise<void> => Promise.resolve(),
-      claimTestMessageSend: (now: number): Promise<{ allowed: true } | { allowed: false; retryAfter: number }> => {
+      claimTestMessageSend: (now: number): Promise<TestMessageClaim> => {
+        if (claimOverride !== undefined) return claimOverride(channelId, now);
         const previous = lastAttemptByChannel.get(channelId);
         if (previous !== undefined && now - previous < 30_000) {
           return Promise.resolve({ allowed: false, retryAfter: Math.max(1, Math.ceil((previous + 30_000 - now) / 1_000)) });
         }
         lastAttemptByChannel.set(channelId, now);
         return Promise.resolve({ allowed: true });
+      },
+      releaseTestMessageSend: (claimedAt: number): Promise<boolean> => {
+        if (lastAttemptByChannel.get(channelId) !== claimedAt) return Promise.resolve(false);
+        lastAttemptByChannel.delete(channelId);
+        return Promise.resolve(true);
       },
     }),
   },
@@ -62,9 +69,9 @@ const requestFor = async (userId: string, channelId: string): Promise<Request> =
   });
 };
 
-const send = async (userId: string, channelId: string): Promise<Response> => panelRouter.fetch(
+const send = async (userId: string, channelId: string, environment = environmentFor()): Promise<Response> => panelRouter.fetch(
   await requestFor(userId, channelId),
-  environmentFor(),
+  environment,
 );
 
 const chatResult = (overrides: Partial<{
@@ -102,6 +109,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   database.close();
 });
 
@@ -260,6 +268,64 @@ describe("quick action test-message route", () => {
     expect(retry.status).toBe(200);
     await expect(retry.json()).resolves.toEqual({ result: "sent" });
     expect(lastAttemptByChannel.has("channel-a")).toBe(true);
+    expect(requestedUrls).toContain("https://api.twitch.tv/helix/chat/messages");
+  });
+
+  it("rechecks membership after a delayed cooldown claim and releases the unused reservation", async () => {
+    await prepareChannel("channel-a");
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-a', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+
+    const { sendChatMessage: productionSendChatMessage } = await vi.importActual<ChatModule>("../../src/worker/chat");
+    vi.mocked(mocks.sendChatMessage).mockImplementation((...args) => productionSendChatMessage(...args));
+
+    let resolveClaim: (() => void) | undefined;
+    let markClaimStarted: (() => void) | undefined;
+    const claimGate = new Promise<void>((resolve) => { resolveClaim = resolve; });
+    const claimStarted = new Promise<void>((resolve) => { markClaimStarted = resolve; });
+    const requestedUrls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = input instanceof Request ? input.url : String(input);
+      requestedUrls.push(url);
+      if (url === "https://id.twitch.tv/oauth2/token") {
+        return Promise.resolve(new Response(JSON.stringify({ access_token: "app-token", expires_in: 3600 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ data: [{ is_sent: true, message_id: "message-a" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+
+    const delayedClaimEnvironment = environmentFor(async (channelId, now) => {
+      markClaimStarted?.();
+      await claimGate;
+      lastAttemptByChannel.set(channelId, now);
+      return { allowed: true };
+    });
+    const pendingResponse = send("operator-a", "channel-a", delayedClaimEnvironment);
+    await claimStarted;
+    await database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?").bind("channel-a", "operator-a").run();
+    resolveClaim?.();
+
+    const response = await pendingResponse;
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "test_message_denied" });
+    expect(lastAttemptByChannel.has("channel-a")).toBe(false);
+    expect(requestedUrls).toEqual(["https://id.twitch.tv/oauth2/token"]);
+
+    await insertMember(database, "channel-a", "operator-a", "operator");
+    const retry = await send("operator-a", "channel-a");
+
+    expect(retry.status).toBe(200);
+    await expect(retry.json()).resolves.toEqual({ result: "sent" });
     expect(requestedUrls).toContain("https://api.twitch.tv/helix/chat/messages");
   });
 

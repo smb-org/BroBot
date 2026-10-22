@@ -4,6 +4,7 @@ export const textCommandQuickActionTexts = {
   counter: {
     name: { de: "Zähler +1", en: "Counter +1" },
     paletteKeywords: ["counter", "variable", "zähler", "kanalvariable"],
+    loading: { de: "Variablen werden geladen …", en: "Loading variables…" },
     noVariables: { de: "Keine numerischen Kanalvariablen verfügbar.", en: "No numeric channel variables are available." },
     loadFailed: { de: "Variablen konnten nicht geladen werden.", en: "Variables could not be loaded." },
     variableLabel: { de: "Kanalvariable", en: "Channel variable" },

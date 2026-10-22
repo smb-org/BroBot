@@ -249,7 +249,7 @@ export const textCommandModule: BotModule<typeof settingsSchema> = {
       icon: "counter",
       conditions: ["streamLive", counterHasVariables],
       requiredRole: "operator",
-      content: { presentation: "popover", load: () => import("./panel/action-content") },
+      content: { presentation: "popover", requiresReadiness: true, load: () => import("./panel/action-content") },
       errorMessage: textCommandQuickActionTexts.counter.error,
       execute: async ({ channelId, formData }) => {
         const variableName = formData.get("variableName");

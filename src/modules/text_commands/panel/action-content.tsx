@@ -17,7 +17,7 @@ interface CounterSelectionState {
   name: string | null;
 }
 
-export default function CounterActionContent({ channelId, language }: ModuleImmediateActionContentProperties): ReactElement {
+export default function CounterActionContent({ channelId, language, onReadinessChange }: ModuleImmediateActionContentProperties): ReactElement {
   const texts = textCommandQuickActionTexts.counter;
   const [variablesState, setVariablesState] = useState<CounterVariablesState>({ channelId, variables: null, failed: false });
   const [selectionState, setSelectionState] = useState<CounterSelectionState>(() => ({
@@ -41,6 +41,19 @@ export default function CounterActionContent({ channelId, language }: ModuleImme
   const selectedName = numericVariables?.some((variable) => variable.name === savedSelection) === true
     ? savedSelection
     : numericVariables?.[0]?.name ?? null;
+  const ready = numericVariables !== null && !variablesState.failed && selectedName !== null &&
+    numericVariables.some((variable) => variable.name === selectedName);
+  const readinessReason = ready
+    ? null
+    : variables === null
+      ? texts.loading[language]
+      : variablesState.failed
+        ? texts.loadFailed[language]
+        : texts.noVariables[language];
+
+  useEffect(() => {
+    onReadinessChange?.(ready, readinessReason);
+  }, [onReadinessChange, readinessReason, ready]);
 
   return <div className="live-action-content live-action-content--counter" aria-busy={variables === null}>
     {variables === null

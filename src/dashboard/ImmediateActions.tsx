@@ -204,11 +204,23 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
   const [draftDirty, setDraftDirty] = useState(false);
   const [contentFailed, setContentFailed] = useState(false);
   const [loadedContent, setLoadedContent] = useState<{ actionId: string; component: ComponentType<ModuleImmediateActionContentProperties> } | null>(null);
+  const [contentReadiness, setContentReadiness] = useState<{ actionId: string; channelId: string; generation: number; ready: boolean; reason: string | null } | null>(null);
+  const [contentReadinessGeneration, setContentReadinessGeneration] = useState(0);
   const [error, setError] = useState<ActionFeedback | null>(null);
   const [result, setResult] = useState<ActionFeedback | null>(null);
   const [feedbackNow, setFeedbackNow] = useState(() => Date.now());
   const content = loadedContent?.actionId === action.id ? loadedContent.component : null;
   const contentLoading = open && action.content !== undefined && content === null && !contentFailed;
+  const requiresContentReadiness = action.content?.requiresReadiness === true;
+  const currentContentReadiness = contentReadiness?.actionId === action.id && contentReadiness.channelId === channelId &&
+    contentReadiness.generation === contentReadinessGeneration
+    ? contentReadiness
+    : null;
+  const contentReady = !requiresContentReadiness || currentContentReadiness?.ready === true;
+  const contentReadinessReason = !requiresContentReadiness || contentReady
+    ? null
+    : currentContentReadiness?.reason ?? texts.streamManager.actionLoading;
+  const contentReadinessReasonId = `live-action-readiness-${moduleId}-${action.id}`;
   const Content = content;
   const reasonId = `live-action-reason-${moduleId}-${action.id}`;
 
@@ -259,8 +271,26 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
     navigationGuard.guardSwitch(closeNow);
   };
 
+  const openAction = (): void => {
+    if (busy) return;
+    if (requiresContentReadiness) {
+      setContentReadiness(null);
+      setContentReadinessGeneration((generation) => generation + 1);
+    }
+    setOpen(true);
+    setDraftDirty(false);
+    setError(null);
+  };
+
+  const reportContentReadiness = useCallback((ready: boolean, readinessReason: string | null): void => {
+    setContentReadiness((current) => current?.actionId === action.id && current.channelId === channelId &&
+      current.generation === contentReadinessGeneration && current.ready === ready && current.reason === readinessReason
+      ? current
+      : { actionId: action.id, channelId, generation: contentReadinessGeneration, ready, reason: readinessReason });
+  }, [action.id, channelId, contentReadinessGeneration]);
+
   const run = async (formData: FormData): Promise<void> => {
-    if (disabled || busy || contentLoading || contentFailed) return;
+    if (disabled || busy || contentLoading || contentFailed || !contentReady) return;
     setBusy(true);
     setError(null);
     setResult(null);
@@ -333,12 +363,15 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
           <p>{texts.streamManager.actionLoadFailed}</p>
           <Button size="compact" variant="neutral" onClick={retryModuleChunkLoad}>{dashboardCommonTexts().retry}</Button>
         </div>
-        : Content === null ? null : <fieldset disabled={busy} className="live-action-frame__fields"><Content channelId={channelId} language={language} onDraftChange={setDraftDirty} /></fieldset>}
+        : Content === null ? null : <fieldset disabled={busy} className="live-action-frame__fields"><Content channelId={channelId} language={language} onDraftChange={setDraftDirty}
+          {...(requiresContentReadiness ? { onReadinessChange: reportContentReadiness } : {})} /></fieldset>}
     </div>
+    {contentReadinessReason === null ? null : <span className="sr-only" id={contentReadinessReasonId}>{contentReadinessReason}</span>}
     <p className={`live-action-frame__error${error === null ? "" : " has-error"}`} aria-live="polite" role="status">{error === null ? "\u00a0" : feedbackMessage(error)}</p>
     <footer className="live-action-frame__footer">
       <Button variant="subtle" disabled={busy} onClick={close}>{texts.streamManager.actionCancel}</Button>
-      <Button variant="primary" type="submit" disabled={disabled || busy || contentLoading || contentFailed}>
+      <Button variant="primary" type="submit" disabled={disabled || busy || contentLoading || contentFailed || !contentReady}
+        {...(contentReadinessReason === null ? {} : { describedBy: contentReadinessReasonId, title: contentReadinessReason })}>
         {busy ? texts.streamManager.actionRunning : texts.streamManager.actionRun}
       </Button>
     </footer>
@@ -346,7 +379,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
 
   if (action.content?.presentation === "popover") {
     return <div className="live-action">
-      <PopoverPrimitive.Root open={open} onOpenChange={(next) => { if (next) { if (!busy) { setOpen(true); setDraftDirty(false); setError(null); } } else close(); }}>
+      <PopoverPrimitive.Root open={open} onOpenChange={(next) => { if (next) openAction(); else close(); }}>
         <PopoverPrimitive.Trigger {...triggerProps} type="button" className={triggerClassName}>{buttonContents}</PopoverPrimitive.Trigger>
         <PopoverContent aria-labelledby={popoverTitleId} align="start" side="bottom" className="live-action-frame-popover">{frameBody}</PopoverContent>
       </PopoverPrimitive.Root>
@@ -365,7 +398,7 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
 
   if (action.content?.presentation === "dialog") {
     return <div className="live-action">
-      <DialogPrimitive.Root open={open} modal="trap-focus" onOpenChange={(next) => { if (next) { if (!busy) { setOpen(true); setDraftDirty(false); setError(null); } } else close(); }}>
+      <DialogPrimitive.Root open={open} modal="trap-focus" onOpenChange={(next) => { if (next) openAction(); else close(); }}>
         <DialogPrimitive.Trigger {...triggerProps} type="button" className={triggerClassName}>{buttonContents}</DialogPrimitive.Trigger>
         <DialogContent className="live-action-frame-dialog">
           {frameBody}

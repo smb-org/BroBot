@@ -4,7 +4,11 @@ test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
 const channelId = "issue-510-quick-actions";
 
-const setupQuickActionCockpit = async (page: Page, onVariableAvailabilityChange: (available: boolean) => void) => {
+const setupQuickActionCockpit = async (
+  page: Page,
+  onVariableAvailabilityChange: (available: boolean) => void,
+  deferCounterLoad = false,
+) => {
   const modules = [{ id: "text_commands", enabled: true, settings: "{}" }];
   const channel = {
     channelId,
@@ -34,6 +38,8 @@ const setupQuickActionCockpit = async (page: Page, onVariableAvailabilityChange:
   const variable = { channelId, name: "score", value: 4, description: "Score", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [] };
   let score = 4;
   let valueRouteCalls = 0;
+  let counterLoadPending = false;
+  let releaseCounterLoad: (() => void) | undefined;
   const json = (value: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
 
   await page.route("**/api/**", async (route) => {
@@ -79,6 +85,12 @@ const setupQuickActionCockpit = async (page: Page, onVariableAvailabilityChange:
       return;
     }
     if (pathname === `/api/channels/${channelId}/modules/text_commands/commands`) {
+      if (deferCounterLoad) {
+        counterLoadPending = true;
+        await new Promise<void>((resolve) => {
+          releaseCounterLoad = () => { counterLoadPending = false; resolve(); };
+        });
+      }
       const available = await page.evaluate(() => document.documentElement.dataset.counterVariables !== "off");
       await route.fulfill(json({ commands: [], variables: available ? [{ name: "score", value: score, description: "Score" }] : [] }));
       return;
@@ -99,6 +111,8 @@ const setupQuickActionCockpit = async (page: Page, onVariableAvailabilityChange:
 
   return {
     valueRouteCalls: () => valueRouteCalls,
+    counterLoadIsPending: () => counterLoadPending,
+    releaseCounterLoad: () => { releaseCounterLoad?.(); },
     hideVariables: async () => page.evaluate(() => { document.documentElement.dataset.counterVariables = "off"; }),
   };
 };
@@ -149,4 +163,33 @@ test("shows both quick actions at desktop and mobile widths and keeps the grid f
   await expect.poll(() => actionGridBox(page)).toEqual(mobileGrid);
   expect(availabilityChanges).toContain(false);
   expect(desktopGrid.width).toBeGreaterThan(0);
+});
+
+test("keeps Counter Run disabled and guarded while its variable request is pending", async ({ page }) => {
+  const actions = await setupQuickActionCockpit(page, () => {}, true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/channels/${channelId}`);
+
+  const counter = page.getByRole("button", { name: "Zähler +1" });
+  await expect(counter).toBeEnabled();
+  await counter.click();
+  const popover = page.getByRole("dialog", { name: "Zähler +1" });
+  const runButton = popover.getByRole("button", { name: "Ausführen" });
+  await expect(runButton).toBeDisabled();
+  await expect.poll(() => actions.counterLoadIsPending()).toBe(true);
+  await expect(runButton).toHaveAttribute("title", "Variablen werden geladen …");
+
+  const readinessDescriptionId = await runButton.getAttribute("aria-describedby");
+  expect(readinessDescriptionId).not.toBeNull();
+  await expect(page.locator(`#${readinessDescriptionId ?? ""}`)).toHaveText("Variablen werden geladen …");
+  await runButton.evaluate((button) => {
+    button.closest("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+  expect(actions.valueRouteCalls()).toBe(0);
+
+  actions.releaseCounterLoad();
+  await expect(runButton).toBeEnabled();
+  await runButton.click();
+  await expect(page.getByText("Neuer Wert: 5").first()).toBeVisible();
+  expect(actions.valueRouteCalls()).toBe(1);
 });

@@ -1516,6 +1516,7 @@ export interface ModuleImmediateActionContentProperties {
   channelId: string;
   language: ModuleLanguage;
   onDraftChange?: (dirty: boolean) => void;
+  onReadinessChange?: (ready: boolean, reason: string | null) => void;
 }
 
 interface ModuleImmediateActionExecutionProperties extends ModuleImmediateActionContentProperties {
@@ -1540,6 +1541,7 @@ export interface ModuleImmediateActionDefinition {
   errorMessage?: Readonly<Record<ModuleLanguage, string>>;
   content?: {
     presentation: "popover" | "dialog";
+    requiresReadiness?: boolean;
     load: () => Promise<{ default: ComponentType<ModuleImmediateActionContentProperties> }>;
   };
 }

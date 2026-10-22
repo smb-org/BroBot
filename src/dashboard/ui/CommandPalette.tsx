@@ -154,14 +154,19 @@ export function CommandPalette({
           {groupedItems.map(([heading, groupItems]) => (
             <Command.Group heading={heading || undefined} key={heading || "default"}>
               {groupItems.map((item) => {
-                const descriptionText = item.disabled ? item.disabledReason ?? item.description : item.description;
+                const descriptionText = item.disabled
+                  ? item.disabledReason ?? item.inlineReason ?? item.description
+                  : item.inlineReason ?? item.description;
+                const descriptionId = `command-palette-item-${item.id}-description`;
                 const itemIcon = typeof item.icon === "string"
                   ? <Icon name={item.icon as IconName} size={20} />
                   : item.icon;
                 return (
                   <Command.Item
+                    aria-label={item.stateLabel === undefined ? item.label : `${item.label} ${item.stateLabel}`}
                     data-command-palette-item-id={item.id}
                     {...(item.disabled === undefined ? {} : { disabled: item.disabled })}
+                    {...(descriptionText === undefined ? {} : { "aria-describedby": descriptionId, title: descriptionText })}
                     key={item.id}
                     onSelect={() => {
                       if (item.disabled) return;
@@ -175,9 +180,9 @@ export function CommandPalette({
                     {itemIcon === undefined ? null : <span className="command-palette__item-icon">{itemIcon}</span>}
                     <span className="command-palette__item-copy">
                       <span className="command-palette__item-main">{item.label}</span>
-                      {descriptionText === undefined ? null : <span className="command-palette__item-description">{descriptionText}</span>}
                     </span>
-                    {item.inlineReason === undefined ? null : <span className="command-palette__inline-reason" title={item.inlineReason}>{item.inlineReason}</span>}
+                    {descriptionText === undefined ? null : <span aria-hidden="true" className="command-palette__inline-reason" title={descriptionText}>{descriptionText}</span>}
+                    {descriptionText === undefined ? null : <span className="sr-only" id={descriptionId}>{descriptionText}</span>}
                     {item.stateLabel === undefined ? null : <span className="command-palette__state">{item.stateLabel}</span>}
                     <span aria-hidden="true" className="command-palette__arrow">↵</span>
                   </Command.Item>

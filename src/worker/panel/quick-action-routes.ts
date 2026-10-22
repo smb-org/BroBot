@@ -27,6 +27,7 @@ quickActionRouter.post(
     const language = channel.language === "en" ? "en" : "de";
     const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
     let localCooldownUntil = 0;
+    const reservation: { claimedAt: number | null } = { claimedAt: null };
     const stillValid = async (): Promise<boolean> => {
       const currentAuthorization = context.get("authorizeMutation")(
         channelId,
@@ -49,6 +50,7 @@ quickActionRouter.post(
         const claimAt = Date.now();
         const claim = await channelObject.claimTestMessageSend(claimAt);
         if (claim.allowed) {
+          reservation.claimedAt = claimAt;
           localCooldownUntil = claimAt + 30_000;
           return true;
         }
@@ -57,7 +59,10 @@ quickActionRouter.post(
       },
     );
 
-    if (result.reason === "stale_before_send") return context.json({ error: "test_message_denied" }, 403);
+    if (result.reason === "stale_before_send") {
+      if (reservation.claimedAt !== null) await channelObject.releaseTestMessageSend(reservation.claimedAt);
+      return context.json({ error: "test_message_denied" }, 403);
+    }
 
     let response: TestMessageResult;
     if (result.sent) response = { result: "sent" };

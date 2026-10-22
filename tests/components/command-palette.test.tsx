@@ -178,12 +178,24 @@ describe("cmdk command palette", () => {
     fireEvent.change(input, { target: { value: "counter" } });
     const counter = await screen.findByRole("option", { name: /Counter \+1|Zähler \+1/u });
     await waitFor(() => expect(counter.getAttribute("aria-disabled")).toBe("true"));
-    expect(counter.textContent).toMatch(/No numeric channel variables|Keine numerischen Kanalvariablen/u);
+    const counterReason = counter.querySelector<HTMLElement>(".command-palette__inline-reason");
+    expect(counterReason?.textContent).toMatch(/No numeric channel variables|Keine numerischen Kanalvariablen/u);
+    expect(counterReason?.title).toMatch(/No numeric channel variables|Keine numerischen Kanalvariablen/u);
+    expect(counter.querySelector(".command-palette__item-description")).toBeNull();
+    const counterDescriptionId = counter.getAttribute("aria-describedby");
+    expect(counterDescriptionId).not.toBeNull();
+    expect(document.getElementById(counterDescriptionId ?? "")?.textContent).toMatch(/No numeric channel variables|Keine numerischen Kanalvariablen/u);
 
     fireEvent.change(input, { target: { value: "test message" } });
     const message = await screen.findByRole("option", { name: /Send test message|Testnachricht senden/u });
     expect(message.getAttribute("aria-disabled")).toBe("true");
-    expect(message.textContent).toMatch(/bot is not connected|Bot ist nicht verbunden/u);
+    const messageReason = message.querySelector<HTMLElement>(".command-palette__inline-reason");
+    expect(messageReason?.textContent).toMatch(/bot is not connected|Bot ist nicht verbunden/u);
+    expect(messageReason?.title).toMatch(/bot is not connected|Bot ist nicht verbunden/u);
+    expect(message.querySelector(".command-palette__item-description")).toBeNull();
+    const messageDescriptionId = message.getAttribute("aria-describedby");
+    expect(messageDescriptionId).not.toBeNull();
+    expect(document.getElementById(messageDescriptionId ?? "")?.textContent).toMatch(/bot is not connected|Bot ist nicht verbunden/u);
   });
 
   it("shows counter loading status inline without adding a second row", async () => {

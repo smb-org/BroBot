@@ -88,6 +88,38 @@ describe("cockpit action role mirror", () => {
     expect((await screen.findByText(/Neuer Wert: 5|New value: 5/u)).textContent).toMatch(/Neuer Wert: 5|New value: 5/u);
   });
 
+  it("keeps counter submission disabled and guarded until variables finish loading", async () => {
+    let resolveCounterData: ((value: Awaited<ReturnType<typeof loadTextCommandData>>) => void) | undefined;
+    vi.mocked(loadTextCommandData).mockImplementation(() => new Promise((resolve) => { resolveCounterData = resolve; }));
+    vi.mocked(changeChannelVariableValue).mockResolvedValue({
+      variable: { channelId: "channel-a", name: "score", value: 5, description: "Score", resetOnStreamStart: false, createdAt: "", updatedAt: "" },
+    });
+    const onActionStart = vi.fn(() => Date.now());
+
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+      modules={[{ id: "text_commands", enabled: true }]} botConnected onActionStart={onActionStart} />
+    </UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Counter \+1|Zähler \+1/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(action);
+    const runButton = await screen.findByRole("button", { name: dashboardTexts().streamManager.actionRun });
+    await waitFor(() => expect(document.querySelector(".live-action-content--counter[aria-busy='true']")).not.toBeNull());
+
+    expect((runButton as HTMLButtonElement).disabled).toBe(true);
+    expect(runButton.getAttribute("title")).toMatch(/Loading variables|Variablen werden geladen/u);
+    fireEvent.submit(runButton.closest("form") as HTMLFormElement);
+    expect(onActionStart).not.toHaveBeenCalled();
+    expect(changeChannelVariableValue).not.toHaveBeenCalled();
+
+    resolveCounterData?.({ commands: [], variables: [{ name: "score", value: 4, description: "Score" }] });
+    await waitFor(() => expect((runButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(runButton);
+
+    await waitFor(() => expect(changeChannelVariableValue).toHaveBeenCalledWith("channel-a", "score", "add", 1));
+    expect(onActionStart).toHaveBeenCalledOnce();
+  });
+
   it("remembers the counter variable per channel in the picker", async () => {
     localStorage.setItem("brobot-dashboard-counter-variable-v1:channel-a", "lives");
     localStorage.setItem("brobot-dashboard-counter-variable-v1:channel-b", "score");

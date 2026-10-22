@@ -1,6 +1,7 @@
 interface TestMessageRateLimitTransaction {
   get: <Value>(key: string) => Promise<Value | undefined>;
   put: (key: string, value: unknown) => Promise<void>;
+  delete: (key: string) => Promise<boolean | number>;
 }
 
 interface TestMessageRateLimitStorage {
@@ -22,4 +23,14 @@ export const claimTestMessageSend = (
     allowed: false,
     retryAfter: Math.max(1, Math.ceil((previous + 30_000 - now) / 1_000)),
   };
+});
+
+export const releaseTestMessageSend = (
+  storage: TestMessageRateLimitStorage,
+  claimedAt: number,
+): Promise<boolean> => storage.transaction(async (transaction) => {
+  const currentClaim = await transaction.get<number>(LAST_TEST_MESSAGE_AT_KEY);
+  if (currentClaim !== claimedAt) return false;
+  await transaction.delete(LAST_TEST_MESSAGE_AT_KEY);
+  return true;
 });
