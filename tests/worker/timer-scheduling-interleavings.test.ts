@@ -1990,6 +1990,61 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     }
   });
 
+  it.each([{ restart: false }, { restart: true }])(
+    "keeps a skipped stream-start timer suppressed after post-deadline re-enable (restart=$restart)",
+    async ({ restart }) => {
+      vi.useFakeTimers();
+      const start = Date.parse("2026-10-12T12:00:00.000Z");
+      vi.setSystemTime(start);
+      const stream = onlineStream("stream-1", 1, start - 30_000);
+      const original = channelObjectFor(stream);
+      const config = timerConfig(`skip-post-deadline-enable-${String(restart)}`, { type: "stream_start", minutes: 1 });
+      original.setDatabaseConfig(config);
+      await original.object.upsertTimerConfig(config);
+      const scheduler = original.object as unknown as {
+        skipNextTimerOccurrence(timerId: string, revision: number, actor: { userId: string; sessionId: string }): Promise<{ result: string }>;
+      };
+      const actor = { userId: "operator-user", sessionId: "operator-session" };
+
+      await expect(scheduler.skipNextTimerOccurrence(config.id, config.revision, actor))
+        .resolves.toMatchObject({ result: "skipped" });
+      const skippedOccurrence = dueOccurrence(original.values, config.id);
+      expect(skippedOccurrence.identity.deadline).toBe(start + 30_000);
+
+      const disabled = { ...config, enabled: false, revision: config.revision + 1 };
+      original.setDatabaseConfig(disabled);
+      await original.object.upsertTimerConfig(disabled);
+      expect(Date.now()).toBeLessThan(skippedOccurrence.identity.deadline);
+
+      const reenabledAt = skippedOccurrence.identity.deadline + 1_000;
+      vi.setSystemTime(reenabledAt);
+      const reenabled = { ...config, revision: config.revision + 2 };
+      const harness = restart
+        ? channelObjectFor(stream, new Map(structuredClone([...original.values])))
+        : original;
+      harness.setDatabaseConfig(reenabled);
+      if (restart) await harness.object.reconcileTimerSchedules("activation");
+      else await harness.object.upsertTimerConfig(reenabled);
+
+      const replannedOccurrence = dueOccurrence(harness.values, config.id);
+      expect(replannedOccurrence.identity.deadline).toBe(reenabledAt);
+      const sends: string[] = [];
+      await harness.object.runTimerOccurrence(
+        timerAlarmContext((_text, key) => {
+          sends.push(key);
+          return Promise.resolve({ sent: true, reason: null, retryable: false });
+        }),
+        `timer:${config.id}`,
+        replannedOccurrence.identity.deadline,
+        reenabled.revision,
+        replannedOccurrence.identity,
+        replannedOccurrence.sequence,
+      );
+
+      expect(sends).toEqual([]);
+    },
+  );
+
   it("retries a skip with refreshed timezone inputs when reconciliation finishes during authorization", async () => {
     vi.useFakeTimers();
     const start = Date.parse("2026-10-13T10:00:00.000Z");

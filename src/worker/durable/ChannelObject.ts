@@ -284,8 +284,10 @@ const LEGACY_TIMER_CLAIMS_IMPORTED_KEY = "timers:legacy_claims_imported";
 
 const streamStartIdempotencyKey = (timerId: string, streamId: string): string =>
   `${timerId}:stream_start:${encodeURIComponent(streamId)}`;
-const timerSkipReceiptKey = (occurrence: TimerOccurrence): string =>
-  timerOccurrenceKey(occurrence.identity.timerId, occurrence.identity.deadline, occurrence.identity.streamId ?? undefined);
+const timerSkipReceiptKey = (occurrence: TimerOccurrence): string => occurrence.identity.triggerType === "stream_start" &&
+  occurrence.identity.streamId !== null
+  ? streamStartIdempotencyKey(occurrence.identity.timerId, occurrence.identity.streamId)
+  : timerOccurrenceKey(occurrence.identity.timerId, occurrence.identity.deadline, occurrence.identity.streamId ?? undefined);
 const TIMER_SKIP_RECEIPT_RETENTION_MS = 24 * 60 * 60_000;
 const timerSkipReceiptsForSchedule = (
   entry: DurableTimerEntry,
