@@ -221,6 +221,17 @@
     .live-cockpit-actions { min-height: 360px; }
     .live-cockpit-actions__grid { overflow: visible; }
   }
+  @media (min-width: 1101px) and (max-width: 1678px) {
+    /* The ads slot stays fixed below actions; running and next fill the middle column. */
+    .live-cockpit__wall { grid-template-rows: minmax(0, 1fr) 188px; }
+    .live-cockpit__running-area, .live-cockpit__running { display: contents; }
+    .live-cockpit-actions { grid-column: 1; grid-row: 1; min-height: 0; }
+    .live-cockpit-actions__grid { overflow: auto; scrollbar-gutter: stable; }
+    .live-cockpit-running-tile { grid-column: 2; grid-row: 1; }
+    .live-cockpit-ads-tile { grid-column: 1; grid-row: 2; height: 188px; min-height: 188px; }
+    .live-cockpit-next-tile { grid-column: 2; grid-row: 2; }
+    .live-cockpit-event-feed { grid-column: 3; grid-row: 1 / -1; }
+  }
   @media (max-width: 1100px) {
     .live-cockpit__wall { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .live-cockpit-reserve[data-slot="events"] { grid-column: 1 / -1; min-height: 280px; }
@@ -245,6 +256,7 @@
     .live-cockpit-actions { grid-column: auto; min-height: auto; padding: var(--s2); }
     .live-cockpit-actions__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .live-cockpit__running { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+    .live-vote-tile__options { flex: none; overflow: visible; scrollbar-gutter: auto; }
     .live-cockpit-running-tile, .live-cockpit-ads-tile, .live-cockpit-next-tile { grid-column: 1; grid-row: auto; }
     .live-cockpit-reserve { min-height: 112px; padding: var(--s3); }
     .live-cockpit__status { justify-content: flex-start; flex-wrap: wrap; padding-top: var(--s2); }

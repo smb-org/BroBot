@@ -72,8 +72,8 @@ const installMocks = async (page: Page, role: "manager" | "operator", duels: rea
           id: "vote-509",
           channelId,
           kind: "options",
-          optionCount: 2,
-          labels: ["Abenteuer", "Strategie"],
+          optionCount: 3,
+          labels: ["Abenteuer", "Strategie", "Rollenspiel"],
           answerColors: [],
           status: "open",
           title: "Was spielen wir als Nächstes?",
@@ -82,11 +82,11 @@ const installMocks = async (page: Page, role: "manager" | "operator", duels: rea
           requestedDurationSeconds: 120,
           closedAt: null,
           closeReason: "timer",
-          counts: [3, 1],
+          counts: [3, 1, 0],
           voterCount: 4,
         }
         : null;
-      return route.fulfill(json({ vote, counts: vote === null ? null : [3, 1], revision: 1, terms: null, moreTerms: null, hasOpenBallot: vote !== null, defaultDurationSeconds: 120 }));
+      return route.fulfill(json({ vote, counts: vote === null ? null : [3, 1, 0], revision: 1, terms: null, moreTerms: null, hasOpenBallot: vote !== null, defaultDurationSeconds: 120 }));
     }
     if (path === "/modules/ads/schedule") {
       return route.fulfill(json({
@@ -367,8 +367,13 @@ for (const viewport of viewports) {
   });
 }
 
-for (const width of [1280, 1440, 1920]) {
-  test(`cockpit: running content stays inside its tile at ${String(width)}px`, async ({ page }) => {
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 1440, height: 900 },
+  { width: 1920, height: 1080 },
+  { width: 390, height: 844 },
+]) {
+  test(`cockpit: visible tile content is not clipped at ${String(viewport.width)}x${String(viewport.height)}`, async ({ page }) => {
     const voteNow = Date.now();
     const duel = {
       id: "duel-509-geometry",
@@ -378,38 +383,140 @@ for (const width of [1280, 1440, 1920]) {
       stake: 1_250,
       closesAt: new Date(voteNow + 75_000).toISOString(),
     };
-    await open(page, { width, height: 1080 }, "", (next) => {
+    await open(page, viewport, "", (next) => {
       next.setLock("chat_vote");
-      next.setAds("upcoming");
+      next.setAds("running");
     }, "manager", [duel]);
     const tile = page.locator(".live-cockpit-running-tile");
     await expect(tile.getByTestId("live-vote-tile")).toBeVisible();
     await expect(tile.getByTestId("live-duel-tile")).toBeVisible();
-    await expect(page.locator(".live-cockpit-ads-tile")).toHaveAttribute("data-state", "upcoming");
+    const adsTile = page.locator(".live-cockpit-ads-tile");
+    await expect(adsTile).toHaveAttribute("data-state", "running");
+    const optionLabels = ["Abenteuer", "Strategie", "Rollenspiel"];
+    const voteOptions = tile.locator(".live-vote-tile__options");
+    await expect(voteOptions.locator(".live-vote-tile__option-label strong")).toHaveText(optionLabels);
+    if (viewport.width === 1280 || viewport.width === 1440) {
+      const actions = page.locator(".live-cockpit-actions");
+      const actionsGrid = actions.locator(".live-cockpit-actions__grid");
+      const [actionsBox, actionsGridBox, adsBox, wallBox] = await Promise.all([
+        box(actions),
+        box(actionsGrid),
+        box(adsTile),
+        box(page.locator(".live-cockpit__wall")),
+      ]);
+      expect(adsBox.height).toBe(188);
+      expect(adsBox.x).toBeCloseTo(actionsBox.x, 0);
+      expect(adsBox.width).toBeCloseTo(actionsBox.width, 0);
+      expect(adsBox.y).toBeGreaterThanOrEqual(actionsBox.y + actionsBox.height);
+      expect(adsBox.y).toBeGreaterThanOrEqual(actionsGridBox.y + actionsGridBox.height);
 
-    const overflow = await tile.evaluate((element) => {
-      const tileRect = element.getBoundingClientRect();
+      const [runningBox, nextBox] = await Promise.all([
+        box(page.locator(".live-cockpit-running-tile")),
+        box(page.locator(".live-cockpit-next-tile")),
+      ]);
+      expect(runningBox.y).toBeCloseTo(wallBox.y, 0);
+      expect(runningBox.x).toBeCloseTo(nextBox.x, 0);
+      expect(runningBox.width).toBeCloseTo(nextBox.width, 0);
+      expect(runningBox.height).toBeGreaterThanOrEqual(280);
+      expect(nextBox.y).toBeGreaterThanOrEqual(runningBox.y + runningBox.height);
+      expect(nextBox.height).toBe(188);
+      expect(nextBox.y + nextBox.height).toBeCloseTo(wallBox.y + wallBox.height, 0);
+
+      const optionVisibility = await voteOptions.evaluate((element) => {
+        const options = element as HTMLElement;
+        const contentTop = options.getBoundingClientRect().top + options.clientTop;
+        const contentLeft = options.getBoundingClientRect().left + options.clientLeft;
+        const optionElements = [...options.querySelectorAll<HTMLElement>(".live-vote-tile__option")];
+        return {
+          scrollTop: options.scrollTop,
+          scrollHeight: options.scrollHeight,
+          clientHeight: options.clientHeight,
+          visible: optionElements.map((option) => {
+            const rect = option.getBoundingClientRect();
+            return rect.top >= contentTop - 0.5 && rect.bottom <= contentTop + options.clientHeight + 0.5 &&
+              rect.left >= contentLeft - 0.5 && rect.right <= contentLeft + options.clientWidth + 0.5;
+          }),
+        };
+      });
+      expect(optionVisibility.scrollTop).toBe(0);
+      expect(optionVisibility.scrollHeight).toBe(optionVisibility.clientHeight);
+      expect(optionVisibility.visible).toEqual([true, true, true]);
+      const votekickEmptyText = page.locator(".live-cockpit-next-list--recent p");
+      await expect(votekickEmptyText).toBeVisible();
+      await expect(votekickEmptyText).toHaveText("Keine offenen Timeouts aus Votekicks.");
+    } else if (viewport.width === 1920) {
+      const [runningBox, adsBox] = await Promise.all([box(tile), box(adsTile)]);
+      expect(runningBox.y).toBeCloseTo(adsBox.y, 0);
+      expect(adsBox.x).toBeGreaterThan(runningBox.x + runningBox.width);
+      await expect(page.locator(".live-cockpit__running .live-cockpit-ads-tile")).toHaveCount(1);
+    } else {
+      const stackedSlots = await page.locator(".live-cockpit__running > .live-cockpit-reserve, .live-cockpit__running > .live-cockpit-ads-tile").evaluateAll((elements) => elements.map((element) => ({
+        slot: element.classList.contains("live-cockpit-running-tile") ? "running"
+          : element.classList.contains("live-cockpit-ads-tile") ? "ads" : "next",
+        y: element.getBoundingClientRect().y,
+      })));
+      expect(stackedSlots.map(({ slot }) => slot)).toEqual(["running", "ads", "next"]);
+      expect(stackedSlots[0]?.y).toBeLessThan(stackedSlots[1]?.y ?? 0);
+      expect(stackedSlots[1]?.y).toBeLessThan(stackedSlots[2]?.y ?? 0);
+      expect((await box(adsTile)).height).toBe(188);
+    }
+
+    const clipping = await page.locator(".live-cockpit__wall").evaluate((wall) => {
       const violations: string[] = [];
-      const contains = (rect: DOMRect): boolean => rect.left >= tileRect.left - 0.5 &&
-        rect.top >= tileRect.top - 0.5 && rect.right <= tileRect.right + 0.5 && rect.bottom <= tileRect.bottom + 0.5;
-      for (const [index, button] of [...element.querySelectorAll("button")].entries()) {
-        if (!contains(button.getBoundingClientRect())) violations.push(`button ${String(index)}`);
-      }
-      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-      let node = walker.nextNode();
-      while (node !== null) {
-        if (node.textContent?.trim()) {
-          const range = document.createRange();
-          range.selectNodeContents(node);
-          for (const [index, rect] of [...range.getClientRects()].entries()) {
-            if (rect.width > 0 && rect.height > 0 && !contains(rect)) violations.push(`text ${JSON.stringify(node.textContent.trim())} fragment ${String(index)}`);
+      const tileSelector = ".live-cockpit-actions, .live-cockpit-running-tile, .live-cockpit-ads-tile, .live-cockpit-next-tile, .live-cockpit-event-feed";
+      const targetSelector = "button, .live-vote-tile__option, .live-vote-tile__track, .live-vote-tile__track > span, .live-cockpit-duels__item, .live-cockpit-next-tile p";
+      const isInside = (target: DOMRect, ancestor: HTMLElement, axis: "x" | "y"): boolean => {
+        const rect = ancestor.getBoundingClientRect();
+        const start = axis === "x" ? rect.left + ancestor.clientLeft : rect.top + ancestor.clientTop;
+        const size = axis === "x" ? ancestor.clientWidth : ancestor.clientHeight;
+        const targetStart = axis === "x" ? target.left : target.top;
+        const targetEnd = axis === "x" ? target.right : target.bottom;
+        return targetStart >= start - 0.5 && targetEnd <= start + size + 0.5;
+      };
+      const canScrollTo = (target: DOMRect, scroller: HTMLElement, axis: "x" | "y"): boolean => {
+        const box = scroller.getBoundingClientRect();
+        const clientStart = axis === "x" ? box.left + scroller.clientLeft : box.top + scroller.clientTop;
+        const targetStart = axis === "x" ? target.left : target.top;
+        const targetEnd = axis === "x" ? target.right : target.bottom;
+        const scrollPosition = axis === "x" ? scroller.scrollLeft : scroller.scrollTop;
+        const clientSize = axis === "x" ? scroller.clientWidth : scroller.clientHeight;
+        const scrollSize = axis === "x" ? scroller.scrollWidth : scroller.scrollHeight;
+        const contentStart = targetStart - clientStart + scrollPosition;
+        const contentEnd = targetEnd - clientStart + scrollPosition;
+        return targetEnd - targetStart <= clientSize + 0.5 && contentStart >= -0.5 && contentEnd <= scrollSize + 0.5;
+      };
+      const tiles = [...wall.querySelectorAll<HTMLElement>(tileSelector)];
+      for (const [tileIndex, tileElement] of tiles.entries()) {
+        const targets = [...tileElement.querySelectorAll<HTMLElement>(targetSelector)];
+        for (const [targetIndex, targetElement] of targets.entries()) {
+          const targetRect = targetElement.getBoundingClientRect();
+          if (targetRect.width === 0 || targetRect.height === 0 || getComputedStyle(targetElement).visibility === "hidden") continue;
+          for (let ancestor = targetElement.parentElement; ancestor !== null && tileElement.contains(ancestor); ancestor = ancestor.parentElement) {
+            const style = getComputedStyle(ancestor);
+            for (const axis of ["x", "y"] as const) {
+              const overflow = axis === "x" ? style.overflowX : style.overflowY;
+              if (overflow === "visible") continue;
+              if (isInside(targetRect, ancestor, axis)) continue;
+              const stableScrollAncestors: HTMLElement[] = [];
+              for (let candidate = targetElement.parentElement; candidate !== null && candidate !== ancestor; candidate = candidate.parentElement) {
+                const candidateStyle = getComputedStyle(candidate);
+                const candidateOverflow = axis === "x" ? candidateStyle.overflowX : candidateStyle.overflowY;
+                if ((candidateOverflow === "auto" || candidateOverflow === "scroll") && candidateStyle.scrollbarGutter.includes("stable") && canScrollTo(targetRect, candidate, axis)) {
+                  stableScrollAncestors.push(candidate);
+                }
+              }
+              const ancestorCanScroll = (overflow === "auto" || overflow === "scroll") && style.scrollbarGutter.includes("stable") && canScrollTo(targetRect, ancestor, axis);
+              const reachableInside = (scroller: HTMLElement): boolean => scroller === ancestor || isInside(scroller.getBoundingClientRect(), ancestor, axis);
+              if (!ancestorCanScroll && !stableScrollAncestors.some(reachableInside)) {
+                violations.push(`tile ${String(tileIndex)} target ${String(targetIndex)} clipped on ${axis} at .${ancestor.className.replaceAll(" ", ".")}`);
+              }
+            }
           }
         }
-        node = walker.nextNode();
       }
       return violations;
     });
-    expect(overflow).toEqual([]);
+    expect(clipping).toEqual([]);
     await expectNoHorizontalScroll(page);
   });
 }
