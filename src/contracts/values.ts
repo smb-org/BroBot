@@ -318,6 +318,7 @@ export const AUDIT_ACTIONS = [
   "blitz_round.question.updated",
   "blitz_round.question.deleted",
   "blitz_round.started",
+  "duel.round.cancelled",
   "text_library.block.created",
   "text_library.block.updated",
   "text_library.block.renamed",

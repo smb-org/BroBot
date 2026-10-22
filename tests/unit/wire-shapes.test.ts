@@ -1,3 +1,4 @@
+import { duelSettingsForLanguage } from "../../src/modules/duel/contracts";
 import { blitzTexts } from "../../src/modules/blitz_round/locale";
 import { readFileSync } from "node:fs";
 
@@ -375,6 +376,7 @@ const realtimeForms = {
 };
 
 const expectedModuleSettings = {
+  duel: duelSettingsForLanguage("de"),
   blitz_round: {
     prize: 50, answerTimeSeconds: 60, chatTarget: null,
     startText: blitzTexts("de").startTextDefault,
@@ -873,6 +875,7 @@ describe("serialized contract shapes", () => {
         "chat_voting",
         "clips",
         "currency",
+        "duel",
         "emote_slots",
         "faq",
         "moon",

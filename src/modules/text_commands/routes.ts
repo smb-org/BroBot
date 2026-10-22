@@ -19,6 +19,8 @@ import { createTextCommandRepository } from "./adapters/d1";
 import { COMMAND_NAME_PATTERN, initialTextCommandRevision, validCommandName } from "./domain";
 import { textCommandDefaultsFor } from "./contracts/chat-defaults";
 import { readTextBlockGraphRevision, textBlockGraphRevisionChanged, textBlockWriteGuard } from "../contracts/text-block-write-guard";
+import { findModuleCommandCollision } from "../contracts/module-command-collision";
+import { moduleCommandCollisionWriteGuard, type CommandCollisionWriteGuard } from "../contracts/module-command-collision";
 
 const aliasesSchema = z.array(z.string().regex(COMMAND_NAME_PATTERN))
   .max(TEXT_COMMAND_MAX_ALIASES)
@@ -266,6 +268,17 @@ textCommandRoutes.post("/commands", async (context) => {
     context.get("prepareModuleAudit"),
   );
   const channelId = param(context, "channelId");
+  const { MODULES } = await import("../registry");
+  const commandCollision = await findModuleCommandCollision(
+    context.env.DB,
+    channelId,
+    [`!${body.name}`, ...body.aliases.map((alias) => `!${alias}`)],
+    MODULES,
+    { includeCustomCommands: false },
+  );
+  if (commandCollision !== null) return context.json({ error: "module_command_collision", command: commandCollision }, 409);
+  const commandTokens = [`!${body.name}`, ...body.aliases.map((alias) => `!${alias}`)];
+  const commandWriteGuard = moduleCommandCollisionWriteGuard(channelId, commandTokens, MODULES);
   const graphRevision = await readTextBlockGraphRevision(context.env.DB, channelId);
   const hasBlockReferences = textBlockWriteGuard(channelId, graphRevision, commandTemplateTexts(body)).references.length > 0;
   if (body.variableAction !== null && await context.get("findChannelVariable")(channelId, body.variableAction.name) === null) {
@@ -279,7 +292,7 @@ textCommandRoutes.post("/commands", async (context) => {
   const warnings = body.kind === "list"
     ? []
     : warningsForCommand(body.text, body.timeoutAction, effectiveCommandVariables(channelVariables), registeredVariables.map(({ name }) => name));
-  const created = await repository.create({ channelId, ...body, now }, context.get("actor"), graphRevision);
+  const created = await repository.create({ channelId, ...body, now }, context.get("actor"), graphRevision, commandWriteGuard);
   if (created.ok) {
     const command: TextCommand = {
       channelId,
@@ -309,6 +322,14 @@ textCommandRoutes.post("/commands", async (context) => {
     };
     return context.json({ command, warnings }, 201);
   }
+  const writeCollision = await findModuleCommandCollision(
+    context.env.DB,
+    channelId,
+    commandTokens,
+    MODULES,
+    { includeCustomCommands: false },
+  );
+  if (writeCollision !== null) return context.json({ error: "module_command_collision", command: writeCollision }, 409);
   if (created.reason === "not_authorized" && hasBlockReferences &&
       await textBlockGraphRevisionChanged(context.env.DB, channelId, graphRevision)) {
     return context.json({ error: "command_changed_concurrently" }, 409);
@@ -338,6 +359,21 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
   if (!validCommandName(newName)) return context.json({ error: "command_data_invalid", path: "name", reasonCode: "custom" }, 400);
   const aliases = body.aliases ?? before.aliases;
   if (aliases.includes(newName)) return context.json({ error: "command_data_invalid", path: "aliases", reasonCode: "custom" }, 400);
+  let commandWriteGuard: CommandCollisionWriteGuard = { sql: "", values: [] };
+  const checksModuleCollision = body.name !== undefined || body.aliases !== undefined || body.enabled === true;
+  const commandTokens = [`!${newName}`, ...aliases.map((alias) => `!${alias}`)];
+  if (checksModuleCollision) {
+    const { MODULES } = await import("../registry");
+    const commandCollision = await findModuleCommandCollision(
+      context.env.DB,
+      channelId,
+      [`!${newName}`, ...aliases.map((alias) => `!${alias}`)],
+      MODULES,
+      { excludeTextCommandName: oldName, includeCustomCommands: false },
+    );
+    if (commandCollision !== null) return context.json({ error: "module_command_collision", command: commandCollision }, 409);
+    commandWriteGuard = moduleCommandCollisionWriteGuard(channelId, commandTokens, MODULES);
+  }
   const contentChanged = Object.keys(body).some((key) => key !== "enabled" && key !== "revision");
   if (contentChanged && !canManage(context.get("channelRole"))) return managementDenied(context);
   const kind = body.kind ?? before.kind;
@@ -414,7 +450,7 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
     expectedGraphRevision: graphRevision,
     onlyToggle: !contentChanged,
     now,
-  }, context.get("actor"));
+  }, context.get("actor"), commandWriteGuard);
   if (changed.ok) {
     const command: TextCommand = {
       ...before,
@@ -439,6 +475,17 @@ textCommandRoutes.patch("/commands/:name", async (context) => {
       revision: before.revision + 1,
     };
     return context.json({ command, warnings });
+  }
+  if (checksModuleCollision) {
+    const { MODULES } = await import("../registry");
+    const writeCollision = await findModuleCommandCollision(
+      context.env.DB,
+      channelId,
+      commandTokens,
+      MODULES,
+      { excludeTextCommandName: oldName, includeCustomCommands: false },
+    );
+    if (writeCollision !== null) return context.json({ error: "module_command_collision", command: writeCollision }, 409);
   }
   if (changed.reason === "not_authorized" && hasBlockReferences &&
       await textBlockGraphRevisionChanged(context.env.DB, channelId, graphRevision)) {

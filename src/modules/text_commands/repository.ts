@@ -6,6 +6,7 @@ import type {
   TextCommandActor,
   PrepareTextCommandVariableChange,
 } from "./contracts";
+import type { CommandCollisionWriteGuard } from "../contracts/module-command-collision";
 
 type TextCommandMutationReason =
   | "already_exists"
@@ -28,8 +29,13 @@ export interface TextCommandRepository {
   list(channelId: string): Promise<TextCommand[]>;
   find(channelId: string, name: string): Promise<TextCommand | null>;
   findByAlias(channelId: string, alias: string): Promise<TextCommand | null>;
-  create(input: NewTextCommand, actor: TextCommandActor, expectedGraphRevision?: number): Promise<TextCommandMutationResult>;
-  change(input: TextCommandChange, actor: TextCommandActor): Promise<TextCommandMutationResult>;
+  create(
+    input: NewTextCommand,
+    actor: TextCommandActor,
+    expectedGraphRevision?: number,
+    commandCollisionGuard?: CommandCollisionWriteGuard,
+  ): Promise<TextCommandMutationResult>;
+  change(input: TextCommandChange, actor: TextCommandActor, commandCollisionGuard?: CommandCollisionWriteGuard): Promise<TextCommandMutationResult>;
   delete(
     channelId: string,
     name: string,

@@ -34,6 +34,30 @@ describe("live cockpit voting actions", () => {
     expect(english.voteOptionCount("2", "50")).toBe("2 votes · 50%");
   });
 
+  it("does not show the empty running state beside an active duel", () => {
+    render(<UiProvider><LiveCockpitTiles
+      channelId="channel-a"
+      role="manager"
+      snapshots={[{
+        kind: "duel",
+        id: "duel-open",
+        challenger: "frostfern",
+        target: "moonmoss",
+        stake: 50,
+        closesAt: "2030-01-01T12:01:00.000Z",
+      }]}
+      loading={false}
+      failed={false}
+      now={Date.parse("2030-01-01T12:00:30.000Z")}
+      timeZone="Europe/Berlin"
+      onMessage={() => undefined}
+      onRefresh={() => undefined}
+    /></UiProvider>);
+
+    expect(screen.getByTestId("live-duel-tile")).toBeInTheDocument();
+    expect(screen.queryByText(dashboardTexts().liveCockpit.noActionRunning)).not.toBeInTheDocument();
+  });
+
   it("lets operators approve free-text terms and lift a completed votekick timeout", async () => {
     const requests = vi.fn<typeof fetch>((input) => {
       const url = requestUrl(input);

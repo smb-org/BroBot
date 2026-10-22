@@ -5,6 +5,8 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import { blitzQuestionColumns } from "../../src/modules/blitz_round/adapters/d1";
+import { moduleCommandCollisionWriteGuard } from "../../src/modules/contracts/module-command-collision";
+import { MODULES } from "../../src/modules/registry";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
 import {
   actorGuard,
@@ -226,6 +228,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["predicateSql", "1 = 1"],
   ["blockGuard.sql", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["textBlockGuard?.sql ?? \"\"", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
+  ["commandCollisionGuard?.sql ?? \"\"", moduleCommandCollisionWriteGuard("channel-id", ["!duel"], MODULES).sql],
   ["stateGuard?.sql ?? \"\"", `AND EXISTS (
         SELECT 1 FROM channel_modules AS required_module
          WHERE required_module.channel_id = ? AND required_module.module_id = ? AND required_module.enabled = 1

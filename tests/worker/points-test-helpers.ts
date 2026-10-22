@@ -54,6 +54,13 @@ export interface PointsWorkerObject {
   readBallotDryRunSnapshot(moduleId: string, ballotId: string, voterId?: string): Promise<unknown>;
   hasOpenBallotSnapshot(): Promise<boolean>;
   openGameRound(moduleId: string, roundId: string, data: unknown): Promise<void>;
+  openGameRoundWithStake(moduleId: string, roundId: string, data: unknown, operationId: string, accountId: string, login: string,
+    stake: number, cooldown?: { key: string; seconds: number }): Promise<{ roundId: string; replayed: boolean }>;
+  listOpenGameRounds(moduleId: string): Promise<Array<{ roundId: string; state: "announcing" | "open"; data: unknown; deadlineAt: number | null }>>;
+  acceptGameRound(moduleId: string, roundId: string, operationId: string, accountId: string, login: string): Promise<{
+    replayed: boolean; result: unknown; balances: Record<string, number>;
+  }>;
+  cancelGameRound(moduleId: string, roundId: string): Promise<number>;
   markGameRoundAnnounced(moduleId: string, roundId: string, deadlineAt: number, alarmKey: string): Promise<void>;
   joinGameRound(moduleId: string, roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown): Promise<{
     status: "joined" | "already_joined" | "round_closed";

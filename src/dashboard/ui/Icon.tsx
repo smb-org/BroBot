@@ -7,7 +7,7 @@ import type { LucideIcon } from "lucide-react";
 import type { ReactElement } from "react";
 
 const glyphs = {
-  ad: Megaphone, shoutout: User, clip: Film, vote: Vote, boss: Crown, blitz: Zap,
+  ad: Megaphone, shoutout: User, clip: Film, vote: Vote, boss: Crown, blitz: Zap, duel: Sword,
   counter: Plus, "test-message": MessageSquareText, marker: Bookmark,
   timer: Timer,
   cloud: Cloud, "cloud-fog": CloudFog, "cloud-lightning": CloudLightning, "cloud-moon": CloudMoon,
