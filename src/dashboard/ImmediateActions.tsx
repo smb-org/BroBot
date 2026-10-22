@@ -438,11 +438,17 @@ const ActionFrame = ({ action, moduleId, channelId, language, pollId, disabled, 
 
   return <div className="live-action">
     <button {...triggerProps} className={triggerClassName} type="button" onClick={() => { void run(new FormData()); }}>{buttonContents}</button>
-    {resultLink === null ? null : <a className="live-action__result-link" href={resultLink.href}
-      {...(actionResultLink === null ? {} : { target: "_blank", rel: "noreferrer" })}
-      aria-label={`${resultLink.message} ${resultLink.label}`}>
-      <span className="live-action__result-message">{resultLink.message}</span>
-      <span>{resultLink.label}</span>
+    {resultLink !== null && actionResultLink === null
+      ? <div className="live-action__availability-link">
+        <span className="live-action__availability-message">{resultLink.message}</span>
+        <a href={resultLink.href}>{resultLink.label}</a>
+      </div>
+      : null}
+    {actionResultLink === null ? null : <a className="live-action__result-link" href={actionResultLink.href}
+      target="_blank" rel="noreferrer"
+      aria-label={`${actionResultLink.message} ${actionResultLink.label}`}>
+      <span className="live-action__result-message">{actionResultLink.message}</span>
+      <span>{actionResultLink.label}</span>
     </a>}
   </div>;
 };
