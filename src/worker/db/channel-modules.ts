@@ -2,6 +2,7 @@ import { actorGuard, bindActorGuard, type ActorContext } from "./guards";
 import { MANAGING_ROLES, type AuditWriteAction } from "../../contracts/values";
 import { prepareChannelModuleSettingsWrite } from "../../modules/repository/channel-module-storage";
 import { prepareModuleAudit as prepareHostModuleAudit } from "../module-audit";
+import type { CommandCollisionWriteGuard } from "../../modules/contracts/module-command-collision";
 
 export interface ChannelModuleRecord {
   channelId: string;
@@ -132,6 +133,7 @@ export const updateChannelModuleSettingsWithAudit = async (
   expectedSettingsRevision: number,
   textBlockGuard?: { sql: string; values: readonly unknown[] },
   requireEnabled = false,
+  commandCollisionGuard?: CommandCollisionWriteGuard,
 ): Promise<boolean> => {
   const before = await getChannelModule(db, channelId, moduleId);
   if (before === null) return false;
@@ -150,11 +152,13 @@ export const updateChannelModuleSettingsWithAudit = async (
     `AND settings_revision = ?
        AND (? = 0 OR enabled = 1)
        ${textBlockGuard?.sql ?? ""}
+       ${commandCollisionGuard?.sql ?? ""}
        ${actorGuard(MANAGING_ROLES)}`,
     [
       expectedSettingsRevision,
       requireEnabled ? 1 : 0,
       ...(textBlockGuard?.values ?? []),
+      ...(commandCollisionGuard?.values ?? []),
       ...bindActorGuard(actor, channelId, changedAt),
     ],
   );

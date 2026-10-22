@@ -14,6 +14,13 @@ import {
 import { canManage, type AuditAction } from "../../contracts/values";
 import type { HelixResult, ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
+import {
+  combineCommandCollisionWriteGuards,
+  effectiveModuleCommandTokens,
+  findModuleCommandCollision,
+  moduleCommandCollisionWriteGuard,
+  textCommandCollisionWriteGuard,
+} from "../../modules/contracts/module-command-collision";
 import { BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET } from "../../modules/belabox/contracts";
 import { validateBelaboxStatsUrl } from "../../modules/belabox/domain/stats-url";
 import { resetSampleAfterStatsUrlChangeBestEffort } from "../../modules/belabox/routes";
@@ -103,6 +110,19 @@ const runPostCommitStep = async (moduleId: string, step: string, action: () => P
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const moduleCommandCollision = async (
+  db: D1Database,
+  channelId: string,
+  moduleId: string,
+  candidateSettings: unknown,
+): Promise<string | null> => {
+  const module = MODULES.find((candidate) => candidate.id === moduleId);
+  if (module === undefined) return null;
+  return findModuleCommandCollision(db, channelId, effectiveModuleCommandTokens(module, candidateSettings), MODULES, {
+    excludeModuleId: moduleId,
+  });
+};
 
 const validBoxArtTemplate = (value: unknown): value is string => {
   if (typeof value !== "string" || value.length > 500) return false;
@@ -909,6 +929,13 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   }
   const semanticError = module.validateSettings?.(settings.data);
   if (semanticError !== undefined && semanticError !== null) return context.json({ error: semanticError }, 400);
+  const commandCollision = await moduleCommandCollision(context.env.DB, channelId, module.id, settings.data);
+  if (commandCollision !== null) return context.json({ error: "module_command_collision", command: commandCollision }, 409);
+  const commandTokens = effectiveModuleCommandTokens(module, settings.data);
+  const commandWriteGuard = combineCommandCollisionWriteGuards(
+    moduleCommandCollisionWriteGuard(channelId, commandTokens, MODULES, { excludeModuleId: module.id }),
+    textCommandCollisionWriteGuard(channelId, commandTokens),
+  );
   if (module.id === "clips") {
     let rawStoredSettings: unknown;
     try {
@@ -974,8 +1001,11 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     expectedRevision,
     blockGuard.references.length === 0 ? undefined : blockGuard,
     module.id === "clips",
+    commandWriteGuard,
   );
   if (!changed) {
+    const collision = await moduleCommandCollision(context.env.DB, channelId, module.id, settings.data);
+    if (collision !== null) return context.json({ error: "module_command_collision", command: collision }, 409);
     const current = await getChannelModuleForChannel(context.env.DB, channelId, module.id);
     let currentSettings: unknown = null;
     if (current !== null) {
@@ -1039,6 +1069,40 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
+  const initialize = enabled && existing?.initialized !== true;
+  const reusedTextCommandName = initialize && module.onEnableCommandTokens?.includes("!befehle") === true
+    ? "befehle"
+    : undefined;
+  const collisionOptions = {
+    excludeModuleId: module.id,
+    ...(reusedTextCommandName === undefined ? {} : { excludeTextCommandName: reusedTextCommandName }),
+  };
+  let activationCommandTokens: string[] = [];
+  if (enabled) {
+    let currentSettings: unknown = JSON.parse(defaultSettingsJson) as unknown;
+    if (existing !== null) {
+      try {
+        currentSettings = JSON.parse(existing.settings) as unknown;
+      } catch {
+        currentSettings = null;
+      }
+    }
+    const parsedSettings = module.settingsSchema.safeParse(currentSettings);
+    if (parsedSettings.success) {
+      activationCommandTokens = [
+        ...effectiveModuleCommandTokens(module, parsedSettings.data),
+        ...(existing?.initialized === true ? [] : module.onEnableCommandTokens ?? []),
+      ];
+      const commandCollision = await findModuleCommandCollision(
+        context.env.DB,
+        channelId,
+        activationCommandTokens,
+        MODULES,
+        collisionOptions,
+      );
+      if (commandCollision !== null) return context.json({ error: "module_command_collision", command: commandCollision }, 409);
+    }
+  }
   const requiredModules = enabled ? module.requiresModules ?? [] : [];
   const dependentModules = !enabled
     ? MODULES.filter((candidate) => candidate.requiresModules?.includes(moduleId)).map((candidate) => candidate.id)
@@ -1061,9 +1125,15 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
         values: [channelId, ...dependentModules],
       }
       : undefined;
+  const commandWriteGuard = enabled
+    ? combineCommandCollisionWriteGuards(
+      moduleCommandCollisionWriteGuard(channelId, activationCommandTokens, MODULES, { excludeModuleId: module.id }),
+      textCommandCollisionWriteGuard(channelId, activationCommandTokens, collisionOptions),
+    )
+    : { sql: "", values: [] };
+  const atomicStateGuard = combineCommandCollisionWriteGuards(stateGuard ?? { sql: "", values: [] }, commandWriteGuard);
   const retryingPostCommit = existing !== null && existing.enabled === enabled && expectedRevision !== undefined &&
     Number(expectedRevision) + 1 === existing.revision;
-  const initialize = enabled && existing?.initialized !== true;
   let dependentMutations: readonly D1PreparedStatement[] = [];
   if (initialize && module.onEnable !== undefined) {
     dependentMutations = await module.onEnable({
@@ -1086,7 +1156,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       action,
       now,
       dependentMutations,
-      stateGuard,
+      atomicStateGuard,
     );
   } else if (existing !== null) {
     if (retryingPostCommit) revision = existing.revision;
@@ -1102,7 +1172,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
         dependentMutations,
         expectedRevision === undefined ? existing.revision : Number(expectedRevision),
         initialize,
-        stateGuard,
+        atomicStateGuard,
       );
       revision = activation?.revision ?? null;
       lastDisabledRevision = activation?.lastDisabledRevision ?? null;
@@ -1111,6 +1181,16 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     return context.json({ error: "module_changed_concurrently" }, 409);
   }
   if (revision === null) {
+    if (enabled) {
+      const collision = await findModuleCommandCollision(
+        context.env.DB,
+        channelId,
+        activationCommandTokens,
+        MODULES,
+        collisionOptions,
+      );
+      if (collision !== null) return context.json({ error: "module_command_collision", command: collision }, 409);
+    }
     if (enabled && requiredModules.length > 0) {
       const placeholders = requiredModules.map(() => "?").join(", ");
       const enabledCount = await context.env.DB.prepare(

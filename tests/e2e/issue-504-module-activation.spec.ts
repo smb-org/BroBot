@@ -234,7 +234,7 @@ test("keeps module rows and following row tops stable while Points and Slot togg
     expect(await moduleRowGeometry(page)).toEqual(initialGeometry);
   }
 
-  expect(api.toggleRequests).toEqual([
+  await expect.poll(() => api.toggleRequests).toEqual([
     "points", "emote_slots", "emote_slots", "points",
     "points", "emote_slots", "emote_slots", "points",
   ]);
@@ -285,6 +285,39 @@ test("keeps the Slot header stable while Points toggles at narrow and desktop wi
   }
 
   expect(api.toggleRequests).toEqual(["points", "points", "points", "points"]);
+});
+
+test("keeps the Emote Slots title on one line at 1100px without growing its header", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await mockDashboard(page, moduleStates(true, true));
+  const readHeader = async () => page.locator(".settings-page--slot > .page-header").evaluate((header) => {
+    const title = header.querySelector<HTMLElement>(".page-header__title-row :is(h1, h2, h3)");
+    const switchControl = header.querySelector<HTMLElement>(".page-header__module-switch");
+    if (title === null || switchControl === null) throw new Error("Emote Slots settings header is incomplete.");
+    const titleBox = title.getBoundingClientRect();
+    const switchBox = switchControl.getBoundingClientRect();
+    return {
+      height: Math.round(header.getBoundingClientRect().height),
+      titleText: title.textContent.trim(),
+      titleHeight: Math.round(titleBox.height),
+      titleLineHeight: Number.parseFloat(getComputedStyle(title).lineHeight),
+      switchCenter: Math.round(switchBox.y + switchBox.height / 2),
+      titleCenter: Math.round(titleBox.y + titleBox.height / 2),
+    };
+  });
+
+  await page.goto(`/channels/${channelId}/modules/emote_slots?lang=en`);
+  await expect(page.locator(".settings-page--slot > .page-header")).toBeVisible();
+  await expect.poll(async () => {
+    const header = await readHeader();
+    return header.height > 0 && Number.isFinite(header.titleLineHeight);
+  }).toBe(true);
+  const compact = await readHeader();
+
+  expect(compact.titleText).toBe("Slot");
+  expect(compact.titleHeight).toBeLessThanOrEqual(compact.titleLineHeight * 1.25);
+  expect(compact.height).toBe(124);
+  expect(Math.abs(compact.switchCenter - compact.titleCenter)).toBeLessThanOrEqual(4);
 });
 
 test("shows the missing requirement when another manager disables points first (protects=the module_requires race response gives a localized dependency toast instead of a generic API failure; fails_when=the toast shows the generic change failure or no requirement name; no_claim=the other manager's current module state)", async ({ page }) => {

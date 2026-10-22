@@ -608,6 +608,8 @@ export interface ModuleExecutionContext {
   botUserId?: () => Promise<string | null>;
   /** Looks up one public Twitch user by login; throws when Helix lookup fails. */
   lookupUserByLogin?: (login: string) => Promise<ModuleTwitchUser | null>;
+  /** Looks up one public Twitch user using the connected bot's token. */
+  lookupUserByLoginWithBotToken?: (login: string) => Promise<ModuleTwitchUser | null>;
   /** Returns null when Twitch moderator lookup fails. */
   isChannelModerator?: (userId: string) => Promise<boolean | null>;
   /** Checks the channel's recent bot send history for an identity or exact text match. */
@@ -800,13 +802,14 @@ export interface ModuleAlarmContext {
     elementKind: string,
     payload: Readonly<Record<string, unknown>>,
   ) => Promise<void>;
-  /** Sends scheduled automated output through the shared channel limit with an occurrence claim. */
+  /** Sends scheduled output with an occurrence claim; automated output uses the shared channel limit by default. */
   sendChat: (
     text: string,
     idempotencyKey: string,
     attributions?: readonly string[],
     stillValid?: () => Promise<boolean>,
     target?: ChatOutputTarget,
+    options?: { replyToMessageId?: string; sourceBroadcasterUserId?: string; automated?: boolean },
   ) => Promise<{
     sent: boolean;
     reason: string | null;
@@ -1058,11 +1061,23 @@ export interface ModulePointsAccess {
   claimCooldown: (key: string, seconds: number) => Promise<boolean>;
   rounds: {
     open: (roundId: string, data: unknown) => Promise<void>;
+    openWithStake: (
+      roundId: string,
+      data: unknown,
+      operationId: string,
+      accountId: string,
+      login: string,
+      stake: number,
+      cooldown?: PointSettlementCooldown,
+    ) => Promise<{ roundId: string; replayed: boolean }>;
     active: () => Promise<PointActiveRound | null>;
+    listOpen: () => Promise<PointActiveRound[]>;
     markAnnounced: (roundId: string, deadlineAt: number, alarmKey: string) => Promise<void>;
     join: (roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown) => Promise<PointJoinResult>;
     answer: (roundId: string, operationId: string, accountId: string, login: string, graceS: number, messageAt: number) => Promise<PointRoundAnswerResult>;
     resolve: (roundId: string, settlement: { kind: string; params: unknown }) => Promise<PointsApplyResult>;
+    accept: (roundId: string, operationId: string, accountId: string, login: string, replyToMessageId?: string) => Promise<PointsApplyResult>;
+    cancel: (roundId: string) => Promise<number>;
     cancelOpenRounds: (revision: number) => Promise<number>;
     setGate: (closed: boolean, revision: number, lastDisabledRevision?: number | null) => Promise<{ applied: boolean }>;
   };
@@ -1490,7 +1505,7 @@ export interface ModulePanelProperties {
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
 
-type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "counter" | "test-message" | "marker";
+type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "duel" | "counter" | "test-message" | "marker";
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
@@ -1575,6 +1590,14 @@ export type ModuleLiveTileSnapshot =
     id: string;
     target: string;
     endedAt: string;
+  }
+  | {
+    kind: "duel";
+    id: string;
+    challenger: string;
+    target: string | null;
+    stake: number;
+    closesAt: string;
   }
   | {
     kind: "upcoming";
@@ -1801,6 +1824,12 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   requiresModules?: readonly string[];
   /** Read-only help shown on the module page for commands listened to in chat. */
   chatCommands?: readonly ModuleChatCommandDeclaration[];
+  /** Effective command tokens for settings-configurable command modules. */
+  chatCommandNames?: (settings: unknown) => readonly string[];
+  /** Root settings fields that store the configurable command tokens for SQL write guards. */
+  chatCommandSettingsFields?: readonly string[];
+  /** Command tokens inserted by onEnable and included in activation collision guards. */
+  onEnableCommandTokens?: readonly string[];
   /** The module is always enabled for every released channel and cannot be disabled. */
   mandatory?: boolean;
   /** Localized explanation shown when this module cannot be disabled. */
@@ -1902,15 +1931,33 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   alarms?: readonly ModuleAlarmDefinition[];
   /** Reconciles accepted start metadata, even if the round was cancelled before announcement. */
   onPointRoundOpened?: (context: ModuleAlarmContext, round: ModulePointRoundAnnouncement) => Promise<void>;
+  /** Whether cancelling funded rounds queues the shared refund notice. Defaults to true. */
+  pointRoundCancellationNotice?: boolean;
   /** Formats the persisted result of a resolved points round for retryable chat delivery. */
   formatPointRoundResult?: (
     context: ModuleAlarmContext,
     round: ModulePointRoundResult,
-  ) => Promise<{ text: string; attributions?: readonly string[]; target?: ChatOutputTarget } | null>;
+  ) => Promise<{
+    text: string;
+    attributions?: readonly string[];
+    target?: ChatOutputTarget;
+    replyToMessageId?: string;
+    sourceBroadcasterUserId?: string;
+    automated?: boolean;
+  } | null>;
   formatPointRoundAnnouncement?: (
     context: ModuleAlarmContext,
     round: ModulePointRoundAnnouncement,
-  ) => Promise<{ text: string; attributions?: readonly string[]; target?: ChatOutputTarget } | null>;
+  ) => Promise<{
+    text: string;
+    attributions?: readonly string[];
+    target?: ChatOutputTarget;
+    replyToMessageId?: string;
+    sourceBroadcasterUserId?: string;
+    automated?: boolean;
+  } | null>;
+  /** Retries this module's result after shared automated-output limit rejections until delivered. */
+  retryPointRoundRateLimitedResults?: boolean;
   /** Hourly module-owned cleanup run by the host through the registry. */
   scheduledMaintenance?: (db: D1Database, now: string) => Promise<void>;
   /** Generic event-time sources that scheduled modules may select. */

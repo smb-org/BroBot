@@ -25,6 +25,7 @@ export interface LiveCockpitMockOptions {
   tokens?: { botExpiresAt: string | null; loginStatus: "connected" | "error" | "revoked" | null; loginReason: string | null; loginExpiresAt: string | null };
   vote?: Record<string, unknown> | null;
   votekick?: Record<string, unknown> | null;
+  duels?: readonly Record<string, unknown>[];
   shoutoutFailureReason?: string;
   currentStateError?: boolean;
   belaboxStatus?: { errorCode?: string | null; fetchFailureNotice?: boolean; bitrateKbps?: number };
@@ -32,6 +33,7 @@ export interface LiveCockpitMockOptions {
   waitForOverlays?: () => Promise<void>;
   onVoteClose?: (pollId: string) => void;
   onVotekickCancel?: (id: string) => void;
+  onDuelCancel?: (id: string) => void;
 }
 
 export interface LiveCockpitMockController {
@@ -54,6 +56,7 @@ export interface LiveCockpitMockController {
 
 export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMockOptions): Promise<LiveCockpitMockController> => {
   const modules = options.modules ?? [];
+  let duels = [...(options.duels ?? [])];
   const channelId = options.channelId;
   // Timestamps are getters so every response is fresh, however long a run takes.
   const freshNow = (): string => new Date().toISOString();
@@ -175,6 +178,14 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
       const requestedId = decodeURIComponent(pathname.split("/").at(-2) ?? "");
       options.onVotekickCancel?.(requestedId);
       if (requestedId !== options.votekick?.id) return route.fulfill(json({ error: "votekick_changed" }, 409));
+      return route.fulfill({ status: 204, body: "" });
+    }
+    if (pathname === `${channelPrefix}/modules/duel/rounds` && method === "GET") return route.fulfill(json(duels));
+    if (pathname.startsWith(`${channelPrefix}/modules/duel/rounds/`) && pathname.endsWith("/cancel") && method === "POST") {
+      const requestedId = decodeURIComponent(pathname.split("/").at(-2) ?? "");
+      options.onDuelCancel?.(requestedId);
+      if (!duels.some((duel) => duel.id === requestedId)) return route.fulfill(json({ error: "duel_not_open" }, 404));
+      duels = duels.filter((duel) => duel.id !== requestedId);
       return route.fulfill({ status: 204, body: "" });
     }
     if (pathname === `${channelPrefix}/shoutout` && method === "POST" && options.shoutoutFailureReason !== undefined) {

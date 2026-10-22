@@ -6,6 +6,7 @@ import { panelRouter } from "../../src/worker/panel/routes";
 import { textFingerprint } from "../../src/text";
 import { createTextBlockRepository } from "../../src/modules/text_library/adapters/d1";
 import { createTextLibraryService } from "../../src/modules/text_library/service";
+import { duelSettingsForLanguage } from "../../src/modules/duel/contracts";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
@@ -54,6 +55,12 @@ const requestFor = async (
     headers,
     ...(requestBody === undefined ? {} : { body: JSON.stringify(requestBody) }),
   });
+};
+
+const insertEnabledDuel = async (): Promise<void> => {
+  await database.prepare(
+    "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES ('kanal-a', 'duel', 1, ?, 1)",
+  ).bind(JSON.stringify(duelSettingsForLanguage("en"))).run();
 };
 
 describe("Text commands panel", () => {
@@ -941,5 +948,144 @@ describe("Text commands panel", () => {
       before_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "everyone", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: null }),
       after_json: JSON.stringify({ name: "hallo", kind: "text", enabled: true, minimumTier: "moderator", text: "Antwort", cooldownSeconds: 5, aliases: [], userCooldownSeconds: 0, streamCondition: "any", games: [], responseType: "say", chatTarget: null }),
     });
+  });
+
+  it("rejects creating a custom command reserved by enabled Duel settings", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertEnabledDuel();
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "duel", text: "A custom reply", cooldownSeconds: 0,
+      }),
+      environmentFor(database),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "module_command_collision", command: "!duel" });
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM text_commands WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ count: 0 });
+  });
+
+  it("rejects renaming a custom command to the configured Duel accept command", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertEnabledDuel();
+    const environment = environmentFor(database);
+    await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "arena", text: "A custom reply", cooldownSeconds: 0,
+      }),
+      environment,
+    );
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/arena", "PATCH", { name: "yes" }),
+      environment,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "module_command_collision", command: "!yes" });
+    await expect(database.prepare("SELECT command_name FROM text_commands WHERE channel_id = 'kanal-a'").first())
+      .resolves.toEqual({ command_name: "arena" });
+  });
+
+  it("rejects enabling a custom command reserved by enabled Duel settings", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const environment = environmentFor(database);
+    await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "duel", enabled: false, text: "A custom reply", cooldownSeconds: 0,
+      }),
+      environment,
+    );
+    await insertEnabledDuel();
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/duel", "PATCH", { enabled: true }),
+      environment,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "module_command_collision", command: "!duel" });
+    await expect(database.prepare("SELECT enabled FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'duel'").first())
+      .resolves.toEqual({ enabled: 0 });
+  });
+
+  it("keeps malformed legacy module settings from breaking atomic command writes", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES ('kanal-a', 'duel', 1, ?, 1)",
+    ).bind("{malformed").run();
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "arena", text: "A custom reply", cooldownSeconds: 0,
+      }),
+      environmentFor(database),
+    );
+
+    expect(response.status).toBe(201);
+  });
+
+  it("reserves module and custom command names atomically across their concurrent writes", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertEnabledDuel();
+
+    const originalBatch = database.batch.bind(database);
+    let batchCount = 0;
+    let releaseBatches!: () => void;
+    const bothBatchesReady = new Promise<void>((resolve) => { releaseBatches = resolve; });
+    const interleavedDatabase = new Proxy(database, {
+      get(target, property) {
+        if (property === "batch") {
+          return async (statements: Parameters<TestD1Database["batch"]>[0]) => {
+            batchCount += 1;
+            if (batchCount === 2) releaseBatches();
+            await bothBatchesReady;
+            return originalBatch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        if (typeof value === "function") return value.bind(target) as unknown;
+        return value;
+      },
+    });
+    const environment = { ...environmentFor(database), DB: interleavedDatabase as unknown as D1Database } as Env;
+    const settings = { ...duelSettingsForLanguage("en"), challengeCommand: "!arena" };
+    const [moduleResponse, commandResponse] = await Promise.all([
+      panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/kanal-a/modules/duel/settings", "PATCH", { revision: 1, settings }),
+        environment,
+      ),
+      panelRouter.fetch(
+        await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+          name: "arena", text: "A custom reply", cooldownSeconds: 0,
+        }),
+        environment,
+      ),
+    ]);
+
+    const storedSettings = await database.prepare(
+      "SELECT settings FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'duel'",
+    ).first<{ settings: string }>();
+    const storedCommand = await database.prepare(
+      "SELECT command_name FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'arena'",
+    ).first<{ command_name: string }>();
+    const moduleClaimsArena = storedSettings !== null &&
+      (JSON.parse(storedSettings.settings) as { challengeCommand: string }).challengeCommand === "!arena";
+
+    expect(moduleClaimsArena && storedCommand !== null).toBe(false);
+    expect([moduleResponse.status, commandResponse.status].filter((status) => status === 200 || status === 201)).toHaveLength(1);
+    expect([moduleResponse.status, commandResponse.status]).toContain(409);
   });
 });
