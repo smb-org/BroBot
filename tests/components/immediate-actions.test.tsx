@@ -277,6 +277,36 @@ describe("cockpit action role mirror", () => {
     expect(onFeedbackMessage).toHaveBeenCalledWith(expect.stringMatching(/5:23/u), undefined, "success");
   });
 
+  it("clears a saved scope_missing result once a later availability check confirms the granted permission", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      vi.mocked(createStreamMarker).mockResolvedValue({
+        result: "scope_missing",
+        error: "broadcast_scope_missing",
+        grantHref: "/auth/channels/channel-a/broadcaster-scopes/broadcast",
+      });
+      render(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId="channel-a" streamState="online" role="manager"
+        modules={[{ id: "channel_events", enabled: true }]} /></UiProvider>);
+
+      const marker = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
+      await waitFor(() => expect((marker as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(marker);
+      expect(await screen.findByRole("link", { name: /Berechtigung erteilen/u })).not.toBeNull();
+
+      vi.mocked(fetchStreamMarkerAvailability).mockResolvedValue({ manageScopeAvailable: false });
+      await act(async () => { vi.advanceTimersByTime(4_000); await Promise.resolve(); });
+      await waitFor(() => expect((marker as HTMLButtonElement).disabled).toBe(true));
+      expect(screen.getByRole("link", { name: /Berechtigung erteilen/u })).not.toBeNull();
+
+      vi.mocked(fetchStreamMarkerAvailability).mockResolvedValue({ manageScopeAvailable: true });
+      await act(async () => { vi.advanceTimersByTime(4_000); await Promise.resolve(); });
+      await waitFor(() => expect((marker as HTMLButtonElement).disabled).toBe(false));
+      expect(screen.queryByRole("link", { name: /Grant permission|Berechtigung erteilen/u })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("drops a delayed marker result after the cockpit switches channels", async () => {
     let resolveMarker: ((value: Awaited<ReturnType<typeof createStreamMarker>>) => void) | undefined;
     vi.mocked(createStreamMarker).mockImplementation(() => new Promise((resolve) => { resolveMarker = resolve; }));

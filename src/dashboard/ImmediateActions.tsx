@@ -29,6 +29,8 @@ interface ActionFeedback {
   href?: string;
   linkLabel?: string;
   until?: number;
+  /** Availability generation at the time of an error result that carries a link; a later confirmation supersedes it. */
+  supersededByConfirmationAfter?: number;
 }
 
 const remainingTime = (until: number, now: number): string => {
@@ -86,6 +88,7 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
     stale: false,
   };
   const [now, setNow] = useState(() => Date.now());
+  const [availabilityConfirmations, setAvailabilityConfirmations] = useState(0);
   const actionKey = `${moduleId}:${action.id}`;
 
   useEffect(() => {
@@ -140,6 +143,7 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
         }
         if (active) {
           setConditionState({ channelId, loading: false, reason: null, link: null, until: null, pollId, stale: false });
+          setAvailabilityConfirmations((count) => count + 1);
           onAvailabilityStateChange(actionKey, false);
         }
       } catch {
@@ -192,6 +196,7 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
 
   return <ActionFrame action={action} moduleId={moduleId} channelId={channelId} {...(viewerUserId === undefined ? {} : { viewerUserId })} language={language} pollId={activeConditionState.pollId}
     disabled={lockReason !== null} reason={lockReason} availabilityStale={activeConditionState.stale}
+    availabilityConfirmations={availabilityConfirmations}
     availabilityLink={shouldCheckConditions && activeConditionState.reason !== null ? activeConditionState.link : null}
     {...(onFeedbackMessage === undefined ? {} : { onFeedbackMessage })}
     {...(onActionStart === undefined ? {} : { onActionStart })}
@@ -199,7 +204,7 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
     {...(onActionFailure === undefined ? {} : { onActionFailure })} />;
 };
 
-const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, pollId, disabled, reason, availabilityStale, availabilityLink, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
+const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, pollId, disabled, reason, availabilityStale, availabilityConfirmations, availabilityLink, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
@@ -209,6 +214,7 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
   disabled: boolean;
   reason: string | null;
   availabilityStale: boolean;
+  availabilityConfirmations: number;
   availabilityLink: { href: string; label: string } | null;
   onActionStart?: (moduleId: string, actionId: string) => number;
   onActionResult?: (moduleId: string, result: ModuleImmediateActionResult, observedAt: number) => void;
@@ -224,9 +230,14 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
   const [contentReadiness, setContentReadiness] = useState<{ actionId: string; channelId: string; generation: number; ready: boolean; reason: string | null } | null>(null);
   const [contentReadinessGeneration, setContentReadinessGeneration] = useState(0);
   const [error, setError] = useState<ActionFeedback | null>(null);
-  const [result, setResult] = useState<ActionFeedback | null>(null);
+  const [savedResult, setResult] = useState<ActionFeedback | null>(null);
   const [feedbackNow, setFeedbackNow] = useState(() => Date.now());
   const mounted = useRef(true);
+  const confirmationsRef = useRef(availabilityConfirmations);
+  // A linked error result (for example a missing permission) is superseded once a later availability check confirms the action again.
+  const result = savedResult?.supersededByConfirmationAfter !== undefined && availabilityConfirmations > savedResult.supersededByConfirmationAfter
+    ? null
+    : savedResult;
   const content = loadedContent?.actionId === action.id ? loadedContent.component : null;
   const contentLoading = open && action.content !== undefined && content === null && !contentFailed;
   const requiresContentReadiness = action.content?.requiresReadiness === true;
@@ -246,6 +257,7 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
+  useLayoutEffect(() => { confirmationsRef.current = availabilityConfirmations; }, [availabilityConfirmations]);
 
   const discardDraft = (): void => {
     setOpen(false);
@@ -325,6 +337,7 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
       setResult({
         message: actionResult?.message?.[language] ?? texts.streamManager.actionSucceeded(action.name[language]),
         ...(actionResult?.link === undefined ? {} : { href: actionResult.link.href, linkLabel: actionResult.link.label[language] }),
+        ...(actionResult?.link !== undefined && actionResult.tone === "error" ? { supersededByConfirmationAfter: confirmationsRef.current } : {}),
       });
       onFeedbackMessage?.(
         actionResult?.message?.[language] ?? texts.streamManager.actionSucceeded(action.name[language]),
