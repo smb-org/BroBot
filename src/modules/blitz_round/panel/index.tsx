@@ -873,7 +873,8 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
 
   const save = (): Promise<string | null> => {
     if (savePromise.current !== null) return savePromise.current;
-    if (!canManage || !valid) return Promise.resolve(labels.settingsError);
+    if (!canManage) return Promise.resolve(labels.settingsError);
+    if (!valid) return Promise.resolve(labels.settingsInvalid);
     const session = editorSession.current;
     setSaving(true);
     setError(undefined);

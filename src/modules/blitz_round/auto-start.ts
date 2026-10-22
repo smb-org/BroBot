@@ -97,6 +97,9 @@ const readConfig = async (context: ModuleAlarmContext): Promise<BlitzAutoStartCo
 const baselineFromRoundData = (data: unknown): string | null =>
   isRecord(data) && typeof data.autoStartBaseline === "string" ? data.autoStartBaseline : null;
 
+const activeForBaseline = (active: RoundReference | null, baseline: string): RoundReference | null =>
+  active !== null && baselineFromRoundData(active.data) === baseline ? active : null;
+
 const intervalFor = (minutes: number): number => Math.max(BLITZ_AUTO_START_MINUTES,
   Math.min(BLITZ_AUTO_START_MAX_MINUTES, minutes)) * MINUTE_MS;
 
@@ -114,10 +117,10 @@ const stateForBaseline = (
   stream: ModuleStreamState,
   now: number,
   active: RoundReference | null,
-  roundBaseline?: string | null,
 ): BlitzAutoStartState => {
   const remainingMs = intervalFor(config.settings.autoStartIntervalMinutes);
-  const awaitingRoundId = active?.roundId ?? null;
+  const currentBaselineRound = activeForBaseline(active, config.baseline);
+  const awaitingRoundId = currentBaselineRound?.roundId ?? null;
   return {
     baseline: config.baseline,
     moduleActivationRevision: config.moduleActivationRevision,
@@ -127,7 +130,7 @@ const stateForBaseline = (
     deadlineAt: awaitingRoundId === null ? deadlineFor(stream, now, remainingMs) : null,
     remainingMs,
     awaitingRoundId,
-    awaitingRoundBaseline: awaitingRoundId === null ? null : roundBaseline ?? baselineFromRoundData(active?.data) ?? null,
+    awaitingRoundBaseline: currentBaselineRound === null ? null : baselineFromRoundData(currentBaselineRound.data),
     watchdogAt: awaitingRoundId === null ? null : now + BLITZ_AUTO_START_WATCHDOG_MS,
   };
 };
@@ -151,11 +154,15 @@ const sameAlarmIdentity = (left: ModuleAlarmIdentity | null | undefined, right: 
   left.state === right.state && left.streamId === right.streamId && left.generation === right.generation &&
   left.deadline === right.deadline;
 
-const persistAndArm = async (context: ModuleAlarmContext, state: BlitzAutoStartState): Promise<void> => {
+const persistState = async (context: ModuleAlarmContext, state: BlitzAutoStartState): Promise<void> => {
   const current = await readState(context);
   if (current === null || JSON.stringify(current) !== JSON.stringify(state)) {
     await context.storage.put(BLITZ_AUTO_START_STATE_KEY, state);
   }
+};
+
+const persistAndArm = async (context: ModuleAlarmContext, state: BlitzAutoStartState): Promise<void> => {
+  await persistState(context, state);
   const identity = expectedAlarmIdentity(state);
   if (identity === null) {
     await context.clear(BLITZ_AUTO_START_ALARM_KEY);
@@ -191,12 +198,12 @@ const prepareCurrentState = (
   now: number,
 ): BlitzAutoStartState => {
   if (state === null || state.baseline !== config.baseline) {
-    const currentBaselineRound = active !== null && baselineFromRoundData(active.data) === config.baseline ? active : null;
-    return stateForBaseline(config, stream, now, currentBaselineRound);
+    return stateForBaseline(config, stream, now, active);
   }
 
-  if (active !== null) {
-    if (state.awaitingRoundId === active.roundId) {
+  const currentBaselineRound = activeForBaseline(active, config.baseline);
+  if (currentBaselineRound !== null) {
+    if (state.awaitingRoundId === currentBaselineRound.roundId) {
       return state.mode === modeFor(stream) ? state : { ...state, mode: modeFor(stream) };
     }
     return {
@@ -204,8 +211,8 @@ const prepareCurrentState = (
       mode: modeFor(stream),
       deadlineAt: null,
       remainingMs: intervalFor(config.settings.autoStartIntervalMinutes),
-      awaitingRoundId: active.roundId,
-      awaitingRoundBaseline: baselineFromRoundData(active.data) ?? state.baseline,
+      awaitingRoundId: currentBaselineRound.roundId,
+      awaitingRoundBaseline: baselineFromRoundData(currentBaselineRound.data),
       watchdogAt: now + BLITZ_AUTO_START_WATCHDOG_MS,
     };
   }
@@ -281,8 +288,8 @@ const handleOpenedRound = async (
     context.points.rounds.active(),
   ]);
   const callbackBaseline = baselineFromRoundData(round.data);
-  if (active === null || active.roundId !== round.roundId ||
-      callbackBaseline !== config.baseline || baselineFromRoundData(active.data) !== callbackBaseline) return;
+  const currentBaselineRound = activeForBaseline(active, config.baseline);
+  if (currentBaselineRound === null || currentBaselineRound.roundId !== round.roundId || callbackBaseline !== config.baseline) return;
   if (state?.awaitingRoundId === round.roundId) {
     const next = prepareCurrentState(config, state, round, stream, now);
     const identity = expectedAlarmIdentity(next);
@@ -313,6 +320,19 @@ const handleOpenedRound = async (
   await persistAndArm(context, next);
 };
 
+const handleActiveRound = async (
+  context: ModuleAlarmContext,
+  config: BlitzAutoStartConfig,
+  active: RoundReference,
+): Promise<void> => {
+  const currentBaselineRound = activeForBaseline(active, config.baseline);
+  if (currentBaselineRound === null) {
+    await context.schedule(BLITZ_AUTO_START_RECOVERY_ALARM_KEY, Date.now() + BLITZ_AUTO_START_WATCHDOG_MS);
+    return;
+  }
+  await handleOpenedRound(context, config, currentBaselineRound);
+};
+
 export const reconcileBlitzAutoStart = async (
   context: ModuleAlarmContext,
   reason: ModuleScheduleInputChangeReason | "settings" | "reconcile",
@@ -330,6 +350,12 @@ export const reconcileBlitzAutoStart = async (
   ]);
   const now = Date.now();
   const next = prepareCurrentState(config, state, active, stream, now);
+  if (active !== null && activeForBaseline(active, config.baseline) === null &&
+      next.awaitingRoundId === null && next.deadlineAt !== null && next.deadlineAt <= now) {
+    await persistState(context, next);
+    await context.schedule(BLITZ_AUTO_START_RECOVERY_ALARM_KEY, now + BLITZ_AUTO_START_WATCHDOG_MS);
+    return;
+  }
   await persistAndArm(context, next);
 };
 
@@ -385,7 +411,7 @@ const recoverAwaitedRound = async (
   stream: ModuleStreamState,
   now: number,
 ): Promise<void> => {
-  if (active !== null) {
+  if (activeForBaseline(active, config.baseline) !== null) {
     await persistAndArm(context, {
       ...state,
       mode: modeFor(stream),
@@ -436,7 +462,7 @@ export const handleBlitzAutoStartAlarm = async (
     return;
   }
   if (active !== null) {
-    await handleOpenedRound(context, config, active);
+    await handleActiveRound(context, config, active);
     return;
   }
   if (stream !== "online") {
@@ -460,7 +486,7 @@ export const handleBlitzAutoStartAlarm = async (
     await handleOpenedRound(context, config, { roundId: opened.roundId, data: opened.data });
   } catch {
     const current = await context.points.rounds.active();
-    if (current !== null) await handleOpenedRound(context, config, current);
+    if (current !== null) await handleActiveRound(context, config, current);
     else await persistAndArm(context, stateForBaseline(config, stream, Date.now(), null));
   }
 };

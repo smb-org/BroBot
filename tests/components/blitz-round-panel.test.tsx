@@ -1629,6 +1629,24 @@ describe("Blitz Round collection panel", () => {
     expect(saveStatus).not.toHaveTextContent("The settings could not be saved.");
   });
 
+  it("shows the validation message when saving an invalid settings draft from the Back confirmation", async () => {
+    const api = installPanelFetch([sampleQuestion]);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.click(screen.getByRole("button", { name: /^Settings$/u }));
+    await screen.findByText("Round settings", { exact: true });
+    fireEvent.click(screen.getByRole("switch", { name: "Start automatically" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Interval" }), { target: { value: "14" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to questions" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Save changes?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: /^Save$/u }));
+
+    expect(await within(confirmation).findByText("Please check the highlighted fields.")).toBeInTheDocument();
+    expect(api.requests.mock.calls.filter(([input, init]) => parseUrl(input).pathname.endsWith("/modules/blitz_round/settings") && init?.method === "PATCH")).toHaveLength(0);
+  });
+
   it("renders one back action and a wrapping chat-target control in settings", async () => {
     installPanelFetch([sampleQuestion]);
     mountPanel();

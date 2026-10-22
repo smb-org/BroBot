@@ -160,6 +160,30 @@ describe("Blitz automatic start scheduling", () => {
     expect(openBlitzRound).not.toHaveBeenCalled();
   });
 
+  it("finishes watchdog recovery when only an older-baseline round is active", async () => {
+    const fixture = setup();
+    await reconcileBlitzAutoStart(fixture.context, "activation");
+    const oldRound = openingRound("fictional-watchdog-old-round", "0:1");
+    fixture.state.setActive({ roundId: oldRound.roundId, state: "open", data: oldRound.data, deadlineAt: null });
+    await onBlitzPointRoundOpened(fixture.context, oldRound);
+
+    fixture.state.setSettings({ autoStart: true, autoStartIntervalMinutes: 30 }, 2, 2);
+    await reconcileBlitzAutoStart(fixture.context, "settings");
+    const currentRound = openingRound("fictional-watchdog-current-round", "0:2");
+    fixture.state.setActive({ roundId: currentRound.roundId, state: "open", data: currentRound.data, deadlineAt: null });
+    await onBlitzPointRoundOpened(fixture.context, currentRound);
+
+    fixture.state.setActive({ roundId: oldRound.roundId, state: "open", data: oldRound.data, deadlineAt: null });
+    const watchdog = fixture.state.scheduled.get(alarmKey);
+    vi.setSystemTime(watchdog?.deadline ?? Date.now());
+    Object.assign(fixture.context, { alarmIdentity: watchdog?.identity });
+
+    await handleBlitzAutoStartAlarm(fixture.context, alarmKey, watchdog?.deadline ?? 0);
+
+    expect(fixture.state.storage.get(stateKey)).toMatchObject({ baseline: "0:2", awaitingRoundId: null });
+    expect(fixture.state.scheduled.get(alarmKey)?.deadline).toBe(Date.now() + 30 * minute);
+  });
+
   it("starts a full new interval when Blitz is re-enabled", async () => {
     const fixture = setup();
     await reconcileBlitzAutoStart(fixture.context, "activation");
@@ -251,6 +275,61 @@ describe("Blitz automatic start scheduling", () => {
 
     expect(fixture.state.scheduled.get(alarmKey)?.deadline).toBe(currentDeadline);
     expect(fixture.state.storage.get(stateKey)).toMatchObject({ baseline: "0:2", awaitingRoundId: null });
+  });
+
+  it("keeps the saved interval when unrelated activation reconciliation sees an older active round", async () => {
+    const fixture = setup();
+    await reconcileBlitzAutoStart(fixture.context, "activation");
+    const oldRound = openingRound("fictional-old-active-round", "0:1");
+    fixture.state.setActive({ roundId: oldRound.roundId, state: "open", data: oldRound.data, deadlineAt: null });
+    await onBlitzPointRoundOpened(fixture.context, oldRound);
+
+    fixture.state.setSettings({ autoStart: true, autoStartIntervalMinutes: 30 }, 2, 2);
+    await reconcileBlitzAutoStart(fixture.context, "settings");
+    const savedDeadline = fixture.state.scheduled.get(alarmKey)?.deadline;
+    expect(fixture.state.storage.get(stateKey)).toMatchObject({ baseline: "0:2", awaitingRoundId: null });
+
+    await reconcileBlitzAutoStart(fixture.context, "activation");
+    vi.advanceTimersByTime(2 * minute);
+    fixture.state.setActive(null);
+    await onBlitzPointRoundResolved(fixture.context, { ...oldRound, result: {}, resolvedAt: new Date().toISOString() });
+
+    expect(fixture.state.scheduled.get(alarmKey)?.deadline).toBe(savedDeadline);
+    expect(fixture.state.storage.get(stateKey)).toMatchObject({ baseline: "0:2", awaitingRoundId: null });
+  });
+
+  it("retries a due interval while an older-baseline round is active", async () => {
+    const fixture = setup();
+    await reconcileBlitzAutoStart(fixture.context, "activation");
+    const oldRound = openingRound("fictional-due-old-round", "0:1");
+    fixture.state.setActive({ roundId: oldRound.roundId, state: "open", data: oldRound.data, deadlineAt: null });
+    await onBlitzPointRoundOpened(fixture.context, oldRound);
+
+    fixture.state.setSettings({ autoStart: true, autoStartIntervalMinutes: 30 }, 2, 2);
+    await reconcileBlitzAutoStart(fixture.context, "settings");
+    const originalDeadline = fixture.state.scheduled.get(alarmKey)?.deadline ?? Date.now();
+    vi.setSystemTime(originalDeadline);
+    const dueAlarm = fixture.state.scheduled.get(alarmKey);
+    Object.assign(fixture.context, { alarmIdentity: dueAlarm?.identity });
+    fixture.state.scheduled.delete(alarmKey);
+
+    await handleBlitzAutoStartAlarm(fixture.context, alarmKey, originalDeadline);
+
+    expect(fixture.state.storage.get(stateKey)).toMatchObject({ baseline: "0:2", awaitingRoundId: null, deadlineAt: originalDeadline });
+    expect(fixture.state.scheduled.get("settings-changed")?.deadline).toBe(Date.now() + 60_000);
+    expect(openBlitzRound).not.toHaveBeenCalled();
+
+    fixture.state.setActive(null);
+    vi.advanceTimersByTime(60_000);
+    await fixture.state.deliverAlarm("settings-changed");
+    const retriedAlarm = fixture.state.scheduled.get(alarmKey);
+    expect(retriedAlarm?.deadline).toBeLessThanOrEqual(Date.now());
+    Object.assign(fixture.context, { alarmIdentity: retriedAlarm?.identity });
+    fixture.state.scheduled.delete(alarmKey);
+    await handleBlitzAutoStartAlarm(fixture.context, alarmKey, retriedAlarm?.deadline ?? 0);
+
+    expect(openBlitzRound).toHaveBeenCalledOnce();
+    expect(fixture.state.storage.get(stateKey)).toMatchObject({ baseline: "0:2", awaitingRoundId: "fictional-auto-round" });
   });
 
   it("ignores a previous activation resolution after the module is re-enabled", async () => {
