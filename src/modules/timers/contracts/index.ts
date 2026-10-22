@@ -53,3 +53,9 @@ export interface TimerMutationInput {
   chatTarget: Exclude<ChatOutputTarget, "where_asked"> | null;
   trigger: TimerTrigger;
 }
+
+export type SkipTimerOccurrenceResult =
+  | { result: "skipped"; skippedOccurrenceAt: string; nextOccurrenceAt: string | null }
+  | { result: "already_skipped" }
+  | { result: "nothing_planned" }
+  | { result: "not_found" };

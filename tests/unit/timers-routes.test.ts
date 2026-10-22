@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleRegisteredTemplateVariable, ModuleRouteEnvironment } from "../../src/modules/contract";
+import type { ChannelRole } from "../../src/contracts/values";
 import type { DurableTimerConfig } from "../../src/modules/timers/durable";
 import { makeTimerPlan } from "../../src/modules/timers/durable";
 import { timerRoutes } from "../../src/modules/timers/routes";
@@ -12,6 +13,14 @@ const CHANNEL_ID = "timers-route-channel";
 const ACTOR_ID = "timers-route-actor";
 const EVENT_SOURCE_ID = "sun.sunrise";
 const databases: TestD1Database[] = [];
+
+interface SkipTimerRouteOptions {
+  role?: ChannelRole | "viewer";
+  authorizationSql?: string;
+  result?: { result: string; skippedOccurrenceAt?: string; nextOccurrenceAt?: string | null };
+  skipped?: (channelId: string, timerId: string, revision: number) => void;
+  auditActions?: string[];
+}
 
 const createDatabase = async (): Promise<TestD1Database> => {
   const database = new TestD1Database();
@@ -41,13 +50,25 @@ const raidViewersVariable = {
   availableInEventTemplates: false,
 } satisfies ModuleRegisteredTemplateVariable;
 
-const appFor = (database: D1Database, variables: readonly ModuleRegisteredTemplateVariable[] = []): Hono<ModuleRouteEnvironment> => {
+const appFor = (
+  database: D1Database,
+  variables: readonly ModuleRegisteredTemplateVariable[] = [],
+  options: SkipTimerRouteOptions = {},
+): Hono<ModuleRouteEnvironment> => {
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
-    context.set("channelRole", "manager");
+    context.set("channelRole", (options.role ?? "manager") as ChannelRole);
     context.set("actor", { userId: ACTOR_ID, sessionId: "timers-route-session" });
+    context.set("authorizeMutation", () => ({ sql: options.authorizationSql ?? "AND 1 = 1", values: [] }));
     context.set("authorizeManagementMutation", () => ({ sql: "AND 1 = 1", values: [] }));
-    context.set("prepareModuleAudit", () => database.prepare("SELECT 1"));
+    context.set("prepareModuleAudit", (input) => {
+      options.auditActions?.push(input.action);
+      return database.prepare("SELECT 1");
+    });
+    context.set("writeModuleAudit", (input) => {
+      options.auditActions?.push(input.action);
+      return Promise.resolve();
+    });
     context.set("listEventTimeSources", () => [{ id: EVENT_SOURCE_ID, label: { de: "Sonnenaufgang", en: "Sunrise" } }]);
     context.set("listRegisteredTemplateVariables", () => Promise.resolve(variables));
     // No occurrence within the source's own horizon -- the polar-night case
@@ -59,7 +80,12 @@ const appFor = (database: D1Database, variables: readonly ModuleRegisteredTempla
   return app;
 };
 
-const environmentFor = (database: D1Database, scheduled: ScheduledAlarm[], failScheduler = false): Env => ({
+const environmentFor = (
+  database: D1Database,
+  scheduled: ScheduledAlarm[],
+  failScheduler = false,
+  options: SkipTimerRouteOptions = {},
+): Env => ({
   DB: database,
   CHANNEL: {
     idFromName: () => "channel-object",
@@ -113,12 +139,32 @@ const environmentFor = (database: D1Database, scheduled: ScheduledAlarm[], failS
       deleteTimerConfig: () => failScheduler
         ? Promise.reject(new Error("Channel Durable Object is unavailable."))
         : Promise.resolve(),
+      skipNextTimerOccurrence: (timerId: string, revision: number) => {
+        options.skipped?.("timers-route-channel", timerId, revision);
+        return Promise.resolve(options.result ?? {
+          result: "skipped",
+          skippedOccurrenceAt: "2026-10-13T12:10:00.000Z",
+          nextOccurrenceAt: "2026-10-13T12:20:00.000Z",
+        });
+      },
       reconcileTimerSchedules: () => failScheduler
         ? Promise.reject(new Error("Channel Durable Object is unavailable."))
         : Promise.resolve(),
     }),
   },
 } as unknown as Env);
+
+const insertSkipTimerFixture = async (database: TestD1Database, channelId = CHANNEL_ID): Promise<void> => {
+  await database.prepare(
+    "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'timers', 1, '{}')",
+  ).bind(channelId).run();
+  await database.prepare(
+    `INSERT INTO timers
+      (timer_id, channel_id, name, enabled, message_text, trigger_type, trigger_json, revision,
+       next_run_at, next_run_state, schedule_mirror_sequence, last_run_at, created_at, updated_at)
+     VALUES ('timer-1', ?, 'Reminder', 1, 'Hello', 'interval', ?, 3, '2026-10-13T12:10:00.000Z', 'live', 1, NULL, ?, ?)`,
+  ).bind(channelId, JSON.stringify({ type: "interval", live: { minutes: 10 } }), "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z").run();
+};
 
 afterEach(() => {
   vi.useRealTimers();
@@ -273,6 +319,91 @@ describe("timer scheduling and validation routes", () => {
     await expect(response.json()).resolves.toEqual({ error: "timer_conflict" });
     await expect(database.prepare("SELECT COUNT(*) AS count FROM timers WHERE channel_id = ?")
       .bind(CHANNEL_ID).first<{ count: number }>()).resolves.toEqual({ count: 0 });
+  });
+});
+
+describe("skip next timer quick-action route", () => {
+  it.each([
+    [{ result: "skipped", skippedOccurrenceAt: "2026-10-13T12:10:00.000Z", nextOccurrenceAt: "2026-10-13T12:20:00.000Z" }, 200],
+    [{ result: "already_skipped" }, 200],
+    [{ result: "nothing_planned" }, 200],
+    [{ result: "not_found" }, 200],
+  ] as const)("returns the typed scheduler result %j", async (result, expectedStatus) => {
+    const database = await createDatabase();
+    await insertSkipTimerFixture(database);
+    const auditActions: string[] = [];
+    const options: SkipTimerRouteOptions = { result, auditActions };
+    const app = appFor(database as unknown as D1Database, [], options);
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/quick-actions/skip-next`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ timerId: "timer-1" }),
+    }), environmentFor(database as unknown as D1Database, [], false, options));
+
+    expect(response.status).toBe(expectedStatus);
+    await expect(response.json()).resolves.toEqual(result);
+    expect(auditActions).toEqual(result.result === "skipped" ? ["timers.timer.skipped"] : []);
+  });
+
+  it("rejects a non-member before asking the channel scheduler to skip", async () => {
+    const database = await createDatabase();
+    await insertSkipTimerFixture(database);
+    let schedulerCalls = 0;
+    const options: SkipTimerRouteOptions = {
+      authorizationSql: "AND 1 = 0",
+      skipped: () => { schedulerCalls += 1; },
+    };
+    const response = await appFor(database as unknown as D1Database, [], options).fetch(
+      new Request(`https://brobot.example/channels/${CHANNEL_ID}/quick-actions/skip-next`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timerId: "timer-1" }),
+      }), environmentFor(database as unknown as D1Database, [], false, options),
+    );
+
+    expect(response.status).toBe(403);
+    expect(schedulerCalls).toBe(0);
+  });
+
+  it("rejects a role below operator before asking the channel scheduler to skip", async () => {
+    const database = await createDatabase();
+    await insertSkipTimerFixture(database);
+    let schedulerCalls = 0;
+    const options: SkipTimerRouteOptions = {
+      role: "viewer",
+      skipped: () => { schedulerCalls += 1; },
+    };
+    const response = await appFor(database as unknown as D1Database, [], options).fetch(
+      new Request(`https://brobot.example/channels/${CHANNEL_ID}/quick-actions/skip-next`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timerId: "timer-1" }),
+      }), environmentFor(database as unknown as D1Database, [], false, options),
+    );
+
+    expect(response.status).toBe(403);
+    expect(schedulerCalls).toBe(0);
+  });
+
+  it("does not expose a timer that belongs to another channel", async () => {
+    const database = await createDatabase();
+    await insertChannel(database, "other-timer-channel");
+    await insertSkipTimerFixture(database, "other-timer-channel");
+    let schedulerCalls = 0;
+    const options: SkipTimerRouteOptions = {
+      skipped: () => { schedulerCalls += 1; },
+    };
+    const response = await appFor(database as unknown as D1Database, [], options).fetch(
+      new Request(`https://brobot.example/channels/${CHANNEL_ID}/quick-actions/skip-next`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timerId: "timer-1" }),
+      }), environmentFor(database as unknown as D1Database, [], false, options),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ result: "not_found" });
+    expect(schedulerCalls).toBe(0);
   });
 });
 

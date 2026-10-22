@@ -6,6 +6,9 @@ import type { TextCommand } from "../modules/text_commands/contracts";
 import { readLastCounterVariable } from "../modules/text_commands/panel/counter-selection";
 import { textCommandQuickActionTexts } from "../modules/text_commands/panel/quick-action-locale";
 import { loadTextCommands } from "../modules/text_commands/panel/service";
+import type { Timer } from "../modules/timers/contracts";
+import { loadUpcomingTimers } from "../modules/timers/panel/service";
+import { timersQuickActionTexts } from "../modules/timers/panel/quick-action-locale";
 import { canManage, hasRequiredChannelRole, type ChannelRole } from "../contracts/values";
 import type { PanelChannelControls, PanelModuleState } from "../panel-contract";
 import { PanelApiError, createClip, fetchChannelVariables, sendManualShoutout, setChannelControl, startCommercial, type PanelChannelVariable } from "./api";
@@ -41,7 +44,7 @@ const moduleImmediateActionAvailability = (
   const module = MODULES.find((entry) => entry.id === moduleId);
   const action = module?.actions?.find((entry) => entry.id === actionId);
   const state = modules.find((entry) => entry.id === moduleId);
-  if (action === undefined || state === undefined || !state.enabled || role === null) {
+  if (action === undefined || state === undefined || role === null || (!state.enabled && !action.conditions.includes("moduleEnabled"))) {
     return { offered: false, disabledReason: null };
   }
   if (!hasRequiredChannelRole(role, action.requiredRole)) {
@@ -50,7 +53,7 @@ const moduleImmediateActionAvailability = (
       disabledReason: action.requiredRole === "manager" ? dashboardTexts().streamManager.managerOnly : dashboardTexts().streamManager.operatorOnly,
     };
   }
-  const availability = evaluateImmediateActionAvailability(action.conditions, streamState);
+  const availability = evaluateImmediateActionAvailability(action.conditions, streamState, state.enabled);
   return {
     offered: true,
     disabledReason: availability.reason === null
@@ -110,6 +113,17 @@ interface CounterPickerState {
   variableName: string | null;
 }
 
+interface TimerPickerState {
+  channelId: string;
+  timerId: string | null;
+}
+
+const timersWithPlannedOccurrence = (timers: readonly Timer[]): Timer[] => timers.filter((timer) =>
+  timer.enabled && timer.nextRunAt !== null && Number.isFinite(Date.parse(timer.nextRunAt)));
+
+const formatTimerNextRun = (at: string, language: "de" | "en"): string =>
+  new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "short" }).format(new Date(at));
+
 /** Cmd/Ctrl+K finds navigation, text commands, variables, and channel actions. */
 export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, viewerUserId = null, route, isPlatformAdmin = false, botSignedIn, botConnected, streamState, channelControls, onRefreshChannelState, onToggleModule, modules, onNavigate, onOpenCommand, onOpenVariable }: ChannelCommandPaletteProperties): ReactElement => {
   const texts = dashboardTexts();
@@ -122,8 +136,11 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
   const openCycle = paletteSession.open === open
     ? paletteSession.cycle
     : paletteSession.cycle + (open ? 1 : 0);
+  const timersModuleEnabled = modules.find((candidate) => candidate.id === "timers")?.enabled === true;
   const [variableState, setVariableState] = useState<ChannelCommandData<readonly PanelChannelVariable[]>>({ channelId, value: [], loaded: false, failed: false, openCycle: 0 });
+  const [timerState, setTimerState] = useState<ChannelCommandData<readonly Timer[]>>({ channelId, value: [], loaded: false, failed: false, openCycle: 0 });
   const [counterPicker, setCounterPicker] = useState<CounterPickerState | null>(null);
+  const [timerPicker, setTimerPicker] = useState<TimerPickerState | null>(null);
   const [query, setQuery] = useState("");
   const commands = useMemo(() => commandState.channelId === channelId ? commandState.value : [], [channelId, commandState]);
   const variablesMatchOpenCycle = variableState.channelId === channelId && variableState.openCycle === openCycle;
@@ -159,11 +176,18 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
     }).catch(() => {
       if (active) setVariableState({ channelId, value: [], loaded: true, failed: true, openCycle });
     });
+    if (timersModuleEnabled) {
+      void loadUpcomingTimers(channelId, controller.signal).then((value) => {
+        if (active) setTimerState({ channelId, value, loaded: true, failed: false, openCycle });
+      }).catch(() => {
+        if (active) setTimerState({ channelId, value: [], loaded: true, failed: true, openCycle });
+      });
+    }
     return () => {
       active = false;
       controller.abort();
     };
-  }, [channelId, open, openCycle]);
+  }, [channelId, open, openCycle, timersModuleEnabled]);
 
   const navigationItems = useMemo<CommandPaletteItem[]>(() => dashboardNavigationGroups(
     { isPlatformAdmin },
@@ -260,11 +284,21 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
     await onToggleModule(channelId, "ads", enabled);
   }, [channelId, modules, onToggleModule]);
   const quickActions = MODULES.find((module) => module.id === "text_commands")?.actions ?? [];
+  const timerQuickActions = MODULES.find((module) => module.id === "timers")?.actions ?? [];
   const counterAction = quickActions.find((action) => action.id === "counter-plus-one");
   const testMessageAction = quickActions.find((action) => action.id === "send-test-message");
+  const timerAction = timerQuickActions.find((action) => action.id === "skip-next-timer-message");
   const language = dashboardLanguage();
   const pickerState = counterPicker?.channelId === channelId ? counterPicker : null;
+  const timerPickerState = timerPicker?.channelId === channelId ? timerPicker : null;
   const numericVariables = variables.filter((variable) => Number.isFinite(variable.value));
+  const timerStateMatchesOpenCycle = timerState.channelId === channelId && timerState.openCycle === openCycle;
+  const plannedTimers = useMemo(
+    () => timerStateMatchesOpenCycle ? timersWithPlannedOccurrence(timerState.value) : [],
+    [timerState.value, timerStateMatchesOpenCycle],
+  );
+  const timersLoaded = timerStateMatchesOpenCycle && timerState.loaded;
+  const timersFailed = timerStateMatchesOpenCycle && timerState.failed;
   const counterReason = !variablesLoaded
     ? texts.streamManager.actionLoading
     : variablesFailed
@@ -274,6 +308,15 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         : textCommandQuickActionTexts.counter.noVariables[language];
   const counterAvailability = moduleImmediateActionAvailability("text_commands", "counter-plus-one", modules, streamState, ownRole, counterReason);
   const counterActionAvailable = counterAvailability.offered && counterAvailability.disabledReason === null;
+  const timerReason = !timersLoaded
+    ? texts.streamManager.actionLoading
+    : timersFailed
+      ? timersQuickActionTexts.loadFailed[language]
+      : plannedTimers.length > 0
+        ? null
+        : timersQuickActionTexts.noPlanned[language];
+  const timerAvailability = moduleImmediateActionAvailability("timers", "skip-next-timer-message", modules, streamState, ownRole, timerReason);
+  const timerActionAvailable = timerAvailability.offered && timerAvailability.disabledReason === null;
   const runCounterAction = useCallback((variableName: string): void => {
     if (channelId === null || counterAction === undefined || !counterActionAvailable ||
         !numericVariables.some((variable) => variable.name === variableName)) return;
@@ -287,6 +330,18 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
   }, [channelId, counterAction, counterActionAvailable, language, numericVariables, texts]);
   const pickerSelectionIsValid = pickerState?.variableName !== null && pickerState?.variableName !== undefined &&
     counterActionAvailable && numericVariables.some((variable) => variable.name === pickerState.variableName);
+  const timerPickerSelectionIsValid = timerPickerState?.timerId !== null && timerPickerState?.timerId !== undefined &&
+    timerActionAvailable && plannedTimers.some((timer) => timer.id === timerPickerState.timerId);
+  const runTimerAction = useCallback((timerId: string): void => {
+    if (channelId === null || timerAction === undefined || !timerActionAvailable || !plannedTimers.some((timer) => timer.id === timerId)) return;
+    const formData = new FormData();
+    formData.set("timerId", timerId);
+    void timerAction.execute({ channelId, language, formData }).then((result) => {
+      notify({ tone: result?.tone ?? "success", message: result?.message?.[language] ?? texts.streamManager.actionSucceeded(timerAction.name[language]) });
+    }).catch(() => {
+      notify({ tone: "error", message: timerAction.errorMessage?.[language] ?? texts.streamManager.actionFailed });
+    });
+  }, [channelId, language, plannedTimers, texts, timerAction, timerActionAvailable]);
   const actionItems = useMemo<CommandPaletteItem[]>(() => {
     if (channelId === null) return [];
     const managementLockReason = manageable ? undefined : texts.module.managementLocked;
@@ -429,8 +484,23 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         },
       });
     }
+    if (timerAvailability.offered && timerAction !== undefined) {
+      items.push({
+        id: "action:skip-next-timer-message",
+        label: timerAction.name[language],
+        group: texts.commandPalette.groupActions,
+        keywords: [...timersQuickActionTexts.paletteKeywords],
+        icon: timerAction.icon,
+        disabled: timerAvailability.disabledReason !== null,
+        ...(timerAvailability.disabledReason === null ? {} : { inlineReason: timerAvailability.disabledReason }),
+        onTrigger: () => {
+          if (!timerActionAvailable) return;
+          setTimerPicker({ channelId, timerId: null });
+        },
+      });
+    }
     return items;
-  }, [texts, manageable, adsEnabled, channelId, channelControls, ownRole, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl, botConnected, counterAction, counterAvailability, counterActionAvailable, numericVariables, language, runCounterAction, testMessageAction]);
+  }, [texts, manageable, adsEnabled, channelId, channelControls, ownRole, shoutoutLogin, streamState, modules, toggleAds, toggleChannelControl, botConnected, counterAction, counterAvailability, counterActionAvailable, numericVariables, language, runCounterAction, testMessageAction, timerAction, timerActionAvailable, timerAvailability]);
 
   const targetItems = navigationItems;
   const recentItems = recentTargetPaths.flatMap((path, index) => {
@@ -491,6 +561,39 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         }))}
         placeholder={textCommandQuickActionTexts.counter.selectVariable[language]}
         disabled={numericVariables.length === 0}
+        required
+      />
+    </FormDialog>
+    <FormDialog
+      opened={timerPickerState !== null}
+      title={timersQuickActionTexts.name[language]}
+      description={timersQuickActionTexts.chooseTimerHint[language]}
+      confirmLabel={texts.streamManager.actionRun}
+      cancelLabel={texts.streamManager.actionCancel}
+      confirmDisabled={!timerPickerSelectionIsValid}
+      onCancel={() => { setTimerPicker(null); }}
+      onConfirm={() => {
+        if (timerPickerState?.timerId === null || timerPickerState?.timerId === undefined || !timerPickerSelectionIsValid) return;
+        runTimerAction(timerPickerState.timerId);
+        setTimerPicker(null);
+      }}
+    >
+      <Select
+        label={timersQuickActionTexts.timerLabel[language]}
+        name="timerId"
+        value={timerPickerState?.timerId ?? null}
+        onChange={(timerId) => {
+          if (timerPickerState === null) return;
+          setTimerPicker({ ...timerPickerState, timerId });
+        }}
+        options={plannedTimers.map((timer) => ({
+          value: timer.id,
+          label: timer.name.trim() || timer.id,
+          description: timer.nextRunAt === null ? "" : formatTimerNextRun(timer.nextRunAt, language),
+        }))}
+        placeholder={timersQuickActionTexts.chooseTimer[language]}
+        hint={timersQuickActionTexts.chooseTimerHint[language]}
+        disabled={!timerActionAvailable || plannedTimers.length === 0}
         required
       />
     </FormDialog>

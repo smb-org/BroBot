@@ -44,6 +44,8 @@ interface TimerSendClaim {
 export interface DurableTimerEntry {
   config: DurableTimerConfig;
   plannedOccurrence: TimerOccurrence | null;
+  /** The planned occurrence the operator explicitly marked to skip. */
+  skippedOccurrence?: TimerOccurrence | null;
   inFlightClaim: TimerSendClaim | null;
   planSequence: number;
   mirrorSequence: number;

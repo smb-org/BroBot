@@ -51,6 +51,7 @@ import {
 import { sameTimerAlarmIdentity } from "../../modules/timers/identity";
 import { acceptsTimerAlarmClear, acceptsTimerAlarmSet } from "../../modules/timers/identity";
 import type { TimerIntervalState } from "../../modules/timers/contracts";
+import type { SkipTimerOccurrenceResult } from "../../modules/timers/contracts";
 import { mapTimerRow, type TimerRow } from "../../modules/timers/service";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_MODULE_ID } from "../../modules/chat_voting/contracts";
 import { reconcileLegacyChatVoteResultDeliveries as reconcileLegacyChatVoteResultDeliveriesInD1 } from "../../modules/chat_voting/result-delivery-reconciliation";
@@ -688,6 +689,7 @@ export class ChannelObject extends DurableObject<Env> {
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
   private timerScheduleInitialization: Promise<void> | null = null;
+  private timerOccurrenceQueues = new Map<string, Promise<void>>();
   private activeChatterSchemaReady = false;
   private pointsSchemaReady = false;
   private pointsInitialized = false;
@@ -965,11 +967,16 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private setTimerPlanSync(entry: DurableTimerEntry, plan: TimerPlan): void {
+    const skippedOccurrence = entry.skippedOccurrence;
     entry.planSequence += 1;
     entry.plannedOccurrence = plan.identity === null
       ? null
       : { identity: plan.identity, sequence: entry.planSequence } satisfies TimerOccurrence;
     entry.inFlightClaim = null;
+    entry.skippedOccurrence = skippedOccurrence !== null && skippedOccurrence !== undefined && entry.plannedOccurrence !== null &&
+      sameTimerAlarmIdentity(skippedOccurrence.identity, entry.plannedOccurrence.identity)
+      ? entry.plannedOccurrence
+      : null;
     entry.refreshAt = plan.refreshAt;
     entry.mirrorSequence += 1;
   }
@@ -978,6 +985,7 @@ export class ChannelObject extends DurableObject<Env> {
     return {
       config,
       plannedOccurrence: null,
+      skippedOccurrence: null,
       inFlightClaim: null,
       planSequence: 0,
       mirrorSequence: 0,
@@ -1327,6 +1335,61 @@ export class ChannelObject extends DurableObject<Env> {
     await this.scheduleEarliestAlarm();
   }
 
+  /** Serializes an operator skip against the full alarm send path for this timer. */
+  public async skipNextTimerOccurrence(timerId: string, expectedRevision: number): Promise<SkipTimerOccurrenceResult> {
+    return this.withTimerOccurrenceOperation(timerId, async () => {
+      await this.ensurePointRoundRecovery();
+      await this.ensureTimerSchedulesInitialized();
+      await this.refreshTimerOccurrenceSnapshot(timerId);
+      const current = this.timerScheduleStateSync().timers[timerId];
+      if (current === undefined || current.config.revision !== expectedRevision) return { result: "not_found" };
+      if (!current.config.enabled || current.plannedOccurrence === null) return { result: "nothing_planned" };
+      if (sameTimerOccurrence(current.skippedOccurrence, current.plannedOccurrence)) {
+        return { result: "already_skipped" };
+      }
+
+      const inputs = await this.timerScheduleInputs([current.config], Date.now());
+      return this.ctx.storage.transactionSync((): SkipTimerOccurrenceResult => {
+        const state = this.timerScheduleStateSync();
+        const entry = state.timers[timerId];
+        if (entry === undefined || entry.config.revision !== expectedRevision) return { result: "not_found" };
+        const occurrence = entry.plannedOccurrence;
+        if (!entry.config.enabled || occurrence === null) return { result: "nothing_planned" };
+        if (sameTimerOccurrence(entry.skippedOccurrence, occurrence)) return { result: "already_skipped" };
+
+        entry.skippedOccurrence = occurrence;
+        this.writeTimerDurableStateSync(state);
+        const nextPlan = makeTimerPlan(
+          entry.config,
+          state.stream,
+          occurrence,
+          { ...inputs, now: Math.max(Date.now(), occurrence.identity.deadline) },
+          "after_occurrence",
+          entry.config.trigger.type === "stream_start" ? occurrence.identity.streamId : entry.completedStreamId ?? null,
+        );
+        return {
+          result: "skipped",
+          skippedOccurrenceAt: new Date(occurrence.identity.deadline).toISOString(),
+          nextOccurrenceAt: nextPlan.identity === null ? null : new Date(nextPlan.identity.deadline).toISOString(),
+        };
+      });
+    });
+  }
+
+  private async withTimerOccurrenceOperation<Result>(timerId: string, operation: () => Promise<Result>): Promise<Result> {
+    const previous = this.timerOccurrenceQueues.get(timerId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    this.timerOccurrenceQueues.set(timerId, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.timerOccurrenceQueues.get(timerId) === current) this.timerOccurrenceQueues.delete(timerId);
+    }
+  }
+
   /** Removes a committed D1 timer and fences any config snapshot read before its delete. */
   public async deleteTimerConfig(timerId: string, expectedRevision: number): Promise<void> {
     await this.ensurePointRoundRecovery();
@@ -1621,6 +1684,25 @@ export class ChannelObject extends DurableObject<Env> {
     identity?: ModuleAlarmIdentity | null,
     planSequence?: number,
   ): Promise<"retain" | undefined> {
+    if (key.startsWith("mirror:")) return await this.runTimerOccurrenceSerial(context, key, deadline, ownerRevision, identity, planSequence);
+    const refreshMarker = ":refresh:";
+    const refreshAt = key.indexOf(refreshMarker);
+    const timerId = key.startsWith("timer:")
+      ? key.slice("timer:".length, refreshAt < 0 ? undefined : refreshAt)
+      : "";
+    if (timerId.length === 0) return await this.runTimerOccurrenceSerial(context, key, deadline, ownerRevision, identity, planSequence);
+    return await this.withTimerOccurrenceOperation(timerId,
+      () => this.runTimerOccurrenceSerial(context, key, deadline, ownerRevision, identity, planSequence));
+  }
+
+  private async runTimerOccurrenceSerial(
+    context: ModuleAlarmContext,
+    key: string,
+    deadline: number,
+    ownerRevision?: number,
+    identity?: ModuleAlarmIdentity | null,
+    planSequence?: number,
+  ): Promise<"retain" | undefined> {
     await this.ensurePointRoundRecovery();
     if (key.startsWith("mirror:")) {
       const timerId = key.slice("mirror:".length).split(":")[0] ?? "";
@@ -1646,6 +1728,7 @@ export class ChannelObject extends DurableObject<Env> {
       occurrence: TimerOccurrence;
       token: string;
       activityCount: number;
+      skipped: boolean;
     } | null => {
       const state = this.timerScheduleStateSync();
       const entry = state.timers[timerId];
@@ -1658,14 +1741,19 @@ export class ChannelObject extends DurableObject<Env> {
       const token = crypto.randomUUID();
       const streamState = identity.state === "live" ? "live" : identity.state === "offline" ? "offline" : null;
       const activityCount = streamState === null ? 0 : state.activityCounts[streamState];
+      const skipped = sameTimerOccurrence(entry.skippedOccurrence, occurrence);
       entry.inFlightClaim = { occurrence, token, activityCount };
       this.writeTimerDurableStateSync(state);
-      return { config: entry.config, occurrence, token, activityCount };
+      return { config: entry.config, occurrence, token, activityCount, skipped };
     });
     if (claimed === null) return;
 
     const planInputs = await this.timerScheduleInputs([claimed.config], Date.now());
     if (!this.timerClaimIsCurrentSync(timerId, claimed.token, claimed.occurrence)) return;
+    if (claimed.skipped) {
+      await this.finishTimerOccurrence(timerId, claimed, false, planInputs);
+      return;
+    }
     const now = Date.now();
     const trigger = claimed.config.trigger;
     const intervalState: TimerIntervalState | null = trigger.type === "interval" &&

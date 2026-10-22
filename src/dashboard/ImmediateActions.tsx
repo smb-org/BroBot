@@ -42,13 +42,14 @@ const roleReason = (requiredRole: ChannelRole): string => {
   return texts.operatorOnly;
 };
 
-const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, role, availabilityRetryGeneration, onAvailabilityStateChange, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
+const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, role, moduleEnabled, availabilityRetryGeneration, onAvailabilityStateChange, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
   streamState: ChannelStreamState | null | undefined;
   botConnected?: boolean | null | undefined;
   role: ChannelRole;
+  moduleEnabled: boolean;
   availabilityRetryGeneration: number;
   onAvailabilityStateChange: (actionKey: string, stale: boolean) => void;
   onActionStart?: (moduleId: string, actionId: string) => number;
@@ -58,7 +59,7 @@ const ActionButton = ({ action, moduleId, channelId, streamState, botConnected, 
 }): ReactElement => {
   const language = dashboardLanguage();
   const texts = dashboardTexts();
-  const staticAvailability = evaluateImmediateActionAvailability(action.conditions, streamState);
+  const staticAvailability = evaluateImmediateActionAvailability(action.conditions, streamState, moduleEnabled);
   const meetsRole = hasRequiredChannelRole(role, action.requiredRole);
   const customConditions = useMemo(
     () => action.conditions.filter((condition): condition is CustomCondition => typeof condition !== "string"),
@@ -440,9 +441,13 @@ export const ImmediateActions = ({ channelId, streamState, botConnected, role, m
 }): ReactElement => {
   const texts = dashboardTexts();
   const moduleStates = new Map(modules.map((module) => [module.id, module.enabled]));
-  const actions = MODULES.flatMap((module) => module.actions === undefined || moduleStates.get(module.id) !== true
-    ? []
-    : module.actions.map((action) => ({ moduleId: module.id, action })));
+  const actions = MODULES.flatMap((module) => {
+    const moduleEnabled = moduleStates.get(module.id);
+    if (module.actions === undefined || moduleEnabled === undefined) return [];
+    return module.actions
+      .filter((action) => moduleEnabled || action.conditions.includes("moduleEnabled"))
+      .map((action) => ({ moduleId: module.id, action, moduleEnabled }));
+  });
   const count = texts.streamManager.actionCount(actions.length);
   const [staleActionKeys, setStaleActionKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [availabilityRetryGeneration, setAvailabilityRetryGeneration] = useState(0);
@@ -470,7 +475,7 @@ export const ImmediateActions = ({ channelId, streamState, botConnected, role, m
     </header>
     <div className="live-cockpit-actions__grid" role="group" aria-label={texts.streamManager.immediateActions}>
       {modulesLoaded
-        ? actions.map(({ moduleId, action }) => <ActionButton key={`${moduleId}:${action.id}`} action={action} moduleId={moduleId} channelId={channelId} streamState={streamState} botConnected={botConnected} role={role} availabilityRetryGeneration={availabilityRetryGeneration} onAvailabilityStateChange={onAvailabilityStateChange}
+        ? actions.map(({ moduleId, action, moduleEnabled }) => <ActionButton key={`${moduleId}:${action.id}`} action={action} moduleId={moduleId} channelId={channelId} streamState={streamState} botConnected={botConnected} role={role} moduleEnabled={moduleEnabled} availabilityRetryGeneration={availabilityRetryGeneration} onAvailabilityStateChange={onAvailabilityStateChange}
           {...(onActionStart === undefined ? {} : { onActionStart })}
           {...(onActionResult === undefined ? {} : { onActionResult })}
           {...(onActionFailure === undefined ? {} : { onActionFailure })}
