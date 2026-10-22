@@ -1,19 +1,22 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { StrictMode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { changeChannelVariableValue, fetchChannelVariables, setChannelControl } from "../../src/dashboard/api";
+import { changeChannelVariableValue, createStreamMarker, fetchStreamMarkerAvailability, fetchChannelVariables, setChannelControl } from "../../src/dashboard/api";
 import type { PanelChannelControl, PanelChannelControls } from "../../src/panel-contract";
 import { dashboardTexts } from "../../src/dashboard/locale";
 import { ChannelCommandPalette } from "../../src/dashboard/command-palette";
 import { CommandPalette } from "../../src/dashboard/ui/CommandPalette";
 import { UiProvider, type CommandPaletteItem } from "../../src/dashboard/ui";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import type { DashboardRoute } from "../../src/dashboard/router";
 
 vi.mock("../../src/dashboard/api", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
   changeChannelVariableValue: vi.fn(),
+  createStreamMarker: vi.fn(),
+  fetchStreamMarkerAvailability: vi.fn(),
   fetchChannelVariables: vi.fn(),
   setChannelControl: vi.fn(),
 }));
@@ -26,7 +29,9 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.mocked(fetchChannelVariables).mockResolvedValue({ count: 0, maximum: 50, variables: [] });
+  vi.mocked(fetchStreamMarkerAvailability).mockReset().mockResolvedValue({ manageScopeAvailable: true });
   vi.mocked(changeChannelVariableValue).mockReset();
+  vi.mocked(createStreamMarker).mockReset();
 });
 
 const off: PanelChannelControl = { active: false, until: null, mode: null };
@@ -474,5 +479,194 @@ describe("cmdk command palette", () => {
 
     await waitFor(() => expect(changeChannelVariableValue).toHaveBeenCalledWith("kanal-a", "score", "add", 1));
     expect(localStorage.getItem("brobot-dashboard-counter-variable-v1:kanal-a")).toBe("score");
+  });
+
+  it("shows a disabled stream marker and grant action when the broadcaster scope is missing", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const onNavigate = vi.fn();
+    vi.mocked(fetchStreamMarkerAvailability).mockResolvedValue({ manageScopeAvailable: false });
+    render(<QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+      open onOpenChange={vi.fn()} channelId="kanal-a" viewerUserId="kanal-a" ownRole="manager" streamState="online"
+      modules={[{ id: "channel_events", enabled: true, settings: "{}" }]}
+      onToggleModule={() => Promise.resolve()} onNavigate={onNavigate} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()}
+    /></UiProvider></QueryClientProvider>);
+
+    await waitFor(() => expect(fetchStreamMarkerAvailability).toHaveBeenCalledWith("kanal-a", expect.any(AbortSignal)));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "stream marker" } });
+    const marker = await screen.findByRole("option", { name: /Set stream marker|Stream-Marker setzen/u });
+    expect(marker.getAttribute("aria-disabled")).toBe("true");
+    const reasonId = marker.getAttribute("aria-describedby");
+    expect(reasonId).not.toBeNull();
+    expect(document.getElementById(reasonId ?? "")?.textContent).toMatch(/broadcast permission is missing|Broadcaster-Berechtigung fehlt/u);
+    expect(await screen.findByRole("option", { name: /Grant permission|Berechtigung erteilen/u })).not.toBeNull();
+  });
+
+  it("shows an owner-only grant reason without an actionable grant item for other members", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(fetchStreamMarkerAvailability).mockResolvedValue({ manageScopeAvailable: false });
+    render(<QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+      open onOpenChange={vi.fn()} channelId="kanal-a" viewerUserId="manager-1" ownRole="manager" streamState="online"
+      modules={[{ id: "channel_events", enabled: true, settings: "{}" }]}
+      onToggleModule={() => Promise.resolve()} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()}
+    /></UiProvider></QueryClientProvider>);
+
+    await waitFor(() => expect(fetchStreamMarkerAvailability).toHaveBeenCalledWith("kanal-a", expect.any(AbortSignal)));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "stream marker" } });
+    const marker = await screen.findByRole("option", { name: /Set stream marker|Stream-Marker setzen/u });
+    expect(marker.getAttribute("aria-disabled")).toBe("true");
+    const reasonId = marker.getAttribute("aria-describedby");
+    expect(document.getElementById(reasonId ?? "")?.textContent).toMatch(/only the channel owner can grant this permission|Nur der Kanalinhaber kann diese Berechtigung erteilen/u);
+    expect(screen.queryByRole("option", { name: /Grant permission|Berechtigung erteilen/u })).toBeNull();
+  });
+
+  it("shows the offline reason for stream markers in the palette", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+      open onOpenChange={vi.fn()} channelId="kanal-a" ownRole="manager" streamState="offline"
+      modules={[{ id: "channel_events", enabled: true, settings: "{}" }]}
+      onToggleModule={() => Promise.resolve()} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()}
+    /></UiProvider></QueryClientProvider>);
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "stream marker" } });
+    const marker = await screen.findByRole("option", { name: /Set stream marker|Stream-Marker setzen/u });
+    expect(marker.getAttribute("aria-disabled")).toBe("true");
+    const reasonId = marker.getAttribute("aria-describedby");
+    expect(document.getElementById(reasonId ?? "")?.textContent).toMatch(/stream is offline|Stream ist offline/u);
+    expect(fetchStreamMarkerAvailability).not.toHaveBeenCalled();
+  });
+
+  it("shows typed stream marker feedback after choosing the palette action", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(createStreamMarker).mockResolvedValue({ result: "created", positionSeconds: 323 });
+    render(<QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+      open onOpenChange={vi.fn()} channelId="kanal-a" ownRole="manager" streamState="online"
+      modules={[{ id: "channel_events", enabled: true, settings: "{}" }]}
+      onToggleModule={() => Promise.resolve()} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()}
+    /></UiProvider></QueryClientProvider>);
+
+    await waitFor(() => expect(fetchStreamMarkerAvailability).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "stream marker" } });
+    const marker = await screen.findByRole("option", { name: /Set stream marker|Stream-Marker setzen/u });
+    await waitFor(() => expect(marker.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(marker);
+
+    await waitFor(() => expect(createStreamMarker).toHaveBeenCalledWith("kanal-a"));
+    await waitFor(() => expect(toastsSnapshot().at(-1)?.message).toMatch(/Stream marker set at 5:23|Stream-Marker bei 5:23 gesetzt/u));
+  });
+
+  it("dismisses a published marker grant toast when the palette switches channels", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(createStreamMarker).mockResolvedValue({
+      result: "scope_missing",
+      error: "broadcast_scope_missing",
+      grantHref: "/auth/channels/kanal-a/broadcaster-scopes/broadcast",
+    });
+    const palette = (channelId: string) => <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+      key={channelId}
+      open onOpenChange={vi.fn()} channelId={channelId} viewerUserId={channelId} ownRole="manager" streamState="online"
+      modules={[{ id: "channel_events", enabled: true, settings: "{}" }]}
+      onToggleModule={() => Promise.resolve()} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()}
+    /></UiProvider></QueryClientProvider>;
+    const view = render(palette("kanal-a"));
+
+    await waitFor(() => expect(fetchStreamMarkerAvailability).toHaveBeenCalledWith("kanal-a", expect.any(AbortSignal)));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "stream marker" } });
+    const marker = await screen.findByRole("option", { name: /Set stream marker|Stream-Marker setzen/u });
+    await waitFor(() => expect(marker.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(marker);
+
+    const grantMessage = /broadcast permission is missing|Broadcaster-Berechtigung fehlt/u;
+    await waitFor(() => expect(toastsSnapshot().some(({ message }) => grantMessage.test(message))).toBe(true));
+    view.rerender(palette("kanal-b"));
+
+    expect(toastsSnapshot().some(({ message }) => grantMessage.test(message))).toBe(false);
+  });
+
+  it("shows stream marker feedback when rendered under StrictMode", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const existingToastIds = new Set(toastsSnapshot().map(({ id }) => id));
+    vi.mocked(createStreamMarker).mockResolvedValue({ result: "created", positionSeconds: 323 });
+    render(<StrictMode><QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+      open onOpenChange={vi.fn()} channelId="kanal-a" ownRole="manager" streamState="online"
+      modules={[{ id: "channel_events", enabled: true, settings: "{}" }]}
+      onToggleModule={() => Promise.resolve()} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()}
+    /></UiProvider></QueryClientProvider></StrictMode>);
+
+    await waitFor(() => expect(fetchStreamMarkerAvailability).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "stream marker" } });
+    const marker = await screen.findByRole("option", { name: /Set stream marker|Stream-Marker setzen/u });
+    await waitFor(() => expect(marker.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(marker);
+
+    const createdMessage = /Stream marker set at 5:23|Stream-Marker bei 5:23 gesetzt/u;
+    await waitFor(() => expect(toastsSnapshot().some(({ id, message }) => !existingToastIds.has(id) && createdMessage.test(message))).toBe(true));
+    for (const toast of toastsSnapshot()) {
+      if (!existingToastIds.has(toast.id) && createdMessage.test(toast.message)) dismissToast(toast.id);
+    }
+  });
+
+  it("drops a delayed marker grant toast after switching palette channels", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let resolveMarker: ((value: Awaited<ReturnType<typeof createStreamMarker>>) => void) | undefined;
+    vi.mocked(createStreamMarker).mockImplementation(() => new Promise((resolve) => { resolveMarker = resolve; }));
+    const palette = (channelId: string) => <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+      open onOpenChange={vi.fn()} channelId={channelId} viewerUserId={channelId} ownRole="manager" streamState="online"
+      modules={[{ id: "channel_events", enabled: true, settings: "{}" }]}
+      onToggleModule={() => Promise.resolve()} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()}
+    /></UiProvider></QueryClientProvider>;
+    const view = render(palette("kanal-a"));
+    const toastCount = toastsSnapshot().length;
+
+    await waitFor(() => expect(fetchStreamMarkerAvailability).toHaveBeenCalledWith("kanal-a", expect.any(AbortSignal)));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "stream marker" } });
+    const marker = await screen.findByRole("option", { name: /Set stream marker|Stream-Marker setzen/u });
+    await waitFor(() => expect(marker.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(marker);
+    await waitFor(() => expect(createStreamMarker).toHaveBeenCalledWith("kanal-a"));
+    view.rerender(palette("kanal-b"));
+
+    await act(async () => {
+      resolveMarker?.({
+        result: "scope_missing",
+        error: "broadcast_scope_missing",
+        grantHref: "/auth/channels/kanal-a/broadcaster-scopes/broadcast",
+      });
+      await Promise.resolve();
+    });
+
+    expect(toastsSnapshot()).toHaveLength(toastCount);
+  });
+
+  it("ignores a late marker-scope response after switching palette channels", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let resolveChannelA: ((value: Awaited<ReturnType<typeof fetchStreamMarkerAvailability>>) => void) | undefined;
+    let resolveChannelB: ((value: Awaited<ReturnType<typeof fetchStreamMarkerAvailability>>) => void) | undefined;
+    vi.mocked(fetchStreamMarkerAvailability).mockImplementation((channelId) => new Promise((resolve) => {
+      if (channelId === "kanal-a") resolveChannelA = resolve;
+      else resolveChannelB = resolve;
+    }));
+    const palette = (channelId: string) => <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
+      open onOpenChange={vi.fn()} channelId={channelId} ownRole="manager" streamState="online"
+      modules={[{ id: "channel_events", enabled: true, settings: "{}" }]}
+      onToggleModule={() => Promise.resolve()} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()}
+    /></UiProvider></QueryClientProvider>;
+    const view = render(palette("kanal-a"));
+    await waitFor(() => expect(resolveChannelA).toBeTypeOf("function"));
+    view.rerender(palette("kanal-b"));
+    await waitFor(() => expect(resolveChannelB).toBeTypeOf("function"));
+
+    await act(async () => {
+      resolveChannelB?.({ manageScopeAvailable: true });
+      await Promise.resolve();
+    });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "stream marker" } });
+    const marker = await screen.findByRole("option", { name: /Set stream marker|Stream-Marker setzen/u });
+    await waitFor(() => expect(marker.getAttribute("aria-disabled")).not.toBe("true"));
+    await act(async () => {
+      resolveChannelA?.({ manageScopeAvailable: false });
+      await Promise.resolve();
+    });
+
+    expect(marker.getAttribute("aria-disabled")).not.toBe("true");
   });
 });

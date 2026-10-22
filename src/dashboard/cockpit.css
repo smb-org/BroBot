@@ -73,7 +73,9 @@
   .live-action__reason.is-locked { color: var(--warn); }
   .live-action__reason.has-error { color: var(--error); }
   .live-action__reason.is-availability-warning { color: var(--warn); }
-  .live-action__reason.is-result { visibility: hidden; }
+  .live-action__availability-link { position: absolute; z-index: 1; right: var(--s2); bottom: var(--s2); left: var(--s2); display: grid; grid-auto-rows: 12px; min-width: 0; overflow: hidden; text-align: center; font-size: 10px; line-height: 12px; }
+  .live-action__availability-message { overflow: hidden; color: var(--warn); text-overflow: ellipsis; white-space: nowrap; }
+  .live-action__availability-link a { overflow: hidden; color: var(--brand-text); text-decoration: underline; text-overflow: ellipsis; white-space: nowrap; }
   .live-action__result-link { position: absolute; z-index: 1; right: var(--s2); bottom: var(--s2); left: var(--s2); display: flex; align-items: center; justify-content: center; gap: var(--s1); min-width: 0; overflow: hidden; color: var(--brand-text); font-size: 11px; line-height: 14px; text-decoration: underline; text-overflow: ellipsis; white-space: nowrap; }
   .live-action__result-message { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .live-cockpit__running { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); min-width: 0; min-height: 0; overflow: hidden; }
