@@ -112,6 +112,41 @@ describe("dashboard realtime messages", () => {
     queryClient.clear();
   });
 
+  it("refreshes cockpit Next up when the timer panel resource changes", async () => {
+    const revisionChannel = "timer-resource-live-cockpit";
+    const reader = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const liveCockpit = queryKeys.channel(revisionChannel, "live-cockpit", { modules: "timers:true" });
+    const timerPanel = moduleQueryKey(revisionChannel, "timers", "panel");
+    const reads = { cockpit: 0, timerPanel: 0 };
+    reader.setQueryData(liveCockpit, { upcoming: [] });
+    reader.setQueryData(timerPanel, { timers: [] });
+    const unsubscribers = [
+      new QueryObserver(reader, {
+        queryKey: liveCockpit,
+        queryFn: () => { reads.cockpit += 1; return Promise.resolve({ upcoming: [{ id: "next-timer" }] }); },
+        staleTime: Infinity,
+      }).subscribe(() => undefined),
+      new QueryObserver(reader, {
+        queryKey: timerPanel,
+        queryFn: () => { reads.timerPanel += 1; return Promise.resolve({ timers: [{ id: "timer-a" }] }); },
+        staleTime: Infinity,
+      }).subscribe(() => undefined),
+    ];
+    let revisions: Readonly<Record<string, number>> = { "module:timers:panel": 0 };
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))));
+
+    await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    revisions = { "module:timers:panel": 1 };
+    await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    await vi.waitFor(() => { expect(reads).toEqual({ cockpit: 1, timerPanel: 1 }); });
+
+    unsubscribers.forEach((unsubscribe) => { unsubscribe(); });
+    reader.clear();
+  });
+
   it("refreshes an overlay detail only once when its overlay list also changes", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const overlays = dashboardDataKeys.overlays(channelId);

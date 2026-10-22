@@ -593,6 +593,7 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         }))}
         placeholder={timersQuickActionTexts.chooseTimer[language]}
         hint={timersQuickActionTexts.chooseTimerHint[language]}
+        dropdownBelowField
         disabled={!timerActionAvailable || plannedTimers.length === 0}
         required
       />

@@ -313,6 +313,23 @@ test("skips a chosen timer at desktop and mobile widths without moving the actio
   expect(actions.timerSkipCalls()).toBe(1);
   await expect.poll(() => actionGridBox(page)).toEqual(mobileGrid);
 
+  await page.keyboard.press(await page.evaluate(() => /Mac|iPhone|iPad|iPod/u.test(navigator.platform || navigator.userAgent) ? "Meta+k" : "Control+k"));
+  const palette = page.locator(".command-palette");
+  await expect(palette).toBeVisible();
+  await palette.locator('[data-command-palette-item-id="action:skip-next-timer-message"]').click();
+  const paletteDialog = page.getByRole("dialog", { name: "Timer überspringen" });
+  await expect(paletteDialog).toBeVisible();
+  const paletteTimerSelect = paletteDialog.getByRole("combobox", { name: "Timer" });
+  await paletteTimerSelect.click();
+  await expect(timerOptions).toBeVisible();
+  const paletteHintBounds = await paletteDialog.locator(".ui-select__description").boundingBox();
+  const paletteOptionsBounds = await timerOptions.boundingBox();
+  expect(paletteHintBounds).not.toBeNull();
+  expect(paletteOptionsBounds).not.toBeNull();
+  expect(paletteOptionsBounds?.y).toBeGreaterThanOrEqual((paletteHintBounds?.y ?? 0) + (paletteHintBounds?.height ?? 0));
+  await page.keyboard.press("Escape");
+  await paletteDialog.getByRole("button", { name: "Abbrechen" }).click();
+
   await actions.hideTimerOccurrences();
   await expect(skipTimer).toBeDisabled({ timeout: 8_000 });
   await expect(page.getByText("Kein Timer hat einen geplanten nächsten Lauf.").first()).toBeVisible();
