@@ -125,11 +125,10 @@ export const StateRow = ({ label, tone, word, detail, action, icon }: {
   );
 };
 
-const LockedModuleStatus = ({ status, reason, showReason = false }: { status: string; reason: string; showReason?: boolean }): ReactElement => (
+const LockedModuleStatus = ({ status, reason }: { status: string; reason: string }): ReactElement => (
   <span className="module-locked-status" aria-label={`${status}: ${reason}`} aria-description={reason} title={reason}>
     <Icon name="lock" size={16} className="module-locked-status__icon" />
     <span>{status}</span>
-    {showReason ? <span className="module-locked-status__reason" role="note">{reason}</span> : null}
   </span>
 );
 
@@ -1058,7 +1057,7 @@ const ModuleWorkspaceRow = ({
   const state = permissionsMissing ? labels.disabled : statusWord(effectiveEnabled);
   const route: DashboardRoute = { kind: "module", channelId, moduleId };
   const dependencyReason = mandatory ? null : moduleDependencyLockReason(moduleId, !rawEnabled, modules);
-  const lockedReason = mandatory ? undefined : dependencyReason ?? (manageable ? undefined : texts.module.managementLocked);
+  const lockedReason = mandatory ? mandatoryReason : dependencyReason ?? (manageable ? undefined : texts.module.managementLocked);
   const reserveDependencyReason = moduleParticipatesInDependency(moduleId);
 
   return (
@@ -1072,7 +1071,7 @@ const ModuleWorkspaceRow = ({
         {lockedReason === undefined && !reserveDependencyReason ? null : <span className="module-workspace__lock-reason"><LockedReason id={`module-lock-${moduleId}`} {...(lockedReason === undefined ? {} : { reason: lockedReason })} /></span>}
       </>}
       status={mandatory
-        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} showReason />
+        ? <LockedModuleStatus status={labels.alwaysActiveStatus} reason={mandatoryReason} />
         : <StatusLed state={permissionsMissing ? "warn" : effectiveEnabled ? "ok" : "off"} label={state} />}
       action={mandatory ? null : <div className="module-switch-control">
         <SwitchPrimitive aria-label={`${details.name}: ${statusWord(rawEnabled)}`} aria-describedby={lockedReason === undefined ? undefined : `module-lock-${moduleId}`} aria-busy={busy} checked={rawEnabled} disabled={!manageable || dependencyReason !== null || busy} onCheckedChange={onToggle} />

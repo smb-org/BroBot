@@ -250,12 +250,30 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
     await expect(moduleLockReason).toBeVisible();
     if (viewport.width <= 640) expect((await box(moduleLockReason)).width).toBeGreaterThan(140);
     const mandatoryModuleRow = page.locator(".module-workspace .list-row").filter({ hasText: "Die Textbibliothek ist immer verfügbar." }).first();
-    await expect(mandatoryModuleRow.locator(".module-workspace__lock-reason")).toHaveCount(0);
-    if (viewport.width <= 640) {
-      const mandatoryDescription = await box(mandatoryModuleRow.locator(".list-row__description"));
-      const mandatoryStatus = await box(mandatoryModuleRow.locator(".module-locked-status"));
-      expect(mandatoryStatus.y).toBeGreaterThanOrEqual(mandatoryDescription.y + mandatoryDescription.height - 1);
+    // The mandatory reason sits in the description slot; the status column only carries the lock and the status word.
+    const mandatoryDescription = mandatoryModuleRow.locator(".list-row__description");
+    await expect(mandatoryDescription.locator(".module-workspace__lock-reason").getByText("Die Textbibliothek ist immer verfügbar.")).toBeVisible();
+    await expect(mandatoryModuleRow.locator(".module-locked-status")).toHaveText("Läuft · immer aktiv");
+    const lockedStatuses = page.locator(".module-workspace__group .list-row .module-locked-status");
+    expect(await lockedStatuses.count()).toBeGreaterThan(2);
+    const statusLefts = await lockedStatuses.evaluateAll((nodes) => nodes.map((node) => Math.round(node.querySelector(".module-locked-status__icon")?.getBoundingClientRect().x ?? Number.NaN)));
+    expect(new Set(statusLefts).size).toBe(1);
+    // Wide: the status column sits right of the description. Narrow: it drops below the description.
+    expect(await lockedStatuses.evaluateAll((nodes, narrow) => nodes.every((node) => {
+      const row = node.closest(".list-row");
+      const description = row?.querySelector(".list-row__description")?.getBoundingClientRect();
+      const status = node.getBoundingClientRect();
+      if (row === null || description === undefined || row.scrollWidth > row.clientWidth) return false;
+      return narrow ? status.y >= description.bottom - 1 : status.x >= description.right - 1;
+    }), viewport.width <= 640)).toBe(true);
+    if (viewport.width > 640) {
+      const ledBox = await box(page.locator(".module-workspace__group .list-row .status-led").first());
+      const ledRight = ledBox.x + ledBox.width;
+      const statusBox = await box(lockedStatuses.first());
+      expect(Math.abs(statusBox.x + statusBox.width - ledRight)).toBeLessThanOrEqual(1);
     }
+    expect((await box(mandatoryDescription)).width).toBeGreaterThan(viewport.width <= 640 ? 100 : 200);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     const operatorRowBox = await box(operatorModuleRow);
     const operatorSwitchBox = await box(operatorModuleSwitch);
     expect(Math.abs((operatorRowBox.y + operatorRowBox.height / 2) - (operatorSwitchBox.y + operatorSwitchBox.height / 2))).toBeLessThanOrEqual(2);
