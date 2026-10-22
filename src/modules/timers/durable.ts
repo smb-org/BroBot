@@ -35,6 +35,18 @@ export interface TimerOccurrence {
   sequence: number;
 }
 
+export interface TimerSkipAuditIntent {
+  operationId: string;
+  actorUserId: string;
+  changedAt: string;
+  timerId: string;
+  timerName: string;
+  timerRevision: number;
+  skippedOccurrenceAt: string;
+  nextOccurrenceAt: string | null;
+  retryAttempt: number;
+}
+
 interface TimerSendClaim {
   occurrence: TimerOccurrence;
   token: string;
@@ -46,6 +58,10 @@ export interface DurableTimerEntry {
   plannedOccurrence: TimerOccurrence | null;
   /** The planned occurrence the operator explicitly marked to skip. */
   skippedOccurrence?: TimerOccurrence | null;
+  /** Effective next-up value while the skipped occurrence remains alarmed. */
+  effectiveNextOccurrence?: TimerOccurrence | null;
+  /** Idempotency key proving that the committed skip has an audit entry or durable intent. */
+  skipAuditOperationId?: string | null;
   inFlightClaim: TimerSendClaim | null;
   planSequence: number;
   mirrorSequence: number;
@@ -62,6 +78,8 @@ export interface DurableTimerState {
   activityCounts: Record<TimerIntervalState, number>;
   timers: Record<string, DurableTimerEntry>;
   tombstones: Record<string, { revision: number; deletedAt: number }>;
+  /** Durable outbox committed in the same transaction as its skip marker. */
+  pendingSkipAudits?: Record<string, TimerSkipAuditIntent>;
 }
 
 export interface TimerScheduleInputs {
@@ -86,6 +104,7 @@ export const emptyDurableTimerState = (): DurableTimerState => ({
   activityCounts: { live: 0, offline: 0 },
   timers: {},
   tombstones: {},
+  pendingSkipAudits: {},
 });
 
 export const sameTimerOccurrence = (
@@ -93,6 +112,15 @@ export const sameTimerOccurrence = (
   right: TimerOccurrence | null | undefined,
 ): boolean => left !== null && left !== undefined && right !== null && right !== undefined &&
   left.sequence === right.sequence && sameTimerAlarmIdentity(left.identity, right.identity);
+
+/** Compares the scheduled occurrence itself, independent of plan revision or sequence changes. */
+export const sameTimerScheduledOccurrence = (
+  left: TimerOccurrence | null | undefined,
+  right: TimerOccurrence | null | undefined,
+): boolean => left !== null && left !== undefined && right !== null && right !== undefined &&
+  left.identity.timerId === right.identity.timerId && left.identity.triggerType === right.identity.triggerType &&
+  left.identity.state === right.identity.state && left.identity.streamId === right.identity.streamId &&
+  left.identity.generation === right.identity.generation && left.identity.deadline === right.identity.deadline;
 
 export const makeTimerPlan = (
   config: DurableTimerConfig,

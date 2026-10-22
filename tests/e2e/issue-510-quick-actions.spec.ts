@@ -298,6 +298,15 @@ test("skips a chosen timer at desktop and mobile widths without moving the actio
   await expect(popover).toBeVisible();
   const timerSelect = popover.getByRole("combobox", { name: "Timer" });
   await timerSelect.click();
+  const timerOptions = page.locator(".ui-select__dropdown");
+  await expect(timerOptions).toBeVisible();
+  const timerHint = popover.getByText("Wähle den Timer aus, dessen nächste Nachricht entfallen soll.");
+  const hintBounds = await timerHint.boundingBox();
+  const optionsBounds = await timerOptions.boundingBox();
+  expect(hintBounds).not.toBeNull();
+  expect(optionsBounds).not.toBeNull();
+  expect(optionsBounds?.y).toBeGreaterThanOrEqual((hintBounds?.y ?? 0) + (hintBounds?.height ?? 0));
+  await page.screenshot({ path: testInfo.outputPath("timer-quick-action-picker-390.png"), fullPage: true });
   await page.getByRole("option", { name: /Welcome reminder/u }).click();
   await popover.getByRole("button", { name: "Ausführen" }).click();
   await expect(page.getByText(/Übersprungen.*Nächster Lauf/u).first()).toBeVisible();

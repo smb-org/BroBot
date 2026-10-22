@@ -1980,7 +1980,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       availabilityReasons: {
         stream_offline: "Der Stream ist offline.",
         stream_state_unknown: "Der Streamstatus ist derzeit nicht verfügbar.",
-        module_disabled: "Das Timer-Modul ist deaktiviert.",
+        module_disabled: "Das Modul ist deaktiviert.",
       },
       runAd: (length) => `Werbung jetzt (${length}s)`,
       createClip: "Clip erstellen",
@@ -2591,7 +2591,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       availabilityReasons: {
         stream_offline: "The stream is offline.",
         stream_state_unknown: "The stream status is currently unavailable.",
-        module_disabled: "The timers module is disabled.",
+        module_disabled: "The module is disabled.",
       },
       runAd: (length) => `Run ad now (${length}s)`,
       createClip: "Create clip",

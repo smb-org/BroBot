@@ -76,6 +76,7 @@ export default function SkipTimerActionContent({ channelId, language, onReadines
       }))}
       placeholder={texts.chooseTimer[language]}
       hint={texts.chooseTimerHint[language]}
+      dropdownBelowField
       {...(fieldError === undefined ? {} : { error: fieldError })}
       disabled={timers === null || timerListState.failed || availableTimers.length === 0}
       busy={timers === null}

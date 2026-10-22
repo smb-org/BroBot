@@ -101,7 +101,7 @@ timerRoutes.post("/quick-actions/skip-next", async (context) => {
   const now = nowIso();
   const authorization = context.get("authorizeMutation")(channelId, actor, now);
   const target = await context.env.DB.prepare(
-    `SELECT timer.timer_id, timer.name, timer.revision, module.enabled AS module_enabled
+    `SELECT timer.timer_id, timer.revision, module.enabled AS module_enabled
        FROM channels
        LEFT JOIN timers AS timer
          ON timer.channel_id = channels.channel_id AND timer.timer_id = ?
@@ -110,35 +110,16 @@ timerRoutes.post("/quick-actions/skip-next", async (context) => {
       WHERE channels.channel_id = ? ${authorization.sql}`,
   ).bind(timerId, MODULE_ID, channelId, ...authorization.values).first<{
     timer_id: string | null;
-    name: string | null;
     revision: number | null;
     module_enabled: number | null;
   }>();
   if (target === null) return context.json({ error: "timer_skip_denied" }, 403);
-  if (target.timer_id === null || target.revision === null || target.name === null) return context.json({ result: "not_found" });
+  if (target.timer_id === null || target.revision === null) return context.json({ result: "not_found" });
   if (target.module_enabled !== 1) return context.json({ result: "nothing_planned" });
 
   const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-  const result = await channelObject.skipNextTimerOccurrence(timerId, target.revision);
-  if (result.result === "skipped") {
-    const auditAt = nowIso();
-    const auditAuthorization = context.get("authorizeMutation")(channelId, actor, auditAt);
-    const stillMember = await context.env.DB.prepare(
-      `SELECT 1 AS member FROM channels WHERE channel_id = ? ${auditAuthorization.sql}`,
-    ).bind(channelId, ...auditAuthorization.values).first<{ member: number }>();
-    if (stillMember === null) return context.json({ error: "timer_skip_denied" }, 403);
-    await context.get("writeModuleAudit")({
-      channelId,
-      moduleId: MODULE_ID,
-      action: "timers.timer.skipped" satisfies AuditAction,
-      before: { timerId, name: target.name, revision: target.revision },
-      after: {
-        timerId,
-        skippedOccurrenceAt: result.skippedOccurrenceAt,
-        nextOccurrenceAt: result.nextOccurrenceAt,
-      },
-    }, auditAt);
-  }
+  const result = await channelObject.skipNextTimerOccurrence(timerId, target.revision, actor);
+  if (result.result === "denied") return context.json({ error: "timer_skip_denied" }, 403);
   return context.json(result);
 });
 

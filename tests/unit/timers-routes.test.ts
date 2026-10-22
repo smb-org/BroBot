@@ -18,7 +18,7 @@ interface SkipTimerRouteOptions {
   role?: ChannelRole | "viewer";
   authorizationSql?: string;
   result?: { result: string; skippedOccurrenceAt?: string; nextOccurrenceAt?: string | null };
-  skipped?: (channelId: string, timerId: string, revision: number) => void;
+  skipped?: (channelId: string, timerId: string, revision: number, actor: { userId: string; sessionId: string }) => void;
   auditActions?: string[];
 }
 
@@ -139,8 +139,8 @@ const environmentFor = (
       deleteTimerConfig: () => failScheduler
         ? Promise.reject(new Error("Channel Durable Object is unavailable."))
         : Promise.resolve(),
-      skipNextTimerOccurrence: (timerId: string, revision: number) => {
-        options.skipped?.("timers-route-channel", timerId, revision);
+      skipNextTimerOccurrence: (timerId: string, revision: number, actor: { userId: string; sessionId: string }) => {
+        options.skipped?.("timers-route-channel", timerId, revision, actor);
         return Promise.resolve(options.result ?? {
           result: "skipped",
           skippedOccurrenceAt: "2026-10-13T12:10:00.000Z",
@@ -342,7 +342,32 @@ describe("skip next timer quick-action route", () => {
 
     expect(response.status).toBe(expectedStatus);
     await expect(response.json()).resolves.toEqual(result);
-    expect(auditActions).toEqual(result.result === "skipped" ? ["timers.timer.skipped"] : []);
+    expect(auditActions).toEqual([]);
+  });
+
+  it("passes the session actor to the queued scheduler and returns its authorization denial", async () => {
+    const database = await createDatabase();
+    await insertSkipTimerFixture(database);
+    const actors: Array<{ userId: string; sessionId: string }> = [];
+    const auditActions: string[] = [];
+    const options: SkipTimerRouteOptions = {
+      result: { result: "denied" },
+      auditActions,
+      skipped: (_channelId, _timerId, _revision, actor) => actors.push(actor),
+    };
+    const response = await appFor(database as unknown as D1Database, [], options).fetch(
+      new Request(`https://brobot.example/channels/${CHANNEL_ID}/quick-actions/skip-next`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timerId: "timer-1" }),
+      }),
+      environmentFor(database as unknown as D1Database, [], false, options),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "timer_skip_denied" });
+    expect(actors).toEqual([{ userId: ACTOR_ID, sessionId: "timers-route-session" }]);
+    expect(auditActions).toEqual([]);
   });
 
   it("rejects a non-member before asking the channel scheduler to skip", async () => {

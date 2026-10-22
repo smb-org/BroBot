@@ -57,5 +57,6 @@ export interface TimerMutationInput {
 export type SkipTimerOccurrenceResult =
   | { result: "skipped"; skippedOccurrenceAt: string; nextOccurrenceAt: string | null }
   | { result: "already_skipped" }
+  | { result: "denied" }
   | { result: "nothing_planned" }
   | { result: "not_found" };
