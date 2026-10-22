@@ -164,7 +164,7 @@ const box = async (locator: ReturnType<Page["locator"]>) => {
   return result;
 };
 
-test("issue 438 member page layout stays aligned at the requested viewports", async ({ page }) => {
+test("issue 438 layout regressions stay aligned at the requested viewports", async ({ page }) => {
   test.setTimeout(300_000);
 
   for (const viewport of viewports) {
@@ -220,29 +220,6 @@ test("issue 438 member page layout stays aligned at the requested viewports", as
       })).toEqual(["0px", "0px", "0px", "0px", "0px", "rgba(0, 0, 0, 0)"]);
     }
 
-    await freshRoute(page, viewport, `/channels/${channelId}/members`);
-    await page.getByRole("button", { name: "Zugriff vergeben" }).click();
-    const dialog = page.locator(".ui-step-dialog");
-    const personStepHeight = (await box(dialog)).height;
-    await page.getByRole("textbox", { name: "Twitch-Name" }).fill("lena_luchs");
-    await page.getByRole("button", { name: "Suchen" }).click();
-    await expect(page.getByRole("heading", { name: "Rolle vergeben" })).toBeVisible();
-    expect(Math.abs((await box(dialog)).height - personStepHeight)).toBeLessThanOrEqual(1);
-    const roleCardsBox = await box(page.locator(".member-invite-dialog .ui-choice-cards-field"));
-    const footerBox = await box(dialog.locator(".ui-step-dialog__footer"));
-    expect(footerBox.y - (roleCardsBox.y + roleCardsBox.height)).toBeLessThanOrEqual(100);
-    await page.getByRole("button", { name: "Weiter" }).click();
-    await expect(page.getByRole("heading", { name: "Zugriff prüfen" })).toBeVisible();
-    expect(Math.abs((await box(dialog)).height - personStepHeight)).toBeLessThanOrEqual(1);
-    await page.getByRole("button", { name: "Abbrechen" }).click();
-    await expect(page.getByText("Einladung verwerfen?")).toBeVisible();
-  }
-});
-
-test("issue 438 module page layout stays aligned at the requested viewports", async ({ page }) => {
-  test.setTimeout(300_000);
-
-  for (const viewport of viewports) {
     await freshRoute(page, viewport, `/channels/${channelId}/modules`);
     const groups = page.locator(".module-workspace__groups");
     const moduleGroups = groups.locator(":scope > .module-workspace__group");
@@ -301,13 +278,7 @@ test("issue 438 module page layout stays aligned at the requested viewports", as
     const operatorRowBox = await box(operatorModuleRow);
     const operatorSwitchBox = await box(operatorModuleSwitch);
     expect(Math.abs((operatorRowBox.y + operatorRowBox.height / 2) - (operatorSwitchBox.y + operatorSwitchBox.height / 2))).toBeLessThanOrEqual(2);
-  }
-});
 
-test("issue 438 system page layout stays aligned at the requested viewports", async ({ page }) => {
-  test.setTimeout(300_000);
-
-  for (const viewport of viewports) {
     await freshRoute(page, viewport, `/channels/${channelId}/system`);
     await expect(page.locator(".system-page__status-list .state-row").first()).toBeVisible();
     const systemHeader = await box(page.locator(".system-page > .page-header"));
@@ -354,6 +325,23 @@ test("issue 438 system page layout stays aligned at the requested viewports", as
     const operatorModeratorRowBox = await box(operatorModeratorRow);
     const operatorReasonBox = await box(operatorModeratorReason);
     expect(operatorReasonBox.y + operatorReasonBox.height).toBeLessThanOrEqual(operatorModeratorRowBox.y + operatorModeratorRowBox.height + 1);
+
+    await freshRoute(page, viewport, `/channels/${channelId}/members`);
+    await page.getByRole("button", { name: "Zugriff vergeben" }).click();
+    const dialog = page.locator(".ui-step-dialog");
+    const personStepHeight = (await box(dialog)).height;
+    await page.getByRole("textbox", { name: "Twitch-Name" }).fill("lena_luchs");
+    await page.getByRole("button", { name: "Suchen" }).click();
+    await expect(page.getByRole("heading", { name: "Rolle vergeben" })).toBeVisible();
+    expect(Math.abs((await box(dialog)).height - personStepHeight)).toBeLessThanOrEqual(1);
+    const roleCardsBox = await box(page.locator(".member-invite-dialog .ui-choice-cards-field"));
+    const footerBox = await box(dialog.locator(".ui-step-dialog__footer"));
+    expect(footerBox.y - (roleCardsBox.y + roleCardsBox.height)).toBeLessThanOrEqual(100);
+    await page.getByRole("button", { name: "Weiter" }).click();
+    await expect(page.getByRole("heading", { name: "Zugriff prüfen" })).toBeVisible();
+    expect(Math.abs((await box(dialog)).height - personStepHeight)).toBeLessThanOrEqual(1);
+    await page.getByRole("button", { name: "Abbrechen" }).click();
+    await expect(page.getByText("Einladung verwerfen?")).toBeVisible();
   }
 });
 
