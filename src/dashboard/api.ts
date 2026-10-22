@@ -22,7 +22,7 @@ import type {
 import type { ChannelControlDuration, ChannelRole, ChatOutputTarget, OverlayElementKind } from "../contracts/values";
 import type { ModuleRegisteredTemplateVariable } from "../modules/contract";
 import type { DryRunRequest, DryRunResponse } from "../contracts/dry-run";
-import type { TestMessageResult } from "../contracts/quick-actions";
+import type { StreamMarkerResult, TestMessageResult } from "../contracts/quick-actions";
 import type { NormalizedWeather } from "../modules/weather/contracts";
 import type { SunDay, SunAltitudeInterval } from "../modules/sun/domain";
 
@@ -380,13 +380,23 @@ export interface PanelChannelBroadcast {
   manageScopeAvailable: boolean;
 }
 
+export interface PanelStreamMarkerAvailability {
+  manageScopeAvailable: boolean;
+}
+
 export const fetchChannelBroadcast = (channelId: string, signal?: AbortSignal): Promise<PanelChannelBroadcast> =>
   requestJson<PanelChannelBroadcast>(channelPath(channelId, "broadcast"), requestOptions(signal));
+
+export const fetchStreamMarkerAvailability = (channelId: string, signal?: AbortSignal): Promise<PanelStreamMarkerAvailability> =>
+  requestJson<PanelStreamMarkerAvailability>(channelPath(channelId, "broadcast/markers/availability"), requestOptions(signal));
 
 export const saveChannelBroadcast = (
   channelId: string,
   update: { title?: string; gameId?: string },
 ): Promise<undefined> => requestMutation<undefined>(channelPath(channelId, "broadcast"), "PATCH", update);
+
+export const createStreamMarker = (channelId: string): Promise<StreamMarkerResult> =>
+  requestMutation<StreamMarkerResult>(channelPath(channelId, "broadcast/markers"), "POST");
 
 export const searchChannelGames = async (channelId: string, query: string): Promise<readonly PanelBroadcastGame[]> => {
   const search = new URLSearchParams({ q: query });

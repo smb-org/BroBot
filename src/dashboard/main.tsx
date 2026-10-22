@@ -930,11 +930,12 @@ interface ChannelOverviewRouteProperties {
   overview: PanelChannelOverview;
   modules: PanelModuleState[];
   modulesLoaded: boolean;
+  viewerUserId: string | null;
   onNavigate: (route: DashboardRoute) => void;
 }
 
-const ChannelOverviewRoute = ({ overview, modules, modulesLoaded, onNavigate }: ChannelOverviewRouteProperties): ReactElement =>
-  <LiveCockpit overview={overview} modules={modules} modulesLoaded={modulesLoaded} onNavigate={onNavigate} />;
+const ChannelOverviewRoute = ({ overview, modules, modulesLoaded, viewerUserId, onNavigate }: ChannelOverviewRouteProperties): ReactElement =>
+  <LiveCockpit overview={overview} modules={modules} modulesLoaded={modulesLoaded} viewerUserId={viewerUserId} onNavigate={onNavigate} />;
 
 interface SystemPageProperties {
   channelId: string;
@@ -1566,6 +1567,7 @@ export const DashboardApp = (): ReactElement => {
           overview={overview.data}
           modules={selectedChannel.modules ?? overview.data.modules ?? modules.data?.modules ?? []}
           modulesLoaded={overviewModulesLoaded}
+          viewerUserId={viewerUserId}
           onNavigate={navigate}
         /> : null}</UiLoadState> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "location-weather" && selectedChannel !== null

@@ -61,6 +61,7 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/chat_voting/panel/action-content-locale.ts": "Bilingual DE/EN chat-voting action form text; only its `de` half is German.",
   "src/modules/text_library/panel/locale.ts": "Bilingual DE/EN text-library panel text catalogue; only its `de` half is German.",
   "src/modules/text_library/catalog.ts": "Bilingual DE/EN module navigation and mandatory-state catalog; only its `de` half is German.",
+  "src/modules/channel_events/panel/quick-action-locale.ts": "Bilingual DE/EN channel-events stream-marker quick-action text catalogue; only its `de` half is German.",
   "src/modules/channel_events/catalog.ts": "Bilingual DE/EN channel-events mandatory-state catalog; only its `de` half is German.",
   "src/modules/timers/contracts/catalog.ts": "Bilingual DE/EN timer module navigation catalog; only its `de` half is German.",
   "src/modules/timers/panel/locale.ts": "Bilingual DE/EN timer panel text catalogue; only its `de` half is German.",

@@ -444,9 +444,15 @@ describe("Module panel loader", () => {
     const row = screen.getByText("Kanalereignisse").closest(".list-row");
     const status = within(row as HTMLElement).getByText("Läuft · immer aktiv");
     expect(within(row as HTMLElement).getByRole("note")).toHaveTextContent("Ereignisdaten sind immer verfügbar.");
+    expect(within(row?.querySelector(".list-row__description") as HTMLElement).getByRole("note")).toBeInTheDocument();
+    expect(row?.querySelector(".list-row__status")).not.toHaveTextContent("Ereignisdaten sind immer verfügbar.");
     expect(status.closest(".module-locked-status")).toHaveAttribute("title", "Ereignisdaten sind immer verfügbar.");
-    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-description", "Ereignisdaten sind immer verfügbar.");
-    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-label", "Läuft · immer aktiv: Ereignisdaten sind immer verfügbar.");
+    expect(status.closest(".module-locked-status")).not.toHaveAttribute("aria-description");
+    expect(status.closest(".module-locked-status")).toHaveAttribute("aria-label", "Läuft · immer aktiv");
+    // The note already carries the reason, so the link's accessible name must contain it exactly once.
+    const link = within(row as HTMLElement).getByRole("link");
+    expect(link).toHaveAccessibleName(expect.stringContaining("Ereignisdaten sind immer verfügbar."));
+    expect(link).toHaveAccessibleName(expect.not.stringMatching(/Ereignisdaten sind immer verfügbar\.[^]*Ereignisdaten sind immer verfügbar\./u));
   });
 
   it("shows the mandatory module detail as always active without a switch", () => {

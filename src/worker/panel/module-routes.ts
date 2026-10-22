@@ -12,7 +12,7 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import type { ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
+import type { HelixResult, ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import {
   combineCommandCollisionWriteGuards,
@@ -25,6 +25,7 @@ import { BELABOX_MODULE_ID, BELABOX_STATS_URL_SECRET } from "../../modules/belab
 import { validateBelaboxStatsUrl } from "../../modules/belabox/domain/stats-url";
 import { resetSampleAfterStatsUrlChangeBestEffort } from "../../modules/belabox/routes";
 import type { PanelModuleState } from "../../panel-contract";
+import type { StreamMarkerResult } from "../../contracts/quick-actions";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { moduleBroadcasterScopeState } from "../module-scopes";
 import { getPanelModuleStates } from "./module-repository";
@@ -488,6 +489,7 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
 
 moduleRouter.use("/api/channels/:channelId/games", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/broadcast", requireChannelAuthorization());
+moduleRouter.use("/api/channels/:channelId/broadcast/*", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/template-variables", requireChannelAuthorization());
 moduleRouter.use("/api/channels/:channelId/template-preview", requireChannelAuthorization());
 
@@ -673,6 +675,106 @@ moduleRouter.patch("/api/channels/:channelId/broadcast", async (context) => {
   const changed = parsed.data;
   await recordAudit(context.env.DB, actor.userId, updatedAt, channelId, null, "channel.broadcast.updated", null, changed);
   return context.body(null, 204);
+});
+
+moduleRouter.get("/api/channels/:channelId/broadcast/markers/availability", async (context) => {
+  const identity = await getLoginIdentity(context.env.DB, context.req.param("channelId"));
+  return context.json({ manageScopeAvailable: loginIdentityHasBroadcastScope(identity) });
+});
+
+moduleRouter.post("/api/channels/:channelId/broadcast/markers", async (context) => {
+  const channelId = context.req.param("channelId");
+  const actor = context.get("actor");
+  const managementStillAuthorized = async (): Promise<boolean> => {
+    const authorization = context.get("authorizeManagementMutation")(channelId, actor, nowIso());
+    const authorized = await context.env.DB.prepare(
+      `SELECT channel_id FROM channels WHERE channel_id = ? ${authorization.sql}`,
+    ).bind(channelId, ...authorization.values).first<{ channel_id: string }>();
+    return authorized !== null;
+  };
+  if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+
+  let identity = await getLoginIdentity(context.env.DB, channelId);
+  const grantHref = `/auth/channels/${encodeURIComponent(channelId)}/broadcaster-scopes/broadcast`;
+  if (identity === null || identity.status !== "connected") {
+    return context.json({ result: "failed" } satisfies StreamMarkerResult);
+  }
+  if (!loginIdentityHasBroadcastScope(identity)) {
+    return context.json({ result: "scope_missing", error: "broadcast_scope_missing", grantHref } satisfies StreamMarkerResult);
+  }
+
+  let accessToken: string | null;
+  try {
+    accessToken = await decryptLoginIdentityAccessToken(identity, context.env);
+  } catch {
+    return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+  }
+  if (accessToken === null) return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+
+  if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+  const createMarker = (token: string): Promise<HelixResult<{ data?: unknown }>> =>
+    context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{ data?: unknown }>({
+      url: "https://api.twitch.tv/helix/streams/markers",
+      accessToken: token,
+      clientId: context.env.TWITCH_CLIENT_ID,
+      method: "POST",
+      body: { user_id: channelId, description: "BroBot marker" },
+    }));
+  let result: HelixResult<{ data?: unknown }>;
+  try {
+    result = await createMarker(accessToken);
+  } catch {
+    return context.json({ result: "failed" } satisfies StreamMarkerResult);
+  }
+
+  if (!result.ok && result.status === 401) {
+    let refreshedIdentity: LoginIdentityRecord | null;
+    try {
+      refreshedIdentity = await refreshLoginIdentityTokens(context.env, identity, nowIso());
+    } catch {
+      return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    }
+    if (refreshedIdentity === null || refreshedIdentity.status !== "connected") {
+      return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    }
+    identity = refreshedIdentity;
+    if (!loginIdentityHasBroadcastScope(identity)) {
+      return context.json({ result: "scope_missing", error: "broadcast_scope_missing", grantHref } satisfies StreamMarkerResult);
+    }
+    let refreshedToken: string | null;
+    try {
+      refreshedToken = await decryptLoginIdentityAccessToken(identity, context.env);
+    } catch {
+      return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    }
+    if (refreshedToken === null) return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    if (!await managementStillAuthorized()) return context.json({ error: "broadcast_manage_denied" }, 403);
+    try {
+      result = await createMarker(refreshedToken);
+    } catch {
+      return context.json({ result: "failed" } satisfies StreamMarkerResult);
+    }
+  }
+
+  if (!result.ok) {
+    if (result.status === 404) return context.json({ result: "offline" } satisfies StreamMarkerResult);
+    if (result.status === 401) return context.json({ result: "token_expired" } satisfies StreamMarkerResult);
+    if (result.status === 403) return context.json({ result: "not_broadcaster" } satisfies StreamMarkerResult);
+    if (result.status === 429) {
+      const retryAfter = result.retryAfter == null
+        ? 1
+        : Math.max(1, Math.ceil((result.retryAfter - Date.now()) / 1_000));
+      return context.json({ result: "rate_limited", retryAfter } satisfies StreamMarkerResult);
+    }
+    return context.json({ result: "failed" } satisfies StreamMarkerResult);
+  }
+
+  const rows = isRecord(result.data) ? result.data.data : undefined;
+  const marker: unknown = Array.isArray(rows) ? (rows as unknown[])[0] : undefined;
+  if (!isRecord(marker) || typeof marker.position_seconds !== "number" || !Number.isFinite(marker.position_seconds) || marker.position_seconds < 0) {
+    return context.json({ result: "failed" } satisfies StreamMarkerResult);
+  }
+  return context.json({ result: "created", positionSeconds: marker.position_seconds } satisfies StreamMarkerResult);
 });
 
 moduleRouter.get("/api/channels/:channelId/template-variables", async (context) => {

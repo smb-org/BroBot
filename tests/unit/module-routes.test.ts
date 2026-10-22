@@ -9,7 +9,7 @@ import { belaboxDefaultAlertTexts } from "../../src/modules/belabox/contracts/al
 import { textCommandModule } from "../../src/modules/text_commands";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
-import { TestD1Database, type TestPreparedStatement } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 // This suite supplies small module doubles to keep route activation checks
 // focused on persistence and authorization, independent of product modules.
@@ -479,6 +479,332 @@ describe("Module management in the panel", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: "broadcast_scope_missing" });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "created",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ data: [{ id: "marker-1", created_at: "2026-10-22T12:00:00Z", position_seconds: 323 }] }), { status: 200 }),
+      expected: { result: "created", positionSeconds: 323 },
+    },
+    {
+      name: "broadcaster cannot create a marker for another broadcaster",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ error: "Forbidden", status: 403, message: "The user does not have permission to perform this action on this broadcaster" }), { status: 403 }),
+      expected: { result: "not_broadcaster" },
+    },
+    {
+      name: "offline",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ message: "Broadcaster is not live" }), { status: 404 }),
+      expected: { result: "offline" },
+    },
+    {
+      name: "invalid Helix request",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ message: "Invalid request" }), { status: 400 }),
+      expected: { result: "failed" },
+    },
+    {
+      name: "rate limited",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ error: "Too Many Requests", status: 429, message: "Too many requests" }), { status: 429, headers: { "Ratelimit-Reset": String(Math.ceil(Date.now() / 1_000) + 30) } }),
+      expected: { result: "rate_limited" },
+    },
+    {
+      name: "other Helix failures",
+      scopes: ["channel:manage:broadcast"],
+      response: () => new Response(JSON.stringify({ message: "Unavailable" }), { status: 503 }),
+      expected: { result: "failed" },
+    },
+  ])("maps stream marker result: $name", async ({ scopes, response: helixResponse, expected }) => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, scopes);
+    const twitchFetch = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(helixResponse()));
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    const resultBody: unknown = await response.json();
+    if (expected.result === "rate_limited") {
+      expect(resultBody).toMatchObject(expected);
+      if (typeof resultBody !== "object" || resultBody === null || !("retryAfter" in resultBody)) {
+        throw new Error("Expected Twitch's rate limit reset time.");
+      }
+      expect(resultBody.retryAfter).toBeGreaterThanOrEqual(30);
+      expect(resultBody.retryAfter).toBeLessThanOrEqual(31);
+    } else {
+      expect(resultBody).toEqual(expected);
+    }
+    if (scopes.length === 0) {
+      expect(twitchFetch).not.toHaveBeenCalled();
+    } else {
+      expect(twitchFetch).toHaveBeenCalledOnce();
+      const [input, init] = twitchFetch.mock.calls[0] ?? [];
+      const url = urlForFetchInput(input);
+      expect(url.pathname).toBe("/helix/streams/markers");
+      expect(url.search).toBe("");
+      expect(init?.method).toBe("POST");
+      expect(init?.body).toBe(JSON.stringify({ user_id: "kanal-a", description: "BroBot marker" }));
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer channel-token");
+    }
+  });
+
+  it("refreshes an expired marker token and retries once with the Twitch body contract", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    const twitchFetch = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = urlForFetchInput(input);
+      if (url.pathname === "/oauth2/token") {
+        return Promise.resolve(new Response(JSON.stringify({
+          access_token: "channel-token-refreshed",
+          refresh_token: "channel-refresh-refreshed",
+          expires_in: 7_200,
+          scope: ["channel:manage:broadcast"],
+        }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      const authorization = new Headers(init?.headers).get("Authorization");
+      return Promise.resolve(authorization === "Bearer channel-token"
+        ? new Response(JSON.stringify({ error: "Unauthorized", status: 401, message: "Invalid OAuth token" }), { status: 401 })
+        : new Response(JSON.stringify({ data: [{ id: "marker-1", created_at: "2026-10-22T12:00:00Z", position_seconds: 323 }] }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ result: "created", positionSeconds: 323 });
+    const helixCalls = twitchFetch.mock.calls.filter(([input]) => urlForFetchInput(input).pathname === "/helix/streams/markers");
+    expect(helixCalls).toHaveLength(2);
+    expect(helixCalls.map(([, init]) => init?.body)).toEqual([
+      JSON.stringify({ user_id: "kanal-a", description: "BroBot marker" }),
+      JSON.stringify({ user_id: "kanal-a", description: "BroBot marker" }),
+    ]);
+    expect(helixCalls.map(([, init]) => new Headers(init?.headers).get("Authorization"))).toEqual([
+      "Bearer channel-token",
+      "Bearer channel-token-refreshed",
+    ]);
+  });
+
+  it("rechecks management authorization before retrying a marker after token refresh", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    const twitchFetch = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = urlForFetchInput(input);
+      if (url.pathname === "/oauth2/token") {
+        return new Response(JSON.stringify({
+          access_token: "channel-token-refreshed",
+          refresh_token: "channel-refresh-refreshed",
+          expires_in: 7_200,
+          scope: ["channel:manage:broadcast"],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (new Headers(init?.headers).get("Authorization") === "Bearer channel-token") {
+        await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
+        return new Response(JSON.stringify({ error: "Unauthorized", status: 401, message: "Invalid OAuth token" }), { status: 401 });
+      }
+      return new Response(JSON.stringify({ data: [{ id: "marker-1", position_seconds: 323 }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "broadcast_manage_denied" });
+    expect(twitchFetch.mock.calls.filter(([input]) => urlForFetchInput(input).pathname === "/helix/streams/markers")).toHaveLength(1);
+  });
+
+  it("maps a 401 to missing scope when the refreshed identity no longer has the broadcast scope", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    const twitchFetch = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlForFetchInput(input);
+      if (url.pathname === "/oauth2/token") {
+        return Promise.resolve(new Response(JSON.stringify({
+          access_token: "channel-token-refreshed",
+          refresh_token: "channel-refresh-refreshed",
+          expires_in: 7_200,
+          scope: [],
+        }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ error: "Unauthorized", status: 401, message: "Invalid OAuth token" }), { status: 401 }));
+    });
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      result: "scope_missing",
+      error: "broadcast_scope_missing",
+      grantHref: "/auth/channels/kanal-a/broadcaster-scopes/broadcast",
+    });
+    expect(twitchFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports an expired marker token when refresh fails", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    const twitchFetch = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlForFetchInput(input);
+      return Promise.resolve(url.pathname === "/oauth2/token"
+        ? new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400, headers: { "Content-Type": "application/json" } })
+        : new Response(JSON.stringify({ error: "Unauthorized", status: 401, message: "Invalid OAuth token" }), { status: 401 }));
+    });
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ result: "token_expired" });
+    expect(twitchFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the broadcast scope grant target before calling Helix when the scope is absent", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, []);
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      result: "scope_missing",
+      error: "broadcast_scope_missing",
+      grantHref: "/auth/channels/kanal-a/broadcaster-scopes/broadcast",
+    });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { scopes: ["channel:manage:broadcast"], available: true },
+    { scopes: [], available: false },
+  ])("reads stream marker scope availability from the channel broadcaster identity", async ({ scopes, available }) => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertBroadcastIdentity(database, scopes);
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers/availability"),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ manageScopeAvailable: available });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it("denies an operator before calling Helix to create a stream marker", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "broadcast_manage_denied" });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it("rechecks management authorization immediately before calling Helix", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+    environment.DB = createReadInterleavingDatabase(
+      database,
+      (sql) => sql.includes("SELECT channel_id FROM channels WHERE channel_id = ?"),
+      async () => {
+        await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = 'kanal-a' AND user_id = 'user-1'").run();
+      },
+    );
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "broadcast_manage_denied" });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it("denies a non-member before calling Helix to create a stream marker", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "channel_access_denied" });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps stream marker creation scoped to the route channel", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-b", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "channel_access_denied" });
     expect(twitchFetch).not.toHaveBeenCalled();
   });
 

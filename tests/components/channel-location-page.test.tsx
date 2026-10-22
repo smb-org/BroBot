@@ -78,6 +78,7 @@ const livePageFetcher = (overrides: Record<string, unknown> = {}) => vi.fn<typeo
 describe("channel location page", () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -243,11 +244,14 @@ describe("channel location page", () => {
   });
 
   it("renders current weather, sun and moon values for a saved location", async () => {
+    // Fixed instant 15 minutes after the weather observation (11:30Z), so "updated N min ago" and the sun arc "now" label are deterministic.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-21T11:45:00.000Z"));
     vi.stubGlobal("fetch", livePageFetcher());
     const { container } = renderWithQuery(<UiProvider><ChannelLocationPage channelId="channel-a" role="manager" /></UiProvider>);
 
     expect(await screen.findByText("18,4 °C")).toBeInTheDocument();
-    expect(screen.getByText(/13:30/u)).toBeInTheDocument();
+    expect(container.querySelector(".channel-location-weather-card > .channel-location-live-card__content .channel-location-weather-card__footer > span:last-child")).toHaveTextContent("aktualisiert vor 15 Min. · 13:30");
     expect(await screen.findByText("Sonne heute")).toBeInTheDocument();
     expect((await screen.findAllByText("Mond")).length).toBeGreaterThan(0);
     expect(screen.getByText("74 % beleuchtet")).toBeInTheDocument();
