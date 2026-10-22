@@ -303,6 +303,7 @@ const channelObjectFor = (stream: DurableTimerState["stream"]): {
   Reflect.set(object, "env", { DB: database });
   Reflect.set(object, "alarmScheduleQueue", Promise.resolve());
   Reflect.set(object, "timerScheduleReconciliationQueue", Promise.resolve());
+  Reflect.set(object, "timerScheduleInputGeneration", 0);
   Reflect.set(object, "timerScheduleInitialization", null);
   Reflect.set(object, "timerOccurrenceQueues", new Map());
   let scheduleInputsOverride: Pick<TimerScheduleInputs, "timeZone" | "eventTimes"> | null = null;
@@ -1817,5 +1818,112 @@ describe("timer scheduling interleavings through the channel Durable Object", ()
     expect(finalCheck).toContain("actor.channel_id = ?");
     expect(finalCheck).toContain("timer_module.enabled AS timers_module_enabled");
     expect(stateOf(harness.values).timers[config.id]?.skippedOccurrence).toBeDefined();
+  });
+
+  it.each([
+    {
+      name: "daily",
+      trigger: { type: "time_of_day", time: "14:10", weekdays: [], alsoOffline: true } satisfies DurableTimerConfig["trigger"],
+      stream: { state: "offline", streamId: null, startedAt: null, generation: 1 } as const,
+      now: Date.parse("2026-10-13T10:00:00.000Z"),
+      expectedDeadline: Date.parse("2026-10-13T12:10:00.000Z"),
+    },
+    {
+      name: "stream-start",
+      trigger: { type: "stream_start", minutes: 10 } satisfies DurableTimerConfig["trigger"],
+      stream: onlineStream("stream-1", 1, Date.parse("2026-10-13T10:00:00.000Z")),
+      now: Date.parse("2026-10-13T10:00:00.000Z"),
+      expectedDeadline: Date.parse("2026-10-13T10:10:00.000Z"),
+    },
+  ])("keeps a skipped $name occurrence suppressed after disable and re-enable", async ({
+    name,
+    trigger,
+    stream,
+    now,
+    expectedDeadline,
+  }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const harness = channelObjectFor(stream);
+    const config = timerConfig(`skip-disable-enable-${name}`, trigger);
+    harness.setDatabaseConfig(config);
+    await harness.object.upsertTimerConfig(config);
+    const scheduler = harness.object as unknown as {
+      skipNextTimerOccurrence(timerId: string, revision: number, actor: { userId: string; sessionId: string }): Promise<{ result: string }>;
+    };
+    const actor = { userId: "operator-user", sessionId: "operator-session" };
+
+    await expect(scheduler.skipNextTimerOccurrence(config.id, config.revision, actor))
+      .resolves.toMatchObject({ result: "skipped" });
+    const disabled = { ...config, enabled: false, revision: config.revision + 1 };
+    harness.setDatabaseConfig(disabled);
+    await harness.object.upsertTimerConfig(disabled);
+    const reenabled = { ...config, revision: config.revision + 2 };
+    harness.setDatabaseConfig(reenabled);
+    await harness.object.upsertTimerConfig(reenabled);
+
+    const occurrence = dueOccurrence(harness.values, config.id);
+    expect(occurrence.identity.deadline).toBe(expectedDeadline);
+    vi.setSystemTime(expectedDeadline);
+    const sends: string[] = [];
+    await harness.object.runTimerOccurrence(
+      timerAlarmContext((_text, key) => {
+        sends.push(key);
+        return Promise.resolve({ sent: true, reason: null, retryable: false });
+      }),
+      `timer:${config.id}`,
+      occurrence.identity.deadline,
+      reenabled.revision,
+      occurrence.identity,
+      occurrence.sequence,
+    );
+
+    expect(sends).toEqual([]);
+    expect(stateOf(harness.values).timers[config.id]?.skipReceipts).toEqual([]);
+    if (trigger.type === "stream_start") {
+      expect(stateOf(harness.values).timers[config.id]?.completedStreamId).toBe("stream-1");
+    } else {
+      expect(dueOccurrence(harness.values, config.id).identity.deadline).toBeGreaterThan(expectedDeadline);
+    }
+  });
+
+  it("retries a skip with refreshed timezone inputs when reconciliation finishes during authorization", async () => {
+    vi.useFakeTimers();
+    const start = Date.parse("2026-10-13T10:00:00.000Z");
+    vi.setSystemTime(start);
+    const harness = channelObjectFor({ state: "offline", streamId: null, startedAt: null, generation: 1 });
+    const config = timerConfig("skip-timezone-reconciliation-race", {
+      type: "time_of_day", time: "14:10", weekdays: [], alsoOffline: true,
+    });
+    harness.setDatabaseConfig(config);
+    await harness.object.upsertTimerConfig(config);
+    const authorization = harness.pauseNextTimerModuleCheck();
+    const scheduler = harness.object as unknown as {
+      skipNextTimerOccurrence(timerId: string, revision: number, actor: { userId: string; sessionId: string }): Promise<{
+        result: string;
+        skippedOccurrenceAt?: string;
+        nextOccurrenceAt?: string | null;
+      }>;
+    };
+    const skipping = scheduler.skipNextTimerOccurrence(config.id, config.revision, {
+      userId: "operator-user", sessionId: "operator-session",
+    });
+    await authorization.started;
+
+    harness.setTimeZone("UTC");
+    await harness.object.reconcileTimerSchedules("channel_time_zone");
+    const reconciledOccurrence = dueOccurrence(harness.values, config.id);
+    expect(reconciledOccurrence.identity.deadline).toBe(Date.parse("2026-10-13T14:10:00.000Z"));
+    authorization.release();
+
+    await expect(skipping).resolves.toEqual({
+      result: "skipped",
+      skippedOccurrenceAt: "2026-10-13T14:10:00.000Z",
+      nextOccurrenceAt: "2026-10-14T14:10:00.000Z",
+    });
+    expect(harness.skipAccessCheckQueries()).toHaveLength(2);
+    expect(stateOf(harness.values).timers[config.id]?.effectiveNextOccurrence?.identity.deadline)
+      .toBe(Date.parse("2026-10-14T14:10:00.000Z"));
+    expect(harness.mirrors.get(config.id)?.nextRunAt).toBe("2026-10-14T14:10:00.000Z");
   });
 });

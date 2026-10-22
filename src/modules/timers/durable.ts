@@ -53,11 +53,19 @@ interface TimerSendClaim {
   activityCount: number;
 }
 
+interface TimerSkipReceipt {
+  occurrenceKey: string;
+  deadline: number;
+  auditOperationId: string | null;
+}
+
 export interface DurableTimerEntry {
   config: DurableTimerConfig;
   plannedOccurrence: TimerOccurrence | null;
   /** The planned occurrence the operator explicitly marked to skip. */
   skippedOccurrence?: TimerOccurrence | null;
+  /** Durable skip markers that remain valid until their occurrence deadlines pass. */
+  skipReceipts?: TimerSkipReceipt[];
   /** Effective next-up value while the skipped occurrence remains alarmed. */
   effectiveNextOccurrence?: TimerOccurrence | null;
   /** Idempotency key proving that the committed skip has an audit entry or durable intent. */
