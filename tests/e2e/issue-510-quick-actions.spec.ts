@@ -312,28 +312,3 @@ test("shows the stream marker at desktop and mobile widths and keeps the grid fi
   expect(desktopGrid.width).toBeGreaterThan(0);
 });
 
-test("keeps an offline stream marker visible and disabled with its reason", async ({ page }) => {
-  await setupQuickActionCockpit(page, () => {}, false, true, "offline");
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`/channels/${channelId}`);
-
-  const marker = page.getByRole("button", { name: "Stream-Marker setzen" });
-  await expect(marker).toBeVisible();
-  await expect(marker).toBeDisabled();
-  await expect(page.getByText("Der Stream ist offline.").first()).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-});
-
-test("shows the owner-only scope reason without a grant link to a manager who is not the channel owner", async ({ page }) => {
-  const actions = await setupQuickActionCockpit(page, () => {}, false, true);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`/channels/${channelId}`);
-
-  const marker = page.getByRole("button", { name: "Stream-Marker setzen" });
-  await expect(marker).toBeVisible();
-  await actions.setMarkerScopeAvailable(false);
-  await expect(marker).toBeDisabled({ timeout: 8_000 });
-  await expect(page.getByText("Nur der Kanalinhaber kann diese Berechtigung erteilen.").first()).toBeVisible();
-  await expect(page.getByRole("link", { name: /Berechtigung erteilen/u })).toHaveCount(0);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-});

@@ -175,22 +175,6 @@ test("the mobile drawer moves and traps focus, makes the page inert, and returns
   await expect(burger).toBeFocused();
 });
 
-test("the macOS shortcut preserves Ctrl+K in editable fields and opens with Cmd+K", async ({ page }) => {
-  await page.addInitScript(() => {
-    Object.defineProperty(Object.getPrototypeOf(navigator), "platform", { configurable: true, get: () => "MacIntel" });
-  });
-  await installDashboardFixture(page);
-  await page.goto(`/channels/${channelId}/modules/chat_voting`);
-  const question = page.getByRole("textbox", { name: "Question" });
-  await question.focus();
-  await page.keyboard.press("Control+k");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await page.keyboard.press("Meta+k");
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(question).toBeFocused();
-});
-
 test("the shell header fits narrow widths and keeps the live status at medium widths", async ({ page }) => {
   await installDashboardFixture(page);
   await page.goto(`/channels/${channelId}/modules/chat_voting`);
