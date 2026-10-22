@@ -75,21 +75,28 @@ export const moduleCommandCollisionWriteGuard = (
 export const textCommandCollisionWriteGuard = (
   channelId: string,
   candidateTokens: readonly string[],
+  options: Pick<ModuleCommandCollisionOptions, "excludeTextCommandName"> = {},
 ): CommandCollisionWriteGuard => {
   const candidates = normalizedTokens(candidateTokens);
   if (candidates.length === 0) return { sql: "", values: [] };
   const candidateJson = JSON.stringify(candidates);
+  const excludeCommandName = options.excludeTextCommandName === undefined
+    ? ""
+    : "AND existing.command_name <> ?";
   return {
     sql: `AND NOT EXISTS (
       SELECT 1 FROM text_commands AS existing
        WHERE existing.channel_id = ? AND existing.enabled = 1
+         ${excludeCommandName}
          AND ('!' || lower(existing.command_name) IN (SELECT value FROM json_each(?))
            OR EXISTS (
              SELECT 1 FROM json_each(CASE WHEN json_valid(existing.aliases_json) THEN existing.aliases_json ELSE '[]' END) AS alias
               WHERE '!' || lower(alias.value) IN (SELECT value FROM json_each(?))
            ))
     )`,
-    values: [channelId, candidateJson, candidateJson],
+    values: options.excludeTextCommandName === undefined
+      ? [channelId, candidateJson, candidateJson]
+      : [channelId, options.excludeTextCommandName, candidateJson, candidateJson],
   };
 };
 

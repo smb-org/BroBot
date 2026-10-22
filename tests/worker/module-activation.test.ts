@@ -62,7 +62,9 @@ const insertChannel = async (channelId: string): Promise<void> => {
   ).bind(channelId, channelId, channelId, now, now).run();
 };
 
-const activationRequest = async (channelId: string, moduleId = "points"): Promise<Request> => {
+const authenticatedRequestFactory = async (
+  channelId: string,
+): Promise<(path: string, method: "POST" | "PATCH", body: unknown) => Request> => {
   const sessionId = `session-${channelId}`;
   const userId = `user-${channelId}`;
   const now = new Date().toISOString();
@@ -86,15 +88,20 @@ const activationRequest = async (channelId: string, moduleId = "points"): Promis
     testTokenEncryptionKeys,
   );
   const csrf = await createCsrfToken(sessionId, testSessionCookieKeys, now);
-  return new Request(`https://brobot.example/api/channels/${channelId}/modules/${moduleId}`, {
-    method: "PATCH",
+  return (path, method, body) => new Request(`https://brobot.example${path}`, {
+    method,
     headers: {
       Cookie: `__Host-brobot_session=${cookie}; __Host-brobot_csrf=${csrf}`,
       "Content-Type": "application/json",
       "X-CSRF-Token": csrf,
     },
-    body: JSON.stringify({ enabled: true }),
+    body: JSON.stringify(body),
   });
+};
+
+const activationRequest = async (channelId: string, moduleId = "points"): Promise<Request> => {
+  const request = await authenticatedRequestFactory(channelId);
+  return request(`/api/channels/${channelId}/modules/${moduleId}`, "PATCH", { enabled: true });
 };
 
 describe("module activation schedule RPCs", () => {
@@ -135,6 +142,41 @@ describe("module activation schedule RPCs", () => {
     expect(body).toEqual({ error: "module_command_collision", command: "!befehle" });
     expect(module).toBeNull();
     expect(command).toBeNull();
+  });
+
+  it("reuses a custom befehle command when activating Text Commands through the real router [protects=first activation accepts the existing command row that initializeListCommand reuses; fails_when=activation returns 409 for the row it would preserve; no_claim=commands owned by other modules are allowed to share !befehle]", async () => {
+    const channelId = `module-activation-command-reuse-${crypto.randomUUID()}`;
+    await insertChannel(channelId);
+    const request = await authenticatedRequestFactory(channelId);
+    const createResponse = await panelRouter.fetch(request(
+      `/api/channels/${channelId}/modules/text_commands/commands`,
+      "POST",
+      { name: "befehle", text: "Custom command response", cooldownSeconds: 5 },
+    ), testEnvironment);
+
+    expect(createResponse.status).toBe(201);
+
+    const activationResponse = await panelRouter.fetch(request(
+      `/api/channels/${channelId}/modules/text_commands`,
+      "PATCH",
+      { enabled: true },
+    ), testEnvironment);
+    const activationBody = await activationResponse.json<{ module?: { id: string; enabled: boolean } }>();
+    const module = await database.prepare(
+      "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'text_commands'",
+    ).bind(channelId).first<{ enabled: number }>();
+    const commands = await database.prepare(
+      "SELECT command_name, response_text, kind FROM text_commands WHERE channel_id = ? AND command_name = 'befehle'",
+    ).bind(channelId).all<{ command_name: string; response_text: string; kind: string }>();
+
+    expect(activationResponse.status).toBe(200);
+    expect(activationBody.module).toMatchObject({ id: "text_commands", enabled: true });
+    expect(module).toEqual({ enabled: 1 });
+    expect(commands.results).toEqual([{
+      command_name: "befehle",
+      response_text: "Custom command response",
+      kind: "text",
+    }]);
   });
 
   it("notifies schedules through a real ChannelObject stub (protects=the schedule-input helper invokes the ChannelObject RPC without a remote call method; fails_when=the helper rejects with the Durable Object call TypeError; no_claim=how a schedule is rendered after its inputs change)", async () => {

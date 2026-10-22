@@ -967,6 +967,14 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
+  const initialize = enabled && existing?.initialized !== true;
+  const reusedTextCommandName = initialize && module.onEnableCommandTokens?.includes("!befehle") === true
+    ? "befehle"
+    : undefined;
+  const collisionOptions = {
+    excludeModuleId: module.id,
+    ...(reusedTextCommandName === undefined ? {} : { excludeTextCommandName: reusedTextCommandName }),
+  };
   let activationCommandTokens: string[] = [];
   if (enabled) {
     let currentSettings: unknown = JSON.parse(defaultSettingsJson) as unknown;
@@ -988,7 +996,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
         channelId,
         activationCommandTokens,
         MODULES,
-        { excludeModuleId: module.id },
+        collisionOptions,
       );
       if (commandCollision !== null) return context.json({ error: "module_command_collision", command: commandCollision }, 409);
     }
@@ -1018,13 +1026,12 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const commandWriteGuard = enabled
     ? combineCommandCollisionWriteGuards(
       moduleCommandCollisionWriteGuard(channelId, activationCommandTokens, MODULES, { excludeModuleId: module.id }),
-      textCommandCollisionWriteGuard(channelId, activationCommandTokens),
+      textCommandCollisionWriteGuard(channelId, activationCommandTokens, collisionOptions),
     )
     : { sql: "", values: [] };
   const atomicStateGuard = combineCommandCollisionWriteGuards(stateGuard ?? { sql: "", values: [] }, commandWriteGuard);
   const retryingPostCommit = existing !== null && existing.enabled === enabled && expectedRevision !== undefined &&
     Number(expectedRevision) + 1 === existing.revision;
-  const initialize = enabled && existing?.initialized !== true;
   let dependentMutations: readonly D1PreparedStatement[] = [];
   if (initialize && module.onEnable !== undefined) {
     dependentMutations = await module.onEnable({
@@ -1078,7 +1085,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
         channelId,
         activationCommandTokens,
         MODULES,
-        { excludeModuleId: module.id },
+        collisionOptions,
       );
       if (collision !== null) return context.json({ error: "module_command_collision", command: collision }, 409);
     }
