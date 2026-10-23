@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { useModuleQuery } from "../../../dashboard/data";
@@ -56,6 +56,11 @@ export const VotekickLockCard = ({ state, status, language, now }: {
   now: number;
 }): ReactElement => {
   const words = votekickLockCardTexts(language);
+  const transitionKey = status === "ready" ? state === null ? "free" : state.kind : status;
+  const transitionText = status === "loading" ? words.loading : status === "error" ? words.errorStatus
+    : state === null ? words.available : state.kind === "unknown" ? words.ballotUnknown : words.running;
+  const [stateAnnouncement, setStateAnnouncement] = useState("");
+  const announcedState = useRef(transitionKey);
   const active = state !== null;
   const hasCurrentVote = status === "ready" && state !== null && state.kind !== "unknown";
   const voteTitle = !hasCurrentVote ? "" : state.kind === "chat_vote"
@@ -68,13 +73,20 @@ export const VotekickLockCard = ({ state, status, language, now }: {
         : state.kind === "unknown" ? words.ballotUnknown : null;
   const reserved = status === "error" ? words.error : words.explanation;
 
+  useEffect(() => {
+    if (announcedState.current === transitionKey) return;
+    announcedState.current = transitionKey;
+    setStateAnnouncement(transitionText);
+  }, [transitionKey, transitionText]);
+
   return <section className="votekick-lock-card" aria-label={words.title} data-state={status}>
     <header className="votekick-lock-card__header"><h2>{words.title}</h2><span className={active ? "is-running" : ""}>{status === "loading" ? words.loading : status === "error" ? words.errorStatus : active ? words.running : words.available}</span></header>
-    <p className="votekick-lock-card__main" aria-live="polite">{body === null ? <>
+    <p className="votekick-lock-card__main">{body === null ? <>
       <span className="votekick-lock-card__main-title" title={voteTitle}>{voteTitle}</span>
-      <span className="votekick-lock-card__main-countdown">{countdown}</span>
+      <span className="votekick-lock-card__main-countdown" aria-live="off">{countdown}</span>
     </> : body || " "}</p>
-    <p className="votekick-lock-card__reserved" aria-live="polite">{reserved}</p>
+    <p className="votekick-lock-card__reserved">{reserved}</p>
+    <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{stateAnnouncement}</span>
   </section>;
 };
 

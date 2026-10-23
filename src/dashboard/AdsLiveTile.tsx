@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { ModuleLiveTileSnapshot } from "../modules/contract";
 import type { DashboardLanguage } from "./locale";
@@ -29,6 +29,8 @@ export const AdsLiveTile = ({ ads, now, language, canManage, moduleActive = true
   snoozeFeedback?: string | null;
   onSnooze: () => void;
 }): ReactElement => {
+  const [stateAnnouncement, setStateAnnouncement] = useState("");
+  const announcedState = useRef<AdsTileState | null>(null);
   const labels = dashboardTexts(language).liveCockpit;
   const nextUntil = ads?.nextAdAt === null || ads?.nextAdAt === undefined ? null : countdownFor(ads.nextAdAt, now);
   const runningUntil = ads?.runningBreakEndsAt == null ? null : countdownFor(ads.runningBreakEndsAt, now);
@@ -66,13 +68,23 @@ export const AdsLiveTile = ({ ads, now, language, canManage, moduleActive = true
     : nextUntil === null ? "—" : labels.adTileCountdown(nextUntil.text);
   const reserved = state === "error" ? labels.adTileScheduleUnavailable : " ";
 
+  useEffect(() => {
+    if (announcedState.current === null) {
+      announcedState.current = state;
+      return;
+    }
+    if (announcedState.current === state) return;
+    announcedState.current = state;
+    setStateAnnouncement(statusLabel);
+  }, [state, statusLabel]);
+
   return <section className="live-cockpit-reserve live-cockpit-ads-tile" data-state={state} aria-label={labels.nextAdBreak}>
     <header className="live-cockpit-ads-tile__header">
       <h2><Icon name="ad" size={16} /><span>{labels.adTileTitle}</span></h2>
       <span className={`live-cockpit-ads-tile__status${state === "imminent" ? " is-imminent" : state === "error" ? " is-error" : ""}`}>{statusLabel}</span>
     </header>
     <div className="live-cockpit-ads-tile__body">
-      <strong className="live-cockpit-ads-tile__countdown" aria-live="polite">{countdown}</strong>
+      <strong className="live-cockpit-ads-tile__countdown" aria-live="off">{countdown}</strong>
       <span className="live-cockpit-ads-tile__duration">{details}</span>
     </div>
     <div className="live-cockpit-ads-tile__footer">
@@ -83,5 +95,6 @@ export const AdsLiveTile = ({ ads, now, language, canManage, moduleActive = true
     </div>
     <div className="live-cockpit-ads-tile__reason" id="live-cockpit-ad-snooze-reason" aria-live="polite">{snoozeReason || " "}</div>
     <div className="live-cockpit-ads-tile__reserved" aria-live="polite">{reserved}</div>
+    <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{stateAnnouncement}</span>
   </section>;
 };

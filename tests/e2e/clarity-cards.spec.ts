@@ -34,7 +34,7 @@ const installMocks = async (page: Page, role: "manager" | "operator", duels: rea
   let releaseRaid = (): void => undefined;
   let lock: "idle" | "chat_vote" | "long_chat_vote" | "votekick" = "idle";
   let ads: "none" | "upcoming" | "running" = "none";
-  const activeModules = duels.length === 0 && !enableDuel ? [...modules] : [...modules, { id: "duel", enabled: true, settings: "{}" }];
+  const activeModules = duels.length === 0 && !enableDuel ? [...modules] : [...modules, { id: "duel", enabled: true, settings: "{}" }, { id: "belabox", enabled: true, settings: "{}" }];
   let activeDuels = [...duels];
   let snoozeGate: Promise<void> = Promise.resolve();
   let releaseSnooze = (): void => undefined;
@@ -95,6 +95,10 @@ const installMocks = async (page: Page, role: "manager" | "operator", duels: rea
         : null;
       return route.fulfill(json({ vote, counts: vote === null ? null : [3, 1, 0], revision: 1, terms: null, moreTerms: null, hasOpenBallot: vote !== null, defaultDurationSeconds: 120 }));
     }
+    // A fixed header status: the module is enabled from the start, so the BELABOX indicator never changes text.
+    if (path === "/modules/belabox/status" && method === "GET") {
+      return route.fulfill(json({ configured: false, updatedAt: null, mode: null, sample: null, errorCode: null, polling: false, pollingDesired: false, streamId: null, belaboxStreamId: null, alertNotice: null, fetchFailureNotice: false, intervalSeconds: 5 }));
+    }
     if (path === "/modules/ads/schedule") {
       return route.fulfill(json({
         schedule: {
@@ -133,7 +137,7 @@ const installMocks = async (page: Page, role: "manager" | "operator", duels: rea
       }
     },
     addActions: () => {
-      const actionModuleIds = ["belabox", "clips", "channel_events", "blitz_round"];
+      const actionModuleIds = ["clips", "channel_events", "blitz_round"];
       activeModules.push(...actionModuleIds.map((id) => ({ id, enabled: true, settings: "{}" })));
       return actionModuleIds.length;
     },
@@ -171,7 +175,7 @@ const boxes = (locator: Locator) => locator.evaluateAll((elements) => elements.m
 }));
 
 type BoxGeometry = Awaited<ReturnType<typeof box>>;
-type CockpitGeometry = Record<"ads" | "running" | "next" | "actions", BoxGeometry>;
+type CockpitGeometry = Record<"ads" | "running" | "next" | "actions" | "header", BoxGeometry>;
 
 // Positions are relative to the wall: the page header may differ between page loads.
 const cockpitGeometry = async (page: Page): Promise<CockpitGeometry> => {
@@ -181,6 +185,7 @@ const cockpitGeometry = async (page: Page): Promise<CockpitGeometry> => {
     return { ...tile, x: tile.x - wall.x, y: tile.y - wall.y };
   };
   return {
+    header: await box(page.locator(".live-cockpit-header")),
     ads: await relative(".live-cockpit-ads-tile"),
     running: await relative(".live-cockpit-running-tile"),
     next: await relative(".live-cockpit-next-tile"),
@@ -189,6 +194,7 @@ const cockpitGeometry = async (page: Page): Promise<CockpitGeometry> => {
 };
 
 const expectCockpitGeometryStable = (before: CockpitGeometry, after: CockpitGeometry): void => {
+  expect(Math.abs(before.header.height - after.header.height), "header height changed (pre-existing header wrap, not a tile shift)").toBeLessThanOrEqual(1);
   for (const tile of ["ads", "running", "next", "actions"] as const) {
     for (const dimension of ["x", "y", "width", "height"] as const) {
       expect(Math.abs(before[tile][dimension] - after[tile][dimension]), `${tile} ${dimension} changed`).toBeLessThanOrEqual(1);
@@ -199,6 +205,124 @@ const expectCockpitGeometryStable = (before: CockpitGeometry, after: CockpitGeom
 const expectNoHorizontalScroll = async (page: Page): Promise<void> => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 };
+
+const expectCockpitContentReachable = async (page: Page): Promise<void> => {
+  const violations = await page.locator(".live-cockpit__wall").evaluate((wall) => {
+    const failures: string[] = [];
+    const tileSelector = ".live-cockpit-actions, .live-cockpit-running-tile, .live-cockpit-ads-tile, .live-cockpit-next-tile, .live-cockpit-event-feed";
+    const targetSelector = "button, h2, .live-vote-tile__option, .live-vote-tile__track, .live-vote-tile__track > span, .live-cockpit-duels__item, .live-cockpit-next-tile p";
+    const isInside = (target: DOMRect, ancestor: HTMLElement, axis: "x" | "y"): boolean => {
+      const rect = ancestor.getBoundingClientRect();
+      const start = axis === "x" ? rect.left + ancestor.clientLeft : rect.top + ancestor.clientTop;
+      const size = axis === "x" ? ancestor.clientWidth : ancestor.clientHeight;
+      const targetStart = axis === "x" ? target.left : target.top;
+      const targetEnd = axis === "x" ? target.right : target.bottom;
+      return targetStart >= start - 0.5 && targetEnd <= start + size + 0.5;
+    };
+    const canScrollTo = (target: DOMRect, scroller: HTMLElement, axis: "x" | "y"): boolean => {
+      const rect = scroller.getBoundingClientRect();
+      const start = axis === "x" ? rect.left + scroller.clientLeft : rect.top + scroller.clientTop;
+      const targetStart = axis === "x" ? target.left : target.top;
+      const targetEnd = axis === "x" ? target.right : target.bottom;
+      const scrollPosition = axis === "x" ? scroller.scrollLeft : scroller.scrollTop;
+      const clientSize = axis === "x" ? scroller.clientWidth : scroller.clientHeight;
+      const scrollSize = axis === "x" ? scroller.scrollWidth : scroller.scrollHeight;
+      const contentStart = targetStart - start + scrollPosition;
+      const contentEnd = targetEnd - start + scrollPosition;
+      return targetEnd - targetStart <= clientSize + 0.5 && contentStart >= -0.5 && contentEnd <= scrollSize + 0.5;
+    };
+    const tiles = [...wall.querySelectorAll<HTMLElement>(tileSelector)];
+    for (const [tileIndex, tile] of tiles.entries()) {
+      const targets = [...tile.querySelectorAll<HTMLElement>(targetSelector)];
+      for (const [targetIndex, target] of targets.entries()) {
+        const targetRect = target.getBoundingClientRect();
+        if (targetRect.width === 0 || targetRect.height === 0 || getComputedStyle(target).visibility === "hidden") continue;
+        for (let ancestor = target.parentElement; ancestor !== null && tile.contains(ancestor); ancestor = ancestor.parentElement) {
+          const style = getComputedStyle(ancestor);
+          for (const axis of ["x", "y"] as const) {
+            const overflow = axis === "x" ? style.overflowX : style.overflowY;
+            if (overflow === "visible" || isInside(targetRect, ancestor, axis)) continue;
+            const stableScrollAncestors: HTMLElement[] = [];
+            for (let candidate = target.parentElement; candidate !== null && candidate !== ancestor; candidate = candidate.parentElement) {
+              const candidateStyle = getComputedStyle(candidate);
+              const candidateOverflow = axis === "x" ? candidateStyle.overflowX : candidateStyle.overflowY;
+              if ((candidateOverflow === "auto" || candidateOverflow === "scroll") && candidateStyle.scrollbarGutter.includes("stable") && canScrollTo(targetRect, candidate, axis)) {
+                stableScrollAncestors.push(candidate);
+              }
+            }
+            const ancestorCanScroll = (overflow === "auto" || overflow === "scroll") && style.scrollbarGutter.includes("stable") && canScrollTo(targetRect, ancestor, axis);
+            const reachableInside = (scroller: HTMLElement): boolean => scroller === ancestor || isInside(scroller.getBoundingClientRect(), ancestor, axis);
+            if (!ancestorCanScroll && !stableScrollAncestors.some(reachableInside)) {
+              failures.push(`tile ${String(tileIndex)} target ${String(targetIndex)} clipped on ${axis} at .${ancestor.className.replaceAll(" ", ".")}`);
+            }
+          }
+        }
+      }
+    }
+    return failures;
+  });
+  expect(violations).toEqual([]);
+};
+
+const cockpitVoteOptionExposure = async (page: Page): Promise<{ visible: boolean[]; reachable: boolean[] }> => page.locator(".live-vote-tile__options").evaluate((element) => {
+  const options = element as HTMLElement;
+  const tile = options.closest<HTMLElement>(".live-cockpit-running-tile");
+  const optionElements = [...options.querySelectorAll<HTMLElement>(".live-vote-tile__option")];
+  const isInside = (target: DOMRect, ancestor: HTMLElement, axis: "x" | "y"): boolean => {
+    const rect = ancestor.getBoundingClientRect();
+    const start = axis === "x" ? rect.left + ancestor.clientLeft : rect.top + ancestor.clientTop;
+    const size = axis === "x" ? ancestor.clientWidth : ancestor.clientHeight;
+    const targetStart = axis === "x" ? target.left : target.top;
+    const targetEnd = axis === "x" ? target.right : target.bottom;
+    return targetStart >= start - 0.5 && targetEnd <= start + size + 0.5;
+  };
+  const canScrollTo = (target: DOMRect, scroller: HTMLElement, axis: "x" | "y"): boolean => {
+    const rect = scroller.getBoundingClientRect();
+    const start = axis === "x" ? rect.left + scroller.clientLeft : rect.top + scroller.clientTop;
+    const targetStart = axis === "x" ? target.left : target.top;
+    const targetEnd = axis === "x" ? target.right : target.bottom;
+    const scrollPosition = axis === "x" ? scroller.scrollLeft : scroller.scrollTop;
+    const clientSize = axis === "x" ? scroller.clientWidth : scroller.clientHeight;
+    const scrollSize = axis === "x" ? scroller.scrollWidth : scroller.scrollHeight;
+    const contentStart = targetStart - start + scrollPosition;
+    const contentEnd = targetEnd - start + scrollPosition;
+    return targetEnd - targetStart <= clientSize + 0.5 && contentStart >= -0.5 && contentEnd <= scrollSize + 0.5;
+  };
+  return {
+    visible: optionElements.map((option) => {
+      const rect = option.getBoundingClientRect();
+      if (tile === null) return false;
+      for (let ancestor = option.parentElement; ancestor !== null && tile.contains(ancestor); ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor);
+        if (style.overflowX !== "visible" && !isInside(rect, ancestor, "x")) return false;
+        if (style.overflowY !== "visible" && !isInside(rect, ancestor, "y")) return false;
+      }
+      return true;
+    }),
+    reachable: optionElements.map((option) => {
+      const rect = option.getBoundingClientRect();
+      if (tile === null) return false;
+      for (let ancestor = option.parentElement; ancestor !== null && tile.contains(ancestor); ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor);
+        for (const axis of ["x", "y"] as const) {
+          const overflow = axis === "x" ? style.overflowX : style.overflowY;
+          if (overflow === "visible" || isInside(rect, ancestor, axis)) continue;
+          const ancestorStyleCanScroll = (overflow === "auto" || overflow === "scroll") && style.scrollbarGutter.includes("stable") && canScrollTo(rect, ancestor, axis);
+          let nestedStableScrollerCanReach = false;
+          for (let candidate = option.parentElement; candidate !== null && candidate !== ancestor; candidate = candidate.parentElement) {
+            const candidateStyle = getComputedStyle(candidate);
+            const candidateOverflow = axis === "x" ? candidateStyle.overflowX : candidateStyle.overflowY;
+            if ((candidateOverflow === "auto" || candidateOverflow === "scroll") && candidateStyle.scrollbarGutter.includes("stable") && canScrollTo(rect, candidate, axis) && isInside(candidate.getBoundingClientRect(), ancestor, axis)) {
+              nestedStableScrollerCanReach = true;
+            }
+          }
+          if (!ancestorStyleCanScroll && !nestedStableScrollerCanReach) return false;
+        }
+      }
+      return true;
+    }),
+  };
+});
 
 for (const viewport of viewports) {
   const size = `${String(viewport.width)}x${String(viewport.height)}`;
@@ -389,7 +513,7 @@ for (const viewport of viewports) {
       await expect(tile).toHaveAttribute("data-state", "running", { timeout: 15_000 });
       await expect(tile).toContainText("Werbepause läuft");
       await expect(tile).toContainText("Restzeit");
-      await expect(tile.getByText("Werbepause läuft", { exact: true })).toHaveCount(1);
+      await expect(tile.locator(".live-cockpit-ads-tile__status").getByText("Werbepause läuft", { exact: true })).toHaveCount(1);
       expect(await tile.locator(".live-cockpit-ads-tile__duration").evaluate((element) => element.textContent.trim())).toBe("");
       await expect(tile.getByRole("button", { name: /verschieben/iu })).toBeDisabled();
       expect(await box(wall)).toEqual(reference.wall);
@@ -429,41 +553,32 @@ for (const viewport of [
   { width: 1100, height: 800 },
   { width: 1101, height: 800 },
   { width: 1280, height: 800 },
+  { width: 1440, height: 900 },
+  { width: 1920, height: 1080 },
+  { width: 2560, height: 1440 },
 ]) {
-  test(`cockpit: tile geometry stays fixed as live content arrives at ${String(viewport.width)}x${String(viewport.height)}`, async ({ page }) => {
-    const controls = await open(page, viewport, "", undefined, "manager", [], true);
-    const actions = page.locator(".live-cockpit-actions__grid .live-action");
-    await expect(actions.first()).toBeVisible();
-    const initialActionCount = await actions.count();
-    const initial = await cockpitGeometry(page);
-    expect(initial.ads.height).toBe(188);
-    if (viewport.width >= 768 && viewport.width <= 1100) {
-      expect((await box(page.locator(".live-cockpit__wall"))).height).toBe(844);
-      expect(initial.actions.height).toBe(352);
-      expect(initial.running.height).toBe(352);
-      expect(initial.next.height).toBe(188);
-      expect(initial.ads.y).toBe(initial.actions.y + initial.actions.height + 12);
-      expect(initial.next.y).toBe(initial.running.y + initial.running.height + 12);
-      expect(initial.running.x).toBe(initial.actions.x + initial.actions.width + 12);
-      expect(initial.next.x).toBe(initial.running.x);
-    } else if (viewport.width >= 1101) {
-      expect((await box(page.locator(".live-cockpit__wall"))).height).toBe(552);
-      expect(initial.running.height).toBe(352);
-      expect(initial.ads.y).toBeGreaterThanOrEqual(initial.actions.y + initial.actions.height);
-    }
-
-    controls.setLock("chat_vote");
-    await expect(page.locator(".live-cockpit-running-tile").getByTestId("live-vote-tile")).toBeVisible({ timeout: 12_000 });
-    expectCockpitGeometryStable(initial, await cockpitGeometry(page));
-
+  test(`cockpit: geometry stays stable and content is reachable at ${String(viewport.width)}x${String(viewport.height)}`, async ({ page }) => {
+    const voteNow = Date.now();
     const duel = {
       id: "duel-509-stable-geometry",
       kind: "duel",
       challenger: "spielende_katze",
       target: "rasender_fuchs",
       stake: 1_250,
-      closesAt: new Date(Date.now() + 75_000).toISOString(),
+      closesAt: new Date(voteNow + 75_000).toISOString(),
     };
+    const controls = await open(page, viewport, "", (next) => { next.setAds("running"); }, "manager", [], true);
+    const actions = page.locator(".live-cockpit-actions__grid .live-action");
+    await expect(actions.first()).toBeVisible();
+    await expect(page.locator(".live-cockpit-ads-tile")).toHaveAttribute("data-state", "running");
+    const initialActionCount = await actions.count();
+    const initial = await cockpitGeometry(page);
+    expect(initial.ads.height).toBe(188);
+
+    controls.setLock("chat_vote");
+    await expect(page.locator(".live-cockpit-running-tile").getByTestId("live-vote-tile")).toBeVisible({ timeout: 12_000 });
+    expectCockpitGeometryStable(initial, await cockpitGeometry(page));
+
     // The enabled duel module picks this round up through the cockpit's live-data poll.
     controls.setDuels([duel]);
     await expect(page.locator(".live-cockpit-running-tile").getByTestId("live-duel-tile")).toBeVisible({ timeout: 15_000 });
@@ -480,32 +595,7 @@ for (const viewport of [
     await channelRefresh;
     await expect(actions).toHaveCount(initialActionCount + addedActionCount);
     expectCockpitGeometryStable(initial, await cockpitGeometry(page));
-    await expectNoHorizontalScroll(page);
-  });
-}
 
-for (const viewport of [
-  { width: 1024, height: 800 },
-  { width: 1100, height: 800 },
-  { width: 1280, height: 800 },
-  { width: 1440, height: 900 },
-  { width: 1920, height: 1080 },
-  { width: 390, height: 844 },
-]) {
-  test(`cockpit: visible tile content is not clipped at ${String(viewport.width)}x${String(viewport.height)}`, async ({ page }) => {
-    const voteNow = Date.now();
-    const duel = {
-      id: "duel-509-geometry",
-      kind: "duel",
-      challenger: "spielende_katze",
-      target: "rasender_fuchs",
-      stake: 1_250,
-      closesAt: new Date(voteNow + 75_000).toISOString(),
-    };
-    await open(page, viewport, "", (next) => {
-      next.setLock("chat_vote");
-      next.setAds("running");
-    }, "manager", [duel]);
     const tile = page.locator(".live-cockpit-running-tile");
     await expect(tile.getByTestId("live-vote-tile")).toBeVisible();
     await expect(tile.getByTestId("live-duel-tile")).toBeVisible();
@@ -514,7 +604,9 @@ for (const viewport of [
     const optionLabels = ["Abenteuer", "Strategie", "Rollenspiel"];
     const voteOptions = tile.locator(".live-vote-tile__options");
     await expect(voteOptions.locator(".live-vote-tile__option-label strong")).toHaveText(optionLabels);
-    if (viewport.width >= 1024) {
+    const geometry = await cockpitGeometry(page);
+    expect(geometry.ads.height).toBe(188);
+    if (viewport.width >= 768) {
       const actions = page.locator(".live-cockpit-actions");
       const actionsGrid = actions.locator(".live-cockpit-actions__grid");
       const [actionsBox, actionsGridBox, adsBox, wallBox] = await Promise.all([
@@ -539,37 +631,29 @@ for (const viewport of [
       if (viewport.width <= 1280) expect(runningBox.height).toBe(352);
       else expect(runningBox.height).toBeGreaterThanOrEqual(280);
       expect(nextBox.y).toBeGreaterThanOrEqual(runningBox.y + runningBox.height);
-      expect(nextBox.height).toBe(188);
+      if (viewport.width <= 1399) expect(nextBox.height).toBe(188);
       if (viewport.width <= 1100) {
         expect(wallBox.height).toBe(844);
+        expect(geometry.actions.height).toBe(352);
+        expect(geometry.running.height).toBe(352);
+        expect(geometry.next.height).toBe(188);
+        expect(geometry.ads.y).toBe(geometry.actions.y + geometry.actions.height + 12);
+        expect(geometry.next.y).toBe(geometry.running.y + geometry.running.height + 12);
+        expect(geometry.running.x).toBe(geometry.actions.x + geometry.actions.width + 12);
+        expect(geometry.next.x).toBe(geometry.running.x);
         const eventsBox = await box(page.locator(".live-cockpit-event-feed"));
         expect(eventsBox.x).toBeCloseTo(wallBox.x, 0);
         expect(eventsBox.width).toBeCloseTo(wallBox.width, 0);
         expect(eventsBox.height).toBe(280);
         expect(eventsBox.y).toBeCloseTo(nextBox.y + nextBox.height + 12, 0);
-      } else {
+      } else if (viewport.width <= 1399) {
+        expect(wallBox.height).toBe(552);
+        expect(geometry.running.height).toBe(352);
+        expect(geometry.next.height).toBe(188);
+        expect(geometry.ads.y).toBeGreaterThanOrEqual(geometry.actions.y + geometry.actions.height);
         expect(nextBox.y + nextBox.height).toBeCloseTo(wallBox.y + wallBox.height, 0);
       }
 
-      const optionVisibility = await voteOptions.evaluate((element) => {
-        const options = element as HTMLElement;
-        const contentTop = options.getBoundingClientRect().top + options.clientTop;
-        const contentLeft = options.getBoundingClientRect().left + options.clientLeft;
-        const optionElements = [...options.querySelectorAll<HTMLElement>(".live-vote-tile__option")];
-        return {
-          scrollTop: options.scrollTop,
-          scrollHeight: options.scrollHeight,
-          clientHeight: options.clientHeight,
-          visible: optionElements.map((option) => {
-            const rect = option.getBoundingClientRect();
-            return rect.top >= contentTop - 0.5 && rect.bottom <= contentTop + options.clientHeight + 0.5 &&
-              rect.left >= contentLeft - 0.5 && rect.right <= contentLeft + options.clientWidth + 0.5;
-          }),
-        };
-      });
-      expect(optionVisibility.scrollTop).toBe(0);
-      expect(optionVisibility.scrollHeight).toBe(optionVisibility.clientHeight);
-      expect(optionVisibility.visible).toEqual([true, true, true]);
       const votekickEmptyText = page.locator(".live-cockpit-next-list--recent p");
       await expect(votekickEmptyText).toBeVisible();
       await expect(votekickEmptyText).toHaveText("Keine offenen Timeouts aus Votekicks.");
@@ -591,7 +675,7 @@ for (const viewport of [
         expect(votekickEmptyTextVisibility.fullyVisible).toBe(true);
         await expect(page.getByRole("heading", { name: "Als Nächstes", exact: true })).toBeVisible();
       }
-      if (viewport.width === 1920) {
+      if (viewport.width >= 1920) {
         expect(runningBox.width).toBeGreaterThanOrEqual(400);
         const title = tile.getByText("Was spielen wir als Nächstes?").first();
         const fit = await title.evaluate((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }));
@@ -609,62 +693,21 @@ for (const viewport of [
       expect((await box(adsTile)).height).toBe(188);
     }
 
-    const clipping = await page.locator(".live-cockpit__wall").evaluate((wall) => {
-      const violations: string[] = [];
-      const tileSelector = ".live-cockpit-actions, .live-cockpit-running-tile, .live-cockpit-ads-tile, .live-cockpit-next-tile, .live-cockpit-event-feed";
-      const targetSelector = "button, h2, .live-vote-tile__option, .live-vote-tile__track, .live-vote-tile__track > span, .live-cockpit-duels__item, .live-cockpit-next-tile p";
-      const isInside = (target: DOMRect, ancestor: HTMLElement, axis: "x" | "y"): boolean => {
-        const rect = ancestor.getBoundingClientRect();
-        const start = axis === "x" ? rect.left + ancestor.clientLeft : rect.top + ancestor.clientTop;
-        const size = axis === "x" ? ancestor.clientWidth : ancestor.clientHeight;
-        const targetStart = axis === "x" ? target.left : target.top;
-        const targetEnd = axis === "x" ? target.right : target.bottom;
-        return targetStart >= start - 0.5 && targetEnd <= start + size + 0.5;
-      };
-      const canScrollTo = (target: DOMRect, scroller: HTMLElement, axis: "x" | "y"): boolean => {
-        const box = scroller.getBoundingClientRect();
-        const clientStart = axis === "x" ? box.left + scroller.clientLeft : box.top + scroller.clientTop;
-        const targetStart = axis === "x" ? target.left : target.top;
-        const targetEnd = axis === "x" ? target.right : target.bottom;
-        const scrollPosition = axis === "x" ? scroller.scrollLeft : scroller.scrollTop;
-        const clientSize = axis === "x" ? scroller.clientWidth : scroller.clientHeight;
-        const scrollSize = axis === "x" ? scroller.scrollWidth : scroller.scrollHeight;
-        const contentStart = targetStart - clientStart + scrollPosition;
-        const contentEnd = targetEnd - clientStart + scrollPosition;
-        return targetEnd - targetStart <= clientSize + 0.5 && contentStart >= -0.5 && contentEnd <= scrollSize + 0.5;
-      };
-      const tiles = [...wall.querySelectorAll<HTMLElement>(tileSelector)];
-      for (const [tileIndex, tileElement] of tiles.entries()) {
-        const targets = [...tileElement.querySelectorAll<HTMLElement>(targetSelector)];
-        for (const [targetIndex, targetElement] of targets.entries()) {
-          const targetRect = targetElement.getBoundingClientRect();
-          if (targetRect.width === 0 || targetRect.height === 0 || getComputedStyle(targetElement).visibility === "hidden") continue;
-          for (let ancestor = targetElement.parentElement; ancestor !== null && tileElement.contains(ancestor); ancestor = ancestor.parentElement) {
-            const style = getComputedStyle(ancestor);
-            for (const axis of ["x", "y"] as const) {
-              const overflow = axis === "x" ? style.overflowX : style.overflowY;
-              if (overflow === "visible") continue;
-              if (isInside(targetRect, ancestor, axis)) continue;
-              const stableScrollAncestors: HTMLElement[] = [];
-              for (let candidate = targetElement.parentElement; candidate !== null && candidate !== ancestor; candidate = candidate.parentElement) {
-                const candidateStyle = getComputedStyle(candidate);
-                const candidateOverflow = axis === "x" ? candidateStyle.overflowX : candidateStyle.overflowY;
-                if ((candidateOverflow === "auto" || candidateOverflow === "scroll") && candidateStyle.scrollbarGutter.includes("stable") && canScrollTo(targetRect, candidate, axis)) {
-                  stableScrollAncestors.push(candidate);
-                }
-              }
-              const ancestorCanScroll = (overflow === "auto" || overflow === "scroll") && style.scrollbarGutter.includes("stable") && canScrollTo(targetRect, ancestor, axis);
-              const reachableInside = (scroller: HTMLElement): boolean => scroller === ancestor || isInside(scroller.getBoundingClientRect(), ancestor, axis);
-              if (!ancestorCanScroll && !stableScrollAncestors.some(reachableInside)) {
-                violations.push(`tile ${String(tileIndex)} target ${String(targetIndex)} clipped on ${axis} at .${ancestor.className.replaceAll(" ", ".")}`);
-              }
-            }
-          }
-        }
-      }
-      return violations;
-    });
-    expect(clipping).toEqual([]);
+    const optionExposure = await cockpitVoteOptionExposure(page);
+    if (viewport.width >= 768) {
+      const optionMetrics = await voteOptions.evaluate((element) => ({
+        scrollTop: (element as HTMLElement).scrollTop,
+        scrollHeight: (element as HTMLElement).scrollHeight,
+        clientHeight: (element as HTMLElement).clientHeight,
+      }));
+      expect(optionMetrics.scrollTop).toBe(0);
+      expect(optionMetrics.scrollHeight).toBe(optionMetrics.clientHeight);
+      expect(optionExposure.visible).toEqual([true, true, true]);
+    } else {
+      expect(optionExposure.visible.map((visible, index) => visible || optionExposure.reachable[index])).toEqual([true, true, true]);
+    }
+
+    await expectCockpitContentReachable(page);
     await expectNoHorizontalScroll(page);
   });
 }

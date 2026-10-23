@@ -31,6 +31,27 @@ describe("VotekickLockCard", () => {
     expect(countdown?.textContent).toBe(" · endet in 1:20");
   });
 
+  it("keeps the ticking countdown out of live regions and announces lock transitions", () => {
+    const { container, rerender } = render(<UiProvider><VotekickLockCard
+      state={null} status="ready" language="en" now={Date.parse("2030-01-01T00:00:00.000Z")}
+    /></UiProvider>);
+    rerender(<UiProvider><VotekickLockCard
+      state={{ kind: "chat_vote", title: "What should we play?", until: "2030-01-01T00:01:20.000Z" }}
+      status="ready" language="en" now={Date.parse("2030-01-01T00:00:00.000Z")}
+    /></UiProvider>);
+
+    const countdown = container.querySelector(".votekick-lock-card__main-countdown");
+    expect(countdown).toHaveAttribute("aria-live", "off");
+    expect(countdown?.closest('[aria-live="polite"], [aria-live="assertive"]')).toBeNull();
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByRole("status")).toHaveTextContent("A vote is running");
+
+    rerender(<UiProvider><VotekickLockCard
+      state={null} status="ready" language="en" now={Date.parse("2030-01-01T00:00:01.000Z")}
+    /></UiProvider>);
+    expect(screen.getByRole("status")).toHaveTextContent("No vote is active");
+  });
+
   it("shows a running votekick and its remaining time", () => {
     render(<UiProvider><VotekickLockCard
       state={{ kind: "votekick", target: "sampleviewer", until: "2030-01-01T00:00:45.000Z" }}

@@ -67,6 +67,23 @@ describe("AdsLiveTile", () => {
     expect(duration.textContent.trim()).toBe("");
   });
 
+  it("keeps the ticking countdown out of live regions and announces break state changes", () => {
+    const { container, rerender } = render(<UiProvider><AdsLiveTile
+      ads={schedule} now={Date.parse("2030-01-01T00:00:00.000Z")} language="en" canManage onSnooze={vi.fn()}
+    /></UiProvider>);
+    const countdown = container.querySelector(".live-cockpit-ads-tile__countdown");
+    expect(countdown).toHaveAttribute("aria-live", "off");
+    expect(countdown?.closest('[aria-live="polite"], [aria-live="assertive"]')).toBeNull();
+
+    rerender(<UiProvider><AdsLiveTile
+      ads={{ ...schedule, runningBreakEndsAt: "2030-01-01T00:01:30.000Z" }}
+      now={Date.parse("2030-01-01T00:00:00.000Z")} language="en" canManage onSnooze={vi.fn()}
+    /></UiProvider>);
+
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByRole("status")).toHaveTextContent("Break running");
+  });
+
   it("describes disabled snooze reasons and disables the action while pending", () => {
     const { rerender } = render(<UiProvider><AdsLiveTile ads={schedule} now={Date.parse("2030-01-01T00:00:00.000Z")} language="en" canManage={false} onSnooze={vi.fn()} /></UiProvider>);
     const snooze = screen.getByRole("button", { name: "Snooze" });
