@@ -28,12 +28,6 @@
   .text-command-editor > .page-header .page-header__title-row { gap: 6px 10px; }
   .text-command-editor > .page-header .page-header__title-row :is(h1, h2, h3) { font-size: 18px; }
   .text-command-editor > .page-header .page-header__meta { margin-top: 2px; }
-  .text-command-editor .page-header__save { flex: 0 1 auto; min-width: 0; }
-  .text-command-editor .page-header__save .ui-save-bar { display: flex; min-height: var(--control-height); align-items: center; justify-content: flex-end; gap: var(--s3); width: 100%; padding: 0; }
-  .text-command-editor .page-header__save .ui-save-bar--persistent { margin-top: 0; padding: 0; border-top: 0; background: transparent; }
-  .text-command-editor .page-header__save .ui-save-bar__status { flex: 1 1 auto; min-width: 0; }
-  .text-command-editor .page-header__save .ui-save-bar__actions { flex: none; }
-  .text-command-editor .page-header__save .ui-save-bar__buttons { flex-wrap: nowrap; }
   .text-command-editor__scroll { container: text-command-form / inline-size; display: grid; flex: 1 1 auto; gap: 0; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--s1) var(--s8) 0; }
   .text-command-editor__scroll--readonly { align-content: start; }
   .text-command-editor__scroll > .ui-section { margin: 0; padding: 3px 0; }

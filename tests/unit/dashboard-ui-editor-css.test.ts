@@ -87,7 +87,7 @@ describe("editor seam styles", () => {
     expect(styles).toMatch(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\)\s*\{[^}]*position: fixed;/u);
     expect(styles).toMatch(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\) > \.ui-save-bar--mobile-fixed \{[^}]*min-height: 44px;[^}]*padding: 0;/u);
     expect(textCommandSource).toContain("saveStatus={saveBar}");
-    expect(textCommandStyles).toContain(".text-command-editor .page-header__save .ui-save-bar");
+    expect(textCommandStyles).not.toMatch(/\.text-command-editor \.page-header__save[^{}]*\{[^{}]*\}/u);
   });
 
   it("collapses unused dashboard header status slots while preserving labeled slots", () => {
@@ -107,12 +107,13 @@ describe("editor seam styles", () => {
   it("keeps the upcoming action reason in a reserved slot beside its action", () => {
     expect(cockpitPartsSource).toContain("live-cockpit-next-item__action");
     const action = cockpitStyles.match(/\.live-cockpit-next-item__action\s*\{([^}]+)\}/u)?.[1] ?? "";
-    expect(action).toContain("display: grid;");
-    expect(action).toContain("grid-template-rows: 28px 24px;");
+    expect(action).toContain("display: contents;");
+    expect(action).not.toContain("max-content");
+    expect(cockpitStyles).not.toContain(":has(.live-cockpit-next-item__action)");
     const reason = cockpitStyles.match(/\.live-cockpit-next-item__reason\s*\{([^}]+)\}/u)?.[1] ?? "";
-    expect(reason).toContain("grid-column: 1;");
+    expect(reason).toContain("grid-column: 2 / -1;");
     expect(reason).toContain("grid-row: 2;");
-    expect(reason).toContain("min-height: 24px;");
+    expect(reason).toContain("height: 24px;");
     expect(reason).not.toContain("nowrap");
   });
 
