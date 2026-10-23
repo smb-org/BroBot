@@ -2,6 +2,7 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 
 import type { DryRunResponse } from "../../src/contracts/dry-run";
 import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
+import { waitForWebFonts } from "./web-fonts";
 
 const CHANNEL_ID = "test-area-pr3-r9";
 const TIMESTAMP = "2030-01-01T12:00:00.000Z";
@@ -147,6 +148,7 @@ test("keeps the first result row fixed when an input makes the result stale", as
   await page.getByRole("button", { name: "Prüfen", exact: true }).click();
   const firstRow = page.locator(".test-area__result-row").first();
   await expect(firstRow).toBeVisible();
+  await waitForWebFonts(page);
   const beforeY = await firstRow.evaluate((row) => row.getBoundingClientRect().y);
 
   await page.getByRole("textbox", { name: "Nachricht" }).fill("!dc geaendert");

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 
 // Pinned: day grouping depends on the browser zone, and the fixtures below are built in local time.
 test.use({ locale: "en-US", timezoneId: "Europe/Berlin" });
@@ -754,6 +755,7 @@ test("event rows keep their cell geometry after loading older events at desktop 
       if (rect.width === 0 && rect.height === 0) return [0, 0, 0, 0];
       return [round(rect.x + window.scrollX), round(rect.y + window.scrollY), round(rect.width), round(rect.height)];
     }));
+    await waitForWebFonts(page);
     const before = await measureRow();
 
     await page.getByRole("button", { name: "Load older events" }).evaluate((button) => {

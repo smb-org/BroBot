@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 
 const channelId = "channel-overlay-drag";
 const overlayId = "overlay-drag";
@@ -99,6 +100,7 @@ test("module overlay previews retain their styling and drag by measured bounds (
   await page.getByRole("option", { name: "Voting tally" }).click();
   await editorRequestStarted;
   const propertyFields = page.locator(".overlay-editor__property-fields");
+  await waitForWebFonts(page);
   const propertyFieldsBeforeEditorLoads = await box(propertyFields);
   releaseEditorRequest();
   await expect(page.locator(".module-overlay-element-editor select")).toBeVisible();

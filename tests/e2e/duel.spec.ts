@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import { duelSettingsForLanguage, type DuelSettings } from "../../src/modules/duel/contracts";
 import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
+import { waitForWebFonts } from "./web-fonts";
 
 const channelId = "fictional_duel_channel";
 const settingsPath = `/api/channels/${channelId}/modules/duel/settings`;
@@ -111,6 +112,7 @@ test("a settings save error changes no geometry outside the reserved status area
     await page.goto(`/channels/${channelId}/modules/duel?lang=en`);
     await expect(page.locator(".settings-page__columns")).toBeVisible();
     await page.getByLabel("Minimum stake").fill("20");
+    await waitForWebFonts(page);
     const before = await layoutOutsideSaveStatus(page);
     api.failNextSave();
     await page.getByRole("button", { name: "Save", exact: true }).click();

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
@@ -130,6 +131,7 @@ const box = async (locator: Locator) => {
 };
 
 const expectStableHeight = async (page: Page, locator: Locator, expectedHeight: number): Promise<void> => {
+  await waitForWebFonts(page);
   const first = await box(locator);
   expect(first.height).toBe(expectedHeight);
   await page.waitForTimeout(200);

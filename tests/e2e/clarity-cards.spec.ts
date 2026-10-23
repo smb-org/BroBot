@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page, type Route } from "@playwright/t
 
 import { DEFAULT_VOTEKICK_SETTINGS } from "../../src/modules/votekick/contracts";
 import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
+import { waitForWebFonts } from "./web-fonts";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
@@ -364,6 +365,7 @@ for (const viewport of viewports) {
       await expectNoHorizontalScroll(page);
 
       const summary = matrix.locator("summary");
+      await waitForWebFonts(page);
       const before = {
         page: await box(page.locator(".collection-page__heading--page-header")),
         summary: await box(summary),

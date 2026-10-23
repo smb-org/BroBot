@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
@@ -257,6 +258,7 @@ for (const width of [1920, 1280, 390, 2560]) {
     await page.goto(`/channels/${CHANNEL_ID}/modules/clips`);
     await expect(page.locator(".clips-panel__settings-load-state[data-status='loading']")).toBeVisible();
 
+    await waitForWebFonts(page);
     const loadStateBefore = await page.locator(".clips-panel__settings-load-state").boundingBox();
     const listBefore = await page.locator(".clips-panel__clips-section").boundingBox();
     await expect(page.getByRole("heading", { name: "Clip-Einstellungen", exact: true })).toBeVisible();

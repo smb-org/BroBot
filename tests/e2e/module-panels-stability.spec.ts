@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 import type { ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import type { FaqEntry } from "../../src/modules/faq/contracts";
 
@@ -130,6 +131,7 @@ test("command editor and variable control stay in place while registered variabl
   await expect(response).toBeVisible();
   const editor = page.locator(".command-template-editor").first();
   const insertVariable = page.getByRole("button", { name: "Insert variable" });
+  await waitForWebFonts(page);
   const desktopBefore = { editor: await box(editor), insertVariable: await box(insertVariable) };
 
   await page.setViewportSize({ width: 390, height: 844 });
