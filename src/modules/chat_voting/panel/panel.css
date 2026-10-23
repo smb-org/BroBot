@@ -46,6 +46,8 @@
   .chat-voting-editor__color-palette button:disabled { cursor: not-allowed; }
   .chat-voting-editor__color-palette button.is-selected { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--focus); }
   .chat-voting-editor__color-field { gap: var(--s1); min-width: 0; }
+  /* The popover has its own feedback line; the field's reserved description and error rows would leave an empty block. */
+  .chat-voting-editor__color-field .ui-field__description, .chat-voting-editor__color-field .ui-field__error { display: none; }
   .chat-voting-editor__color-field .ui-field__input { box-sizing: border-box; width: 100%; min-width: 0; padding-inline: var(--s2); font-family: var(--font-mono); }
   .chat-voting-editor__color-feedback { display: block; height: 32px; min-height: 32px; overflow: hidden; color: var(--color-error-text); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
   .chat-voting-editor__color-preview { display: grid; gap: var(--s2); min-width: 0; margin-top: var(--s3); padding: var(--s3); border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface-well); }

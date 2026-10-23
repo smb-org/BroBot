@@ -821,6 +821,20 @@
 }
 
 @media (min-width: 821px) {
+  .test-area__results { container: test-results / inline-size; }
+}
+
+/* In a narrow results column the title row wraps onto reserved lines (two, three in the narrowest), so the counter and the Stumm/Pausiert badges keep their text. */
+@container test-results (max-width: 359px) {
+  .test-area__results-title { min-height: 42px; align-items: flex-start; }
+  .test-area__results-title-copy { flex-wrap: wrap; align-content: flex-start; gap: 2px var(--s2); }
+}
+
+@container test-results (max-width: 299px) {
+  .test-area__results-title { min-height: 60px; }
+}
+
+@media (min-width: 821px) {
   .main-content:has(.test-area) {
     height: auto;
     min-height: calc(100dvh - var(--app-shell-header-height));
