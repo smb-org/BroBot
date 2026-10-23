@@ -402,7 +402,7 @@ describe("Module management in the panel", () => {
     ]);
 
     expect(responses.map(({ status }) => status)).toEqual([204, 204]);
-    expect(refreshRequests).toBe(2);
+    expect(refreshRequests).toBe(1);
   });
 
   it("sends only fields changed by each manager to Twitch", async () => {

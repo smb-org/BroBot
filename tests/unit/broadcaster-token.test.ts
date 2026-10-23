@@ -54,6 +54,28 @@ const seedIdentity = async (
   });
 };
 
+const replaceIdentity = async (
+  database: TestD1Database,
+  accessToken: string,
+  refreshToken: string,
+  expiresAt: string,
+  updatedAt: string,
+): Promise<void> => {
+  await upsertLoginIdentity(database as unknown as D1Database, {
+    userId: CHANNEL_ID,
+    login: "test-channel",
+    scopesJson: '["channel:manage:broadcast"]',
+    tokenScopesJson: '["channel:manage:broadcast"]',
+    accessTokenCiphertext: await encryptedToken(accessToken),
+    refreshTokenCiphertext: await encryptedToken(refreshToken),
+    expiresAt,
+    status: "connected",
+    reason: null,
+    createdAt: NOW,
+    updatedAt,
+  });
+};
+
 const refreshedTokenResponse = (scopes = ["channel:manage:broadcast"]): Response => new Response(JSON.stringify({
   access_token: "new-access-token",
   refresh_token: "new-refresh-token",
@@ -104,6 +126,29 @@ describe("withBroadcasterToken", () => {
     }
   });
 
+  it("shares one refresh across three concurrent calls for an expiring token", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, { expiresAt: "2026-10-23T10:04:00.000Z" });
+      const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(refreshedTokenResponse()));
+      const call = vi.fn(() => Promise.resolve(SUCCESS));
+      const operations = Array.from({ length: 3 }, () => withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        { now: () => NOW, fetcher },
+      ));
+
+      await expect(Promise.all(operations)).resolves.toEqual(Array.from({ length: 3 }, () => ({
+        kind: "ok",
+        value: { value: "done" },
+      })));
+
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(call).toHaveBeenCalledTimes(3);
+    } finally {
+      database.close();
+    }
+  });
+
   it("refreshes once after a 401 and retries with the replacement access token", async () => {
     const database = new TestD1Database();
     try {
@@ -120,6 +165,86 @@ describe("withBroadcasterToken", () => {
 
       expect(call.mock.calls.map(([token]) => token)).toEqual(["old-access-token", "new-access-token"]);
       expect(fetcher).toHaveBeenCalledOnce();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses a replacement committed while the initial Helix call is pending", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database);
+      let markInitialCallStarted!: () => void;
+      let releaseInitialCall!: () => void;
+      const initialCallStarted = new Promise<void>((resolve) => { markInitialCallStarted = resolve; });
+      const initialCallGate = new Promise<void>((resolve) => { releaseInitialCall = resolve; });
+      const fetcher = vi.fn<typeof fetch>();
+      const call = vi.fn(async (token: string) => {
+        if (token === "old-access-token") {
+          markInitialCallStarted();
+          await initialCallGate;
+          return UNAUTHORIZED;
+        }
+        return token === "replacement-access-token" ? SUCCESS : UNAUTHORIZED;
+      });
+      const operation = withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        { now: () => NOW, fetcher },
+      );
+
+      await initialCallStarted;
+      await replaceIdentity(
+        database,
+        "replacement-access-token",
+        "replacement-refresh-token",
+        "2026-10-23T12:00:00.000Z",
+        "2026-10-23T10:00:01.000Z",
+      );
+      releaseInitialCall();
+
+      await expect(operation).resolves.toEqual({ kind: "ok", value: { value: "done" } });
+      expect(call.mock.calls.map(([token]) => token)).toEqual(["old-access-token", "replacement-access-token"]);
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not refresh twice when a proactive refresh is followed by a 401", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, { expiresAt: "2026-10-23T10:04:00.000Z" });
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(refreshedTokenResponse());
+      const call = vi.fn<(token: string) => Promise<HelixResult<{ value: string }>>>().mockResolvedValue(UNAUTHORIZED);
+
+      await expect(withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        { now: () => NOW, fetcher },
+      )).resolves.toEqual({ kind: "http_error", result: UNAUTHORIZED });
+
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(call).toHaveBeenCalledOnce();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("fails without network or writes when a read-only token is expired", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, { expiresAt: "2026-10-23T09:59:00.000Z" });
+      const before = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      const fetcher = vi.fn<typeof fetch>();
+      const call = vi.fn<(token: string) => Promise<HelixResult<{ value: string }>>>();
+
+      await expect(withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        { now: () => NOW, fetcher, refresh: "never" },
+      )).resolves.toEqual({ kind: "refresh_failed" });
+
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(call).not.toHaveBeenCalled();
+      expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toEqual(before);
     } finally {
       database.close();
     }

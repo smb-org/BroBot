@@ -275,6 +275,7 @@ export const isTwitchChannelModerator = async (
   channelId: string,
   userId: string,
   fetcher: typeof fetch = fetch,
+  options: { refresh?: "allow" | "never" } = {},
 ): Promise<boolean | null> => {
   const lookup = await withBroadcasterToken(
     environment,
@@ -287,7 +288,7 @@ export const isTwitchChannelModerator = async (
       clientId: environment.TWITCH_CLIENT_ID,
       fetcher,
     }),
-    { fetcher },
+    { fetcher, ...options },
   );
   if (lookup.kind !== "ok" || !Array.isArray(lookup.value.data)) return null;
   if (!lookup.value.data.every((row) => typeof row === "object" && row !== null && !Array.isArray(row) &&

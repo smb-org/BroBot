@@ -14,6 +14,7 @@ export interface BroadcasterTokenDependencies {
   now?: () => string;
   fetcher?: typeof fetch;
   beforeCall?: () => Promise<boolean>;
+  refresh?: "allow" | "never";
 }
 
 export type BroadcasterTokenResult<Data> =
@@ -48,7 +49,8 @@ const isReplacementIdentity = (
   current.userId === expected.userId &&
   current.status === "connected" &&
   (current.accessTokenCiphertext !== expected.accessTokenCiphertext ||
-    current.refreshTokenCiphertext !== expected.refreshTokenCiphertext);
+    current.refreshTokenCiphertext !== expected.refreshTokenCiphertext ||
+    current.updatedAt !== expected.updatedAt);
 
 type RefreshResult =
   | { kind: "refreshed"; identity: LoginIdentityRecord }
@@ -57,12 +59,25 @@ type RefreshResult =
   | { kind: "not_connected" }
   | { kind: "failed" };
 
-const refreshIdentity = async (
+// ponytail: per-isolate single-flight; cross-isolate races fall back to CAS + reread.
+const refreshFlights = new Map<string, Promise<RefreshResult>>();
+
+const refreshIdentityOnce = async (
   environment: BroadcasterTokenEnvironment,
   identity: LoginIdentityRecord,
   now: string,
   fetcher: typeof fetch,
 ): Promise<RefreshResult> => {
+  let current: LoginIdentityRecord | null;
+  try {
+    current = await getLoginIdentity(environment.DB, identity.userId);
+  } catch {
+    return { kind: "failed" };
+  }
+  if (current?.status === "revoked") return { kind: "revoked" };
+  if (current === null || current.status !== "connected") return { kind: "not_connected" };
+  if (isReplacementIdentity(current, identity)) return { kind: "replacement", identity: current };
+
   try {
     const refreshed = await refreshLoginIdentityTokens(environment, identity, now, fetcher);
     if (refreshed === null) {
@@ -92,6 +107,25 @@ const refreshIdentity = async (
   }
 };
 
+const refreshIdentity = async (
+  environment: BroadcasterTokenEnvironment,
+  identity: LoginIdentityRecord,
+  now: string,
+  fetcher: typeof fetch,
+): Promise<RefreshResult> => {
+  const identityKey = identity.userId;
+  const existingFlight = refreshFlights.get(identityKey);
+  if (existingFlight !== undefined) return await existingFlight;
+
+  const flight = refreshIdentityOnce(environment, identity, now, fetcher);
+  refreshFlights.set(identityKey, flight);
+  try {
+    return await flight;
+  } finally {
+    if (refreshFlights.get(identityKey) === flight) refreshFlights.delete(identityKey);
+  }
+};
+
 const accessTokenFor = async (identity: LoginIdentityRecord, environment: BroadcasterTokenEnvironment): Promise<string | null> => {
   try {
     return await decryptLoginIdentityAccessToken(identity, environment);
@@ -105,6 +139,24 @@ const isNearExpiry = (expiresAt: string, now: string): boolean => {
   const currentTime = Date.parse(now);
   return !Number.isFinite(expiryTime) || !Number.isFinite(currentTime) ||
     expiryTime <= currentTime + BROADCASTER_TOKEN_REFRESH_WINDOW_MS;
+};
+
+const isExpired = (expiresAt: string, now: string): boolean => {
+  const expiryTime = Date.parse(expiresAt);
+  const currentTime = Date.parse(now);
+  return !Number.isFinite(expiryTime) || !Number.isFinite(currentTime) || expiryTime <= currentTime;
+};
+
+const replacementAfterRequest = async (
+  environment: BroadcasterTokenEnvironment,
+  identity: LoginIdentityRecord,
+): Promise<LoginIdentityRecord | null> => {
+  try {
+    const current = await getLoginIdentity(environment.DB, identity.userId);
+    return isReplacementIdentity(current, identity) ? current : null;
+  } catch {
+    return null;
+  }
 };
 
 /** Loads, checks, refreshes, and uses one broadcaster token for a single Helix operation. */
@@ -125,14 +177,20 @@ export const withBroadcasterToken = async <Data>(
   const initiallyMissing = missingScopes(identity, requiredScopes);
   if (initiallyMissing.length > 0) return { kind: "scope_missing", missing: initiallyMissing };
 
+  let refreshSpent = false;
   if (isNearExpiry(identity.expiresAt, now())) {
-    const refreshResult = await refreshIdentity(environment, identity, now(), fetcher);
-    if (refreshResult.kind === "revoked") return { kind: "revoked", source: "refresh" };
-    if (refreshResult.kind === "not_connected") return { kind: "not_connected" };
-    if (refreshResult.kind === "failed") return { kind: "refresh_failed" };
-    identity = refreshResult.identity;
-    const missing = missingScopes(identity, requiredScopes);
-    if (missing.length > 0) return { kind: "scope_missing", missing };
+    if (dependencies.refresh === "never") {
+      if (isExpired(identity.expiresAt, now())) return { kind: "refresh_failed" };
+    } else {
+      refreshSpent = true;
+      const refreshResult = await refreshIdentity(environment, identity, now(), fetcher);
+      if (refreshResult.kind === "revoked") return { kind: "revoked", source: "refresh" };
+      if (refreshResult.kind === "not_connected") return { kind: "not_connected" };
+      if (refreshResult.kind === "failed") return { kind: "refresh_failed" };
+      identity = refreshResult.identity;
+      const missing = missingScopes(identity, requiredScopes);
+      if (missing.length > 0) return { kind: "scope_missing", missing };
+    }
   }
 
   let accessToken = await accessTokenFor(identity, environment);
@@ -155,11 +213,17 @@ export const withBroadcasterToken = async <Data>(
   if (result.ok) return { kind: "ok", value: result.data };
   if (result.status !== 401) return { kind: "http_error", result };
 
-  const refreshResult = await refreshIdentity(environment, identity, now(), fetcher);
-  if (refreshResult.kind === "revoked") return { kind: "revoked", source: "refresh" };
-  if (refreshResult.kind === "not_connected") return { kind: "not_connected" };
-  if (refreshResult.kind === "failed") return { kind: "refresh_failed" };
-  identity = refreshResult.identity;
+  if (refreshSpent || dependencies.refresh === "never") {
+    const replacement = await replacementAfterRequest(environment, identity);
+    if (replacement === null) return { kind: "http_error", result };
+    identity = replacement;
+  } else {
+    const refreshResult = await refreshIdentity(environment, identity, now(), fetcher);
+    if (refreshResult.kind === "revoked") return { kind: "revoked", source: "refresh" };
+    if (refreshResult.kind === "not_connected") return { kind: "not_connected" };
+    if (refreshResult.kind === "failed") return { kind: "refresh_failed" };
+    identity = refreshResult.identity;
+  }
 
   const missing = missingScopes(identity, requiredScopes);
   if (missing.length > 0) return { kind: "scope_missing", missing };
