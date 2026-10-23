@@ -430,7 +430,7 @@ for (const viewport of viewports) {
       if (viewport.width >= 1280) {
         const rowsBox = await box(card.locator(".raid-state-card__rows"));
         const footnoteBox = await box(card.locator(".raid-state-card__footnote"));
-        expect(footnoteBox.y - rowsBox.y - rowsBox.height).toBeLessThanOrEqual(40);
+        expect(footnoteBox.y - rowsBox.y - rowsBox.height).toBeLessThanOrEqual(16);
       }
       expect.soft(await box(column)).toEqual(before.column);
       expect.soft(await boxes(editors)).toEqual(before.editors);
@@ -478,6 +478,8 @@ for (const viewport of viewports) {
       const [cardBox, countdownBox] = await Promise.all([box(lock), box(countdown)]);
       expect(countdownBox.x).toBeGreaterThanOrEqual(cardBox.x);
       expect(countdownBox.x + countdownBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+      const titleBox = await box(lockTitle);
+      expect(countdownBox.x - (titleBox.x + titleBox.width), "gap between the truncated title and the countdown").toBeLessThanOrEqual(5);
 
       controls.setLock("votekick");
       await expect(lock).toContainText("Votekick gegen troll_tim · endet in", { timeout: 12_000 });

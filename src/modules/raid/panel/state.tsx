@@ -33,8 +33,8 @@ export const RaidStateCard = ({ state, status, language, now }: {
       <div><dt>{words.lastRaid}</dt><dd>{lastRaid === null ? words.noRaid : <>{lastRaid.channel ?? words.unknownChannel} · {relative(lastRaid.at)}</>}</dd></div>
       <div><dt>{words.lastShoutout}</dt><dd>{lastShoutout === null ? words.noShoutout : <>{lastShoutout.channel ?? words.unknownChannel} · {relative(lastShoutout.at)}</>}</dd></div>
     </dl>
-    <p className="raid-state-card__reserved" aria-live="polite">{status === "error" ? words.loadError : status === "loading" ? words.loadingDetails : " "}</p>
     <p className="raid-state-card__footnote">{words.threshold(state?.shoutoutThreshold ?? null)}</p>
+    <p className="raid-state-card__reserved" aria-live="polite">{status === "error" ? words.loadError : status === "loading" ? words.loadingDetails : " "}</p>
   </section>;
 };
 

@@ -821,6 +821,22 @@
 }
 
 @media (min-width: 821px) {
+  .test-area__results { container: test-results / inline-size; }
+}
+
+/* In a narrow results column the title row wraps onto reserved lines (title with badges, then the summary, which may wrap once), so the counter and the Stumm/Pausiert badges keep their full text and the rows below never move when the badges appear. */
+@container test-results (max-width: 389px) {
+  .test-area__results-title { min-height: 60px; align-items: flex-start; }
+  .test-area__results-title-copy { flex-wrap: wrap; align-content: flex-start; gap: 2px var(--s2); }
+  .test-area__results-summary { order: 1; max-width: 100%; white-space: normal; text-overflow: clip; }
+}
+
+/* The hint slots leave little width beside the title here, so the badges can take a second line and the summary two more. */
+@container test-results (max-width: 299px) {
+  .test-area__results-title { min-height: 78px; }
+}
+
+@media (min-width: 821px) {
   .main-content:has(.test-area) {
     height: auto;
     min-height: calc(100dvh - var(--app-shell-header-height));

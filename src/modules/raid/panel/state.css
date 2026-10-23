@@ -1,6 +1,6 @@
 @layer components.modules {
   .raid-state-panel { min-width: 0; }
-  .raid-state-card { position: relative; box-sizing: border-box; display: grid; grid-template-rows: auto auto 20px auto; gap: var(--s2); width: 100%; height: 188px; min-width: 0; padding: var(--s4); border-radius: var(--r-container); background: var(--surface-well); }
+  .raid-state-card { position: relative; box-sizing: border-box; display: grid; grid-template-rows: auto auto auto 20px; gap: var(--s2); width: 100%; height: 188px; min-width: 0; padding: var(--s4); border-radius: var(--r-container); background: var(--surface-well); }
   .raid-state-card__header { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
   .raid-state-card__header > div { display: grid; gap: var(--s2); min-width: 0; }
   .raid-state-card h2 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
