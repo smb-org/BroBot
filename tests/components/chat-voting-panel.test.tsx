@@ -1,8 +1,11 @@
+import { useState, type ReactElement } from "react";
+
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { moduleQueryKey } from "../../src/dashboard/data";
+import { ModuleWorkspace } from "../../src/dashboard/module-panels";
 import ChatVotingPanel from "../../src/modules/chat_voting/panel";
 import type { ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import { chatVotingSavedPanelTexts } from "../../src/modules/chat_voting/panel/locale-saved";
@@ -37,9 +40,12 @@ const mount = (options: {
   templates?: ChatVoteTemplate[];
   canManage?: boolean;
   waitForTemplates?: Promise<Response>;
+  waitForReloadTemplates?: Promise<Response>;
+  onReloadStarted?: () => void;
   templateResponses?: ChatVoteTemplate[][];
   patchResponse?: (updated: ChatVoteTemplate) => Promise<Response>;
   templateVariables?: unknown[];
+  content?: ReactElement;
 } = {}) => {
   const saved: string[] = [];
   let currentTemplates = [...(options.templates ?? [template])];
@@ -48,8 +54,13 @@ const mount = (options: {
     const url = requestUrl(input);
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/channels/channel-432/modules/chat_voting/templates" && method === "GET") {
-      const responseTemplates = options.templateResponses?.[templateRead] ?? currentTemplates;
+      const readIndex = templateRead;
       templateRead += 1;
+      if (readIndex === 2 && options.waitForReloadTemplates !== undefined) {
+        options.onReloadStarted?.();
+        return options.waitForReloadTemplates;
+      }
+      const responseTemplates = options.templateResponses?.[readIndex] ?? currentTemplates;
       return options.waitForTemplates ?? Promise.resolve(jsonResponse({
         templates: responseTemplates,
         count: responseTemplates.length,
@@ -87,8 +98,25 @@ const mount = (options: {
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
   vi.stubGlobal("fetch", requests);
-  const view = render(<UiProvider><ChatVotingPanel channelId="channel-432" language="de" canManage={options.canManage ?? true} /></UiProvider>);
+  const view = render(<UiProvider>{options.content ?? <ChatVotingPanel channelId="channel-432" language="de" canManage={options.canManage ?? true} />}</UiProvider>);
   return { ...view, requests, saved };
+};
+
+const ModuleDisableHarness = (): ReactElement => {
+  const [enabled, setEnabled] = useState(true);
+  return <>
+    {enabled ? <ChatVotingPanel channelId="channel-432" language="de" canManage /> : null}
+    <ModuleWorkspace
+      channelId="channel-432"
+      ownRole="manager"
+      modules={[{ id: "chat_voting", enabled, settings: "{}" }]}
+      onNavigate={() => undefined}
+      onToggleModule={(_channelId, _moduleId, nextEnabled) => {
+        setEnabled(nextEnabled);
+        return Promise.resolve();
+      }}
+    />
+  </>;
 };
 
 afterEach(() => {
@@ -278,6 +306,87 @@ describe("saved chat voting collection", () => {
     const reloadedPopover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
     expect(within(reloadedPopover).getByRole("textbox", { name: "Eigener Hex-Wert" })).toHaveValue("#2ed3a3");
     expect(screen.getByRole("button", { name: "Speichern" })).toBeDisabled();
+  });
+
+  it("keeps an answer hex draft through another answer edit and removal", async () => {
+    mount();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Farbe für Antwort 2" }));
+    let popover = await screen.findByRole("dialog", { name: "Farbe für Antwort 2" });
+    const hexInput = within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" });
+    fireEvent.change(hexInput, { target: { value: "#abc" } });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Antwort 1" }), { target: { value: "Salat" } });
+    expect(within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" })).toHaveValue("#abc");
+
+    fireEvent.click(screen.getByRole("button", { name: "Farbe für Antwort 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Antwort 1 entfernen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Farbe für Antwort 1" }));
+    popover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
+    expect(within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" })).toHaveValue("#abc");
+
+    fireEvent.click(screen.getByRole("button", { name: "Verwerfen" }));
+    expect(screen.getByRole("textbox", { name: "Antwort 1" })).toHaveValue("Pizza");
+    expect(screen.getByRole("textbox", { name: "Antwort 2" })).toHaveValue("Burger");
+  });
+
+  it("keeps a newer answer hex edit when a conflict reload finishes", async () => {
+    let markReloadStarted: (() => void) | undefined;
+    const reloadStarted = new Promise<void>((resolve) => { markReloadStarted = resolve; });
+    let finishReload: ((response: Response) => void) | undefined;
+    const reloadResponse = new Promise<Response>((resolve) => { finishReload = resolve; });
+    const serverTemplate = { ...template, title: "Server question", answerColors: ["#2ed3a3", "#ff9f43"], revision: 2 };
+    mount({
+      waitForReloadTemplates: reloadResponse,
+      onReloadStarted: () => { markReloadStarted?.(); },
+      patchResponse: () => Promise.resolve(jsonResponse({ error: "chat_vote_template_conflict" }, 409)),
+    });
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Frage" }), { target: { value: "Local question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Neu laden" }));
+    await reloadStarted;
+
+    fireEvent.click(screen.getByRole("button", { name: "Farbe für Antwort 1" }));
+    const popover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
+    const hexInput = within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" });
+    fireEvent.change(hexInput, { target: { value: "#abcdef" } });
+    const completeReload = finishReload;
+    if (completeReload === undefined) throw new Error("The pending template reload is missing.");
+    act(() => { completeReload(jsonResponse({ templates: [serverTemplate], count: 1, maximum: 100 })); });
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Frage" })).toHaveValue("Server question"));
+    expect(within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" })).toHaveValue("#abcdef");
+    expect(screen.getByTestId("chat-vote-color-preview").querySelector(".chat-voting-editor__color-preview-track > span")).toHaveStyle({ backgroundColor: "rgb(171, 205, 239)" });
+  });
+
+  it("keeps a dirty vote and its module enabled when module disable is cancelled", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    mount({ content: <ModuleDisableHarness /> });
+
+    const question = await screen.findByRole("textbox", { name: "Frage" });
+    fireEvent.change(question, { target: { value: "Lokale Frage" } });
+    fireEvent.click(screen.getByRole("switch", { name: /^Chat-Abstimmung: Läuft/u }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Änderungen verwerfen?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Weiter bearbeiten" }));
+
+    expect(screen.getByRole("switch", { name: /^Chat-Abstimmung: Läuft/u })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "Frage" })).toHaveValue("Lokale Frage");
+  });
+
+  it("discards a dirty vote when module disable is confirmed", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    mount({ content: <ModuleDisableHarness /> });
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Frage" }), { target: { value: "Lokale Frage" } });
+    fireEvent.click(screen.getByRole("switch", { name: /^Chat-Abstimmung: Läuft/u }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Änderungen verwerfen?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Änderungen verwerfen" }));
+
+    expect(await screen.findByRole("switch", { name: /^Chat-Abstimmung: Aus/u })).not.toBeChecked();
+    expect(screen.queryByRole("textbox", { name: "Frage" })).not.toBeInTheDocument();
   });
 
   it("keeps a new vote as a two-minute draft until the explicit save action", async () => {

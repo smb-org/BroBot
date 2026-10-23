@@ -1143,7 +1143,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
   const busyModulesRef = useRef(new Set<string>());
   const [busyModules, setBusyModules] = useState<ReadonlySet<string>>(new Set());
 
-  const toggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
+  const performToggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
     if (busyModulesRef.current.has(moduleId) || moduleDependencyLockReason(moduleId, nextEnabled, modules) !== null) return;
     busyModulesRef.current.add(moduleId);
     setBusyModules(new Set(busyModulesRef.current));
@@ -1155,6 +1155,14 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
       busyModulesRef.current.delete(moduleId);
       setBusyModules(new Set(busyModulesRef.current));
     }
+  };
+
+  const toggle = (moduleId: string, nextEnabled: boolean): void => {
+    if (!nextEnabled) {
+      runDashboardNavigationGuards(() => { void performToggle(moduleId, nextEnabled); }, () => undefined);
+      return;
+    }
+    void performToggle(moduleId, nextEnabled);
   };
 
   type WorkspaceModule = Omit<(typeof MODULES)[number], "navigationCategory"> & { navigationCategory?: (typeof MODULE_NAVIGATION_CATEGORIES)[number] };
@@ -1183,7 +1191,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
               manageable={manageable}
               modules={modules}
               busy={busyModules.has(module.id)}
-              onToggle={(nextEnabled) => { void toggle(module.id, nextEnabled); }}
+              onToggle={(nextEnabled) => { toggle(module.id, nextEnabled); }}
               onNavigate={onNavigate}
             />
           );
@@ -1312,7 +1320,11 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           ...(moduleId === "emote_slots" ? { meta: <SlotJackpotMeta channelId={channelId} language={dashboardLanguage()} /> } : {}),
           icon: iconFor(moduleId, "module-heading-glyph"),
           active: enabled,
-          onToggle: (nextEnabled) => { if (nextEnabled !== enabled) onToggle(); },
+          onToggle: (nextEnabled) => {
+            if (nextEnabled === enabled) return;
+            if (!nextEnabled) runDashboardNavigationGuards(onToggle, () => undefined);
+            else onToggle();
+          },
           switchDisabled: !manageable || switchDisabled || busy,
           switchBusy: busy,
           ...(disabledReason === null ? {} : { lockHint: disabledReason }),
