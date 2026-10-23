@@ -1095,6 +1095,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
   </dl>;
   const saveBar = <SaveStatus
     persistent
+    mobileFixed
     dirty={dirty}
     pending={pending}
     saved={saved || (!isCreate && !dirty)}
@@ -1116,7 +1117,6 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
     savedLabel={labels.saved}
     pendingLabel={labels.pending}
   />;
-  const saveStatus = <div className="text-command-editor__save">{saveBar}</div>;
   return <div ref={editorRef} className="text-command-editor" role="region" aria-label={isCreate ? labels.add : labels.details(command.name)} onKeyDown={(event) => {
     if (event.key === "Escape") { event.preventDefault(); onClose(); }
     // Legacy IME events can report keyCode 229 without setting isComposing.
@@ -1144,7 +1144,7 @@ const TextCommandEditor = ({ channelId, channelDefaultChatTarget, language, regi
         switchBusy: pending,
         onToggle: (enabled: boolean) => { setDraftField("enabled", enabled); },
       } : {})}
-      saveStatus={saveStatus}
+      saveStatus={saveBar}
       actions={pageActions}
       actionHint={pageActionHint}
     />

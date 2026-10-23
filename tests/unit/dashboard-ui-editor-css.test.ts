@@ -3,6 +3,13 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const styles = readFileSync(path.resolve(process.cwd(), "src/dashboard/ui/core.css"), "utf8");
+const dashboardSource = readFileSync(path.resolve(process.cwd(), "src/dashboard/main.tsx"), "utf8");
+const switchStyles = readFileSync(path.resolve(process.cwd(), "src/dashboard/ui/primitives/switch.tsx"), "utf8");
+const timerStyles = readFileSync(path.resolve(process.cwd(), "src/modules/timers/panel/panel.css"), "utf8");
+const textCommandStyles = readFileSync(path.resolve(process.cwd(), "src/modules/text_commands/panel/panel.css"), "utf8");
+const textCommandSource = readFileSync(path.resolve(process.cwd(), "src/modules/text_commands/panel/index.tsx"), "utf8");
+const cockpitStyles = readFileSync(path.resolve(process.cwd(), "src/dashboard/cockpit.css"), "utf8");
+const cockpitPartsSource = readFileSync(path.resolve(process.cwd(), "src/dashboard/LiveCockpitParts.tsx"), "utf8");
 
 describe("editor seam styles", () => {
   it("uses the editor container threshold for FieldPair without viewport JavaScript", () => {
@@ -41,6 +48,71 @@ describe("editor seam styles", () => {
     expect(styles).toContain(".ui-editor-shell__body { flex: 1 1 auto; min-height: 0; overflow: auto;");
     expect(styles).toContain(".ui-save-bar { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto;");
     expect(styles).toContain(".ui-save-bar__invalid-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }");
+  });
+
+  it("aligns the SwitchRow control to the right column and distinguishes checked, invalid, and disabled states", () => {
+    expect(styles).toContain(".ui-switch-row [data-slot=\"switch\"] { grid-column: 2; grid-row: 1; }");
+    const row = styles.match(/\.ui-switch-row\s*\{([^}]+)\}/u)?.[1] ?? "";
+    expect(row).toContain("padding-inline-end: 8px;");
+    expect(switchStyles).toContain("data-checked:bg-[var(--color-brand)]");
+    expect(switchStyles).toContain("data-checked:bg-[var(--color-brand-on)]");
+    expect(switchStyles).toContain("data-disabled:opacity-70");
+    expect(switchStyles).toContain("aria-invalid:border-[var(--color-error)]");
+    expect(switchStyles).toContain("focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]");
+  });
+
+  it("keeps both mobile interval states separated from their headings", () => {
+    const expandedContent = styles.match(/\.ui-switch-section__content\s*\{([^}]+)\}/u)?.[1] ?? "";
+    const collapsedHint = styles.match(/\.ui-switch-section__hint\s*\{([^}]+)\}/u)?.[1] ?? "";
+
+    expect(expandedContent).toContain("padding: 12px 0 0;");
+    expect(expandedContent).toContain("border-top: 1px solid var(--color-border);");
+    expect(collapsedHint).toContain("padding: 12px 0 0;");
+    expect(collapsedHint).toContain("border-top: 1px solid var(--color-border);");
+  });
+
+  it("pushes weekday switches to the right edge of their timer rows", () => {
+    const weekday = timerStyles.match(/\.timer-weekday\s*\{([^}]+)\}/u)?.[1] ?? "";
+
+    expect(weekday).toContain("justify-content: space-between;");
+  });
+
+  it("pushes the read-only text command switch to the right edge of its value cell", () => {
+    const control = textCommandStyles.match(/\.text-command-properties__switch\s*\{([^}]+)\}/u)?.[1] ?? "";
+
+    expect(control).toContain("justify-content: flex-end;");
+  });
+
+  it("uses one shared fixed save bar treatment for mobile editor headers", () => {
+    expect(styles).toMatch(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\)\s*\{[^}]*position: fixed;/u);
+    expect(styles).toMatch(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\) > \.ui-save-bar--mobile-fixed \{[^}]*min-height: 44px;[^}]*padding: 0;/u);
+    expect(textCommandSource).toContain("saveStatus={saveBar}");
+    expect(textCommandStyles).toContain(".text-command-editor .page-header__save .ui-save-bar");
+  });
+
+  it("collapses unused dashboard header status slots while preserving labeled slots", () => {
+    expect(dashboardSource).toContain('configured && label !== null ? "" : " is-empty"');
+    expect(styles).toContain(".dashboard-header__control-state-slot { display: block; flex: none; width: max-content; max-width: 180px; min-width: 0; }");
+    expect(styles).toContain(".dashboard-header__control-state-slot.is-empty { display: none; }");
+  });
+
+  it("lets populated control statuses size to their label while retaining narrow header cutoffs", () => {
+    expect(styles).toContain(".dashboard-header__control-state-slot { display: block; flex: none; width: max-content; max-width: 180px; min-width: 0; }");
+    expect(styles).toContain("@container dashboard-header-end (max-width: 740px) {");
+    expect(styles).toContain(".dashboard-header__control-state-slot { display: none; }");
+    expect(styles).toContain(".dashboard-header__status, .dashboard-header__controls { display: none; }");
+    expect(styles).toContain(".dashboard-header__control-state > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }");
+  });
+
+  it("keeps the upcoming action reason in a reserved slot beside its action", () => {
+    expect(cockpitPartsSource).toContain("live-cockpit-next-item__action");
+    const action = cockpitStyles.match(/\.live-cockpit-next-item__action\s*\{([^}]+)\}/u)?.[1] ?? "";
+    expect(action).toContain("display: grid;");
+    expect(action).toContain("grid-template-rows: 28px 16px;");
+    const reason = cockpitStyles.match(/\.live-cockpit-next-item__reason\s*\{([^}]+)\}/u)?.[1] ?? "";
+    expect(reason).toContain("grid-column: 1;");
+    expect(reason).toContain("grid-row: 2;");
+    expect(reason).toContain("min-height: 16px;");
   });
 
   it("applies the shared hand-drawn SVG stroke family to command palette module icons", () => {

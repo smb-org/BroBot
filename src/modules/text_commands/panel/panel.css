@@ -28,12 +28,12 @@
   .text-command-editor > .page-header .page-header__title-row { gap: 6px 10px; }
   .text-command-editor > .page-header .page-header__title-row :is(h1, h2, h3) { font-size: 18px; }
   .text-command-editor > .page-header .page-header__meta { margin-top: 2px; }
-  .text-command-editor__save { flex: 0 1 auto; min-width: 0; }
-  .text-command-editor__save .ui-save-bar { display: flex; min-height: var(--control-height); align-items: center; justify-content: flex-end; gap: var(--s3); width: 100%; padding: 0; }
-  .text-command-editor__save .ui-save-bar--persistent { margin-top: 0; padding: 0; border-top: 0; background: transparent; }
-  .text-command-editor__save .ui-save-bar__status { flex: 1 1 auto; min-width: 0; }
-  .text-command-editor__save .ui-save-bar__actions { flex: none; }
-  .text-command-editor__save .ui-save-bar__buttons { flex-wrap: nowrap; }
+  .text-command-editor .page-header__save { flex: 0 1 auto; min-width: 0; }
+  .text-command-editor .page-header__save .ui-save-bar { display: flex; min-height: var(--control-height); align-items: center; justify-content: flex-end; gap: var(--s3); width: 100%; padding: 0; }
+  .text-command-editor .page-header__save .ui-save-bar--persistent { margin-top: 0; padding: 0; border-top: 0; background: transparent; }
+  .text-command-editor .page-header__save .ui-save-bar__status { flex: 1 1 auto; min-width: 0; }
+  .text-command-editor .page-header__save .ui-save-bar__actions { flex: none; }
+  .text-command-editor .page-header__save .ui-save-bar__buttons { flex-wrap: nowrap; }
   .text-command-editor__scroll { container: text-command-form / inline-size; display: grid; flex: 1 1 auto; gap: 0; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--s1) var(--s8) 0; }
   .text-command-editor__scroll--readonly { align-content: start; }
   .text-command-editor__scroll > .ui-section { margin: 0; padding: 3px 0; }
@@ -73,7 +73,7 @@
   .command-timeout-action { display: grid; gap: var(--s2); min-width: 0; }
   .text-command-reserved-note { min-height: 18px; margin: 0; }
   .text-command-properties { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .text-command-properties__switch { display: inline-flex; align-items: center; gap: var(--s2); }
+  .text-command-properties__switch { display: flex; align-items: center; justify-content: flex-end; gap: var(--s2); }
   .text-command-properties__response { white-space: pre-wrap; }
   .text-command-module-filter .ui-select__label { white-space: normal; }
   @media (min-width: 640px) {
@@ -106,7 +106,6 @@
     .text-command-editor > .page-header .page-header__meta { font-size: 11px; }
     .text-command-editor > .page-header .page-header__badges { gap: 4px; }
     .text-command-editor > .page-header .module-status-switch { gap: 5px; min-height: 30px; font-size: 11px; }
-    .text-command-editor > .page-header .page-header__save { position: fixed; z-index: 20; right: 0; bottom: 0; left: 0; width: auto; max-width: none; margin: 0; padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface); box-shadow: 0 -8px 18px color-mix(in srgb, var(--color-shadow) 8%, transparent); }
     .text-command-editor__scroll { gap: 0; margin-bottom: calc(88px + env(safe-area-inset-bottom)); padding-right: 0; padding-bottom: var(--s3); }
     .text-command-editor__scroll > .ui-section { padding: 4px 0; }
     .text-command-editor__scroll > .ui-section > .ui-section__content { gap: 4px; }
@@ -121,11 +120,6 @@
     .text-command-response-fields { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
     .text-command-trigger-section .ui-field-pair { gap: var(--s2); }
     .text-command-row { min-height: 68px; }
-  }
-  @media (max-width: 419px) {
-    .text-command-editor__save .ui-save-bar--persistent { grid-template-columns: minmax(0, 1fr) auto; height: auto; min-height: 64px; gap: 4px 8px; padding: 8px 0 calc(10px + env(safe-area-inset-bottom)); }
-    .text-command-editor__save .ui-save-bar__status { grid-row: 1; grid-column: 1; }
-    .text-command-editor__save .ui-save-bar__buttons { flex-wrap: nowrap; justify-content: flex-end; }
   }
   @container text-command-form (max-width: 900px) {
     .text-command-response-fields { grid-template-columns: minmax(0, 1fr); }

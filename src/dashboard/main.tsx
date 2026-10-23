@@ -433,7 +433,7 @@ const ChannelControlStatus = ({ control, kind, compact = false }: {
   else if (compact) label = labels.inactive;
   const timed = control.active && control.mode === "timed" && control.until !== null && Date.parse(control.until) > now;
   if (compact) return <span className="dashboard-header__account-control-state" title={label ?? labels.inactive}>{label}</span>;
-  return <span className="dashboard-header__control-state-slot">
+  return <span className={`dashboard-header__control-state-slot${configured && label !== null ? "" : " is-empty"}`}>
     {configured && label !== null ? <span className="dashboard-header__control-state" title={label}>{timed ? <Icon name="clock-hour-4" size={16} /> : null}<span>{label}</span></span> : null}
   </span>;
 };

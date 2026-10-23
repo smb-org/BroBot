@@ -76,6 +76,21 @@ afterEach(() => {
 });
 
 describe("FAQ panel", () => {
+  it("uses the FAQ locale for the enabled status in the detail header", async () => {
+    const englishBrowser = Object.create(navigator) as Navigator;
+    Object.defineProperty(englishBrowser, "language", { configurable: true, value: "en-US" });
+    vi.stubGlobal("navigator", englishBrowser);
+    installPanelFetch();
+    renderFaqPanel("de");
+
+    const toggle = await screen.findByRole("switch", { name: "Greeting" });
+    const status = toggle.closest(".module-status-switch");
+
+    expect(status).not.toBeNull();
+    expect(status).toHaveTextContent("Aktiv");
+    expect(toggle.previousElementSibling).toHaveTextContent("Aktiv");
+  });
+
   it("opens the saved FAQ entry in the test area and disables the action while dirty", async () => {
     installPanelFetch();
     const onOpenTestArea = vi.fn();

@@ -85,13 +85,14 @@
   .live-cockpit-running-tile { gap: var(--s2); }
   .live-cockpit-duels__list { display: grid; gap: var(--s1); min-width: 0; min-height: 0; max-height: 144px; overflow: auto; scrollbar-gutter: stable; }
   .live-cockpit-duels__list h3 { margin: 0; color: var(--text-2); font-size: 11px; font-weight: 600; }
-  .live-cockpit-duels__item { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: var(--s2); min-width: 0; min-height: 32px; padding: var(--s1) 0; border-bottom: 1px solid var(--line); }
+  .live-cockpit-duels__item { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; grid-template-rows: auto 16px; align-items: center; gap: var(--s2); min-width: 0; min-height: 32px; padding: var(--s1) 0; border-bottom: 1px solid var(--line); }
   .live-cockpit-duels__icon { display: inline-flex; align-items: center; justify-content: center; color: var(--brand-text); }
   .live-cockpit-duels__copy { display: grid; min-width: 0; }
   .live-cockpit-duels__copy strong, .live-cockpit-duels__copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .live-cockpit-duels__copy strong { color: var(--text-2); font-size: 11px; }
   .live-cockpit-duels__copy small { color: var(--text-3); font-size: 10px; }
   .live-cockpit-duels__item .ui-button { min-height: 28px; padding-inline: var(--s2); font-size: 10px; }
+  .live-cockpit-duels__item > .ui-locked-reason { grid-column: 2 / -1; grid-row: 2; height: 16px; min-height: 16px; overflow: hidden; font-size: 10px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
   .live-cockpit-duels__more { flex: none; margin: 0 !important; color: var(--text-3) !important; font-size: 10px !important; }
   .live-vote-tile, .live-votekick-tile { display: flex; flex: 1; flex-direction: column; gap: var(--s2); min-width: 0; min-height: 0; }
   .live-vote-tile__header, .live-votekick-tile > header { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-width: 0; }
@@ -126,7 +127,8 @@
   .live-cockpit-next-item__copy strong { color: var(--text-2); font-size: 11px; }
   .live-cockpit-next-item__copy small { color: var(--text-3); font-size: 10px; }
   .live-cockpit-next-item__time { color: var(--text-3); font-size: 10px; white-space: nowrap; }
-  .live-cockpit-next-item__reason { box-sizing: border-box; grid-column: 2 / -1; grid-row: 2; height: 16px; min-height: 16px; max-height: 16px; overflow: hidden; color: var(--text-3); font-size: 10px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+  .live-cockpit-next-item__action { display: grid; grid-template-rows: 28px 16px; align-items: center; width: max-content; max-width: 180px; min-width: 0; }
+  .live-cockpit-next-item__reason { box-sizing: border-box; grid-column: 1; grid-row: 2; width: 100%; height: 16px; min-height: 16px; max-height: 16px; overflow: hidden; color: var(--text-3); font-size: 10px; line-height: 16px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
   .live-cockpit-next-item__reason.is-warning { color: var(--warn); }
   .live-cockpit-next-item .ui-button { min-height: 28px; padding-inline: var(--s2); font-size: 10px; }
   .live-cockpit-event-feed { display: flex; gap: var(--s2); }

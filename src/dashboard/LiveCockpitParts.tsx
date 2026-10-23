@@ -18,6 +18,7 @@ import { immediateActionErrorFeedback } from "./immediate-action-errors";
 import { adSnoozeRetryMessage } from "./ad-snooze-retry";
 import { formatRelativeTime } from "./ui/format-relative-time";
 import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon } from "./ui";
+import { LockedReason } from "./ui/LockedReason";
 
 type EventFilter = "all" | "raids" | "community" | "chat";
 
@@ -237,9 +238,7 @@ export const LiveCockpitTiles = ({
             onClick={() => { setDuelCancelTarget({ id: duel.id }); setDuelCancelError(undefined); }}>
             {labels.duelCancel}
           </Button>
-          {!roleCanManageDuel ? <span id={`duel-cancel-reason-${duel.id}`} className="sr-only">
-            {dashboardTexts().streamManager.managerOnly}
-          </span> : null}
+          <LockedReason id={`duel-cancel-reason-${duel.id}`} {...(!roleCanManageDuel ? { reason: dashboardTexts().streamManager.managerOnly } : {})} />
         </article>)}
         </div>
         {duels.length > visibleDuels.length ? <p className="live-cockpit-duels__more">{labels.duelMore(formatNumber(duels.length - visibleDuels.length))}</p> : null}
@@ -303,12 +302,14 @@ export const LiveCockpitTiles = ({
             <span className="live-cockpit-next-item__icon"><Icon name={item.category === "ad" ? "ad" : "clock-hour-4"} size={16} /></span>
             <span className="live-cockpit-next-item__copy"><strong>{title}</strong>{detail === null ? null : <small>{detail}</small>}</span>
             <time className="live-cockpit-next-item__time" dateTime={item.at} title={new Date(item.at).toLocaleString(dashboardLanguage(), { timeZone })}>{relative}</time>
-            {item.category === "ad" ? <>
-              <Button size="compact" variant="subtle" disabled={busy || !roleCanSnooze || item.canSnooze !== true}
-                {...(snoozeReason === "" ? {} : { describedBy: snoozeReasonId })}
-                onClick={() => { void doSnoozeAd(item.id, item.canSnooze === true); }}>{labels.adSnooze}</Button>
-              <span className={`live-cockpit-next-item__reason${retryMessage === null ? "" : " is-warning"}`} id={snoozeReasonId} aria-live="polite">{snoozeReason}</span>
-            </> : null}
+            {item.category === "ad" ?
+              <div className="live-cockpit-next-item__action">
+                <Button size="compact" variant="subtle" disabled={busy || !roleCanSnooze || item.canSnooze !== true}
+                  {...(snoozeReason === "" ? {} : { describedBy: snoozeReasonId })}
+                  onClick={() => { void doSnoozeAd(item.id, item.canSnooze === true); }}>{labels.adSnooze}</Button>
+                <span className={`live-cockpit-next-item__reason${retryMessage === null ? "" : " is-warning"}`} id={snoozeReasonId} aria-live="polite">{snoozeReason}</span>
+              </div>
+              : null}
           </div>;
         })}
       </div>}

@@ -19,6 +19,7 @@ export interface SaveStatusProps {
   invalidMessage?: string;
   invalidStatus?: ReactNode;
   persistent?: boolean;
+  mobileFixed?: boolean;
   warnings?: readonly string[];
   warningStatusLabel?: (warnings: readonly string[], saved: boolean) => ReactNode;
   conflict?: { message: string; reloadLabel: string; onReload: () => void };
@@ -48,6 +49,7 @@ export function SaveStatus({
   invalidMessage,
   invalidStatus,
   persistent = false,
+  mobileFixed = false,
   warnings = [],
   warningStatusLabel,
   conflict,
@@ -102,7 +104,7 @@ export function SaveStatus({
   const footerOnly = statusText === null && footer !== undefined && conflict === undefined;
   const showFooter = footer !== undefined && conflict === undefined && invalidLockReason === undefined;
   return (
-    <div data-ui="" className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}${error === undefined ? "" : " ui-save-bar--error"}`} aria-busy={pending}>
+    <div data-ui="" className={`ui-save-bar${persistent ? " ui-save-bar--persistent" : ""}${mobileFixed ? " ui-save-bar--mobile-fixed" : ""}${error === undefined ? "" : " ui-save-bar--error"}`} aria-busy={pending}>
       <div className={`ui-save-bar__status${footerOnly ? " ui-save-bar__status--footer-only" : ""}`} role="status" aria-live="polite">
         {warningStatus !== null && statusText === warningStatus || warningStatus !== null && saved && !dirty ? <Icon name="warning" size={16} /> : null}
         {statusText === null ? null : <div className="ui-save-bar__message" style={{ color: conflict !== undefined || error !== undefined || (invalid && dirty) ? colors.errorText : warningStatus !== null ? colors.amber : colors.text3 }}>

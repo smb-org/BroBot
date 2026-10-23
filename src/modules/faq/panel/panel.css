@@ -428,27 +428,6 @@
     justify-self: end;
   }
 
-  .faq-panel__detail > .page-header .page-header__save {
-    position: fixed;
-    z-index: var(--layer-popover);
-    right: 0;
-    bottom: 0;
-    left: 0;
-    display: block;
-    box-sizing: border-box;
-    width: auto;
-    max-width: none;
-    flex: none;
-    padding: 6px 16px calc(6px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--line);
-    background: var(--surface-inspector);
-  }
-
-  .faq-panel__detail > .page-header .page-header__save .ui-save-bar {
-    min-height: 44px;
-    padding: 0;
-    border-top: 0;
-  }
 }
 
 @media (min-width: 1680px) and (max-width: 2199px) {

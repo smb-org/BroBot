@@ -428,9 +428,9 @@ for (const [width, height] of [[820, 1180], [1024, 768]] as const) {
     await openTextCommand(page, width, height);
 
     await expect(page.locator(".text-command-editor")).toBeVisible();
-    const commandSaveActions = page.locator(".text-command-editor__save .ui-save-bar__actions");
+    const commandSaveActions = page.locator(".text-command-editor .page-header__save .ui-save-bar__actions");
     await expect(commandSaveActions.getByRole("button", { name: "Speichern", exact: true })).toBeVisible();
-    await expectCollectionPaneGeometry(page, ".text-command-editor__save .ui-save-bar__actions");
+    await expectCollectionPaneGeometry(page, ".text-command-editor .page-header__save .ui-save-bar__actions");
 
     await page.goto(`/channels/${channelId}/modules/faq`);
     const faqEntry = page.locator(".faq-panel__entry").filter({ hasText: "Begrüßung" });
