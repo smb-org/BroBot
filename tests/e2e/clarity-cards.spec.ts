@@ -395,7 +395,7 @@ for (const viewport of [
     const optionLabels = ["Abenteuer", "Strategie", "Rollenspiel"];
     const voteOptions = tile.locator(".live-vote-tile__options");
     await expect(voteOptions.locator(".live-vote-tile__option-label strong")).toHaveText(optionLabels);
-    if (viewport.width === 1280 || viewport.width === 1440) {
+    if (viewport.width >= 1280) {
       const actions = page.locator(".live-cockpit-actions");
       const actionsGrid = actions.locator(".live-cockpit-actions__grid");
       const [actionsBox, actionsGridBox, adsBox, wallBox] = await Promise.all([
@@ -444,11 +444,12 @@ for (const viewport of [
       const votekickEmptyText = page.locator(".live-cockpit-next-list--recent p");
       await expect(votekickEmptyText).toBeVisible();
       await expect(votekickEmptyText).toHaveText("Keine offenen Timeouts aus Votekicks.");
-    } else if (viewport.width === 1920) {
-      const [runningBox, adsBox] = await Promise.all([box(tile), box(adsTile)]);
-      expect(runningBox.y).toBeCloseTo(adsBox.y, 0);
-      expect(adsBox.x).toBeGreaterThan(runningBox.x + runningBox.width);
-      await expect(page.locator(".live-cockpit__running .live-cockpit-ads-tile")).toHaveCount(1);
+      if (viewport.width === 1920) {
+        expect(runningBox.width).toBeGreaterThanOrEqual(400);
+        const title = tile.getByText("Was spielen wir als Nächstes?").first();
+        const fit = await title.evaluate((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }));
+        expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+      }
     } else {
       const stackedSlots = await page.locator(".live-cockpit__running > .live-cockpit-reserve, .live-cockpit__running > .live-cockpit-ads-tile").evaluateAll((elements) => elements.map((element) => ({
         slot: element.classList.contains("live-cockpit-running-tile") ? "running"

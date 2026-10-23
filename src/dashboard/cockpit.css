@@ -221,7 +221,7 @@
     .live-cockpit-actions { min-height: 360px; }
     .live-cockpit-actions__grid { overflow: visible; }
   }
-  @media (min-width: 1101px) and (max-width: 1678px) {
+  @media (min-width: 1101px) {
     /* The ads slot stays fixed below actions; running and next fill the middle column. */
     .live-cockpit__wall { grid-template-rows: minmax(0, 1fr) 188px; }
     .live-cockpit__running-area, .live-cockpit__running { display: contents; }
