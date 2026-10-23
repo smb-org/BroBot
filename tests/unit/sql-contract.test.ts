@@ -138,6 +138,8 @@ const sqlGetFixtures = new Map<string, string>([
   ["tokenPredicate", CHAT_VOTE_RESULT_TEXT_REFERENCE_TOKEN_PREDICATE_SQL],
   ["updatedAtSql", CHAT_VOTE_RESULT_TEXT_REFERENCE_DEFAULT_UPDATED_AT_SQL],
   ["conditionSql", "1 = 1"],
+  ["clearLease", ""],
+  ["leaseGuard", ""],
   ["sessionGuard.sql", belaboxStreamSessionGuard("channel-id", {
     state: "online",
     changedAt: now,
@@ -318,6 +320,9 @@ describe("SQL contract", () => {
         "checked_at", "eventsub_changed_at",
       ]));
       expect([...tableColumns("blitz_questions")]).toContain("search_text");
+      expect([...tableColumns("twitch_login_identity")]).toEqual(expect.arrayContaining([
+        "refresh_lease_owner", "refresh_lease_until",
+      ]));
       const blitzQuestionForeignKeys = database.prepare("PRAGMA foreign_key_list(blitz_questions)").all() as {
         table: string; from: string; to: string; on_delete: string;
       }[];
