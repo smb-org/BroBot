@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { moduleQueryKey } from "../../src/dashboard/data";
-import { ModuleWorkspace } from "../../src/dashboard/module-panels";
+import { ModulePage } from "../../src/dashboard/module-panels";
 import ChatVotingPanel from "../../src/modules/chat_voting/panel";
 import type { ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import { chatVotingSavedPanelTexts } from "../../src/modules/chat_voting/panel/locale-saved";
@@ -104,19 +104,15 @@ const mount = (options: {
 
 const ModuleDisableHarness = (): ReactElement => {
   const [enabled, setEnabled] = useState(true);
-  return <>
-    {enabled ? <ChatVotingPanel channelId="channel-432" language="de" canManage /> : null}
-    <ModuleWorkspace
-      channelId="channel-432"
-      ownRole="manager"
-      modules={[{ id: "chat_voting", enabled, settings: "{}" }]}
-      onNavigate={() => undefined}
-      onToggleModule={(_channelId, _moduleId, nextEnabled) => {
-        setEnabled(nextEnabled);
-        return Promise.resolve();
-      }}
-    />
-  </>;
+  return <ModulePage
+    channelId="channel-432"
+    moduleId="chat_voting"
+    ownRole="manager"
+    modules={[{ id: "chat_voting", enabled, settings: "{}" }]}
+    activeModules={enabled ? [{ moduleId: "chat_voting", settings: "{}" }] : []}
+    onNavigate={() => undefined}
+    onToggle={() => { setEnabled((current) => !current); }}
+  />;
 };
 
 afterEach(() => {
@@ -360,33 +356,29 @@ describe("saved chat voting collection", () => {
     expect(screen.getByTestId("chat-vote-color-preview").querySelector(".chat-voting-editor__color-preview-track > span")).toHaveStyle({ backgroundColor: "rgb(171, 205, 239)" });
   });
 
-  it("keeps a dirty vote and its module enabled when module disable is cancelled", async () => {
+  it("keeps a vote draft across module disable and re-enable, then saves it", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    mount({ content: <ModuleDisableHarness /> });
+    const { requests } = mount({ content: <ModuleDisableHarness /> });
 
     const question = await screen.findByRole("textbox", { name: "Frage" });
     fireEvent.change(question, { target: { value: "Lokale Frage" } });
     fireEvent.click(screen.getByRole("switch", { name: /^Chat-Abstimmung: Läuft/u }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Änderungen verwerfen?" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Weiter bearbeiten" }));
-
-    expect(screen.getByRole("switch", { name: /^Chat-Abstimmung: Läuft/u })).toBeChecked();
-    expect(screen.getByRole("textbox", { name: "Frage" })).toHaveValue("Lokale Frage");
-  });
-
-  it("discards a dirty vote when module disable is confirmed", async () => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    mount({ content: <ModuleDisableHarness /> });
-
-    fireEvent.change(await screen.findByRole("textbox", { name: "Frage" }), { target: { value: "Lokale Frage" } });
-    fireEvent.click(screen.getByRole("switch", { name: /^Chat-Abstimmung: Läuft/u }));
-
-    const dialog = await screen.findByRole("dialog", { name: "Änderungen verwerfen?" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Änderungen verwerfen" }));
-
-    expect(await screen.findByRole("switch", { name: /^Chat-Abstimmung: Aus/u })).not.toBeChecked();
+    const disabledSwitch = await screen.findByRole("switch", { name: /^Chat-Abstimmung: Aus/u });
+    expect(disabledSwitch).not.toBeChecked();
     expect(screen.queryByRole("textbox", { name: "Frage" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: /^Chat-Abstimmung: Aus/u }));
+    const restoredQuestion = await screen.findByRole("textbox", { name: "Frage" });
+    expect(restoredQuestion).toHaveValue("Lokale Frage");
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    await waitFor(() => expect(requests.mock.calls.some(([input, init]) =>
+      requestUrl(input).pathname.endsWith("/templates/template-dinner") && init?.method === "PATCH",
+    )).toBe(true));
+    const savedBody = requests.mock.calls.find(([input, init]) =>
+      requestUrl(input).pathname.endsWith("/templates/template-dinner") && init?.method === "PATCH",
+    )?.[1]?.body;
+    expect(JSON.parse(savedBody as string)).toMatchObject({ title: "Lokale Frage" });
   });
 
   it("keeps a new vote as a two-minute draft until the explicit save action", async () => {

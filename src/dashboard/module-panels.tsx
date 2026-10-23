@@ -1158,10 +1158,6 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
   };
 
   const toggle = (moduleId: string, nextEnabled: boolean): void => {
-    if (!nextEnabled) {
-      runDashboardNavigationGuards(() => { void performToggle(moduleId, nextEnabled); }, () => undefined);
-      return;
-    }
     void performToggle(moduleId, nextEnabled);
   };
 
@@ -1292,6 +1288,13 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const [chatVotingTab, setChatVotingTab] = useState<"votes" | "settings">("votes");
   const viewLoading = loading || moduleState === undefined || ((registered?.panel !== undefined || registered?.settingsEditor !== undefined) && enabled && activeModule === undefined);
   const showActiveView = activeModule !== undefined && (enabled || moduleState === undefined);
+  const mountedModule = activeModule ?? (moduleId === "chat_voting" && moduleState !== undefined
+    ? { moduleId, settings: moduleState.settings }
+    : undefined);
+  const retainDisabledChatVotingView = moduleId === "chat_voting"
+    && moduleState?.enabled === false
+    && mountedModule !== undefined
+    && !permissionsMissing;
 
   const stateMessage = registered === undefined
     ? labels.unknown(details.name)
@@ -1301,6 +1304,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         ? labels.switchedOff(details.name)
         : null;
   const stateTone = registered === undefined || permissionsMissing ? "notice" : "neutral";
+  const renderActiveView = (stateMessage === null && showActiveView) || retainDisabledChatVotingView;
 
   useEffect(() => {
     if (error !== null) notify({ tone: "error", message: error });
@@ -1322,8 +1326,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           active: enabled,
           onToggle: (nextEnabled) => {
             if (nextEnabled === enabled) return;
-            if (!nextEnabled) runDashboardNavigationGuards(onToggle, () => undefined);
-            else onToggle();
+            onToggle();
           },
           switchDisabled: !manageable || switchDisabled || busy,
           switchBusy: busy,
@@ -1351,8 +1354,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             active: effectiveEnabled,
             onToggle: (nextEnabled: boolean) => {
               if (nextEnabled === effectiveEnabled) return;
-              if (!nextEnabled) runDashboardNavigationGuards(onToggle, () => undefined);
-              else onToggle();
+              onToggle();
             },
             switchTitle: `${details.name}: ${statusWord(effectiveEnabled)}`,
             switchDisabled: !manageable || switchDisabled || busy,
@@ -1401,13 +1403,10 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           {ownRole === "broadcaster" ? null : <p className="lock-reason">{texts.module.scopeConsentLocked}</p>}
         </section>}
         {viewLoading ? <p className="muted">{texts.module.load}</p> : null}
-        {stateMessage === null ? (
-          registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
-            <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} viewerIsBot={viewerIsBot} {...(initialSelection === undefined ? {} : { initialSelection })} {...(initialCommand === undefined ? {} : { initialCommand })} {...(onInitialCommandConsumed === undefined ? {} : { onInitialCommandConsumed })} onOpenTestArea={(targetModuleId, entryId) => onNavigate({ kind: "channel", channelId, section: "test-area", only: { moduleId: targetModuleId, entryId } })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
-            </section>
-          )
-        ) : (
+        {stateMessage === null && registered?.panel === undefined && registered?.settingsEditor === undefined && showActiveView
+          ? <p className="module-state">{texts.module.noView}</p>
+          : null}
+        {stateMessage === null ? null : (
           <section className={`module-state module-state--${stateTone}`} aria-label={texts.module.module}>
             <div className="module-state__summary">
               <NavigationIcon kind="permission" className="module-state__icon" />
@@ -1416,6 +1415,13 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             <ModuleListLink channelId={channelId} onNavigate={onNavigate} />
           </section>
         )}
+        {(registered?.panel === undefined && registered?.settingsEditor === undefined) || !renderActiveView
+          ? null
+          : (
+            <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content} hidden={!showActiveView}>
+              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={mountedModule === undefined ? [] : [mountedModule]} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} viewerIsBot={viewerIsBot} {...(initialSelection === undefined ? {} : { initialSelection })} {...(initialCommand === undefined ? {} : { initialCommand })} {...(onInitialCommandConsumed === undefined ? {} : { onInitialCommandConsumed })} onOpenTestArea={(targetModuleId, entryId) => onNavigate({ kind: "channel", channelId, section: "test-area", only: { moduleId: targetModuleId, entryId } })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
+            </section>
+          )}
       </section>
     </>
   );
