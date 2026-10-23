@@ -56,38 +56,32 @@ const draftFromTemplate = (template: ChatVoteTemplate): ChatVoteTemplateDraft =>
 });
 
 const reconcileAnswerIds = (
-  previousServerLabels: readonly (string | undefined)[],
+  previousServerLabels: readonly string[],
   previousAnswerIds: readonly string[],
   nextLabels: readonly string[],
   createAnswerId: () => string,
 ): string[] => {
-  const sameSequence = previousServerLabels.length === nextLabels.length
-    && previousServerLabels.every((label, index) => label !== undefined && label === nextLabels[index]);
-  if (sameSequence) return nextLabels.map((_label, index) => previousAnswerIds[index] ?? createAnswerId());
-
-  const countLabels = (labels: readonly (string | undefined)[]): Map<string, number> => {
+  const countLabels = (labels: readonly string[]): Map<string, number> => {
     const counts = new Map<string, number>();
     labels.forEach((label) => {
-      if (label !== undefined) counts.set(label, (counts.get(label) ?? 0) + 1);
+      counts.set(label, (counts.get(label) ?? 0) + 1);
     });
     return counts;
   };
   const previousCounts = countLabels(previousServerLabels);
   const nextCounts = countLabels(nextLabels);
+  const sameSequence = previousServerLabels.length === nextLabels.length
+    && previousServerLabels.every((label, index) => label === nextLabels[index]
+      && previousCounts.get(label) === 1
+      && nextCounts.get(label) === 1);
+  if (sameSequence) return nextLabels.map((_label, index) => previousAnswerIds[index] ?? createAnswerId());
+
   return nextLabels.map((label) => {
     if (previousCounts.get(label) !== 1 || nextCounts.get(label) !== 1) return createAnswerId();
     const previousIndex = previousServerLabels.indexOf(label);
     return previousAnswerIds[previousIndex] ?? createAnswerId();
   });
 };
-
-const mapServerLabelsToAnswerIds = (
-  answerIds: readonly string[],
-  serverLabels: readonly string[],
-): Map<string, string> => new Map(answerIds.flatMap((answerId, index) => {
-  const serverLabel = serverLabels[index];
-  return serverLabel === undefined ? [] : [[answerId, serverLabel] as const];
-}));
 
 const blankDraft = (draft: ChatVoteTemplateDraft): boolean =>
   draft.shortcut === null && draft.title.trim().length === 0 && draft.labels.every((label) => label.trim().length === 0) && draft.freeTextMode === null;
@@ -157,7 +151,6 @@ export function ChatVoteTemplateInspector({
   const initialAnswerIds = initialDraft.labels.map((_label, index) => `${answerIdPrefix}-answer-${String(index + 1)}`);
   const [answerIds, setAnswerIds] = useState<readonly string[]>(initialAnswerIds);
   const answerIdsRef = useRef(answerIds);
-  const acceptedServerLabelsByAnswerId = useRef(mapServerLabelsToAnswerIds(initialAnswerIds, initialDraft.labels));
   const baselineAnswerIds = useRef<readonly string[]>(initialAnswerIds);
   const [durationMode, setDurationMode] = useState(() => durationPreset(draft.value.durationSeconds));
   const [customDurationSelected, setCustomDurationSelected] = useState(false);
@@ -353,7 +346,6 @@ export function ChatVoteTemplateInspector({
       baseRevision.current = next.revision;
       baselineDraft.current = acceptedDraft;
       const acceptedAnswerIds = reconcileAnswerIds(submitted.labels, submittedAnswerIds, acceptedDraft.labels, createAnswerId);
-      acceptedServerLabelsByAnswerId.current = mapServerLabelsToAnswerIds(acceptedAnswerIds, acceptedDraft.labels);
       baselineAnswerIds.current = acceptedAnswerIds;
       draft.accept(acceptedDraft);
       if (JSON.stringify(current) !== JSON.stringify(submitted)) {
@@ -416,7 +408,6 @@ export function ChatVoteTemplateInspector({
     const nextAnswerIds = nextDraft.labels.map(() => createAnswerId());
     answerIdsRef.current = nextAnswerIds;
     setAnswerIds(nextAnswerIds);
-    acceptedServerLabelsByAnswerId.current = mapServerLabelsToAnswerIds(nextAnswerIds, nextDraft.labels);
     baselineAnswerIds.current = nextAnswerIds;
     draftValue.current = nextDraft;
     baselineDraft.current = nextDraft;
@@ -454,12 +445,11 @@ export function ChatVoteTemplateInspector({
         return;
       }
       const serverDraft = draftFromTemplate(latest);
-      const currentAnswerIds = answerIdsRef.current;
-      const previousServerLabels = currentAnswerIds.map((answerId) => acceptedServerLabelsByAnswerId.current.get(answerId));
-      const nextAnswerIds = reconcileAnswerIds(previousServerLabels, currentAnswerIds, serverDraft.labels, createAnswerId);
+      const previousServerLabels = baselineDraft.current.labels;
+      const previousAnswerIds = baselineAnswerIds.current;
+      const nextAnswerIds = reconcileAnswerIds(previousServerLabels, previousAnswerIds, serverDraft.labels, createAnswerId);
       answerIdsRef.current = nextAnswerIds;
       setAnswerIds(nextAnswerIds);
-      acceptedServerLabelsByAnswerId.current = mapServerLabelsToAnswerIds(nextAnswerIds, serverDraft.labels);
       baselineAnswerIds.current = nextAnswerIds;
       const remainingColorDrafts: Record<string, CustomColorDraft> = {};
       const nextColors = [...serverDraft.answerColors];

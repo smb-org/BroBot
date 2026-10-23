@@ -406,6 +406,41 @@ describe("saved chat voting collection", () => {
     expect(within(screen.getByRole("dialog", { name: "Farbe für Antwort 1" })).getByRole("textbox", { name: "Eigener Hex-Wert" })).toHaveValue("#2ed3a3");
   });
 
+  it("drops a color draft when a reload resolves a locally hidden duplicate label", async () => {
+    let markReloadStarted: (() => void) | undefined;
+    const reloadStarted = new Promise<void>((resolve) => { markReloadStarted = resolve; });
+    let finishReload: ((response: Response) => void) | undefined;
+    const reloadResponse = new Promise<Response>((resolve) => { finishReload = resolve; });
+    const duplicateTemplate = { ...template, labels: ["Same", "Same"], answerColors: ["#5b8cff", "#ff9f43"] };
+    const serverTemplate = { ...duplicateTemplate, labels: ["Same"], answerColors: ["#2ed3a3"], revision: 2 };
+    mount({
+      templates: [duplicateTemplate],
+      templateResponses: [[duplicateTemplate], [serverTemplate], [serverTemplate]],
+      waitForReloadTemplates: reloadResponse,
+      onReloadStarted: () => { markReloadStarted?.(); },
+      patchResponse: () => Promise.resolve(jsonResponse({ error: "chat_vote_template_conflict" }, 409)),
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Antwort 1 entfernen" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Frage" }), { target: { value: "Local question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Neu laden" }));
+    await reloadStarted;
+
+    fireEvent.click(await screen.findByRole("button", { name: "Farbe für Antwort 1" }));
+    const popover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
+    fireEvent.change(within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" }), { target: { value: "#abcdef" } });
+    const completeReload = finishReload;
+    if (completeReload === undefined) throw new Error("The pending template reload is missing.");
+    act(() => { completeReload(jsonResponse({ templates: [serverTemplate], count: 1, maximum: 100 })); });
+
+    await waitFor(() => expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Frage" }).value).toBe("Abendessen"));
+    const colorTrigger = screen.getByRole("button", { name: "Farbe für Antwort 1" });
+    expect(colorTrigger.style.backgroundColor).toBe("rgb(46, 211, 163)");
+    if (screen.queryByRole("dialog", { name: "Farbe für Antwort 1" }) === null) fireEvent.click(colorTrigger);
+    expect(within(screen.getByRole("dialog", { name: "Farbe für Antwort 1" })).getByRole<HTMLInputElement>("textbox", { name: "Eigener Hex-Wert" }).value).toBe("#2ed3a3");
+  });
+
   it("preserves a color draft re-edited to its original value during a conflict reload", async () => {
     let markReloadStarted: (() => void) | undefined;
     const reloadStarted = new Promise<void>((resolve) => { markReloadStarted = resolve; });
