@@ -7,6 +7,7 @@ import {
   upsertLoginIdentity,
 } from "../../src/worker/db/login-identity";
 import { confirmLoginIdentityAuthorization, maintainLoginIdentities } from "../../src/worker/login-maintenance";
+import { insertChannel, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const keyRingSerialized = JSON.stringify({
@@ -525,6 +526,60 @@ describe("Login token maintenance", () => {
       const recovered = await getLoginIdentity(environment.DB, "user-1");
       expect(recovered?.accessTokenCiphertext).not.toBe(initialAccessTokenCiphertext);
       expect(recovered?.refreshTokenCiphertext).not.toBe(initialRefreshTokenCiphertext);
+    } finally {
+      vi.unstubAllGlobals();
+      database.close();
+    }
+  });
+
+  it("revokes an errored identity on invalid_grant with cleared scopes, revoked session and realtime notification in SQLite", async () => {
+    const database = new TestD1Database();
+    const now = "2026-10-23T10:00:00.000Z";
+    try {
+      const keys = parseKeyRing(keyRingSerialized);
+      await insertChannel(database, "channel-a");
+      await insertMember(database, "channel-a", "user-1", "operator");
+      await upsertLoginIdentity(database as unknown as D1Database, {
+        userId: "user-1",
+        login: "tester",
+        scopesJson: "[\"user:read:moderated_channels\"]",
+        tokenScopesJson: "[\"user:read:moderated_channels\"]",
+        accessTokenCiphertext: await encryptJson({ token: "access-alt" }, keys),
+        refreshTokenCiphertext: await encryptJson({ token: "refresh-alt" }, keys),
+        expiresAt: "2026-10-23T10:59:59.000Z",
+        status: "error",
+        reason: "invalid_client",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await database.prepare(
+        `INSERT INTO auth_sessions
+          (session_id, user_id, login, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind("session-1", "user-1", "tester", "2026-10-24T10:00:00.000Z", now, now).run();
+      const revokeUser = vi.fn().mockResolvedValue(undefined);
+      const environment = {
+        DB: database as unknown as D1Database,
+        CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ revokeUser }) },
+        TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
+        SESSION_ENCRYPTION_KEYS: keyRingSerialized,
+      } as unknown as Env;
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: 401, message: "invalid access token" }), { status: 401 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 })));
+
+      await maintainLoginIdentities(environment, now);
+
+      const row = await database.prepare(
+        "SELECT status, scopes_json, token_scopes_json FROM twitch_login_identity WHERE user_id = 'user-1'",
+      ).first<{ status: string; scopes_json: string; token_scopes_json: string }>();
+      expect(row).toEqual({ status: "revoked", scopes_json: "[]", token_scopes_json: "[]" });
+      const session = await database.prepare(
+        "SELECT revoked_at FROM auth_sessions WHERE session_id = 'session-1'",
+      ).first<{ revoked_at: string | null }>();
+      expect(session?.revoked_at).not.toBeNull();
+      expect(revokeUser).toHaveBeenCalledWith("user-1");
     } finally {
       vi.unstubAllGlobals();
       database.close();

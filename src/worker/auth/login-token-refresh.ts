@@ -252,7 +252,7 @@ const refreshLoginIdentityTokensOnce = async (
       if (error instanceof TwitchApiError && error.code === "invalid_grant") {
         const current = await getLoginIdentityRefreshState(env.DB, identity.userId);
         if (current !== null && isReplacementIdentity(current.identity, identity)) return current.identity;
-        if (current !== null && current.identity.status !== "connected") return current.identity;
+        if (current !== null && current.identity.status === "revoked") return current.identity;
         if (expiredLeaseTakeover) {
           // The expired holder may have rotated Twitch's token without persisting it, so its first invalid_grant is ambiguous.
           releaseLease = false;
