@@ -108,11 +108,12 @@ describe("editor seam styles", () => {
     expect(cockpitPartsSource).toContain("live-cockpit-next-item__action");
     const action = cockpitStyles.match(/\.live-cockpit-next-item__action\s*\{([^}]+)\}/u)?.[1] ?? "";
     expect(action).toContain("display: grid;");
-    expect(action).toContain("grid-template-rows: 28px 16px;");
+    expect(action).toContain("grid-template-rows: 28px 24px;");
     const reason = cockpitStyles.match(/\.live-cockpit-next-item__reason\s*\{([^}]+)\}/u)?.[1] ?? "";
     expect(reason).toContain("grid-column: 1;");
     expect(reason).toContain("grid-row: 2;");
-    expect(reason).toContain("min-height: 16px;");
+    expect(reason).toContain("min-height: 24px;");
+    expect(reason).not.toContain("nowrap");
   });
 
   it("applies the shared hand-drawn SVG stroke family to command palette module icons", () => {

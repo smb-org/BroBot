@@ -127,9 +127,12 @@
   .live-cockpit-next-item__copy strong { color: var(--text-2); font-size: 11px; }
   .live-cockpit-next-item__copy small { color: var(--text-3); font-size: 10px; }
   .live-cockpit-next-item__time { color: var(--text-3); font-size: 10px; white-space: nowrap; }
-  .live-cockpit-next-item__action { display: grid; grid-template-rows: 28px 16px; align-items: center; width: max-content; max-width: 180px; min-width: 0; }
-  .live-cockpit-next-item__reason { box-sizing: border-box; grid-column: 1; grid-row: 2; width: 100%; height: 16px; min-height: 16px; max-height: 16px; overflow: hidden; color: var(--text-3); font-size: 10px; line-height: 16px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+  .live-cockpit-next-item__action { display: grid; grid-template-rows: 28px 24px; align-items: center; justify-items: end; width: max-content; max-width: 240px; min-width: 0; }
+  .live-cockpit-next-item__reason { box-sizing: border-box; grid-column: 1; grid-row: 2; width: 100%; height: 24px; min-height: 24px; max-height: 24px; overflow: hidden; color: var(--text-3); font-size: 10px; line-height: 12px; text-align: right; overflow-wrap: anywhere; }
   .live-cockpit-next-item__reason.is-warning { color: var(--warn); }
+  @media (max-width: 639px) {
+    .live-cockpit-next-item__action { grid-column: 2 / -1; grid-row: 2; width: 100%; max-width: none; }
+  }
   .live-cockpit-next-item .ui-button { min-height: 28px; padding-inline: var(--s2); font-size: 10px; }
   .live-cockpit-event-feed { display: flex; gap: var(--s2); }
   .live-cockpit-event-feed__heading { display: flex; align-items: center; justify-content: space-between; min-height: 22px; }
