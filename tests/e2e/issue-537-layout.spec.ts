@@ -174,6 +174,63 @@ test.describe("test area", () => {
   }
 });
 
+for (const [locale, label] of [["de-DE", "German"], ["en-US", "English"]] as const) {
+  test.describe(`test area mixed outcomes (${label})`, () => {
+    test.use({ locale });
+    const mixedChannel = "kanal-537-test-area-mixed";
+    const entry = (id: string, outcome: "fires" | "blocked" | "indeterminate") => ({
+      moduleId: "text_commands",
+      entry: { kind: "text_command", id, label: `!${id}` },
+      outcome,
+      match: { kind: "alias", token: id },
+      blocks: outcome === "blocked" ? [{ code: "text_commands.person_cooldown", detail: { remainingSeconds: 42 } }] : [],
+      effects: outcome === "fires" ? [{ kind: "chat", text: "Hallo", target: "source_only", postsTo: "this_chat", reply: true, suppressedBy: null, automated: true }] : [],
+      templateNotes: [],
+    });
+    const mixed = (controls: { muted: boolean; paused: boolean }) => ({
+      evaluatedAt: "2030-01-01T12:01:00.000Z",
+      controls,
+      sender: { userId: "dry-run:viewer_42", resolved: false, perUserCooldownsUseSyntheticId: true },
+      modules: [{ moduleId: "text_commands", status: "reacts", entries: [entry("eins", "fires"), entry("zwei", "blocked"), entry("drei", "indeterminate")] }],
+    });
+
+    for (const [width, height] of [[821, 800], [1280, 800], [1920, 1080]] as const) {
+      test(`the header and rows stay put when Muted and Paused appear at ${String(width)}px`, async ({ page }) => {
+        let controls = { muted: false, paused: false };
+        await installLiveCockpitMocks(page, { channelId: mixedChannel, role: "manager", streamState: "online", modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
+        await page.route(`**/api/channels/${mixedChannel}/dry-run`, (route) => route.fulfill(json(mixed(controls))));
+        await page.setViewportSize({ width, height });
+        await page.goto(`/channels/${mixedChannel}/test-area`);
+        const input = page.locator(".test-area__context-form input[type=text]").first();
+        await expect(input).toBeVisible();
+        const run = async (text: string): Promise<void> => {
+          await input.fill(text);
+          await page.locator(".test-area__context-form .test-area__run-button").click();
+          await expect(page.locator(".test-area__result-row")).toHaveCount(3);
+          await waitForWebFonts(page);
+        };
+        await run("!eins");
+        const before = { head: await rect(page, ".test-area__results-head"), row: await rect(page, ".test-area__result-row") };
+        controls = { muted: true, paused: true };
+        await run("!eins ");
+        await expect(page.locator(".test-area__results-title-copy .ui-badge")).toHaveCount(2);
+        await waitForWebFonts(page);
+        const after = { head: await rect(page, ".test-area__results-head"), row: await rect(page, ".test-area__result-row") };
+        expect(Math.abs(after.head.height - before.head.height)).toBeLessThanOrEqual(1);
+        expect(Math.abs(after.row.y - before.row.y)).toBeLessThanOrEqual(1);
+        const clipped = await page.locator(".test-area__results-title-copy").evaluate((copy) => {
+          const copyBox = copy.getBoundingClientRect();
+          return [...copy.children].filter((child) => {
+            const box = child.getBoundingClientRect();
+            return box.width > 0 && (box.right > copyBox.right + 0.5 || box.bottom > copyBox.bottom + 0.5 || (child as HTMLElement).scrollWidth > (child as HTMLElement).clientWidth + 0.5);
+          }).map((child) => child.textContent);
+        });
+        expect(clipped).toEqual([]);
+      });
+    }
+  });
+}
+
 test("shell and protokoll: nothing covers the selected nav row, the header spans the rows", async ({ page }) => {
   const auditChannel = "kanal-537-audit";
   const entries = Array.from({ length: 4 }, (_, index) => ({
