@@ -91,8 +91,12 @@ describe("editor seam styles", () => {
   });
 
   it("lifts the toast host above the fixed mobile save bar after the settings-page rule", () => {
-    const lift = "body:has(.ui-save-bar--mobile-fixed) .ui-toast-host { top: auto; bottom: calc(88px + env(safe-area-inset-bottom) + var(--s1));";
+    const lift = "body:has(.ui-save-bar--mobile-fixed) .ui-toast-host { top: auto; bottom: calc(var(--mobile-save-bar-outer) + var(--s1));";
     expect(styles).toContain(lift);
+    expect(styles).toContain(":root { --mobile-save-bar-outer: calc(81px + env(safe-area-inset-bottom)); }");
+    // The error state keeps the normal 64px single-row geometry in the fixed variant.
+    expect(styles).toMatch(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\) > \.ui-save-bar--persistent\.ui-save-bar--error \{[^}]*grid-template-rows: none;[^}]*height: auto;[^}]*min-height: 64px;/u);
+    expect(styles).not.toMatch(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\)[^{]*\{[^}]*88px/u);
     expect(styles.indexOf(lift)).toBeGreaterThan(styles.indexOf("body:has(.module-detail--settings-page) .ui-toast-host { bottom: var(--s1); }"));
   });
 

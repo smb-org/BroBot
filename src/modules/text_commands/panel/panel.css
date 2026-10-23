@@ -100,7 +100,7 @@
     .text-command-editor > .page-header .page-header__meta { font-size: 11px; }
     .text-command-editor > .page-header .page-header__badges { gap: 4px; }
     .text-command-editor > .page-header .module-status-switch { gap: 5px; min-height: 30px; font-size: 11px; }
-    .text-command-editor__scroll { gap: 0; margin-bottom: calc(88px + env(safe-area-inset-bottom)); padding-right: 0; padding-bottom: var(--s3); }
+    .text-command-editor__scroll { gap: 0; margin-bottom: var(--mobile-save-bar-outer); padding-right: 0; padding-bottom: var(--s3); }
     .text-command-editor__scroll > .ui-section { padding: 4px 0; }
     .text-command-editor__scroll > .ui-section > .ui-section__content { gap: 4px; }
     .text-command-editor .ui-template-text-field__description-content { gap: var(--s1); }
