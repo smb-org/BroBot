@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
+import { waitForWebFonts } from "./web-fonts";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
@@ -71,6 +72,7 @@ test("event load errors keep a fixed table slot and retry in that slot", async (
   const scroll = page.locator(".live-cockpit-event-feed__scroll");
   const error = page.locator(".live-cockpit-event-feed__error");
   await expect(error).toBeVisible({ timeout: 10_000 });
+  await waitForWebFonts(page);
   const initialGeometry = await Promise.all([
     panel.boundingBox(),
     scroll.evaluate((element) => ({ height: element.getBoundingClientRect().height, scrollHeight: element.scrollHeight })),

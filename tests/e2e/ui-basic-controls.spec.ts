@@ -1,4 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 
 test("primitive controls use the shared desktop height and portal layout stays stable", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
@@ -21,6 +22,7 @@ test("primitive controls use the shared desktop height and portal layout stays s
     expect(await labels.evaluateAll((items) => items.every((item) => item.scrollWidth <= item.clientWidth))).toBe(true);
   }
 
+  await waitForWebFonts(page);
   const anchorHeight = (await anchor.boundingBox())?.height;
   await anchor.getByRole("button", { name: "Popover help" }).focus();
   await expect(page.getByRole("tooltip")).toBeVisible();

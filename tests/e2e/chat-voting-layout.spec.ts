@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 
 import { DEFAULT_CHAT_VOTING_SETTINGS, type ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 
@@ -200,6 +201,7 @@ for (const viewport of viewports) {
     const duration = inspector.locator(".chat-voting-editor__duration-control");
     const durationSlot = duration.locator(".chat-voting-editor__duration-slot");
     await expect(durationSlot.locator(".unit-input")).toHaveCount(0);
+    await waitForWebFonts(page);
     const reservedDurationHeight = await durationSlot.evaluate((element) => element.getBoundingClientRect().height);
     await page.getByRole("button", { name: "Eigene", exact: true }).click();
     await expect(durationSlot.locator(".unit-input")).toBeVisible();

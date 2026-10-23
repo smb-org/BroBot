@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import type { DryRunRequest, DryRunResponse } from "../../src/contracts/dry-run";
 import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
+import { waitForWebFonts } from "./web-fonts";
 
 test.use({ locale: "de-DE" });
 
@@ -169,6 +170,7 @@ test("keeps the first result row close to its heading and stationary when hints 
     { width: 1920, height: 1080 },
   ]) {
     await page.setViewportSize(viewport);
+    await waitForWebFonts(page);
     const pageHeaderHeightBeforeRun = await page.locator(".tool-page > .page-header")
       .evaluate((header) => header.getBoundingClientRect().height);
     await message.fill("!dc hallo");

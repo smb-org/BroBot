@@ -4,6 +4,7 @@ import { BLITZ_STARTER_WORDS } from "../../src/modules/blitz_round/seed-words";
 import { dashboardTexts } from "../../src/dashboard/locale";
 import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
 import { blitzCaptureCatalog } from "./blitz-round.locale";
+import { waitForWebFonts } from "./web-fonts";
 import type { BlitzQuestion } from "../../src/modules/blitz_round/contracts";
 
 const question = (id: string, prompt: string, enabled = true): BlitzQuestion => ({
@@ -212,6 +213,7 @@ test("automatic start settings retain their layout in German and English at desk
 
       const settingsArea = page.locator(".blitz-panel__auto-start");
       const feedbackBelow = page.locator(".blitz-panel__auto-start + *");
+      await waitForWebFonts(page);
       const areaBefore = await settingsArea.boundingBox();
       const belowBefore = await feedbackBelow.boundingBox();
       await toggle.click();
