@@ -17,6 +17,20 @@ describe("VotekickLockCard", () => {
     expect(screen.getByRole("region", { name: "Mutual lock" })).toHaveTextContent("A vote is running");
   });
 
+  it("keeps the countdown separate from a long vote title", () => {
+    const title = "Welches Spiel spielen wir am kommenden Wochenende zusammen im Community-Stream?";
+    const { container } = render(<UiProvider><VotekickLockCard
+      state={{ kind: "chat_vote", title, until: "2030-01-01T00:01:20.000Z" }}
+      status="ready" language="de" now={Date.parse("2030-01-01T00:00:00.000Z")}
+    /></UiProvider>);
+    const titleElement = container.querySelector(".votekick-lock-card__main-title");
+    const countdown = container.querySelector(".votekick-lock-card__main-countdown");
+
+    expect(titleElement?.getAttribute("title")).toBe(title);
+    expect(titleElement?.textContent).toBe(title);
+    expect(countdown?.textContent).toBe(" · endet in 1:20");
+  });
+
   it("shows a running votekick and its remaining time", () => {
     render(<UiProvider><VotekickLockCard
       state={{ kind: "votekick", target: "sampleviewer", until: "2030-01-01T00:00:45.000Z" }}

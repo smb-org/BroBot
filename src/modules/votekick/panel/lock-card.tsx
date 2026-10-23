@@ -57,19 +57,23 @@ export const VotekickLockCard = ({ state, status, language, now }: {
 }): ReactElement => {
   const words = votekickLockCardTexts(language);
   const active = state !== null;
-  const title = state === null || state.kind === "unknown" ? "" : words.currentVote(
-    state.kind === "chat_vote" ? state.title ?? words.chatVote : words.votekick(state.target ?? words.unknownTarget),
-    remainingTime(state.until, now, words.unknownTime),
-  );
+  const hasCurrentVote = status === "ready" && state !== null && state.kind !== "unknown";
+  const voteTitle = !hasCurrentVote ? "" : state.kind === "chat_vote"
+    ? state.title ?? words.chatVote
+    : words.votekick(state.target ?? words.unknownTarget);
+  const countdown = !hasCurrentVote ? "" : words.currentVoteCountdown(remainingTime(state.until, now, words.unknownTime));
   const body = status === "error" ? " "
     : status === "loading" ? words.loading
       : state === null ? words.noVote
-        : state.kind === "unknown" ? words.ballotUnknown : title;
+        : state.kind === "unknown" ? words.ballotUnknown : null;
   const reserved = status === "error" ? words.error : words.explanation;
 
   return <section className="votekick-lock-card" aria-label={words.title} data-state={status}>
     <header className="votekick-lock-card__header"><h2>{words.title}</h2><span className={active ? "is-running" : ""}>{status === "loading" ? words.loading : status === "error" ? words.errorStatus : active ? words.running : words.available}</span></header>
-    <p className="votekick-lock-card__main" aria-live="polite">{body || " "}</p>
+    <p className="votekick-lock-card__main" aria-live="polite">{body === null ? <>
+      <span className="votekick-lock-card__main-title" title={voteTitle}>{voteTitle}</span>
+      <span className="votekick-lock-card__main-countdown">{countdown}</span>
+    </> : body || " "}</p>
     <p className="votekick-lock-card__reserved" aria-live="polite">{reserved}</p>
   </section>;
 };

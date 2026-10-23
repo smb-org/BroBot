@@ -26,7 +26,7 @@ export interface VotekickLockCardTexts {
   loading: string;
   errorStatus: string;
   error: string;
-  currentVote: (title: string, remaining: string) => string;
+  currentVoteCountdown: (remaining: string) => string;
   ballotUnknown: string;
   noVote: string;
   explanation: string;
@@ -44,7 +44,7 @@ const lockCardCatalog: LocaleCatalog<VotekickLockCardTexts> = {
     loading: "Abstimmungsstatus wird geladen …",
     errorStatus: "Nicht verfügbar",
     error: "Der Abstimmungsstatus konnte nicht geladen werden.",
-    currentVote: (title, remaining) => `${title} · endet in ${remaining}`,
+    currentVoteCountdown: (remaining) => ` · endet in ${remaining}`,
     ballotUnknown: "Eine Abstimmung ist aktiv. Details werden noch geladen.",
     noVote: "Gerade läuft keine Abstimmung.",
     explanation: "Chat-Abstimmungen und Votekicks teilen sich diese Sperre.",
@@ -60,7 +60,7 @@ const lockCardCatalog: LocaleCatalog<VotekickLockCardTexts> = {
     loading: "Loading voting status …",
     errorStatus: "Unavailable",
     error: "Voting status could not be loaded.",
-    currentVote: (title, remaining) => `${title} · ends in ${remaining}`,
+    currentVoteCountdown: (remaining) => ` · ends in ${remaining}`,
     ballotUnknown: "A vote is active. Its details are still loading.",
     noVote: "No vote is running right now.",
     explanation: "Chat votes and votekicks share this lock.",

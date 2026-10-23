@@ -7,6 +7,7 @@ test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
 const channelId = "kanal-509-clarity";
 const viewports = [{ width: 1920, height: 1080 }, { width: 390, height: 844 }] as const;
+const longVoteTitle = "Welches Spiel spielen wir am kommenden Wochenende zusammen im Community-Stream?";
 const modules = ["ads", "chat_voting", "raid", "timers", "votekick"].map((id) => ({ id, enabled: true, settings: "{}" }));
 const members = [
   { userId: "viewer-509", login: "mira_fox", displayName: "Mira Fox", profileImageUrl: null, role: "manager", joinedAt: "2025-08-13T10:00:00.000Z" },
@@ -19,21 +20,21 @@ interface Controls {
   setRaidState: (state: "ready" | "empty" | "error") => void;
   holdRaidState: () => void;
   releaseRaidState: () => void;
-  setLock: (lock: "idle" | "chat_vote" | "votekick") => void;
+  setLock: (lock: "idle" | "chat_vote" | "long_chat_vote" | "votekick") => void;
   setAds: (ads: "none" | "upcoming" | "running") => void;
   setDuels: (duels: readonly Record<string, unknown>[]) => void;
-  addActions: () => void;
+  addActions: () => number;
   holdSnooze: () => void;
   releaseSnooze: () => void;
 }
 
-const installMocks = async (page: Page, role: "manager" | "operator", duels: readonly Record<string, unknown>[] = []): Promise<Controls> => {
+const installMocks = async (page: Page, role: "manager" | "operator", duels: readonly Record<string, unknown>[] = [], enableDuel = false): Promise<Controls> => {
   let raidState: "ready" | "empty" | "error" = "ready";
   let raidGate: Promise<void> = Promise.resolve();
   let releaseRaid = (): void => undefined;
-  let lock: "idle" | "chat_vote" | "votekick" = "idle";
+  let lock: "idle" | "chat_vote" | "long_chat_vote" | "votekick" = "idle";
   let ads: "none" | "upcoming" | "running" = "none";
-  const activeModules = duels.length === 0 ? [...modules] : [...modules, { id: "duel", enabled: true, settings: "{}" }];
+  const activeModules = duels.length === 0 && !enableDuel ? [...modules] : [...modules, { id: "duel", enabled: true, settings: "{}" }];
   let activeDuels = [...duels];
   let snoozeGate: Promise<void> = Promise.resolve();
   let releaseSnooze = (): void => undefined;
@@ -50,6 +51,7 @@ const installMocks = async (page: Page, role: "manager" | "operator", duels: rea
     const now = Date.now();
     if (path === "/modules/duel/rounds" && method === "GET") return route.fulfill(json(activeDuels));
     if (path === "/members" && method === "GET") return route.fulfill(json({ members, nextCursor: null, broadcasterCount: 1, viewerUserId: "viewer-509" }));
+    if (path === "/modules/text_commands/commands" && method === "GET") return route.fulfill(json({ commands: [], warnings: [] }));
     if (path === "/template-variables" || path === "/variables") return route.fulfill(json({ variables: [] }));
     if (path === "/modules/votekick/settings" && method === "GET") return route.fulfill(json({ settings: DEFAULT_VOTEKICK_SETTINGS, revision: 1, variables: [] }));
     if (/^\/modules\/[^/]+\/settings$/u.test(path) && method === "GET") return route.fulfill(json({ settings: {}, revision: 1, variables: [] }));
@@ -72,7 +74,7 @@ const installMocks = async (page: Page, role: "manager" | "operator", duels: rea
       return route.fulfill(json({ running, votekicks: running === null ? [] : [running], now: new Date(now).toISOString() }));
     }
     if (path === "/modules/chat_voting/current") {
-      const vote = lock === "chat_vote"
+      const vote = lock === "chat_vote" || lock === "long_chat_vote"
         ? {
           id: "vote-509",
           channelId,
@@ -81,7 +83,7 @@ const installMocks = async (page: Page, role: "manager" | "operator", duels: rea
           labels: ["Abenteuer", "Strategie", "Rollenspiel"],
           answerColors: [],
           status: "open",
-          title: "Was spielen wir als Nächstes?",
+          title: lock === "long_chat_vote" ? longVoteTitle : "Was spielen wir als Nächstes?",
           openedAt: new Date(now - 60_000).toISOString(),
           closesAt: new Date(now + 90_000).toISOString(),
           requestedDurationSeconds: 120,
@@ -131,7 +133,9 @@ const installMocks = async (page: Page, role: "manager" | "operator", duels: rea
       }
     },
     addActions: () => {
-      activeModules.push(...["belabox", "clips", "channel_events", "blitz_round"].map((id) => ({ id, enabled: true, settings: "{}" })));
+      const actionModuleIds = ["belabox", "clips", "channel_events", "blitz_round"];
+      activeModules.push(...actionModuleIds.map((id) => ({ id, enabled: true, settings: "{}" })));
+      return actionModuleIds.length;
     },
     holdSnooze: () => { snoozeGate = new Promise<void>((resolve) => { releaseSnooze = resolve; }); },
     releaseSnooze: () => { releaseSnooze(); },
@@ -145,10 +149,11 @@ const open = async (
   prepare?: (controls: Controls) => void,
   role: "manager" | "operator" = "manager",
   duels: readonly Record<string, unknown>[] = [],
+  enableDuel = false,
 ): Promise<Controls> => {
   await page.unrouteAll({ behavior: "wait" });
   await page.setViewportSize(viewport);
-  const controls = await installMocks(page, role, duels);
+  const controls = await installMocks(page, role, duels, enableDuel);
   prepare?.(controls);
   await page.goto(`/channels/${channelId}${path}`);
   return controls;
@@ -312,6 +317,16 @@ for (const viewport of viewports) {
       expect(await box(columns)).toEqual(columnsBefore);
       expect(await boxes(page.locator(".ui-editor-shell__column"))).toEqual(bodyBefore);
 
+      controls.setLock("long_chat_vote");
+      const lockTitle = lock.locator(".votekick-lock-card__main-title");
+      const countdown = lock.locator(".votekick-lock-card__main-countdown");
+      await expect(lockTitle).toHaveAttribute("title", longVoteTitle, { timeout: 12_000 });
+      await expect(countdown).toBeVisible();
+      await expect(countdown).toContainText("endet in");
+      const [cardBox, countdownBox] = await Promise.all([box(lock), box(countdown)]);
+      expect(countdownBox.x).toBeGreaterThanOrEqual(cardBox.x);
+      expect(countdownBox.x + countdownBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+
       controls.setLock("votekick");
       await expect(lock).toContainText("Votekick gegen troll_tim · endet in", { timeout: 12_000 });
       expect(await box(lock)).toEqual(lockBefore);
@@ -416,9 +431,10 @@ for (const viewport of [
   { width: 1280, height: 800 },
 ]) {
   test(`cockpit: tile geometry stays fixed as live content arrives at ${String(viewport.width)}x${String(viewport.height)}`, async ({ page }) => {
-    const controls = await open(page, viewport, "");
+    const controls = await open(page, viewport, "", undefined, "manager", [], true);
     const actions = page.locator(".live-cockpit-actions__grid .live-action");
-    await expect(actions).toHaveCount(4);
+    await expect(actions.first()).toBeVisible();
+    const initialActionCount = await actions.count();
     const initial = await cockpitGeometry(page);
     expect(initial.ads.height).toBe(188);
     if (viewport.width >= 768 && viewport.width <= 1100) {
@@ -448,14 +464,21 @@ for (const viewport of [
       stake: 1_250,
       closesAt: new Date(Date.now() + 75_000).toISOString(),
     };
+    // The enabled duel module picks this round up through the cockpit's live-data poll.
     controls.setDuels([duel]);
-    await page.reload();
-    await expect(page.locator(".live-cockpit-running-tile").getByTestId("live-duel-tile")).toBeVisible();
+    await expect(page.locator(".live-cockpit-running-tile").getByTestId("live-duel-tile")).toBeVisible({ timeout: 15_000 });
     expectCockpitGeometryStable(initial, await cockpitGeometry(page));
 
-    controls.addActions();
-    await page.reload();
-    await expect(actions).toHaveCount(8);
+    const addedActionCount = controls.addActions();
+    const shortcut = await page.evaluate(() => /Mac|iPhone|iPad|iPod/u.test(navigator.platform || navigator.userAgent) ? "Meta+k" : "Control+k");
+    await page.keyboard.press(shortcut);
+    const palette = page.locator(".command-palette");
+    await expect(palette).toBeVisible();
+    // A channel-control command uses the dashboard's normal channel refresh, which reloads the module list.
+    const channelRefresh = page.waitForResponse((response) => response.url().endsWith("/api/channels") && response.request().method() === "GET");
+    await palette.locator('[data-command-palette-item-id="action:channel-mute"]').click();
+    await channelRefresh;
+    await expect(actions).toHaveCount(initialActionCount + addedActionCount);
     expectCockpitGeometryStable(initial, await cockpitGeometry(page));
     await expectNoHorizontalScroll(page);
   });
