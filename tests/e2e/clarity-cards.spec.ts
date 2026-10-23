@@ -422,7 +422,14 @@ for (const viewport of [
     const initial = await cockpitGeometry(page);
     expect(initial.ads.height).toBe(188);
     if (viewport.width >= 768 && viewport.width <= 1100) {
-      expect((await box(page.locator(".live-cockpit__wall"))).height).toBe(832);
+      expect((await box(page.locator(".live-cockpit__wall"))).height).toBe(844);
+      expect(initial.actions.height).toBe(352);
+      expect(initial.running.height).toBe(352);
+      expect(initial.next.height).toBe(188);
+      expect(initial.ads.y).toBe(initial.actions.y + initial.actions.height + 12);
+      expect(initial.next.y).toBe(initial.running.y + initial.running.height + 12);
+      expect(initial.running.x).toBe(initial.actions.x + initial.actions.width + 12);
+      expect(initial.next.x).toBe(initial.running.x);
     } else if (viewport.width >= 1101) {
       expect((await box(page.locator(".live-cockpit__wall"))).height).toBe(552);
       expect(initial.running.height).toBe(352);
@@ -455,6 +462,8 @@ for (const viewport of [
 }
 
 for (const viewport of [
+  { width: 1024, height: 800 },
+  { width: 1100, height: 800 },
   { width: 1280, height: 800 },
   { width: 1440, height: 900 },
   { width: 1920, height: 1080 },
@@ -482,7 +491,7 @@ for (const viewport of [
     const optionLabels = ["Abenteuer", "Strategie", "Rollenspiel"];
     const voteOptions = tile.locator(".live-vote-tile__options");
     await expect(voteOptions.locator(".live-vote-tile__option-label strong")).toHaveText(optionLabels);
-    if (viewport.width >= 1280) {
+    if (viewport.width >= 1024) {
       const actions = page.locator(".live-cockpit-actions");
       const actionsGrid = actions.locator(".live-cockpit-actions__grid");
       const [actionsBox, actionsGridBox, adsBox, wallBox] = await Promise.all([
@@ -504,10 +513,20 @@ for (const viewport of [
       expect(runningBox.y).toBeCloseTo(wallBox.y, 0);
       expect(runningBox.x).toBeCloseTo(nextBox.x, 0);
       expect(runningBox.width).toBeCloseTo(nextBox.width, 0);
-      expect(runningBox.height).toBeGreaterThanOrEqual(280);
+      if (viewport.width <= 1280) expect(runningBox.height).toBe(352);
+      else expect(runningBox.height).toBeGreaterThanOrEqual(280);
       expect(nextBox.y).toBeGreaterThanOrEqual(runningBox.y + runningBox.height);
       expect(nextBox.height).toBe(188);
-      expect(nextBox.y + nextBox.height).toBeCloseTo(wallBox.y + wallBox.height, 0);
+      if (viewport.width <= 1100) {
+        expect(wallBox.height).toBe(844);
+        const eventsBox = await box(page.locator(".live-cockpit-event-feed"));
+        expect(eventsBox.x).toBeCloseTo(wallBox.x, 0);
+        expect(eventsBox.width).toBeCloseTo(wallBox.width, 0);
+        expect(eventsBox.height).toBe(280);
+        expect(eventsBox.y).toBeCloseTo(nextBox.y + nextBox.height + 12, 0);
+      } else {
+        expect(nextBox.y + nextBox.height).toBeCloseTo(wallBox.y + wallBox.height, 0);
+      }
 
       const optionVisibility = await voteOptions.evaluate((element) => {
         const options = element as HTMLElement;
@@ -531,6 +550,24 @@ for (const viewport of [
       const votekickEmptyText = page.locator(".live-cockpit-next-list--recent p");
       await expect(votekickEmptyText).toBeVisible();
       await expect(votekickEmptyText).toHaveText("Keine offenen Timeouts aus Votekicks.");
+      if (viewport.width >= 1024) {
+        const votekickEmptyTextVisibility = await votekickEmptyText.evaluate((element) => {
+          const list = element.parentElement;
+          if (list === null) return { scrollTop: -1, fullyVisible: false };
+          const listRect = list.getBoundingClientRect();
+          const textRect = element.getBoundingClientRect();
+          const contentTop = listRect.top + list.clientTop;
+          const contentLeft = listRect.left + list.clientLeft;
+          return {
+            scrollTop: list.scrollTop,
+            fullyVisible: textRect.top >= contentTop - 0.5 && textRect.bottom <= contentTop + list.clientHeight + 0.5 &&
+              textRect.left >= contentLeft - 0.5 && textRect.right <= contentLeft + list.clientWidth + 0.5,
+          };
+        });
+        expect(votekickEmptyTextVisibility.scrollTop).toBe(0);
+        expect(votekickEmptyTextVisibility.fullyVisible).toBe(true);
+        await expect(page.getByRole("heading", { name: "Als Nächstes", exact: true })).toBeVisible();
+      }
       if (viewport.width === 1920) {
         expect(runningBox.width).toBeGreaterThanOrEqual(400);
         const title = tile.getByText("Was spielen wir als Nächstes?").first();
@@ -552,7 +589,7 @@ for (const viewport of [
     const clipping = await page.locator(".live-cockpit__wall").evaluate((wall) => {
       const violations: string[] = [];
       const tileSelector = ".live-cockpit-actions, .live-cockpit-running-tile, .live-cockpit-ads-tile, .live-cockpit-next-tile, .live-cockpit-event-feed";
-      const targetSelector = "button, .live-vote-tile__option, .live-vote-tile__track, .live-vote-tile__track > span, .live-cockpit-duels__item, .live-cockpit-next-tile p";
+      const targetSelector = "button, h2, .live-vote-tile__option, .live-vote-tile__track, .live-vote-tile__track > span, .live-cockpit-duels__item, .live-cockpit-next-tile p";
       const isInside = (target: DOMRect, ancestor: HTMLElement, axis: "x" | "y"): boolean => {
         const rect = ancestor.getBoundingClientRect();
         const start = axis === "x" ? rect.left + ancestor.clientLeft : rect.top + ancestor.clientTop;

@@ -51,7 +51,7 @@
   .live-cockpit__warning-summary .live-cockpit__location-action:active:not(:disabled) { border-color: var(--color-gold-press); background: var(--color-gold-press); }
   .live-cockpit__warning-details { display: grid; gap: var(--s3); }
   .live-cockpit__wall { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, .92fr); gap: var(--s3); min-width: 0; min-height: 0; overflow: hidden; }
-  .live-cockpit__running-area { grid-column: 2; min-width: 0; min-height: 0; container: live-cockpit-running / inline-size; }
+  .live-cockpit__running-area { grid-column: 2; min-width: 0; min-height: 0; }
   .live-cockpit-actions { display: flex; grid-column: 1; flex-direction: column; min-width: 0; min-height: 0; padding: var(--s3); border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface); }
   .live-cockpit-actions__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-height: 62px; margin-bottom: var(--s3); padding: 0 var(--s1) var(--s3); border-bottom: 1px solid var(--line); }
   .live-cockpit-actions__heading > div:first-child { min-width: 0; }
@@ -87,12 +87,6 @@
   .live-cockpit-running-tile { grid-column: 1; grid-row: 1; gap: var(--s2); }
   .live-cockpit-ads-tile { grid-column: 2; grid-row: 1; }
   .live-cockpit-next-tile { grid-column: 1 / -1; grid-row: 2; }
-  @container live-cockpit-running (max-width: 520px) {
-    .live-cockpit__running { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1.15fr) 188px minmax(0, .85fr); }
-    .live-cockpit-running-tile { grid-column: 1; grid-row: 1; }
-    .live-cockpit-ads-tile { grid-column: 1; grid-row: 2; height: 188px; min-height: 188px; }
-    .live-cockpit-next-tile { grid-column: 1; grid-row: 3; }
-  }
   .live-cockpit-duels__list { display: grid; gap: var(--s1); min-width: 0; min-height: 0; max-height: 144px; overflow: auto; scrollbar-gutter: stable; }
   .live-cockpit-duels__list h3 { margin: 0; color: var(--text-2); font-size: 11px; font-weight: 600; }
   .live-cockpit-duels__item { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: var(--s2); min-width: 0; min-height: 32px; padding: var(--s1) 0; border-bottom: 1px solid var(--line); }
@@ -221,10 +215,8 @@
     .live-cockpit-actions { min-height: 360px; }
     .live-cockpit-actions__grid { overflow: visible; }
   }
-  @media (min-width: 1101px) {
-    /* The ads slot stays fixed below actions; running and next fill the middle column. */
-    /* Below 1400px, 352px + the 12px row gap + the 188px lower row = 552px. */
-    .live-cockpit__wall { grid-template-rows: minmax(0, 1fr) 188px; }
+  @media (min-width: 768px) {
+    /* Keep the ads slot below actions and put running/next in the second column. */
     .live-cockpit__running-area, .live-cockpit__running { display: contents; }
     .live-cockpit-actions { grid-column: 1; grid-row: 1; min-height: 0; }
     .live-cockpit-actions__grid { overflow: auto; scrollbar-gutter: stable; }
@@ -233,13 +225,15 @@
     .live-cockpit-next-tile { grid-column: 2; grid-row: 2; }
     .live-cockpit-event-feed { grid-column: 3; grid-row: 1 / -1; }
   }
+  @media (min-width: 1101px) {
+    /* At 1280px, 352px + the 12px row gap + the 188px lower row = 552px. */
+    .live-cockpit__wall { grid-template-rows: minmax(0, 1fr) 188px; }
+  }
   @media (max-width: 1100px) {
-    /* From 768px through 1100px, 540px + 12px + the 280px event row = 832px. */
-    .live-cockpit__wall { height: 832px; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: 540px 280px; }
+    /* 352px + 12px + 188px + 12px + 280px = 844px. */
+    .live-cockpit__wall { height: 844px; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: 352px 188px 280px; }
     .live-cockpit-actions { height: 100%; min-height: 0; }
-    .live-cockpit-actions__grid { overflow: auto; scrollbar-gutter: stable; }
-    .live-cockpit-ads-tile { height: 188px; min-height: 188px; }
-    .live-cockpit-reserve[data-slot="events"] { grid-column: 1 / -1; min-height: 280px; }
+    .live-cockpit-reserve[data-slot="events"] { grid-column: 1 / -1; grid-row: 3; min-height: 280px; }
   }
   @media (max-width: 767px) {
     .main-content:has(.live-cockpit) { padding: 12px; }
