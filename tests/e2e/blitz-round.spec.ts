@@ -191,6 +191,7 @@ test("automatic start settings retain their layout in German and English at desk
       await expect(interval).toBeVisible();
       const autoStartHint = blitzTexts(language).autoStartHint;
       await expect(page.getByText(autoStartHint, { exact: true })).toBeVisible();
+      await waitForWebFonts(page);
       const toggleBounds = await toggle.boundingBox();
       const toggleLabelBounds = await page.getByText(blitzTexts(language).autoStart, { exact: true }).boundingBox();
       expect(toggleBounds).not.toBeNull();
@@ -213,7 +214,6 @@ test("automatic start settings retain their layout in German and English at desk
 
       const settingsArea = page.locator(".blitz-panel__auto-start");
       const feedbackBelow = page.locator(".blitz-panel__auto-start + *");
-      await waitForWebFonts(page);
       const areaBefore = await settingsArea.boundingBox();
       const belowBefore = await feedbackBelow.boundingBox();
       await toggle.click();

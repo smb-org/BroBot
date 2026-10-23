@@ -123,6 +123,7 @@ for (const viewport of viewports) {
     if (viewport.width <= 935) await page.setViewportSize(viewport);
     await expect(inspector.getByRole("textbox", { name: "Frage" })).toHaveValue(template.title);
 
+    await waitForWebFonts(page);
     const collectionLayout = await page.evaluate(() => {
       const header = document.querySelector<HTMLElement>(".module-detail--chat_voting > .page-header");
       const tabList = document.querySelector<HTMLElement>(".chat-voting-page-tabs__list");
@@ -201,7 +202,6 @@ for (const viewport of viewports) {
     const duration = inspector.locator(".chat-voting-editor__duration-control");
     const durationSlot = duration.locator(".chat-voting-editor__duration-slot");
     await expect(durationSlot.locator(".unit-input")).toHaveCount(0);
-    await waitForWebFonts(page);
     const reservedDurationHeight = await durationSlot.evaluate((element) => element.getBoundingClientRect().height);
     await page.getByRole("button", { name: "Eigene", exact: true }).click();
     await expect(durationSlot.locator(".unit-input")).toBeVisible();
