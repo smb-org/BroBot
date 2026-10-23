@@ -1578,6 +1578,7 @@ p.lock-reason { margin-bottom: 1em; }
   .module-detail--settings-page .settings-page__columns { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; padding: 8px 0; }
   .module-detail--settings-page .settings-page__column { flex: none; width: 100%; min-height: 0; overflow: visible; }
   body:has(.module-detail--settings-page) .ui-toast-host { bottom: var(--s1); }
+  body:has(.ui-save-bar--mobile-fixed) .ui-toast-host { top: auto; bottom: calc(88px + env(safe-area-inset-bottom) + var(--s1)); align-content: end; }
   .header-action { justify-items: start; }
   .inspector-result, .form-row { flex-direction: column; align-items: stretch; }
   .inspector-result .button { width: 100%; }

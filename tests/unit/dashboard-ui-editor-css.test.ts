@@ -90,6 +90,12 @@ describe("editor seam styles", () => {
     expect(textCommandStyles).not.toMatch(/\.text-command-editor \.page-header__save[^{}]*\{[^{}]*\}/u);
   });
 
+  it("lifts the toast host above the fixed mobile save bar after the settings-page rule", () => {
+    const lift = "body:has(.ui-save-bar--mobile-fixed) .ui-toast-host { top: auto; bottom: calc(88px + env(safe-area-inset-bottom) + var(--s1));";
+    expect(styles).toContain(lift);
+    expect(styles.indexOf(lift)).toBeGreaterThan(styles.indexOf("body:has(.module-detail--settings-page) .ui-toast-host { bottom: var(--s1); }"));
+  });
+
   it("collapses unused dashboard header status slots while preserving labeled slots", () => {
     expect(dashboardSource).toContain('configured && label !== null ? "" : " is-empty"');
     expect(styles).toContain(".dashboard-header__control-state-slot { display: block; flex: none; width: max-content; max-width: 180px; min-width: 0; }");
