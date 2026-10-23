@@ -55,6 +55,30 @@ const draftFromTemplate = (template: ChatVoteTemplate): ChatVoteTemplateDraft =>
   durationSeconds: template.durationSeconds,
 });
 
+const reconcileAnswerIds = (
+  previousLabels: readonly string[],
+  previousAnswerIds: readonly string[],
+  nextLabels: readonly string[],
+  createAnswerId: () => string,
+): string[] => {
+  const sameSequence = previousLabels.length === nextLabels.length
+    && previousLabels.every((label, index) => label === nextLabels[index]);
+  if (sameSequence) return nextLabels.map((_label, index) => previousAnswerIds[index] ?? createAnswerId());
+
+  const countLabels = (labels: readonly string[]): Map<string, number> => {
+    const counts = new Map<string, number>();
+    labels.forEach((label) => { counts.set(label, (counts.get(label) ?? 0) + 1); });
+    return counts;
+  };
+  const previousCounts = countLabels(previousLabels);
+  const nextCounts = countLabels(nextLabels);
+  return nextLabels.map((label) => {
+    if (previousCounts.get(label) !== 1 || nextCounts.get(label) !== 1) return createAnswerId();
+    const previousIndex = previousLabels.indexOf(label);
+    return previousAnswerIds[previousIndex] ?? createAnswerId();
+  });
+};
+
 const blankDraft = (draft: ChatVoteTemplateDraft): boolean =>
   draft.shortcut === null && draft.title.trim().length === 0 && draft.labels.every((label) => label.trim().length === 0) && draft.freeTextMode === null;
 
@@ -415,7 +439,7 @@ export function ChatVoteTemplateInspector({
       }
       const serverDraft = draftFromTemplate(latest);
       const currentAnswerIds = answerIdsRef.current;
-      const nextAnswerIds = serverDraft.labels.map((_label, index) => currentAnswerIds[index] ?? createAnswerId());
+      const nextAnswerIds = reconcileAnswerIds(draftValue.current.labels, currentAnswerIds, serverDraft.labels, createAnswerId);
       answerIdsRef.current = nextAnswerIds;
       setAnswerIds(nextAnswerIds);
       const remainingColorDrafts: Record<string, CustomColorDraft> = {};
@@ -423,7 +447,7 @@ export function ChatVoteTemplateInspector({
       nextAnswerIds.forEach((answerId, index) => {
         const currentColorDraft = customColorDraftsRef.current[answerId];
         const colorDraftAtReloadStart = colorDraftsAtReloadStart[answerId];
-        if (currentColorDraft === undefined || currentColorDraft.value === colorDraftAtReloadStart?.value) return;
+        if (currentColorDraft === undefined || currentColorDraft.generation === colorDraftAtReloadStart?.generation) return;
         remainingColorDrafts[answerId] = currentColorDraft;
         const normalized = normalizeChatVoteColor(currentColorDraft.value);
         if (normalized !== null) nextColors[index] = normalized;

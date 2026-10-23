@@ -67,9 +67,12 @@ test.describe("live cockpit", () => {
     const item = page.locator(".live-cockpit-next-item").first();
     await expect(item).toBeVisible();
     await waitForWebFonts(page);
-    const [itemBox, listBox] = await Promise.all([item.boundingBox(), page.locator(".live-cockpit-next-list").last().boundingBox()]);
-    if (itemBox === null || listBox === null) throw new Error("Expected boxes.");
-    expect(itemBox.y - listBox.y).toBeLessThanOrEqual(8);
+    const [textBox, listBox] = await Promise.all([
+      item.locator(".live-cockpit-next-item__copy strong").boundingBox(),
+      page.locator(".live-cockpit-next-list").last().boundingBox(),
+    ]);
+    if (textBox === null || listBox === null) throw new Error("Expected boxes.");
+    expect(textBox.y - listBox.y).toBeLessThanOrEqual(8);
     expect((await rect(page, ".live-action")).height).toBeGreaterThan(103);
     await page.setViewportSize({ width: 1280, height: 800 });
     await expect.poll(async () => (await rect(page, ".live-action")).height).toBe(103);
