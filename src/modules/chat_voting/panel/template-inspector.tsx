@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { ActionMenu, Button, ChatPreview, ConfirmDialog, Field, InspectorSection, PageHeader, SaveStatus, SegmentChoice, SwitchRow, SwitchSection, TemplateTextField, UnitInput, panelTemplateOptions, registeredModuleTemplateGroup, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
@@ -54,6 +54,34 @@ const draftFromTemplate = (template: ChatVoteTemplate): ChatVoteTemplateDraft =>
   freeTextMode: template.freeTextMode,
   durationSeconds: template.durationSeconds,
 });
+
+const reconcileAnswerIds = (
+  previousServerLabels: readonly string[],
+  previousAnswerIds: readonly string[],
+  nextLabels: readonly string[],
+  createAnswerId: () => string,
+): string[] => {
+  const countLabels = (labels: readonly string[]): Map<string, number> => {
+    const counts = new Map<string, number>();
+    labels.forEach((label) => {
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    });
+    return counts;
+  };
+  const previousCounts = countLabels(previousServerLabels);
+  const nextCounts = countLabels(nextLabels);
+  const sameSequence = previousServerLabels.length === nextLabels.length
+    && previousServerLabels.every((label, index) => label === nextLabels[index]
+      && previousCounts.get(label) === 1
+      && nextCounts.get(label) === 1);
+  if (sameSequence) return nextLabels.map((_label, index) => previousAnswerIds[index] ?? createAnswerId());
+
+  return nextLabels.map((label) => {
+    if (previousCounts.get(label) !== 1 || nextCounts.get(label) !== 1) return createAnswerId();
+    const previousIndex = previousServerLabels.indexOf(label);
+    return previousAnswerIds[previousIndex] ?? createAnswerId();
+  });
+};
 
 const blankDraft = (draft: ChatVoteTemplateDraft): boolean =>
   draft.shortcut === null && draft.title.trim().length === 0 && draft.labels.every((label) => label.trim().length === 0) && draft.freeTextMode === null;
@@ -115,9 +143,15 @@ export function ChatVoteTemplateInspector({
   const draftValue = useRef(draft.value);
   const baselineDraft = useRef(initialDraft);
   const baseRevision = useRef(template.revision);
-  const draftGeneration = useRef(0);
   const reloadGeneration = useRef(0);
   const reloadPending = useRef(false);
+  const answerIdPrefix = useId().replaceAll(":", "");
+  const answerIdSequence = useRef(initialDraft.labels.length);
+  const createAnswerId = (): string => `${answerIdPrefix}-answer-${String(++answerIdSequence.current)}`;
+  const initialAnswerIds = initialDraft.labels.map((_label, index) => `${answerIdPrefix}-answer-${String(index + 1)}`);
+  const [answerIds, setAnswerIds] = useState<readonly string[]>(initialAnswerIds);
+  const answerIdsRef = useRef(answerIds);
+  const baselineAnswerIds = useRef<readonly string[]>(initialAnswerIds);
   const [durationMode, setDurationMode] = useState(() => durationPreset(draft.value.durationSeconds));
   const [customDurationSelected, setCustomDurationSelected] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -129,20 +163,24 @@ export function ChatVoteTemplateInspector({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>();
-  const customColorDraftsRef = useRef<Readonly<Record<number, CustomColorDraft>>>({});
+  const customColorDraftsRef = useRef<Readonly<Record<string, CustomColorDraft>>>({});
   const customColorEditGeneration = useRef(0);
-  const [customColorDrafts, setCustomColorDrafts] = useState<Readonly<Record<number, CustomColorDraft>>>({});
+  const [customColorDrafts, setCustomColorDrafts] = useState<Readonly<Record<string, CustomColorDraft>>>({});
   const deletingRef = useRef(false);
   const updateCustomColorDrafts = (
-    update: (current: Readonly<Record<number, CustomColorDraft>>) => Readonly<Record<number, CustomColorDraft>>,
+    update: (current: Readonly<Record<string, CustomColorDraft>>) => Readonly<Record<string, CustomColorDraft>>,
   ): void => {
     const next = update(customColorDraftsRef.current);
     customColorDraftsRef.current = next;
     setCustomColorDrafts(next);
   };
-  const clearCustomColorDrafts = (): void => {
-    customColorDraftsRef.current = {};
-    setCustomColorDrafts({});
+  const clearCustomColorDrafts = (answerId?: string): void => {
+    if (answerId === undefined) {
+      customColorDraftsRef.current = {};
+      setCustomColorDrafts({});
+      return;
+    }
+    updateCustomColorDrafts((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== answerId)));
   };
   const hasInvalidCustomColorDraft = Object.values(customColorDrafts).some(({ value }) => normalizeChatVoteColor(value) === null);
   const dirty = canManageContent && (isNew || draft.dirty || hasInvalidCustomColorDraft);
@@ -151,8 +189,13 @@ export function ChatVoteTemplateInspector({
       : templates.some((entry) => entry.id !== template.id && entry.shortcut === draft.value.shortcut) ? labels.shortcutDuplicate
         : null);
   const answerColorAt = (index: number): string => draft.value.answerColors[index] ?? chatVoteDefaultColorAt(index);
+  const answerIdAt = (index: number): string => {
+    const answerId = answerIds[index];
+    if (answerId === undefined) throw new Error("A chat vote answer is missing its local identity.");
+    return answerId;
+  };
   const answerColorIssue = (index: number): "format" | "contrast" | "duplicate" | null => {
-    const customDraft = customColorDrafts[index]?.value;
+    const customDraft = customColorDrafts[answerIdAt(index)]?.value;
     if (customDraft !== undefined && normalizeChatVoteColor(customDraft) === null) return "format";
     const color = customDraft === undefined ? answerColorAt(index) : normalizeChatVoteColor(customDraft) ?? answerColorAt(index);
     if (draft.value.answerColors.some((existing, otherIndex) => otherIndex !== index && existing === color)) return "duplicate";
@@ -203,9 +246,8 @@ export function ChatVoteTemplateInspector({
     reloadPending.current = false;
   };
 
-  const updateDraft = (update: Partial<ChatVoteTemplateDraft>): void => {
-    draftGeneration.current += 1;
-    invalidateReload();
+  const updateDraft = (update: Partial<ChatVoteTemplateDraft>, options: { keepReloadPending?: boolean } = {}): void => {
+    if (options.keepReloadPending !== true) invalidateReload();
     const next = { ...draftValue.current, ...update };
     draftValue.current = next;
     draft.setValue(next);
@@ -214,25 +256,42 @@ export function ChatVoteTemplateInspector({
     if ("shortcut" in update) setServerShortcutError(null);
   };
 
-  const updateAnswerLabels = (nextLabels: readonly string[], nextColors?: readonly string[]): void => {
+  const updateAnswerLabels = (nextLabels: readonly string[], nextColors?: readonly string[], nextAnswerIds?: readonly string[]): void => {
     const colors = nextColors === undefined ? [] : [...nextColors];
     if (nextColors === undefined) {
       nextLabels.forEach((_label, index) => {
         colors.push(draftValue.current.answerColors[index] ?? nextUnusedChatVoteDefaultColor(colors));
       });
     }
-    clearCustomColorDrafts();
+    const currentAnswerIds = answerIdsRef.current;
+    const answerIds = nextAnswerIds ?? [
+      ...currentAnswerIds.slice(0, nextLabels.length),
+      ...nextLabels.slice(currentAnswerIds.length).map(() => createAnswerId()),
+    ];
+    answerIdsRef.current = answerIds;
+    setAnswerIds(answerIds);
+    const remainingAnswerIds = new Set(answerIds);
+    updateCustomColorDrafts((current) => Object.fromEntries(Object.entries(current).filter(([id]) => remainingAnswerIds.has(id))));
     updateDraft({ labels: nextLabels, answerColors: colors });
   };
 
-  const changeAnswerColor = (index: number, value: string): void => {
+  const changeAnswerColor = (answerId: string, index: number, value: string): void => {
     const generation = ++customColorEditGeneration.current;
-    updateCustomColorDrafts((current) => ({ ...current, [index]: { value, generation } }));
+    updateCustomColorDrafts((current) => ({ ...current, [answerId]: { value, generation } }));
+    const normalized = normalizeChatVoteColor(value);
+    if (normalized === null) return;
+    const nextColors = draftValue.current.labels.map((_label, colorIndex) => draftValue.current.answerColors[colorIndex] ?? chatVoteDefaultColorAt(colorIndex));
+    nextColors[index] = normalized;
+    updateDraft({ answerColors: nextColors }, { keepReloadPending: true });
+  };
+
+  const applyAnswerColor = (answerId: string, index: number, value: string): void => {
     const normalized = normalizeChatVoteColor(value);
     if (normalized === null) return;
     const nextColors = draftValue.current.labels.map((_label, colorIndex) => draftValue.current.answerColors[colorIndex] ?? chatVoteDefaultColorAt(colorIndex));
     nextColors[index] = normalized;
     updateDraft({ answerColors: nextColors });
+    clearCustomColorDrafts(answerId);
   };
 
   const saveDraft = async (): Promise<string | null> => {
@@ -242,6 +301,7 @@ export function ChatVoteTemplateInspector({
       return saveInvalidReason;
     }
     const submitted = { ...draftValue.current, labels: [...draftValue.current.labels], answerColors: [...draftValue.current.answerColors] };
+    const submittedAnswerIds = [...answerIdsRef.current];
     const submittedColorDrafts = { ...customColorDraftsRef.current };
     if (blankDraft(submitted)) {
       setSaveError(labels.emptyDraftError);
@@ -275,16 +335,18 @@ export function ChatVoteTemplateInspector({
       });
       const acceptedDraft = draftFromTemplate(next);
       const current = draftValue.current;
-      const remainingColorDrafts: Record<number, CustomColorDraft> = {};
-      for (const [index, currentColorDraft] of Object.entries(customColorDraftsRef.current)) {
-        const submittedColorDraft = submittedColorDrafts[Number(index)];
+      const remainingColorDrafts: Record<string, CustomColorDraft> = {};
+      for (const [answerId, currentColorDraft] of Object.entries(customColorDraftsRef.current)) {
+        const submittedColorDraft = submittedColorDrafts[answerId];
         if (submittedColorDraft === undefined || currentColorDraft.generation !== submittedColorDraft.generation) {
-          remainingColorDrafts[Number(index)] = currentColorDraft;
+          remainingColorDrafts[answerId] = currentColorDraft;
         }
       }
       updateCustomColorDrafts(() => remainingColorDrafts);
       baseRevision.current = next.revision;
       baselineDraft.current = acceptedDraft;
+      const acceptedAnswerIds = reconcileAnswerIds(submitted.labels, submittedAnswerIds, acceptedDraft.labels, createAnswerId);
+      baselineAnswerIds.current = acceptedAnswerIds;
       draft.accept(acceptedDraft);
       if (JSON.stringify(current) !== JSON.stringify(submitted)) {
         draftValue.current = current;
@@ -325,8 +387,10 @@ export function ChatVoteTemplateInspector({
 
   const saveForGuard = (): Promise<string | null> => saveDraft();
   const resetDraft = (): void => {
-    draftGeneration.current += 1;
     invalidateReload();
+    const nextAnswerIds = [...baselineAnswerIds.current];
+    answerIdsRef.current = nextAnswerIds;
+    setAnswerIds(nextAnswerIds);
     draft.accept(baselineDraft.current);
     draftValue.current = baselineDraft.current;
     setSaveError(undefined);
@@ -339,9 +403,12 @@ export function ChatVoteTemplateInspector({
   const draftGuard = useDraftGuard(dirty, saveForGuard, resetDraft);
 
   const acceptTemplate = (accepted: ChatVoteTemplate): void => {
-    draftGeneration.current += 1;
     invalidateReload();
     const nextDraft = draftFromTemplate(accepted);
+    const nextAnswerIds = nextDraft.labels.map(() => createAnswerId());
+    answerIdsRef.current = nextAnswerIds;
+    setAnswerIds(nextAnswerIds);
+    baselineAnswerIds.current = nextAnswerIds;
     draftValue.current = nextDraft;
     baselineDraft.current = nextDraft;
     baseRevision.current = accepted.revision;
@@ -367,9 +434,8 @@ export function ChatVoteTemplateInspector({
     if (reloadPending.current) return;
     reloadPending.current = true;
     const requestGeneration = ++reloadGeneration.current;
-    const requestDraftGeneration = draftGeneration.current;
-    const isCurrentRequest = (): boolean => reloadGeneration.current === requestGeneration
-      && draftGeneration.current === requestDraftGeneration;
+    const colorDraftsAtReloadStart = { ...customColorDraftsRef.current };
+    const isCurrentRequest = (): boolean => reloadGeneration.current === requestGeneration;
     try {
       const latest = (await refetchModuleQueryData<ChatVoteTemplateListState>(queryClient, channelId, "chat_voting", "templates"))
         .templates.find((entry) => entry.id === template.id);
@@ -378,13 +444,30 @@ export function ChatVoteTemplateInspector({
         setSaveError(labels.conflictReloadMissing);
         return;
       }
-      const nextDraft = draftFromTemplate(latest);
-      draftGeneration.current += 1;
+      const serverDraft = draftFromTemplate(latest);
+      const previousServerLabels = baselineDraft.current.labels;
+      const previousAnswerIds = baselineAnswerIds.current;
+      const nextAnswerIds = reconcileAnswerIds(previousServerLabels, previousAnswerIds, serverDraft.labels, createAnswerId);
+      answerIdsRef.current = nextAnswerIds;
+      setAnswerIds(nextAnswerIds);
+      baselineAnswerIds.current = nextAnswerIds;
+      const remainingColorDrafts: Record<string, CustomColorDraft> = {};
+      const nextColors = [...serverDraft.answerColors];
+      nextAnswerIds.forEach((answerId, index) => {
+        const currentColorDraft = customColorDraftsRef.current[answerId];
+        const colorDraftAtReloadStart = colorDraftsAtReloadStart[answerId];
+        if (currentColorDraft === undefined || currentColorDraft.generation === colorDraftAtReloadStart?.generation) return;
+        remainingColorDrafts[answerId] = currentColorDraft;
+        const normalized = normalizeChatVoteColor(currentColorDraft.value);
+        if (normalized !== null) nextColors[index] = normalized;
+      });
+      const nextDraft = { ...serverDraft, answerColors: nextColors };
       baseRevision.current = latest.revision;
-      baselineDraft.current = nextDraft;
+      baselineDraft.current = serverDraft;
       draftValue.current = nextDraft;
-      draft.accept(nextDraft);
-      clearCustomColorDrafts();
+      draft.accept(serverDraft);
+      if (JSON.stringify(nextDraft) !== JSON.stringify(serverDraft)) draft.setValue(nextDraft);
+      updateCustomColorDrafts(() => remainingColorDrafts);
       setCustomDurationSelected(false);
       setConflict(false);
       setSaveError(undefined);
@@ -474,11 +557,12 @@ export function ChatVoteTemplateInspector({
           <span className="mono">2</span><span>{labels.ghostNo}</span>
         </div> : <div className="chat-voting-editor__answer-list">{draft.value.labels.map((answer, index) => {
           const answerNumber = index + 1;
+          const answerId = answerIdAt(index);
           const answerProblem = answerError(index);
-          return <div className="chat-voting-editor__answer" key={"answer-" + String(answerNumber)}>
+          return <div className="chat-voting-editor__answer" key={answerId}>
             <span className="mono chat-voting-editor__answer-key" aria-hidden="true">{String(answerNumber)}</span>
             <Field
-              id={"chat-vote-answer-" + template.id + "-" + String(index)}
+              id={"chat-vote-answer-" + template.id + "-" + answerId}
               label={labels.answer(answerNumber)}
               labelHidden
               ariaLabel={labels.answer(answerNumber)}
@@ -514,7 +598,7 @@ export function ChatVoteTemplateInspector({
                         className={answerColorAt(index) === color ? "is-selected" : ""}
                         disabled={used}
                         key={color}
-                        onClick={() => { changeAnswerColor(index, color); }}
+                        onClick={() => { applyAnswerColor(answerId, index, color); }}
                         style={{ backgroundColor: color }}
                         title={color}
                         type="button"
@@ -525,8 +609,8 @@ export function ChatVoteTemplateInspector({
                     ariaLabel={labels.customHexColor}
                     className="chat-voting-editor__color-field"
                     label={labels.customHexColor}
-                    onChange={(value) => { changeAnswerColor(index, value); }}
-                    value={customColorDrafts[index]?.value ?? answerColorAt(index)}
+                    onChange={(value) => { changeAnswerColor(answerId, index, value); }}
+                    value={customColorDrafts[answerId]?.value ?? answerColorAt(index)}
                   />
                   <span aria-live="polite" className="chat-voting-editor__color-feedback">
                     {answerColorIssue(index) === "format" ? labels.colorFormatError
@@ -541,7 +625,7 @@ export function ChatVoteTemplateInspector({
               size="compact"
               variant="subtle"
               ariaLabel={labels.removeAnswer(answerNumber)}
-              onClick={() => { updateAnswerLabels(draft.value.labels.filter((_label, labelIndex) => labelIndex !== index), draft.value.answerColors.filter((_color, colorIndex) => colorIndex !== index)); }}
+              onClick={() => { updateAnswerLabels(draft.value.labels.filter((_label, labelIndex) => labelIndex !== index), draft.value.answerColors.filter((_color, colorIndex) => colorIndex !== index), answerIds.filter((_answerId, answerIndex) => answerIndex !== index)); }}
             />
           </div>;
         })}</div>}
@@ -582,8 +666,8 @@ export function ChatVoteTemplateInspector({
 
       <InspectorSection title={labels.quickTemplates}>
         <div className="chat-voting-editor__quick-templates">
-          <Button size="compact" variant="neutral" onClick={() => { const next = language === "de" ? ["Ja", "Nein"] : ["Yes", "No"]; updateAnswerLabels(next, next.map((_answer, index) => chatVoteDefaultColorAt(index))); }}>{labels.yesNo}</Button>
-          <Button size="compact" variant="neutral" onClick={() => { const next = ["1", "2", "3", "4", "5"]; updateAnswerLabels(next, next.map((_answer, index) => chatVoteDefaultColorAt(index))); }}>{labels.scale}</Button>
+          <Button size="compact" variant="neutral" onClick={() => { const next = language === "de" ? ["Ja", "Nein"] : ["Yes", "No"]; updateAnswerLabels(next, next.map((_answer, index) => chatVoteDefaultColorAt(index)), next.map(() => createAnswerId())); }}>{labels.yesNo}</Button>
+          <Button size="compact" variant="neutral" onClick={() => { const next = ["1", "2", "3", "4", "5"]; updateAnswerLabels(next, next.map((_answer, index) => chatVoteDefaultColorAt(index)), next.map(() => createAnswerId())); }}>{labels.scale}</Button>
         </div>
       </InspectorSection>
 
