@@ -103,25 +103,32 @@ describe("votekick starter role setting", () => {
     expect(screen.getByText("11 net yes votes needed")).toBeInTheDocument();
   });
 
-  it.each(["de", "en"] as const)("shows localized threshold semantics and read-only values for operators (%s)", (language) => {
+  it.each([
+    ["de", false], ["de", true], ["en", false], ["en", true],
+  ] as const)("shows the saved threshold example and read-only values for operators (%s, section-only: %s)", (language, readOnlySectionOnly) => {
     const copy = votekickSettingsEditorCatalog(language);
+    const savedSettings = { ...DEFAULT_VOTEKICK_SETTINGS, minNetVotes: 8, percent: 30 };
     render(<UiProvider>
       <SettingsEditor
         spec={settingsEditor.spec}
         sectionId="settings"
-        settings={DEFAULT_VOTEKICK_SETTINGS}
+        settings={savedSettings}
         onChange={() => undefined}
         texts={copy}
         templateMessages={copy.templateMessages}
         readOnly
+        readOnlySectionOnly={readOnlySectionOnly}
         enabledLabel={copy.enabledLabel}
         disabledLabel={copy.disabledLabel}
+        afterNote={<VotekickThresholdExample minNetVotes={savedSettings.minNetVotes} percent={savedSettings.percent} language={language} />}
       />
     </UiProvider>);
 
-    expect(screen.getByText(copy.notes?.thresholdRule ?? "")).toBeInTheDocument();
-    expect(screen.getByText(language === "de" ? "Mindest-Netto-Ja-Stimmen" : "Minimum net yes votes")).toBeInTheDocument();
-    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(screen.getByText(copy.notes?.thresholdRule ?? "")).not.toBeNull();
+    expect(screen.getByText(language === "de" ? "11 Netto-Ja-Stimmen nötig" : "11 net yes votes needed")).not.toBeNull();
+    expect(document.querySelector(".ui-rule-note")?.nextElementSibling?.classList.contains("votekick-threshold-example")).toBe(true);
+    expect(screen.getByText(language === "de" ? "Mindest-Netto-Ja-Stimmen" : "Minimum net yes votes")).not.toBeNull();
+    expect(screen.queryByRole("spinbutton")).toBeNull();
   });
 
   it("keeps each message's enabled state and text together in operator properties", () => {

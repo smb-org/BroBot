@@ -481,6 +481,8 @@ export function SettingsEditor<Settings extends object>({
   if (readOnly) {
     return readOnlySectionOnly
       ? <InspectorSection title={section === undefined ? "" : texts.sections[section.id]}>
+        {section?.note === undefined || texts.notes?.[section.note] === undefined ? null : <RuleNote>{texts.notes[section.note]}</RuleNote>}
+        {afterNote}
         <dl className="properties ui-settings-editor__properties">
           {section?.fields.map(renderReadOnlyProperty)}
         </dl>
@@ -488,6 +490,7 @@ export function SettingsEditor<Settings extends object>({
       : <div className="ui-settings-editor__readonly-sections">
         {spec.sections.map((candidate) => <InspectorSection title={texts.sections[candidate.id]} key={candidate.id}>
           {candidate.note === undefined || texts.notes?.[candidate.note] === undefined ? null : <RuleNote>{texts.notes[candidate.note]}</RuleNote>}
+          {candidate.id === sectionId ? afterNote : null}
           <dl className="properties ui-settings-editor__properties">
             {candidate.fields.map(renderReadOnlyProperty)}
           </dl>

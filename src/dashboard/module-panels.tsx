@@ -547,6 +547,10 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   })) as Readonly<Partial<Record<string, readonly (TemplateTextFieldVariable & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
   const templateVariableOptions: Readonly<Partial<Record<string, readonly TemplateTextFieldVariable[]>>> = templateMetadata;
   const slotRate = module.id === "emote_slots" ? calculateSlotPayoutRateForDraft(currentValue) : null;
+  const votekickThresholdExample = (sectionId: string): ReactElement | undefined =>
+    module.id === "votekick" && sectionId === "settings"
+      ? <VotekickThresholdExample minNetVotes={currentValue.minNetVotes} percent={currentValue.percent} language={language} />
+      : undefined;
   const settingsEditor = (sectionId: string, fieldErrors: Readonly<Record<string, string>>): ReactElement => (
     <SettingsEditor
       key={sectionId}
@@ -577,9 +581,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
       {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
-      {...(module.id === "votekick" && sectionId === "settings" ? {
-        afterNote: <VotekickThresholdExample minNetVotes={currentValue.minNetVotes} percent={currentValue.percent} language={language} />,
-      } : {})}
+      afterNote={votekickThresholdExample(sectionId)}
       onIssuesChange={reportTemplateIssues}
     />
   );
@@ -598,6 +600,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
       {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
+      afterNote={votekickThresholdExample(spec.sections[0]?.id ?? "")}
     />,
   } : undefined;
   const collectErrors = (includeUntouched = false): Record<string, string> => {

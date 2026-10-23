@@ -21,6 +21,8 @@ interface Controls {
   releaseRaidState: () => void;
   setLock: (lock: "idle" | "chat_vote" | "votekick") => void;
   setAds: (ads: "none" | "upcoming" | "running") => void;
+  setDuels: (duels: readonly Record<string, unknown>[]) => void;
+  addActions: () => void;
   holdSnooze: () => void;
   releaseSnooze: () => void;
 }
@@ -31,19 +33,22 @@ const installMocks = async (page: Page, role: "manager" | "operator", duels: rea
   let releaseRaid = (): void => undefined;
   let lock: "idle" | "chat_vote" | "votekick" = "idle";
   let ads: "none" | "upcoming" | "running" = "none";
+  const activeModules = duels.length === 0 ? [...modules] : [...modules, { id: "duel", enabled: true, settings: "{}" }];
+  let activeDuels = [...duels];
   let snoozeGate: Promise<void> = Promise.resolve();
   let releaseSnooze = (): void => undefined;
 
   await installLiveCockpitMocks(page, {
     channelId,
     role,
-    modules: duels.length === 0 ? modules : [...modules, { id: "duel", enabled: true, settings: "{}" }],
+    modules: activeModules,
     duels,
   });
   await page.route(`**/api/channels/${channelId}/**`, async (route: Route) => {
     const path = new URL(route.request().url()).pathname.slice(`/api/channels/${channelId}`.length);
     const method = route.request().method();
     const now = Date.now();
+    if (path === "/modules/duel/rounds" && method === "GET") return route.fulfill(json(activeDuels));
     if (path === "/members" && method === "GET") return route.fulfill(json({ members, nextCursor: null, broadcasterCount: 1, viewerUserId: "viewer-509" }));
     if (path === "/template-variables" || path === "/variables") return route.fulfill(json({ variables: [] }));
     if (path === "/modules/votekick/settings" && method === "GET") return route.fulfill(json({ settings: DEFAULT_VOTEKICK_SETTINGS, revision: 1, variables: [] }));
@@ -119,6 +124,15 @@ const installMocks = async (page: Page, role: "manager" | "operator", duels: rea
     releaseRaidState: () => { releaseRaid(); },
     setLock: (next) => { lock = next; },
     setAds: (next) => { ads = next; },
+    setDuels: (next) => {
+      activeDuels = [...next];
+      if (activeDuels.length > 0 && !activeModules.some((module) => module.id === "duel")) {
+        activeModules.push({ id: "duel", enabled: true, settings: "{}" });
+      }
+    },
+    addActions: () => {
+      activeModules.push(...["belabox", "clips", "channel_events", "blitz_round"].map((id) => ({ id, enabled: true, settings: "{}" })));
+    },
     holdSnooze: () => { snoozeGate = new Promise<void>((resolve) => { releaseSnooze = resolve; }); },
     releaseSnooze: () => { releaseSnooze(); },
   };
@@ -150,6 +164,32 @@ const boxes = (locator: Locator) => locator.evaluateAll((elements) => elements.m
   const { x, y, width, height } = element.getBoundingClientRect();
   return { x, y, width, height };
 }));
+
+type BoxGeometry = Awaited<ReturnType<typeof box>>;
+type CockpitGeometry = Record<"ads" | "running" | "next" | "actions", BoxGeometry>;
+
+// Positions are relative to the wall: the page header may differ between page loads.
+const cockpitGeometry = async (page: Page): Promise<CockpitGeometry> => {
+  const wall = await box(page.locator(".live-cockpit__wall"));
+  const relative = async (selector: string): Promise<BoxGeometry> => {
+    const tile = await box(page.locator(selector));
+    return { ...tile, x: tile.x - wall.x, y: tile.y - wall.y };
+  };
+  return {
+    ads: await relative(".live-cockpit-ads-tile"),
+    running: await relative(".live-cockpit-running-tile"),
+    next: await relative(".live-cockpit-next-tile"),
+    actions: await relative(".live-cockpit-actions"),
+  };
+};
+
+const expectCockpitGeometryStable = (before: CockpitGeometry, after: CockpitGeometry): void => {
+  for (const tile of ["ads", "running", "next", "actions"] as const) {
+    for (const dimension of ["x", "y", "width", "height"] as const) {
+      expect(Math.abs(before[tile][dimension] - after[tile][dimension]), `${tile} ${dimension} changed`).toBeLessThanOrEqual(1);
+    }
+  }
+};
 
 const expectNoHorizontalScroll = async (page: Page): Promise<void> => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
@@ -364,6 +404,53 @@ for (const viewport of viewports) {
       await expect(page.locator(".live-cockpit-ads-tile")).toHaveAttribute("data-state", "upcoming");
       await expect(page.locator(".live-cockpit-next-tile .live-cockpit-next-item")).toHaveCount(0);
     });
+  });
+}
+
+for (const viewport of [
+  { width: 390, height: 844 },
+  { width: 768, height: 800 },
+  { width: 1024, height: 800 },
+  { width: 1100, height: 800 },
+  { width: 1101, height: 800 },
+  { width: 1280, height: 800 },
+]) {
+  test(`cockpit: tile geometry stays fixed as live content arrives at ${String(viewport.width)}x${String(viewport.height)}`, async ({ page }) => {
+    const controls = await open(page, viewport, "");
+    const actions = page.locator(".live-cockpit-actions__grid .live-action");
+    await expect(actions).toHaveCount(4);
+    const initial = await cockpitGeometry(page);
+    expect(initial.ads.height).toBe(188);
+    if (viewport.width >= 768 && viewport.width <= 1100) {
+      expect((await box(page.locator(".live-cockpit__wall"))).height).toBe(832);
+    } else if (viewport.width >= 1101) {
+      expect((await box(page.locator(".live-cockpit__wall"))).height).toBe(552);
+      expect(initial.running.height).toBe(352);
+      expect(initial.ads.y).toBeGreaterThanOrEqual(initial.actions.y + initial.actions.height);
+    }
+
+    controls.setLock("chat_vote");
+    await expect(page.locator(".live-cockpit-running-tile").getByTestId("live-vote-tile")).toBeVisible({ timeout: 12_000 });
+    expectCockpitGeometryStable(initial, await cockpitGeometry(page));
+
+    const duel = {
+      id: "duel-509-stable-geometry",
+      kind: "duel",
+      challenger: "spielende_katze",
+      target: "rasender_fuchs",
+      stake: 1_250,
+      closesAt: new Date(Date.now() + 75_000).toISOString(),
+    };
+    controls.setDuels([duel]);
+    await page.reload();
+    await expect(page.locator(".live-cockpit-running-tile").getByTestId("live-duel-tile")).toBeVisible();
+    expectCockpitGeometryStable(initial, await cockpitGeometry(page));
+
+    controls.addActions();
+    await page.reload();
+    await expect(actions).toHaveCount(8);
+    expectCockpitGeometryStable(initial, await cockpitGeometry(page));
+    await expectNoHorizontalScroll(page);
   });
 }
 
