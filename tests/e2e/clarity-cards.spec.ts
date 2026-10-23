@@ -206,6 +206,32 @@ const expectNoHorizontalScroll = async (page: Page): Promise<void> => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 };
 
+const expectCockpitTilesApartAndControlsClickable = async (page: Page): Promise<void> => {
+  const tiles = await page.locator(".live-cockpit-actions, .live-cockpit-running-tile, .live-cockpit-ads-tile, .live-cockpit-next-tile, .live-cockpit-event-feed").evaluateAll((elements) => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { name: (element.getAttribute("class") ?? "").split(" ")[0] ?? "", left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+  }));
+  for (const [index, a] of tiles.entries()) {
+    for (const b of tiles.slice(index + 1)) {
+      const intersects = a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+      expect(intersects, `${a.name} overlaps ${b.name}`).toBe(false);
+    }
+  }
+  const buttons = page.locator(".live-cockpit-running-tile button:visible");
+  const count = await buttons.count();
+  expect(count).toBeGreaterThan(0);
+  for (let index = 0; index < count; index += 1) {
+    const button = buttons.nth(index);
+    await button.scrollIntoViewIfNeeded();
+    const topmost = await button.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return hit !== null && element.contains(hit);
+    });
+    expect(topmost, `running tile button ${String(index)} is covered`).toBe(true);
+  }
+};
+
 const expectCockpitContentReachable = async (page: Page): Promise<void> => {
   const violations = await page.locator(".live-cockpit__wall").evaluate((wall) => {
     const failures: string[] = [];
@@ -707,6 +733,7 @@ for (const viewport of [
       expect(optionExposure.visible.map((visible, index) => visible || optionExposure.reachable[index])).toEqual([true, true, true]);
     }
 
+    await expectCockpitTilesApartAndControlsClickable(page);
     await expectCockpitContentReachable(page);
     await expectNoHorizontalScroll(page);
   });
