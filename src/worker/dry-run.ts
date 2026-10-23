@@ -207,7 +207,13 @@ export const dryRunChatMessage = async (
           const user = await lookupUserByLogin(login);
           return user === null ? null : { userId: user.userId, login: user.login, displayName: user.displayName };
         },
-        isChannelModerator: (userId) => isTwitchChannelModerator(readOnlyEnvironment, channelId, userId, fetcher),
+        isChannelModerator: (userId) => isTwitchChannelModerator(
+          readOnlyEnvironment,
+          channelId,
+          userId,
+          fetcher,
+          { refresh: "never" },
+        ),
         readChannelVariables: readSimulatedChannelVariables,
         renderTemplate: (text, moduleValues, changed) => renderTemplate(text, moduleValues, changed, "chat"),
         followedAt: () => Promise.resolve("unavailable"),
