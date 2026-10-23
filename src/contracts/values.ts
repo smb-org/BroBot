@@ -28,6 +28,46 @@ const CHANNEL_ROLE_RANK: Readonly<Record<ChannelRole, number>> = {
 export const hasRequiredChannelRole = (role: ChannelRole, requiredRole: ChannelRole): boolean =>
   CHANNEL_ROLE_RANK[role] >= CHANNEL_ROLE_RANK[requiredRole];
 
+export type RoleMatrixActionId =
+  | "view_channel"
+  | "manage_access"
+  | "manage_commands"
+  | "toggle_commands"
+  | "run_voting"
+  | "send_shoutouts_clips"
+  | "manage_votekicks"
+  | "manage_operations"
+  | "adjust_counters"
+  | "manage_ads"
+  | "manage_broadcast"
+  | "assign_broadcaster";
+
+export type RoleMatrixAccess = "member" | "operator" | "manager" | "broadcaster";
+
+/** Action thresholds for the member role matrix; manager access shares the worker's MANAGING_ROLES set. */
+export const ROLE_MATRIX_ACTIONS: readonly { id: RoleMatrixActionId; access: RoleMatrixAccess }[] = [
+  { id: "view_channel", access: "member" },
+  { id: "manage_access", access: "manager" },
+  { id: "manage_commands", access: "manager" },
+  { id: "toggle_commands", access: "operator" },
+  { id: "run_voting", access: "operator" },
+  { id: "send_shoutouts_clips", access: "operator" },
+  { id: "manage_votekicks", access: "operator" },
+  { id: "manage_operations", access: "operator" },
+  { id: "adjust_counters", access: "manager" },
+  { id: "manage_ads", access: "manager" },
+  { id: "manage_broadcast", access: "manager" },
+  { id: "assign_broadcaster", access: "broadcaster" },
+];
+
+/** Same role predicates used by module authorization and channel operations. */
+export const roleMatrixAllows = (role: ChannelRole, access: RoleMatrixAccess): boolean => {
+  if (access === "member") return CHANNEL_ROLES.includes(role);
+  if (access === "operator") return hasRequiredChannelRole(role, "operator");
+  if (access === "manager") return canManage(role);
+  return role === "broadcaster";
+};
+
 export type AuditActorKind = "member" | "platform_admin" | "system";
 
 export const EVENT_TONES = ["info", "warning", "error"] as const;

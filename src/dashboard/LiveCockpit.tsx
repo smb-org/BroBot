@@ -91,17 +91,21 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
   const timeZone = channelSettings.data?.timeZone ?? browserTimeZone();
   const liveQuery = useQuery({
     queryKey: queryKeys.channel(overview.channelId, "live-cockpit", { modules: modules.map((module) => `${module.id}:${String(module.enabled)}`).sort((left, right) => left.localeCompare(right)).join(",") }),
-    queryFn: async ({ signal }): Promise<{ snapshots: ModuleLiveTileSnapshot[]; failed: boolean }> => {
+    queryFn: async ({ signal }): Promise<{ snapshots: ModuleLiveTileSnapshot[]; failed: boolean; failedModules: string[] }> => {
       const results = await Promise.all(MODULES.flatMap((module) => {
         if (module.liveTile === undefined || moduleState.get(module.id) !== true) return [];
         return [module.liveTile.load(overview.channelId, signal)
-          .then((snapshots) => ({ snapshots, failed: false }))
+          .then((snapshots) => ({ moduleId: module.id, snapshots, failed: false }))
           .catch((error: unknown) => {
             if (error instanceof Error && error.name === "AbortError") throw error;
-            return { snapshots: [] as readonly ModuleLiveTileSnapshot[], failed: true };
+            return { moduleId: module.id, snapshots: [] as readonly ModuleLiveTileSnapshot[], failed: true };
           })];
       }));
-      return { snapshots: results.flatMap((result) => result.snapshots), failed: results.some((result) => result.failed) };
+      return {
+        snapshots: results.flatMap((result) => result.snapshots),
+        failed: results.some((result) => result.failed),
+        failedModules: results.filter((result) => result.failed).map((result) => result.moduleId),
+      };
     },
     enabled: modulesLoaded,
     refetchInterval: modulesLoaded ? 5_000 : false,
@@ -302,18 +306,22 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
         }}
         onFeedbackMessage={(text, link, tone) => { showFooterMessage({ text, ...(link === undefined ? {} : { link }), ...(tone === "info" ? { tone: "warning" } : {}) }); }}
       />
-      <LiveCockpitTiles
-        key={overview.channelId}
-        channelId={overview.channelId}
-        role={overview.role}
-        snapshots={liveQuery.data?.snapshots ?? []}
-        loading={liveQuery.isPending}
-        failed={liveQuery.data?.failed ?? liveQuery.isError}
-        now={now}
-        timeZone={timeZone}
-        onMessage={(text, tone) => { showFooterMessage({ text, ...(tone === undefined ? {} : { tone }) }); }}
-        onRefresh={refreshLiveData}
-      />
+      <div className="live-cockpit__running-area">
+        <LiveCockpitTiles
+          key={overview.channelId}
+          channelId={overview.channelId}
+          role={overview.role}
+          snapshots={liveQuery.data?.snapshots ?? []}
+          failedModules={liveQuery.data?.failedModules ?? []}
+          adsEnabled={moduleState.get("ads") === true}
+          loading={liveQuery.isPending}
+          failed={liveQuery.data?.failed ?? liveQuery.isError}
+          now={now}
+          timeZone={timeZone}
+          onMessage={(text, tone) => { showFooterMessage({ text, ...(tone === undefined ? {} : { tone }) }); }}
+          onRefresh={refreshLiveData}
+        />
+      </div>
       <LiveCockpitEventFeed channelId={overview.channelId} role={overview.role} now={now} timeZone={timeZone} eventQuery={eventsQuery}
         streamState={overview.streamState} raidEnabled={modules.some((module) => module.id === "raid" && module.enabled)}
         onMessage={(text) => { showFooterMessage({ text }); }} />

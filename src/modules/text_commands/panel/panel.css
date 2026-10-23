@@ -115,6 +115,9 @@
     .text-command-trigger-section .ui-field-pair { gap: var(--s2); }
     .text-command-row { min-height: 68px; }
   }
+  @media (min-width: 769px) {
+    .text-command-editor > .page-header .page-header__save > .ui-save-bar { gap: 12px; }
+  }
   @container text-command-form (max-width: 900px) {
     .text-command-response-fields { grid-template-columns: minmax(0, 1fr); }
   }

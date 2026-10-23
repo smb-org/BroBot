@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 
 test.use({ locale: "en-US" });
 
@@ -10,6 +11,7 @@ test("TemplateTextField supports the brace, filter, insert, and Escape keyboard 
   const dropdown = page.locator(".ui-template-text-field__suggestions-dropdown");
   const contentBelow = page.locator("#content-below-picker");
   await expect(input).toBeVisible();
+  await waitForWebFonts(page);
   const beforeContent = await contentBelow.boundingBox();
 
   await page.keyboard.press("Tab");
@@ -54,6 +56,7 @@ test("ExpressionField inserts a filtered function and keeps its picker inside a 
   const dropdown = page.locator(".ui-template-text-field__suggestions-dropdown");
   const contentBelow = page.locator("#content-below-expression");
   await expect(input).toBeVisible();
+  await waitForWebFonts(page);
   const beforeContent = await contentBelow.boundingBox();
 
   await input.focus();

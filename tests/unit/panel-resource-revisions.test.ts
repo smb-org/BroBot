@@ -458,7 +458,13 @@ describe("panel resource revisions", () => {
     expect(memberRoutes).toMatch(/if \(!changed\) return[\s\S]*?await revokeRealtimeUser\(context\.env\.CHANNEL, channelId, userId\);/u);
     expect(platformRoutes).toMatch(/if \(!changed\) return[\s\S]*?await revokeRealtimeUser\(context\.env\.CHANNEL, channelId, userId\);/u);
     expect(authSource).toMatch(/await revokeSession\(context\.env\.DB, session\.sessionId, now, "logout"\);\s*await revokeRealtimeSessionForUser/u);
-    expect(loginMaintenance).toMatch(/if \(revoked\) \{\s*const pending = await getPendingRealtimeUserRevocation[\s\S]*?await revokeRealtimeUserFromAllChannels/u);
+    const loginRevocation = readFileSync(resolve(root, "src/worker/login-revocation.ts"), "utf8");
+    const loginTokenRefresh = readFileSync(resolve(root, "src/worker/auth/login-token-refresh.ts"), "utf8");
+    expect(loginRevocation).toMatch(/if \(!revoked\) return false;\s*const pending = await getPendingRealtimeUserRevocation[\s\S]*?await revokeRealtimeUserFromAllChannels/u);
+    expect(loginRevocation.match(/revokeLoginIdentityAndSessionsForUser\(/gu) ?? []).toHaveLength(1);
+    expect(loginTokenRefresh).toMatch(/await markLoginRevoked\(/u);
+    expect(loginTokenRefresh).not.toMatch(/revokeLoginIdentityAndSessionsForUser/u);
+    expect(loginMaintenance).not.toMatch(/revokeLoginIdentityAndSessionsForUser/u);
   });
 
   it("keeps every registered channel panel GET read-only with an expired ballot", async () => {

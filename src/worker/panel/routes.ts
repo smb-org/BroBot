@@ -603,10 +603,12 @@ panelRouter.post(
     if (!isShoutoutLogin(login)) return context.json({ error: "twitch_login_invalid" }, 400);
 
     let targetUserId: string;
+    let targetLogin: string;
     try {
       const user = await fetchTwitchUserByLogin(fetch, context.env, login.trim());
       if (user === null) return context.json({ error: "twitch_user_not_found" }, 404);
       targetUserId = user.userId;
+      targetLogin = user.login;
     } catch {
       return context.json({ error: "twitch_user_search_failed" }, 502);
     }
@@ -614,7 +616,7 @@ panelRouter.post(
     const result = await sendShoutout(context.env, channelId, targetUserId, fetch);
     await writeModuleDiagnostics(context.env.DB, channelId, "host", triggerId, context.get("actor").userId, [
       result.sent
-        ? { code: "host.shoutout.sent" satisfies EventCode, detail: result.detail }
+        ? { code: "host.shoutout.sent" satisfies EventCode, detail: { ...result.detail, toLogin: targetLogin } }
         : { code: "host.shoutout.failed" satisfies EventCode, detail: { cause: result.reason, ...result.detail } },
     ], now);
 

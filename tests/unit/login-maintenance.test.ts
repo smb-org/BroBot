@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import {
+  getLoginIdentity,
   setLoginIdentityStatus,
   upsertLoginIdentity,
 } from "../../src/worker/db/login-identity";
 import { confirmLoginIdentityAuthorization, maintainLoginIdentities } from "../../src/worker/login-maintenance";
+import { insertChannel, insertMember } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const keyRingSerialized = JSON.stringify({
@@ -41,6 +43,8 @@ const makeEnvironment = async (
     expires_at: expiresAt,
     status: "connected",
     reason: null as string | null,
+    refresh_lease_owner: null as string | null,
+    refresh_lease_until: null as number | null,
     created_at: "2026-09-17T00:00:00.000Z",
     updated_at: "2026-09-17T00:00:00.000Z",
   };
@@ -73,14 +77,36 @@ const makeEnvironment = async (
             ? { results: (options.memberChannelIds ?? []).map((channel_id) => ({ channel_id })) }
           : { results: [] }),
       first: vi.fn().mockImplementation(() => {
-        if (!sql.includes("FROM pending_realtime_user_revocations")) return null;
-        const pending = pendingRealtimeRevocations.get(String(values[0]));
-        return pending === undefined ? null : {
-          user_id: String(values[0]),
-          ...pending,
-        };
+        if (sql.includes("FROM pending_realtime_user_revocations")) {
+          const pending = pendingRealtimeRevocations.get(String(values[0]));
+          return pending === undefined ? null : {
+            user_id: String(values[0]),
+            ...pending,
+          };
+        }
+        if (sql.includes("FROM twitch_login_identity") && row.user_id === values[0]) return { ...row };
+        return null;
       }),
       run: vi.fn().mockImplementation(async () => {
+        if (sql.includes("UPDATE twitch_login_identity") && sql.includes("SET refresh_lease_owner")) {
+          if (sql.includes("SET refresh_lease_owner = ?,")) {
+            const [owner, leaseUntil, userId, now, expectedAccess, expectedRefresh] = values;
+            if (row.user_id !== userId || row.status === "revoked" ||
+                (row.refresh_lease_until !== null && row.refresh_lease_until >= Number(now)) ||
+                row.access_token_ciphertext !== expectedAccess ||
+                row.refresh_token_ciphertext !== expectedRefresh) {
+              return { success: true, meta: { changes: 0 } };
+            }
+            row = { ...row, refresh_lease_owner: String(owner), refresh_lease_until: Number(leaseUntil) };
+            return { success: true, meta: { changes: 1 } };
+          }
+          const [userId, owner] = values;
+          if (row.user_id !== userId || row.refresh_lease_owner !== owner) {
+            return { success: true, meta: { changes: 0 } };
+          }
+          row = { ...row, refresh_lease_owner: null, refresh_lease_until: null };
+          return { success: true, meta: { changes: 1 } };
+        }
         if (sql.includes("INSERT INTO pending_realtime_user_revocations")) {
           const userId = String(values[0]);
           const previous = pendingRealtimeRevocations.get(userId);
@@ -114,7 +140,8 @@ const makeEnvironment = async (
           const [access, refresh, expires, recoveryCutoff, , updated, userId, expectedAccess, expectedRefresh] = values;
           if (row.user_id !== userId ||
               row.access_token_ciphertext !== expectedAccess ||
-              row.refresh_token_ciphertext !== expectedRefresh) {
+              row.refresh_token_ciphertext !== expectedRefresh ||
+              (values.length > 9 && row.refresh_lease_owner !== values[9])) {
             return { success: true, meta: { changes: 0 } };
           }
           const wasRevokedAfterStart = row.status !== "revoked" ||
@@ -126,6 +153,8 @@ const makeEnvironment = async (
             expires_at: String(expires),
             status: wasRevokedAfterStart ? "connected" : row.status,
             reason: wasRevokedAfterStart ? null : row.reason,
+            refresh_lease_owner: null,
+            refresh_lease_until: null,
             updated_at: String(updated),
           };
           options.onSuccessfulTokenWrite?.();
@@ -152,13 +181,17 @@ const makeEnvironment = async (
           const [reason, updatedAt, userId, expectedAccess, expectedRefresh] = values;
           if (row.user_id !== userId || row.status === "revoked" ||
               row.access_token_ciphertext !== expectedAccess ||
-              row.refresh_token_ciphertext !== expectedRefresh) {
+              row.refresh_token_ciphertext !== expectedRefresh ||
+              (values.length > 5 && row.refresh_lease_owner !== values[5]) ||
+              (values.length > 6 && (row.refresh_lease_until === null || row.refresh_lease_until < Number(values[6])))) {
             return { success: true, meta: { changes: 0 } };
           }
           row = {
             ...row,
             status: "revoked",
             reason: String(reason),
+            refresh_lease_owner: null,
+            refresh_lease_until: null,
             updated_at: String(updatedAt),
           };
         }
@@ -409,7 +442,7 @@ describe("Login token maintenance", () => {
     expect(readSessions()[0]?.revoked_at).toBeNull();
   });
 
-  it("classifies invalid_client as a temporary refresh error", async () => {
+  it("marks a login identity as errored when refresh returns invalid_client", async () => {
     const { environment, read } = await makeEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(
@@ -423,6 +456,134 @@ describe("Login token maintenance", () => {
 
     expect(read().status).toBe("error");
     expect(read().reason).toBe("invalid_client");
+  });
+
+  it("records a cron refresh error and recovers it after a successful refresh in SQLite", async () => {
+    const database = new TestD1Database();
+    const now = "2026-10-23T10:00:00.000Z";
+    try {
+      const keys = parseKeyRing(keyRingSerialized);
+      const initialAccessTokenCiphertext = await encryptJson({ token: "access-alt" }, keys);
+      const initialRefreshTokenCiphertext = await encryptJson({ token: "refresh-alt" }, keys);
+      await upsertLoginIdentity(database as unknown as D1Database, {
+        userId: "user-1",
+        login: "tester",
+        scopesJson: "[]",
+        tokenScopesJson: "[]",
+        accessTokenCiphertext: initialAccessTokenCiphertext,
+        refreshTokenCiphertext: initialRefreshTokenCiphertext,
+        expiresAt: "2026-10-23T10:59:59.000Z",
+        status: "connected",
+        reason: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await database.prepare(
+        `INSERT INTO auth_sessions
+          (session_id, user_id, login, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind("session-1", "user-1", "tester", "2026-10-24T10:00:00.000Z", now, now).run();
+      const environment = {
+        DB: database as unknown as D1Database,
+        TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
+        SESSION_ENCRYPTION_KEYS: keyRingSerialized,
+      } as unknown as Env;
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ user_id: "user-1", login: "tester", expires_in: 3599 }),
+          { status: 200 },
+        ))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_client" }), { status: 400 })));
+
+      await maintainLoginIdentities(environment, now);
+
+      await expect(getLoginIdentity(environment.DB, "user-1")).resolves.toMatchObject({
+        status: "error",
+        reason: "invalid_client",
+        accessTokenCiphertext: initialAccessTokenCiphertext,
+        refreshTokenCiphertext: initialRefreshTokenCiphertext,
+      });
+
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ user_id: "user-1", login: "tester", expires_in: 3599 }),
+          { status: 200 },
+        ))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          access_token: "access-new",
+          refresh_token: "refresh-new",
+          expires_in: 7200,
+          scope: [],
+        }), { status: 200 })));
+
+      await maintainLoginIdentities(environment, "2026-10-23T10:01:00.000Z");
+
+      await expect(getLoginIdentity(environment.DB, "user-1")).resolves.toMatchObject({
+        status: "connected",
+        reason: null,
+      });
+      const recovered = await getLoginIdentity(environment.DB, "user-1");
+      expect(recovered?.accessTokenCiphertext).not.toBe(initialAccessTokenCiphertext);
+      expect(recovered?.refreshTokenCiphertext).not.toBe(initialRefreshTokenCiphertext);
+    } finally {
+      vi.unstubAllGlobals();
+      database.close();
+    }
+  });
+
+  it("revokes an errored identity on invalid_grant with cleared scopes, revoked session and realtime notification in SQLite", async () => {
+    const database = new TestD1Database();
+    const now = "2026-10-23T10:00:00.000Z";
+    try {
+      const keys = parseKeyRing(keyRingSerialized);
+      await insertChannel(database, "channel-a");
+      await insertMember(database, "channel-a", "user-1", "operator");
+      await upsertLoginIdentity(database as unknown as D1Database, {
+        userId: "user-1",
+        login: "tester",
+        scopesJson: "[\"user:read:moderated_channels\"]",
+        tokenScopesJson: "[\"user:read:moderated_channels\"]",
+        accessTokenCiphertext: await encryptJson({ token: "access-alt" }, keys),
+        refreshTokenCiphertext: await encryptJson({ token: "refresh-alt" }, keys),
+        expiresAt: "2026-10-23T10:59:59.000Z",
+        status: "error",
+        reason: "invalid_client",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await database.prepare(
+        `INSERT INTO auth_sessions
+          (session_id, user_id, login, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind("session-1", "user-1", "tester", "2026-10-24T10:00:00.000Z", now, now).run();
+      const revokeUser = vi.fn().mockResolvedValue(undefined);
+      const environment = {
+        DB: database as unknown as D1Database,
+        CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ revokeUser }) },
+        TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
+        SESSION_ENCRYPTION_KEYS: keyRingSerialized,
+      } as unknown as Env;
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: 401, message: "invalid access token" }), { status: 401 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 })));
+
+      await maintainLoginIdentities(environment, now);
+
+      const row = await database.prepare(
+        "SELECT status, scopes_json, token_scopes_json FROM twitch_login_identity WHERE user_id = 'user-1'",
+      ).first<{ status: string; scopes_json: string; token_scopes_json: string }>();
+      expect(row).toEqual({ status: "revoked", scopes_json: "[]", token_scopes_json: "[]" });
+      const session = await database.prepare(
+        "SELECT revoked_at FROM auth_sessions WHERE session_id = 'session-1'",
+      ).first<{ revoked_at: string | null }>();
+      expect(session?.revoked_at).not.toBeNull();
+      expect(revokeUser).toHaveBeenCalledWith("user-1");
+    } finally {
+      vi.unstubAllGlobals();
+      database.close();
+    }
   });
 
   it("revokes the identity and its existing sessions on invalid_grant", async () => {
@@ -572,12 +733,9 @@ describe("Login token maintenance", () => {
     expect(read().status).toBe("connected");
   });
 
-  it("doesn't set the successful state to revoked when a parallel run gets invalid_grant with the old token", async () => {
-    let markRotationCommitted!: () => void;
-    const rotationCommitted = new Promise<void>((resolve) => { markRotationCommitted = resolve; });
+  it("coalesces parallel maintenance runs into one successful token rotation", async () => {
     const { environment, read, readSessions, getInitialAccessTokenCiphertext } = await makeEnvironment(
       "2026-09-18T00:59:59.000Z",
-      { onSuccessfulTokenWrite: markRotationCommitted },
     );
     let refreshCalls = 0;
     const fetcher = vi.fn().mockImplementation((url: string) => {
@@ -591,7 +749,7 @@ describe("Login token maintenance", () => {
       if (refreshCalls === 1) {
         return Promise.resolve(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }));
       }
-      return rotationCommitted.then(() => new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+      return Promise.resolve(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
     });
     vi.stubGlobal("fetch", fetcher);
 
@@ -600,13 +758,13 @@ describe("Login token maintenance", () => {
       maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z"),
     ]);
 
-    expect(refreshCalls).toBe(2);
+    expect(refreshCalls).toBe(1);
     expect(read().access_token_ciphertext).not.toBe(getInitialAccessTokenCiphertext());
     expect(read().status).toBe("connected");
     expect(readSessions()[0]?.revoked_at).toBeNull();
   });
 
-  it("doesn't permanently set the login state to revoked after an invalid_grant that arrives before the save", async () => {
+  it("lets an overlapping maintenance run share a refresh while its token write is pending", async () => {
     let releaseTokenWrite!: () => void;
     let markTokenWriteStarted!: () => void;
     const tokenWriteStarted = new Promise<void>((resolve) => { markTokenWriteStarted = resolve; });
@@ -635,11 +793,11 @@ describe("Login token maintenance", () => {
 
     const successfulRun = maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z");
     await tokenWriteStarted;
-    await maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z");
+    const overlappingRun = maintainLoginIdentities(environment, "2026-09-18T00:00:01.000Z");
     releaseTokenWrite();
-    await successfulRun;
+    await Promise.all([successfulRun, overlappingRun]);
 
-    expect(refreshCalls).toBe(2);
+    expect(refreshCalls).toBe(1);
     expect(read().access_token_ciphertext).not.toBe(getInitialAccessTokenCiphertext());
     expect(read().status).toBe("connected");
     expect(readSessions()[0]?.revoked_at).toBeNull();

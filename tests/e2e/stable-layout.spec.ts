@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 
 test("field error and warning slots keep their layout boxes stable", async ({ page }) => {
   await page.goto("/tests/e2e/layout-fixture.html");
   await expect(page.getByRole("textbox", { name: "Name" })).toBeVisible();
   await expect(page.locator(".ui-template-text-field__warnings")).toBeVisible();
+  await waitForWebFonts(page);
 
   const selectors = [".ui-field", ".unit-input", ".ui-select", ".chips-input", ".ui-template-text-field"];
   const before = await Promise.all(selectors.map(async (selector) => {

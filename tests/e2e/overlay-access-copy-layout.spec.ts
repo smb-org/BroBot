@@ -1,4 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 
 test.use({ locale: "de-DE" });
 
@@ -110,6 +111,7 @@ test("copying an overlay link stays collapsed and keeps neighboring boxes in pla
   await expect(mainRow).toBeVisible();
   const copyButton = mainRow.locator(".overlay-access-list__copy");
   const menuButton = mainRow.getByRole("button", { name: "Aktionen für OBS Main PC" });
+  await waitForWebFonts(page);
   const before = {
     copy: await copyButton.boundingBox(),
     menu: await menuButton.boundingBox(),

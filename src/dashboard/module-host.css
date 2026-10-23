@@ -6,6 +6,7 @@
   .module-detail--chat_voting .module-detail__content { display: flex; flex: 1 1 0; min-height: 0; }
   .module-detail--chat_voting .module-stack { display: flex; flex: 1 1 0; min-height: 0; }
   .module-detail--chat_voting .module-view { display: flex; flex: 1 1 0; min-height: 0; flex-direction: column; }
+  .raid-settings-state-reserve { height: 188px; min-height: 188px; }
   .chat-voting-page-tabs { width: auto; max-width: 100%; flex: none; }
   .chat-voting-page-tabs__list { gap: var(--s1); border-bottom: 1px solid var(--line); }
   .chat-voting-page-tabs__tab { min-height: 40px; padding-inline: var(--s3); border: 1px solid transparent; color: var(--text-2); background: transparent; font-size: 13px; }
@@ -15,6 +16,9 @@
     .module-detail--chat_voting { height: calc(100dvh - var(--app-shell-header-height) - 32px); }
     .module-detail--chat_voting > .module-detail-heading { grid-template-columns: 56px minmax(0, 1fr) minmax(0, auto); gap: var(--s2); min-height: 0; margin-bottom: 8px; padding-bottom: 8px; }
     .module-detail--chat_voting > .module-detail-heading .page-header__title-row :is(h1, h2, h3) { font-size: 18px; }
+  }
+  @media (max-width: 639px) {
+    .raid-settings-state-reserve { height: 200px; min-height: 200px; }
   }
 
   /* Belabox settings use an eager ModulePage wrapper around a lazy editor. */

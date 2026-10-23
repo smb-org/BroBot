@@ -239,6 +239,92 @@ describe("dryRunChatMessage", () => {
     }
   });
 
+  it("uses a valid near-expiry broadcaster token for a read-only dry-run moderator lookup", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const database = new TestD1Database();
+    const accessToken = await encryptJson({ token: "channel-access-token" }, parseKeyRing(TOKEN_ENCRYPTION_KEYS));
+    const refreshToken = await encryptJson({ token: "channel-refresh-token" }, parseKeyRing(TOKEN_ENCRYPTION_KEYS));
+    const appToken = await encryptJson({ token: "app-access-token" }, parseKeyRing(TOKEN_ENCRYPTION_KEYS));
+    const requestedUrls: string[] = [];
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? input.url : typeof input === "string" ? input : input.href;
+      requestedUrls.push(url);
+      if (url.includes("/oauth2/token")) {
+        return Promise.resolve(new Response(JSON.stringify({ error: "invalid_client" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      if (url.includes("/helix/users")) {
+        return Promise.resolve(new Response(JSON.stringify({ data: [{ id: "target-id", login: "target_viewer", display_name: "Target Viewer" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      if (url.includes("/helix/moderation/moderators")) {
+        return Promise.resolve(new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      return Promise.reject(new Error("Unexpected dry-run fetch."));
+    });
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'votekick', 1, ?)",
+      ).bind(CHANNEL_ID, JSON.stringify(votekickModule.defaultSettings)).run();
+      await database.prepare(
+        `INSERT INTO bot_identity
+          (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, created_at, updated_at)
+         VALUES (1, 'bot-user', 'brobot', '[]', 'access', 'refresh', ?, ?, ?)`,
+      ).bind("2099-09-20T00:00:00.000Z", NOW, NOW).run();
+      await database.prepare(
+        `INSERT INTO twitch_login_identity
+          (user_id, login, scopes_json, token_scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+           expires_at, status, reason, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'connected', NULL, ?, ?)`,
+      ).bind(
+        CHANNEL_ID,
+        CHANNEL_ID,
+        '["moderation:read"]',
+        '["moderation:read"]',
+        accessToken,
+        refreshToken,
+        "2026-09-19T12:04:00.000Z",
+        NOW,
+        NOW,
+      ).run();
+      await insertAppAccessToken(database, appToken, "2099-09-20T00:00:00.000Z", NOW, NOW);
+      const before = snapshotTables(database);
+
+      const response = await dryRunChatMessage({
+        DB: database as unknown as D1Database,
+        PUBLIC_ORIGIN: "https://brobot.example",
+        TWITCH_CLIENT_ID: "client-id",
+        TOKEN_ENCRYPTION_KEYS,
+      } as unknown as Env, CHANNEL_ID, {
+        text: "!votekick @target_viewer",
+        sender: { login: "viewer_42", statuses: ["vip"] },
+        streamState: "online",
+        game: null,
+        sharedChat: false,
+        only: { moduleId: "votekick" },
+      }, fetcher);
+
+      expect(requestedUrls.some((url) => url.includes("/helix/moderation/moderators"))).toBe(true);
+      expect(requestedUrls.some((url) => url.includes("/oauth2/token"))).toBe(false);
+      expect(response.modules[0]?.entries[0]).toMatchObject({
+        outcome: "blocked",
+        blocks: [{ code: "votekick.target_inactive" }],
+      });
+      expect(snapshotTables(database)).toEqual(before);
+    } finally {
+      database.close();
+    }
+  });
+
   it("treats an unreadable cached token as resolved at send time without fetching", async () => {
     const database = new TestD1Database();
     const wrongKeys = JSON.stringify({

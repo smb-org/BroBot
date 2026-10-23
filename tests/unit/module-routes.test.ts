@@ -133,6 +133,7 @@ const { panelRouter } = await import("../../src/worker/panel/routes");
 const environmentKeys = {
   SESSION_COOKIE_KEYS: JSON.stringify({ active: { id: "cookie-v1", key: key(1) }, retired: [] }),
   SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
+  TOKEN_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
 };
 
 const environmentFor = (database: TestD1Database): Env => ({
@@ -401,7 +402,7 @@ describe("Module management in the panel", () => {
     ]);
 
     expect(responses.map(({ status }) => status)).toEqual([204, 204]);
-    expect(refreshRequests).toBe(2);
+    expect(refreshRequests).toBe(1);
   });
 
   it("sends only fields changed by each manager to Twitch", async () => {
@@ -670,6 +671,10 @@ describe("Module management in the panel", () => {
     await insertLoginIdentityAndSession(database, "user-1");
     await insertMember(database, "kanal-a", "user-1", "manager");
     await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    environment.CHANNEL = {
+      idFromName: (channelId: string) => channelId,
+      get: () => ({ revokeUser: () => Promise.resolve() }),
+    } as unknown as Env["CHANNEL"];
     const twitchFetch = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlForFetchInput(input);
       return Promise.resolve(url.pathname === "/oauth2/token"
@@ -686,6 +691,43 @@ describe("Module management in the panel", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ result: "token_expired" });
     expect(twitchFetch).toHaveBeenCalledTimes(2);
+    await expect(database.prepare(
+      "SELECT status, scopes_json, token_scopes_json, reason FROM twitch_login_identity WHERE user_id = 'kanal-a'",
+    ).first()).resolves.toEqual({
+      status: "revoked",
+      scopes_json: "[]",
+      token_scopes_json: "[]",
+      reason: "authorization_revoked",
+    });
+  });
+
+  it("keeps the broadcast update failure response when refresh discovers invalid_grant", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    environment.CHANNEL = {
+      idFromName: (channelId: string) => channelId,
+      get: () => ({ revokeUser: () => Promise.resolve() }),
+    } as unknown as Env["CHANNEL"];
+    const twitchFetch = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlForFetchInput(input);
+      return Promise.resolve(url.pathname === "/oauth2/token"
+        ? new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400, headers: { "Content-Type": "application/json" } })
+        : new Response(JSON.stringify({ error: "Unauthorized", status: 401, message: "Invalid OAuth token" }), { status: 401 }));
+    });
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast", "PATCH", { title: "Neue Sendung" }),
+      environment,
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: "broadcast_update_failed" });
+    await expect(database.prepare(
+      "SELECT status, scopes_json, token_scopes_json FROM twitch_login_identity WHERE user_id = 'kanal-a'",
+    ).first()).resolves.toEqual({ status: "revoked", scopes_json: "[]", token_scopes_json: "[]" });
   });
 
   it("returns the broadcast scope grant target before calling Helix when the scope is absent", async () => {
@@ -707,6 +749,33 @@ describe("Module management in the panel", () => {
       error: "broadcast_scope_missing",
       grantHref: "/auth/channels/kanal-a/broadcaster-scopes/broadcast",
     });
+    expect(twitchFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the existing panel responses for a broadcaster identity revoked before the request", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    await insertBroadcastIdentity(database, ["channel:manage:broadcast"]);
+    await database.prepare(
+      "UPDATE twitch_login_identity SET status = 'revoked', scopes_json = '[]', token_scopes_json = '[]' WHERE user_id = 'kanal-a'",
+    ).run();
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const markerResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast/markers", "POST"),
+      environment,
+    );
+    const broadcastResponse = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/broadcast", "PATCH", { title: "Neue Sendung" }),
+      environment,
+    );
+
+    expect(markerResponse.status).toBe(200);
+    await expect(markerResponse.json()).resolves.toEqual({ result: "failed" });
+    expect(broadcastResponse.status).toBe(409);
+    await expect(broadcastResponse.json()).resolves.toEqual({ error: "broadcast_identity_missing" });
     expect(twitchFetch).not.toHaveBeenCalled();
   });
 

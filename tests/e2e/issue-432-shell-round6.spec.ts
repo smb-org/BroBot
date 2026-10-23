@@ -18,26 +18,21 @@ test("the upcoming ad remains visible below the recent timeout reservation", asy
   for (const viewport of [{ width: 1440, height: 800 }, { width: 1280, height: 800 }]) {
     await page.setViewportSize(viewport);
     await page.goto(`/channels/${channelId}`);
+    // The ad break lives in its own tile; Next up keeps the recent and upcoming lists.
     const tile = page.locator('[data-slot="next-up"]');
-    const upcoming = tile.getByRole("button", { name: "Verschieben" });
+    const adTile = page.locator(".live-cockpit-ads-tile");
+    const upcoming = adTile.getByRole("button", { name: "Verschieben" });
     await expect(upcoming).toBeVisible();
-    const geometry = await tile.evaluate((element) => {
-      const recent = element.querySelector<HTMLElement>(".live-cockpit-next-list--recent");
-      const upcomingList = element.querySelectorAll<HTMLElement>(".live-cockpit-next-list").item(1);
-      const button = upcomingList.querySelector<HTMLElement>("button");
-      if (recent === null || button === null) throw new Error("The recent and upcoming cockpit lists must render.");
-      const tileBox = element.getBoundingClientRect();
-      const upcomingBox = upcomingList.getBoundingClientRect();
+    const buttonInsideTile = await upcoming.evaluate((button) => {
+      const tileBox = button.closest(".live-cockpit-ads-tile")?.getBoundingClientRect();
       const buttonBox = button.getBoundingClientRect();
-      return {
-        recentHeight: recent.getBoundingClientRect().height,
-        upcomingHeight: upcomingBox.height,
-        buttonInsideTile: buttonBox.top >= tileBox.top && buttonBox.bottom <= tileBox.bottom,
-      };
+      return tileBox !== undefined && buttonBox.top >= tileBox.top && buttonBox.bottom <= tileBox.bottom;
     });
-    expect(geometry.recentHeight).toBeGreaterThan(0);
-    expect(geometry.upcomingHeight).toBeGreaterThan(0);
-    expect(geometry.buttonInsideTile).toBe(true);
+    // With no timers, Next up keeps its recent list and shows the empty note instead of an upcoming list.
+    const recentHeight = await tile.locator(".live-cockpit-next-list--recent").evaluate((element) => element.getBoundingClientRect().height);
+    expect(recentHeight).toBeGreaterThan(0);
+    await expect(tile.locator(".live-cockpit-next-list")).toHaveCount(1);
+    expect(buttonInsideTile).toBe(true);
   }
 });
 
@@ -63,8 +58,9 @@ test("five upcoming timers and an ad keep the snooze action reachable in the nex
     await page.goto(`/channels/${channelId}`);
     const tile = page.locator('[data-slot="next-up"]');
     const list = tile.locator(".live-cockpit-next-list").last();
-    await expect(list.locator(".live-cockpit-next-item")).toHaveCount(6);
-    const snoozeActions = list.getByRole("button", { name: "Verschieben" });
+    await expect(list.locator(".live-cockpit-next-item")).toHaveCount(5);
+    await expect(list.getByRole("button", { name: "Verschieben" })).toHaveCount(0);
+    const snoozeActions = page.locator(".live-cockpit-ads-tile").getByRole("button", { name: "Verschieben" });
     await expect(snoozeActions).toHaveCount(1);
 
     const widths = await tile.evaluate((element) => {
@@ -86,26 +82,15 @@ test("five upcoming timers and an ad keep the snooze action reachable in the nex
     if (scrollState.scrollHeight > scrollState.clientHeight) {
       await list.evaluate((element) => { element.scrollTop = element.scrollHeight; });
     }
+    // The snooze action sits in the ad tile, so it stays reachable however long the timer list scrolls.
     const geometry = await snoozeActions.evaluate((button) => {
-      const listElement = button.closest<HTMLElement>(".live-cockpit-next-list");
-      const tileElement = button.closest<HTMLElement>("[data-slot='next-up']");
-      if (listElement === null || tileElement === null) throw new Error("The ad action must stay in the upcoming list and tile.");
+      const tileElement = button.closest<HTMLElement>(".live-cockpit-ads-tile");
+      if (tileElement === null) throw new Error("The ad action must stay in the ad tile.");
       const buttonBox = button.getBoundingClientRect();
-      const listBox = listElement.getBoundingClientRect();
       const tileBox = tileElement.getBoundingClientRect();
-      return {
-        buttonInsideList: buttonBox.top >= listBox.top && buttonBox.bottom <= listBox.bottom,
-        buttonInsideTile: buttonBox.top >= tileBox.top && buttonBox.bottom <= tileBox.bottom,
-        buttonTop: buttonBox.top,
-        buttonBottom: buttonBox.bottom,
-        listTop: listBox.top,
-        listBottom: listBox.bottom,
-        scrollTop: listElement.scrollTop,
-        scrollHeight: listElement.scrollHeight,
-        clientHeight: listElement.clientHeight,
-      };
+      return { buttonInsideTile: buttonBox.top >= tileBox.top && buttonBox.bottom <= tileBox.bottom };
     });
-    expect(geometry, JSON.stringify({ viewport, ...geometry })).toMatchObject({ buttonInsideList: true, buttonInsideTile: true });
+    expect(geometry, JSON.stringify({ viewport, ...geometry })).toMatchObject({ buttonInsideTile: true });
     await snoozeActions.click();
   }
 });

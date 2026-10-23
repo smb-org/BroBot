@@ -38,12 +38,14 @@ In `twitch_login_identity` beantworten die beiden Scope-Spalten unterschiedliche
 | `scopes_json` | Was hat der Nutzer jemals erteilt? | Login vereinigt; EventSub-Zielauswahl liest `grantedScopes`. |
 | `token_scopes_json` | Welche Scopes trägt das gespeicherte Token gerade? | Login und Wartung ersetzen; künftige Broadcaster-Helix-Aufrufe lesen den aktuellen Umfang. |
 
-`token_scopes_json` hat heute **noch keinen Leser**. Das ist Absicht: Die
-Spalte entsteht, bevor der erste Helix-Aufruf mit einem fremden Nutzertoken
-gebraucht wird, nicht mittendrin. Die Werbe-Vorwarnung aus #22 ist dieser Fall
-ausdrücklich **nicht** — Get Ad Schedule nimmt laut Twitch auch ein App-Token,
-sofern die Zustimmung einmal erteilt wurde, und stützt sich damit auf
-`scopes_json` (siehe [0011](0011-werbe-vorwarnung.md) Abschnitt 2).
+`token_scopes_json` wird von `withBroadcasterToken` vor Broadcaster-Helix-Aufrufen
+gelesen, damit fehlende Scopes sichtbar bleiben. Der Helfer erneuert das Token
+bei Bedarf unabhängig von einer aktiven Sitzung; die stündliche Wartung behält
+ihren Sitzungsfilter, damit Grants nicht auf Vorrat am Leben gehalten werden.
+Die Werbe-Vorwarnung aus #22 ist kein solcher Aufruf — Get Ad Schedule nimmt
+laut Twitch auch ein App-Token, sofern die Zustimmung einmal erteilt wurde,
+und stützt sich damit auf `scopes_json` (siehe
+[0011](0011-werbe-vorwarnung.md) Abschnitt 2).
 
 ### Login
 
@@ -176,6 +178,8 @@ Diese Bindung ist kein Zusatz, sondern Voraussetzung: Ein signierter `state` all
 - Der Worker ist ein **Confidential Client** — das Client-Secret liegt in einem Worker-Secret und erreicht keinen Browser. Dadurch laufen Refresh-Tokens nicht nach 30 Tagen ab, anders als bei einem Public Client.
 - **Refresh-Tokens rotieren:** Jeder Refresh gibt einen neuen aus. Der alte wird im selben Schreibvorgang ersetzt, sonst entsteht bei einem Fehlschlag eine Verbindung ohne gültigen Refresh-Token.
 - Twitch verlangt, Tokens **beim Start und danach stündlich** über `/oauth2/validate` zu prüfen. Für Login-Identitäten gilt das nur, solange mindestens eine nicht widerrufene und noch nicht abgelaufene `auth_sessions`-Zeile existiert; Identitäten ohne aktive Session werden nicht künstlich am Leben gehalten. Der Cron begrenzt die Login-Prüfungen auf vier gleichzeitige Aufrufe. Derselbe Lauf erneuert Tokens, die in weniger als einer Stunde ablaufen, und prüft den Moderatorstatus des Bots.
+- Diese Wartung folgt der aktiven Sitzung; Broadcaster-Token werden bei einem konkreten Helix-Aufruf unabhängig davon bedarfsweise erneuert.
+- Stündliche Wartung, Helix-Aufrufe und Revocation-Bestätigung koordinieren die Erneuerung je Login-Identität über eine kurzlebige D1-Lease, damit nur ein Worker-Isolat das rotierende Refresh-Token verwendet.
 - Ein erneuter Login wird nur nötig, wenn der Nutzer die App entzieht, sein Passwort ändert oder **wir einen neuen Scope brauchen**. Nur der dritte Fall ist vermeidbar — deshalb die Disziplin in Abschnitt 3.
 - **Bei Widerruf kein Endlos-Retry.** Die Verbindung wird als getrennt markiert, die Ursache festgehalten, und das Panel zeigt den Zustand mit einem Weg zur erneuten Verbindung.
 

@@ -170,7 +170,8 @@ export const rememberEventSubMessageAndRevocation = async (
       ? [
         db.prepare(
           `UPDATE twitch_login_identity
-              SET status = 'revoked', reason = ?, updated_at = ?
+              SET status = 'revoked', reason = ?, updated_at = ?,
+                  refresh_lease_owner = NULL, refresh_lease_until = NULL
             WHERE changes() = 1
               AND user_id = ?
               AND status <> 'revoked'`,

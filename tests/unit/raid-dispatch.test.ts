@@ -22,6 +22,62 @@ const jsonRecord = (value: string): Record<string, unknown> => {
 };
 
 describe("Raid dispatch", () => {
+  it("records the source login on a confirmed automatic raid shoutout", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await upsertBotIdentity(database as unknown as D1Database, {
+        id: 1,
+        userId: "bot-1",
+        login: "brobot",
+        scopesJson: "[]",
+        accessTokenCiphertext: await encryptJson({ token: "bot-token" }, parseKeyRing(KEY_RING)),
+        refreshTokenCiphertext: await encryptJson({ token: "refresh" }, parseKeyRing(KEY_RING)),
+        expiresAt: "2026-09-20T00:00:00.000Z",
+        createdAt: "2026-09-19T00:00:00.000Z",
+        updatedAt: "2026-09-19T00:00:00.000Z",
+      });
+      await insertAppAccessToken(
+        database,
+        await encryptJson({ token: "app-token" }, parseKeyRing(KEY_RING)),
+        "2099-09-21T00:00:00.000Z",
+        "2026-09-19T00:00:00.000Z",
+        "2026-09-19T00:00:00.000Z",
+      );
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, ?)",
+      ).bind("kanal-a", raidModule.id, JSON.stringify({ ...raidModule.defaultSettings, textLong: "", textShort: "" })).run();
+
+      await dispatchEventSubNotification({
+        DB: database as unknown as D1Database,
+        TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
+        TOKEN_ENCRYPTION_KEYS: KEY_RING,
+      }, {
+        channelId: "kanal-a",
+        subscriptionType: "channel.raid",
+        subscriptionVariant: "incoming",
+        triggerId: "raid-trigger",
+        payload: {
+          from_broadcaster_user_id: "quelle-1",
+          from_broadcaster_user_login: "quelle",
+          from_broadcaster_user_name: "Quelle",
+          to_broadcaster_user_id: "kanal-a",
+          viewers: 8,
+        },
+        receivedAt: "2026-09-20T10:00:00.000Z",
+      }, vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 })), [raidModule]);
+
+      const event = await database.prepare(
+        "SELECT detail_json FROM event_log WHERE code = 'host.shoutout.sent'",
+      ).first<{ detail_json: string }>();
+
+      expect(jsonRecord(event?.detail_json ?? "{}")).toMatchObject({ to: "quelle-1", toLogin: "quelle" });
+    } finally {
+      database.close();
+    }
+  });
+
   it("sends the full chat text despite a failed shoutout", async () => {
     const database = new TestD1Database();
     try {

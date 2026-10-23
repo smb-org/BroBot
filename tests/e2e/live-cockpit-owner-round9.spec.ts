@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
+import { waitForWebFonts } from "./web-fonts";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
@@ -163,6 +164,6 @@ test("event feed shows loading then a retryable error at desktop size", async ({
   const availabilityRetry = page.locator(".live-cockpit-actions__retry");
   await expect(availabilityRetry).toHaveAttribute("data-variant", "secondary");
   await expect(availabilityRetry).toHaveCSS("font-size", "11px");
-  await page.evaluate(async () => { await document.fonts.ready; });
+  await waitForWebFonts(page);
   await page.screenshot({ path: testInfo.outputPath("owner-live-de-error-1920x1080.png"), fullPage: false });
 });

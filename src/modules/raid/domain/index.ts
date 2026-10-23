@@ -13,6 +13,7 @@ export type RaidDecision =
   | {
     kind: "incoming";
     sourceChannelId: string;
+    sourceChannelLogin: string;
     sourceChannelName: string;
     viewers: number;
     aboveThreshold: boolean;
@@ -53,6 +54,7 @@ export const decideRaid = (
   return {
     kind: "incoming",
     sourceChannelId: fromId,
+    sourceChannelLogin: textValue(payload.from_broadcaster_user_login) ?? fromId,
     sourceChannelName: textValue(payload.from_broadcaster_user_name) ?? textValue(payload.from_broadcaster_user_login) ?? fromId,
     viewers,
     aboveThreshold: viewers >= textThreshold,

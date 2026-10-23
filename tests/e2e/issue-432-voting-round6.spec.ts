@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 
 import { DEFAULT_CHAT_VOTING_SETTINGS, type ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 
@@ -82,6 +83,7 @@ test("both voting tabs keep the same page header geometry", async ({ page }) => 
   const title = header.getByRole("heading", { name: "Abstimmung" });
   const icon = header.locator(".page-header__icon");
   const tabs = header.locator(".chat-voting-page-tabs__list");
+  await waitForWebFonts(page);
   const before = { header: await roundedBox(header), title: await roundedBox(title), icon: await roundedBox(icon), tabs: await roundedBox(tabs) };
 
   await page.getByRole("tab", { name: "Einstellungen", exact: true }).click();

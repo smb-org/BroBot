@@ -1,4 +1,4 @@
-import type { ChannelRole } from "../contracts/values";
+import type { ChannelRole, RoleMatrixActionId } from "../contracts/values";
 import { auditActionLabel as fixedAuditActionLabel, auditUnknownActionLabel, catalogString, dashboardCommonTexts, dashboardLanguage, moduleSettingsChangedText, type DashboardLanguage, type LocaleCatalog } from "./locale";
 import { moduleName } from "./module-labels";
 
@@ -363,6 +363,12 @@ export interface MembersTexts {
   inviteBack: string;
   inviteNext: string;
   selectMemberPrompt: string;
+  roleMatrixTitle: string;
+  roleMatrixDisclosure: string;
+  roleMatrixActionHeading: string;
+  roleMatrixAllowed: string;
+  roleMatrixDenied: string;
+  roleMatrixActions: Record<RoleMatrixActionId, string>;
 }
 
 const membersCatalog: LocaleCatalog<MembersTexts> = {
@@ -394,6 +400,25 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
     inviteConfirmStepDescription: "Prüfe Konto und Rolle, bevor du den Zugriff freigibst.",
     inviteBack: "Zurück", inviteNext: "Weiter",
     selectMemberPrompt: "Wähle ein Mitglied aus, um den freigegebenen Zugriff und die Rolle zu prüfen.",
+    roleMatrixTitle: "Berechtigungen",
+    roleMatrixDisclosure: "Berechtigungen ansehen",
+    roleMatrixActionHeading: "Handlung",
+    roleMatrixAllowed: "Erlaubt",
+    roleMatrixDenied: "Nicht erlaubt",
+    roleMatrixActions: {
+      view_channel: "Kanalbereiche ansehen und Protokoll lesen",
+      manage_access: "Mitglieder, Module und Einstellungen verwalten",
+      manage_commands: "Chatbefehle anlegen, bearbeiten und löschen",
+      toggle_commands: "Einzelne Chatbefehle an- und ausschalten",
+      run_voting: "Abstimmungen starten, beenden und verlängern",
+      send_shoutouts_clips: "Shoutouts und Clips im Live-Cockpit auslösen",
+      manage_votekicks: "Votekicks abbrechen und Timeouts aufheben",
+      manage_operations: "Kanal stummschalten und Aktionen pausieren",
+      adjust_counters: "Punktestände anpassen",
+      manage_ads: "Werbepausen starten und verschieben",
+      manage_broadcast: "Streamtitel und Kategorie ändern",
+      assign_broadcaster: "Broadcaster-Rollen vergeben und entziehen",
+    },
   },
   en: {
     managementLocked: "Only broadcasters and managers may change members.", grantAccessTitle: "Grant access", twitchName: "Twitch name",
@@ -422,6 +447,25 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
     inviteConfirmStepDescription: "Review the account and role before granting access.",
     inviteBack: "Back", inviteNext: "Next",
     selectMemberPrompt: "Select a member to review their access and role.",
+    roleMatrixTitle: "Permissions",
+    roleMatrixDisclosure: "View permissions",
+    roleMatrixActionHeading: "Action",
+    roleMatrixAllowed: "Allowed",
+    roleMatrixDenied: "Not allowed",
+    roleMatrixActions: {
+      view_channel: "View channel areas and read the event log",
+      manage_access: "Manage members, modules, and settings",
+      manage_commands: "Create, edit, and delete chat commands",
+      toggle_commands: "Enable and disable individual chat commands",
+      run_voting: "Start, end, and extend chat votes",
+      send_shoutouts_clips: "Send shoutouts and clips from the live cockpit",
+      manage_votekicks: "Cancel votekicks and lift timeouts",
+      manage_operations: "Mute the channel and pause actions",
+      adjust_counters: "Adjust point balances",
+      manage_ads: "Start and postpone ad breaks",
+      manage_broadcast: "Change the stream title and category",
+      assign_broadcaster: "Grant and revoke broadcaster roles",
+    },
   },
 };
 

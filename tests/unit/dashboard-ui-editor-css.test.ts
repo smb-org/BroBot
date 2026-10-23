@@ -8,8 +8,6 @@ const switchStyles = readFileSync(path.resolve(process.cwd(), "src/dashboard/ui/
 const timerStyles = readFileSync(path.resolve(process.cwd(), "src/modules/timers/panel/panel.css"), "utf8");
 const textCommandStyles = readFileSync(path.resolve(process.cwd(), "src/modules/text_commands/panel/panel.css"), "utf8");
 const textCommandSource = readFileSync(path.resolve(process.cwd(), "src/modules/text_commands/panel/index.tsx"), "utf8");
-const cockpitStyles = readFileSync(path.resolve(process.cwd(), "src/dashboard/cockpit.css"), "utf8");
-const cockpitPartsSource = readFileSync(path.resolve(process.cwd(), "src/dashboard/LiveCockpitParts.tsx"), "utf8");
 
 describe("editor seam styles", () => {
   it("uses the editor container threshold for FieldPair without viewport JavaScript", () => {
@@ -90,12 +88,37 @@ describe("editor seam styles", () => {
     expect(textCommandStyles).not.toMatch(/\.text-command-editor \.page-header__save[^{}]*\{[^{}]*\}/u);
   });
 
+  it("keeps the fixed mobile save bar within its reserved safe-area height", () => {
+    const fixedWrapper = styles.match(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\)\s*\{([^}]+)\}/u)?.[1] ?? "";
+    const fixedBar = styles.match(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\) > \.ui-save-bar--mobile-fixed \{([^}]+)\}/u)?.[1] ?? "";
+    const fixedPersistent = styles.match(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\) > \.ui-save-bar--persistent \{([^}]+)\}/u)?.[1] ?? "";
+    const fixedError = styles.match(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\) > \.ui-save-bar--persistent\.ui-save-bar--error \{([^}]+)\}/u)?.[1] ?? "";
+
+    expect(fixedWrapper).toContain("height: var(--mobile-save-bar-outer);");
+    expect(fixedWrapper).toContain("padding: 8px 16px calc(8px + env(safe-area-inset-bottom));");
+    expect(fixedBar).toContain("height: 100%;");
+    expect(fixedBar).not.toContain("safe-area-inset-bottom");
+    expect(fixedPersistent).toContain("height: 64px;");
+    expect(fixedPersistent).toContain("padding: 8px 0 10px;");
+    expect(fixedError).toContain("height: 64px;");
+    expect(fixedError).toContain("padding: 8px 0 10px;");
+    expect(fixedPersistent).not.toContain("safe-area-inset-bottom");
+    expect(fixedError).not.toContain("safe-area-inset-bottom");
+  });
+
+  it("keeps 12px desktop spacing between text command save status and actions", () => {
+    const desktopSaveBar = textCommandStyles.match(/@media \(min-width: 769px\)\s*\{\s*\.text-command-editor > \.page-header \.page-header__save > \.ui-save-bar \{([^}]+)\}/u)?.[1] ?? "";
+
+    expect(textCommandSource).toContain("saveStatus={saveBar}");
+    expect(desktopSaveBar).toContain("gap: 12px;");
+  });
+
   it("lifts the toast host above the fixed mobile save bar after the settings-page rule", () => {
     const lift = "body:has(.ui-save-bar--mobile-fixed) .ui-toast-host { top: auto; bottom: calc(var(--mobile-save-bar-outer) + var(--s1));";
     expect(styles).toContain(lift);
     expect(styles).toContain(":root { --mobile-save-bar-outer: calc(81px + env(safe-area-inset-bottom)); }");
     // The error state keeps the normal 64px single-row geometry in the fixed variant.
-    expect(styles).toMatch(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\) > \.ui-save-bar--persistent\.ui-save-bar--error \{[^}]*grid-template-rows: none;[^}]*height: auto;[^}]*min-height: 64px;/u);
+    expect(styles).toMatch(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\) > \.ui-save-bar--persistent\.ui-save-bar--error \{[^}]*grid-template-rows: none;[^}]*height: 64px;[^}]*min-height: 64px;/u);
     expect(styles).not.toMatch(/\.page-header__save:has\(> \.ui-save-bar--mobile-fixed\)[^{]*\{[^}]*88px/u);
     expect(styles.indexOf(lift)).toBeGreaterThan(styles.indexOf("body:has(.module-detail--settings-page) .ui-toast-host { bottom: var(--s1); }"));
   });
@@ -112,19 +135,6 @@ describe("editor seam styles", () => {
     expect(styles).toContain(".dashboard-header__control-state-slot { display: none; }");
     expect(styles).toContain(".dashboard-header__status, .dashboard-header__controls { display: none; }");
     expect(styles).toContain(".dashboard-header__control-state > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }");
-  });
-
-  it("keeps the upcoming action reason in a reserved slot beside its action", () => {
-    expect(cockpitPartsSource).toContain("live-cockpit-next-item__action");
-    const action = cockpitStyles.match(/\.live-cockpit-next-item__action\s*\{([^}]+)\}/u)?.[1] ?? "";
-    expect(action).toContain("display: contents;");
-    expect(action).not.toContain("max-content");
-    expect(cockpitStyles).not.toContain(":has(.live-cockpit-next-item__action)");
-    const reason = cockpitStyles.match(/\.live-cockpit-next-item__reason\s*\{([^}]+)\}/u)?.[1] ?? "";
-    expect(reason).toContain("grid-column: 2 / -1;");
-    expect(reason).toContain("grid-row: 2;");
-    expect(reason).toContain("height: 24px;");
-    expect(reason).not.toContain("nowrap");
   });
 
   it("applies the shared hand-drawn SVG stroke family to command palette module icons", () => {

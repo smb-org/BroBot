@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { waitForWebFonts } from "./web-fonts";
 
 import { DEFAULT_CHAT_VOTING_SETTINGS, type ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 
@@ -122,6 +123,7 @@ for (const viewport of viewports) {
     if (viewport.width <= 935) await page.setViewportSize(viewport);
     await expect(inspector.getByRole("textbox", { name: "Frage" })).toHaveValue(template.title);
 
+    await waitForWebFonts(page);
     const collectionLayout = await page.evaluate(() => {
       const header = document.querySelector<HTMLElement>(".module-detail--chat_voting > .page-header");
       const tabList = document.querySelector<HTMLElement>(".chat-voting-page-tabs__list");

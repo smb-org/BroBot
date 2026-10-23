@@ -118,7 +118,7 @@ test("captures the stable dashboard routes at desktop and mobile widths", async 
         const cockpit = page.locator(".live-cockpit");
         await expect(cockpit).toBeVisible();
         await expect(immediateActions).toBeVisible();
-        await expect(page.locator(".live-cockpit-reserve")).toHaveCount(3);
+        await expect(page.locator(".live-cockpit-reserve")).toHaveCount(4);
         if (viewport.width === 1920) {
           await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
         }

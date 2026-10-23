@@ -128,6 +128,47 @@ describe("moderation actions", () => {
     }
   });
 
+  it("refreshes the broadcaster token once after a moderator lookup returns 401", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, CHANNEL_ID);
+      await seedBroadcasterIdentity(database);
+      const { environment } = environmentFor(database);
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        if (url.pathname === "/oauth2/token") {
+          return Promise.resolve(new Response(JSON.stringify({
+            access_token: "fictional-broadcaster-token-refreshed",
+            refresh_token: "fictional-broadcaster-refresh-refreshed",
+            expires_in: 7_200,
+            scope: ["moderation:read"],
+          }), { status: 200, headers: { "content-type": "application/json" } }));
+        }
+        const authorization = new Headers(init?.headers).get("Authorization");
+        return Promise.resolve(authorization === "Bearer fictional-broadcaster-token"
+          ? responseFor(401, "Invalid OAuth token")
+          : new Response(JSON.stringify({ data: [{ user_id: TARGET_USER_ID }] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }));
+      });
+
+      await expect(isTwitchChannelModerator(environment, CHANNEL_ID, TARGET_USER_ID, fetcher)).resolves.toBe(true);
+
+      const helixCalls = fetcher.mock.calls.filter(([input]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        return url.pathname === "/helix/moderation/moderators";
+      });
+      expect(helixCalls).toHaveLength(2);
+      expect(helixCalls.map(([, init]) => new Headers(init?.headers).get("Authorization"))).toEqual([
+        "Bearer fictional-broadcaster-token",
+        "Bearer fictional-broadcaster-token-refreshed",
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("fails moderator protection closed when the broadcaster token lacks moderation:read", async () => {
     const database = new TestD1Database();
     try {

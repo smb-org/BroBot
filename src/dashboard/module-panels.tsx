@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from "react";
 
 import { MODULES } from "../modules/registry";
+import { VotekickThresholdExample } from "../modules/votekick/panel/threshold-example";
 import { MODULE_NAVIGATION_CATEGORIES } from "../modules/contract";
 import type { ModulePanelProperties, ModuleRegisteredTemplateVariable } from "../modules/contract";
 import type { BelaboxSettings } from "../modules/belabox/contracts";
@@ -398,6 +399,30 @@ const AdsSettingsPanelMount = ({ module, channelId, language, canManageContent, 
   />;
 };
 
+const RaidSettingsPanelMount = ({ module, channelId, language, canManageContent }: {
+  module: (typeof MODULES)[number];
+  channelId: string;
+  language: DashboardLanguage;
+  canManageContent: boolean;
+}): ReactElement => {
+  const loadPanel = useCallback(() => loadModulePanel(module) as Promise<{ default: ComponentType<ModulePanelProperties> }>, [module]);
+  return <RetryableLazy
+    instanceKey="raid:settings-state"
+    load={loadPanel}
+    properties={{ channelId, language, canManage: canManageContent, canOperate: true }}
+    loadingFallback={<LoadStateLines rows={4} height={24} />}
+    renderError={(retry) => <LoadState
+      variant="panel-0"
+      status="error"
+      loading={null}
+      empty={null}
+      error={null}
+      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: dashboardTexts().module.componentLoadError, onRetry: retry }}
+    >{null}</LoadState>}
+    onRetry={retryModuleChunkLoad}
+  />;
+};
+
 const BelaboxSettingsPanelMount = ({ module, channelId, language, canManageContent, lowBitrateKbps, recoverBitrateKbps,
   statsUrlDraft, onStatsUrlDraftChange, settingsRevision, onSettingsRevisionChange, onRemovePendingChange, savingSettings }: {
   module: (typeof MODULES)[number];
@@ -522,6 +547,10 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   })) as Readonly<Partial<Record<string, readonly (TemplateTextFieldVariable & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
   const templateVariableOptions: Readonly<Partial<Record<string, readonly TemplateTextFieldVariable[]>>> = templateMetadata;
   const slotRate = module.id === "emote_slots" ? calculateSlotPayoutRateForDraft(currentValue) : null;
+  const votekickThresholdExample = (sectionId: string): ReactElement | undefined =>
+    module.id === "votekick" && sectionId === "settings"
+      ? <VotekickThresholdExample minNetVotes={currentValue.minNetVotes} percent={currentValue.percent} language={language} />
+      : undefined;
   const settingsEditor = (sectionId: string, fieldErrors: Readonly<Record<string, string>>): ReactElement => (
     <SettingsEditor
       key={sectionId}
@@ -552,6 +581,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
       {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
+      afterNote={votekickThresholdExample(sectionId)}
       onIssuesChange={reportTemplateIssues}
     />
   );
@@ -570,6 +600,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
       {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
+      afterNote={votekickThresholdExample(spec.sections[0]?.id ?? "")}
     />,
   } : undefined;
   const collectErrors = (includeUntouched = false): Record<string, string> => {
@@ -830,7 +861,17 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       onSettingsRevisionChange={setLatestSettingsRevision}
       onRemovePendingChange={setUrlRemovalPending}
       savingSettings={pending || urlRemovalPending} /> } : {})}
-    columns={module.id === "ads"
+    columns={module.id === "raid"
+      ? [
+        <div className="settings-page__column-stack" key="raid-state">
+          <div className="raid-settings-state-reserve">
+            <RaidSettingsPanelMount module={module} channelId={channelId} language={language} canManageContent={canManageContent} />
+          </div>
+          {settingsEditor("messages", fieldErrors)}
+        </div>,
+        <div className="settings-page__column-stack" key="raid-shoutout">{settingsEditor("shoutout", fieldErrors)}</div>,
+      ]
+      : module.id === "ads"
       ? [
         <AdsSettingsPanelMount key="ads-panel" module={module} channelId={channelId} language={language} canManageContent={canManageContent} moduleActive={page.active} />,
         settingsEditor("announcements", fieldErrors),
