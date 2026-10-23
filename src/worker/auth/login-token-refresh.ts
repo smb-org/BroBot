@@ -1,5 +1,6 @@
 import {
   acquireLoginIdentityRefreshLease,
+  extendLoginIdentityRefreshLease,
   getLoginIdentity,
   getLoginIdentityRefreshState,
   releaseLoginIdentityRefreshLease,
@@ -22,9 +23,12 @@ export interface LoginTokenRefreshEnvironment {
 export interface LoginTokenRefreshLeaseOptions {
   clock?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
+  leaseDurationMs?: number;
+  requestTimeoutMs?: number;
 }
 
-const LOGIN_TOKEN_REFRESH_LEASE_MS = 30_000;
+const LOGIN_TOKEN_REFRESH_LEASE_MS = 60_000;
+const LOGIN_TOKEN_REFRESH_REQUEST_TIMEOUT_MS = 10_000;
 const LOGIN_TOKEN_REFRESH_WAIT_MS = 3_000;
 const LOGIN_TOKEN_REFRESH_POLL_MS = 100;
 
@@ -96,12 +100,28 @@ const leaseOwnerMatches = (
   state.identity.accessTokenCiphertext === identity.accessTokenCiphertext &&
   state.identity.refreshTokenCiphertext === identity.refreshTokenCiphertext;
 
+const tookOverExpiredLease = (
+  state: Awaited<ReturnType<typeof getLoginIdentityRefreshState>>,
+  now: number,
+): boolean => state !== null &&
+  state.refreshLeaseOwner !== null &&
+  state.refreshLeaseUntil !== null &&
+  state.refreshLeaseUntil < now;
+
+const isDefinitiveRefreshRejection = (error: unknown): boolean =>
+  error instanceof TwitchApiError && error.status >= 400 && error.status < 500 && error.code !== null;
+
 const waitForReplacementOrLease = async (
   env: LoginTokenRefreshEnvironment,
   identity: LoginIdentityRecord,
   owner: string,
   options: LoginTokenRefreshLeaseOptions,
-): Promise<{ acquired: boolean; identity: LoginIdentityRecord | null; retriedExpiredLease: boolean }> => {
+): Promise<{
+  acquired: boolean;
+  identity: LoginIdentityRecord | null;
+  retriedExpiredLease: boolean;
+  tookOverExpiredLease: boolean;
+}> => {
   const clock = options.clock ?? Date.now;
   const sleep = options.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   const deadline = clock() + LOGIN_TOKEN_REFRESH_WAIT_MS;
@@ -109,13 +129,14 @@ const waitForReplacementOrLease = async (
 
   while (clock() <= deadline) {
     const state = await getLoginIdentityRefreshState(env.DB, identity.userId);
-    if (state === null) return { acquired: false, identity: null, retriedExpiredLease };
+    if (state === null) return { acquired: false, identity: null, retriedExpiredLease, tookOverExpiredLease: false };
     if (isReplacementIdentity(state.identity, identity) || state.identity.status === "revoked") {
-      return { acquired: false, identity: state.identity, retriedExpiredLease };
+      return { acquired: false, identity: state.identity, retriedExpiredLease, tookOverExpiredLease: false };
     }
 
     const now = clock();
     if (!retriedExpiredLease && (state.refreshLeaseUntil === null || state.refreshLeaseUntil < now)) {
+      const expiredLease = tookOverExpiredLease(state, now);
       retriedExpiredLease = true;
       const acquired = await acquireLoginIdentityRefreshLease(
         env.DB,
@@ -123,17 +144,17 @@ const waitForReplacementOrLease = async (
         identity.accessTokenCiphertext,
         identity.refreshTokenCiphertext,
         owner,
-        now + LOGIN_TOKEN_REFRESH_LEASE_MS,
+        now + (options.leaseDurationMs ?? LOGIN_TOKEN_REFRESH_LEASE_MS),
         now,
       );
-      if (acquired) return { acquired: true, identity: state.identity, retriedExpiredLease };
+      if (acquired) return { acquired: true, identity: state.identity, retriedExpiredLease, tookOverExpiredLease: expiredLease };
     }
 
     const remaining = deadline - clock();
-    if (remaining <= 0) return { acquired: false, identity: state.identity, retriedExpiredLease };
+    if (remaining <= 0) return { acquired: false, identity: state.identity, retriedExpiredLease, tookOverExpiredLease: false };
     await sleep(Math.min(LOGIN_TOKEN_REFRESH_POLL_MS, remaining));
   }
-  return { acquired: false, identity: null, retriedExpiredLease };
+  return { acquired: false, identity: null, retriedExpiredLease, tookOverExpiredLease: false };
 };
 
 const refreshLoginIdentityTokensOnce = async (
@@ -144,20 +165,29 @@ const refreshLoginIdentityTokensOnce = async (
   leaseOptions: LoginTokenRefreshLeaseOptions,
 ): Promise<LoginIdentityRecord | null> => {
   const clock = leaseOptions.clock ?? Date.now;
+  const leaseDurationMs = leaseOptions.leaseDurationMs ?? LOGIN_TOKEN_REFRESH_LEASE_MS;
+  const requestTimeoutMs = leaseOptions.requestTimeoutMs ?? LOGIN_TOKEN_REFRESH_REQUEST_TIMEOUT_MS;
   const owner = crypto.randomUUID();
   const acquiredAt = clock();
+  const beforeAcquire = await getLoginIdentityRefreshState(env.DB, identity.userId);
+  if (beforeAcquire === null) return null;
+  if (isReplacementIdentity(beforeAcquire.identity, identity) || beforeAcquire.identity.status === "revoked") {
+    return beforeAcquire.identity;
+  }
+  let expiredLeaseTakeover = tookOverExpiredLease(beforeAcquire, acquiredAt);
   let acquired = await acquireLoginIdentityRefreshLease(
     env.DB,
     identity.userId,
     identity.accessTokenCiphertext,
     identity.refreshTokenCiphertext,
     owner,
-    acquiredAt + LOGIN_TOKEN_REFRESH_LEASE_MS,
+    acquiredAt + leaseDurationMs,
     acquiredAt,
   );
 
   if (!acquired) {
     const waiting = await waitForReplacementOrLease(env, identity, owner, leaseOptions);
+    expiredLeaseTakeover ||= waiting.tookOverExpiredLease;
     if (!waiting.acquired) {
       if (waiting.identity !== null && (
         isReplacementIdentity(waiting.identity, identity) || waiting.identity.status === "revoked"
@@ -178,14 +208,16 @@ const refreshLoginIdentityTokensOnce = async (
           identity.accessTokenCiphertext,
           identity.refreshTokenCiphertext,
           owner,
-          currentTime + LOGIN_TOKEN_REFRESH_LEASE_MS,
+          currentTime + leaseDurationMs,
           currentTime,
         );
+        if (acquired) expiredLeaseTakeover = tookOverExpiredLease(finalState, currentTime);
       }
       if (!acquired) throw new Error("The login token refresh lease is currently held by another isolate.");
     }
   }
 
+  let releaseLease = !expiredLeaseTakeover;
   try {
     const state = await getLoginIdentityRefreshState(env.DB, identity.userId);
     if (state === null) return null;
@@ -208,11 +240,24 @@ const refreshLoginIdentityTokensOnce = async (
     }
 
     let refreshed: Awaited<ReturnType<typeof refreshBotToken>>;
+    releaseLease = false;
     try {
-      refreshed = await refreshBotToken(fetcher, env, refreshToken);
+      refreshed = await refreshBotToken(
+        (input, init) => fetcher(input, { ...init, signal: AbortSignal.timeout(requestTimeoutMs) }),
+        env,
+        refreshToken,
+      );
     } catch (error: unknown) {
+      releaseLease = !expiredLeaseTakeover && isDefinitiveRefreshRejection(error);
       if (error instanceof TwitchApiError && error.code === "invalid_grant") {
         const current = await getLoginIdentityRefreshState(env.DB, identity.userId);
+        if (current !== null && isReplacementIdentity(current.identity, identity)) return current.identity;
+        if (current !== null && current.identity.status !== "connected") return current.identity;
+        if (expiredLeaseTakeover) {
+          // The expired holder may have rotated Twitch's token without persisting it, so its first invalid_grant is ambiguous.
+          releaseLease = false;
+          throw error;
+        }
         const leaseNow = clock();
         if (leaseOwnerMatches(current, identity, owner, leaseNow) && current !== null) {
           let notificationError: unknown;
@@ -231,10 +276,10 @@ const refreshLoginIdentityTokensOnce = async (
             return latest.identity;
           }
           if (isReplacementIdentity(latest.identity, identity)) return latest.identity;
+          releaseLease = false;
           throw new Error("The login token refresh lease changed during invalid_grant handling.", { cause: error });
         }
-        if (current !== null && isReplacementIdentity(current.identity, identity)) return current.identity;
-        if (current !== null && current.identity.status !== "connected") return current.identity;
+        releaseLease = false;
         throw new Error("The login token refresh lease changed after invalid_grant.", { cause: error });
       }
       throw error;
@@ -244,6 +289,22 @@ const refreshLoginIdentityTokensOnce = async (
     const accessTokenCiphertext = await encryptJson({ token: refreshed.accessToken }, keys);
     const refreshTokenCiphertext = await encryptJson({ token: refreshed.refreshToken }, keys);
     const expiresAt = new Date(Date.parse(now) + refreshed.expiresIn * 1_000).toISOString();
+    const renewed = await extendLoginIdentityRefreshLease(
+      env.DB,
+      identity.userId,
+      identity.accessTokenCiphertext,
+      identity.refreshTokenCiphertext,
+      owner,
+      clock() + leaseDurationMs,
+    );
+    if (!renewed) {
+      const replacement = await rereadReplacement(env, identity);
+      if (replacement !== null) {
+        releaseLease = true;
+        return replacement;
+      }
+      throw new Error("The login token refresh lease changed before token persistence.");
+    }
     let replaced: boolean;
     try {
       replaced = await rotateLoginTokensWithRetry(
@@ -258,13 +319,21 @@ const refreshLoginIdentityTokensOnce = async (
       );
     } catch (error: unknown) {
       const replacement = await rereadReplacement(env, identity);
-      if (replacement !== null) return replacement;
+      if (replacement !== null) {
+        releaseLease = true;
+        return replacement;
+      }
       throw error;
     }
-    if (!replaced) return await rereadReplacement(env, identity);
+    if (!replaced) {
+      const replacement = await rereadReplacement(env, identity);
+      if (replacement !== null) releaseLease = true;
+      return replacement;
+    }
+    releaseLease = true;
     return await getLoginIdentity(env.DB, identity.userId);
   } finally {
-    await releaseLoginIdentityRefreshLease(env.DB, identity.userId, owner);
+    if (releaseLease) await releaseLoginIdentityRefreshLease(env.DB, identity.userId, owner);
   }
 };
 

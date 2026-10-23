@@ -128,6 +128,17 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
         currentStatus = undefined;
       }
       if (currentStatus === "revoked") throw error;
+      if (!(error instanceof TwitchApiError && error.code === "invalid_grant")) {
+        await setLoginIdentityStatusIfCurrent(
+          env.DB,
+          identity.userId,
+          "error",
+          refreshFailureReason(error),
+          now,
+          identity.accessTokenCiphertext,
+          identity.refreshTokenCiphertext,
+        );
+      }
       return;
     }
   }

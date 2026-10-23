@@ -484,13 +484,225 @@ describe("withBroadcasterToken", () => {
 
       await expect(withBroadcasterToken(
         environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
-        { now: () => NOW, fetcher, refreshLease: { clock: () => clockNow, sleep: () => Promise.resolve() } },
+        {
+          now: () => NOW,
+          fetcher,
+          refreshLease: {
+            clock: () => clockNow,
+            sleep: () => Promise.resolve(),
+            leaseDurationMs: 1_000,
+            requestTimeoutMs: 500,
+          },
+        },
       )).resolves.toEqual({ kind: "refresh_failed" });
 
       expect(fetcher).toHaveBeenCalledOnce();
       expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toEqual(before);
       expect(call).not.toHaveBeenCalled();
-      await expect(readRefreshLease(database)).resolves.toEqual({ refresh_lease_owner: null, refresh_lease_until: null });
+      const lease = await readRefreshLease(database);
+      expect(lease?.refresh_lease_owner).toBeTruthy();
+      expect(lease?.refresh_lease_until).toBe(2_000);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps an identity connected when an expired live holder is taken over before invalid_grant", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, { expiresAt: "2026-10-23T10:04:00.000Z" });
+      await database.prepare(
+        `INSERT INTO auth_sessions
+          (session_id, user_id, login, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind("session-1", CHANNEL_ID, "test-channel", "2026-10-24T10:00:00.000Z", NOW, NOW).run();
+      const identity = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      if (identity === null) throw new Error("The seeded login identity was not stored.");
+      let clockNow = 1_000;
+      let releaseFirstRefresh!: (response: Response) => void;
+      let markFirstRefreshStarted!: () => void;
+      const firstRefreshStarted = new Promise<void>((resolve) => { markFirstRefreshStarted = resolve; });
+      const firstRefresh = new Promise<Response>((resolve) => { releaseFirstRefresh = resolve; });
+      const firstFetcher = vi.fn<typeof fetch>(() => {
+        markFirstRefreshStarted();
+        return firstRefresh;
+      });
+      const leaseOptions = {
+        clock: () => clockNow,
+        leaseDurationMs: 2_000,
+        requestTimeoutMs: 1_000,
+      };
+      const firstCall = refreshLoginIdentityTokens(
+        { ...environmentFor(database), DB: createIndependentD1Binding(database) },
+        identity,
+        NOW,
+        firstFetcher,
+        leaseOptions,
+      );
+      await firstRefreshStarted;
+
+      clockNow = 3_001;
+      const secondFetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+        JSON.stringify({ error: "invalid_grant" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      ));
+      const helixCall = vi.fn(() => Promise.resolve(SUCCESS));
+      const secondCall = withBroadcasterToken(
+        { ...environmentFor(database), DB: createIndependentD1Binding(database) },
+        CHANNEL_ID,
+        ["channel:manage:broadcast"],
+        helixCall,
+        { now: () => NOW, fetcher: secondFetcher, refreshLease: leaseOptions },
+      );
+
+      await expect(secondCall).resolves.toEqual({ kind: "refresh_failed" });
+      releaseFirstRefresh(refreshedTokenResponse());
+      await expect(firstCall).rejects.toThrow();
+
+      expect(firstFetcher).toHaveBeenCalledOnce();
+      expect(secondFetcher).toHaveBeenCalledOnce();
+      expect(helixCall).not.toHaveBeenCalled();
+      expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({
+        status: "connected",
+        accessTokenCiphertext: identity.accessTokenCiphertext,
+        refreshTokenCiphertext: identity.refreshTokenCiphertext,
+      });
+      await expect(database.prepare(
+        "SELECT revoked_at FROM auth_sessions WHERE session_id = ?",
+      ).bind("session-1").first()).resolves.toEqual({ revoked_at: null });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("aborts a hanging token request before its lease expires", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database);
+      const identity = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      if (identity === null) throw new Error("The seeded login identity was not stored.");
+      const requestState: { signal: AbortSignal | null } = { signal: null };
+      const fetcher = vi.fn<typeof fetch>((_input, init) => new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal === undefined || signal === null) {
+          reject(new Error("The token request did not receive an abort signal."));
+          return;
+        }
+        requestState.signal = signal;
+        signal.addEventListener("abort", () => {
+          reject(signal.reason instanceof Error ? signal.reason : new Error("The token request timed out."));
+        }, { once: true });
+      }));
+
+      await expect(refreshLoginIdentityTokens(
+        environmentFor(database),
+        identity,
+        NOW,
+        fetcher,
+        { leaseDurationMs: 100, requestTimeoutMs: 10 },
+      )).rejects.toThrow();
+
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(requestState.signal?.aborted).toBe(true);
+      expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({ status: "connected" });
+      const lease = await readRefreshLease(database);
+      expect(lease?.refresh_lease_owner).toBeTruthy();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("preserves expired lease uncertainty after a definitive refresh rejection", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, { expiresAt: "2026-10-23T10:04:00.000Z" });
+      const identity = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      if (identity === null) throw new Error("The seeded login identity was not stored.");
+      let clockNow = 2_000;
+      await database.prepare(
+        `UPDATE twitch_login_identity
+            SET refresh_lease_owner = ?, refresh_lease_until = ?
+          WHERE user_id = ?`,
+      ).bind("expired-holder", 1_000, CHANNEL_ID).run();
+      const leaseOptions = {
+        clock: () => clockNow,
+        leaseDurationMs: 100,
+        requestTimeoutMs: 50,
+      };
+      const invalidClientFetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+        JSON.stringify({ error: "invalid_client" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      ));
+
+      await expect(refreshLoginIdentityTokens(
+        { ...environmentFor(database), DB: createIndependentD1Binding(database) },
+        identity,
+        NOW,
+        invalidClientFetcher,
+        leaseOptions,
+      )).rejects.toThrow();
+
+      const rejectedLease = await readRefreshLease(database);
+      expect(rejectedLease?.refresh_lease_owner).toBeTruthy();
+      expect(rejectedLease?.refresh_lease_until).toBe(2_100);
+
+      clockNow = 2_101;
+      const invalidGrantFetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+        JSON.stringify({ error: "invalid_grant" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      ));
+      await expect(refreshLoginIdentityTokens(
+        { ...environmentFor(database), DB: createIndependentD1Binding(database) },
+        identity,
+        NOW,
+        invalidGrantFetcher,
+        leaseOptions,
+      )).rejects.toThrow();
+
+      expect(invalidClientFetcher).toHaveBeenCalledOnce();
+      expect(invalidGrantFetcher).toHaveBeenCalledOnce();
+      expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({
+        status: "connected",
+        accessTokenCiphertext: identity.accessTokenCiphertext,
+        refreshTokenCiphertext: identity.refreshTokenCiphertext,
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses a concurrent token replacement after invalid_grant on an expired takeover", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, { expiresAt: "2026-10-23T10:04:00.000Z" });
+      const identity = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      if (identity === null) throw new Error("The seeded login identity was not stored.");
+      const clock = () => 2_000;
+      await database.prepare(
+        `UPDATE twitch_login_identity
+            SET refresh_lease_owner = ?, refresh_lease_until = ?
+          WHERE user_id = ?`,
+      ).bind("expired-holder", 1_000, CHANNEL_ID).run();
+      const fetcher = vi.fn<typeof fetch>(async () => {
+        await replaceIdentity(database, "replacement-access", "replacement-refresh", "2026-10-23T12:00:00.000Z", NOW);
+        return new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      await expect(refreshLoginIdentityTokens(
+        { ...environmentFor(database), DB: createIndependentD1Binding(database) },
+        identity,
+        NOW,
+        fetcher,
+        { clock, leaseDurationMs: 100, requestTimeoutMs: 50 },
+      )).resolves.toMatchObject({ status: "connected" });
+
+      const replacement = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      expect(replacement).toMatchObject({ status: "connected" });
+      expect(replacement?.accessTokenCiphertext).not.toBe(identity.accessTokenCiphertext);
+      expect(replacement?.refreshTokenCiphertext).not.toBe(identity.refreshTokenCiphertext);
     } finally {
       database.close();
     }

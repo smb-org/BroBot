@@ -403,6 +403,32 @@ export const releaseLoginIdentityRefreshLease = async (
   ).bind(userId, owner).run();
 };
 
+export const extendLoginIdentityRefreshLease = async (
+  db: D1Database,
+  userId: string,
+  expectedAccessTokenCiphertext: string,
+  expectedRefreshTokenCiphertext: string,
+  owner: string,
+  leaseUntil: number,
+): Promise<boolean> => {
+  const result = await db.prepare(
+    `UPDATE twitch_login_identity
+        SET refresh_lease_until = ?
+      WHERE user_id = ?
+        AND refresh_lease_owner = ?
+        AND status <> 'revoked'
+        AND access_token_ciphertext = ?
+        AND refresh_token_ciphertext = ?`,
+  ).bind(
+    leaseUntil,
+    userId,
+    owner,
+    expectedAccessTokenCiphertext,
+    expectedRefreshTokenCiphertext,
+  ).run();
+  return result.meta.changes > 0;
+};
+
 export interface PendingRealtimeUserRevocation {
   userId: string;
   requestedAt: string;

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import {
+  getLoginIdentity,
   setLoginIdentityStatus,
   upsertLoginIdentity,
 } from "../../src/worker/db/login-identity";
@@ -164,8 +165,7 @@ const makeEnvironment = async (
           const [status, reason, updatedAt, userId, expectedAccess, expectedRefresh] = values;
           if (row.user_id !== userId || row.status === "revoked" ||
               row.access_token_ciphertext !== expectedAccess ||
-              row.refresh_token_ciphertext !== expectedRefresh ||
-              (values.length > 5 && row.refresh_lease_owner !== values[5])) {
+              row.refresh_token_ciphertext !== expectedRefresh) {
             return { success: true, meta: { changes: 0 } };
           }
           row = {
@@ -441,7 +441,7 @@ describe("Login token maintenance", () => {
     expect(readSessions()[0]?.revoked_at).toBeNull();
   });
 
-  it("keeps login identity state unchanged when refresh returns invalid_client", async () => {
+  it("marks a login identity as errored when refresh returns invalid_client", async () => {
     const { environment, read } = await makeEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(
@@ -453,8 +453,82 @@ describe("Login token maintenance", () => {
 
     await maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z");
 
-    expect(read().status).toBe("connected");
-    expect(read().reason).toBeNull();
+    expect(read().status).toBe("error");
+    expect(read().reason).toBe("invalid_client");
+  });
+
+  it("records a cron refresh error and recovers it after a successful refresh in SQLite", async () => {
+    const database = new TestD1Database();
+    const now = "2026-10-23T10:00:00.000Z";
+    try {
+      const keys = parseKeyRing(keyRingSerialized);
+      const initialAccessTokenCiphertext = await encryptJson({ token: "access-alt" }, keys);
+      const initialRefreshTokenCiphertext = await encryptJson({ token: "refresh-alt" }, keys);
+      await upsertLoginIdentity(database as unknown as D1Database, {
+        userId: "user-1",
+        login: "tester",
+        scopesJson: "[]",
+        tokenScopesJson: "[]",
+        accessTokenCiphertext: initialAccessTokenCiphertext,
+        refreshTokenCiphertext: initialRefreshTokenCiphertext,
+        expiresAt: "2026-10-23T10:59:59.000Z",
+        status: "connected",
+        reason: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await database.prepare(
+        `INSERT INTO auth_sessions
+          (session_id, user_id, login, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind("session-1", "user-1", "tester", "2026-10-24T10:00:00.000Z", now, now).run();
+      const environment = {
+        DB: database as unknown as D1Database,
+        TWITCH_CLIENT_ID: "client-id",
+        TWITCH_CLIENT_SECRET: "client-secret",
+        SESSION_ENCRYPTION_KEYS: keyRingSerialized,
+      } as unknown as Env;
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ user_id: "user-1", login: "tester", expires_in: 3599 }),
+          { status: 200 },
+        ))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_client" }), { status: 400 })));
+
+      await maintainLoginIdentities(environment, now);
+
+      await expect(getLoginIdentity(environment.DB, "user-1")).resolves.toMatchObject({
+        status: "error",
+        reason: "invalid_client",
+        accessTokenCiphertext: initialAccessTokenCiphertext,
+        refreshTokenCiphertext: initialRefreshTokenCiphertext,
+      });
+
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ user_id: "user-1", login: "tester", expires_in: 3599 }),
+          { status: 200 },
+        ))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          access_token: "access-new",
+          refresh_token: "refresh-new",
+          expires_in: 7200,
+          scope: [],
+        }), { status: 200 })));
+
+      await maintainLoginIdentities(environment, "2026-10-23T10:01:00.000Z");
+
+      await expect(getLoginIdentity(environment.DB, "user-1")).resolves.toMatchObject({
+        status: "connected",
+        reason: null,
+      });
+      const recovered = await getLoginIdentity(environment.DB, "user-1");
+      expect(recovered?.accessTokenCiphertext).not.toBe(initialAccessTokenCiphertext);
+      expect(recovered?.refreshTokenCiphertext).not.toBe(initialRefreshTokenCiphertext);
+    } finally {
+      vi.unstubAllGlobals();
+      database.close();
+    }
   });
 
   it("revokes the identity and its existing sessions on invalid_grant", async () => {
