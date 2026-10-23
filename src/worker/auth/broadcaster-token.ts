@@ -49,8 +49,7 @@ const isReplacementIdentity = (
   current.userId === expected.userId &&
   current.status === "connected" &&
   (current.accessTokenCiphertext !== expected.accessTokenCiphertext ||
-    current.refreshTokenCiphertext !== expected.refreshTokenCiphertext ||
-    current.updatedAt !== expected.updatedAt);
+    current.refreshTokenCiphertext !== expected.refreshTokenCiphertext);
 
 type RefreshResult =
   | { kind: "refreshed"; identity: LoginIdentityRecord }
@@ -58,9 +57,6 @@ type RefreshResult =
   | { kind: "revoked" }
   | { kind: "not_connected" }
   | { kind: "failed" };
-
-// ponytail: per-isolate single-flight; cross-isolate races fall back to CAS + reread.
-const refreshFlights = new Map<string, Promise<RefreshResult>>();
 
 const refreshIdentityOnce = async (
   environment: BroadcasterTokenEnvironment,
@@ -104,25 +100,6 @@ const refreshIdentityOnce = async (
     return current === null || current.status !== "connected"
       ? { kind: "not_connected" }
       : { kind: "failed" };
-  }
-};
-
-const refreshIdentity = async (
-  environment: BroadcasterTokenEnvironment,
-  identity: LoginIdentityRecord,
-  now: string,
-  fetcher: typeof fetch,
-): Promise<RefreshResult> => {
-  const identityKey = identity.userId;
-  const existingFlight = refreshFlights.get(identityKey);
-  if (existingFlight !== undefined) return await existingFlight;
-
-  const flight = refreshIdentityOnce(environment, identity, now, fetcher);
-  refreshFlights.set(identityKey, flight);
-  try {
-    return await flight;
-  } finally {
-    if (refreshFlights.get(identityKey) === flight) refreshFlights.delete(identityKey);
   }
 };
 
@@ -183,7 +160,7 @@ export const withBroadcasterToken = async <Data>(
       if (isExpired(identity.expiresAt, now())) return { kind: "refresh_failed" };
     } else {
       refreshSpent = true;
-      const refreshResult = await refreshIdentity(environment, identity, now(), fetcher);
+      const refreshResult = await refreshIdentityOnce(environment, identity, now(), fetcher);
       if (refreshResult.kind === "revoked") return { kind: "revoked", source: "refresh" };
       if (refreshResult.kind === "not_connected") return { kind: "not_connected" };
       if (refreshResult.kind === "failed") return { kind: "refresh_failed" };
@@ -218,7 +195,7 @@ export const withBroadcasterToken = async <Data>(
     if (replacement === null) return { kind: "http_error", result };
     identity = replacement;
   } else {
-    const refreshResult = await refreshIdentity(environment, identity, now(), fetcher);
+    const refreshResult = await refreshIdentityOnce(environment, identity, now(), fetcher);
     if (refreshResult.kind === "revoked") return { kind: "revoked", source: "refresh" };
     if (refreshResult.kind === "not_connected") return { kind: "not_connected" };
     if (refreshResult.kind === "failed") return { kind: "refresh_failed" };

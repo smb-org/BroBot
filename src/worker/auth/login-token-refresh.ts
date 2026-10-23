@@ -63,7 +63,7 @@ export const decryptLoginIdentityAccessToken = async (identity: LoginIdentityRec
   decryptStoredToken(identity.accessTokenCiphertext, getTokenEncryptionKeys(env));
 
 /** Refreshes and persists a login identity's rotated tokens for both maintenance and request paths. */
-export const refreshLoginIdentityTokens = async (
+const refreshLoginIdentityTokensOnce = async (
   env: LoginTokenRefreshEnvironment,
   identity: LoginIdentityRecord,
   now: string,
@@ -106,4 +106,32 @@ export const refreshLoginIdentityTokens = async (
   }
   if (!replaced) return rereadReplacement(env, identity);
   return await getLoginIdentity(env.DB, identity.userId);
+};
+
+const refreshFlights = new WeakMap<D1Database, Map<string, Promise<LoginIdentityRecord | null>>>();
+
+/** Coalesces token refreshes per database and identity inside the current isolate. */
+export const refreshLoginIdentityTokens = async (
+  env: LoginTokenRefreshEnvironment,
+  identity: LoginIdentityRecord,
+  now: string,
+  fetcher: typeof fetch = fetch,
+): Promise<LoginIdentityRecord | null> => {
+  let flights = refreshFlights.get(env.DB);
+  if (flights === undefined) {
+    flights = new Map();
+    refreshFlights.set(env.DB, flights);
+  }
+
+  const existingFlight = flights.get(identity.userId);
+  if (existingFlight !== undefined) return await existingFlight;
+
+  const flight = refreshLoginIdentityTokensOnce(env, identity, now, fetcher);
+  flights.set(identity.userId, flight);
+  try {
+    return await flight;
+  } finally {
+    if (flights.get(identity.userId) === flight) flights.delete(identity.userId);
+    if (flights.size === 0) refreshFlights.delete(env.DB);
+  }
 };

@@ -186,9 +186,10 @@ Grenzen nicht auf.
 
 Für Funktionen der Kategorie 1 muss das ursprüngliche Nutzertoken nicht als
 Arbeitsmittel gepflegt werden — es ist dort nur noch **Nachweis**, dass die
-Zustimmung lebt. Für Kategorie 2 und 3 bleibt es Arbeitsmittel.
+Zustimmung lebt. Das Bot-Token der Kategorie 2 bleibt bei der Bot-Wartung.
+Das Broadcaster-Token der Kategorie 3 bleibt Arbeitsmittel.
 
-Broadcaster-Token für Kategorie 2 und 3 werden bei konkreten Helix-Aufrufen
+Broadcaster-Token der Kategorie 3 werden bei konkreten Helix-Aufrufen
 über `withBroadcasterToken` bedarfsweise erneuert, auch ohne aktive Sitzung.
 Der stündliche Abgleich behält seinen Sitzungsfilter: Grants auf Vorrat am Leben
 zu halten, wäre mit der Datenschutzentscheidung aus ADR 0003 §6 unvereinbar.

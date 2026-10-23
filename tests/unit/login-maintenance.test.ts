@@ -572,12 +572,9 @@ describe("Login token maintenance", () => {
     expect(read().status).toBe("connected");
   });
 
-  it("doesn't set the successful state to revoked when a parallel run gets invalid_grant with the old token", async () => {
-    let markRotationCommitted!: () => void;
-    const rotationCommitted = new Promise<void>((resolve) => { markRotationCommitted = resolve; });
+  it("coalesces parallel maintenance runs into one successful token rotation", async () => {
     const { environment, read, readSessions, getInitialAccessTokenCiphertext } = await makeEnvironment(
       "2026-09-18T00:59:59.000Z",
-      { onSuccessfulTokenWrite: markRotationCommitted },
     );
     let refreshCalls = 0;
     const fetcher = vi.fn().mockImplementation((url: string) => {
@@ -591,7 +588,7 @@ describe("Login token maintenance", () => {
       if (refreshCalls === 1) {
         return Promise.resolve(new Response(JSON.stringify({ access_token: "access-neu", refresh_token: "refresh-neu", expires_in: 7200, scope: [] }), { status: 200 }));
       }
-      return rotationCommitted.then(() => new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+      return Promise.resolve(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
     });
     vi.stubGlobal("fetch", fetcher);
 
@@ -600,13 +597,13 @@ describe("Login token maintenance", () => {
       maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z"),
     ]);
 
-    expect(refreshCalls).toBe(2);
+    expect(refreshCalls).toBe(1);
     expect(read().access_token_ciphertext).not.toBe(getInitialAccessTokenCiphertext());
     expect(read().status).toBe("connected");
     expect(readSessions()[0]?.revoked_at).toBeNull();
   });
 
-  it("doesn't permanently set the login state to revoked after an invalid_grant that arrives before the save", async () => {
+  it("lets an overlapping maintenance run share a refresh while its token write is pending", async () => {
     let releaseTokenWrite!: () => void;
     let markTokenWriteStarted!: () => void;
     const tokenWriteStarted = new Promise<void>((resolve) => { markTokenWriteStarted = resolve; });
@@ -635,11 +632,11 @@ describe("Login token maintenance", () => {
 
     const successfulRun = maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z");
     await tokenWriteStarted;
-    await maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z");
+    const overlappingRun = maintainLoginIdentities(environment, "2026-09-18T00:00:01.000Z");
     releaseTokenWrite();
-    await successfulRun;
+    await Promise.all([successfulRun, overlappingRun]);
 
-    expect(refreshCalls).toBe(2);
+    expect(refreshCalls).toBe(1);
     expect(read().access_token_ciphertext).not.toBe(getInitialAccessTokenCiphertext());
     expect(read().status).toBe("connected");
     expect(readSessions()[0]?.revoked_at).toBeNull();

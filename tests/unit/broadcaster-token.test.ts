@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { HelixResult } from "../../src/modules/contract";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
-import { getLoginIdentity, upsertLoginIdentity } from "../../src/worker/db/login-identity";
+import { refreshLoginIdentityTokens } from "../../src/worker/auth/login-token-refresh";
+import { maintainLoginIdentities } from "../../src/worker/login-maintenance";
+import { getLoginIdentity, setLoginIdentityTokenScopes, upsertLoginIdentity } from "../../src/worker/db/login-identity";
 import { withBroadcasterToken } from "../../src/worker/auth/broadcaster-token";
-import { TestD1Database } from "./test-d1";
+import { createReadInterleavingDatabase, TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const CHANNEL_ID = "1000001";
 const NOW = "2026-10-23T10:00:00.000Z";
@@ -37,7 +39,7 @@ const encryptedToken = async (token: string): Promise<string> =>
 
 const seedIdentity = async (
   database: TestD1Database,
-  options: { expiresAt?: string; status?: "connected" | "revoked"; scopes?: string[] } = {},
+  options: { expiresAt?: string; status?: "connected" | "revoked"; scopes?: string[]; updatedAt?: string } = {},
 ): Promise<void> => {
   await upsertLoginIdentity(database as unknown as D1Database, {
     userId: CHANNEL_ID,
@@ -50,7 +52,7 @@ const seedIdentity = async (
     status: options.status ?? "connected",
     reason: null,
     createdAt: NOW,
-    updatedAt: NOW,
+    updatedAt: options.updatedAt ?? NOW,
   });
 };
 
@@ -82,6 +84,32 @@ const refreshedTokenResponse = (scopes = ["channel:manage:broadcast"]): Response
   expires_in: 7_200,
   scope: scopes,
 }), { status: 200, headers: { "Content-Type": "application/json" } });
+
+const requestUrl = (input: RequestInfo | URL): string =>
+  typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
+const createTokenWriteBarrierDatabase = (
+  database: TestD1Database,
+  beforeWrite: () => Promise<void>,
+): D1Database => {
+  let tokenRotationPrepared = false;
+  let barrierUsed = false;
+  return {
+    prepare: (sql: string) => {
+      if (sql.includes("UPDATE twitch_login_identity") && sql.includes("SET access_token_ciphertext")) {
+        tokenRotationPrepared = true;
+      }
+      return database.prepare(sql);
+    },
+    batch: (statements: D1PreparedStatement[]) => {
+      const shouldWait = tokenRotationPrepared && !barrierUsed;
+      tokenRotationPrepared = false;
+      if (!shouldWait) return database.batch(statements as unknown as TestPreparedStatement[]);
+      barrierUsed = true;
+      return beforeWrite().then(() => database.batch(statements as unknown as TestPreparedStatement[]));
+    },
+  } as unknown as D1Database;
+};
 
 describe("withBroadcasterToken", () => {
   it("uses a connected broadcaster token without requiring an active session", async () => {
@@ -144,6 +172,122 @@ describe("withBroadcasterToken", () => {
 
       expect(fetcher).toHaveBeenCalledOnce();
       expect(call).toHaveBeenCalledTimes(3);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("shares an in-flight cron refresh with a request started at a later timestamp", async () => {
+    const database = new TestD1Database();
+    let releaseTokenWrite!: () => void;
+    let markTokenWriteStarted!: () => void;
+    let releaseInitialRequest!: () => void;
+    let markInitialRequestStarted!: () => void;
+    const tokenWriteGate = new Promise<void>((resolve) => { releaseTokenWrite = resolve; });
+    const tokenWriteStarted = new Promise<void>((resolve) => { markTokenWriteStarted = resolve; });
+    const initialRequestGate = new Promise<void>((resolve) => { releaseInitialRequest = resolve; });
+    const initialRequestStarted = new Promise<void>((resolve) => { markInitialRequestStarted = resolve; });
+    try {
+      await seedIdentity(database, { updatedAt: "2026-10-22T10:00:00.000Z" });
+      await database.prepare(
+        `INSERT INTO auth_sessions (session_id, user_id, login, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind("session-1", CHANNEL_ID, "test-channel", "2099-10-23T10:00:00.000Z", NOW, NOW).run();
+
+      const cronFetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+        if (requestUrl(input).endsWith("/validate")) {
+          return Promise.resolve(new Response(JSON.stringify({ error: "invalid_token" }), { status: 401 }));
+        }
+        if (requestUrl(input).endsWith("/token")) {
+          return Promise.resolve(refreshedTokenResponse());
+        }
+        return Promise.reject(new Error("Unexpected maintenance request."));
+      });
+      vi.stubGlobal("fetch", cronFetcher);
+
+      const environment = environmentFor(database);
+      environment.DB = createTokenWriteBarrierDatabase(database, async () => {
+        markTokenWriteStarted();
+        await tokenWriteGate;
+      });
+      const maintenance = maintainLoginIdentities(environment, NOW);
+      await tokenWriteStarted;
+
+      const requestFetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+        JSON.stringify({ error: "invalid_grant" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      ));
+      const requestCall = vi.fn(async (token: string) => {
+        if (token === "old-access-token") {
+          markInitialRequestStarted();
+          await initialRequestGate;
+          return UNAUTHORIZED;
+        }
+        return token === "new-access-token" ? SUCCESS : UNAUTHORIZED;
+      });
+      const request = withBroadcasterToken(
+        environment, CHANNEL_ID, ["channel:manage:broadcast"], requestCall,
+        { now: () => "2026-10-23T10:00:01.000Z", fetcher: requestFetcher },
+      );
+
+      await initialRequestStarted;
+      releaseInitialRequest();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const requestRefreshCallsBeforeCronPersists = requestFetcher.mock.calls.length;
+
+      releaseTokenWrite();
+      await maintenance;
+
+      await expect(request).resolves.toEqual({ kind: "ok", value: { value: "done" } });
+      expect(cronFetcher.mock.calls.filter(([input]) => requestUrl(input).endsWith("/token"))).toHaveLength(1);
+      expect(requestRefreshCallsBeforeCronPersists).toBe(0);
+      expect(requestFetcher).not.toHaveBeenCalled();
+      expect(requestCall.mock.calls.map(([token]) => token)).toEqual(["old-access-token", "new-access-token"]);
+      expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({
+        status: "connected",
+        reason: null,
+      });
+    } finally {
+      releaseInitialRequest();
+      releaseTokenWrite();
+      vi.unstubAllGlobals();
+      database.close();
+    }
+  });
+
+  it("refreshes after a metadata-only update that changes updatedAt", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, {
+        expiresAt: "2026-10-23T10:04:00.000Z",
+        updatedAt: "2026-10-22T10:00:00.000Z",
+      });
+      const identity = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      if (identity === null) throw new Error("The seeded login identity was not stored.");
+      const environment = environmentFor(database);
+      environment.DB = createReadInterleavingDatabase(
+        database,
+        (sql) => sql.includes("FROM twitch_login_identity") && sql.includes("WHERE user_id = ?"),
+        () => setLoginIdentityTokenScopes(
+          database as unknown as D1Database,
+          CHANNEL_ID,
+          JSON.stringify(["channel:manage:broadcast", "user:read:email"]),
+          "2026-10-23T10:00:01.000Z",
+          identity.accessTokenCiphertext,
+          identity.refreshTokenCiphertext,
+        ),
+      );
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(refreshedTokenResponse());
+      const call = vi.fn((token: string) => Promise.resolve(token === "new-access-token" ? SUCCESS : UNAUTHORIZED));
+
+      await expect(withBroadcasterToken(
+        environment, CHANNEL_ID, ["channel:manage:broadcast"], call,
+        { now: () => NOW, fetcher },
+      )).resolves.toEqual({ kind: "ok", value: { value: "done" } });
+
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(call).toHaveBeenCalledOnce();
+      expect(call).toHaveBeenCalledWith("new-access-token");
     } finally {
       database.close();
     }
@@ -246,6 +390,67 @@ describe("withBroadcasterToken", () => {
       expect(call).not.toHaveBeenCalled();
       expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toEqual(before);
     } finally {
+      database.close();
+    }
+  });
+
+  it("does not refresh or write when a read-only token gets a Helix 401", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database);
+      const before = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      const fetcher = vi.fn<typeof fetch>();
+      const call = vi.fn<(token: string) => Promise<HelixResult<{ value: string }>>>().mockResolvedValue(UNAUTHORIZED);
+
+      await expect(withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        { now: () => NOW, fetcher, refresh: "never" },
+      )).resolves.toEqual({ kind: "http_error", result: UNAUTHORIZED });
+
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(call).toHaveBeenCalledOnce();
+      expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toEqual(before);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("clears a rejected shared refresh so a later call can recover", async () => {
+    const database = new TestD1Database();
+    let releaseRejectedRefresh!: () => void;
+    let markRejectedRefreshStarted!: () => void;
+    const rejectedRefreshGate = new Promise<void>((resolve) => { releaseRejectedRefresh = resolve; });
+    const rejectedRefreshStarted = new Promise<void>((resolve) => { markRejectedRefreshStarted = resolve; });
+    try {
+      await seedIdentity(database);
+      const identity = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      if (identity === null) throw new Error("The seeded login identity was not stored.");
+      const fetcher = vi.fn<typeof fetch>(async () => {
+        markRejectedRefreshStarted();
+        await rejectedRefreshGate;
+        return new Response(JSON.stringify({ error: "invalid_client" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      const firstRefresh = refreshLoginIdentityTokens(environmentFor(database), identity, NOW, fetcher);
+      await rejectedRefreshStarted;
+      const overlappingRefresh = refreshLoginIdentityTokens(environmentFor(database), identity, NOW, fetcher);
+      releaseRejectedRefresh();
+      await expect(Promise.all([firstRefresh, overlappingRefresh])).rejects.toThrow();
+      expect(fetcher).toHaveBeenCalledOnce();
+
+      fetcher.mockResolvedValueOnce(refreshedTokenResponse());
+      await expect(refreshLoginIdentityTokens(environmentFor(database), identity, NOW, fetcher)).resolves.toMatchObject({
+        userId: CHANNEL_ID,
+        status: "connected",
+        expiresAt: "2026-10-23T12:00:00.000Z",
+      });
+
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      releaseRejectedRefresh();
       database.close();
     }
   });
