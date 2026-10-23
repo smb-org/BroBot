@@ -204,6 +204,8 @@
   padding: 4px 0 24px;
 }
 
+.blitz-panel__settings-form { container-type: inline-size; container-name: editor; }
+
 .blitz-panel__editor > .ui-switch-section,
 .blitz-panel__settings-form > .ui-switch-section {
   margin: 0;
@@ -263,6 +265,8 @@
 .blitz-panel__settings-grid > :last-child {
   grid-column: 1 / -1;
 }
+
+.blitz-panel__auto-start { min-width: 0; }
 
 .collection-page[data-single-column="true"] .blitz-panel__editor,
 .collection-page[data-single-column="true"] .blitz-panel__settings-form {

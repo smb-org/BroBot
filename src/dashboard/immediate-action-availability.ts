@@ -14,8 +14,13 @@ export interface ImmediateActionAvailability {
 export const evaluateImmediateActionAvailability = (
   conditions: readonly ModuleImmediateActionCondition[],
   streamState: StreamState,
+  moduleEnabled = true,
 ): ImmediateActionAvailability => {
   for (const condition of conditions) {
+    if (condition === "moduleEnabled") {
+      if (!moduleEnabled) return { enabled: false, reason: "module_disabled" };
+      continue;
+    }
     if (condition !== "streamLive") continue;
     const reason: ImmediateActionUnavailableReason | null = streamState === "online"
       ? null

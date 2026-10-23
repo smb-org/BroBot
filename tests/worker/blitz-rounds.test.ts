@@ -1,9 +1,10 @@
 import { evictDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import type { ModuleAlarmContext } from "../../src/modules/contract";
+import type { ModuleAlarmContext, ModuleAlarmPlan } from "../../src/modules/contract";
 import { createBlitzQuestionRepository } from "../../src/modules/blitz_round/adapters/d1";
+import { reconcileBlitzAutoStart } from "../../src/modules/blitz_round/auto-start";
 import { blitzRoundDefaultsForLanguage } from "../../src/modules/blitz_round/locale";
-import { openBlitzRound, processBlitzMessage } from "../../src/modules/blitz_round/service";
+import { loadBlitzAutoStartBaseline, openBlitzRound, processBlitzMessage } from "../../src/modules/blitz_round/service";
 import { modulePoints } from "../../src/worker/module-points";
 import { POINTS_ANNOUNCE_MAX_ATTEMPTS, POINTS_ANNOUNCE_RETRY_MS } from "../../src/worker/durable/points";
 import { claimAutomatedChatOutput } from "../../src/worker/durable/automated-chat-output";
@@ -28,6 +29,7 @@ import {
 } from "./points-test-helpers";
 
 interface BlitzPointRoundObject extends PointsWorkerObject {
+  getModuleAlarmPlan(moduleId: string, alarmKey: string): Promise<ModuleAlarmPlan | null>;
   answerGameRound(
     moduleId: string,
     roundId: string,
@@ -321,6 +323,86 @@ describe("blitz answers in the channel Durable Object", () => {
     const audits = await worker.DB.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = ? AND action = ?")
       .bind(channelId, "blitz_round.started").first<{ count: number }>();
     expect(audits?.count).toBe(1);
+  });
+
+  it("keeps the committed interval when a resolution resumes after reading stale settings", async () => {
+    const channelId = `blitz-settings-resolution-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const worker = env as unknown as { DB: D1Database; CHANNEL: Env["CHANNEL"] };
+    const settings = { ...blitzRoundDefaultsForLanguage("en"), autoStart: true, autoStartIntervalMinutes: 15 };
+    await worker.DB.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'blitz_round', 1, ?, 1)")
+      .bind(channelId, JSON.stringify(settings)).run();
+    await worker.DB.prepare("INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'helix')")
+      .bind(channelId, new Date().toISOString()).run();
+    const repository = createBlitzQuestionRepository(worker.DB);
+    await repository.create(channelId, { kind: "quiz", prompt: "Which star is nearest?", answers: ["Sun"], enabled: true }, new Date().toISOString());
+    const object = blitzObject(pointObject(channelId));
+    const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({ sent: true, retryable: false, reason: null, delivery: "delivered" }));
+    let releaseResolution!: () => void;
+    let resolutionReadConfig!: () => void;
+    const resolutionGate = new Promise<void>((resolve) => { releaseResolution = resolve; });
+    const resolutionEntered = new Promise<void>((resolve) => { resolutionReadConfig = resolve; });
+    let pauseResolution = false;
+    await runPointObject(object, (target) => {
+      stubPointRoundChat(target, sendChat);
+      const runtime = target as unknown as { moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext };
+      const original = runtime.moduleAlarmContext.bind(runtime);
+      vi.spyOn(runtime, "moduleAlarmContext").mockImplementation((...args) => {
+        const context = original(...args);
+        const registration = args[1] as { key?: string } | undefined;
+        if (!pauseResolution || args[0] !== "blitz_round" || registration?.key !== "auto-start") return context;
+        pauseResolution = false;
+        let firstStreamRead = true;
+        return {
+          ...context,
+          streamState: async () => {
+            if (firstStreamRead) {
+              firstStreamRead = false;
+              resolutionReadConfig();
+              await resolutionGate;
+            }
+            return context.streamState();
+          },
+        };
+      });
+    });
+    const points = modulePoints(worker.CHANNEL, channelId, "blitz_round");
+    const opened = await openBlitzRound({ channelId, autoStartBaseline: await loadBlitzAutoStartBaseline(worker.DB, channelId),
+      repository, points, settings, language: "en" });
+    await forcePointAlarm(object, opened.roundId);
+    const savedSettings = { ...settings, autoStartIntervalMinutes: 30 };
+    const registration = blitzRoundModule.alarms?.[0];
+    if (registration === undefined) throw new Error("The Blitz automatic-start alarm is not registered.");
+    await runPointObject(object, async (target, durableState) => {
+      const runtime = target as unknown as {
+        moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext;
+        resolveGameRound: (moduleId: string, roundId: string, settlement: { kind: string; params: unknown }) => Promise<unknown>;
+      };
+      pauseResolution = true;
+      const pendingResolution = runtime.resolveGameRound("blitz_round", opened.roundId, { kind: "blitz", params: { prize: 50 } });
+      await resolutionEntered;
+      const context = runtime.moduleAlarmContext("blitz_round", registration, undefined);
+      await context.DB.prepare("UPDATE channel_modules SET settings = ?, revision = revision + 1, settings_revision = settings_revision + 1 WHERE channel_id = ? AND module_id = 'blitz_round'")
+        .bind(JSON.stringify(savedSettings), channelId).run();
+      await reconcileBlitzAutoStart(context, "settings");
+      releaseResolution();
+      await pendingResolution;
+      return durableState.storage.get<{ baseline: string; intervalMinutes: number; awaitingRoundId: string | null; deadlineAt: number }>(
+        "module:blitz_round:storage:auto-start-state",
+      );
+    });
+
+    const state = await runPointObject(object, (_target, durableState) =>
+      durableState.storage.get<{ baseline: string; intervalMinutes: number; awaitingRoundId: string | null; deadlineAt: number }>(
+        "module:blitz_round:storage:auto-start-state"));
+    expect(state).toMatchObject({ baseline: "0:2", intervalMinutes: 30, awaitingRoundId: null });
+    expect(state?.deadlineAt).toBeGreaterThan(Date.now() + 30 * 60_000 - 1_000);
+    expect(state?.deadlineAt).toBeLessThanOrEqual(Date.now() + 30 * 60_000);
+    const plan = await object.getModuleAlarmPlan("blitz_round", "auto-start");
+    expect(plan).toMatchObject({
+      identity: { triggerType: "interval", deadline: state?.deadlineAt },
+    });
+    expect(plan?.planSequence).toBeTypeOf("number");
   });
 
   it("rejects a matching message timestamped before the start line was delivered [protects=answers sent before the persisted announcement timestamp are recorded as round_closed without adding a participant; fails_when=a delayed pre-round EventSub message wins the open round; no_claim=sendChat delivery is mocked and EventSub signature verification is outside this module worker test]", async () => {

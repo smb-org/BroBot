@@ -776,6 +776,7 @@ export interface ModuleAlarmContext {
     ownerRevision?: number,
     streamGeneration?: number | null,
     identity?: ModuleAlarmIdentity,
+    /** Serialized lifecycle modules can omit this; the ChannelObject allocates it with the alarm write. */
     planSequence?: number,
   ) => Promise<void>;
   clear: (
@@ -1506,7 +1507,7 @@ export interface ModulePanelProperties {
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
 
-type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "duel" | "counter" | "test-message" | "marker";
+type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "duel" | "counter" | "test-message" | "marker" | "timer";
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
@@ -1526,7 +1527,7 @@ interface ModuleImmediateActionConditionContext {
   signal: AbortSignal;
 }
 
-export type ModuleImmediateActionCondition = "streamLive" | {
+export type ModuleImmediateActionCondition = "streamLive" | "moduleEnabled" | {
   check: (context: ModuleImmediateActionConditionContext) => Promise<ModuleImmediateActionAvailability>;
 };
 
@@ -1937,8 +1938,12 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   overlayElements?: readonly ModuleOverlayElementDefinition[];
   /** Durable alarm handlers registered through the shared host contract. */
   alarms?: readonly ModuleAlarmDefinition[];
+  /** Serializes this module's alarm and point-round lifecycle mutations per channel. */
+  serializeLifecycleMutations?: boolean;
   /** Reconciles accepted start metadata, even if the round was cancelled before announcement. */
   onPointRoundOpened?: (context: ModuleAlarmContext, round: ModulePointRoundAnnouncement) => Promise<void>;
+  /** Receives an internal, replayable notification immediately after round resolution and during watchdog recovery. */
+  onPointRoundResolved?: (context: ModuleAlarmContext, round: ModulePointRoundResult) => Promise<void>;
   /** Whether cancelling funded rounds queues the shared refund notice. Defaults to true. */
   pointRoundCancellationNotice?: boolean;
   /** Formats the persisted result of a resolved points round for retryable chat delivery. */

@@ -312,6 +312,9 @@ const invalidatePanelResource = (
     invalidateModuleDataQueries(queryClient, channelId, moduleId, scheduledQueryRefreshes, resourceRefreshes);
     return;
   }
+  if (moduleId === "timers" && part === "panel") {
+    invalidate(queryClient, queryKeys.channel(channelId, "live-cockpit"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+  }
   if (moduleId === "belabox" && part === "live") {
     invalidateBelaboxLiveQueries(queryClient, channelId, scheduledQueryRefreshes, resourceRefreshes);
     return;

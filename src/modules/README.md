@@ -147,6 +147,12 @@ Host vor dem EventSub-Abo prüft), `onEnable` (einmalige Initialdaten),
 (Kanalvariablen in eigenen Daten; für Einstellungen genügt
 `settingsVariableReferences(moduleId, fields)`).
 
+Modules that mutate one persisted scheduler from alarms, activation changes,
+stream transitions, and point-round lifecycle callbacks can set
+`serializeLifecycleMutations`. The ChannelObject routes those callbacks through
+one per-channel queue; each callback must still re-read persisted state after
+entering the queue.
+
 ## Wie ein Modul zu seinem Ereignis kommt
 
 `handleEvent` ist der fachliche Einstiegspunkt. Es beschreibt weiterhin in

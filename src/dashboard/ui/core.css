@@ -1027,6 +1027,11 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .segment-choice__label-full { display: inline; }
 .segment-choice__label-compact { display: none; }
 .segment-choice__description { color: var(--text-3); font-size: 11px; font-weight: 400; }
+@media (max-width: 600px) {
+  .segment-choice--wrap { width: 100%; height: auto; min-height: var(--control-height); flex-wrap: wrap; overflow: visible; }
+  .segment-choice--wrap .segment-choice__option { flex: 1 1 calc(50% - 4px); min-width: 0; height: auto; min-height: var(--control-height); }
+  .segment-choice--wrap .segment-choice__label { white-space: normal; overflow-wrap: anywhere; }
+}
 
 .ui-choice-cards-field { display: grid; gap: 6px; min-width: 0; }
 .ui-choice-cards-field__label { color: var(--color-text-2); font-size: 13px; font-weight: 500; }
@@ -1058,7 +1063,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-switch-row__copy strong { color: var(--color-text); font-size: 13px; font-weight: 500; }
 .ui-switch-row__copy small, .ui-switch-row__hint { color: var(--color-text-3); font-size: 12px; line-height: 1.4; }
 .ui-switch-row__hint, .ui-switch-row > .ui-locked-reason { grid-column: 1 / -1; }
+.ui-switch-row__hint { min-height: 18px; }
 .ui-switch-row [data-slot="switch"] { grid-column: 2; grid-row: 1; }
+.ui-switch-row--inline { grid-template-columns: auto auto; justify-content: start; column-gap: 10px; }
 .ui-switch-section { display: grid; align-content: start; gap: 8px; min-width: 0; }
 .ui-switch-section__heading { display: flex; align-items: center; gap: 10px; min-height: var(--control-height); }
 .ui-switch-section__heading h2 { flex: 1; min-width: 0; margin: 0; color: var(--color-text); font-size: 13px; font-weight: 500; }
