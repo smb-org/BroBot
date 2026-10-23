@@ -56,28 +56,38 @@ const draftFromTemplate = (template: ChatVoteTemplate): ChatVoteTemplateDraft =>
 });
 
 const reconcileAnswerIds = (
-  previousLabels: readonly string[],
+  previousServerLabels: readonly (string | undefined)[],
   previousAnswerIds: readonly string[],
   nextLabels: readonly string[],
   createAnswerId: () => string,
 ): string[] => {
-  const sameSequence = previousLabels.length === nextLabels.length
-    && previousLabels.every((label, index) => label === nextLabels[index]);
+  const sameSequence = previousServerLabels.length === nextLabels.length
+    && previousServerLabels.every((label, index) => label !== undefined && label === nextLabels[index]);
   if (sameSequence) return nextLabels.map((_label, index) => previousAnswerIds[index] ?? createAnswerId());
 
-  const countLabels = (labels: readonly string[]): Map<string, number> => {
+  const countLabels = (labels: readonly (string | undefined)[]): Map<string, number> => {
     const counts = new Map<string, number>();
-    labels.forEach((label) => { counts.set(label, (counts.get(label) ?? 0) + 1); });
+    labels.forEach((label) => {
+      if (label !== undefined) counts.set(label, (counts.get(label) ?? 0) + 1);
+    });
     return counts;
   };
-  const previousCounts = countLabels(previousLabels);
+  const previousCounts = countLabels(previousServerLabels);
   const nextCounts = countLabels(nextLabels);
   return nextLabels.map((label) => {
     if (previousCounts.get(label) !== 1 || nextCounts.get(label) !== 1) return createAnswerId();
-    const previousIndex = previousLabels.indexOf(label);
+    const previousIndex = previousServerLabels.indexOf(label);
     return previousAnswerIds[previousIndex] ?? createAnswerId();
   });
 };
+
+const mapServerLabelsToAnswerIds = (
+  answerIds: readonly string[],
+  serverLabels: readonly string[],
+): Map<string, string> => new Map(answerIds.flatMap((answerId, index) => {
+  const serverLabel = serverLabels[index];
+  return serverLabel === undefined ? [] : [[answerId, serverLabel] as const];
+}));
 
 const blankDraft = (draft: ChatVoteTemplateDraft): boolean =>
   draft.shortcut === null && draft.title.trim().length === 0 && draft.labels.every((label) => label.trim().length === 0) && draft.freeTextMode === null;
@@ -144,8 +154,11 @@ export function ChatVoteTemplateInspector({
   const answerIdPrefix = useId().replaceAll(":", "");
   const answerIdSequence = useRef(initialDraft.labels.length);
   const createAnswerId = (): string => `${answerIdPrefix}-answer-${String(++answerIdSequence.current)}`;
-  const [answerIds, setAnswerIds] = useState<readonly string[]>(() => initialDraft.labels.map((_label, index) => `${answerIdPrefix}-answer-${String(index + 1)}`));
+  const initialAnswerIds = initialDraft.labels.map((_label, index) => `${answerIdPrefix}-answer-${String(index + 1)}`);
+  const [answerIds, setAnswerIds] = useState<readonly string[]>(initialAnswerIds);
   const answerIdsRef = useRef(answerIds);
+  const acceptedServerLabelsByAnswerId = useRef(mapServerLabelsToAnswerIds(initialAnswerIds, initialDraft.labels));
+  const baselineAnswerIds = useRef<readonly string[]>(initialAnswerIds);
   const [durationMode, setDurationMode] = useState(() => durationPreset(draft.value.durationSeconds));
   const [customDurationSelected, setCustomDurationSelected] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -295,6 +308,7 @@ export function ChatVoteTemplateInspector({
       return saveInvalidReason;
     }
     const submitted = { ...draftValue.current, labels: [...draftValue.current.labels], answerColors: [...draftValue.current.answerColors] };
+    const submittedAnswerIds = [...answerIdsRef.current];
     const submittedColorDrafts = { ...customColorDraftsRef.current };
     if (blankDraft(submitted)) {
       setSaveError(labels.emptyDraftError);
@@ -338,6 +352,9 @@ export function ChatVoteTemplateInspector({
       updateCustomColorDrafts(() => remainingColorDrafts);
       baseRevision.current = next.revision;
       baselineDraft.current = acceptedDraft;
+      const acceptedAnswerIds = reconcileAnswerIds(submitted.labels, submittedAnswerIds, acceptedDraft.labels, createAnswerId);
+      acceptedServerLabelsByAnswerId.current = mapServerLabelsToAnswerIds(acceptedAnswerIds, acceptedDraft.labels);
+      baselineAnswerIds.current = acceptedAnswerIds;
       draft.accept(acceptedDraft);
       if (JSON.stringify(current) !== JSON.stringify(submitted)) {
         draftValue.current = current;
@@ -379,10 +396,7 @@ export function ChatVoteTemplateInspector({
   const saveForGuard = (): Promise<string | null> => saveDraft();
   const resetDraft = (): void => {
     invalidateReload();
-    const nextAnswerIds = [
-      ...answerIdsRef.current.slice(0, baselineDraft.current.labels.length),
-      ...baselineDraft.current.labels.slice(answerIdsRef.current.length).map(() => createAnswerId()),
-    ];
+    const nextAnswerIds = [...baselineAnswerIds.current];
     answerIdsRef.current = nextAnswerIds;
     setAnswerIds(nextAnswerIds);
     draft.accept(baselineDraft.current);
@@ -402,6 +416,8 @@ export function ChatVoteTemplateInspector({
     const nextAnswerIds = nextDraft.labels.map(() => createAnswerId());
     answerIdsRef.current = nextAnswerIds;
     setAnswerIds(nextAnswerIds);
+    acceptedServerLabelsByAnswerId.current = mapServerLabelsToAnswerIds(nextAnswerIds, nextDraft.labels);
+    baselineAnswerIds.current = nextAnswerIds;
     draftValue.current = nextDraft;
     baselineDraft.current = nextDraft;
     baseRevision.current = accepted.revision;
@@ -439,9 +455,12 @@ export function ChatVoteTemplateInspector({
       }
       const serverDraft = draftFromTemplate(latest);
       const currentAnswerIds = answerIdsRef.current;
-      const nextAnswerIds = reconcileAnswerIds(draftValue.current.labels, currentAnswerIds, serverDraft.labels, createAnswerId);
+      const previousServerLabels = currentAnswerIds.map((answerId) => acceptedServerLabelsByAnswerId.current.get(answerId));
+      const nextAnswerIds = reconcileAnswerIds(previousServerLabels, currentAnswerIds, serverDraft.labels, createAnswerId);
       answerIdsRef.current = nextAnswerIds;
       setAnswerIds(nextAnswerIds);
+      acceptedServerLabelsByAnswerId.current = mapServerLabelsToAnswerIds(nextAnswerIds, serverDraft.labels);
+      baselineAnswerIds.current = nextAnswerIds;
       const remainingColorDrafts: Record<string, CustomColorDraft> = {};
       const nextColors = [...serverDraft.answerColors];
       nextAnswerIds.forEach((answerId, index) => {

@@ -339,6 +339,42 @@ describe("saved chat voting collection", () => {
     expect(screen.getByTestId("chat-vote-color-preview").querySelector(".chat-voting-editor__color-preview-track > span")).toHaveStyle({ backgroundColor: "rgb(171, 205, 239)" });
   });
 
+  it("keeps a renamed answer's color draft with its original server answer when a new answer has the local name", async () => {
+    let markReloadStarted: (() => void) | undefined;
+    const reloadStarted = new Promise<void>((resolve) => { markReloadStarted = resolve; });
+    let finishReload: ((response: Response) => void) | undefined;
+    const reloadResponse = new Promise<Response>((resolve) => { finishReload = resolve; });
+    const serverTemplate = {
+      ...template,
+      labels: ["Pizza", "Burger", "Pasta"],
+      answerColors: ["#5b8cff", "#ff9f43", "#2ed3a3"],
+      revision: 2,
+    };
+    mount({
+      templateResponses: [[template], [serverTemplate], [serverTemplate]],
+      waitForReloadTemplates: reloadResponse,
+      onReloadStarted: () => { markReloadStarted?.(); },
+      patchResponse: () => Promise.resolve(jsonResponse({ error: "chat_vote_template_conflict" }, 409)),
+    });
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Antwort 1" }), { target: { value: "Pasta" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Neu laden" }));
+    await reloadStarted;
+
+    fireEvent.click(screen.getByRole("button", { name: "Farbe für Antwort 1" }));
+    const popover = await screen.findByRole("dialog", { name: "Farbe für Antwort 1" });
+    fireEvent.change(within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" }), { target: { value: "#abcdef" } });
+    const completeReload = finishReload;
+    if (completeReload === undefined) throw new Error("The pending template reload is missing.");
+    act(() => { completeReload(jsonResponse({ templates: [serverTemplate], count: 1, maximum: 100 })); });
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Antwort 1" })).toHaveValue("Pizza"));
+    const previewTracks = screen.getByTestId("chat-vote-color-preview").querySelectorAll(".chat-voting-editor__color-preview-track > span");
+    expect(previewTracks[0]).toHaveStyle({ backgroundColor: "rgb(171, 205, 239)" });
+    expect(previewTracks[2]).toHaveStyle({ backgroundColor: "rgb(46, 211, 163)" });
+  });
+
   it("does not attach a color draft to another answer when the server removes an answer", async () => {
     let markReloadStarted: (() => void) | undefined;
     const reloadStarted = new Promise<void>((resolve) => { markReloadStarted = resolve; });
