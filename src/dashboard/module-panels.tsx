@@ -1143,7 +1143,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
   const busyModulesRef = useRef(new Set<string>());
   const [busyModules, setBusyModules] = useState<ReadonlySet<string>>(new Set());
 
-  const performToggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
+  const toggle = async (moduleId: string, nextEnabled: boolean): Promise<void> => {
     if (busyModulesRef.current.has(moduleId) || moduleDependencyLockReason(moduleId, nextEnabled, modules) !== null) return;
     busyModulesRef.current.add(moduleId);
     setBusyModules(new Set(busyModulesRef.current));
@@ -1155,10 +1155,6 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
       busyModulesRef.current.delete(moduleId);
       setBusyModules(new Set(busyModulesRef.current));
     }
-  };
-
-  const toggle = (moduleId: string, nextEnabled: boolean): void => {
-    void performToggle(moduleId, nextEnabled);
   };
 
   type WorkspaceModule = Omit<(typeof MODULES)[number], "navigationCategory"> & { navigationCategory?: (typeof MODULE_NAVIGATION_CATEGORIES)[number] };
@@ -1187,7 +1183,7 @@ const ModuleToggleList = ({ channelId, ownRole, modules, onNavigate, onToggleMod
               manageable={manageable}
               modules={modules}
               busy={busyModules.has(module.id)}
-              onToggle={(nextEnabled) => { toggle(module.id, nextEnabled); }}
+              onToggle={(nextEnabled) => { void toggle(module.id, nextEnabled); }}
               onNavigate={onNavigate}
             />
           );
@@ -1288,13 +1284,6 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const [chatVotingTab, setChatVotingTab] = useState<"votes" | "settings">("votes");
   const viewLoading = loading || moduleState === undefined || ((registered?.panel !== undefined || registered?.settingsEditor !== undefined) && enabled && activeModule === undefined);
   const showActiveView = activeModule !== undefined && (enabled || moduleState === undefined);
-  const mountedModule = activeModule ?? (moduleId === "chat_voting" && moduleState !== undefined
-    ? { moduleId, settings: moduleState.settings }
-    : undefined);
-  const retainDisabledChatVotingView = moduleId === "chat_voting"
-    && moduleState?.enabled === false
-    && mountedModule !== undefined
-    && !permissionsMissing;
 
   const stateMessage = registered === undefined
     ? labels.unknown(details.name)
@@ -1304,7 +1293,6 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         ? labels.switchedOff(details.name)
         : null;
   const stateTone = registered === undefined || permissionsMissing ? "notice" : "neutral";
-  const renderActiveView = (stateMessage === null && showActiveView) || retainDisabledChatVotingView;
 
   useEffect(() => {
     if (error !== null) notify({ tone: "error", message: error });
@@ -1324,10 +1312,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           ...(moduleId === "emote_slots" ? { meta: <SlotJackpotMeta channelId={channelId} language={dashboardLanguage()} /> } : {}),
           icon: iconFor(moduleId, "module-heading-glyph"),
           active: enabled,
-          onToggle: (nextEnabled) => {
-            if (nextEnabled === enabled) return;
-            onToggle();
-          },
+          onToggle: (nextEnabled) => { if (nextEnabled !== enabled) onToggle(); },
           switchDisabled: !manageable || switchDisabled || busy,
           switchBusy: busy,
           ...(disabledReason === null ? {} : { lockHint: disabledReason }),
@@ -1354,7 +1339,8 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             active: effectiveEnabled,
             onToggle: (nextEnabled: boolean) => {
               if (nextEnabled === effectiveEnabled) return;
-              onToggle();
+              if (!nextEnabled) runDashboardNavigationGuards(onToggle, () => undefined);
+              else onToggle();
             },
             switchTitle: `${details.name}: ${statusWord(effectiveEnabled)}`,
             switchDisabled: !manageable || switchDisabled || busy,
@@ -1403,10 +1389,13 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
           {ownRole === "broadcaster" ? null : <p className="lock-reason">{texts.module.scopeConsentLocked}</p>}
         </section>}
         {viewLoading ? <p className="muted">{texts.module.load}</p> : null}
-        {stateMessage === null && registered?.panel === undefined && registered?.settingsEditor === undefined && showActiveView
-          ? <p className="module-state">{texts.module.noView}</p>
-          : null}
-        {stateMessage === null ? null : (
+        {stateMessage === null ? (
+          registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
+            <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
+              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} viewerIsBot={viewerIsBot} {...(initialSelection === undefined ? {} : { initialSelection })} {...(initialCommand === undefined ? {} : { initialCommand })} {...(onInitialCommandConsumed === undefined ? {} : { onInitialCommandConsumed })} onOpenTestArea={(targetModuleId, entryId) => onNavigate({ kind: "channel", channelId, section: "test-area", only: { moduleId: targetModuleId, entryId } })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
+            </section>
+          )
+        ) : (
           <section className={`module-state module-state--${stateTone}`} aria-label={texts.module.module}>
             <div className="module-state__summary">
               <NavigationIcon kind="permission" className="module-state__icon" />
@@ -1415,13 +1404,6 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             <ModuleListLink channelId={channelId} onNavigate={onNavigate} />
           </section>
         )}
-        {(registered?.panel === undefined && registered?.settingsEditor === undefined) || !renderActiveView
-          ? null
-          : (
-            <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content} hidden={!showActiveView}>
-              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={mountedModule === undefined ? [] : [mountedModule]} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} viewerIsBot={viewerIsBot} {...(initialSelection === undefined ? {} : { initialSelection })} {...(initialCommand === undefined ? {} : { initialCommand })} {...(onInitialCommandConsumed === undefined ? {} : { onInitialCommandConsumed })} onOpenTestArea={(targetModuleId, entryId) => onNavigate({ kind: "channel", channelId, section: "test-area", only: { moduleId: targetModuleId, entryId } })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
-            </section>
-          )}
       </section>
     </>
   );

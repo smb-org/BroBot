@@ -1,11 +1,8 @@
-import { useState, type ReactElement } from "react";
-
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { moduleQueryKey } from "../../src/dashboard/data";
-import { ModulePage } from "../../src/dashboard/module-panels";
 import ChatVotingPanel from "../../src/modules/chat_voting/panel";
 import type { ChatVoteTemplate } from "../../src/modules/chat_voting/contracts";
 import { chatVotingSavedPanelTexts } from "../../src/modules/chat_voting/panel/locale-saved";
@@ -45,7 +42,6 @@ const mount = (options: {
   templateResponses?: ChatVoteTemplate[][];
   patchResponse?: (updated: ChatVoteTemplate) => Promise<Response>;
   templateVariables?: unknown[];
-  content?: ReactElement;
 } = {}) => {
   const saved: string[] = [];
   let currentTemplates = [...(options.templates ?? [template])];
@@ -98,21 +94,8 @@ const mount = (options: {
     return Promise.resolve(jsonResponse({ error: "not_found" }, 404));
   });
   vi.stubGlobal("fetch", requests);
-  const view = render(<UiProvider>{options.content ?? <ChatVotingPanel channelId="channel-432" language="de" canManage={options.canManage ?? true} />}</UiProvider>);
+  const view = render(<UiProvider><ChatVotingPanel channelId="channel-432" language="de" canManage={options.canManage ?? true} /></UiProvider>);
   return { ...view, requests, saved };
-};
-
-const ModuleDisableHarness = (): ReactElement => {
-  const [enabled, setEnabled] = useState(true);
-  return <ModulePage
-    channelId="channel-432"
-    moduleId="chat_voting"
-    ownRole="manager"
-    modules={[{ id: "chat_voting", enabled, settings: "{}" }]}
-    activeModules={enabled ? [{ moduleId: "chat_voting", settings: "{}" }] : []}
-    onNavigate={() => undefined}
-    onToggle={() => { setEnabled((current) => !current); }}
-  />;
 };
 
 afterEach(() => {
@@ -354,31 +337,6 @@ describe("saved chat voting collection", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Frage" })).toHaveValue("Server question"));
     expect(within(popover).getByRole("textbox", { name: "Eigener Hex-Wert" })).toHaveValue("#abcdef");
     expect(screen.getByTestId("chat-vote-color-preview").querySelector(".chat-voting-editor__color-preview-track > span")).toHaveStyle({ backgroundColor: "rgb(171, 205, 239)" });
-  });
-
-  it("keeps a vote draft across module disable and re-enable, then saves it", async () => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
-    const { requests } = mount({ content: <ModuleDisableHarness /> });
-
-    const question = await screen.findByRole("textbox", { name: "Frage" });
-    fireEvent.change(question, { target: { value: "Lokale Frage" } });
-    fireEvent.click(screen.getByRole("switch", { name: /^Chat-Abstimmung: Läuft/u }));
-
-    const disabledSwitch = await screen.findByRole("switch", { name: /^Chat-Abstimmung: Aus/u });
-    expect(disabledSwitch).not.toBeChecked();
-    expect(screen.queryByRole("textbox", { name: "Frage" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("switch", { name: /^Chat-Abstimmung: Aus/u }));
-    const restoredQuestion = await screen.findByRole("textbox", { name: "Frage" });
-    expect(restoredQuestion).toHaveValue("Lokale Frage");
-    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
-    await waitFor(() => expect(requests.mock.calls.some(([input, init]) =>
-      requestUrl(input).pathname.endsWith("/templates/template-dinner") && init?.method === "PATCH",
-    )).toBe(true));
-    const savedBody = requests.mock.calls.find(([input, init]) =>
-      requestUrl(input).pathname.endsWith("/templates/template-dinner") && init?.method === "PATCH",
-    )?.[1]?.body;
-    expect(JSON.parse(savedBody as string)).toMatchObject({ title: "Lokale Frage" });
   });
 
   it("keeps a new vote as a two-minute draft until the explicit save action", async () => {
