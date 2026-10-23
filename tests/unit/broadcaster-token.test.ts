@@ -111,6 +111,38 @@ const createTokenWriteBarrierDatabase = (
   } as unknown as D1Database;
 };
 
+const createIndependentD1Binding = (database: TestD1Database): D1Database => ({
+  prepare: (sql: string) => database.prepare(sql),
+  batch: (statements: D1PreparedStatement[]) => database.batch(statements as unknown as TestPreparedStatement[]),
+} as unknown as D1Database);
+
+const createWriteCountingD1Binding = (database: TestD1Database, onWrite: () => void): D1Database => ({
+  prepare: (sql: string) => {
+    const statement = database.prepare(sql);
+    const wrapped = {
+      bind: (...values: Parameters<TestPreparedStatement["bind"]>) => {
+        statement.bind(...values);
+        return wrapped;
+      },
+      first: <T>() => statement.first<T>(),
+      all: <T>(...typeHint: readonly T[]) => statement.all<T>(...typeHint),
+      run: () => {
+        if (/^\s*(UPDATE|INSERT|DELETE|REPLACE)\b/iu.test(sql)) onWrite();
+        return statement.run();
+      },
+    };
+    return wrapped;
+  },
+  batch: (statements: D1PreparedStatement[]) => {
+    onWrite();
+    return database.batch(statements as unknown as TestPreparedStatement[]);
+  },
+} as unknown as D1Database);
+
+const readRefreshLease = (database: TestD1Database) => database.prepare(
+  "SELECT refresh_lease_owner, refresh_lease_until FROM twitch_login_identity WHERE user_id = ?",
+).bind(CHANNEL_ID).first<{ refresh_lease_owner: string | null; refresh_lease_until: number | null }>();
+
 describe("withBroadcasterToken", () => {
   it("uses a connected broadcaster token without requiring an active session", async () => {
     const database = new TestD1Database();
@@ -149,6 +181,7 @@ describe("withBroadcasterToken", () => {
         expiresAt: "2026-10-23T12:00:00.000Z",
         tokenScopesJson: '["channel:manage:broadcast"]',
       });
+      await expect(readRefreshLease(database)).resolves.toEqual({ refresh_lease_owner: null, refresh_lease_until: null });
     } finally {
       database.close();
     }
@@ -251,6 +284,214 @@ describe("withBroadcasterToken", () => {
       releaseInitialRequest();
       releaseTokenWrite();
       vi.unstubAllGlobals();
+      database.close();
+    }
+  });
+
+  it("uses a cross-isolate lease while a cron token rotation is waiting to persist", async () => {
+    const database = new TestD1Database();
+    let releaseTokenWrite!: () => void;
+    let markTokenWriteStarted!: () => void;
+    let markRequestWaitStarted!: () => void;
+    const tokenWriteGate = new Promise<void>((resolve) => { releaseTokenWrite = resolve; });
+    const tokenWriteStarted = new Promise<void>((resolve) => { markTokenWriteStarted = resolve; });
+    const requestWaitStarted = new Promise<void>((resolve) => { markRequestWaitStarted = resolve; });
+    try {
+      await seedIdentity(database, { expiresAt: "2026-10-23T10:59:00.000Z", updatedAt: "2026-10-22T10:00:00.000Z" });
+      await database.prepare(
+        `INSERT INTO auth_sessions (session_id, user_id, login, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind("session-1", CHANNEL_ID, "test-channel", "2099-10-23T10:00:00.000Z", NOW, NOW).run();
+
+      const cronFetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+        if (requestUrl(input).endsWith("/validate")) {
+          return Promise.resolve(new Response(JSON.stringify({ error: "invalid_token" }), { status: 401 }));
+        }
+        if (requestUrl(input).endsWith("/token")) return Promise.resolve(refreshedTokenResponse());
+        return Promise.reject(new Error("Unexpected maintenance request."));
+      });
+      vi.stubGlobal("fetch", cronFetcher);
+
+      const cronEnvironment = environmentFor(database);
+      cronEnvironment.DB = createTokenWriteBarrierDatabase(database, async () => {
+        markTokenWriteStarted();
+        await tokenWriteGate;
+      });
+      const maintenance = maintainLoginIdentities(cronEnvironment, NOW);
+      await tokenWriteStarted;
+
+      const requestEnvironment = environmentFor(database);
+      requestEnvironment.DB = createIndependentD1Binding(database);
+      const requestFetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }));
+      const requestCall = vi.fn((token: string) => Promise.resolve(token === "old-access-token" ? UNAUTHORIZED : SUCCESS));
+      const request = withBroadcasterToken(
+        requestEnvironment, CHANNEL_ID, ["channel:manage:broadcast"], requestCall,
+        {
+          now: () => "2026-10-23T10:00:01.000Z",
+          fetcher: requestFetcher,
+          refreshLease: {
+            sleep: (milliseconds) => {
+              markRequestWaitStarted();
+              return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+            },
+          },
+        },
+      );
+
+      await requestWaitStarted;
+      const requestRefreshCallsBeforeCronPersists = requestFetcher.mock.calls.length;
+      releaseTokenWrite();
+      await maintenance;
+
+      await expect(request).resolves.toEqual({ kind: "ok", value: { value: "done" } });
+      expect(cronFetcher.mock.calls.filter(([input]) => requestUrl(input).endsWith("/token"))).toHaveLength(1);
+      expect(requestRefreshCallsBeforeCronPersists).toBe(0);
+      expect(requestFetcher).not.toHaveBeenCalled();
+      expect(requestCall.mock.calls.map(([token]) => token)).toEqual(["old-access-token", "new-access-token"]);
+      expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({
+        status: "connected",
+        reason: null,
+        scopesJson: '["channel:manage:broadcast"]',
+        tokenScopesJson: '["channel:manage:broadcast"]',
+      });
+      await expect(database.prepare("SELECT revoked_at FROM auth_sessions WHERE session_id = ?").bind("session-1").first())
+        .resolves.toEqual({ revoked_at: null });
+      await expect(readRefreshLease(database)).resolves.toEqual({ refresh_lease_owner: null, refresh_lease_until: null });
+    } finally {
+      releaseTokenWrite();
+      vi.unstubAllGlobals();
+      database.close();
+    }
+  });
+
+  it("recovers after a crashed refresh holder's lease expires", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database);
+      const identity = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      if (identity === null) throw new Error("The seeded login identity was not stored.");
+      let clockNow = 1_000;
+      await database.prepare(
+        `UPDATE twitch_login_identity
+            SET refresh_lease_owner = ?, refresh_lease_until = ?
+          WHERE user_id = ?`,
+      ).bind("crashed-isolate", 1_200, CHANNEL_ID).run();
+      const sleep = vi.fn((milliseconds: number) => {
+        clockNow += milliseconds;
+        return Promise.resolve();
+      });
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(refreshedTokenResponse());
+
+      await expect(refreshLoginIdentityTokens(
+        environmentFor(database), identity, NOW, fetcher, { clock: () => clockNow, sleep },
+      )).resolves.toMatchObject({ status: "connected", expiresAt: "2026-10-23T12:00:00.000Z" });
+
+      expect(sleep).toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledOnce();
+      await expect(readRefreshLease(database)).resolves.toEqual({ refresh_lease_owner: null, refresh_lease_until: null });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("returns refresh_failed without changing state while another isolate holds a live lease", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, { expiresAt: "2026-10-23T10:04:00.000Z" });
+      const before = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      let clockNow = 1_000;
+      await database.prepare(
+        `UPDATE twitch_login_identity
+            SET refresh_lease_owner = ?, refresh_lease_until = ?
+          WHERE user_id = ?`,
+      ).bind("live-isolate", 10_000, CHANNEL_ID).run();
+      const fetcher = vi.fn<typeof fetch>();
+      const call = vi.fn();
+
+      await expect(withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        {
+          now: () => NOW,
+          fetcher,
+          refreshLease: {
+            clock: () => clockNow,
+            sleep: (milliseconds) => {
+              clockNow += milliseconds;
+              return Promise.resolve();
+            },
+          },
+        },
+      )).resolves.toEqual({ kind: "refresh_failed" });
+
+      expect(clockNow).toBe(4_000);
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(call).not.toHaveBeenCalled();
+      expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toEqual(before);
+      await expect(readRefreshLease(database)).resolves.toMatchObject({ refresh_lease_owner: "live-isolate" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not revoke unchanged tokens after losing its refresh lease", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, { expiresAt: "2026-10-23T10:04:00.000Z" });
+      const before = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      const fetcher = vi.fn<typeof fetch>(async () => {
+        await database.prepare(
+          `UPDATE twitch_login_identity
+              SET refresh_lease_owner = ?, refresh_lease_until = ?
+            WHERE user_id = ?`,
+        ).bind("replacement-holder", Date.now() + 20_000, CHANNEL_ID).run();
+        return new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+      const call = vi.fn();
+
+      await expect(withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        { now: () => NOW, fetcher },
+      )).resolves.toEqual({ kind: "refresh_failed" });
+
+      expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toEqual(before);
+      expect(call).not.toHaveBeenCalled();
+      await expect(readRefreshLease(database)).resolves.toMatchObject({ refresh_lease_owner: "replacement-holder" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not revoke after its lease expires while Twitch returns invalid_grant", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, { expiresAt: "2026-10-23T10:04:00.000Z" });
+      const before = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      let clockNow = 1_000;
+      const fetcher = vi.fn<typeof fetch>(() => {
+        clockNow = 32_000;
+        return Promise.resolve(new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }));
+      });
+      const call = vi.fn();
+
+      await expect(withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        { now: () => NOW, fetcher, refreshLease: { clock: () => clockNow, sleep: () => Promise.resolve() } },
+      )).resolves.toEqual({ kind: "refresh_failed" });
+
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toEqual(before);
+      expect(call).not.toHaveBeenCalled();
+      await expect(readRefreshLease(database)).resolves.toEqual({ refresh_lease_owner: null, refresh_lease_until: null });
+    } finally {
       database.close();
     }
   });
@@ -378,16 +619,20 @@ describe("withBroadcasterToken", () => {
     try {
       await seedIdentity(database, { expiresAt: "2026-10-23T09:59:00.000Z" });
       const before = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      const writes = vi.fn();
+      const environment = environmentFor(database);
+      environment.DB = createWriteCountingD1Binding(database, writes);
       const fetcher = vi.fn<typeof fetch>();
       const call = vi.fn<(token: string) => Promise<HelixResult<{ value: string }>>>();
 
       await expect(withBroadcasterToken(
-        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        environment, CHANNEL_ID, ["channel:manage:broadcast"], call,
         { now: () => NOW, fetcher, refresh: "never" },
       )).resolves.toEqual({ kind: "refresh_failed" });
 
       expect(fetcher).not.toHaveBeenCalled();
       expect(call).not.toHaveBeenCalled();
+      expect(writes).not.toHaveBeenCalled();
       expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toEqual(before);
     } finally {
       database.close();
@@ -399,16 +644,20 @@ describe("withBroadcasterToken", () => {
     try {
       await seedIdentity(database);
       const before = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      const writes = vi.fn();
+      const environment = environmentFor(database);
+      environment.DB = createWriteCountingD1Binding(database, writes);
       const fetcher = vi.fn<typeof fetch>();
       const call = vi.fn<(token: string) => Promise<HelixResult<{ value: string }>>>().mockResolvedValue(UNAUTHORIZED);
 
       await expect(withBroadcasterToken(
-        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        environment, CHANNEL_ID, ["channel:manage:broadcast"], call,
         { now: () => NOW, fetcher, refresh: "never" },
       )).resolves.toEqual({ kind: "http_error", result: UNAUTHORIZED });
 
       expect(fetcher).not.toHaveBeenCalled();
       expect(call).toHaveBeenCalledOnce();
+      expect(writes).not.toHaveBeenCalled();
       expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toEqual(before);
     } finally {
       database.close();
@@ -495,6 +744,7 @@ describe("withBroadcasterToken", () => {
         scopesJson: "[]",
         tokenScopesJson: "[]",
       });
+      await expect(readRefreshLease(database)).resolves.toEqual({ refresh_lease_owner: null, refresh_lease_until: null });
       expect(call).toHaveBeenCalledOnce();
     } finally {
       database.close();
@@ -518,6 +768,7 @@ describe("withBroadcasterToken", () => {
       )).resolves.toEqual({ kind: "refresh_failed" });
 
       expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toEqual(before);
+      await expect(readRefreshLease(database)).resolves.toEqual({ refresh_lease_owner: null, refresh_lease_until: null });
       expect(call).toHaveBeenCalledOnce();
     } finally {
       database.close();

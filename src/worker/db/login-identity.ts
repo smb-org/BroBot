@@ -28,6 +28,11 @@ interface LoginIdentityRow {
   updated_at: string;
 }
 
+interface LoginIdentityRefreshRow extends LoginIdentityRow {
+  refresh_lease_owner: string | null;
+  refresh_lease_until: number | null;
+}
+
 interface FullConsentChannelRow {
   is_present: number;
 }
@@ -114,6 +119,25 @@ export const getLoginIdentity = async (
   return row === null ? null : mapLoginIdentity(row);
 };
 
+export const getLoginIdentityRefreshState = async (
+  db: D1Database,
+  userId: string,
+): Promise<{ identity: LoginIdentityRecord; refreshLeaseOwner: string | null; refreshLeaseUntil: number | null } | null> => {
+  const row = await db.prepare(
+    `SELECT user_id, login, scopes_json, token_scopes_json, access_token_ciphertext,
+            refresh_token_ciphertext, expires_at, status, reason,
+            created_at, updated_at, refresh_lease_owner, refresh_lease_until
+       FROM twitch_login_identity
+      WHERE user_id = ?`,
+  ).bind(userId).first<LoginIdentityRefreshRow>();
+  if (row === null) return null;
+  return {
+    identity: mapLoginIdentity(row),
+    refreshLeaseOwner: row.refresh_lease_owner,
+    refreshLeaseUntil: row.refresh_lease_until,
+  };
+};
+
 export const hasFullConsentForChannelId = async (
   db: D1Database,
   channelId: string,
@@ -165,6 +189,8 @@ export const upsertLoginIdentity = async (
        expires_at = excluded.expires_at,
        status = excluded.status,
        reason = excluded.reason,
+       refresh_lease_owner = NULL,
+       refresh_lease_until = NULL,
        updated_at = excluded.updated_at`,
   ).bind(
     identity.userId,
@@ -221,9 +247,10 @@ export const setLoginIdentityStatus = async (
   reason: string | null,
   updatedAt: string,
 ): Promise<void> => {
+  const clearLease = status === "revoked" ? ", refresh_lease_owner = NULL, refresh_lease_until = NULL" : "";
   await db.prepare(
     `UPDATE twitch_login_identity
-        SET status = ?, reason = ?, updated_at = ?
+        SET status = ?, reason = ?, updated_at = ?${clearLease}
       WHERE user_id = ?`,
   ).bind(status, reason, updatedAt, userId).run();
   if (status === "revoked") {
@@ -244,9 +271,10 @@ export const setLoginIdentityStatusIfCurrent = async (
   expectedAccessTokenCiphertext: string,
   expectedRefreshTokenCiphertext: string,
 ): Promise<boolean> => {
+  const clearLease = status === "revoked" ? ", refresh_lease_owner = NULL, refresh_lease_until = NULL" : "";
   const result = await db.prepare(
     `UPDATE twitch_login_identity
-        SET status = ?, reason = ?, updated_at = ?
+        SET status = ?, reason = ?, updated_at = ?${clearLease}
       WHERE user_id = ?
         AND status <> 'revoked'
         AND access_token_ciphertext = ?
@@ -278,21 +306,29 @@ export const revokeLoginIdentityAndSessionsForUser = async (
   expectedRefreshTokenCiphertext: string,
   reason: string,
   revokedAt: string,
+  refreshLease?: { owner: string; now: number },
 ): Promise<boolean> => {
+  const leaseGuard = refreshLease === undefined
+    ? ""
+    : "AND refresh_lease_owner = ? AND refresh_lease_until >= ?";
   const identityRevocation = db.prepare(
     `UPDATE twitch_login_identity
-        SET status = 'revoked', reason = ?, updated_at = ?, scopes_json = '[]', token_scopes_json = '[]'
+        SET status = 'revoked', reason = ?, updated_at = ?, scopes_json = '[]', token_scopes_json = '[]',
+            refresh_lease_owner = NULL, refresh_lease_until = NULL
       WHERE user_id = ?
         AND status <> 'revoked'
         AND access_token_ciphertext = ?
-        AND refresh_token_ciphertext = ?`,
-  ).bind(
+        AND refresh_token_ciphertext = ? ${leaseGuard}`,
+  );
+  const identityRevocationValues: Array<string | number> = [
     reason,
     revokedAt,
     userId,
     expectedAccessTokenCiphertext,
     expectedRefreshTokenCiphertext,
-  );
+  ];
+  if (refreshLease !== undefined) identityRevocationValues.push(refreshLease.owner, refreshLease.now);
+  const identityRevocationStatement = identityRevocation.bind(...identityRevocationValues);
   const sessionRevocation = db.prepare(
     `UPDATE auth_sessions
         SET revoked_at = ?, revocation_reason = ?, updated_at = ?
@@ -323,8 +359,48 @@ export const revokeLoginIdentityAndSessionsForUser = async (
        requested_at = excluded.requested_at,
        generation = pending_realtime_user_revocations.generation + 1`,
   ).bind(userId, reason, revokedAt);
-  const results = await db.batch([identityRevocation, sessionRevocation, queueSocketRevocation]);
+  const results = await db.batch([identityRevocationStatement, sessionRevocation, queueSocketRevocation]);
   return (results[0]?.meta.changes ?? 0) > 0;
+};
+
+export const acquireLoginIdentityRefreshLease = async (
+  db: D1Database,
+  userId: string,
+  expectedAccessTokenCiphertext: string,
+  expectedRefreshTokenCiphertext: string,
+  owner: string,
+  leaseUntil: number,
+  now: number,
+): Promise<boolean> => {
+  const result = await db.prepare(
+    `UPDATE twitch_login_identity
+        SET refresh_lease_owner = ?, refresh_lease_until = ?
+      WHERE user_id = ?
+        AND status <> 'revoked'
+        AND (refresh_lease_until IS NULL OR refresh_lease_until < ?)
+        AND access_token_ciphertext = ?
+        AND refresh_token_ciphertext = ?`,
+  ).bind(
+    owner,
+    leaseUntil,
+    userId,
+    now,
+    expectedAccessTokenCiphertext,
+    expectedRefreshTokenCiphertext,
+  ).run();
+  return result.meta.changes > 0;
+};
+
+export const releaseLoginIdentityRefreshLease = async (
+  db: D1Database,
+  userId: string,
+  owner: string,
+): Promise<void> => {
+  await db.prepare(
+    `UPDATE twitch_login_identity
+        SET refresh_lease_owner = NULL, refresh_lease_until = NULL
+      WHERE user_id = ? AND refresh_lease_owner = ?`,
+  ).bind(userId, owner).run();
 };
 
 export interface PendingRealtimeUserRevocation {
@@ -387,7 +463,12 @@ export const rotateLoginTokensForUser = async (
   updatedAt: string,
   expectedUpdatedAt: string,
   tokenScopesJson?: string,
+  refreshLeaseOwner?: string,
 ): Promise<boolean> => {
+  const leaseGuard = refreshLeaseOwner === undefined ? "" : "AND refresh_lease_owner = ?";
+  const clearLease = refreshLeaseOwner === undefined
+    ? ""
+    : ", refresh_lease_owner = NULL, refresh_lease_until = NULL";
   const tokenRotation = db.prepare(
     `UPDATE twitch_login_identity
       SET access_token_ciphertext = ?,
@@ -403,11 +484,12 @@ export const rotateLoginTokensForUser = async (
                 THEN NULL
               ELSE reason
             END,
-            updated_at = ?
+            updated_at = ?${clearLease}
       WHERE user_id = ?
         AND access_token_ciphertext = ?
-        AND refresh_token_ciphertext = ?`,
-  ).bind(
+        AND refresh_token_ciphertext = ? ${leaseGuard}`,
+  );
+  const tokenRotationValues = [
     accessTokenCiphertext,
     refreshTokenCiphertext,
     expiresAt,
@@ -417,7 +499,9 @@ export const rotateLoginTokensForUser = async (
     userId,
     expectedAccessTokenCiphertext,
     expectedRefreshTokenCiphertext,
-  );
+  ];
+  if (refreshLeaseOwner !== undefined) tokenRotationValues.push(refreshLeaseOwner);
+  const tokenRotationStatement = tokenRotation.bind(...tokenRotationValues);
   const tokenScopes = tokenScopesJson === undefined ? null : db.prepare(
     `UPDATE twitch_login_identity
         SET token_scopes_json = ?, updated_at = ?
@@ -456,7 +540,7 @@ export const rotateLoginTokensForUser = async (
     refreshTokenCiphertext,
   );
   const results = await db.batch(tokenScopes === null
-    ? [tokenRotation, sessionRecovery]
-    : [tokenRotation, tokenScopes, sessionRecovery]);
+    ? [tokenRotationStatement, sessionRecovery]
+    : [tokenRotationStatement, tokenScopes, sessionRecovery]);
   return (results[0]?.meta.changes ?? 0) > 0;
 };

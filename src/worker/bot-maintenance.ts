@@ -322,7 +322,7 @@ const rotateBotTokensWithRetry = async (
 const isInvalidGrant = (error: unknown): boolean =>
   error instanceof TwitchApiError && error.code === "invalid_grant";
 
-export interface IdentityAuthorizationRecord {
+interface IdentityAuthorizationRecord {
   userId: string;
   accessTokenCiphertext: string;
   refreshTokenCiphertext: string;
@@ -331,7 +331,7 @@ export interface IdentityAuthorizationRecord {
 }
 
 /** Shared flow for confirming a revoked identity token. */
-export const confirmIdentityAuthorization = async (
+const confirmIdentityAuthorization = async (
   env: Env,
   expectedUserId: string,
   now: string,

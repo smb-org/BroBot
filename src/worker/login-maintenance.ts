@@ -1,50 +1,21 @@
 import {
-  getPendingRealtimeUserRevocation,
   getLoginIdentity,
   listLoginIdentities,
   listPendingRealtimeUserRevocations,
   clearPendingRealtimeUserRevocation,
-  revokeLoginIdentityAndSessionsForUser,
-  rotateLoginTokensForUser,
   setLoginIdentityTokenScopes,
   setLoginIdentityStatusIfCurrent,
 } from "./db/login-identity";
 import { getTokenEncryptionKeys } from "./auth/crypto";
 import {
-  confirmIdentityAuthorization,
   decryptStoredToken,
   shouldRefreshBotToken,
   TwitchApiError,
   validateBotToken,
   logMaintenanceError,
 } from "./bot-maintenance";
-import { revokeRealtimeUserFromAllChannels } from "./realtime";
-import { notifyCommittedResources } from "./panel-resources";
 import { refreshLoginIdentityTokens } from "./auth/login-token-refresh";
-
-export const markLoginRevoked = async (
-  env: { DB: D1Database; CHANNEL?: Env["CHANNEL"] },
-  identity: Awaited<ReturnType<typeof listLoginIdentities>>[number],
-  now: string,
-  reason: string,
-): Promise<void> => {
-  const revoked = await revokeLoginIdentityAndSessionsForUser(
-    env.DB,
-    identity.userId,
-    identity.accessTokenCiphertext,
-    identity.refreshTokenCiphertext,
-    reason,
-    now,
-  );
-  if (revoked) {
-    const pending = await getPendingRealtimeUserRevocation(env.DB, identity.userId);
-    if (env.CHANNEL !== undefined) {
-      await revokeRealtimeUserFromAllChannels(env.DB, env.CHANNEL, identity.userId);
-      if (pending !== null) await clearPendingRealtimeUserRevocation(env.DB, pending);
-      await notifyCommittedResources({ DB: env.DB, CHANNEL: env.CHANNEL });
-    }
-  }
-};
+import { revokeRealtimeUserFromAllChannels } from "./realtime";
 
 const retryPendingRealtimeUserRevocations = async (env: Env): Promise<void> => {
   const pendingRevocations = await listPendingRealtimeUserRevocations(env.DB);
@@ -62,51 +33,6 @@ const retryPendingRealtimeUserRevocations = async (env: Env): Promise<void> => {
   }
 };
 
-const rotateLoginTokensWithRetry = async (
-  db: D1Database,
-  userId: string,
-  expectedAccessTokenCiphertext: string,
-  expectedRefreshTokenCiphertext: string,
-  accessTokenCiphertext: string,
-  refreshTokenCiphertext: string,
-  expiresAt: string,
-  updatedAt: string,
-  expectedUpdatedAt: string,
-): Promise<boolean> => {
-  try {
-    return await rotateLoginTokensForUser(
-      db,
-      userId,
-      expectedAccessTokenCiphertext,
-      expectedRefreshTokenCiphertext,
-      accessTokenCiphertext,
-      refreshTokenCiphertext,
-      expiresAt,
-      updatedAt,
-      expectedUpdatedAt,
-    );
-  } catch (firstError: unknown) {
-    try {
-      return await rotateLoginTokensForUser(
-        db,
-        userId,
-        expectedAccessTokenCiphertext,
-        expectedRefreshTokenCiphertext,
-        accessTokenCiphertext,
-        refreshTokenCiphertext,
-        expiresAt,
-        updatedAt,
-        expectedUpdatedAt,
-      );
-    } catch {
-      throw firstError;
-    }
-  }
-};
-
-const isInvalidGrant = (error: unknown): boolean =>
-  error instanceof TwitchApiError && error.code === "invalid_grant";
-
 /** Confirms a login revocation without writing the revocation state itself. */
 export const confirmLoginIdentityAuthorization = async (
   env: Env,
@@ -114,38 +40,24 @@ export const confirmLoginIdentityAuthorization = async (
   now: string,
   fetcher: typeof fetch = fetch,
 ): Promise<boolean> => {
-  return confirmIdentityAuthorization(
-    env,
-    userId,
-    now,
-    () => getLoginIdentity(env.DB, userId),
-    (identity) => identity.status === "revoked",
-    async (db, identity, accessTokenCiphertext, refreshTokenCiphertext, expiresAt, updatedAt, scopes) => {
-      const replaced = await rotateLoginTokensWithRetry(
-        db,
-        identity.userId,
-        identity.accessTokenCiphertext,
-        identity.refreshTokenCiphertext,
-        accessTokenCiphertext,
-        refreshTokenCiphertext,
-        expiresAt,
-        updatedAt,
-        identity.updatedAt,
-      );
-      if (replaced) {
-        await setLoginIdentityTokenScopes(
-          db,
-          identity.userId,
-          JSON.stringify(scopes),
-          updatedAt,
-          accessTokenCiphertext,
-          refreshTokenCiphertext,
-        );
-      }
-      return replaced;
-    },
-    fetcher,
-  );
+  const identity = await getLoginIdentity(env.DB, userId);
+  if (identity === null || identity.userId !== userId) return false;
+  if (identity.status === "revoked") return true;
+
+  const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, getTokenEncryptionKeys(env));
+  if (accessToken === null) return false;
+  try {
+    await validateBotToken(fetcher, env, accessToken);
+    return false;
+  } catch (error: unknown) {
+    if (!(error instanceof TwitchApiError) || error.status !== 401) return false;
+    try {
+      const refreshed = await refreshLoginIdentityTokens({ ...env, CHANNEL: undefined }, identity, now, fetcher);
+      return refreshed?.status === "revoked";
+    } catch {
+      return false;
+    }
+  }
 };
 
 const refreshFailureReason = (error: unknown): string =>
@@ -209,19 +121,13 @@ const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<type
       statusExpectedRefreshTokenCiphertext = refreshedIdentity.refreshTokenCiphertext;
     } catch (error: unknown) {
       logMaintenanceError({ channelId: identity.userId, subscriptionType: "login-identity", variant: "refresh" }, error, refreshFailureReason(error));
-      if (isInvalidGrant(error)) {
-        await markLoginRevoked(env, identity, now, "authorization_revoked");
-      } else {
-        await setLoginIdentityStatusIfCurrent(
-          env.DB,
-          identity.userId,
-          "error",
-          refreshFailureReason(error),
-          now,
-          identity.accessTokenCiphertext,
-          identity.refreshTokenCiphertext,
-        );
+      let currentStatus: string | undefined;
+      try {
+        currentStatus = (await getLoginIdentity(env.DB, identity.userId))?.status;
+      } catch {
+        currentStatus = undefined;
       }
+      if (currentStatus === "revoked") throw error;
       return;
     }
   }

@@ -195,9 +195,10 @@ Der stündliche Abgleich behält seinen Sitzungsfilter: Grants auf Vorrat am Leb
 zu halten, wäre mit der Datenschutzentscheidung aus ADR 0003 §6 unvereinbar.
 Vor dem Aufruf prüft der Helfer `token_scopes_json`; nach einem 401 erneuert er
 höchstens einmal und wiederholt den Aufruf. Meldet der Token-Endpunkt
-`invalid_grant` und liegt kein konkurrierend erneuertes Token vor, markiert er
-die Identität wie der Cron als widerrufen und leert beide Scope-Listen. Andere
-Refresh-Fehler ändern den Status nicht.
+`invalid_grant`, darf nur der aktuelle Lease-Inhaber bei unveränderten
+Token-Chiffretexten die Identität wie der Cron widerrufen und beide
+Scope-Listen leeren. Andere Refresh-Fehler ändern den Status nicht.
+Wartung, Helix-Aufrufe und Revocation-Bestätigung stimmen sich für jede Login-Identität über eine kurzlebige D1-Lease ab, damit nur ein Worker-Isolat das rotierende Refresh-Token erneuert.
 
 ## 6. Regeln für neue Aufrufe
 

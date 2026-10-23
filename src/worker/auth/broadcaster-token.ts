@@ -1,8 +1,11 @@
 import type { HelixResult } from "../../modules/contract";
 import { getLoginIdentity, type LoginIdentityRecord } from "../db/login-identity";
-import { TwitchApiError } from "../bot-maintenance";
-import { decryptLoginIdentityAccessToken, refreshLoginIdentityTokens, type LoginTokenRefreshEnvironment } from "./login-token-refresh";
-import { markLoginRevoked } from "../login-maintenance";
+import {
+  decryptLoginIdentityAccessToken,
+  refreshLoginIdentityTokens,
+  type LoginTokenRefreshEnvironment,
+  type LoginTokenRefreshLeaseOptions,
+} from "./login-token-refresh";
 
 const BROADCASTER_TOKEN_REFRESH_WINDOW_MS = 5 * 60 * 1_000;
 
@@ -15,6 +18,7 @@ export interface BroadcasterTokenDependencies {
   fetcher?: typeof fetch;
   beforeCall?: () => Promise<boolean>;
   refresh?: "allow" | "never";
+  refreshLease?: LoginTokenRefreshLeaseOptions;
 }
 
 export type BroadcasterTokenResult<Data> =
@@ -63,6 +67,7 @@ const refreshIdentityOnce = async (
   identity: LoginIdentityRecord,
   now: string,
   fetcher: typeof fetch,
+  leaseOptions: LoginTokenRefreshLeaseOptions,
 ): Promise<RefreshResult> => {
   let current: LoginIdentityRecord | null;
   try {
@@ -75,31 +80,27 @@ const refreshIdentityOnce = async (
   if (isReplacementIdentity(current, identity)) return { kind: "replacement", identity: current };
 
   try {
-    const refreshed = await refreshLoginIdentityTokens(environment, identity, now, fetcher);
+    const refreshed = await refreshLoginIdentityTokens(environment, identity, now, fetcher, leaseOptions);
     if (refreshed === null) {
       const current = await getLoginIdentity(environment.DB, identity.userId);
       if (current?.status === "revoked") return { kind: "revoked" };
       if (current !== null && isReplacementIdentity(current, identity)) return { kind: "replacement", identity: current };
-      return { kind: "not_connected" };
+      return current === null || current.status !== "connected"
+        ? { kind: "not_connected" }
+        : { kind: "failed" };
     }
     if (refreshed.status === "revoked") return { kind: "revoked" };
     if (refreshed.status !== "connected") return { kind: "not_connected" };
     return { kind: "refreshed", identity: refreshed };
-  } catch (error: unknown) {
-    if (!(error instanceof TwitchApiError) || error.code !== "invalid_grant") return { kind: "failed" };
-
+  } catch {
     try {
-      await markLoginRevoked(environment, identity, now, "authorization_revoked");
+      if ((await getLoginIdentity(environment.DB, identity.userId))?.status === "revoked") {
+        return { kind: "revoked" };
+      }
     } catch {
-      // The identity write may have committed before a realtime notification failed.
+      // Keep the refresh failure result if the state cannot be read back.
     }
-
-    const current = await getLoginIdentity(environment.DB, identity.userId);
-    if (current?.status === "revoked") return { kind: "revoked" };
-    if (current !== null && isReplacementIdentity(current, identity)) return { kind: "replacement", identity: current };
-    return current === null || current.status !== "connected"
-      ? { kind: "not_connected" }
-      : { kind: "failed" };
+    return { kind: "failed" };
   }
 };
 
@@ -160,7 +161,7 @@ export const withBroadcasterToken = async <Data>(
       if (isExpired(identity.expiresAt, now())) return { kind: "refresh_failed" };
     } else {
       refreshSpent = true;
-      const refreshResult = await refreshIdentityOnce(environment, identity, now(), fetcher);
+      const refreshResult = await refreshIdentityOnce(environment, identity, now(), fetcher, dependencies.refreshLease ?? {});
       if (refreshResult.kind === "revoked") return { kind: "revoked", source: "refresh" };
       if (refreshResult.kind === "not_connected") return { kind: "not_connected" };
       if (refreshResult.kind === "failed") return { kind: "refresh_failed" };
@@ -195,7 +196,7 @@ export const withBroadcasterToken = async <Data>(
     if (replacement === null) return { kind: "http_error", result };
     identity = replacement;
   } else {
-    const refreshResult = await refreshIdentityOnce(environment, identity, now(), fetcher);
+    const refreshResult = await refreshIdentityOnce(environment, identity, now(), fetcher, dependencies.refreshLease ?? {});
     if (refreshResult.kind === "revoked") return { kind: "revoked", source: "refresh" };
     if (refreshResult.kind === "not_connected") return { kind: "not_connected" };
     if (refreshResult.kind === "failed") return { kind: "refresh_failed" };

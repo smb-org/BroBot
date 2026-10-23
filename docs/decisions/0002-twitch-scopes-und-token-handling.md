@@ -179,6 +179,7 @@ Diese Bindung ist kein Zusatz, sondern Voraussetzung: Ein signierter `state` all
 - **Refresh-Tokens rotieren:** Jeder Refresh gibt einen neuen aus. Der alte wird im selben Schreibvorgang ersetzt, sonst entsteht bei einem Fehlschlag eine Verbindung ohne gültigen Refresh-Token.
 - Twitch verlangt, Tokens **beim Start und danach stündlich** über `/oauth2/validate` zu prüfen. Für Login-Identitäten gilt das nur, solange mindestens eine nicht widerrufene und noch nicht abgelaufene `auth_sessions`-Zeile existiert; Identitäten ohne aktive Session werden nicht künstlich am Leben gehalten. Der Cron begrenzt die Login-Prüfungen auf vier gleichzeitige Aufrufe. Derselbe Lauf erneuert Tokens, die in weniger als einer Stunde ablaufen, und prüft den Moderatorstatus des Bots.
 - Diese Wartung folgt der aktiven Sitzung; Broadcaster-Token werden bei einem konkreten Helix-Aufruf unabhängig davon bedarfsweise erneuert.
+- Stündliche Wartung, Helix-Aufrufe und Revocation-Bestätigung koordinieren die Erneuerung je Login-Identität über eine kurzlebige D1-Lease, damit nur ein Worker-Isolat das rotierende Refresh-Token verwendet.
 - Ein erneuter Login wird nur nötig, wenn der Nutzer die App entzieht, sein Passwort ändert oder **wir einen neuen Scope brauchen**. Nur der dritte Fall ist vermeidbar — deshalb die Disziplin in Abschnitt 3.
 - **Bei Widerruf kein Endlos-Retry.** Die Verbindung wird als getrennt markiert, die Ursache festgehalten, und das Panel zeigt den Zustand mit einem Weg zur erneuten Verbindung.
 

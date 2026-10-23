@@ -41,6 +41,8 @@ const makeEnvironment = async (
     expires_at: expiresAt,
     status: "connected",
     reason: null as string | null,
+    refresh_lease_owner: null as string | null,
+    refresh_lease_until: null as number | null,
     created_at: "2026-09-17T00:00:00.000Z",
     updated_at: "2026-09-17T00:00:00.000Z",
   };
@@ -73,14 +75,36 @@ const makeEnvironment = async (
             ? { results: (options.memberChannelIds ?? []).map((channel_id) => ({ channel_id })) }
           : { results: [] }),
       first: vi.fn().mockImplementation(() => {
-        if (!sql.includes("FROM pending_realtime_user_revocations")) return null;
-        const pending = pendingRealtimeRevocations.get(String(values[0]));
-        return pending === undefined ? null : {
-          user_id: String(values[0]),
-          ...pending,
-        };
+        if (sql.includes("FROM pending_realtime_user_revocations")) {
+          const pending = pendingRealtimeRevocations.get(String(values[0]));
+          return pending === undefined ? null : {
+            user_id: String(values[0]),
+            ...pending,
+          };
+        }
+        if (sql.includes("FROM twitch_login_identity") && row.user_id === values[0]) return { ...row };
+        return null;
       }),
       run: vi.fn().mockImplementation(async () => {
+        if (sql.includes("UPDATE twitch_login_identity") && sql.includes("SET refresh_lease_owner")) {
+          if (sql.includes("SET refresh_lease_owner = ?,")) {
+            const [owner, leaseUntil, userId, now, expectedAccess, expectedRefresh] = values;
+            if (row.user_id !== userId || row.status === "revoked" ||
+                (row.refresh_lease_until !== null && row.refresh_lease_until >= Number(now)) ||
+                row.access_token_ciphertext !== expectedAccess ||
+                row.refresh_token_ciphertext !== expectedRefresh) {
+              return { success: true, meta: { changes: 0 } };
+            }
+            row = { ...row, refresh_lease_owner: String(owner), refresh_lease_until: Number(leaseUntil) };
+            return { success: true, meta: { changes: 1 } };
+          }
+          const [userId, owner] = values;
+          if (row.user_id !== userId || row.refresh_lease_owner !== owner) {
+            return { success: true, meta: { changes: 0 } };
+          }
+          row = { ...row, refresh_lease_owner: null, refresh_lease_until: null };
+          return { success: true, meta: { changes: 1 } };
+        }
         if (sql.includes("INSERT INTO pending_realtime_user_revocations")) {
           const userId = String(values[0]);
           const previous = pendingRealtimeRevocations.get(userId);
@@ -114,7 +138,8 @@ const makeEnvironment = async (
           const [access, refresh, expires, recoveryCutoff, , updated, userId, expectedAccess, expectedRefresh] = values;
           if (row.user_id !== userId ||
               row.access_token_ciphertext !== expectedAccess ||
-              row.refresh_token_ciphertext !== expectedRefresh) {
+              row.refresh_token_ciphertext !== expectedRefresh ||
+              (values.length > 9 && row.refresh_lease_owner !== values[9])) {
             return { success: true, meta: { changes: 0 } };
           }
           const wasRevokedAfterStart = row.status !== "revoked" ||
@@ -126,6 +151,8 @@ const makeEnvironment = async (
             expires_at: String(expires),
             status: wasRevokedAfterStart ? "connected" : row.status,
             reason: wasRevokedAfterStart ? null : row.reason,
+            refresh_lease_owner: null,
+            refresh_lease_until: null,
             updated_at: String(updated),
           };
           options.onSuccessfulTokenWrite?.();
@@ -137,7 +164,8 @@ const makeEnvironment = async (
           const [status, reason, updatedAt, userId, expectedAccess, expectedRefresh] = values;
           if (row.user_id !== userId || row.status === "revoked" ||
               row.access_token_ciphertext !== expectedAccess ||
-              row.refresh_token_ciphertext !== expectedRefresh) {
+              row.refresh_token_ciphertext !== expectedRefresh ||
+              (values.length > 5 && row.refresh_lease_owner !== values[5])) {
             return { success: true, meta: { changes: 0 } };
           }
           row = {
@@ -152,13 +180,17 @@ const makeEnvironment = async (
           const [reason, updatedAt, userId, expectedAccess, expectedRefresh] = values;
           if (row.user_id !== userId || row.status === "revoked" ||
               row.access_token_ciphertext !== expectedAccess ||
-              row.refresh_token_ciphertext !== expectedRefresh) {
+              row.refresh_token_ciphertext !== expectedRefresh ||
+              (values.length > 5 && row.refresh_lease_owner !== values[5]) ||
+              (values.length > 6 && (row.refresh_lease_until === null || row.refresh_lease_until < Number(values[6])))) {
             return { success: true, meta: { changes: 0 } };
           }
           row = {
             ...row,
             status: "revoked",
             reason: String(reason),
+            refresh_lease_owner: null,
+            refresh_lease_until: null,
             updated_at: String(updatedAt),
           };
         }
@@ -409,7 +441,7 @@ describe("Login token maintenance", () => {
     expect(readSessions()[0]?.revoked_at).toBeNull();
   });
 
-  it("classifies invalid_client as a temporary refresh error", async () => {
+  it("keeps login identity state unchanged when refresh returns invalid_client", async () => {
     const { environment, read } = await makeEnvironment("2026-09-18T00:59:59.000Z");
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(
@@ -421,8 +453,8 @@ describe("Login token maintenance", () => {
 
     await maintainLoginIdentities(environment, "2026-09-18T00:00:00.000Z");
 
-    expect(read().status).toBe("error");
-    expect(read().reason).toBe("invalid_client");
+    expect(read().status).toBe("connected");
+    expect(read().reason).toBeNull();
   });
 
   it("revokes the identity and its existing sessions on invalid_grant", async () => {
