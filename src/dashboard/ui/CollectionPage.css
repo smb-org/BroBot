@@ -11,12 +11,13 @@
 .collection-page__list-content { flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; overflow-wrap: anywhere; }
 .collection-page__empty { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 16px; border: 1px dashed var(--line-strong); border-radius: var(--r-container); color: var(--text-3); font-size: 13px; overflow-wrap: anywhere; }
 .collection-page__detail { min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-left: 16px; overflow-wrap: anywhere; }
-.collection-page__detail-back { display: none; }
+.collection-page__detail-back, .collection-page__detail-back-placeholder { display: none; }
 /* 360px list + 16px divider space + 560px editor = a 936px workspace. */
 .collection-page[data-single-column="true"] .collection-page__body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; padding-top: 0; }
 .collection-page[data-single-column="true"] .collection-page__list { min-height: 0; padding: 0; border: 0; }
 .collection-page[data-single-column="true"] .collection-page__detail { display: none; }
 .collection-page[data-single-column="true"] .collection-page__detail-back { display: inline-flex; box-sizing: border-box; min-height: 44px; flex: none; align-self: flex-start; align-items: center; gap: 8px; margin: 0 0 8px; }
+.collection-page[data-single-column="true"] .collection-page__detail-back-placeholder { display: block; box-sizing: border-box; height: 44px; flex: none; margin: 0 0 8px; }
 .collection-page[data-single-column="true"][data-detail-open="true"] .collection-page__list { display: none; }
 .collection-page[data-single-column="true"][data-detail-open="true"] .collection-page__detail { display: flex; flex-direction: column; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 0; }
 .collection-page[data-single-column="true"][data-detail-open="true"] .collection-page__detail .page-header { position: sticky; top: 0; z-index: var(--layer-inspector); background: var(--background); }

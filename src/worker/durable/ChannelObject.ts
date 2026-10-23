@@ -734,6 +734,7 @@ export class ChannelObject extends DurableObject<Env> {
   private adScheduleRefreshGeneration = 0;
   private adScheduleOperationQueue: Promise<void> = Promise.resolve();
   private belaboxPollQueue: Promise<void> = Promise.resolve();
+  private moduleLifecycleMutationQueue: Promise<void> = Promise.resolve();
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
   private timerScheduleInputGeneration = 0;
@@ -852,11 +853,23 @@ export class ChannelObject extends DurableObject<Env> {
     handlerKey: string,
     operation: () => Promise<Result>,
   ): Promise<Result> {
-    // Both explicit poll requests and the alarm dispatcher enter through this
-    // gate, so every BELABOX reason shares the alarm's serialized routine.
-    return moduleId === "belabox" && handlerKey === "poll"
-      ? await this.serializeBelaboxPoll(operation)
-      : await operation();
+    if (moduleId === "belabox" && handlerKey === "poll") return await this.serializeBelaboxPoll(operation);
+    if (MODULES.find((module) => module.id === moduleId)?.serializeLifecycleMutations === true) {
+      return await this.serializeModuleLifecycleMutation(operation);
+    }
+    return await operation();
+  }
+
+  private async serializeModuleLifecycleMutation<Result>(operation: () => Promise<Result>): Promise<Result> {
+    const previous = this.moduleLifecycleMutationQueue;
+    let release!: () => void;
+    this.moduleLifecycleMutationQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   private ensureActiveChatterTable(): void {
@@ -2846,7 +2859,14 @@ export class ChannelObject extends DurableObject<Env> {
       if (!await this.acceptAlarmStreamGeneration(storage, key, streamGeneration)) return;
       if (ownerRevision !== undefined && !await this.acceptAlarmOwnerRevision(storage, key, ownerRevision)) return;
       if (identity !== undefined || planSequence !== undefined) {
-        if (identity === undefined || planSequence === undefined || !Number.isSafeInteger(planSequence) || planSequence < 0 ||
+        const modulePrefix = "module:";
+        const moduleSeparator = key.startsWith(modulePrefix) ? key.indexOf(":", modulePrefix.length) : -1;
+        const moduleId = moduleSeparator > modulePrefix.length ? key.slice(modulePrefix.length, moduleSeparator) : null;
+        const ownsSerializedLifecycle = moduleId !== null &&
+          MODULES.find((module) => module.id === moduleId)?.serializeLifecycleMutations === true;
+        if (identity === undefined || (planSequence !== undefined &&
+            (!Number.isSafeInteger(planSequence) || planSequence < 0)) ||
+            (planSequence === undefined && !ownsSerializedLifecycle) ||
             identity.deadline !== deadline || identity.revision !== ownerRevision ||
             identity.generation !== (streamGeneration ?? null)) return;
         const savedValue = await storage.get(MODULE_ALARM_PLAN_SEQUENCES_KEY);
@@ -2864,12 +2884,25 @@ export class ChannelObject extends DurableObject<Env> {
         };
         const fence = entryFence !== undefined && (savedFence === undefined ||
           entryFence.planSequence > savedFence.planSequence) ? entryFence : savedFenceForComparison;
-        if (!acceptsTimerAlarmSet(fence, identity, planSequence)) return;
+        const reusingCurrentPlan = planSequence === undefined && current !== undefined &&
+          current.planSequence !== undefined && current.deadline === deadline && current.handler === handler &&
+          current.ownerRevision === ownerRevision && current.streamGeneration ===
+            (typeof streamGeneration === "number" ? streamGeneration : undefined) &&
+          current.suppressedBy === suppressedBy && sameTimerAlarmIdentity(current.identity, identity);
+        // A serialized lifecycle module can omit the sequence: the host allocates
+        // one atomically for each new identity and reuses it for an unchanged
+        // plan, so reconciliation repairs the platform alarm without shifting
+        // its baseline or rewriting the module's schedule.
+        const acceptedPlanSequence = planSequence ?? (reusingCurrentPlan
+          ? current.planSequence ?? -1
+          : Math.max(current?.planSequence ?? -1, savedFence?.planSequence ?? -1) + 1);
+        if (!acceptsTimerAlarmSet(fence, identity, acceptedPlanSequence)) return;
+        if (reusingCurrentPlan) return;
         const now = Date.now();
         const fences = Object.fromEntries(Object.entries(saved).filter(([, value]) =>
           validModuleAlarmPlanFence(value) && now - value.updatedAt <= MODULE_ALARM_PLAN_SEQUENCE_RETENTION_MS,
         )) as Record<string, ModuleAlarmPlanFenceRecord>;
-        fences[key] = { identity, planSequence, cleared: false, updatedAt: now };
+        fences[key] = { identity, planSequence: acceptedPlanSequence, cleared: false, updatedAt: now };
         table[key] = {
           deadline,
           handler,
@@ -2877,7 +2910,7 @@ export class ChannelObject extends DurableObject<Env> {
           ownerRevision,
           ...(typeof streamGeneration === "number" ? { streamGeneration } : {}),
           identity,
-          planSequence,
+          planSequence: acceptedPlanSequence,
           ...(suppressedBy === undefined ? {} : { suppressedBy }),
         };
         await storage.put(MODULE_ALARM_PLAN_SEQUENCES_KEY, fences);
@@ -4196,6 +4229,11 @@ export class ChannelObject extends DurableObject<Env> {
       throw error;
     }
     await this.scheduleEarliestAlarm();
+    try {
+      await this.notifyPointRoundResolved(roundId);
+    } catch (error) {
+      console.error(`Point round ${roundId} lifecycle notification failed.`, error);
+    }
     return { replayed: resolved.replayed, result: resolved.result, balances: resolved.balances };
   }
 
@@ -4257,6 +4295,11 @@ export class ChannelObject extends DurableObject<Env> {
       throw error;
     }
     await this.scheduleEarliestAlarm();
+    try {
+      await this.notifyPointRoundResolved(roundId);
+    } catch (error) {
+      console.error(`Point round ${roundId} lifecycle notification failed.`, error);
+    }
     return { replayed: resolved.replayed, result: resolved.result, balances: resolved.balances };
   }
 
@@ -4557,9 +4600,15 @@ export class ChannelObject extends DurableObject<Env> {
     let round = pointRoundRow(this.ctx.storage.sql, roundId);
     if (round === null) return;
     if (round.prepare_state === "pending") {
-      const prepare = MODULES.find((module) => module.id === round?.module_id)?.onPointRoundOpened;
-      await prepare?.(this.moduleAlarmContext(round.module_id, POINTS_ANNOUNCEMENT_REGISTRATION, createModuleExternalFetchBudget()),
-        { roundId, data: JSON.parse(round.data_json) as unknown, text: round.announce_text });
+      const pendingRound = round;
+      const module = MODULES.find((candidate) => candidate.id === pendingRound.module_id);
+      const prepare = module?.onPointRoundOpened;
+      if (module !== undefined && prepare !== undefined) {
+        await this.runModuleAlarmHandler(module.id, POINTS_ANNOUNCEMENT_REGISTRATION.key, () => prepare(
+          this.moduleAlarmContext(pendingRound.module_id, POINTS_ANNOUNCEMENT_REGISTRATION, createModuleExternalFetchBudget()),
+          { roundId, data: JSON.parse(pendingRound.data_json) as unknown, text: pendingRound.announce_text },
+        ));
+      }
       this.ctx.storage.transactionSync(() => {
         this.ctx.storage.sql.exec("UPDATE game_rounds SET prepare_state = 'delivered' WHERE round_id = ?", roundId);
       });
@@ -4705,6 +4754,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   private async deliverPointRoundResult(roundId: string): Promise<void> {
     const initialRound = pointRoundRow(this.ctx.storage.sql, roundId);
+    if (initialRound?.state === "resolved") await this.notifyPointRoundResolved(roundId);
     const initialModule = MODULES.find((candidate) => candidate.id === initialRound?.module_id);
     const retryRateLimited = initialModule?.retryPointRoundRateLimitedResults === true;
     if (initialRound?.state === "resolved" && initialRound.resolve_delivery_state === "sending") {
@@ -4878,6 +4928,31 @@ export class ChannelObject extends DurableObject<Env> {
       else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
     });
     await this.scheduleEarliestAlarm();
+  }
+
+  private async notifyPointRoundResolved(roundId: string): Promise<void> {
+    const round = pointRoundRow(this.ctx.storage.sql, roundId);
+    if (round === null || round.state !== "resolved") return;
+    const module = MODULES.find((candidate) => candidate.id === round.module_id);
+    const onResolved = module?.onPointRoundResolved;
+    if (module === undefined || onResolved === undefined) return;
+    const operation = this.ctx.storage.sql.exec<{ result_json: string }>(
+      "SELECT result_json FROM point_operations WHERE operation_id = ? AND module_id = ?",
+      `round:${roundId}:resolve`,
+      round.module_id,
+    ).toArray()[0];
+    if (operation === undefined) return;
+    const notification: ModulePointRoundResult = {
+      roundId,
+      data: JSON.parse(round.data_json) as unknown,
+      result: JSON.parse(operation.result_json) as unknown,
+      resolvedAt: round.resolved_at ?? new Date().toISOString(),
+    };
+    const registration = module.alarms?.[0] ?? POINTS_ANNOUNCEMENT_REGISTRATION;
+    await this.runModuleAlarmHandler(module.id, registration.key, () => onResolved(
+      this.moduleAlarmContext(module.id, registration, createModuleExternalFetchBudget()),
+      notification,
+    ));
   }
 
   private ballotAccess(moduleId: string): ModuleBallotAccess {
@@ -5530,8 +5605,12 @@ export class ChannelObject extends DurableObject<Env> {
           if (reason !== "event_times" && reason !== "channel_time_zone" && reason !== "activation" && reason !== "stream_state") return;
           for (const module of modules) {
             for (const registration of module.alarms ?? []) {
-              if (registration.onScheduleInputsChanged === undefined) continue;
-              await registration.onScheduleInputsChanged(this.moduleAlarmContext(module.id, registration, externalFetchBudget), reason);
+              const onScheduleInputsChanged = registration.onScheduleInputsChanged;
+              if (onScheduleInputsChanged === undefined) continue;
+              await this.runModuleAlarmHandler(module.id, registration.key, () => onScheduleInputsChanged(
+                this.moduleAlarmContext(module.id, registration, externalFetchBudget),
+                reason,
+              ));
             }
           }
         },

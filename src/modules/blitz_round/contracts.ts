@@ -5,10 +5,14 @@ export const BLITZ_ROUND_MODULE_ID = "blitz_round";
 export const BLITZ_QUESTION_MAXIMUM_COUNT = 500;
 export const BLITZ_QUESTION_PAGE_SIZE = 25;
 export const BLITZ_GRACE_SECONDS = 5;
+export const BLITZ_AUTO_START_MINUTES = 15;
+export const BLITZ_AUTO_START_MAX_MINUTES = 240;
 
 export const blitzRoundSettingsSchema = z.object({
   prize: z.number().int().min(1).max(10_000).default(50),
   answerTimeSeconds: z.number().int().min(15).max(300).default(60),
+  autoStart: z.boolean().default(false),
+  autoStartIntervalMinutes: z.number().int().min(BLITZ_AUTO_START_MINUTES).max(BLITZ_AUTO_START_MAX_MINUTES).default(BLITZ_AUTO_START_MINUTES),
   chatTarget: z.enum(["all_chats", "source_only", "where_asked"]).nullable().default(null),
   startText: z.string().min(1).max(500).default(""),
   solvedText: z.string().min(1).max(500).default(""),
@@ -48,6 +52,7 @@ export interface BlitzRoundData {
   questionId?: string;
   openedAt?: string;
   startedBy?: string;
+  autoStartBaseline?: string;
   kind: BlitzQuestionKind;
   prompt: string;
   answer: string;

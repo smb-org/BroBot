@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Re
 import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardCommonTexts } from "../../../dashboard/locale";
 import {
-  Badge, Button, ChipsInput, CollectionPage, ConfirmDialog, Field, Icon, PageHeader,
-  registerDashboardNavigationGuard, SegmentChoice, SwitchSection, TemplateTextField, UnitInput, useDraft, useDraftGuard,
+  Badge, Button, ChipsInput, CollectionPage, ConfirmDialog, Field, FieldPair, Icon, PageHeader,
+  registerDashboardNavigationGuard, SegmentChoice, SwitchRow, SwitchSection, TemplateTextField, UnitInput, useDraft, useDraftGuard,
 } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import { validateBlitzQuestion } from "../domain/questions";
@@ -548,8 +548,16 @@ function BlitzRoundPanelContent({ channelId, language, canManage = true }: Modul
       list={list}
       detail={detail}
       detailOpen={detailOpen}
-      backLabel={labels.back}
-      onCloseDetail={() => { cancelPendingDeleteSelection(); requestSwitch(() => { setDetailOpen(false); }); }}
+      {...(showSettings && settingsQuery.data !== undefined ? {} : { backLabel: labels.back })}
+      reserveDetailBack={showSettings}
+      onCloseDetail={() => {
+        if (showSettings) {
+          closeSettings();
+          return;
+        }
+        cancelPendingDeleteSelection();
+        requestSwitch(() => { setDetailOpen(false); });
+      }}
     />
     <ConfirmDialog
       opened={deleteIntent?.opened === true && deleteQuestion !== null}
@@ -841,6 +849,8 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   const labels = blitzTexts(language);
   const queryClient = useDashboardQueryClient();
   const draft = useDraft(settings);
+  const savedInterval = useRef(settings.autoStartIntervalMinutes);
+  const [autoStartInterval, setAutoStartInterval] = useState<number | "">(settings.autoStartIntervalMinutes);
   const editorSession = useRef(Symbol());
   const [currentRevision, setCurrentRevision] = useState(revision);
   const [saving, setSaving] = useState(false);
@@ -849,13 +859,22 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   const [error, setError] = useState<string | undefined>();
   const [serverConflict, setServerConflict] = useState(false);
   const parsed = blitzRoundSettingsSchema.safeParse(draft.value);
-  const valid = parsed.success;
+  const validInterval = typeof autoStartInterval === "number" && Number.isSafeInteger(autoStartInterval) &&
+    autoStartInterval >= 15 && autoStartInterval <= 240 && autoStartInterval === draft.value.autoStartIntervalMinutes;
+  const valid = parsed.success && validInterval;
+  const dirty = draft.dirty || autoStartInterval !== draft.value.autoStartIntervalMinutes;
 
-  const reset = (): void => { draft.reset(); setError(undefined); setSaved(false); };
+  const reset = (): void => {
+    draft.reset();
+    setAutoStartInterval(savedInterval.current);
+    setError(undefined);
+    setSaved(false);
+  };
 
   const save = (): Promise<string | null> => {
     if (savePromise.current !== null) return savePromise.current;
-    if (!canManage || !valid) return Promise.resolve(labels.settingsError);
+    if (!canManage) return Promise.resolve(labels.settingsError);
+    if (!valid) return Promise.resolve(labels.settingsInvalid);
     const session = editorSession.current;
     setSaving(true);
     setError(undefined);
@@ -868,6 +887,8 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
         });
         if (!isCurrentEditorSession(session)) return null;
         draft.accept(result.settings);
+        savedInterval.current = result.settings.autoStartIntervalMinutes;
+        setAutoStartInterval(result.settings.autoStartIntervalMinutes);
         setCurrentRevision(result.revision);
         setServerConflict(false);
         setSaved(true);
@@ -896,6 +917,8 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
       if (latest === null) return;
       if (!isCurrentEditorSession(session)) return;
       draft.accept(latest.settings);
+      savedInterval.current = latest.settings.autoStartIntervalMinutes;
+      setAutoStartInterval(latest.settings.autoStartIntervalMinutes);
       setCurrentRevision(latest.revision);
       setServerConflict(false);
       setSaved(false);
@@ -907,22 +930,23 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   };
 
   const saveProps = {
-    dirty: draft.dirty,
+    dirty,
     persistent: true,
     pending: saving,
     saved,
     ...(serverConflict ? { conflict: { message: labels.settingsConflict, reloadLabel: labels.reloadSettings, onReload: reloadCurrent } } : {}),
     ...(error === undefined ? {} : { error }),
     invalid: !valid,
-    invalidMessage: labels.settingsError,
+    invalidMessage: labels.settingsInvalid,
+    invalidStatus: labels.settingsInvalid,
     onSave: () => { void save(); },
-    onDiscard: draft.reset,
+    onDiscard: reset,
     saveLabel: labels.save,
     discardLabel: labels.discard,
     savedLabel: labels.saved,
     pendingLabel: labels.saving,
   };
-  const guard = useDraftGuard(draft.dirty, save, reset);
+  const guard = useDraftGuard(dirty, save, reset);
   const { guardSwitch } = guard;
   useEffect(() => registerEditorSession(editorSession.current), [registerEditorSession]);
   useEffect(() => registerDashboardNavigationGuard(guardSwitch), [guardSwitch]);
@@ -930,6 +954,35 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
     registerSwitch(guardSwitch);
     return () => { registerSwitch(null); };
   }, [guardSwitch, registerSwitch]);
+  const autoStartFields = [
+    <SwitchRow
+      key="auto-start-switch"
+      label={labels.autoStart}
+      checked={draft.value.autoStart}
+      onChange={(autoStart) => { draft.setValue((current) => ({ ...current, autoStart })); }}
+      hint={labels.autoStartHint}
+      disabled={!canManage}
+      pending={saving}
+      layout="inline"
+    />,
+    <UnitInput
+      key="auto-start-interval"
+      label={labels.autoStartInterval}
+      value={autoStartInterval}
+      onChange={(value) => {
+        setAutoStartInterval(value);
+        if (typeof value === "number") draft.setValue((current) => ({ ...current, autoStartIntervalMinutes: value }));
+      }}
+      min={15}
+      max={240}
+      unit={labels.minutesUnit}
+      hint={labels.autoStartIntervalHint}
+      {...(validInterval ? {} : { error: labels.autoStartIntervalError })}
+      disabled={!canManage || saving || !draft.value.autoStart}
+      required
+      clampOnBlur={false}
+    />,
+  ] as const;
 
   return <div className="blitz-panel__detail blitz-panel__settings">
     <PageHeader kind="blitz" className="page-header--editor" title={labels.settingsSection} pageActions={<Button variant="neutral" icon="collapse" onClick={() => { guard.guardSwitch(onBack); }}>{labels.back}</Button>} save={saveProps} />
@@ -949,7 +1002,11 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
           disabled={!canManage || saving}
           onChange={(value) => { draft.setValue((current) => ({ ...current, chatTarget: value === "channel_default" ? null : value })); }}
           reserveError
+          wrap
         />
+      </div>
+      <div className="blitz-panel__auto-start">
+        <FieldPair>{autoStartFields}</FieldPair>
       </div>
       <TemplateSetting language={language} label={labels.startText} value={draft.value.startText} onChange={(startText) => { draft.setValue((current) => ({ ...current, startText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
       <TemplateSetting language={language} label={labels.solvedText} value={draft.value.solvedText} onChange={(solvedText) => { draft.setValue((current) => ({ ...current, solvedText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />

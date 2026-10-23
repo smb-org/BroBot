@@ -19,8 +19,16 @@ export const loadEnabledBlitzSettings = async (db: D1Database, channelId: string
   }
 };
 
+export const loadBlitzAutoStartBaseline = async (db: D1Database, channelId: string): Promise<string | null> => {
+  const row = await db.prepare(
+    "SELECT revision, settings_revision FROM channel_modules WHERE channel_id = ? AND module_id = ? AND enabled = 1",
+  ).bind(channelId, BLITZ_ROUND_MODULE_ID).first<{ revision: number; settings_revision: number }>();
+  return row === null ? null : `${String(row.revision - row.settings_revision)}:${String(row.settings_revision)}`;
+};
+
 export interface OpenBlitzRoundInput {
   channelId: string;
+  autoStartBaseline?: string | null;
   startedBy?: string;
   settings: BlitzRoundSettings;
   language: ModuleLanguage;
@@ -45,6 +53,7 @@ export const openBlitzRound = async (input: OpenBlitzRoundInput): Promise<Opened
     questionId: question.id,
     openedAt,
     ...(input.startedBy === undefined ? {} : { startedBy: input.startedBy }),
+    ...(input.autoStartBaseline == null ? {} : { autoStartBaseline: input.autoStartBaseline }),
     kind: question.kind,
     prompt,
     answer,

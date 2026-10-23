@@ -77,6 +77,22 @@ describe("basic UI controls", () => {
     expect(screen.getByRole("button", { name: "Second" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("supports an opt-in wrapping segment layout without changing its options", () => {
+    const onChange = vi.fn();
+    renderUi(<SegmentChoice label="Chat target" value="default" onChange={onChange} wrap options={[
+      { value: "default", label: "Channel default" },
+      { value: "all", label: "All chats" },
+      { value: "source", label: "This chat" },
+      { value: "asked", label: "Chat where asked" },
+    ]} />);
+    const group = screen.getByRole("group", { name: "Chat target" });
+
+    expect(group).toHaveClass("segment-choice--wrap");
+    expect(screen.getByRole("button", { name: "Channel default" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Chat where asked" }));
+    expect(onChange).toHaveBeenCalledWith("asked");
+  });
+
   it("adds chips on Enter and comma, strips a leading prefix, and removes the last chip on Backspace", () => {
     function Harness() {
       const [values, setValues] = useState<string[]>([]);

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { POINTS_CANCELLATION_NOTICE_ALARM_PREFIX } from "../../src/worker/durable/points";
+import type { ModuleAlarmContext } from "../../src/modules/contract";
 
 const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
   query: "?raw",
@@ -157,7 +158,7 @@ export const runPointObject = <T>(
 
 export const stubPointRoundChat = (
   target: PointsWorkerObject,
-  sendChat: () => Promise<{
+  sendChat: (...args: Parameters<ModuleAlarmContext["sendChat"]>) => Promise<{
     sent: boolean;
     retryable?: boolean;
     reason?: string | null;
@@ -165,7 +166,15 @@ export const stubPointRoundChat = (
     delivery: "delivered" | "rate_limited" | "ambiguous" | "not_attempted" | "failed";
   }>,
 ): void => {
-  Object.assign(target, { moduleAlarmContext: () => ({ sendChat }) });
+  const contextTarget = target as unknown as {
+    moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext;
+  };
+  const original = contextTarget.moduleAlarmContext;
+  Object.assign(target, {
+    moduleAlarmContext: function (this: unknown, ...args: unknown[]) {
+      return { ...Reflect.apply(original, this, args), sendChat };
+    },
+  });
 };
 
 export const deferPointAlarmWithin = async (state: DurableObjectState): Promise<void> => {

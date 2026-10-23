@@ -5,6 +5,7 @@ import { BLITZ_ROUND_MODULE_ID, blitzRoundSettingsSchema } from "./contracts";
 import { blitzActionTexts, blitzRoundDefaultsForLanguage, blitzRoundTypeLabel, blitzTexts, formatBlitzResolutionLine } from "./locale";
 import { blitzRoundRoutes } from "./routes";
 import { processBlitzMessage } from "./service";
+import { blitzAutoStartAlarm, onBlitzPointRoundOpened, onBlitzPointRoundResolved } from "./auto-start";
 import { blitzStarterSeedStatement } from "./seed-words";
 import type { BlitzRoundData } from "./contracts";
 import { type BlitzWinner } from "./domain/round";
@@ -55,6 +56,7 @@ const reconcileOpenedRound = async (context: ModuleAlarmContext, round: ModulePo
     }, data.openedAt, { operationId: `round:${round.roundId}:started`,
       ...(data.startedBy === undefined ? {} : { actorUserId: data.startedBy }) });
   }
+  await onBlitzPointRoundOpened(context, round);
 };
 
 const resultText = async (
@@ -101,11 +103,15 @@ export const blitzRoundModule: BotModule<typeof blitzRoundSettingsSchema> = {
   panel: () => import("./panel"),
   panelManagesSettings: true,
   routes: blitzRoundRoutes,
+  serializeLifecycleMutations: true,
   eventSubTypes: ["channel.chat.message"],
   onEnable: ({ DB, now, actor, authorizeMutation }, channelId) => [
     blitzStarterSeedStatement(DB, channelId, now, authorizeMutation(channelId, actor, now)),
   ],
+  alarms: [blitzAutoStartAlarm],
+  settingsChangedAlarm: { handlerKey: blitzAutoStartAlarm.key, alarmKey: "settings-changed" },
   onPointRoundOpened: reconcileOpenedRound,
+  onPointRoundResolved: onBlitzPointRoundResolved,
   formatPointRoundAnnouncement: announcementText,
   formatPointRoundResult: resultText,
   handleEvent: (event, context) => processBlitzMessage(event, context),

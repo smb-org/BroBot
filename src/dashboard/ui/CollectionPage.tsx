@@ -32,6 +32,7 @@ export interface CollectionPageProps {
   empty?: ReactNode;
   detailOpen?: boolean;
   backLabel?: string;
+  reserveDetailBack?: boolean;
   closeDetailDisabled?: boolean;
   onCloseDetail?: () => void;
 }
@@ -48,6 +49,7 @@ export function CollectionPage({
   empty,
   detailOpen = false,
   backLabel,
+  reserveDetailBack = false,
   closeDetailDisabled = false,
   onCloseDetail,
 }: CollectionPageProps): ReactElement {
@@ -146,7 +148,9 @@ export function CollectionPage({
             onCloseDetail();
           }}
         >
-          {onCloseDetail === undefined || backLabel === undefined ? null : <Button className="collection-page__detail-back" variant="neutral" disabled={closeDetailDisabled} onClick={onCloseDetail}><Icon name="collapse" size={16} />{backLabel}</Button>}
+          {onCloseDetail === undefined ? null : backLabel === undefined
+            ? reserveDetailBack ? <div className="collection-page__detail-back-placeholder" aria-hidden="true" /> : null
+            : <Button className="collection-page__detail-back" variant="neutral" disabled={closeDetailDisabled} onClick={onCloseDetail}><Icon name="collapse" size={16} />{backLabel}</Button>}
           {detail}
         </section>
       </div>
