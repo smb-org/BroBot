@@ -5,7 +5,7 @@ import { decryptJson, getTokenEncryptionKeys, parseKeyRing } from "./auth/crypto
 import { moderationOutputSuppressionReason } from "./chat-output-gate";
 import { getBotIdentity } from "./db/bot-identity";
 import { readChannelControls } from "./db/channel-controls";
-import { getLoginIdentity } from "./db/login-identity";
+import { withBroadcasterToken } from "./auth/broadcaster-token";
 import { helixRequest } from "./twitch/helix";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "./twitch/rate-limit";
 
@@ -20,6 +20,7 @@ interface ModerationBanRequest {
 interface ModerationEnvironment {
   DB: D1Database;
   TWITCH_CLIENT_ID: string;
+  TWITCH_CLIENT_SECRET: string;
   TOKEN_ENCRYPTION_KEYS?: string;
   SESSION_ENCRYPTION_KEYS?: string;
   CHANNEL?: Env["CHANNEL"];
@@ -216,27 +217,6 @@ export const sendModerationBan = (
   fetcher: typeof fetch = fetch,
 ): Promise<ModerationExecutionResult> => executeModeration(environment, channelId, request, "POST", fetcher);
 
-const broadcasterModerationToken = async (
-  environment: ModerationEnvironment,
-  channelId: string,
-): Promise<string | null> => {
-  const identity = await getLoginIdentity(environment.DB, channelId);
-  if (identity === null || identity.status !== "connected") return null;
-  try {
-    const scopes: unknown = JSON.parse(identity.tokenScopesJson);
-    if (!Array.isArray(scopes) || !scopes.includes("moderation:read")) return null;
-    const tokenData = await decryptJson<{ token?: unknown }>(
-      identity.accessTokenCiphertext,
-      parseKeyRing(getTokenEncryptionKeys(environment)),
-    );
-    return tokenData !== null && typeof tokenData.token === "string" && tokenData.token.length > 0
-      ? tokenData.token
-      : null;
-  } catch {
-    return null;
-  }
-};
-
 const isCurrentExpectedTimeout = async (
   environment: ModerationEnvironment,
   channelId: string,
@@ -247,18 +227,23 @@ const isCurrentExpectedTimeout = async (
   if (!Number.isSafeInteger(expected.durationSeconds) || expected.durationSeconds < 1 || expected.durationSeconds > MODERATION_TIMEOUT_MAX_SECONDS) return null;
   const expectedStart = Date.parse(expected.startedAt);
   if (!Number.isFinite(expectedStart)) return null;
-  const token = await broadcasterModerationToken(environment, channelId);
   const bot = await getBotIdentity(environment.DB);
-  if (token === null || bot === null) return null;
-  const result = await helixRequest<{ data?: TwitchModerationBanRow[] }>({
-    url: "https://api.twitch.tv/helix/moderation/banned",
-    query: { broadcaster_id: channelId, user_id: userId },
-    accessToken: token,
-    clientId: environment.TWITCH_CLIENT_ID,
-    fetcher,
-  });
-  if (!result.ok || !isTwitchModerationBanRows(result.data.data)) return null;
-  const current = result.data.data.find((row) => row.user_id === userId);
+  if (bot === null) return null;
+  const lookup = await withBroadcasterToken(
+    environment,
+    channelId,
+    ["moderation:read"],
+    (accessToken) => helixRequest<{ data?: TwitchModerationBanRow[] }>({
+      url: "https://api.twitch.tv/helix/moderation/banned",
+      query: { broadcaster_id: channelId, user_id: userId },
+      accessToken,
+      clientId: environment.TWITCH_CLIENT_ID,
+      fetcher,
+    }),
+    { fetcher },
+  );
+  if (lookup.kind !== "ok" || !isTwitchModerationBanRows(lookup.value.data)) return null;
+  const current = lookup.value.data.find((row) => row.user_id === userId);
   if (current === undefined) return "absent";
   if (current.moderator_id !== bot.userId || current.reason !== expected.reason) return false;
   const createdAt = Date.parse(current.created_at as string);
@@ -291,17 +276,21 @@ export const isTwitchChannelModerator = async (
   userId: string,
   fetcher: typeof fetch = fetch,
 ): Promise<boolean | null> => {
-  const accessToken = await broadcasterModerationToken(environment, channelId);
-  if (accessToken === null) return null;
-  const result = await helixRequest<{ data?: unknown }>({
-    url: "https://api.twitch.tv/helix/moderation/moderators",
-    query: { broadcaster_id: channelId, user_id: userId },
-    accessToken,
-    clientId: environment.TWITCH_CLIENT_ID,
-    fetcher,
-  });
-  if (!result.ok || !Array.isArray(result.data.data)) return null;
-  if (!result.data.data.every((row) => typeof row === "object" && row !== null && !Array.isArray(row) &&
+  const lookup = await withBroadcasterToken(
+    environment,
+    channelId,
+    ["moderation:read"],
+    (accessToken) => helixRequest<{ data?: unknown }>({
+      url: "https://api.twitch.tv/helix/moderation/moderators",
+      query: { broadcaster_id: channelId, user_id: userId },
+      accessToken,
+      clientId: environment.TWITCH_CLIENT_ID,
+      fetcher,
+    }),
+    { fetcher },
+  );
+  if (lookup.kind !== "ok" || !Array.isArray(lookup.value.data)) return null;
+  if (!lookup.value.data.every((row) => typeof row === "object" && row !== null && !Array.isArray(row) &&
       typeof Reflect.get(row, "user_id") === "string")) return null;
-  return result.data.data.some((row) => Reflect.get(row, "user_id") === userId);
+  return lookup.value.data.some((row) => Reflect.get(row, "user_id") === userId);
 };

@@ -2,8 +2,16 @@ import { getLoginIdentity, rotateLoginTokensForUser, type LoginIdentityRecord } 
 import { encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./crypto";
 import { decryptStoredToken, refreshBotToken, TwitchApiError } from "../bot-maintenance";
 
+export interface LoginTokenRefreshEnvironment {
+  DB: D1Database;
+  TWITCH_CLIENT_ID: string;
+  TWITCH_CLIENT_SECRET: string;
+  TOKEN_ENCRYPTION_KEYS?: string;
+  SESSION_ENCRYPTION_KEYS?: string;
+}
+
 const rotateLoginTokensWithRetry = async (
-  env: Env,
+  env: LoginTokenRefreshEnvironment,
   identity: LoginIdentityRecord,
   accessTokenCiphertext: string,
   refreshTokenCiphertext: string,
@@ -44,19 +52,19 @@ const isReplacementIdentity = (
     current.refreshTokenCiphertext !== expected.refreshTokenCiphertext);
 
 const rereadReplacement = async (
-  env: Env,
+  env: LoginTokenRefreshEnvironment,
   expected: LoginIdentityRecord,
 ): Promise<LoginIdentityRecord | null> => {
   const current = await getLoginIdentity(env.DB, expected.userId);
   return isReplacementIdentity(current, expected) ? current : null;
 };
 
-export const decryptLoginIdentityAccessToken = async (identity: LoginIdentityRecord, env: Env): Promise<string | null> =>
+export const decryptLoginIdentityAccessToken = async (identity: LoginIdentityRecord, env: LoginTokenRefreshEnvironment): Promise<string | null> =>
   decryptStoredToken(identity.accessTokenCiphertext, getTokenEncryptionKeys(env));
 
 /** Refreshes and persists a login identity's rotated tokens for both maintenance and request paths. */
 export const refreshLoginIdentityTokens = async (
-  env: Env,
+  env: LoginTokenRefreshEnvironment,
   identity: LoginIdentityRecord,
   now: string,
   fetcher: typeof fetch = fetch,

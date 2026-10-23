@@ -22,8 +22,8 @@ import { revokeRealtimeUserFromAllChannels } from "./realtime";
 import { notifyCommittedResources } from "./panel-resources";
 import { refreshLoginIdentityTokens } from "./auth/login-token-refresh";
 
-const markLoginRevoked = async (
-  env: Env,
+export const markLoginRevoked = async (
+  env: { DB: D1Database; CHANNEL?: Env["CHANNEL"] },
   identity: Awaited<ReturnType<typeof listLoginIdentities>>[number],
   now: string,
   reason: string,
@@ -38,9 +38,11 @@ const markLoginRevoked = async (
   );
   if (revoked) {
     const pending = await getPendingRealtimeUserRevocation(env.DB, identity.userId);
-    await revokeRealtimeUserFromAllChannels(env.DB, env.CHANNEL, identity.userId);
-    if (pending !== null) await clearPendingRealtimeUserRevocation(env.DB, pending);
-    await notifyCommittedResources(env);
+    if (env.CHANNEL !== undefined) {
+      await revokeRealtimeUserFromAllChannels(env.DB, env.CHANNEL, identity.userId);
+      if (pending !== null) await clearPendingRealtimeUserRevocation(env.DB, pending);
+      await notifyCommittedResources({ DB: env.DB, CHANNEL: env.CHANNEL });
+    }
   }
 };
 

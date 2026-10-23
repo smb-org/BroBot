@@ -188,11 +188,15 @@ Für Funktionen der Kategorie 1 muss das ursprüngliche Nutzertoken nicht als
 Arbeitsmittel gepflegt werden — es ist dort nur noch **Nachweis**, dass die
 Zustimmung lebt. Für Kategorie 2 und 3 bleibt es Arbeitsmittel.
 
-**Offener Mangel:** Broadcaster-Token werden heute nur aufgefrischt, solange
-eine aktive Sitzung besteht (`listLoginIdentities`). Für Kategorie 3 ist das zu
-wenig — die Funktion scheitert still bei jedem Broadcaster, der gerade nicht im
-Panel ist. Festgehalten in [#150](https://github.com/smb-org/BroBot/issues/150);
-zu beheben, **bevor** der erste Aufruf dieser Kategorie entsteht.
+Broadcaster-Token für Kategorie 2 und 3 werden bei konkreten Helix-Aufrufen
+über `withBroadcasterToken` bedarfsweise erneuert, auch ohne aktive Sitzung.
+Der stündliche Abgleich behält seinen Sitzungsfilter: Grants auf Vorrat am Leben
+zu halten, wäre mit der Datenschutzentscheidung aus ADR 0003 §6 unvereinbar.
+Vor dem Aufruf prüft der Helfer `token_scopes_json`; nach einem 401 erneuert er
+höchstens einmal und wiederholt den Aufruf. Meldet der Token-Endpunkt
+`invalid_grant` und liegt kein konkurrierend erneuertes Token vor, markiert er
+die Identität wie der Cron als widerrufen und leert beide Scope-Listen. Andere
+Refresh-Fehler ändern den Status nicht.
 
 ## 6. Regeln für neue Aufrufe
 
