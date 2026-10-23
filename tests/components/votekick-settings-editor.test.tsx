@@ -7,6 +7,7 @@ import { SettingsEditor, UiProvider } from "../../src/dashboard/ui";
 import { DEFAULT_VOTEKICK_SETTINGS } from "../../src/modules/votekick/contracts";
 import { votekickSettingsEditorCatalog } from "../../src/modules/votekick/panel/locale";
 import settingsEditor from "../../src/modules/votekick/panel/settings-editor";
+import { VotekickThresholdExample } from "../../src/modules/votekick/panel/threshold-example";
 
 afterEach(() => { cleanup(); });
 
@@ -76,25 +77,58 @@ describe("votekick starter role setting", () => {
     expect(settingsEditor.locales.en.templateMessages.previewCountLabel(1)).toBe("1 character");
   });
 
-  it.each(["de", "en"] as const)("shows localized threshold semantics and read-only values for operators (%s)", (language) => {
+  it("updates the worked threshold example beside its rule note from unsaved settings values", () => {
+    function Harness() {
+      const [settings, setSettings] = useState(DEFAULT_VOTEKICK_SETTINGS);
+      return <UiProvider>
+        <SettingsEditor
+          spec={settingsEditor.spec}
+          sectionId="settings"
+          settings={settings}
+          onChange={(key, next) => { setSettings((current) => ({ ...current, [key]: next })); }}
+          texts={votekickSettingsEditorCatalog("en")}
+          templateMessages={votekickSettingsEditorCatalog("en").templateMessages}
+          afterNote={<VotekickThresholdExample minNetVotes={settings.minNetVotes} percent={settings.percent} language="en" />}
+        />
+      </UiProvider>;
+    }
+
+    render(<Harness />);
+    expect(screen.getByText("7 net yes votes needed")).toBeInTheDocument();
+    const note = document.querySelector(".ui-rule-note");
+    expect(note?.nextElementSibling).toHaveClass("votekick-threshold-example");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Minimum net yes votes" }), { target: { value: "8" } });
+    expect(screen.getByText("8 net yes votes needed")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Active chatters percent" }), { target: { value: "30" } });
+    expect(screen.getByText("11 net yes votes needed")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["de", false], ["de", true], ["en", false], ["en", true],
+  ] as const)("shows the saved threshold example and read-only values for operators (%s, section-only: %s)", (language, readOnlySectionOnly) => {
     const copy = votekickSettingsEditorCatalog(language);
+    const savedSettings = { ...DEFAULT_VOTEKICK_SETTINGS, minNetVotes: 8, percent: 30 };
     render(<UiProvider>
       <SettingsEditor
         spec={settingsEditor.spec}
         sectionId="settings"
-        settings={DEFAULT_VOTEKICK_SETTINGS}
+        settings={savedSettings}
         onChange={() => undefined}
         texts={copy}
         templateMessages={copy.templateMessages}
         readOnly
+        readOnlySectionOnly={readOnlySectionOnly}
         enabledLabel={copy.enabledLabel}
         disabledLabel={copy.disabledLabel}
+        afterNote={<VotekickThresholdExample minNetVotes={savedSettings.minNetVotes} percent={savedSettings.percent} language={language} />}
       />
     </UiProvider>);
 
-    expect(screen.getByText(copy.notes?.thresholdRule ?? "")).toBeInTheDocument();
-    expect(screen.getByText(language === "de" ? "Mindest-Netto-Ja-Stimmen" : "Minimum net yes votes")).toBeInTheDocument();
-    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(screen.getByText(copy.notes?.thresholdRule ?? "")).not.toBeNull();
+    expect(screen.getByText(language === "de" ? "11 Netto-Ja-Stimmen nötig" : "11 net yes votes needed")).not.toBeNull();
+    expect(document.querySelector(".ui-rule-note")?.nextElementSibling?.classList.contains("votekick-threshold-example")).toBe(true);
+    expect(screen.getByText(language === "de" ? "Mindest-Netto-Ja-Stimmen" : "Minimum net yes votes")).not.toBeNull();
+    expect(screen.queryByRole("spinbutton")).toBeNull();
   });
 
   it("keeps each message's enabled state and text together in operator properties", () => {

@@ -116,8 +116,8 @@ test("snooze retry details appear on the ad row and the footer signals warning",
   }, 429)));
   await page.goto(`/channels/${channelId}`);
 
-  await page.locator(".live-cockpit-next-item button").click();
-  await expect(page.locator(".live-cockpit-next-item__reason.is-warning")).toContainText(/Try again after|Erneut möglich ab/u);
+  await page.locator(".live-cockpit-ads-tile").getByRole("button", { name: /Verschieben|Postpone|Snooze/u }).click();
+  await expect(page.locator(".live-cockpit-ads-tile__reason")).toContainText(/Try again after|Erneut möglich ab/u);
   const footer = page.locator(".live-cockpit__status");
   await expect(footer).toContainText(/Try again after|Erneut möglich ab/u);
   await expect(footer.locator('.status-led[data-status="warn"]')).toBeVisible();

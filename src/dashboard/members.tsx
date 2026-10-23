@@ -13,6 +13,7 @@ import { dashboardDataKeys } from "./data/keys";
 import { useMembersQuery } from "./data/lists";
 import { dashboardRoutePath } from "./router";
 import { MemberInviteDialog } from "./member-invite-dialog";
+import { RoleMatrixDisclosure } from "./role-matrix";
 import {
   addChannelMember,
   PanelApiError,
@@ -199,7 +200,7 @@ const MemberInspector = ({
         title={name}
         identifier={formatJoinDate(member.joinedAt)}
         sections={[]}
-        readOnly={{ reason: texts.managementLocked, content: propertiesList }}
+        readOnly={{ reason: texts.managementLocked, content: <>{propertiesList}<RoleMatrixDisclosure /></> }}
         dirty={false}
         onSave={() => {}}
         onDiscard={() => {}}
@@ -234,6 +235,10 @@ const MemberInspector = ({
               disabled={locked !== null}
             />
           ),
+        }, {
+          id: "permissions",
+          label: texts.roleMatrixTitle,
+          content: <RoleMatrixDisclosure />,
         }]}
         dirty={dirty}
         pending={pending}

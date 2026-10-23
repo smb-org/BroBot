@@ -56,7 +56,7 @@ export function processRaid(
 
     return {
       actions: [
-        { kind: "shoutout", targetChannelId: decision.sourceChannelId },
+        { kind: "shoutout", targetChannelId: decision.sourceChannelId, targetLogin: decision.sourceChannelLogin },
         ...chatAction,
       ],
       diagnostics: [...templateDiagnostics, {

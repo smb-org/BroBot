@@ -46,6 +46,8 @@ describe("live cockpit voting actions", () => {
         stake: 50,
         closesAt: "2030-01-01T12:01:00.000Z",
       }]}
+      failedModules={[]}
+      adsEnabled={false}
       loading={false}
       failed={false}
       now={Date.parse("2030-01-01T12:00:30.000Z")}
@@ -80,6 +82,8 @@ describe("live cockpit voting actions", () => {
       channelId="channel-a"
       role="operator"
       snapshots={snapshots}
+      failedModules={[]}
+      adsEnabled={false}
       loading={false}
       failed={false}
       now={Date.parse("2030-01-01T12:00:30.000Z")}
@@ -154,6 +158,8 @@ describe("live cockpit voting actions", () => {
       channelId="channel-a"
       role="operator"
       snapshots={snapshots}
+      failedModules={[]}
+      adsEnabled={false}
       loading={false}
       failed={false}
       now={Date.parse("2030-01-01T12:00:30.000Z")}

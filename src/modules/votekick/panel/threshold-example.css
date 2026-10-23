@@ -1,0 +1,5 @@
+@layer components.modules {
+  .votekick-threshold-example { display: flex; align-items: center; gap: var(--s2); box-sizing: border-box; width: 100%; height: 32px; min-width: 0; padding-inline: var(--s3); overflow: hidden; border-radius: var(--r-control); background: var(--surface-well); }
+  .votekick-threshold-example > span { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .votekick-threshold-example > strong { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text); font-size: 12px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+}

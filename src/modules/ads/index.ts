@@ -63,16 +63,22 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   liveTile: {
     load: async (channelId, signal) => {
       const schedule = await (await import("./panel/service")).loadAdsSchedule(channelId, signal);
-      const at = schedule.schedule.nextAdAt;
-      if (at === null || Date.parse(at) <= Date.now()) return [];
+      const now = Date.now();
+      // The existing channel.ad_break.begin handler stores its actual start and duration in recentAdBreaks.
+      const runningBreakEndsAt = schedule.recentAdBreaks.flatMap((breakItem) => {
+        const startedAt = Date.parse(breakItem.timestamp);
+        const endsAt = startedAt + breakItem.durationSeconds * 1_000;
+        return Number.isFinite(startedAt) && startedAt <= now && endsAt > now
+          ? [new Date(endsAt).toISOString()]
+          : [];
+      }).sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
       return [{
-        kind: "upcoming",
-        id: "next-ad-break",
-        category: "ad",
-        name: "",
-        at,
-        detail: schedule.schedule.duration === null ? null : String(schedule.schedule.duration),
-        canSnooze: schedule.snoozeScopeAvailable && (schedule.schedule.snoozeCount ?? 0) > 0,
+        kind: "ad_schedule",
+        nextAdAt: schedule.schedule.nextAdAt,
+        duration: schedule.schedule.duration,
+        snoozeCount: schedule.schedule.snoozeCount,
+        snoozeScopeAvailable: schedule.snoozeScopeAvailable,
+        runningBreakEndsAt,
       }];
     },
   },

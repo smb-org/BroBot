@@ -85,9 +85,11 @@ describe("manual shoutout", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ sent: true });
-    await expect(database.prepare(
-      "SELECT code FROM event_log WHERE channel_id = 'kanal-a'",
-    ).first()).resolves.toEqual({ code: "host.shoutout.sent" });
+    const event = await database.prepare(
+      "SELECT code, detail_json FROM event_log WHERE channel_id = 'kanal-a'",
+    ).first<{ code: string; detail_json: string }>();
+    expect(event?.code).toBe("host.shoutout.sent");
+    expect(JSON.parse(event?.detail_json ?? "{}") as unknown).toMatchObject({ to: "target-1", toLogin: "streamerin" });
   });
 
   it("rejects a shoutout after the raid module is disabled", async () => {

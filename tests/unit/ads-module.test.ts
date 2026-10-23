@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { adsModule, processAdBreak } from "../../src/modules/ads";
 import { renderAdBreakText } from "../../src/modules/ads/domain";
@@ -25,6 +25,38 @@ describe("ads module", () => {
   it("declares both ad events with version 1 and channel:read:ads", () => {
     expect(adsModule.eventSubTypes).toEqual(["stream.online", "channel.ad_break.begin"]);
     expect(adsModule.broadcasterScopes).toEqual(["channel:read:ads"]);
+  });
+
+  it("derives an active break from the persisted channel.ad_break.begin data", async () => {
+    const now = Date.parse("2026-09-20T10:00:30.000Z");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      schedule: {
+        nextAdAt: null,
+        duration: null,
+        lastAdAt: "2026-09-20T10:00:00.000Z",
+        prerollFreeTime: null,
+        snoozeCount: 2,
+        snoozeRefreshAt: null,
+      },
+      recentAdBreaks: [{ timestamp: "2026-09-20T10:00:00.000Z", durationSeconds: 90 }],
+      snoozeScopeAvailable: true,
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const snapshots = await adsModule.liveTile?.load("kanal-a", new AbortController().signal);
+      expect(snapshots).toEqual([{
+        kind: "ad_schedule",
+        nextAdAt: null,
+        duration: null,
+        snoozeCount: 2,
+        snoozeScopeAvailable: true,
+        runningBreakEndsAt: "2026-09-20T10:01:30.000Z",
+      }]);
+    } finally {
+      clock.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("distinguishes automatic and manual breaks and states the duration", () => {

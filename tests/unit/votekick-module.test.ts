@@ -121,7 +121,7 @@ describe("Votekick module", () => {
 
   it("uses the settings editor in the panel and keeps live operations in the cockpit", () => {
     expect(votekickModule.settingsEditor).toBeTypeOf("function");
-    expect(votekickModule.panel).toBeUndefined();
+    expect(votekickModule.panel).toBeTypeOf("function");
     expect(votekickModule.liveTile?.load).toBeTypeOf("function");
   });
 
@@ -161,7 +161,7 @@ describe("Votekick module", () => {
 
     try {
       const snapshots = await votekickModule.liveTile?.load("channel-a", new AbortController().signal);
-      expect(snapshots?.map(({ id }) => id)).toEqual(["liftable", "expired-recovery"]);
+      expect(snapshots?.filter((snapshot) => snapshot.kind === "votekick_recent").map(({ id }) => id)).toEqual(["liftable", "expired-recovery"]);
     } finally {
       localClock.mockRestore();
       load.mockRestore();
