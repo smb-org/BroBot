@@ -2313,6 +2313,13 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("button", { name: "Automatische Aktionen fortsetzen" })).toBeInTheDocument();
     expect(document.querySelector(".dashboard-header__control-state .ui-icon")).toBeInTheDocument();
     expect(screen.getByText("Pausiert")).toBeInTheDocument();
+    expect(document.querySelectorAll(".dashboard-header__control-state-slot.is-empty")).toHaveLength(0);
+  });
+
+  it("keeps empty channel-control status slots out of the header icon gap", async () => {
+    await showChannelOverview(healthyChannel("kanal-a", "Alpha"));
+
+    expect(document.querySelectorAll(".dashboard-header__control-state-slot.is-empty")).toHaveLength(2);
   });
 
   it("retries an expired channel-control refresh after a transient request failure", async () => {

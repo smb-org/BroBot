@@ -47,7 +47,7 @@
   .timer-editor__properties dt { color: var(--text-3); }
   .timer-editor__properties dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
   .timer-editor__properties pre { max-width: none; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .timer-weekday { display: flex; min-height: 32px; align-items: center; gap: var(--s2); color: var(--text-2); font-size: 13px; }
+  .timer-weekday { display: flex; min-height: 32px; align-items: center; justify-content: space-between; gap: var(--s2); color: var(--text-2); font-size: 13px; }
   .timers-panel__list-toolbar .list-toolbar__status:has(.list-toolbar__reason) { height: auto; min-height: 40px; overflow: visible; }
   .timers-panel__list-toolbar .list-toolbar__status:has(.list-toolbar__reason) > .ui-load-state__content { grid-template-columns: minmax(0, 1fr); align-items: start; height: auto; min-height: 40px; }
   .timers-panel__list-toolbar .list-toolbar__status:has(.list-toolbar__reason) .list-toolbar__status-right { justify-content: flex-start; overflow: visible; white-space: normal; }

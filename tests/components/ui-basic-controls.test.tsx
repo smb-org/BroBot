@@ -9,6 +9,7 @@ import { DisabledFieldReasonContext } from "../../src/dashboard/ui/DisabledField
 import { SegmentChoice } from "../../src/dashboard/ui/SegmentChoice";
 import { Select } from "../../src/dashboard/ui/Select";
 import { StatusLed } from "../../src/dashboard/ui/StatusLed";
+import { SwitchRow } from "../../src/dashboard/ui/SwitchRow";
 import { SwitchSection } from "../../src/dashboard/ui/SwitchSection";
 import { UnitInput } from "../../src/dashboard/ui/UnitInput";
 import { UiProvider } from "../../src/dashboard/ui/Provider";
@@ -137,6 +138,17 @@ describe("basic UI controls", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Card switch" }));
 
     expect(changes).toEqual([true]);
+  });
+
+  it("renders the default SwitchRow control without trailing space", () => {
+    renderUi(<SwitchRow label="Automatic starts" checked={false} onChange={() => {}} />);
+
+    const toggle = screen.getByRole("switch", { name: "Automatic starts" });
+    const row = toggle.closest(".ui-switch-row");
+
+    expect(row).toHaveClass("ui-switch-row");
+    expect(row?.querySelector(".ui-switch-row__copy")?.nextElementSibling).toBe(toggle);
+    expect(toggle).not.toHaveClass("me-2");
   });
 
   it("gives CodeField one unique description ID inside a disabled-reason context", () => {

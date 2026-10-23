@@ -26,6 +26,64 @@ afterEach(() => {
 });
 
 describe("Timers panel", () => {
+  it("places timer status labels before switches at the right edge of each row", async () => {
+    const timer: Timer = {
+      id: "timer-switch-layout", name: "Greeting timer", enabled: true, messageText: "Hello", chatTarget: "source_only",
+      trigger: { type: "interval", live: { minutes: 30 } }, revision: 1, nextRunAt: null, nextRunState: null,
+      lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [timer] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
+      if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+
+    renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
+    const timerButton = await screen.findByRole("button", { name: /Greeting timer/u });
+    const row = timerButton.closest(".timer-list__row");
+    const listSwitch = within(row as HTMLElement).getByRole("switch");
+    expect(row?.querySelector(':scope > [data-slot="switch"]')).toBe(listSwitch);
+
+    fireEvent.click(timerButton);
+    const header = document.querySelector(".timer-header__switch");
+    const headerSwitch = within(header as HTMLElement).getByRole("switch");
+    expect(header?.firstElementChild).toHaveTextContent("Enabled");
+    expect(headerSwitch.previousElementSibling).toHaveTextContent("Enabled");
+  });
+
+  it("places weekday switches after their labels", async () => {
+    const timer: Timer = {
+      id: "timer-weekday-layout", name: "Daily timer", enabled: true, messageText: "Hello", chatTarget: "source_only",
+      trigger: { type: "time_of_day", time: "12:00", weekdays: [], alsoOffline: false }, revision: 1, nextRunAt: null, nextRunState: null,
+      lastRunAt: null, createdAt: "2026-09-19T12:00:00.000Z", updatedAt: "2026-09-19T12:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/timers")) return Promise.resolve(jsonResponse({ timers: [timer] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(jsonResponse({
+        timeZone: "UTC", revision: 1, location: null, locationRevision: 1,
+        defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
+      }));
+      if (url.pathname.endsWith("/event-time-sources")) return Promise.resolve(jsonResponse({ sources: [] }));
+      if (url.pathname.endsWith("/template-variables")) return Promise.resolve(jsonResponse({ variables: [] }));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+
+    renderWithQuery(<UiProvider><TimersPanel channelId="channel-a" language="en" /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /Daily timer/u }));
+
+    const mondaySwitch = await screen.findByRole("switch", { name: "Mon" });
+    const mondayRow = mondaySwitch.closest(".timer-weekday");
+    expect(mondaySwitch.previousElementSibling).toHaveTextContent("Mon");
+    expect(mondayRow?.firstElementChild).toHaveTextContent("Mon");
+  });
+
   it("keeps live and offline interval rows visible with an explicit save action", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");

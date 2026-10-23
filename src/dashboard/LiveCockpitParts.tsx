@@ -18,6 +18,7 @@ import { immediateActionErrorFeedback } from "./immediate-action-errors";
 import { adSnoozeRetryMessage } from "./ad-snooze-retry";
 import { formatRelativeTime } from "./ui/format-relative-time";
 import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon } from "./ui";
+import { LockedReason } from "./ui/LockedReason";
 import { AdsLiveTile, type AdsLiveSchedule } from "./AdsLiveTile";
 
 type EventFilter = "all" | "raids" | "community" | "chat";
@@ -68,12 +69,12 @@ export const LiveCockpitTiles = ({
   onRefresh: () => void;
 }): ReactElement => {
   const labels = dashboardTexts().liveCockpit;
+  const adsSnapshot = snapshots.find((snapshot): snapshot is AdsLiveSchedule => snapshot.kind === "ad_schedule") ?? null;
+  const adsFailed = failedModules.includes("ads");
   const upcoming = snapshots
     .filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "upcoming" }> => snapshot.kind === "upcoming" && Date.parse(snapshot.at) > now)
     .sort((left, right) => Date.parse(left.at) - Date.parse(right.at))
     .slice(0, 12);
-  const adsSnapshot = snapshots.find((snapshot): snapshot is AdsLiveSchedule => snapshot.kind === "ad_schedule") ?? null;
-  const adsFailed = failedModules.includes("ads");
   const recentVotekicks = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "votekick_recent" }> => snapshot.kind === "votekick_recent");
   const duels = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "duel" }> => snapshot.kind === "duel");
   const visibleDuels = duels.slice(0, 3);
@@ -244,9 +245,7 @@ export const LiveCockpitTiles = ({
             onClick={() => { setDuelCancelTarget({ id: duel.id }); setDuelCancelError(undefined); }}>
             {labels.duelCancel}
           </Button>
-          {!roleCanManageDuel ? <span id={`duel-cancel-reason-${duel.id}`} className="sr-only">
-            {dashboardTexts().streamManager.managerOnly}
-          </span> : null}
+          <LockedReason id={`duel-cancel-reason-${duel.id}`} {...(!roleCanManageDuel ? { reason: dashboardTexts().streamManager.managerOnly } : {})} />
         </article>)}
         </div>
         {duels.length > visibleDuels.length ? <p className="live-cockpit-duels__more">{labels.duelMore(formatNumber(duels.length - visibleDuels.length))}</p> : null}

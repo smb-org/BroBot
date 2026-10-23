@@ -740,6 +740,7 @@ function QuestionEditor({ question, isNew, language, canManage, onSave, onSaved,
   const saveProps = {
     dirty: draft.dirty || pendingAnswer.trim().length > 0,
     persistent: true,
+    mobileFixed: true,
     pending: saving,
     discardOnConflict: hasServerDeleted,
     ...(hasServerDeleted && !isNew ? { conflict: { message: labels.questionDeletedConflict, reloadLabel: labels.saveAsNew, onReload: saveDeletedAsNew } }
@@ -932,6 +933,7 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   const saveProps = {
     dirty,
     persistent: true,
+    mobileFixed: true,
     pending: saving,
     saved,
     ...(serverConflict ? { conflict: { message: labels.settingsConflict, reloadLabel: labels.reloadSettings, onReload: reloadCurrent } } : {}),
@@ -963,7 +965,6 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
       hint={labels.autoStartHint}
       disabled={!canManage}
       pending={saving}
-      layout="inline"
     />,
     <UnitInput
       key="auto-start-interval"

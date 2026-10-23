@@ -1583,7 +1583,7 @@ describe("Blitz Round collection panel", () => {
     await waitFor(() => expect(api.getSettings()).toMatchObject({ autoStart: true, autoStartIntervalMinutes: 30 }));
   });
 
-  it("places the automatic-start switch beside its label and pairs the interval with the existing settings fields", async () => {
+  it("places the automatic-start switch in the default row and pairs the interval with the existing settings fields", async () => {
     installPanelFetch([sampleQuestion]);
     mountPanel();
     await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
@@ -1594,7 +1594,7 @@ describe("Blitz Round collection panel", () => {
     const toggle = screen.getByRole("switch", { name: "Start automatically" });
     const interval = screen.getByRole("spinbutton", { name: "Interval" });
     const switchRow = toggle.closest(".ui-switch-row");
-    expect(switchRow).toHaveClass("ui-switch-row--inline");
+    expect(switchRow).toHaveClass("ui-switch-row");
     expect(switchRow?.querySelector(".ui-switch-row__copy")?.nextElementSibling).toBe(toggle);
     expect(interval.closest(".blitz-panel__auto-start")?.querySelector(".ui-field-pair")).toBeInTheDocument();
   });

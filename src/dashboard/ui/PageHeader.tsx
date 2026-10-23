@@ -10,17 +10,19 @@ import type { SaveStatusProps } from "./SaveStatus";
 interface ModuleStatusSwitchProps {
   title: string;
   active: boolean;
+  activeLabel?: string;
+  inactiveLabel?: string;
   onToggle: (active: boolean) => void;
   disabled?: boolean;
   busy?: boolean;
 }
 
-function ModuleStatusSwitch({ title, active, onToggle, disabled = false, busy = false }: ModuleStatusSwitchProps): ReactElement {
+function ModuleStatusSwitch({ title, active, activeLabel, inactiveLabel, onToggle, disabled = false, busy = false }: ModuleStatusSwitchProps): ReactElement {
   const texts = dashboardCommonTexts();
   return (
     <div className={`module-status-switch${active ? " is-on" : ""}`}>
+      <span>{active ? activeLabel ?? texts.activeModule : inactiveLabel ?? texts.pausedModule}</span>
       <Switch aria-label={title} aria-busy={busy} checked={active} disabled={disabled || busy} onCheckedChange={onToggle} />
-      <span>{active ? texts.activeModule : texts.pausedModule}</span>
     </div>
   );
 }
@@ -40,6 +42,8 @@ export interface PageHeaderProps {
   switchDisabled?: boolean;
   switchBusy?: boolean;
   switchTitle?: string;
+  activeLabel?: string;
+  inactiveLabel?: string;
   moduleSwitch?: ReactNode;
   badge?: ReactNode;
   badges?: ReactNode;
@@ -69,6 +73,8 @@ export function PageHeader({
   switchDisabled = false,
   switchBusy = false,
   switchTitle = title,
+  activeLabel,
+  inactiveLabel,
   moduleSwitch,
   badge,
   badges,
@@ -86,7 +92,10 @@ export function PageHeader({
   const common = dashboardCommonTexts();
   const switchControl = moduleSwitch ?? (active === undefined || onToggle === undefined
     ? null
-    : <ModuleStatusSwitch title={switchTitle} active={active} onToggle={onToggle} disabled={switchDisabled} busy={switchBusy} />);
+    : <ModuleStatusSwitch title={switchTitle} active={active}
+      {...(activeLabel === undefined ? {} : { activeLabel })}
+      {...(inactiveLabel === undefined ? {} : { inactiveLabel })}
+      onToggle={onToggle} disabled={switchDisabled} busy={switchBusy} />);
   const headerActions = actions === undefined ? pageActions : pageActions === undefined ? actions : <>{actions}{pageActions}</>;
   const headerMeta = lockHint === undefined
     ? reserveLockHint

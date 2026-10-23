@@ -60,6 +60,37 @@ describe("live cockpit voting actions", () => {
     expect(screen.queryByText(dashboardTexts().liveCockpit.noActionRunning)).not.toBeInTheDocument();
   });
 
+  it("shows the manager-only duel cancel reason inline for operators", () => {
+    render(<UiProvider><LiveCockpitTiles
+      channelId="channel-a"
+      role="operator"
+      snapshots={[{
+        kind: "duel",
+        id: "duel-open",
+        challenger: "frostfern",
+        target: "moonmoss",
+        stake: 50,
+        closesAt: "2030-01-01T12:01:00.000Z",
+      }]}
+      failedModules={[]}
+      adsEnabled={false}
+      loading={false}
+      failed={false}
+      now={Date.parse("2030-01-01T12:00:30.000Z")}
+      timeZone="Europe/Berlin"
+      onMessage={() => undefined}
+      onRefresh={() => undefined}
+    /></UiProvider>);
+
+    const cancelButton = screen.getByRole("button", { name: dashboardTexts().liveCockpit.duelCancel });
+    const reason = screen.getByRole("note");
+
+    expect(cancelButton).toBeDisabled();
+    expect(cancelButton).toHaveAttribute("aria-describedby", reason.id);
+    expect(reason).toHaveTextContent(dashboardTexts().streamManager.managerOnly);
+    expect(reason).not.toHaveClass("sr-only");
+  });
+
   it("lets operators approve free-text terms and lift a completed votekick timeout", async () => {
     const requests = vi.fn<typeof fetch>((input) => {
       const url = requestUrl(input);

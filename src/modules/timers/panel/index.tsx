@@ -531,13 +531,13 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
         title={title}
         {...(selectedMeta === undefined ? {} : { meta: selectedMeta })}
         {...(editing === null || selectedTimer === undefined ? {} : { moduleSwitch: <div className="timer-header__switch">
+          <span>{selectedTimer.enabled ? labels.enabled : labels.disabled}</span>
           <SwitchPrimitive
             aria-label={`${selectedTimer.name}: ${selectedTimer.enabled ? labels.enabled : labels.disabled}`}
             checked={selectedTimer.enabled}
             disabled={!canOperate || editorPending || deleteTarget !== null || dirty}
             onCheckedChange={(enabled) => { void toggle(selectedTimer, enabled); }}
           />
-          <span>{selectedTimer.enabled ? labels.enabled : labels.disabled}</span>
         </div> })}
         {...(!canManage ? { lockHint: labels.roleLocked } : {})}
         {...(editing === null ? {} : { actions: <ActionMenu label={common.moreActions} items={[{
@@ -622,12 +622,12 @@ function TimersPanelContent({ channelId, language, canManage = true, canOperate 
                 const allDays = draft.weekdays.length === 0;
                 const checked = allDays || draft.weekdays.includes(index);
                 return <div className="timer-weekday" key={day}>
+                  <span>{day}</span>
                   <SwitchPrimitive aria-label={day} checked={checked} disabled={editorPending} onCheckedChange={() => {
                     const days = allDays ? labels.weekdaysNames.map((_, dayIndex) => dayIndex).filter((dayIndex) => dayIndex !== index)
                       : checked ? draft.weekdays.filter((selected) => selected !== index) : [...draft.weekdays, index].sort((left, right) => left - right);
                     patchDraft({ weekdays: days.length === 7 ? [] : days });
                   }} />
-                  <span>{day}</span>
                 </div>;
               })}
             </div>

@@ -371,6 +371,7 @@ function FaqPanelContent({ channelId, language, canManage = true, initialSelecti
   const saveProps = {
     dirty,
     persistent: true,
+    mobileFixed: true,
     pending: saving,
     ...(saveError === undefined ? {} : { error: saveError }),
     invalid: input === null || matcherValidation !== null || pendingPatterns.trim().length > 0,
@@ -391,6 +392,8 @@ function FaqPanelContent({ channelId, language, canManage = true, initialSelecti
         className="page-header--editor"
         title={draft.name.trim() || labels.newEntry}
         active={draft.enabled}
+        activeLabel={labels.filterActive}
+        inactiveLabel={labels.filterPaused}
         onToggle={(enabled) => { patchDraft({ enabled }); }}
         switchDisabled={!canManage || saving || ordering}
         switchBusy={saving}
