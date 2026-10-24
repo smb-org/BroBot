@@ -264,49 +264,45 @@ test("native Back and Forward keep the current view visible while a module chunk
   await suppressIdlePreload(page);
   await installApiRoutes(page);
 
-  let markRequestStarted: () => void = () => undefined;
-  const requestStarted = new Promise<void>((resolve) => { markRequestStarted = resolve; });
-  let releaseRequest: () => void = () => undefined;
-  const responseGate = new Promise<void>((resolve) => { releaseRequest = resolve; });
-  await page.route("**/src/modules/api_source/panel/index.tsx*", async (route) => {
-    markRequestStarted();
-    await responseGate;
-    await route.continue();
-  });
+  let releaseRequests: () => void = () => undefined;
+  const responseGate = new Promise<void>((resolve) => { releaseRequests = resolve; });
+  // The chunk each target page needs before it can render.
+  const heldChunks = { api_source: "api_source/panel/index.tsx", text_commands: "text_commands/panel/index.tsx" } as const;
+  for (const chunk of Object.values(heldChunks)) {
+    await page.route(`**/src/modules/${chunk}*`, async (route) => {
+      await responseGate;
+      await route.continue();
+    });
+  }
+  const chunkRequested = (moduleId: keyof typeof heldChunks) => page.waitForRequest((request) => request.url().includes(`/src/modules/${heldChunks[moduleId]}`));
 
-  await page.goto(`/channels/${channelId}/modules/text_commands`);
-  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
-  const dataSourcesLink = page.locator(`a[href="/channels/${channelId}/modules/api_source"]`);
-  await dataSourcesLink.hover();
-  await requestStarted;
-  await dataSourcesLink.click();
-  await expect(page).toHaveURL(`/channels/${channelId}/modules/api_source`);
-  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
+  await page.goto(`/channels/${channelId}/modules/ads`);
+  const currentHeading = page.getByRole("heading", { name: "Ad breaks", level: 1 });
+  await expect(currentHeading).toBeVisible();
+  // Two history entries the router has not rendered yet, so Back and Forward each target a
+  // chunk that has not been requested: the request is the signal that the router started
+  // rendering the target while the held chunk keeps it suspended.
+  await page.evaluate(({ channel }) => {
+    window.history.pushState({ __brobotRouteIndex: 1 }, "", `/channels/${channel}/modules/api_source`);
+    window.history.pushState({ __brobotRouteIndex: 2 }, "", `/channels/${channel}/modules/text_commands`);
+  }, { channel: channelId });
 
-  await page.getByRole("link", { name: "System" }).click();
-  await expect(page).toHaveURL(`/channels/${channelId}/system`);
-  await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
-
+  const apiSourceRequested = chunkRequested("api_source");
   await page.goBack();
+  await apiSourceRequested;
   await expect(page).toHaveURL(`/channels/${channelId}/modules/api_source`);
-  await page.waitForTimeout(300);
-  await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
+  await expect(currentHeading).toBeVisible();
   await expect(page.locator(".module-view-fallback")).toHaveCount(0);
 
-  await page.goBack();
-  await expect(page).toHaveURL(`/channels/${channelId}/modules/text_commands`);
-  await expect(page.locator(`a[href="/channels/${channelId}/modules/text_commands"]`)).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
-  await expect(page.locator(".module-view-fallback")).toHaveCount(0);
-
+  const textCommandsRequested = chunkRequested("text_commands");
   await page.goForward();
-  await expect(page).toHaveURL(`/channels/${channelId}/modules/api_source`);
-  await page.waitForTimeout(300);
-  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
+  await textCommandsRequested;
+  await expect(page).toHaveURL(`/channels/${channelId}/modules/text_commands`);
+  await expect(currentHeading).toBeVisible();
   await expect(page.locator(".module-view-fallback")).toHaveCount(0);
 
-  releaseRequest();
-  await expect(page.getByRole("heading", { name: "Data sources", level: 1, exact: true })).toBeVisible();
+  releaseRequests();
+  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
   await expect(page.locator(".module-view-fallback")).toHaveCount(0);
 });
 

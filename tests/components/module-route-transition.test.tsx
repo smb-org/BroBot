@@ -4,11 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
 const pendingLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Target panel loaded</p> })));
+// Panel loads are memoized per module, so each held-panel test needs its own target module.
+const pendingBackLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Target panel loaded</p> })));
 
 vi.mock("../../src/modules/registry", () => ({
   MODULES: [
     { id: "aktiv", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {}, panel: activeLoader },
     { id: "pending", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {}, panel: pendingLoader },
+    { id: "pendingback", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {}, panel: pendingBackLoader },
   ],
 }));
 
@@ -132,14 +135,15 @@ describe("Module route during client-side navigation", () => {
     expect(unmockedRequests).toEqual([]);
   });
 
-  it("keeps the current module visible when native Back targets a pending panel", async () => {
+  /** Renders the "aktiv" module with the target module's panel chunk preloaded but held. */
+  const renderWithHeldPanel = async (targetId: string, loader: typeof pendingLoader) => {
     const idleCallbackScheduled = vi.fn(() => 1);
     Object.defineProperty(window, "requestIdleCallback", { configurable: true, value: idleCallbackScheduled });
     Object.defineProperty(window, "cancelIdleCallback", { configurable: true, value: () => undefined });
 
     let releasePanel: (() => void) | undefined;
     let panelResolved = false;
-    pendingLoader.mockImplementation(() => new Promise((resolve) => {
+    loader.mockImplementation(() => new Promise((resolve) => {
       releasePanel = () => {
         panelResolved = true;
         resolve({ default: () => <p>Target panel loaded</p> });
@@ -150,12 +154,12 @@ describe("Module route during client-side navigation", () => {
       ...channel,
       activeModules: [
         { moduleId: "aktiv", settings: "{}" },
-        { moduleId: "pending", settings: "{}" },
+        { moduleId: targetId, settings: "{}" },
       ],
     };
     const moduleStates = [
       { id: "aktiv", enabled: true, settings: "{}" },
-      { id: "pending", enabled: true, settings: "{}" },
+      { id: targetId, enabled: true, settings: "{}" },
     ];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), window.location.origin).pathname;
@@ -182,26 +186,49 @@ describe("Module route during client-side navigation", () => {
     const rendered = render(<DashboardApp />, undefined, { panelRevisions: {} });
     expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
     const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
-    const targetLink = within(nav).getByRole("link", { name: /pending.*Läuft/u });
+    const targetLink = within(nav).getByRole("link", { name: new RegExp(`${targetId}\\b.*Läuft`, "u") });
 
     fireEvent.mouseEnter(targetLink);
-    await waitFor(() => expect(pendingLoader).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(loader).toHaveBeenCalledTimes(1));
     expect(panelResolved).toBe(false);
+    return { rendered, targetLink, panelResolved: () => panelResolved, releasePanel: () => { releasePanel?.(); } };
+  };
+
+  it("keeps the current module visible when a realtime update arrives during a pending click transition", async () => {
+    const { rendered, targetLink, panelResolved, releasePanel } = await renderWithHeldPanel("pending", pendingLoader);
 
     act(() => {
-      window.history.replaceState({ __brobotRouteIndex: 0 }, "", "/channels/kanal-a/modules/pending");
-      window.dispatchEvent(new PopStateEvent("popstate"));
+      targetLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
       setDashboardRealtimeStatus("kanal-a", "reconnecting");
     });
 
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/pending");
     expect(pendingLoader).toHaveBeenCalledTimes(1);
-    expect(panelResolved).toBe(false);
+    expect(panelResolved()).toBe(false);
+    expect(rendered.container.querySelector(".module-view-fallback")).toBeNull();
+    expect(screen.getByText("Panel geladen")).toBeInTheDocument();
+
+    releasePanel();
+    expect(await screen.findByText("Target panel loaded")).toBeInTheDocument();
+  });
+
+  it("keeps the current module visible when native Back targets a pending panel", async () => {
+    const { rendered, panelResolved, releasePanel } = await renderWithHeldPanel("pendingback", pendingBackLoader);
+
+    act(() => {
+      window.history.replaceState({ __brobotRouteIndex: 0 }, "", "/channels/kanal-a/modules/pendingback");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      setDashboardRealtimeStatus("kanal-a", "reconnecting");
+    });
+
+    expect(window.location.pathname).toBe("/channels/kanal-a/modules/pendingback");
+    expect(pendingBackLoader).toHaveBeenCalledTimes(1);
+    expect(panelResolved()).toBe(false);
     await flushRouteTask();
     expect(rendered.container.querySelector(".module-view-fallback")).toBeNull();
     expect(screen.getByText("Panel geladen")).toBeInTheDocument();
 
-    releasePanel?.();
+    releasePanel();
     expect(await screen.findByText("Target panel loaded")).toBeInTheDocument();
   });
 
