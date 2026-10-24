@@ -288,14 +288,15 @@
   border-bottom: 1px solid var(--line);
 }
 
+/* Row 1 is fixed: title with badges plus the hint slots. Row 2 holds the summary, full width, and is as tall as its text. */
 .test-area__results-title {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: var(--s6) auto;
   align-items: center;
-  gap: var(--s2);
+  column-gap: var(--s2);
   width: 100%;
   min-width: 0;
-  min-height: var(--s6);
   overflow: visible;
 }
 
@@ -317,16 +318,15 @@
 }
 
 .test-area__results-summary {
-  flex: 0 1 auto;
+  grid-column: 1 / -1;
   min-width: 0;
-  overflow: hidden;
   color: var(--text-3);
   font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
-.test-area__results.is-stale .test-area__results-title-copy {
+.test-area__results.is-stale .test-area__results-title-copy,
+.test-area__results.is-stale .test-area__results-summary {
   opacity: 0.58;
 }
 
@@ -824,16 +824,10 @@
   .test-area__results { container: test-results / inline-size; }
 }
 
-/* In a narrow results column the title row wraps onto reserved lines (title with badges, then the summary, which may wrap once), so the counter and the Stumm/Pausiert badges keep their full text and the rows below never move when the badges appear. */
-@container test-results (max-width: 389px) {
-  .test-area__results-title { min-height: 60px; align-items: flex-start; }
-  .test-area__results-title-copy { flex-wrap: wrap; align-content: flex-start; gap: 2px var(--s2); }
-  .test-area__results-summary { order: 1; max-width: 100%; white-space: normal; text-overflow: clip; }
-}
-
-/* The hint slots leave little width beside the title here, so the badges can take a second line and the summary two more. */
+/* Where the results column is too narrow for title, badges and hint slots in one line (just above 820px), the badges take a reserved second line, so Stumm and Pausiert keep their full text and nothing below moves. */
 @container test-results (max-width: 299px) {
-  .test-area__results-title { min-height: 78px; }
+  .test-area__results-title { grid-template-rows: calc(var(--s6) + var(--s5)) auto; }
+  .test-area__results-title-copy { flex-wrap: wrap; align-content: flex-start; gap: var(--s1) var(--s2); }
 }
 
 @media (min-width: 821px) {
