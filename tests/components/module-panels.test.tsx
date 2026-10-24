@@ -130,7 +130,29 @@ vi.mock("../../src/modules/registry", () => ({
       }],
       panel: activeLoader,
     },
-    { id: "ohne-panel", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {} },
+    {
+      id: "ohne-panel",
+      navigationCategory: "chat",
+      mandatory: true,
+      mandatoryReason: { de: "Das Modul stellt einen notwendigen Fixture-Wert bereit.", en: "The module provides a required fixture value." },
+      settingsSchema: {},
+      defaultSettings: {},
+      navigationEntries: [{
+        id: "ohne-panel",
+        label: { de: "Fixture-Wert", en: "Fixture value" },
+        description: { de: "Dieses Modul erklärt den Zweck.", en: "This module explains its purpose." },
+        iconKind: "texts",
+      }],
+      templateVariableCatalog: [{
+        name: "fixture.value",
+        maxLength: 20,
+        sample: "42",
+        picker: {
+          de: { label: "Fixture-Wert", description: "Stellt einen Fixture-Wert bereit." },
+          en: { label: "Fixture value", description: "Provides a fixture value." },
+        },
+      }],
+    },
     {
       id: "channel-page-fixture",
       navigationCategory: "chat",
@@ -275,6 +297,15 @@ describe("Module panel loader", () => {
     expect(activeLoader).not.toHaveBeenCalled();
   });
 
+  it("shows generic information for active panel-less modules on the overview", () => {
+    render(<ModulePanelMount channelId="kanal-a" activeModules={[{ moduleId: "ohne-panel", settings: "{}" }]} />);
+
+    expect(screen.getByText("Dieses Modul erklärt den Zweck.")).toBeDefined();
+    expect(screen.getByText("Das Modul stellt einen notwendigen Fixture-Wert bereit.")).toBeDefined();
+    expect(screen.getByText("{fixture.value}", { exact: true })).toBeDefined();
+    expect(activeLoader).not.toHaveBeenCalled();
+  });
+
   it("lazy-loads the panel only on the module subpage", async () => {
     render(<ModulePage channelId="kanal-a" moduleId="aktiv" ownRole="manager" modules={[{ id: "aktiv", enabled: true, settings: "{}" }]} activeModules={[{ moduleId: "aktiv", settings: "{}" }]} onNavigate={vi.fn()} onToggle={vi.fn()} />);
 
@@ -327,10 +358,17 @@ describe("Module panel loader", () => {
     expect(settings.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
-  it("shows an explained state for an active module without a panel", () => {
+  it("renders generic module information when an active module has no panel", () => {
     render(<ModulePage channelId="kanal-a" moduleId="ohne-panel" ownRole="manager" modules={[{ id: "ohne-panel", enabled: true, settings: "{}" }]} activeModules={[{ moduleId: "ohne-panel", settings: "{}" }]} onNavigate={vi.fn()} onToggle={vi.fn()} />);
 
-    expect(screen.getByText("Für dieses aktive Modul gibt es noch keine Panel-Ansicht.")).toBeInTheDocument();
+    expect(screen.getByText("Dieses Modul erklärt den Zweck.")).toBeDefined();
+    expect(screen.getByText("Das Modul stellt einen notwendigen Fixture-Wert bereit.")).toBeDefined();
+    const catalog = within(screen.getByRole("region", { name: "Vorlagenvariablen" }));
+    expect(catalog.getByRole("heading", { name: "Fixture-Wert" })).toBeDefined();
+    expect(catalog.getByText("fixture.value", { exact: true })).toBeDefined();
+    expect(catalog.getByText("Stellt einen Fixture-Wert bereit.")).toBeDefined();
+    expect(catalog.getByText("{fixture.value}", { exact: true })).toBeDefined();
+    expect(screen.queryByText("Für dieses aktive Modul gibt es noch keine Panel-Ansicht.")).toBeNull();
   });
 
   it("uses the module list as the source and does not claim inactive when the overview is missing", () => {

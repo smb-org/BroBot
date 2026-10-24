@@ -1,0 +1,17 @@
+@layer components.pages {
+  .module-info-view { width: 100%; max-width: var(--dashboard-content-width); min-width: 0; margin-top: var(--s4); }
+  .module-info-view__description,
+  .module-info-view__mandatory-reason,
+  .module-info-view__where-to-use,
+  .module-info-view__empty { margin: 0 0 var(--s3); color: var(--text-2); font-size: var(--text-body); line-height: var(--leading-normal); }
+  .module-info-view__mandatory-reason strong { color: var(--text); font-weight: var(--font-weight-semibold); }
+  .module-info-view__catalog { min-width: 0; }
+  .module-info-view__catalog h2 { margin: var(--s4) 0 var(--s2); color: var(--text); font-size: var(--text-section-title); font-weight: var(--font-weight-semibold); }
+  .module-info-view__list { display: grid; min-width: 0; margin: 0; padding: 0; list-style: none; }
+  .module-info-view__entry { display: grid; min-width: 0; gap: var(--s1); padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+  .module-info-view__entry h3 { min-width: 0; margin: 0; color: var(--text); font-size: var(--text-body); font-weight: var(--font-weight-medium); overflow-wrap: anywhere; }
+  .module-info-view__name { min-width: 0; color: var(--text-3); font-family: var(--font-mono); font-size: var(--text-number); overflow-wrap: anywhere; }
+  .module-info-view__meaning { min-width: 0; margin: 0; color: var(--text-2); font-size: var(--text-body); line-height: var(--leading-normal); overflow-wrap: anywhere; }
+  .module-info-view__example { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: var(--s1); color: var(--text-3); font-size: var(--text-status-label); }
+  .module-info-view__example .ui-token-chip { min-width: 0; }
+}
