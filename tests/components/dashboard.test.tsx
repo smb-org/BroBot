@@ -709,9 +709,13 @@ describe("Dashboard skeleton", () => {
     }, channel);
     window.history.replaceState({}, "", "/channels/kanal-a/events");
 
-    render(<DashboardApp />, undefined, { panelRevisions: { "channel.events": 1 } });
+    const rendered = render(<DashboardApp />, undefined, { panelRevisions: { "channel.events": 1 } });
 
     expect(await screen.findByText("alt")).toBeInTheDocument();
+    const eventsQuery = rendered.queryClient.getQueryCache().getAll().find(({ queryKey }) =>
+      queryKey[1] === "kanal-a" && queryKey[2] === "events");
+    if (eventsQuery === undefined) throw new Error("The event query is missing.");
+    const previousEventData = eventsQuery.state.data;
     const feed = document.querySelector(".event-feed");
     if (feed === null) throw new Error("Ereignis-Feed fehlt");
     const scrollRoot = feed.closest<HTMLElement>(".dashboard-shell__main");
@@ -727,10 +731,12 @@ describe("Dashboard skeleton", () => {
     socket.receive(JSON.stringify({ version: 1, id: "message-lower", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
 
     expect(await screen.findByRole("button", { name: "1 neue Ereignisse" }, { timeout: 2_000 })).toBeInTheDocument();
-    // The query refreshes while the rows the reader is looking at stay frozen.
-    await new Promise((resolve) => { setTimeout(resolve, 400); });
+    // Wait for the background response to land while the reader's visible rows stay frozen.
+    await waitFor(() => {
+      expect(eventRequests).toBe(3);
+      expect(eventsQuery.state.data).not.toBe(previousEventData);
+    }, { timeout: 2_000 });
     expect(screen.queryByText("Raid von unbekannt mit 8 Zuschauern")).not.toBeInTheDocument();
-    expect(eventRequests).toBe(3);
     expect(document.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)")).toHaveLength(1);
 
     Object.defineProperty(feed, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0 }) });
@@ -864,11 +870,16 @@ describe("Dashboard skeleton", () => {
     if (socket === undefined) throw new Error("Realtime-Socket fehlt");
     socket.open();
     await waitFor(() => expect(eventRequests).toBe(2));
+    vi.useFakeTimers();
     socket.close(1006, "Abbruch");
-    await act(async () => { await new Promise<void>((resolve) => { setTimeout(resolve, 300); }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
     const rebuiltSocket = TestWebSocket.instances[1];
     if (rebuiltSocket === undefined) throw new Error("Reconnect-Socket fehlt");
     rebuiltSocket.open();
+    // Realtime refreshes are throttled to one per second, including reconnect catch-up.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(eventRequests).toBe(3);
+    vi.useRealTimers();
 
     expect(await screen.findByText("Raid von unbekannt mit 11 Zuschauern")).toBeInTheDocument();
     expect(eventRequests).toBe(3);
@@ -2888,16 +2899,20 @@ describe("Dashboard skeleton", () => {
     let toggleRequests = 0;
     const overviewSnapshots: boolean[] = [];
     let releaseStale: () => void = () => undefined;
+    let finishStaleResponse: () => void = () => undefined;
     const stale = new Promise<void>((resolve) => { releaseStale = resolve; });
+    const staleResponseReturned = new Promise<void>((resolve) => { finishStaleResponse = resolve; });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/overview") {
-        overviewCalls += 1;
+        const requestNumber = ++overviewCalls;
         const snapshot = enabled;
         overviewSnapshots.push(snapshot);
-        if (overviewCalls === 1) await stale;
-        return jsonResponse({ ...overview(channel), activeModules: snapshot ? [{ moduleId: "text_commands", settings: "{}" }] : [] });
+        if (requestNumber === 1) await stale;
+        const response = jsonResponse({ ...overview(channel), activeModules: snapshot ? [{ moduleId: "text_commands", settings: "{}" }] : [] });
+        if (requestNumber === 1) finishStaleResponse();
+        return response;
       }
       if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
         return jsonResponse({ modules: [{ id: "text_commands", enabled, settings: "{}" }] });
@@ -2921,7 +2936,10 @@ describe("Dashboard skeleton", () => {
     expect(toggleRequests).toBe(1);
     // The pre-toggle response (module still off) arrives only now.
     releaseStale();
-    await new Promise((resolve) => { window.setTimeout(resolve, 20); });
+    await staleResponseReturned;
+    await act(async () => {
+      for (let attempt = 0; attempt < 10; attempt += 1) await Promise.resolve();
+    });
     expect(overviewSnapshots).toContain(false);
 
     navigateToPath("/channels/kanal-a/modules/text_commands");
@@ -4096,15 +4114,16 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => expect(resolveEvents).toBeTypeOf("function"));
     const socket = TestWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
+    vi.useFakeTimers();
     socket.close(1006, "network interruption");
 
     await act(async () => {
       resolveEvents?.(jsonResponse({ error: "session_required" }, 401));
-      await Promise.resolve();
+      for (let attempt = 0; attempt < 10; attempt += 1) await Promise.resolve();
     });
     expect(fetcher.mock.calls.some(([input]) => requestUrl(input).pathname.endsWith("/events"))).toBe(true);
-    await screen.findByRole("heading", { name: "Anmeldung erforderlich", level: 1 });
-    await new Promise<void>((resolve) => { window.setTimeout(resolve, 350); });
+    expect(screen.getByRole("heading", { name: "Anmeldung erforderlich", level: 1 })).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
 
     expect(TestWebSocket.instances).toHaveLength(1);
   });

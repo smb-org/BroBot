@@ -434,6 +434,29 @@ const actions: readonly RoleAction[] = [
   },
 ];
 
+const expectedActionNames = [
+  "Create channel member as operator",
+  "Create channel member as broadcaster",
+  "Change channel member from operator to manager",
+  "Change channel member from broadcaster to manager",
+  "Demote the last broadcaster",
+  "Remove channel member as operator",
+  "Remove a non-last broadcaster",
+  "Remove the last broadcaster",
+  "Enable module",
+  "Change module settings",
+  "Toggle a single text command",
+  "Edit text command",
+  "Create text command",
+  "Delete text command",
+  "Revoke overlay token",
+  "Release operator channel",
+  "Change operator full consent",
+  "Create operator member",
+  "Change operator member",
+  "Remove operator member",
+] as const;
+
 const setupActor = async (database: TestD1Database, role: RoleRow): Promise<void> => {
   await insertChannel(database, "kanal-a");
   await insertLoginIdentityAndSession(database, "actor");
@@ -442,8 +465,8 @@ const setupActor = async (database: TestD1Database, role: RoleRow): Promise<void
 
 describe("Role-times-action matrix", () => {
   it("runs every guard-protected write action for every channel role", async () => {
-    // Without this floor, the test would pass if the table ran empty.
-    expect(actions.length).toBeGreaterThanOrEqual(20);
+    // The action table is local and synchronous; pin its contents so omitted guard cases cannot pass silently.
+    expect(actions.map(({ name }) => name)).toEqual(expectedActionNames);
     const schemaSnapshot = (() => {
       const schemaDatabase = new TestD1Database();
       try {

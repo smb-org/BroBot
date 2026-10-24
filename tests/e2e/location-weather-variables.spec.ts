@@ -199,6 +199,8 @@ test("location page shows the missing-location state at desktop and mobile width
   for (const viewport of [{ width: 1920, height: 1080 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     await page.goto(`/channels/${CHANNEL_ID}/location-weather`);
+    await expect(page.locator(".channel-location-field")).toHaveAttribute("aria-busy", "false");
+    await expect(page.locator(".channel-location-live-empty")).toHaveCount(3);
     await expect(page.getByRole("link", { name: "Standort festlegen" }).first()).toBeVisible();
     await expect(page.getByText("Standort fehlt").first()).toBeVisible();
     await expectNoHorizontalOverflow(page);
