@@ -922,6 +922,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-settings-editor__message-toggle { min-width: 0; }
 .ui-settings-editor__message-toggle .ui-switch-row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; min-height: var(--control-height); padding-inline-end: 0; }
 .ui-settings-editor__message-toggle .ui-switch-row__copy strong { white-space: nowrap; }
+/* The reserved lock-reason row would make the toggle taller than its switch and lift the switch above the heading's centre line. */
+.ui-settings-editor__message-toggle .ui-locked-reason--reserved { display: none; }
 .ui-settings-editor__readonly-message dd { display: grid; gap: var(--s2); }
 .ui-settings-editor__readonly-message dd > strong { color: var(--text-2); font-size: 12px; }
 .ui-settings-editor__readonly-message dd > span { color: var(--text-3); font-size: 12px; }

@@ -20,3 +20,27 @@ export const expectSwitchGeometry = async (page: Page): Promise<void> => {
     expect(track.y + track.height - (thumb.y + thumb.height)).toBeGreaterThanOrEqual(MIN_INSET);
   }
 };
+
+/** Asserts that each message heading and its switch share one centre line, within 1 px. */
+export const expectMessageHeadingsCentred = async (page: Page): Promise<void> => {
+  const headings = await page.locator(".ui-settings-editor__message-heading, .duel-settings-editor__text-heading").all();
+  expect(headings.length).toBeGreaterThan(0);
+  for (const heading of headings) {
+    const title = await heading.locator(":scope > strong, :scope > label").first().boundingBox();
+    const control = await heading.locator('[data-slot="switch"]').boundingBox();
+    expect(title).not.toBeNull();
+    expect(control).not.toBeNull();
+    if (title === null || control === null) return;
+    expect(Math.abs(title.y + title.height / 2 - (control.y + control.height / 2))).toBeLessThanOrEqual(1);
+  }
+};
+
+/** Toggles one message switch and asserts that its heading keeps its height. */
+export const expectHeadingHeightStable = async (page: Page, switchName: string): Promise<void> => {
+  const control = page.getByRole("switch", { name: switchName });
+  const heading = control.locator("xpath=ancestor::*[contains(@class, 'message-heading') or contains(@class, 'text-heading')][1]");
+  const before = await heading.boundingBox();
+  await control.click();
+  const after = await heading.boundingBox();
+  expect(after?.height).toBe(before?.height);
+};

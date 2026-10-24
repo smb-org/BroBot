@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import { expectSwitchGeometry } from "./switch-geometry";
+import { expectHeadingHeightStable, expectMessageHeadingsCentred, expectSwitchGeometry } from "./switch-geometry";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
@@ -109,3 +109,15 @@ test("switches keep their thumb inside the track on the ads page and the module 
   await expect(page.getByRole("switch").first()).toBeVisible();
   await expectSwitchGeometry(page);
 });
+
+for (const width of [390, 768, 1280, 1920, 2560]) {
+  test(`message headings and switches share a centre line at ${String(width)} px`, async ({ page }) => {
+    await mockAdsApi(page, { ...initialSettings });
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(`/channels/${channelId}/modules/ads`);
+    await expect(page.getByRole("switch", { name: "Automatische Werbepause: Nachricht senden" })).toBeVisible();
+    await expectMessageHeadingsCentred(page);
+    await expectHeadingHeightStable(page, "Automatische Werbepause: Nachricht senden");
+    await expectMessageHeadingsCentred(page);
+  });
+}

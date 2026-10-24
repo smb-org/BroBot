@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import { expectMessageHeadingsCentred } from "./switch-geometry";
+
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
 type ModuleId = "ads" | "raid";
@@ -482,6 +484,7 @@ test("Raid settings use compact unframed message fields, stacked unit inputs, an
   expect(messageStyles.backgroundColor).toBe("rgba(0, 0, 0, 0)");
   await expect(message.locator(".ui-settings-editor__message-heading > strong")).toHaveCount(1);
   await expect(message.getByRole("switch", { name: /Nachricht senden/u })).toBeChecked();
+  await expectMessageHeadingsCentred(page);
   const labelBox = await message.locator(".ui-template-text-field__label").boundingBox();
   expect(labelBox?.width).toBeLessThanOrEqual(1);
   const textareaBox = await message.getByRole("textbox").boundingBox();

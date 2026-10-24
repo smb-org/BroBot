@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { expectSwitchGeometry } from "./switch-geometry";
+import { expectMessageHeadingsCentred, expectSwitchGeometry } from "./switch-geometry";
 import { BELABOX_DEFAULT_SETTINGS } from "../../src/modules/belabox/contracts";
 
 test.use({ locale: "de-DE" });
@@ -560,8 +560,10 @@ test("BELABOX switches keep their thumb inside the track in both states", async 
   await page.goto(`/channels/${channelId}/modules/belabox`);
   const switches = page.getByRole("switch");
   await expect(switches.first()).toBeVisible();
+  await expect.poll(() => switches.count()).toBeGreaterThan(1);
   const states = await switches.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-checked")));
   expect(states).toContain("true");
   expect(states).toContain("false");
   await expectSwitchGeometry(page);
+  await expectMessageHeadingsCentred(page);
 });
