@@ -678,7 +678,6 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 
 .command-panel { display: flex; flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .command-panel > .collection-page { flex: 1 1 auto; min-width: 0; }
-.main-content:has(.collection-page) { width: min(calc(var(--page-width) + 64px), 100%); max-width: calc(var(--page-width) + 64px); margin-inline: auto; }
 .main-content:has(> .collection-page) { display: flex; box-sizing: border-box; height: calc(100dvh - var(--app-shell-header-height)); min-height: 0; flex-direction: column; }
 .module-detail:has(.collection-page) { display: flex; width: 100%; max-width: none; height: calc(100dvh - var(--app-shell-header-height) - 64px); min-height: 0; flex-direction: column; }
 .module-detail:has(.collection-page) > .module-detail-heading { width: 100%; max-width: none; grid-template-columns: 56px minmax(0, 1fr) minmax(0, auto); gap: 16px; min-height: 0; margin-bottom: 16px; padding-bottom: 16px; }
