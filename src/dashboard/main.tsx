@@ -1511,6 +1511,8 @@ export const DashboardApp = (): ReactElement => {
           focusKey={dashboardRouteFocusKey(route)}
         >
           <div className="main-content">
+        {/* Keep this boundary outside the route-keyed error boundary so a pending panel retains the current route. */}
+        <Suspense fallback={<div className="module-route-layout"><div className="module-view-fallback" aria-hidden="true"><LoadStateLines rows={3} height={58} /></div></div>}>
         <DashboardPageErrorBoundary key={dashboardRouteFocusKey(route)} fallback={<UiLoadState
           variant="panel-720"
           status="error"
@@ -1602,7 +1604,6 @@ export const DashboardApp = (): ReactElement => {
           : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "modules" && selectedChannel !== null ? <ModuleWorkspace channelId={route.channelId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? []} loading={modules.status === "loading"} error={modules.error} onNavigate={navigate} onToggleModule={toggleModuleEnabled} /> : null}
         {route.kind === "module" ? <div className="module-route-layout">
-          <Suspense fallback={<div className="module-view-fallback" aria-hidden="true"><LoadStateLines rows={3} height={58} /></div>}>
             {!showChannelNotReleased && !showBotBlocking && selectedChannel !== null ? <UiLoadState
               variant="panel-720"
               reserveHeight="calc(100dvh - var(--app-shell-header-height) - var(--dashboard-main-gutters))"
@@ -1615,7 +1616,6 @@ export const DashboardApp = (): ReactElement => {
               {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId && pendingModuleSelection.initialCommand !== undefined ? { initialCommand: pendingModuleSelection.initialCommand } : {})}
               {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId && pendingModuleSelection.initialCommand !== undefined ? { onInitialCommandConsumed: () => { setPendingModuleSelection((pending) => pending?.channelId === route.channelId && pending.moduleId === route.moduleId && pending.initialCommand?.name === pendingModuleSelection.initialCommand?.name ? null : pending); } } : {})}
             /> : null}</UiLoadState> : null}
-          </Suspense>
         </div> : null}
         {!showChannelNotReleased && route.kind === "channel" && route.section === "system" && selectedChannel !== null ? <SystemPage
           key={route.channelId}
@@ -1634,6 +1634,7 @@ export const DashboardApp = (): ReactElement => {
         {!showChannelNotReleased && route.kind === "channel" && route.section === "audit" && selectedChannel !== null ? <AuditPage key={route.channelId} channelId={route.channelId} filters={auditFilters} onFiltersChange={updateAuditFilters} /> : null}
         {!showChannelNotReleased && !showBotBlocking && route.kind === "channel" && route.section === "events" && selectedChannel !== null ? <EventsPage key={route.channelId} channelId={route.channelId} filters={eventFilters} moduleOptions={selectedChannel.modules ?? modules.data?.modules ?? []} onFiltersChange={updateEventFilters} /> : null}
         </DashboardPageErrorBoundary>
+        </Suspense>
         <ChannelCommandPalette
           key={`command-palette-${paletteChannel?.channelId ?? "none"}`}
           open={commandPaletteOpen}

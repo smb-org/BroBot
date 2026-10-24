@@ -87,6 +87,11 @@ const suppressIdlePreload = async (page: Page): Promise<void> => {
 test("hover preloads a module and navigation keeps the current view until its panel chunk is ready", async ({ page }) => {
   await suppressIdlePreload(page);
   await installApiRoutes(page);
+  const sockets: Array<{ close: () => void }> = [];
+  await page.routeWebSocket(`**/ws/channels/${channelId}`, (socket) => {
+    sockets.push(socket);
+    socket.onMessage(() => undefined);
+  });
 
   let markRequestStarted: () => void = () => undefined;
   const requestStarted = new Promise<void>((resolve) => { markRequestStarted = resolve; });
@@ -109,6 +114,16 @@ test("hover preloads a module and navigation keeps the current view until its pa
   await expect(page).toHaveURL(`/channels/${channelId}/modules/api_source`);
   await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
   await expect(page.getByText("Loading module views …", { exact: true })).toHaveCount(0);
+
+  // A background update (realtime reconnect) while the chunk is still held must not
+  // replace the current view with the Suspense fallback.
+  await expect.poll(() => sockets.length).toBeGreaterThan(0);
+  const socketsBefore = sockets.length;
+  sockets[socketsBefore - 1]?.close();
+  await expect.poll(() => sockets.length).toBeGreaterThan(socketsBefore);
+  await page.waitForTimeout(500);
+  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
+  await expect(page.locator(".module-view-fallback")).toHaveCount(0);
 
   releaseRequest();
   await expect(page.getByRole("heading", { name: "Data sources", level: 1, exact: true })).toBeVisible();
@@ -231,7 +246,8 @@ test("cold module navigation keeps the reserved page height and scroll position 
   await page.goto(`/channels/${channelId}/modules/api_source`);
   await requestStarted;
   await expect(page.locator(".module-view-fallback")).toBeVisible();
-  const reservedPage = page.locator(".module-route-layout");
+  // While the boundary suspends, React keeps the hidden primary tree next to the fallback.
+  const reservedPage = page.locator(".module-route-layout:visible");
   const heightBefore = await reservedPage.evaluate((element) => element.getBoundingClientRect().height);
   await page.evaluate(() => { window.scrollTo(0, 120); });
   const scrollBefore = await page.evaluate(() => window.scrollY);
@@ -242,6 +258,52 @@ test("cold module navigation keeps the reserved page height and scroll position 
 
   expect(await reservedPage.evaluate((element) => element.getBoundingClientRect().height)).toBe(heightBefore);
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+});
+
+test("native Back and Forward keep the current view visible while a module chunk is held", async ({ page }) => {
+  await suppressIdlePreload(page);
+  await installApiRoutes(page);
+
+  let releaseRequests: () => void = () => undefined;
+  const responseGate = new Promise<void>((resolve) => { releaseRequests = resolve; });
+  // The chunk each target page needs before it can render.
+  const heldChunks = { api_source: "api_source/panel/index.tsx", text_commands: "text_commands/panel/index.tsx" } as const;
+  for (const chunk of Object.values(heldChunks)) {
+    await page.route(`**/src/modules/${chunk}*`, async (route) => {
+      await responseGate;
+      await route.continue();
+    });
+  }
+  const chunkRequested = (moduleId: keyof typeof heldChunks) => page.waitForRequest((request) => request.url().includes(`/src/modules/${heldChunks[moduleId]}`));
+
+  await page.goto(`/channels/${channelId}/modules/ads`);
+  const currentHeading = page.getByRole("heading", { name: "Ad breaks", level: 1 });
+  await expect(currentHeading).toBeVisible();
+  // Two history entries the router has not rendered yet, so Back and Forward each target a
+  // chunk that has not been requested: the request is the signal that the router started
+  // rendering the target while the held chunk keeps it suspended.
+  await page.evaluate(({ channel }) => {
+    window.history.pushState({ __brobotRouteIndex: 1 }, "", `/channels/${channel}/modules/api_source`);
+    window.history.pushState({ __brobotRouteIndex: 2 }, "", `/channels/${channel}/modules/text_commands`);
+  }, { channel: channelId });
+
+  const apiSourceRequested = chunkRequested("api_source");
+  await page.goBack();
+  await apiSourceRequested;
+  await expect(page).toHaveURL(`/channels/${channelId}/modules/api_source`);
+  await expect(currentHeading).toBeVisible();
+  await expect(page.locator(".module-view-fallback")).toHaveCount(0);
+
+  const textCommandsRequested = chunkRequested("text_commands");
+  await page.goForward();
+  await textCommandsRequested;
+  await expect(page).toHaveURL(`/channels/${channelId}/modules/text_commands`);
+  await expect(currentHeading).toBeVisible();
+  await expect(page.locator(".module-view-fallback")).toHaveCount(0);
+
+  releaseRequests();
+  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
+  await expect(page.locator(".module-view-fallback")).toHaveCount(0);
 });
 
 test("a failed idle settings preload can recover through the module Retry action", async ({ page }) => {
