@@ -9,6 +9,10 @@ const projectRoot = path.resolve(import.meta.dirname, "../..");
 const builtClientDirectory = path.join(projectRoot, "dist/client");
 const builtDashboardHtmlPath = path.join(builtClientDirectory, "index.html");
 const hasBuiltDashboard = existsSync(builtDashboardHtmlPath);
+// CI sets REQUIRE_BUILT_DASHBOARD=1 so a missing build fails instead of falling back or skipping.
+if (process.env.REQUIRE_BUILT_DASHBOARD === "1" && !hasBuiltDashboard) {
+  throw new Error(`REQUIRE_BUILT_DASHBOARD=1 but ${builtDashboardHtmlPath} is missing; run "pnpm run build" first.`);
+}
 const dashboardHtml = readFileSync(
   hasBuiltDashboard ? builtDashboardHtmlPath : path.join(projectRoot, "index.html"),
   "utf8",

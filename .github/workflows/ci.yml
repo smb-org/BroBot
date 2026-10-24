@@ -34,6 +34,12 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run lint
       - run: pnpm run knip
+      - name: Dashboard bauen
+        run: pnpm run build
+      - name: Ebenen-Reihenfolge im Build prüfen
+        run: pnpm exec vitest run tests/unit/dashboard-layer-order.test.ts
+        env:
+          REQUIRE_BUILT_DASHBOARD: "1"
 
   unit:
     runs-on: ubuntu-latest
