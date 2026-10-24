@@ -1315,7 +1315,12 @@ export interface DashboardTexts {
     requiresModulesLock: (modules: string) => string;
     dependentModulesLock: (modules: string) => string;
     noneActive: string;
-    noView: string;
+    infoTitle: string;
+    mandatoryReasonLabel: string;
+    templateVariablesTitle: string;
+    templateVariablesEmpty: string;
+    templateVariablesWhere: string;
+    templateVariableExample: string;
     views: string;
     settingsLoadError: string;
     componentLoadError: string;
@@ -1956,7 +1961,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       managementLocked: "Nur Broadcaster und Verwalter dürfen Module ändern.", noneActive: "Keine Module aktiv.",
       requiresModulesLock: (modules) => `Benötigt: ${modules}`,
       dependentModulesLock: (modules) => `Erst ausschalten: ${modules}`,
-      noView: "Für dieses aktive Modul gibt es noch keine Panel-Ansicht.", views: "Modulansichten",
+      infoTitle: "Modulinformationen", mandatoryReasonLabel: "Warum immer aktiv", templateVariablesTitle: "Vorlagenvariablen",
+      templateVariablesEmpty: "Dieses Modul stellt keine Vorlagenvariablen bereit.",
+      templateVariablesWhere: "Verwende sie in unterstützten Vorlagen, etwa in Textbefehlen oder Timern.", templateVariableExample: "Beispiel",
+      views: "Modulansichten",
       settingsLoadError: "Moduleinstellungen konnten nicht geladen werden.",
       componentLoadError: "Modulinhalte konnten nicht geladen werden.",
       unsavedChangesTitle: "Ungespeicherte Änderungen",
@@ -2596,7 +2604,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       managementLocked: "Only broadcasters and managers may change modules.", noneActive: "No modules active.",
       requiresModulesLock: (modules) => `Requires: ${modules}`,
       dependentModulesLock: (modules) => `Turn off first: ${modules}`,
-      noView: "This active module does not have a panel view yet.", views: "Module views", settingsLoadError: "Module settings could not be loaded.", componentLoadError: "Module content could not be loaded.",
+      infoTitle: "Module information", mandatoryReasonLabel: "Why it stays active", templateVariablesTitle: "Template variables",
+      templateVariablesEmpty: "This module does not provide template variables.",
+      templateVariablesWhere: "Use them in supported templates, such as text commands or timers.", templateVariableExample: "Example",
+      views: "Module views", settingsLoadError: "Module settings could not be loaded.", componentLoadError: "Module content could not be loaded.",
       unsavedChangesTitle: "Unsaved changes",
       unsavedChangesDescription: "You have unsaved module settings. What would you like to do?",
       continueEditing: "Continue editing", discardAndSwitch: "Discard and switch", saveAndSwitch: "Save and switch",

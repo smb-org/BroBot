@@ -9,6 +9,7 @@ import { blockReferencesInText } from "../../contracts/text-block-references";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { ActionMenu, Badge, Button, ChatPreview, CollectionPage, ConfirmDialog, Dialog, EmptyState, Field, GameMultiSelect, InspectorFieldRow, ListToolbar, LoadState, LoadStateLines, PageHeader, registeredModuleTemplateGroup, registerDashboardNavigationGuard, RuleNote, Section, Select, TemplateTextField, notify, useDraftGuard, useTemplatePreview } from "../../../dashboard/ui";
 import { templateVariableNames } from "../../contract";
+import { templateVariableParameter } from "../../../dashboard/ui/template-text-field-model";
 import { dashboardCommonTexts, systemTemplateVariableLocale } from "../../../dashboard/locale";
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardDataKeys } from "../../../dashboard/data/keys";
@@ -846,6 +847,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                                   ? systemTemplateVariableLocale[resolvedLanguage][variable.name as keyof typeof systemTemplateVariableLocale.de]
                                   : undefined;
                                 const sourceGroup = registeredModuleTemplateGroup(variable, resolvedLanguage);
+                                const parameter = templateVariableParameter(variable.parameters, variable.parameterDefault);
                                 return [{
                                   name: variable.name,
                                   label: pickerCopy?.label ?? systemCopy?.label ?? variable.name,
@@ -857,6 +859,7 @@ function TextLibraryPanelContent({ channelId, language, canManage = true, textBl
                                   ...(sourceGroup === undefined ? {} : { sourceGroup }),
                                   ...(variable.external === undefined ? {} : { external: variable.external }),
                                   ...(variable.parameters === undefined ? {} : { parameters: variable.parameters }),
+                                  ...(parameter === undefined ? {} : { parameter }),
                                 }];
                               }),
                               ...data.blocks.filter((block) => !reservedNames.has(block.name)).map((block) => ({ name: `text.${block.name}`, label: `text.${block.name}`, description: labels.variableDescription(block.name), sample: block.variants.flatMap((entry) => entry.texts)[0] ?? "", group: "channel" as const, isTextBlock: true })),

@@ -143,6 +143,36 @@ describe("Text library panel layout slots", () => {
     });
   });
 
+  it("inserts a parameterized module variable with its default argument", async () => {
+    const fallback = libraryFetcher();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input, init) => {
+      const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
+      if (url.pathname.endsWith("/template-variables")) {
+        return Promise.resolve(jsonResponse({ variables: [{
+          name: "currency.convert",
+          moduleId: "currency",
+          source: "module",
+          group: "channel",
+          maxLength: 20,
+          sample: "11,50 €",
+          parameters: "currency_pair",
+          parameterDefault: "USD EUR",
+          picker: { en: { label: "Currency conversion", description: "Converts the first amount." }, de: { label: "Währungsumrechnung", description: "Wandelt den ersten Betrag um." } },
+        }] }));
+      }
+      return fallback(input, init);
+    }));
+    renderWithQuery(<UiProvider><TextLibraryPanel channelId="channel-a" language="en" /></UiProvider>);
+    await waitForLibraryLoad();
+    fireEvent.click(await screen.findByRole("button", { name: "Add text block" }));
+
+    const field = await screen.findByRole("textbox", { name: "Text" });
+    fireEvent.change(field, { target: { value: "{currency.c" } });
+    expect(await screen.findByText("{currency.convert USD EUR}")).toBeInTheDocument();
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(field).toHaveValue("{currency.convert USD EUR}");
+  });
+
   it("keeps a resolved preview through unrelated edits until the next successful panel refresh", async () => {
     const block = {
       name: "welcome",
