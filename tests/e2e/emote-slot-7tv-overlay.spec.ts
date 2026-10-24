@@ -227,6 +227,10 @@ test("revision remount resumes reel and jackpot animations from elapsed presenta
 });
 
 test("unrelated rerenders do not advance a mounted spin's reel or jackpot animation (protects=reel and highlight animation progress stays continuous when unrelated component state rerenders during a spin; fails_when=a rerender jumps either animation ahead; no_claim=animation smoothness on every OBS device)", async ({ page }) => {
+  // The overlay derives elapsed presentation time from Date.now(), so pin the application clock
+  // as well; otherwise a slow driver could legitimately run the reel past its end before the click.
+  const startTime = Date.UTC(2026, 9, 1, 12, 0, 0);
+  await page.clock.setFixedTime(startTime);
   await page.goto("/tests/e2e/emote-slot-overlay-fixture.html");
   const overlay = page.getByTestId("emote-slot-overlay");
   await page.getByRole("button", { name: "Trigger progress spin" }).click();
@@ -256,6 +260,8 @@ test("unrelated rerenders do not advance a mounted spin's reel or jackpot animat
   expect(frozen.highlightProgress).toBeGreaterThan(0);
   expect(frozen.highlightProgress).toBeLessThan(1);
 
+  // 400 ms into the 1200 ms reel: the rerender must still see a running spin.
+  await page.clock.setFixedTime(startTime + 400);
   await page.getByRole("button", { name: "Rerender without changing spin" }).click();
 
   const afterRerender = await overlay.evaluate((node) => {

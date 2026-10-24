@@ -1403,14 +1403,44 @@ describe("Text command editor", () => {
       expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Entwurf C");
     });
 
-    it("does not run a held save-and-switch navigation after the panel unmounted", async () => {
-      const onCloseInspector = vi.fn();
-      const { release, heldRequestFinished } = setup("PATCH", onCloseInspector);
+    // The test setup reports the mobile query as matched, where Escape only closes the detail view and
+    // never reaches the guarded save-and-switch. Report a desktop viewport so that path runs.
+    const stubDesktopViewport = (): void => {
+      vi.stubGlobal("matchMedia", (query: string): MediaQueryList => ({
+        matches: query === "(prefers-reduced-motion: reduce)",
+        media: query,
+        onchange: null,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        dispatchEvent: () => false,
+      }));
+    };
+    const startHeldSaveAndSwitch = async (onCloseInspector: () => void) => {
+      stubDesktopViewport();
+      const held = setup("PATCH", onCloseInspector);
       await selectCommand("hallo");
       fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Entwurf" } });
       fireEvent.keyDown(editor(), { key: "Escape" });
       fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
       await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+      return held;
+    };
+
+    it("closes the inspector after a held save-and-switch while the panel stays mounted", async () => {
+      const onCloseInspector = vi.fn();
+      const { release, heldRequestFinished } = await startHeldSaveAndSwitch(onCloseInspector);
+
+      release();
+      await heldRequestFinished;
+      await flushAsyncUpdates();
+      await waitFor(() => expect(onCloseInspector).toHaveBeenCalledTimes(1));
+    });
+
+    it("does not run a held save-and-switch navigation after the panel unmounted", async () => {
+      const onCloseInspector = vi.fn();
+      const { release, heldRequestFinished } = await startHeldSaveAndSwitch(onCloseInspector);
 
       cleanup();
       release();
