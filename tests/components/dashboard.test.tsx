@@ -1448,7 +1448,7 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => expect(screen.queryByText("Neue Person")).not.toBeInTheDocument());
     // The route switched to the operator's channel: even the plus button
     // that would reopen the grant editor is disabled there.
-    expect(screen.getByRole("button", { name: "Zugriff vergeben" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Zugriff vergeben" })).toBeDisabled();
   });
 
   it("shows the operator module activation disabled with a reason", async () => {
@@ -2651,6 +2651,8 @@ describe("Dashboard skeleton", () => {
     expect(systemCalls).toBe(1);
 
     navigateToPath("/channels/kanal-a");
+    // The popstate route update runs in the next task; give it one more flush.
+    await flushQueryUpdates();
     await flushQueryUpdates();
     expect(screen.getByRole("heading", { name: "Alpha", level: 1 })).toBeInTheDocument();
     expect(overviewCalls).toBe(1);
