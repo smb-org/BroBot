@@ -10,8 +10,8 @@ export const CURRENCY_TEMPLATE_VARIABLE = {
   parameterDefault: "USD EUR",
   external: true,
   picker: {
-    de: { label: "Währungsumrechnung", description: "Wandelt den ersten Betrag des Befehls in die Zielwährung um. Beispiel: {currency.convert USD EUR}" },
-    en: { label: "Currency conversion", description: "Converts the first amount in the command to the target currency. Example: {currency.convert USD EUR}" },
+    de: { label: "Währungsumrechnung", description: "Wandelt den ersten Betrag des Befehls in die Zielwährung um." },
+    en: { label: "Currency conversion", description: "Converts the first amount in the command to the target currency." },
   },
 } as const satisfies TemplateVariable;
 

@@ -31,6 +31,7 @@ import { runDashboardNavigationGuards } from "./ui/navigation-guard";
 import { worstCaseTemplateLength } from "../template";
 import type { TemplateVariable } from "../template";
 import { emoteSlotsCatalog } from "../modules/emote_slots/locale";
+import { ModuleInfoView } from "./ModuleInfoView";
 
 const workspaceTexts = moduleWorkspaceTexts;
 
@@ -954,17 +955,14 @@ export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget 
   const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
-    if (module.panel === undefined && module.settingsEditor === undefined) return [];
     return [{ id: activeModule.moduleId, module }];
   });
 
   if (registeredViews.length === 0) {
     const texts = dashboardTexts();
-    return (
-      <section className="module-empty" aria-label={texts.module.module}>
-        <p>{activeModules.length === 0 ? texts.module.noneActive : texts.module.noView}</p>
-      </section>
-    );
+    return activeModules.length === 0
+      ? <section className="module-empty" aria-label={texts.module.module}><p>{texts.module.noneActive}</p></section>
+      : <section className="module-stack" aria-label={texts.module.views} />;
   }
 
   return (
@@ -1006,6 +1004,8 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
   chatVotingTab?: "votes" | "settings";
 }): ReactElement => {
+  const language = dashboardLanguage();
+  const description = moduleDescription(module.id, language);
   const loadPanel = useCallback(() => loadModulePanel(module) as Promise<{ default: ComponentType<ModulePanelProperties> }>, [module]);
   const settingsEditor = <ModuleSettingsEditor
     module={module}
@@ -1016,6 +1016,14 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
     settingsSaveTarget={settingsSaveTarget}
   />;
   const chatVotingView = module.id === "chat_voting";
+  if (module.panel === undefined && module.settingsEditor === undefined) {
+    return <ModuleInfoView
+      {...(description === null ? {} : { description })}
+      {...(module.mandatory === true ? { mandatoryReason: module.mandatoryReason?.[language] ?? moduleWorkspaceTexts(language).mandatoryReason } : {})}
+      templateVariableCatalog={module.templateVariableCatalog ?? []}
+      language={language}
+    />;
+  }
   return <div className="module-view">
     {chatVotingView ? chatVotingTab === "settings" ? settingsEditor : null : module.settingsEditorPlacement === "before-panel" ? settingsEditor : null}
     {module.panel === undefined || chatVotingView && chatVotingTab === "settings" ? null : <RetryableLazy
@@ -1390,7 +1398,13 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         </section>}
         {viewLoading ? <p className="muted">{texts.module.load}</p> : null}
         {stateMessage === null ? (
-          registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <p className="module-state">{texts.module.noView}</p> : null) : !showActiveView ? null : (
+          registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <section className="module-detail__content" aria-label={texts.module.infoTitle}>
+            <ModuleInfoView
+              {...(mandatory ? { mandatoryReason } : {})}
+              templateVariableCatalog={registered?.templateVariableCatalog ?? []}
+              language={dashboardLanguage()}
+            />
+          </section> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
               <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} viewerIsBot={viewerIsBot} {...(initialSelection === undefined ? {} : { initialSelection })} {...(initialCommand === undefined ? {} : { initialCommand })} {...(onInitialCommandConsumed === undefined ? {} : { onInitialCommandConsumed })} onOpenTestArea={(targetModuleId, entryId) => onNavigate({ kind: "channel", channelId, section: "test-area", only: { moduleId: targetModuleId, entryId } })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
             </section>
