@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { waitForWebFonts } from "./web-fonts";
+
 import type { PanelChannelState, PanelModuleState } from "../../src/panel-contract";
 
 const channelId = "module-info-view";
@@ -59,8 +61,8 @@ const installApiRoutes = async (page: Page, language: "de" | "en"): Promise<void
 const verifyCurrencyInfoView = async (page: Page, language: "de" | "en"): Promise<void> => {
   await installApiRoutes(page, language);
   const labels = language === "de"
-    ? { label: "Währungsumrechnung", description: "Wandelt den ersten Betrag des Befehls in die Zielwährung um. Beispiel: {currency.convert USD EUR}" }
-    : { label: "Currency conversion", description: "Converts the first amount in the command to the target currency. Example: {currency.convert USD EUR}" };
+    ? { label: "Währungsumrechnung", description: "Wandelt den ersten Betrag des Befehls in die Zielwährung um." }
+    : { label: "Currency conversion", description: "Converts the first amount in the command to the target currency." };
 
   for (const width of [390, 1920]) {
     await page.setViewportSize({ width, height: 1000 });
@@ -71,6 +73,7 @@ const verifyCurrencyInfoView = async (page: Page, language: "de" | "en"): Promis
     await expect(entry.getByText("currency.convert", { exact: true })).toBeVisible();
     await expect(entry.getByText(labels.description, { exact: true })).toBeVisible();
     await expect(entry.getByText("{currency.convert USD EUR}", { exact: true })).toBeVisible();
+    await waitForWebFonts(page);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     expect(await page.locator(".module-info-view").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   }
