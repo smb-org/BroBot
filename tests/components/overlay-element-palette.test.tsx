@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OverlayElementPalette, type OverlayElementPaletteMessages, type OverlayElementPaletteOption } from "../../src/dashboard/OverlayElementPalette";
@@ -70,5 +70,6 @@ describe("OverlayElementPalette", () => {
     fireEvent.click(await screen.findByRole("option", { name: /score/u, hidden: true }));
 
     expect(onSelect).toHaveBeenCalledWith(options[0]);
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Add element", hidden: true })).toBeNull());
   });
 });
