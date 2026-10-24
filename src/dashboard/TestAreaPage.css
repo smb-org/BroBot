@@ -303,6 +303,7 @@
 .test-area__results-title-copy {
   display: flex;
   flex: 1 1 auto;
+  align-self: stretch;
   align-items: center;
   gap: var(--s2);
   min-width: 0;
@@ -314,7 +315,7 @@
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  line-height: 18px;
+  line-height: 20px;
 }
 
 .test-area__results-summary {
@@ -521,6 +522,7 @@
 
 .test-area__loading-label {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 5px;
   min-width: 0;
@@ -820,12 +822,10 @@
   .test-area__context .test-area__run-button { height: 34px; min-height: 34px; }
 }
 
-@media (min-width: 821px) {
-  .test-area__results { container: test-results / inline-size; }
-}
+.test-area__results { container: test-results / inline-size; }
 
-/* Where the results column is too narrow for title, badges and hint slots in one line (just above 820px), the badges take a reserved second line, so Stumm and Pausiert keep their full text and nothing below moves. */
-@container test-results (max-width: 299px) {
+/* Where the results column cannot hold title, both badges, the loading label and the hint slots in one line, the title row reserves a second line for them, so no label is squeezed or overlapped and nothing below moves. The title stays on the first line. */
+@container test-results (max-width: 399px) {
   .test-area__results-title { grid-template-rows: calc(var(--s6) + var(--s5)) auto; }
   .test-area__results-title-copy { flex-wrap: wrap; align-content: flex-start; gap: var(--s1) var(--s2); }
 }
