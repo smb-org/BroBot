@@ -117,6 +117,8 @@
   --radius-2xl: var(--radius-container);
   --radius-3xl: var(--radius-container);
   --radius-4xl: var(--radius-container);
+  /* Base for steps without a --spacing-N token (gap-1.5, px-2.5, min-h-16, w-9): the 0.25rem default is 3.5px on the 14px root. */
+  --spacing: 4px;
   --spacing-s1: 4px;
   --spacing-s2: 8px;
   --spacing-s3: 12px;
