@@ -88,4 +88,35 @@ describe("duel message settings", () => {
     expect(stateRow?.textContent).toContain("Off");
     expect(stateRow?.textContent).toContain(saved.texts.challengeOpen);
   });
+
+  it("marks a cleared enabled message with its error and clears the error once text returns", () => {
+    const saved = duelSettingsForLanguage("en");
+    function Harness() {
+      const [settings, setSettings] = useState({ ...saved, texts: { ...saved.texts, challengeOpen: "" } });
+      const fieldErrors = settings.texts.challengeOpen.trim().length === 0 ? { "texts.challengeOpen": "Text missing" } : {};
+      return <UiProvider>
+        <SettingsEditor
+          spec={settingsEditor.spec}
+          sectionId="texts"
+          settings={settings}
+          onChange={(key, next) => { setSettings((current) => ({ ...current, [key]: next })); }}
+          texts={duelSettingsEditorCatalog.en}
+          templateMessages={duelSettingsEditorCatalog.en.templateMessages}
+          customContext={{ language: "en" }}
+          fieldErrors={fieldErrors}
+        />
+      </UiProvider>;
+    }
+
+    render(<Harness />);
+    const textbox = screen.getByRole("textbox", { name: "Open duel announcement" });
+    expect(textbox).toHaveAttribute("aria-invalid", "true");
+    const describedBy = textbox.getAttribute("aria-describedby") ?? "";
+    expect(describedBy).not.toBe("");
+    expect(document.getElementById(describedBy)).toHaveTextContent("Text missing");
+    fireEvent.change(textbox, { target: { value: "A duel is open." } });
+    expect(textbox).not.toHaveAttribute("aria-invalid");
+    expect(textbox).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByText("Text missing")).toBeNull();
+  });
 });

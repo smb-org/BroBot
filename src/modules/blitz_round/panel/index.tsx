@@ -863,6 +863,11 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   const validInterval = typeof autoStartInterval === "number" && Number.isSafeInteger(autoStartInterval) &&
     autoStartInterval >= 15 && autoStartInterval <= 240 && autoStartInterval === draft.value.autoStartIntervalMinutes;
   const valid = parsed.success && validInterval;
+  const messageErrors: Readonly<Partial<Record<BlitzMessageKey, string>>> = parsed.success ? {} : Object.fromEntries(
+    parsed.error.issues.flatMap((issue) => issue.message === "message_text_missing" && isBlitzMessageKey(issue.path[0])
+      ? [[issue.path[0], labels.messageMissing] as const]
+      : []),
+  );
   const dirty = draft.dirty || autoStartInterval !== draft.value.autoStartIntervalMinutes;
 
   const reset = (): void => {
@@ -1009,14 +1014,14 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
       <div className="blitz-panel__auto-start">
         <FieldPair>{autoStartFields}</FieldPair>
       </div>
-      <TemplateSetting language={language} label={labels.startText} enabled={draft.value.startTextEnabled ?? draft.value.startText.trim().length > 0}
-        enabledLabel={labels.messageEnabledLabel} onEnabledChange={(startTextEnabled) => { draft.setValue((current) => ({ ...current, startTextEnabled })); }}
+      <TemplateSetting language={language} fieldKey="startText" error={messageErrors.startText} readOnly={!canManage} label={labels.startText} enabled={draft.value.startTextEnabled ?? draft.value.startText.trim().length > 0}
+        enabledLabel={labels.messageEnabledLabel} stateLabels={{ on: labels.messageOn, off: labels.messageOff }} onEnabledChange={(startTextEnabled) => { draft.setValue((current) => ({ ...current, startTextEnabled })); }}
         value={draft.value.startText} onChange={(startText) => { draft.setValue((current) => ({ ...current, startText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
-      <TemplateSetting language={language} label={labels.solvedText} enabled={draft.value.solvedTextEnabled ?? draft.value.solvedText.trim().length > 0}
-        enabledLabel={labels.messageEnabledLabel} onEnabledChange={(solvedTextEnabled) => { draft.setValue((current) => ({ ...current, solvedTextEnabled })); }}
+      <TemplateSetting language={language} fieldKey="solvedText" error={messageErrors.solvedText} readOnly={!canManage} label={labels.solvedText} enabled={draft.value.solvedTextEnabled ?? draft.value.solvedText.trim().length > 0}
+        enabledLabel={labels.messageEnabledLabel} stateLabels={{ on: labels.messageOn, off: labels.messageOff }} onEnabledChange={(solvedTextEnabled) => { draft.setValue((current) => ({ ...current, solvedTextEnabled })); }}
         value={draft.value.solvedText} onChange={(solvedText) => { draft.setValue((current) => ({ ...current, solvedText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
-      <TemplateSetting language={language} label={labels.timeoutText} enabled={draft.value.timeoutTextEnabled ?? draft.value.timeoutText.trim().length > 0}
-        enabledLabel={labels.messageEnabledLabel} onEnabledChange={(timeoutTextEnabled) => { draft.setValue((current) => ({ ...current, timeoutTextEnabled })); }}
+      <TemplateSetting language={language} fieldKey="timeoutText" error={messageErrors.timeoutText} readOnly={!canManage} label={labels.timeoutText} enabled={draft.value.timeoutTextEnabled ?? draft.value.timeoutText.trim().length > 0}
+        enabledLabel={labels.messageEnabledLabel} stateLabels={{ on: labels.messageOn, off: labels.messageOff }} onEnabledChange={(timeoutTextEnabled) => { draft.setValue((current) => ({ ...current, timeoutTextEnabled })); }}
         value={draft.value.timeoutText} onChange={(timeoutText) => { draft.setValue((current) => ({ ...current, timeoutText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
       <div className="blitz-panel__error-slot" role="status" aria-live="polite">{error ?? "\u00a0"}</div>
     </div>
@@ -1035,25 +1040,36 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   </div>;
 }
 
-function TemplateSetting({ label, value, enabled, enabledLabel, onChange, onEnabledChange, disabled, hint, language }: {
+type BlitzMessageKey = "startText" | "solvedText" | "timeoutText";
+const isBlitzMessageKey = (value: unknown): value is BlitzMessageKey =>
+  value === "startText" || value === "solvedText" || value === "timeoutText";
+
+function TemplateSetting({ label, value, enabled, enabledLabel, stateLabels, onChange, onEnabledChange, disabled, readOnly, hint, language, fieldKey, error }: {
   label: string;
   value: string;
   enabled: boolean;
   enabledLabel: string;
+  stateLabels: { on: string; off: string };
   onChange: (value: string) => void;
   onEnabledChange: (value: boolean) => void;
   disabled: boolean;
+  readOnly: boolean;
   hint: string;
   language: "de" | "en";
+  fieldKey: BlitzMessageKey;
+  error: string | undefined;
 }): ReactElement {
   return <div className="ui-settings-editor__message">
     <div className="ui-settings-editor__message-heading">
       <strong>{label}</strong>
-      <div className="ui-settings-editor__message-toggle">
-        <SwitchRow label={enabledLabel} ariaLabel={`${label}: ${enabledLabel}`} checked={enabled} onChange={onEnabledChange} disabled={disabled} />
-      </div>
+      {readOnly
+        ? <strong className="ui-settings-editor__message-state">{enabled ? stateLabels.on : stateLabels.off}</strong>
+        : <div className="ui-settings-editor__message-toggle">
+          <SwitchRow label={enabledLabel} ariaLabel={`${label}: ${enabledLabel}`} checked={enabled} onChange={onEnabledChange} disabled={disabled} />
+        </div>}
     </div>
-    <TemplateTextField label={label} value={value} onChange={onChange} disabled={disabled} hint={hint}
+    <TemplateTextField id={`settings-${fieldKey}`} label={label} value={value} onChange={onChange} disabled={disabled} hint={hint}
+      {...(error === undefined ? {} : { error })}
       maxLength={500} minRows={2} required={enabled} messages={blitzTemplateMessages[language]}
       variables={BLITZ_TEMPLATE_VARIABLES.map((variable) => ({
         name: variable.name, sample: variable.sample,

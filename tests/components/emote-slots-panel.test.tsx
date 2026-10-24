@@ -3,7 +3,8 @@ import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { SaveStatus, UiProvider } from "../../src/dashboard/ui";
-import { emoteSlotDefaultSettingsForLanguage, emoteSlotSettingsSchema } from "../../src/modules/emote_slots/contracts";
+import { emoteSlotDefaultSettingsForLanguage, emoteSlotSettingsReadSchema, emoteSlotSettingsSchema } from "../../src/modules/emote_slots/contracts";
+import { calculateSlotPayoutRateForDraft } from "../../src/modules/emote_slots/domain/payout-rate";
 import { emoteSlotsCatalog } from "../../src/modules/emote_slots/locale";
 import { emoteSlotSettingsEditorCatalog } from "../../src/modules/emote_slots/panel/locale";
 import { SlotReelTable, SlotShareField, SlotTextsField } from "../../src/modules/emote_slots/panel/slot-fields";
@@ -71,6 +72,39 @@ describe("emote slot settings controls", () => {
     fireEvent.change(textbox, { target: { value: "Edited while disabled" } });
 
     expect(onChange).toHaveBeenLastCalledWith({ ...settings.texts, win: "Edited while disabled" });
+  });
+
+  it("marks a cleared enabled outcome text with its own field error and keeps the payout quote available", () => {
+    const base = emoteSlotDefaultSettingsForLanguage("en");
+    const cleared = { ...base, texts: { ...base.texts, win: "", winEnabled: true } };
+    const copy = emoteSlotsCatalog.en.panel;
+    const strictIssues = emoteSlotSettingsSchema.safeParse(cleared);
+    expect(strictIssues.success).toBe(false);
+    expect(strictIssues.error?.issues.map((issue) => issue.path.join("."))).toContain("texts.win");
+    expect(calculateSlotPayoutRateForDraft(cleared, emoteSlotSettingsReadSchema)).not.toBeNull();
+
+    const view = render(<UiProvider><SlotTextsField settings={cleared} onChange={() => undefined} disabled={false} readOnly={false}
+      fieldErrors={{ "texts.win": copy.messageMissing }} context={{ channelId: "slot_component_demo", language: "en" }} /></UiProvider>);
+    const textbox = screen.getByRole("textbox", { name: copy.win });
+    expect(textbox).toHaveAttribute("aria-invalid", "true");
+    expect(document.getElementById(textbox.getAttribute("aria-describedby")?.split(" ").at(-1) ?? "")).toHaveTextContent(copy.messageMissing);
+    expect(screen.getByRole("textbox", { name: copy.loss })).not.toHaveAttribute("aria-invalid");
+
+    view.rerender(<UiProvider><SlotTextsField settings={{ ...cleared, texts: { ...cleared.texts, win: "Won {slot.net}" } }} onChange={() => undefined} disabled={false} readOnly={false}
+      fieldErrors={{}} context={{ channelId: "slot_component_demo", language: "en" }} /></UiProvider>);
+    expect(screen.getByRole("textbox", { name: copy.win })).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText(copy.messageMissing)).toBeNull();
+  });
+
+  it("shows the outcome text state as text for read-only operators", () => {
+    const base = emoteSlotDefaultSettingsForLanguage("en");
+    const copy = emoteSlotsCatalog.en.panel;
+    render(<UiProvider><SlotTextsField settings={{ ...base, texts: { ...base.texts, lossEnabled: false } }} onChange={() => undefined} disabled={false} readOnly
+      context={{ channelId: "slot_component_demo", language: "en" }} /></UiProvider>);
+
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.getAllByText(copy.messageOn)).toHaveLength(3);
+    expect(screen.getAllByText(copy.messageOff)).toHaveLength(1);
   });
 
   it("normalizes a cleared multiplier when its row becomes the jackpot (protects=selecting a row with an invalid hidden multiplier leaves a valid draft; fails_when=the hidden triple stays empty and keeps the settings invalid; no_claim=save button rendering)", () => {

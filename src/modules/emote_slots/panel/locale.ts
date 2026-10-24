@@ -101,7 +101,7 @@ const catalog = (language: DashboardLanguage): SettingsEditorCatalog => {
       announceJackpot: { label: copy.announce, hint: copy.announceHint, description: copy.announceHint },
       cooldownSeconds: { label: copy.cooldown, hint: de ? "Pause zwischen gebuchten Drehungen derselben Person." : "Wait between booked spins from the same person.", unit: copy.seconds, zeroValueLabel: de ? "aus" : "off", invalidError: copy.cooldownError },
       chatTarget: { label: copy.targetLabel, hint: de ? "Dort erscheint die Antwort auf den Dreh." : "Where the spin reply is sent.", options: allChatOptions },
-      texts: { label: copy.sections.texts, hint: de ? "Vorlagen werden vor dem Senden mit dem Ergebnis gefüllt." : "Templates are filled with the result before sending.", variables: templateVariables },
+      texts: { label: copy.sections.texts, hint: de ? "Vorlagen werden vor dem Senden mit dem Ergebnis gefüllt." : "Templates are filled with the result before sending.", requiredError: copy.messageMissing, variables: templateVariables },
     },
   };
 };

@@ -7,6 +7,7 @@ import type { ModulePanelProperties, ModuleRegisteredTemplateVariable } from "..
 import type { BelaboxSettings } from "../modules/belabox/contracts";
 import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
 import { calculateSlotPayoutRateForDraft } from "../modules/emote_slots/domain/payout-rate";
+import { emoteSlotSettingsReadSchema } from "../modules/emote_slots/contracts";
 import { textCommandListChatCommand } from "../modules/text_commands/contracts/chat-commands";
 import type { TextCommandPanelData } from "../modules/text_commands/panel/service";
 import { loadModulePanel, loadModuleSettingsEditor, ModuleChunkLoadError, retryModuleChunkLoad } from "./module-panel-loaders";
@@ -566,7 +567,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     })];
   })) as Readonly<Partial<Record<string, readonly (TemplateTextFieldVariable & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
   const templateVariableOptions: Readonly<Partial<Record<string, readonly TemplateTextFieldVariable[]>>> = templateMetadata;
-  const slotRate = module.id === "emote_slots" ? calculateSlotPayoutRateForDraft(currentValue) : null;
+  const slotRate = module.id === "emote_slots" ? calculateSlotPayoutRateForDraft(currentValue, emoteSlotSettingsReadSchema) : null;
   const votekickThresholdExample = (sectionId: string): ReactElement | undefined =>
     module.id === "votekick" && sectionId === "settings"
       ? <VotekickThresholdExample minNetVotes={currentValue.minNetVotes} percent={currentValue.percent} language={language} />
@@ -682,6 +683,11 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       const parsed = module.settingsSchema.safeParse(currentValue);
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
+          if (issue.message === "message_text_missing") {
+            // Keep the nested path so the affected message is marked and the payout quote stays visible.
+            errors[`texts.${String(issue.path[1])}`] = copy.fields.texts?.requiredError ?? copy.invalidMessage;
+            continue;
+          }
           const key = typeof issue.path[0] === "string" ? issue.path[0] : "symbols";
           const slotCopy = emoteSlotsCatalog[language].panel;
           const nestedField = issue.path[2];
@@ -716,6 +722,11 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       })] : []),
     ]),
   ];
+  const nestedFieldLabel = (errorKey: string): string | undefined => {
+    if (module.id !== "emote_slots") return undefined;
+    const panel = emoteSlotsCatalog[language].panel;
+    return ({ "texts.win": panel.win, "texts.loss": panel.loss, "texts.pair": panel.pair, "texts.jackpot": panel.jackpotText } as Readonly<Record<string, string>>)[errorKey];
+  };
   const invalidFields: EditorInvalidField[] = [];
   const sections: EditorSection[] = spec.sections.map((section) => {
     const sectionKeys = new Set<string>();
@@ -735,6 +746,18 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
             message: fieldError,
             sectionId: section.id,
           });
+        }
+        if (field.kind === "custom") {
+          // Custom editors mark nested fields (for example texts.win); their text areas use the id settings-<path>.
+          for (const [errorKey, message] of Object.entries(fieldErrors)) {
+            if (!errorKey.startsWith(`${field.key}.`)) continue;
+            sectionInvalidFields.push({
+              id: `settings-${errorKey.replaceAll(".", "-")}`,
+              label: nestedFieldLabel(errorKey) ?? copy.fields[field.key]?.label ?? field.key,
+              message,
+              sectionId: section.id,
+            });
+          }
         }
         if (field.kind === "switchCard" && field.children !== undefined) {
           const childFocusId = disabledBySwitch ?? (currentValue[field.key] === true ? undefined : `settings-${field.key}`);

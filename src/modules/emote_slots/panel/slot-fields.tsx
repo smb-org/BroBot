@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { calculateSlotPayoutRateForDraft, formatSlotPayoutRate } from "../domain/payout-rate";
-import { DEFAULT_EMOTE_SLOT_SETTINGS, type EmoteSlotSettings, type EmoteSlotSymbol, type EmoteSlotTextKind } from "../contracts";
+import { DEFAULT_EMOTE_SLOT_SETTINGS, emoteSlotSettingsReadSchema, type EmoteSlotSettings, type EmoteSlotSymbol, type EmoteSlotTextKind } from "../contracts";
 import { isSevenTvSymbolMissing } from "../domain/seven-tv";
 import { emoteSlotsCatalog } from "../locale";
 import { emoteSlotTemplateMessages } from "./locale";
@@ -173,7 +173,7 @@ export function SlotReelTable({
     return () => { active = false; };
   }, [parsedContext?.channelId]);
 
-  const rate = useMemo(() => calculateSlotPayoutRateForDraft(parsedSettings ?? DEFAULT_EMOTE_SLOT_SETTINGS), [parsedSettings]);
+  const rate = useMemo(() => calculateSlotPayoutRateForDraft(parsedSettings ?? DEFAULT_EMOTE_SLOT_SETTINGS, emoteSlotSettingsReadSchema), [parsedSettings]);
   if (parsedSettings === null || !Array.isArray(value)) return null;
   const emojiEntries: GroupedPickerEntry<SlotEmote>[] = (emotes?.emoji.items ?? []).map((emote) => ({
     id: emote.code,
@@ -358,7 +358,7 @@ export function SlotShareField({
   const language = (context as SlotFieldContext | undefined)?.language ?? "de";
   const copy = copyFor(language);
   const value = typeof settings.jackpotShareBp === "number" ? settings.jackpotShareBp / 100 : "";
-  const rate = calculateSlotPayoutRateForDraft(settings);
+  const rate = calculateSlotPayoutRateForDraft(settings, emoteSlotSettingsReadSchema);
   const rateLocked = rate?.status === "locked";
   const fieldError = rateLocked && (context as SlotFieldContext | undefined)?.lastTouchedField === "jackpotShareBp"
     ? copy.quoteFieldError
@@ -433,18 +433,20 @@ export function SlotTextsField({
     {fields.map(([kind, fieldLabel]) => <div key={kind} className="ui-settings-editor__message">
       <div className="ui-settings-editor__message-heading">
         <strong>{fieldLabel}</strong>
-        <div className="ui-settings-editor__message-toggle">
-          <SwitchRow
-            label={copy.messageEnabledLabel}
-            ariaLabel={`${fieldLabel}: ${copy.messageEnabledLabel}`}
-            checked={isMessageEnabled(settings.texts, kind, `${kind}Enabled`)}
-            disabled={disabled || readOnly}
-            onChange={(next) => onChange({ ...settings.texts, [`${kind}Enabled`]: next })}
-          />
-        </div>
+        {readOnly
+          ? <strong className="ui-settings-editor__message-state">{isMessageEnabled(settings.texts, kind, `${kind}Enabled`) ? copy.messageOn : copy.messageOff}</strong>
+          : <div className="ui-settings-editor__message-toggle">
+            <SwitchRow
+              label={copy.messageEnabledLabel}
+              ariaLabel={`${fieldLabel}: ${copy.messageEnabledLabel}`}
+              checked={isMessageEnabled(settings.texts, kind, `${kind}Enabled`)}
+              disabled={disabled}
+              onChange={(next) => onChange({ ...settings.texts, [`${kind}Enabled`]: next })}
+            />
+          </div>}
       </div>
       <TemplateTextField
-        id={`slot-text-${kind}`}
+        id={`settings-texts-${kind}`}
         name={`texts.${kind}`}
         label={fieldLabel}
         hint=""

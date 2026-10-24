@@ -29,9 +29,12 @@ const textLibraryField = {
       onEnabledChange: (next: boolean) => void,
     ): ReactElement => {
       const error = props.fieldErrors?.[errorKey];
+      // The id follows the settings-<path> convention the editor shell uses to focus an invalid field.
+      const inputId = `settings-${errorKey.replaceAll(".", "-")}`;
+      const errorId = `${inputId}-error`;
       return <div className="duel-settings-editor__text-field" key={id}>
         <div className="duel-settings-editor__text-heading">
-          <label htmlFor={`${id}-input`}>{label}</label>
+          <label htmlFor={inputId}>{label}</label>
           {props.readOnly
             ? <strong>{enabled ? copy.messageOn : copy.messageOff}</strong>
             : <SwitchRow
@@ -42,9 +45,10 @@ const textLibraryField = {
               onChange={onEnabledChange}
             />}
         </div>
-        <Textarea id={`${id}-input`} rows={rows} maxLength={500} value={value} disabled={props.disabled || props.readOnly}
+        <Textarea id={inputId} rows={rows} maxLength={500} value={value} disabled={props.disabled || props.readOnly}
+          aria-invalid={error === undefined ? undefined : true} aria-describedby={error === undefined ? undefined : errorId}
           onChange={(event) => onTextChange(event.currentTarget.value)} />
-        <span className="duel-settings-editor__text-error" role={error === undefined ? undefined : "alert"}>{error ?? "\u00a0"}</span>
+        <span id={errorId} className="duel-settings-editor__text-error" role={error === undefined ? undefined : "alert"}>{error ?? "\u00a0"}</span>
       </div>;
     };
     const updateText = (key: "challengeOpen" | "challengeTargeted" | "result" | "botResult", value: string): void => {
