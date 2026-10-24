@@ -828,7 +828,6 @@ export function TestAreaPage({
           <div className="test-area__results-title">
             <div className="test-area__results-title-copy">
               <h2>{texts.result}</h2>
-              <span className="test-area__results-summary">{response === null || resultSummary.length === 0 ? texts.resultCount(0) : resultSummary}</span>
               {pending ? <span className="test-area__loading-label"><StatusLed state="loading" label={texts.loading} dotOnly />{texts.loading}</span> : null}
               {muted ? <Badge tone="amber">{texts.muted}</Badge> : null}
               {paused ? <Badge>{texts.paused}</Badge> : null}
@@ -844,6 +843,7 @@ export function TestAreaPage({
                 {staleHint.length === 0 ? null : <Popover triggerLabel={staleHint} icon="reload" contentRole="dialog" testId="test-area-stale-result-hint" triggerClassName="test-area__result-hint-trigger">{staleHint}</Popover>}
               </span>
             </div>
+            <span className="test-area__results-summary">{response === null || resultSummary.length === 0 ? texts.resultCount(0) : resultSummary}</span>
           </div>
           <span className="sr-only" data-testid="test-area-live-summary" role="status" aria-live="polite" aria-atomic="true">{liveSummary}</span>
           <span className="sr-only" data-testid="test-area-incomplete-result-announcement" role="status" aria-live="polite" aria-atomic="true">{incompleteHint}</span>
