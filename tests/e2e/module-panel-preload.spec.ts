@@ -87,6 +87,11 @@ const suppressIdlePreload = async (page: Page): Promise<void> => {
 test("hover preloads a module and navigation keeps the current view until its panel chunk is ready", async ({ page }) => {
   await suppressIdlePreload(page);
   await installApiRoutes(page);
+  const sockets: Array<{ close: () => void }> = [];
+  await page.routeWebSocket(`**/ws/channels/${channelId}`, (socket) => {
+    sockets.push(socket);
+    socket.onMessage(() => undefined);
+  });
 
   let markRequestStarted: () => void = () => undefined;
   const requestStarted = new Promise<void>((resolve) => { markRequestStarted = resolve; });
@@ -109,6 +114,16 @@ test("hover preloads a module and navigation keeps the current view until its pa
   await expect(page).toHaveURL(`/channels/${channelId}/modules/api_source`);
   await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
   await expect(page.getByText("Loading module views …", { exact: true })).toHaveCount(0);
+
+  // A background update (realtime reconnect) while the chunk is still held must not
+  // replace the current view with the Suspense fallback.
+  await expect.poll(() => sockets.length).toBeGreaterThan(0);
+  const socketsBefore = sockets.length;
+  sockets[socketsBefore - 1]?.close();
+  await expect.poll(() => sockets.length).toBeGreaterThan(socketsBefore);
+  await page.waitForTimeout(500);
+  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
+  await expect(page.locator(".module-view-fallback")).toHaveCount(0);
 
   releaseRequest();
   await expect(page.getByRole("heading", { name: "Data sources", level: 1, exact: true })).toBeVisible();
@@ -231,7 +246,8 @@ test("cold module navigation keeps the reserved page height and scroll position 
   await page.goto(`/channels/${channelId}/modules/api_source`);
   await requestStarted;
   await expect(page.locator(".module-view-fallback")).toBeVisible();
-  const reservedPage = page.locator(".module-route-layout");
+  // While the boundary suspends, React keeps the hidden primary tree next to the fallback.
+  const reservedPage = page.locator(".module-route-layout:visible");
   const heightBefore = await reservedPage.evaluate((element) => element.getBoundingClientRect().height);
   await page.evaluate(() => { window.scrollTo(0, 120); });
   const scrollBefore = await page.evaluate(() => window.scrollY);

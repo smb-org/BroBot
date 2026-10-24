@@ -1,14 +1,19 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
+const pendingLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Target panel loaded</p> })));
 
 vi.mock("../../src/modules/registry", () => ({
-  MODULES: [{ id: "aktiv", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {}, panel: activeLoader }],
+  MODULES: [
+    { id: "aktiv", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {}, panel: activeLoader },
+    { id: "pending", navigationCategory: "chat", settingsSchema: {}, defaultSettings: {}, panel: pendingLoader },
+  ],
 }));
 
 import { DashboardApp } from "../../src/dashboard/main";
 import { queryKeys } from "../../src/dashboard/data/keys";
+import { setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { renderWithQuery as render } from "../query-test-utils";
 
 const idleCallbackPropertyNames = ["requestIdleCallback", "cancelIdleCallback"] as const;
@@ -41,6 +46,7 @@ const response = (body: unknown, status = 200): Response => new Response(JSON.st
 describe("Module route during client-side navigation", () => {
   afterEach(() => {
     cleanup();
+    setDashboardRealtimeStatus("kanal-a", "offline");
     vi.unstubAllGlobals();
     for (const [name, descriptor] of originalIdleCallbackProperties) {
       if (descriptor === undefined) Reflect.deleteProperty(window, name);
@@ -101,5 +107,76 @@ describe("Module route during client-side navigation", () => {
     expect(activeLoader).toHaveBeenCalledTimes(1);
     expect(overviewAufrufe).toBe(1);
     expect(unmockedRequests).toEqual([]);
+  });
+
+  it("keeps the current module visible when realtime status updates during a pending route transition", async () => {
+    const idleCallbackScheduled = vi.fn(() => 1);
+    Object.defineProperty(window, "requestIdleCallback", { configurable: true, value: idleCallbackScheduled });
+    Object.defineProperty(window, "cancelIdleCallback", { configurable: true, value: () => undefined });
+
+    let releasePanel: (() => void) | undefined;
+    let panelResolved = false;
+    pendingLoader.mockImplementation(() => new Promise((resolve) => {
+      releasePanel = () => {
+        panelResolved = true;
+        resolve({ default: () => <p>Target panel loaded</p> });
+      };
+    }));
+
+    const activeState = {
+      ...channel,
+      activeModules: [
+        { moduleId: "aktiv", settings: "{}" },
+        { moduleId: "pending", settings: "{}" },
+      ],
+    };
+    const moduleStates = [
+      { id: "aktiv", enabled: true, settings: "{}" },
+      { id: "pending", enabled: true, settings: "{}" },
+    ];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = input instanceof Request ? new URL(input.url).pathname : new URL(String(input), window.location.origin).pathname;
+      if (path === "/api/channels") return response({ channels: [channel], bot: channel.bot });
+      if (path === "/api/channels/kanal-a/overview") return response(activeState);
+      if (path === "/api/channels/kanal-a/modules") return response({ modules: moduleStates });
+      if (path === "/api/channels/kanal-a/system") return response({
+        broadcasterConnection: channel.broadcasterConnection,
+        bot: channel.bot,
+        botPermissions: null,
+        broadcasterPermissions: null,
+        chatSubscription: channel.chatSubscription,
+        tokens: channel.tokens,
+      });
+      if (path === "/api/channels/kanal-a/events") return response({ entries: [], nextCursor: null });
+      if (path === "/api/channels/kanal-a/overlays") return response({ overlays: [] });
+      if (path === "/api/channels/kanal-a/settings") return response({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1 });
+      if (path === "/api/channels/kanal-a/broadcast") return response({ title: "", game: null, manageScopeAvailable: true });
+      return response({}, 404);
+    }));
+    setDashboardRealtimeStatus("kanal-a", "offline");
+    window.history.replaceState({}, "", "/channels/kanal-a/modules/aktiv");
+
+    const rendered = render(<DashboardApp />, undefined, { panelRevisions: {} });
+    expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
+    const nav = await screen.findByRole("navigation", { name: "Hauptnavigation" });
+    const targetLink = within(nav).getByRole("link", { name: /pending.*Läuft/u });
+
+    fireEvent.mouseEnter(targetLink);
+    await waitFor(() => expect(pendingLoader).toHaveBeenCalledTimes(1));
+    expect(panelResolved).toBe(false);
+
+    act(() => {
+      targetLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      setDashboardRealtimeStatus("kanal-a", "reconnecting");
+    });
+
+    expect(window.location.pathname).toBe("/channels/kanal-a/modules/pending");
+    expect(pendingLoader).toHaveBeenCalledTimes(1);
+    expect(panelResolved).toBe(false);
+    expect(rendered.container.querySelector(".module-view-fallback")).toBeNull();
+    expect(screen.getByText("Panel geladen")).toBeInTheDocument();
+
+    releasePanel?.();
+    expect(await screen.findByText("Target panel loaded")).toBeInTheDocument();
   });
 });
