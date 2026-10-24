@@ -59,11 +59,40 @@ export const dashboardRouteRequiresBot = (route: DashboardRoute): boolean =>
 
 let suppressNextPopState = false;
 let historyIndex = 0;
+let pendingPopStateRouteUpdate: ReturnType<typeof setTimeout> | null = null;
+let dashboardRouteUpdateRevision = 0;
 
 const historyIndexFromState = (state: unknown): number | null => {
   if (typeof state !== "object" || state === null || Array.isArray(state)) return null;
   const index: unknown = Reflect.get(state, "__brobotRouteIndex");
   return typeof index === "number" && Number.isSafeInteger(index) && index >= 0 ? index : null;
+};
+
+const cancelPendingPopStateRouteUpdate = (): number => {
+  dashboardRouteUpdateRevision += 1;
+  if (pendingPopStateRouteUpdate !== null) {
+    clearTimeout(pendingPopStateRouteUpdate);
+    pendingPopStateRouteUpdate = null;
+  }
+  return dashboardRouteUpdateRevision;
+};
+
+const schedulePopStateRouteUpdate = (
+  setRoute: (route: DashboardRoute) => void,
+  revision: number,
+): void => {
+  // React flushes popstate updates synchronously for scroll restoration; defer this transition to the next task.
+  const timer = setTimeout(() => {
+    if (pendingPopStateRouteUpdate !== timer) return;
+    pendingPopStateRouteUpdate = null;
+    if (revision !== dashboardRouteUpdateRevision) return;
+
+    const currentIndex = historyIndexFromState(window.history.state);
+    if (currentIndex !== null) historyIndex = currentIndex;
+    const currentRoute = parseDashboardRoute(window.location.pathname, window.location.search);
+    startTransition(() => { setRoute(currentRoute); });
+  }, 0);
+  pendingPopStateRouteUpdate = timer;
 };
 
 const historyStateWithIndex = (index: number): Record<string, unknown> => {
@@ -235,6 +264,7 @@ export const dashboardRouteFocusKey = (route: DashboardRoute): string => {
 const navigateToDashboardRoute = (route: DashboardRoute, onNavigated?: () => void): void => {
   const path = dashboardRoutePath(route);
   runDashboardNavigationGuards(() => {
+    cancelPendingPopStateRouteUpdate();
     if (`${window.location.pathname}${window.location.search}` !== path) {
       historyIndex += 1;
       window.history.pushState(historyStateWithIndex(historyIndex), "", path);
@@ -250,6 +280,7 @@ export const replaceDashboardRoute = (route: DashboardRoute): void => {
   const path = dashboardRoutePath(route);
   if (`${window.location.pathname}${window.location.search}` === path) return;
   runDashboardNavigationGuards(() => {
+    cancelPendingPopStateRouteUpdate();
     window.history.replaceState(historyStateWithIndex(historyIndex), "", path);
     suppressNextPopState = true;
     window.dispatchEvent(new PopStateEvent("popstate"));
@@ -269,6 +300,7 @@ export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute, on
       window.history.replaceState(historyStateWithIndex(historyIndex), "", canonicalPath);
     }
     const onPopState = (): void => {
+      const revision = cancelPendingPopStateRouteUpdate();
       const targetRoute = parseDashboardRoute(window.location.pathname, window.location.search);
       const targetIndex = historyIndexFromState(window.history.state);
       if (suppressNextPopState) {
@@ -277,18 +309,22 @@ export const useDashboardRoute = (): [DashboardRoute, (route: DashboardRoute, on
         return;
       }
       if (targetIndex !== null && targetIndex === historyIndex) {
-        startTransition(() => { setRoute(targetRoute); });
+        schedulePopStateRouteUpdate(setRoute, revision);
         return;
       }
       const previousIndex = historyIndex;
       const undoDelta = targetIndex === null || targetIndex < previousIndex ? 1 : -1;
       runDashboardNavigationGuards(() => {
+        if (revision !== dashboardRouteUpdateRevision) return;
         if (targetIndex !== null) historyIndex = targetIndex;
-        startTransition(() => { setRoute(targetRoute); });
+        schedulePopStateRouteUpdate(setRoute, revision);
       }, () => { window.history.go(undoDelta); });
     };
     window.addEventListener("popstate", onPopState);
-    return () => { window.removeEventListener("popstate", onPopState); };
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      cancelPendingPopStateRouteUpdate();
+    };
   }, []);
 
   const navigate = (nextRoute: DashboardRoute, onNavigated?: () => void): void => {

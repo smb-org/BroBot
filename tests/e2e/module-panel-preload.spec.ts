@@ -260,6 +260,56 @@ test("cold module navigation keeps the reserved page height and scroll position 
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
 });
 
+test("native Back and Forward keep the current view visible while a module chunk is held", async ({ page }) => {
+  await suppressIdlePreload(page);
+  await installApiRoutes(page);
+
+  let markRequestStarted: () => void = () => undefined;
+  const requestStarted = new Promise<void>((resolve) => { markRequestStarted = resolve; });
+  let releaseRequest: () => void = () => undefined;
+  const responseGate = new Promise<void>((resolve) => { releaseRequest = resolve; });
+  await page.route("**/src/modules/api_source/panel/index.tsx*", async (route) => {
+    markRequestStarted();
+    await responseGate;
+    await route.continue();
+  });
+
+  await page.goto(`/channels/${channelId}/modules/text_commands`);
+  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
+  const dataSourcesLink = page.locator(`a[href="/channels/${channelId}/modules/api_source"]`);
+  await dataSourcesLink.hover();
+  await requestStarted;
+  await dataSourcesLink.click();
+  await expect(page).toHaveURL(`/channels/${channelId}/modules/api_source`);
+  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: "System" }).click();
+  await expect(page).toHaveURL(`/channels/${channelId}/system`);
+  await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
+
+  await page.goBack();
+  await expect(page).toHaveURL(`/channels/${channelId}/modules/api_source`);
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
+  await expect(page.locator(".module-view-fallback")).toHaveCount(0);
+
+  await page.goBack();
+  await expect(page).toHaveURL(`/channels/${channelId}/modules/text_commands`);
+  await expect(page.locator(`a[href="/channels/${channelId}/modules/text_commands"]`)).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
+  await expect(page.locator(".module-view-fallback")).toHaveCount(0);
+
+  await page.goForward();
+  await expect(page).toHaveURL(`/channels/${channelId}/modules/api_source`);
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("heading", { name: "Text commands", level: 1, exact: true })).toBeVisible();
+  await expect(page.locator(".module-view-fallback")).toHaveCount(0);
+
+  releaseRequest();
+  await expect(page.getByRole("heading", { name: "Data sources", level: 1, exact: true })).toBeVisible();
+  await expect(page.locator(".module-view-fallback")).toHaveCount(0);
+});
+
 test("a failed idle settings preload can recover through the module Retry action", async ({ page }) => {
   await page.addInitScript(() => {
     type IdleTestWindow = Window & { __idleCallbacks?: Array<() => void> };

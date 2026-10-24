@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -14,6 +15,7 @@ vi.mock("../../src/modules/registry", () => ({
 import { DashboardApp } from "../../src/dashboard/main";
 import { queryKeys } from "../../src/dashboard/data/keys";
 import { setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
+import { dashboardRoutePath, useDashboardRoute, type DashboardRoute } from "../../src/dashboard/router";
 import { renderWithQuery as render } from "../query-test-utils";
 
 const idleCallbackPropertyNames = ["requestIdleCallback", "cancelIdleCallback"] as const;
@@ -43,11 +45,32 @@ const response = (body: unknown, status = 200): Response => new Response(JSON.st
   headers: { "Content-Type": "application/json" },
 });
 
+const routeCommits: string[] = [];
+let navigateFromProbe: (route: DashboardRoute) => void = () => undefined;
+
+const DashboardRouteProbe = (): React.JSX.Element => {
+  const [route, navigate] = useDashboardRoute();
+  useEffect(() => { navigateFromProbe = navigate; }, [navigate]);
+  useEffect(() => {
+    routeCommits.push(`${dashboardRoutePath(route)}|${window.location.pathname}${window.location.search}`);
+  }, [route]);
+  return <p>{dashboardRoutePath(route)}</p>;
+};
+
+const flushRouteTask = async (): Promise<void> => {
+  await act(async () => {
+    await new Promise<void>((resolve) => { window.setTimeout(resolve, 0); });
+  });
+};
+
 describe("Module route during client-side navigation", () => {
   afterEach(() => {
     cleanup();
     setDashboardRealtimeStatus("kanal-a", "offline");
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    routeCommits.length = 0;
+    navigateFromProbe = () => undefined;
     for (const [name, descriptor] of originalIdleCallbackProperties) {
       if (descriptor === undefined) Reflect.deleteProperty(window, name);
       else Object.defineProperty(window, name, descriptor);
@@ -109,7 +132,7 @@ describe("Module route during client-side navigation", () => {
     expect(unmockedRequests).toEqual([]);
   });
 
-  it("keeps the current module visible when realtime status updates during a pending route transition", async () => {
+  it("keeps the current module visible when native Back targets a pending panel", async () => {
     const idleCallbackScheduled = vi.fn(() => 1);
     Object.defineProperty(window, "requestIdleCallback", { configurable: true, value: idleCallbackScheduled });
     Object.defineProperty(window, "cancelIdleCallback", { configurable: true, value: () => undefined });
@@ -154,7 +177,7 @@ describe("Module route during client-side navigation", () => {
       return response({}, 404);
     }));
     setDashboardRealtimeStatus("kanal-a", "offline");
-    window.history.replaceState({}, "", "/channels/kanal-a/modules/aktiv");
+    window.history.replaceState({ __brobotRouteIndex: 1 }, "", "/channels/kanal-a/modules/aktiv");
 
     const rendered = render(<DashboardApp />, undefined, { panelRevisions: {} });
     expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
@@ -166,17 +189,80 @@ describe("Module route during client-side navigation", () => {
     expect(panelResolved).toBe(false);
 
     act(() => {
-      targetLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      window.history.replaceState({ __brobotRouteIndex: 0 }, "", "/channels/kanal-a/modules/pending");
+      window.dispatchEvent(new PopStateEvent("popstate"));
       setDashboardRealtimeStatus("kanal-a", "reconnecting");
     });
 
     expect(window.location.pathname).toBe("/channels/kanal-a/modules/pending");
     expect(pendingLoader).toHaveBeenCalledTimes(1);
     expect(panelResolved).toBe(false);
+    await flushRouteTask();
     expect(rendered.container.querySelector(".module-view-fallback")).toBeNull();
     expect(screen.getByText("Panel geladen")).toBeInTheDocument();
 
     releasePanel?.();
     expect(await screen.findByText("Target panel loaded")).toBeInTheDocument();
+  });
+
+  it("commits only the final location after rapid Back and Forward events", async () => {
+    const systemPath = "/channels/kanal-a/system";
+    window.history.replaceState({ __brobotRouteIndex: 1 }, "", systemPath);
+
+    render(<DashboardRouteProbe />);
+    expect(await screen.findByText(systemPath)).toBeInTheDocument();
+    routeCommits.length = 0;
+
+    act(() => {
+      window.history.replaceState({ __brobotRouteIndex: 0 }, "", "/channels/kanal-a/modules/aktiv");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      window.history.replaceState({ __brobotRouteIndex: 1 }, "", systemPath);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await flushRouteTask();
+
+    expect(screen.getByText(systemPath)).toBeInTheDocument();
+    expect(routeCommits).toEqual([`${systemPath}|${systemPath}`]);
+  });
+
+  it("cancels the scheduled popstate route update when a programmatic navigation supersedes it", async () => {
+    const systemPath = "/channels/kanal-a/system";
+    window.history.replaceState({ __brobotRouteIndex: 1 }, "", systemPath);
+
+    render(<DashboardRouteProbe />);
+    expect(await screen.findByText(systemPath)).toBeInTheDocument();
+    routeCommits.length = 0;
+
+    act(() => {
+      window.history.replaceState({ __brobotRouteIndex: 0 }, "", "/channels/kanal-a/modules/aktiv");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      navigateFromProbe({ kind: "platform" });
+    });
+    await flushRouteTask();
+
+    expect(window.location.pathname).toBe("/platform");
+    expect(screen.getByText("/platform")).toBeInTheDocument();
+    expect(routeCommits).toEqual(["/platform|/platform"]);
+  });
+
+  it("cancels the scheduled popstate route update when the router unmounts", async () => {
+    const systemPath = "/channels/kanal-a/system";
+    window.history.replaceState({ __brobotRouteIndex: 1 }, "", systemPath);
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+
+    const rendered = render(<DashboardRouteProbe />);
+    expect(await screen.findByText(systemPath)).toBeInTheDocument();
+    const firstPopstateTimer = setTimeoutSpy.mock.calls.length;
+    act(() => {
+      window.history.replaceState({ __brobotRouteIndex: 0 }, "", "/channels/kanal-a/modules/aktiv");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(setTimeoutSpy.mock.results[firstPopstateTimer]?.value).toBeDefined();
+
+    rendered.unmount();
+
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(setTimeoutSpy.mock.results[firstPopstateTimer]?.value);
+    expect(routeCommits).toEqual([`${systemPath}|${systemPath}`]);
   });
 });
