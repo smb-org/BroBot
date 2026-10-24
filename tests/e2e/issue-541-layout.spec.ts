@@ -5,7 +5,9 @@ import { waitForWebFonts } from "./web-fonts";
 
 const channelId = "kanal-541-layout";
 const json = (value: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
-const viewports = [[390, 844], [821, 800], [1024, 768], [1280, 800], [1440, 900], [1920, 1080]] as const;
+// The optional third value forces the results column to that border-box width. The narrowest real column (821px) is
+// about 256px wide; 258px leaves a 226px content box, the narrowest case a review found, so it stays safe below that.
+const viewports: readonly (readonly [number, number, number?])[] = [[390, 844], [821, 800], [821, 800, 258], [1024, 768], [1280, 800], [1440, 900], [1920, 1080]];
 
 const entry = (id: string, outcome: "fires" | "blocked" | "indeterminate") => ({
   moduleId: "text_commands",
@@ -16,12 +18,25 @@ const entry = (id: string, outcome: "fires" | "blocked" | "indeterminate") => ({
   effects: outcome === "fires" ? [{ kind: "chat", text: "Hallo", target: "source_only", postsTo: "this_chat", reply: true, suppressedBy: null, automated: true }] : [],
   templateNotes: [],
 });
-const mixed = (controls: { muted: boolean; paused: boolean }) => ({
+interface Counts { fires: number; blocked: number; indeterminate: number }
+const shortCounts: Counts = { fires: 1, blocked: 1, indeterminate: 1 };
+// Multi-digit counts in every part make the longest realistic summary, which wraps in a narrow column.
+const longCounts: Counts = { fires: 12, blocked: 10, indeterminate: 11 };
+const mixed = (controls: { muted: boolean; paused: boolean }, counts: Counts = shortCounts) => ({
   evaluatedAt: "2030-01-01T12:01:00.000Z",
   controls,
   sender: { userId: "dry-run:viewer_42", resolved: false, perUserCooldownsUseSyntheticId: true },
-  modules: [{ moduleId: "text_commands", status: "reacts", entries: [entry("eins", "fires"), entry("zwei", "blocked"), entry("drei", "indeterminate")] }],
+  modules: [{
+    moduleId: "text_commands",
+    status: "reacts",
+    entries: [
+      ...Array.from({ length: counts.fires }, (_, index) => entry(`ok${String(index)}`, "fires")),
+      ...Array.from({ length: counts.blocked }, (_, index) => entry(`bl${String(index)}`, "blocked")),
+      ...Array.from({ length: counts.indeterminate }, (_, index) => entry(`un${String(index)}`, "indeterminate")),
+    ],
+  }],
 });
+const total = (counts: Counts): number => counts.fires + counts.blocked + counts.indeterminate;
 
 const rect = async (page: Page, selector: string) => {
   const box = await page.locator(selector).first().boundingBox();
@@ -33,23 +48,25 @@ for (const [locale, label] of [["de-DE", "German"], ["en-US", "English"]] as con
   test.describe(`test area result header (${label})`, () => {
     test.use({ locale });
 
-    for (const [width, height] of viewports) {
-      test(`the summary is fully readable in its own row and nothing moves through badges and loading at ${String(width)}px`, async ({ page }) => {
+    for (const [width, height, forcedColumn] of viewports) {
+      test(`the summary is fully readable in its own row and nothing moves through badges, loading and a long summary at ${String(width)}px${forcedColumn === undefined ? "" : ` with a ${String(forcedColumn)}px results column`}`, async ({ page }) => {
         let controls = { muted: false, paused: false };
+        let counts = shortCounts;
         let gate: Promise<void> | null = null;
         await installLiveCockpitMocks(page, { channelId, role: "manager", streamState: "online", modules: [{ id: "text_commands", enabled: true, settings: "{}" }] });
         await page.route(`**/api/channels/${channelId}/dry-run`, async (route) => {
           if (gate !== null) await gate;
-          await route.fulfill(json(mixed(controls)));
+          await route.fulfill(json(mixed(controls, counts)));
         });
         await page.setViewportSize({ width, height });
         await page.goto(`/channels/${channelId}/test-area`);
+        if (forcedColumn !== undefined) await page.addStyleTag({ content: `.test-area__results { box-sizing: border-box; width: ${String(forcedColumn)}px; justify-self: start; }` });
         const input = page.getByRole("textbox", { name: /^(Nachricht|Message)$/u });
         await expect(input).toBeVisible();
         const run = async (text: string): Promise<void> => {
           await input.fill(text);
           await page.locator(".test-area__run-button:visible").click();
-          await expect(page.locator(".test-area__result-row")).toHaveCount(3);
+          await expect(page.locator(".test-area__result-row")).toHaveCount(total(counts));
           await expect(page.getByTestId("test-area-results-slot")).toHaveAttribute("aria-busy", "false");
           await waitForWebFonts(page);
         };
@@ -116,7 +133,18 @@ for (const [locale, label] of [["de-DE", "German"], ["en-US", "English"]] as con
         gate = null;
         await expect(page.locator(".test-area__loading-label")).toBeHidden();
 
-        for (const [state, other] of [["badges", badges], ["loading", loading]] as const) {
+        // A summary that wraps in a narrow column must not move the rows either: short, long, short again.
+        counts = longCounts;
+        await run("!eins   ");
+        const long = await measure();
+        await expectCopyIntact("with a long summary");
+        const longSummary = await page.locator(".test-area__results-summary").evaluate((element) => ({ overflow: element.scrollWidth > element.clientWidth, text: element.textContent }));
+        expect(longSummary.overflow, `summary ${longSummary.text} is not clipped`).toBe(false);
+        counts = shortCounts;
+        await run("!eins    ");
+        const shortAgain = await measure();
+
+        for (const [state, other] of [["badges", badges], ["loading", loading], ["long summary", long], ["short summary again", shortAgain]] as const) {
           expect(Math.abs(other.head.height - plain.head.height), `header height with ${state}`).toBeLessThanOrEqual(1);
           expect(Math.abs(other.heading.y - plain.heading.y), `heading position with ${state}`).toBeLessThanOrEqual(0.5);
           expect(Math.abs(other.summary.y - plain.summary.y), `summary position with ${state}`).toBeLessThanOrEqual(1);

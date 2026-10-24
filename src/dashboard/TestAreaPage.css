@@ -824,10 +824,16 @@
 
 .test-area__results { container: test-results / inline-size; }
 
-/* Where the results column cannot hold title, both badges, the loading label and the hint slots in one line, the title row reserves a second line for them, so no label is squeezed or overlapped and nothing below moves. The title stays on the first line. */
+/* Where the results column cannot hold title, both badges, the loading label and the hint slots in one line, the title row reserves a second line for them, so no label is squeezed or overlapped and nothing below moves. The title stays on the first line. The summary row reserves two lines here too, because the longest realistic summary ("12 reagieren · 10 blockiert · 11 Ergebnisse noch offen") wraps in such a column. */
 @container test-results (max-width: 399px) {
   .test-area__results-title { grid-template-rows: calc(var(--s6) + var(--s5)) auto; }
   .test-area__results-title-copy { flex-wrap: wrap; align-content: flex-start; gap: var(--s1) var(--s2); }
+  .test-area__results-summary { min-height: 3em; }
+}
+
+/* Safety net for an even narrower column: title, badges and the loading label may need a third line. */
+@container test-results (max-width: 249px) {
+  .test-area__results-title { grid-template-rows: calc(var(--s6) + var(--s5) + var(--s5) + var(--s1)) auto; }
 }
 
 @media (min-width: 821px) {
