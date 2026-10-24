@@ -1,4 +1,4 @@
-/* Dashboard palette tokens and shared layer order. */
+/* Dashboard palette tokens and shared layer order (kept identical to index.html). */
 @layer theme, base, utilities, components;
 @layer components.base, components.kit, components.pages, components.modules;
 

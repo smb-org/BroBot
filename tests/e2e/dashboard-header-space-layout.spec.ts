@@ -198,5 +198,34 @@ for (const locale of ["de-DE", "en-US"] as const) {
       expect(geometry?.iconAfterInitial).toBe(true);
       expect(geometry?.iconHitTestable).toBe(true);
     });
+
+    test("keeps the channel name clear of its avatar", async ({ page }) => {
+      await installHeaderFixture(page);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto(`/channels/${channelId}/overview`);
+
+      const trigger = page.locator(".dashboard-header__channel-select .ui-select__trigger");
+      const avatar = page.locator(".dashboard-header__channel-avatar");
+      const value = page.locator(".dashboard-header__channel-select .ui-select__value");
+      await expect(trigger).toBeVisible();
+      await expect(avatar).toBeVisible();
+      await expect(value).toBeVisible();
+
+      const geometry = await page.evaluate(() => {
+        const trigger = document.querySelector<HTMLElement>(".dashboard-header__channel-select .ui-select__trigger");
+        const avatar = document.querySelector<HTMLElement>(".dashboard-header__channel-avatar");
+        const value = document.querySelector<HTMLElement>(".dashboard-header__channel-select .ui-select__value");
+        if (trigger === null || avatar === null || value === null) return null;
+        return {
+          paddingLeft: getComputedStyle(trigger).paddingLeft,
+          avatarRight: avatar.getBoundingClientRect().right,
+          valueLeft: value.getBoundingClientRect().left,
+        };
+      });
+
+      expect(geometry).not.toBeNull();
+      expect(geometry?.paddingLeft).toBe("38px");
+      expect(geometry?.avatarRight ?? Number.POSITIVE_INFINITY).toBeLessThan(geometry?.valueLeft ?? Number.NEGATIVE_INFINITY);
+    });
   });
 }
