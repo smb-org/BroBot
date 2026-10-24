@@ -1,4 +1,4 @@
-import { cpuUsage } from "node:process";
+import { threadCpuUsage } from "node:process";
 import { describe, expect, it } from "vitest";
 
 import { CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/contracts";
@@ -221,9 +221,8 @@ describe("chat voting normalization with pathological input", () => {
     expect(parseVoteCommand(longTitle)).toMatchObject({ kind: "start", title: "y" });
   });
 
-  it("stays linear on 200k-character pathological input", () => {
-    const size = 200_000;
-    const inputs = [
+  it("scales near-linearly with pathological input length", () => {
+    const inputsFor = (size: number): string[] => [
       " .!?*😀\t".repeat(size / 8),
       `${"*".repeat(size)}x`,
       `x${"*".repeat(size)} y`,
@@ -231,17 +230,30 @@ describe("chat voting normalization with pathological input", () => {
       `!vote${" ".repeat(size)}x`,
       `!vote text ${"\t ".repeat(size / 2)}y`,
     ];
-    const started = cpuUsage();
-    for (const input of inputs) {
-      normalizeFreeTextVote(input, "whole_message");
-      normalizeBlockedVoteTerm(input);
-      parseVoteCommand(input);
-    }
-    const elapsed = cpuUsage(started);
-    const cpuMilliseconds = (elapsed.user + elapsed.system) / 1000;
+    const run = (inputs: readonly string[]): void => {
+      for (const input of inputs) {
+        normalizeFreeTextVote(input, "whole_message");
+        normalizeBlockedVoteTerm(input);
+        parseVoteCommand(input);
+      }
+    };
+    // CPU time of this thread only, so load from other processes or threads does not count.
+    const medianCpuMicroseconds = (inputs: readonly string[]): number => {
+      run(inputs);
+      const samples = Array.from({ length: 5 }, () => {
+        const started = threadCpuUsage();
+        run(inputs);
+        const elapsed = threadCpuUsage(started);
+        return elapsed.user + elapsed.system;
+      });
+      samples.sort((left, right) => left - right);
+      return samples[2] ?? 0;
+    };
 
-    // Linear code needs about 40 ms CPU for all inputs (measured, cold); a quadratic one needs
-    // many seconds. CPU time rather than wall time, and ~50x headroom, keep this independent of load.
-    expect(cpuMilliseconds).toBeLessThan(2_000);
+    const growth = medianCpuMicroseconds(inputsFor(200_000)) / medianCpuMicroseconds(inputsFor(50_000));
+
+    // A 4x longer input costs about 4x as much when linear (measured 3.9-4.8, also under load)
+    // and about 16x or more when quadratic (measured 16-45 for two quadratic variants).
+    expect(growth).toBeLessThan(8);
   });
 });

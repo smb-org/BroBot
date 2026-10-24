@@ -28,12 +28,6 @@ const channel = {
 };
 
 const installApiRoutes = async (page: Page, channelState: typeof channel = channel): Promise<void> => {
-  // Keep the page free of background churn. Unmocked, the dashboard opens a real socket through
-  // the dev proxy and its failed handshakes and reconnects re-render the app while a route
-  // transition waits on a held panel chunk. On a fresh server the hover test then lost its
-  // previous view (the Suspense fallback was committed) in about 1 of 4 runs; with this and the
-  // two mocked endpoints below it is about 1 of 80.
-  await page.routeWebSocket(`**/ws/channels/${channelId}`, (socket) => { socket.onMessage(() => undefined); });
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/api/channels") {
@@ -53,15 +47,6 @@ const installApiRoutes = async (page: Page, channelState: typeof channel = chann
     }
     if (pathname === `/api/channels/${channelId}/revisions`) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ revisions: {} }) });
-      return;
-    }
-    // Unmocked, these 404 and the panel's queries keep retrying, which re-renders during navigation.
-    if (pathname === `/api/channels/${channelId}/settings`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 }) });
-      return;
-    }
-    if (pathname === `/api/channels/${channelId}/template-variables`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ variables: [] }) });
       return;
     }
     if (pathname === `/api/channels/${channelId}/modules/text_commands/commands`) {
