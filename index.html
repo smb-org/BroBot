@@ -5,7 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BroBot Dashboard</title>
     <style>
-      /* Vor dem ersten Stylesheet, damit das Panel nicht weiss aufblitzt. */
+      @layer theme, base, utilities, components;
+      @layer components.base, components.kit, components.pages, components.modules;
+    </style>
+    <style>
+      /* Before the first stylesheet, to prevent a white flash while the dashboard loads. */
       :root { color-scheme: dark; }
       html, body { margin: 0; background: #0a0c10; }
     </style>
