@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
+import { waitForWebFonts } from "./web-fonts";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
@@ -121,6 +122,7 @@ test.describe("English cockpit status labels", () => {
       await expect(indicators.nth(0)).toContainText("Bot · Not connected");
       await expect(indicators.nth(1)).toContainText("BELABOX · connected · 500 kbps");
       await expect(indicators.nth(2)).toContainText("Overlays · Not set up");
+      await waitForWebFonts(page);
 
       const layoutWithWarning = await page.evaluate(() => {
         const header = document.querySelector<HTMLElement>(".live-cockpit-header");

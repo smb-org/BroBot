@@ -113,6 +113,8 @@ test("a sandboxed opaque-origin embed loads bootstrap and applies a realtime upd
 });
 
 test("a sandboxed embed bootstraps through Worker CORS and receives a real Worker variable update", async ({ page }) => {
+  // This integration exercises real Worker storage and WebSocket startup.
+  test.setTimeout(60_000);
   seedE2EOverlay();
   const credentials = createE2ESessionCredentials();
   const bootstrapResponseStatuses: number[] = [];

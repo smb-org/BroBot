@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -125,6 +125,12 @@ const editor = (): HTMLElement => {
   const node = document.querySelector(".text-command-editor");
   if (!(node instanceof HTMLElement)) throw new Error("Command editor is missing");
   return node;
+};
+
+const flushAsyncUpdates = async (): Promise<void> => {
+  await act(async () => {
+    for (let attempt = 0; attempt < 10; attempt += 1) await Promise.resolve();
+  });
 };
 
 const tierInclusion = (tier: TextCommand["minimumTier"]): string => {
@@ -1261,7 +1267,9 @@ describe("Text command editor", () => {
     let rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] })];
     let holdGet = false;
     let releaseGet: () => void = () => undefined;
+    let finishHeldGet: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => { releaseGet = resolve; });
+    const heldGetFinished = new Promise<void>((resolve) => { finishHeldGet = resolve; });
     const baseFetch = panelFetch({
       commands: () => rows,
       onMutation: (method, _path, body) => {
@@ -1275,7 +1283,12 @@ describe("Text command editor", () => {
     });
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input, init) => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
-      if (holdGet && url.pathname.endsWith("/commands") && (init?.method ?? "GET") === "GET") await gate;
+      if (holdGet && url.pathname.endsWith("/commands") && (init?.method ?? "GET") === "GET") {
+        await gate;
+        const response = await baseFetch(input, init);
+        finishHeldGet();
+        return response;
+      }
       return baseFetch(input, init);
     }));
     renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" /></UiProvider>, undefined, {
@@ -1290,8 +1303,9 @@ describe("Text command editor", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Entwurf B" } });
 
     releaseGet();
+    await heldGetFinished;
+    await flushAsyncUpdates();
     await within(await commandList()).findByText("!hallo2");
-    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("beta");
     expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Entwurf B");
   });
@@ -1300,15 +1314,18 @@ describe("Text command editor", () => {
     const setup = (hold: "POST" | "PATCH" | "DELETE" | "GET", onCloseInspector?: () => void) => {
       let rows = [makeCommand(), makeCommand({ name: "beta", text: "Antwort B", aliases: [] }), makeCommand({ name: "gamma", text: "Antwort C", aliases: [] })];
       let release: () => void = () => undefined;
+      let finishHeldRequest: () => void = () => undefined;
       const gate = new Promise<void>((resolve) => { release = resolve; });
+      const heldRequestFinished = new Promise<void>((resolve) => { finishHeldRequest = resolve; });
       let holdGets = false;
       const baseFetch = panelFetch({ commands: () => rows });
       vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input, init) => {
         const url = input instanceof Request ? new URL(input.url) : new URL(String(input), "https://brobot.example");
         const method = init?.method ?? "GET";
         const isCommands = url.pathname.includes("/commands");
-        if (isCommands && method === hold && hold !== "GET") await gate;
-        if (isCommands && method === "GET" && holdGets) await gate;
+        const holdsMutation = isCommands && method === hold && hold !== "GET";
+        const holdsRefresh = isCommands && method === "GET" && holdGets;
+        if (holdsMutation || holdsRefresh) await gate;
         if (isCommands && method === "POST" && typeof init?.body === "string") {
           const { name } = JSON.parse(init.body) as { name: string };
           rows = [...rows, makeCommand({ name, text: "Hallo", aliases: [] })];
@@ -1323,22 +1340,22 @@ describe("Text command editor", () => {
           rows = rows.filter((row) => row.name !== url.pathname.split("/").at(-1));
           holdGets = hold === "GET";
         }
-        return baseFetch(input, init);
+        const response = await baseFetch(input, init);
+        if (holdsMutation || holdsRefresh) finishHeldRequest();
+        return response;
       }));
       renderWithQuery(<UiProvider><TextCommandsPanel channelId="kanal-a" language="de" {...(onCloseInspector === undefined ? {} : { onCloseInspector })} /></UiProvider>, undefined, {
         gcTime: 600_000,
         staleTime: 600_000,
       });
-      return release;
+      return { release, heldRequestFinished };
     };
     const openCreate = async (name: string): Promise<void> => {
       fireEvent.click(await screen.findByRole("button", { name: "Befehl anlegen" }));
       fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: name } });
     };
-    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 50));
-
     it("keeps a newer create draft when an earlier create POST is released late", async () => {
-      const release = setup("POST");
+      const { release, heldRequestFinished } = setup("POST");
       await openCreate("eins");
       fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Hallo" } });
       fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
@@ -1347,13 +1364,15 @@ describe("Text command editor", () => {
       await openCreate("zwei");
 
       release();
+      await heldRequestFinished;
+      await flushAsyncUpdates();
       await within(await commandList()).findByText("!eins");
-      await settle();
+      await flushAsyncUpdates();
       expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("zwei");
     });
 
     it("keeps a newer create form when an earlier create's revalidation finishes late", async () => {
-      const release = setup("GET");
+      const { release, heldRequestFinished } = setup("GET");
       await openCreate("eins");
       fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Hallo" } });
       fireEvent.click(screen.getByRole("button", { name: "Anlegen" }));
@@ -1362,12 +1381,13 @@ describe("Text command editor", () => {
       fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "zwei" } });
 
       release();
-      await settle();
+      await heldRequestFinished;
+      await flushAsyncUpdates();
       expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("zwei");
     });
 
     it("completes save-and-switch only for the current editor when the refresh is delayed", async () => {
-      const release = setup("GET");
+      const { release, heldRequestFinished } = setup("GET");
       await selectCommand("hallo");
       fireEvent.change(screen.getByRole("textbox", { name: "Befehlsname" }), { target: { value: "hallo2" } });
       fireEvent.click((await within(await commandList()).findByText("!beta")).closest(".text-command-row") as HTMLElement);
@@ -1377,28 +1397,60 @@ describe("Text command editor", () => {
       fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Entwurf C" } });
 
       release();
-      await settle();
+      await heldRequestFinished;
+      await flushAsyncUpdates();
       expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("gamma");
       expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Entwurf C");
     });
 
-    it("does not run a held save-and-switch navigation after the panel unmounted", async () => {
-      const onCloseInspector = vi.fn();
-      const release = setup("PATCH", onCloseInspector);
+    // The test setup reports the mobile query as matched, where Escape only closes the detail view and
+    // never reaches the guarded save-and-switch. Report a desktop viewport so that path runs.
+    const stubDesktopViewport = (): void => {
+      vi.stubGlobal("matchMedia", (query: string): MediaQueryList => ({
+        matches: query === "(prefers-reduced-motion: reduce)",
+        media: query,
+        onchange: null,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        dispatchEvent: () => false,
+      }));
+    };
+    const startHeldSaveAndSwitch = async (onCloseInspector: () => void) => {
+      stubDesktopViewport();
+      const held = setup("PATCH", onCloseInspector);
       await selectCommand("hallo");
       fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Entwurf" } });
       fireEvent.keyDown(editor(), { key: "Escape" });
       fireEvent.click(await screen.findByRole("button", { name: "Speichern und wechseln" }));
       await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+      return held;
+    };
+
+    it("closes the inspector after a held save-and-switch while the panel stays mounted", async () => {
+      const onCloseInspector = vi.fn();
+      const { release, heldRequestFinished } = await startHeldSaveAndSwitch(onCloseInspector);
+
+      release();
+      await heldRequestFinished;
+      await flushAsyncUpdates();
+      await waitFor(() => expect(onCloseInspector).toHaveBeenCalledTimes(1));
+    });
+
+    it("does not run a held save-and-switch navigation after the panel unmounted", async () => {
+      const onCloseInspector = vi.fn();
+      const { release, heldRequestFinished } = await startHeldSaveAndSwitch(onCloseInspector);
 
       cleanup();
       release();
-      await settle();
+      await heldRequestFinished;
+      await flushAsyncUpdates();
       expect(onCloseInspector).not.toHaveBeenCalled();
     });
 
     it("keeps a newly selected command when a deletion's revalidation finishes late", async () => {
-      const release = setup("GET");
+      const { release, heldRequestFinished } = setup("GET");
       await selectCommand("hallo");
       fireEvent.click(screen.getByRole("button", { name: "Weitere Aktionen", hidden: true }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Befehl löschen" }));
@@ -1409,7 +1461,8 @@ describe("Text command editor", () => {
       fireEvent.change(screen.getByRole("textbox", { name: "Antworttext" }), { target: { value: "Entwurf B" } });
 
       release();
-      await settle();
+      await heldRequestFinished;
+      await flushAsyncUpdates();
       expect(screen.getByRole("textbox", { name: "Befehlsname" })).toHaveValue("beta");
       expect(screen.getByRole("textbox", { name: "Antworttext" })).toHaveValue("Entwurf B");
     });
