@@ -59,7 +59,7 @@ describe("ad setting defaults", () => {
     });
   });
 
-  it("migrates a legacy disabled prewarning to the blank-only switch", () => {
+  it("maps a legacy disabled prewarning to its optional message switch", () => {
     const settings = adsModule.settingsSchema.parse({
       automatic: "auto",
       manual: "manuell",
@@ -67,7 +67,8 @@ describe("ad setting defaults", () => {
       prewarningText: "Werbung in {ads.seconds} Sekunden.",
     });
 
-    expect(settings.prewarningText).toBe("");
+    expect(settings.prewarningText).toBe("Werbung in {ads.seconds} Sekunden.");
+    expect(settings.prewarningTextEnabled).toBe(false);
     expect(settings).not.toHaveProperty("prewarning");
   });
 });

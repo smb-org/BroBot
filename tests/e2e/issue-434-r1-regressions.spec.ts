@@ -480,8 +480,8 @@ test("Raid settings use compact unframed message fields, stacked unit inputs, an
   });
   expect(messageStyles.borderWidth).toBe("0px");
   expect(messageStyles.backgroundColor).toBe("rgba(0, 0, 0, 0)");
-  await expect(message.locator(".ui-settings-editor__message-heading strong")).toHaveCount(1);
-  await expect(message.locator(".ui-settings-editor__message-heading span")).toHaveCount(1);
+  await expect(message.locator(".ui-settings-editor__message-heading > strong")).toHaveCount(1);
+  await expect(message.getByRole("switch", { name: /Nachricht senden/u })).toBeChecked();
   const labelBox = await message.locator(".ui-template-text-field__label").boundingBox();
   expect(labelBox?.width).toBeLessThanOrEqual(1);
   const textareaBox = await message.getByRole("textbox").boundingBox();
@@ -525,11 +525,11 @@ test("Raid settings use compact unframed message fields, stacked unit inputs, an
   expect(selectedColors.background).toBe(selectedColors.selectionSurface);
 });
 
-test("Raid message-off state keeps one title and its status", async ({ page }) => {
+test("Raid message-off state keeps the title and switch beside the saved text", async ({ page }) => {
   await installModule(page, "raid", "raid-message-off", 1280, 800);
   const shortMessage = page.locator(".ui-settings-editor__message").filter({ has: page.getByRole("textbox", { name: "Kurzer Dankestext" }) });
-  await expect(shortMessage.locator(".ui-settings-editor__message-heading strong")).toHaveText("Kurzer Dankestext");
-  await expect(shortMessage.locator(".ui-settings-editor__message-heading span")).toHaveText("Aus");
+  await expect(shortMessage.locator(".ui-settings-editor__message-heading > strong")).toHaveText("Kurzer Dankestext");
+  await expect(shortMessage.getByRole("switch", { name: /Nachricht senden/u })).not.toBeChecked();
   await expect(shortMessage.locator(".ui-settings-editor__message-heading")).toHaveCount(1);
   const duplicateLabelWidth = await shortMessage.locator(".ui-template-text-field__label").evaluate((element) => getComputedStyle(element).width);
   expect(duplicateLabelWidth).toBe("1px");

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { expectSwitchGeometry } from "./switch-geometry";
 import { BELABOX_DEFAULT_SETTINGS } from "../../src/modules/belabox/contracts";
 
 test.use({ locale: "de-DE" });
@@ -521,7 +522,7 @@ test("BELABOX stale samples are shown as stale after their polling window", asyn
   await expect(page.locator(".belabox-connection-state")).toContainText("Veraltet");
 });
 
-test("BELABOX keeps blank chat templates visible as off", async ({ page }) => {
+test("BELABOX keeps blank chat templates visible with their switches off", async ({ page }) => {
   await page.setViewportSize({ width: 1_280, height: 800 });
   await installMocks(page, { settings: { chatEnabled: true, lowText: "", disconnectText: "", recoveryText: "" } });
   await page.goto(`/channels/${channelId}/modules/belabox`);
@@ -529,8 +530,9 @@ test("BELABOX keeps blank chat templates visible as off", async ({ page }) => {
   const alerts = page.locator(".settings-page__column").nth(1);
   const messages = alerts.locator(".ui-settings-editor__message");
   await expect(messages).toHaveCount(3);
-  expect(await messages.evaluateAll((nodes) => nodes.every((node) => node.getAttribute("data-enabled") === "false"))).toBe(true);
-  await expect(messages.nth(0)).toContainText("Aus");
+  for (const message of await messages.all()) {
+    await expect(message.getByRole("switch", { name: /Nachricht senden/u })).not.toBeChecked();
+  }
   await expect(alerts).toContainText("Chat-Abkühlzeit");
 });
 
@@ -550,4 +552,16 @@ test("BELABOX chart follows the unsaved threshold draft and saves only on reques
   await page.getByRole("button", { name: "Speichern", exact: true }).click();
   await expect.poll(writes.writes).toBe(1);
   expect(writes.lastWrite()?.settings).toMatchObject({ lowBitrateKbps: 650 });
+});
+
+test("BELABOX switches keep their thumb inside the track in both states", async ({ page }) => {
+  await page.setViewportSize({ width: 1_280, height: 800 });
+  await installMocks(page, { settings: { chatEnabled: true, lowText: "", disconnectText: "", recoveryText: "Eigener Entwarnungstext" } });
+  await page.goto(`/channels/${channelId}/modules/belabox`);
+  const switches = page.getByRole("switch");
+  await expect(switches.first()).toBeVisible();
+  const states = await switches.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-checked")));
+  expect(states).toContain("true");
+  expect(states).toContain("false");
+  await expectSwitchGeometry(page);
 });

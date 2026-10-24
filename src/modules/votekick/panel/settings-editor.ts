@@ -22,12 +22,12 @@ const spec: SettingsEditorSpec<VotekickSettings> = {
     ] },
     { id: "messages", icon: "tabMessages", fields: [
       { kind: "chatTarget", key: "chatTarget" },
-      { kind: "switchCard", key: "startTextEnabled", children: [{ kind: "template", key: "startText", preview, optional: true, minRows: 2 }] },
-      { kind: "switchCard", key: "passTextEnabled", children: [{ kind: "template", key: "passText", preview, optional: true, minRows: 2 }] },
-      { kind: "switchCard", key: "failTextEnabled", children: [{ kind: "template", key: "failText", preview, optional: true, minRows: 2 }] },
-      { kind: "switchCard", key: "expiredTextEnabled", children: [{ kind: "template", key: "expiredText", preview, optional: true, minRows: 2 }] },
-      { kind: "switchCard", key: "protectedTextEnabled", children: [{ kind: "template", key: "protectedText", preview, optional: true, minRows: 2 }] },
-      { kind: "switchCard", key: "busyTextEnabled", children: [{ kind: "template", key: "busyText", preview, optional: true, minRows: 2 }] },
+      { kind: "switchCard", key: "startTextEnabled", deriveFromTextKey: "startText", children: [{ kind: "template", key: "startText", preview, optional: true, minRows: 2 }] },
+      { kind: "switchCard", key: "passTextEnabled", deriveFromTextKey: "passText", children: [{ kind: "template", key: "passText", preview, optional: true, minRows: 2 }] },
+      { kind: "switchCard", key: "failTextEnabled", deriveFromTextKey: "failText", children: [{ kind: "template", key: "failText", preview, optional: true, minRows: 2 }] },
+      { kind: "switchCard", key: "expiredTextEnabled", deriveFromTextKey: "expiredText", children: [{ kind: "template", key: "expiredText", preview, optional: true, minRows: 2 }] },
+      { kind: "switchCard", key: "protectedTextEnabled", deriveFromTextKey: "protectedText", children: [{ kind: "template", key: "protectedText", preview, optional: true, minRows: 2 }] },
+      { kind: "switchCard", key: "busyTextEnabled", deriveFromTextKey: "busyText", children: [{ kind: "template", key: "busyText", preview, optional: true, minRows: 2 }] },
     ] },
   ],
 };

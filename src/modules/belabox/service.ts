@@ -57,6 +57,7 @@ import {
 import { validateBelaboxStatsUrl } from "./domain/stats-url";
 import { enrichBelaboxSample, resolvedBelaboxPhase } from "./domain/presentation";
 import { formatTemplateValues } from "./template-values";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 import { BELABOX_TEMPLATE_VARIABLES } from "./contracts/catalog";
 import { prepareChannelModuleSettingsWrite } from "../repository/channel-module-storage";
 
@@ -581,12 +582,14 @@ const storePollResult = async (
 
 const alertTextFor = (settings: BelaboxSettings, output: BelaboxAlertChatOutput): {
   text: string;
+  messageKey: "lowText" | "disconnectText" | "recoveryText";
+  enabledKey: "lowTextEnabled" | "disconnectTextEnabled" | "recoveryTextEnabled";
   target: BelaboxSettings["lowTarget"];
 } => output.kind === "low"
-  ? { text: settings.lowText, target: settings.lowTarget }
+  ? { text: settings.lowText, messageKey: "lowText", enabledKey: "lowTextEnabled", target: settings.lowTarget }
   : output.kind === "disconnect"
-    ? { text: settings.disconnectText, target: settings.disconnectTarget }
-    : { text: settings.recoveryText, target: settings.recoveryTarget };
+    ? { text: settings.disconnectText, messageKey: "disconnectText", enabledKey: "disconnectTextEnabled", target: settings.disconnectTarget }
+    : { text: settings.recoveryText, messageKey: "recoveryText", enabledKey: "recoveryTextEnabled", target: settings.recoveryTarget };
 
 const sendPendingAlert = async (
   context: ModuleAlarmContext,
@@ -614,6 +617,7 @@ const sendPendingAlert = async (
       !beforeRender.settings.alertsEnabled || !beforeRender.settings.chatEnabled) return;
   const settings = moduleState.settings;
   const message = alertTextFor(settings, output);
+  if (!isMessageEnabled(settings, message.messageKey, message.enabledKey)) return;
   const startedAt = Date.parse(output.episodeStartedAt);
   const downForSeconds = Math.max(0, Math.floor((Date.parse(sample.sample.at) - startedAt) / 1_000));
   // All variables come from the sample captured by this run; the renderer must never

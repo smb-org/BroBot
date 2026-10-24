@@ -21,6 +21,7 @@ import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts
 import { moduleDependencyLockReason, moduleParticipatesInDependency } from "./module-dependencies";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
+import { isMessageEnabled } from "../contracts/message-enabled";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
 import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, Section, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorCatalog, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
@@ -581,6 +582,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       readOnlySectionOnly={page !== undefined}
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
+      {...(copy.messageEnabledLabel === undefined ? {} : { messageEnabledLabel: copy.messageEnabledLabel })}
       {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
       afterNote={votekickThresholdExample(sectionId)}
       onIssuesChange={reportTemplateIssues}
@@ -600,13 +602,17 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       readOnly
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
+      {...(copy.messageEnabledLabel === undefined ? {} : { messageEnabledLabel: copy.messageEnabledLabel })}
       {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
       afterNote={votekickThresholdExample(spec.sections[0]?.id ?? "")}
     />,
   } : undefined;
   const collectErrors = (includeUntouched = false): Record<string, string> => {
     const errors: Record<string, string> = {};
-    const collect = (fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"]): void => {
+    const collect = (
+      fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"],
+      parentMessageEnabled = false,
+    ): void => {
       for (const field of fields) {
         const current = currentValue[field.key];
         if (field.kind === "number" && (typeof current !== "number" || !Number.isInteger(current) || current < field.min || current > field.max)) {
@@ -621,7 +627,12 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
               (range.minSeconds as number) < field.min || (range.minSeconds as number) > (range.maxSeconds as number) ||
               (range.maxSeconds as number) > field.max) errors[field.key] = copy.invalidMessage;
         } else if (field.kind === "text" || field.kind === "template" || field.kind === "message") {
-          if (typeof current !== "string" || (field.kind !== "message" && !field.optional && current.trim().length === 0)) {
+          const required = field.kind === "message"
+            ? isMessageEnabled(currentValue, field.key, field.enabledKey)
+            : field.kind === "template" && field.optional
+              ? parentMessageEnabled
+              : !field.optional;
+          if (typeof current !== "string" || (required && current.trim().length === 0)) {
             errors[field.key] = copy.fields[field.key]?.requiredError ?? copy.invalidMessage;
           } else if (field.kind === "text" && field.maxLength !== undefined && textFieldLength(field, current) > field.maxLength) {
             errors[field.key] = copy.invalidMessage;
@@ -632,10 +643,26 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
             errors[field.key] = copy.invalidMessage;
           }
         }
-        if (field.kind === "switchCard" && field.children !== undefined) collect(field.children);
+        if (field.kind === "switchCard" && field.children !== undefined) {
+          const messageEnabled = field.deriveFromTextKey === undefined
+            ? currentValue[field.key] === true
+            : isMessageEnabled(currentValue, field.deriveFromTextKey, field.key);
+          collect(field.children, messageEnabled);
+        }
       }
     };
     collect(spec.sections.flatMap((section) => section.fields));
+    if (module.id === "duel") {
+      const parsed = module.settingsSchema.safeParse(currentValue);
+      if (!parsed.success) {
+        const requiredError = copy.fields.texts?.requiredError ?? copy.invalidMessage;
+        for (const issue of parsed.error.issues) {
+          if (issue.message === "message_text_missing") {
+            errors[`texts.${issue.path.slice(1).join(".")}`] = requiredError;
+          }
+        }
+      }
+    }
     if (module.id === "emote_slots") {
       const parsed = module.settingsSchema.safeParse(currentValue);
       if (!parsed.success) {

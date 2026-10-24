@@ -1,4 +1,5 @@
 import type { EventCode } from "../../contracts/values";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 import { hasChatMessage, templateVariableNames, type ModuleDiagnostic, type ModuleEvent, type ModuleLanguage, type ModuleResult } from "../contract";
 import type { AdsSettings } from "./contracts";
 import { decideAdBreak, localizeAdDurationGrammar, renderAdBreakText } from "./domain";
@@ -46,12 +47,14 @@ export function processAdBreak(
   }
 
   const template = decision.event.automatic ? event.settings.automatic : event.settings.manual;
+  const messageKey = decision.event.automatic ? "automatic" : "manual";
+  const enabledKey = decision.event.automatic ? "automaticEnabled" : "manualEnabled";
   const target = (decision.event.automatic ? event.settings.automaticTarget : event.settings.manualTarget) ?? "source_only";
   const makeResult = (text: string, templateDiagnostics: readonly ModuleDiagnostic[] = []): ModuleResult => ({
     actions: hasChatMessage(text) ? [{ kind: "chat", text, target }] : [],
     diagnostics: [...templateDiagnostics, { code: diagnosticCode(decision), detail: diagnoseDetail(decision) }],
   });
-  if (!hasChatMessage(template)) return makeResult("");
+  if (!isMessageEnabled(event.settings, messageKey, enabledKey) || !hasChatMessage(template)) return makeResult("");
   if (render !== undefined) {
     return render(template, { "ads.duration": decision.event.durationSeconds }).then(({ text, diagnostics }) => {
       const hasDuration = templateVariableNames(template.trim()).includes("ads.duration");

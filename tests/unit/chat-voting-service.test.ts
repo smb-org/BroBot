@@ -495,6 +495,20 @@ describe("chat voting event service", () => {
     expect(context.scheduleAlarm).not.toHaveBeenCalledWith("announce_start", expect.stringMatching(/^start:/u), expect.any(Number), expect.any(Number));
   });
 
+  it("does not schedule a start announcement when its switch is off and text is retained", async () => {
+    const context = executionContext();
+    const event = {
+      ...eventWithText("!vote yesno", ["moderator"]),
+      settings: { ...DEFAULT_CHAT_VOTING_SETTINGS, startText: "Saved announcement", startTextEnabled: false },
+    };
+
+    const result = await processChatVotingMessage(event, repositoryWith(), context);
+
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions[0]?.kind).toBe("overlay");
+    expect(context.scheduleAlarm).not.toHaveBeenCalledWith("announce_start", expect.stringMatching(/^start:/u), expect.any(Number), expect.any(Number));
+  });
+
   it("answers with help and does not start a vote when the chat question is too long", async () => {
     const insertOpen = vi.fn(() => Promise.resolve("inserted" as const));
     const repository = repositoryWith({ insertOpen });

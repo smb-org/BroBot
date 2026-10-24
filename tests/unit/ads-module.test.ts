@@ -135,12 +135,35 @@ describe("ads module", () => {
   it("allows the automatic announcement to be turned off independently", () => {
     const settings = {
       ...adsModule.defaultSettings,
-      automatic: "",
+      automaticEnabled: false,
       manual: "Manuelle Pause",
     };
     expect(adsSettingsSchema.safeParse(settings).success).toBe(true);
     expect(processAdBreak(event({ duration_seconds: 30, started_at: "2026-09-20T10:00:00.000Z", is_automatic: true }, settings)).actions).toEqual([]);
     expect(processAdBreak(event({ duration_seconds: 30, started_at: "2026-09-20T10:00:00.000Z", is_automatic: false }, settings)).actions)
       .toEqual([{ kind: "chat", text: "Manuelle Pause (30 Sekunden)", target: "source_only" }]);
+  });
+
+  it("keeps a disabled automatic message saved while disabling its send", () => {
+    const settings = { ...adsModule.defaultSettings, automatic: "Saved automatic text", automaticEnabled: false };
+    expect(adsSettingsSchema.safeParse(settings).success).toBe(true);
+    expect(processAdBreak(event({ duration_seconds: 30, started_at: "2026-09-20T10:00:00.000Z", is_automatic: true }, settings)).actions)
+      .toEqual([]);
+    expect(settings.automatic).toBe("Saved automatic text");
+  });
+
+  it("keeps a disabled manual message saved while automatic breaks remain enabled", () => {
+    const settings = { ...adsModule.defaultSettings, manual: "Saved manual text", manualEnabled: false };
+
+    expect(processAdBreak(event({ duration_seconds: 30, started_at: "2026-09-20T10:00:00.000Z", is_automatic: false }, settings)).actions).toEqual([]);
+    expect(processAdBreak(event({ duration_seconds: 30, started_at: "2026-09-20T10:00:00.000Z", is_automatic: true }, settings)).actions).toHaveLength(1);
+    expect(settings.manual).toBe("Saved manual text");
+  });
+
+  it("rejects an enabled message with no text", () => {
+    const result = adsSettingsSchema.safeParse({ ...adsModule.defaultSettings, automatic: "  ", automaticEnabled: true });
+
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues.map((issue) => issue.path)).toContainEqual(["automatic"]);
   });
 });

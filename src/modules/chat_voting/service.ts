@@ -11,6 +11,7 @@ import { blockReferencesInText } from "../contracts/text-block-references";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../contracts/text-block-write-guard";
 import type { TextBlockWriteGuard } from "../contracts/text-block-write-guard";
 import { omitUnresolvedChatTemplateReferences } from "../../contracts/chat-template-references";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 import { chatVoteAnswerColorsSchema } from "./contracts/chat-vote-colors-schema";
 import { chatVoteDefaultColors } from "./contracts/vote-colors";
 
@@ -151,7 +152,7 @@ export const startChatVote = async (
       return insertStatus === "reference_conflict" ? { status: "reference_conflict" } : { status: "busy" };
     }
     await scheduleClose(vote.id, deadline.closesAt, 0);
-    if (input.settings.startText.trim().length > 0) {
+    if (isMessageEnabled(input.settings, "startText", "startTextEnabled")) {
       await scheduleStartAnnouncement?.(vote.id, openedAt, 0);
     }
   } catch (error: unknown) {
@@ -631,7 +632,7 @@ export const announceChatVoteStartFromAlarm = async (
   const vote = await repository.byId(context.channelId, pollId);
   if (vote === null || vote.status !== "open") return;
   const settings = await alarmSettings(context);
-  if (settings.startText.trim().length === 0) return;
+  if (!isMessageEnabled(settings, "startText", "startTextEnabled")) return;
   const language = await context.channelLanguage();
   const values = chatVotingTemplateValues(vote, language);
   const template = startAnnouncementTemplate(settings.startText, vote.title, values["vote.duration"] ?? "", language);

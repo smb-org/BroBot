@@ -16,6 +16,12 @@
 .duel-settings-editor__text-groups { display: grid; gap: var(--s6); }
 .duel-settings-editor__text-group { display: grid; gap: var(--s3); }
 .duel-settings-editor__text-field { display: grid; gap: var(--s1); min-width: 0; color: var(--text); font-size: var(--text-sm); }
+.duel-settings-editor__text-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s2); min-width: 0; }
+.duel-settings-editor__text-heading > label { min-width: 0; overflow-wrap: anywhere; }
+.duel-settings-editor__text-heading .ui-switch-row { min-height: var(--control-height); gap: 4px 8px; padding-inline-end: 0; }
+.duel-settings-editor__text-heading .ui-switch-row__copy strong { white-space: nowrap; }
+.duel-settings-editor__text-heading > strong { color: var(--text-2); font-size: var(--text-xs); }
+.duel-settings-editor__text-error { min-height: var(--text-sm); color: var(--error-text); font-size: var(--text-xs); }
 .duel-settings-editor__text-field textarea {
   box-sizing: border-box;
   width: 100%;

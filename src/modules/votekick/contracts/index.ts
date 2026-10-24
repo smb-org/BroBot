@@ -3,6 +3,7 @@ import { z } from "zod";
 import { timeoutDurationRangeSchema } from "../../contracts/moderation";
 import { VOTEKICK_DEFAULT_TEXTS } from "./chat-defaults";
 import { templateTextLength } from "../../../contracts/template-text-length";
+import { isMessageEnabled } from "../../../contracts/message-enabled";
 
 export const VOTEKICK_MODULE_ID = "votekick";
 export const VOTEKICK_WINDOW_MS = 10 * 60 * 1000;
@@ -20,18 +21,25 @@ export const votekickSettingsSchema = z.object({
   channelCooldownSeconds: z.number().int().min(60).max(86_400),
   targetCooldownSeconds: z.number().int().min(60).max(86_400),
   chatTarget: z.enum(["all_chats", "source_only"]),
-  startTextEnabled: z.boolean().default(true),
-  passTextEnabled: z.boolean().default(true),
-  failTextEnabled: z.boolean().default(true),
-  expiredTextEnabled: z.boolean().default(true),
-  protectedTextEnabled: z.boolean().default(true),
-  busyTextEnabled: z.boolean().default(true),
+  startTextEnabled: z.boolean().optional(),
+  passTextEnabled: z.boolean().optional(),
+  failTextEnabled: z.boolean().optional(),
+  expiredTextEnabled: z.boolean().optional(),
+  protectedTextEnabled: z.boolean().optional(),
+  busyTextEnabled: z.boolean().optional(),
   startText: z.string().refine((text) => templateTextLength(text) <= 500),
   passText: z.string().refine((text) => templateTextLength(text) <= 500),
   failText: z.string().refine((text) => templateTextLength(text) <= 500),
   expiredText: z.string().refine((text) => templateTextLength(text) <= 500),
   protectedText: z.string().refine((text) => templateTextLength(text) <= 500),
   busyText: z.string().refine((text) => templateTextLength(text) <= 500),
+}).superRefine((settings, context) => {
+  for (const key of ["startText", "passText", "failText", "expiredText", "protectedText", "busyText"] as const) {
+    const enabledKey = `${key}Enabled`;
+    if (isMessageEnabled(settings, key, enabledKey) && settings[key].trim().length === 0) {
+      context.addIssue({ code: "custom", path: [key], message: "message_text_missing" });
+    }
+  }
 });
 
 export type VotekickSettings = z.output<typeof votekickSettingsSchema>;
