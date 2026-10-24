@@ -4,7 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "./utils";
 
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border text-[13px] font-semibold whitespace-nowrap transition-colors outline-none select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)] disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex shrink-0 items-center justify-center rounded-md border text-[13px] font-semibold whitespace-nowrap transition-colors outline-none select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)] disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -16,7 +16,7 @@ const buttonVariants = cva(
         "danger-outline": "border-[var(--color-error-text)] bg-transparent text-[var(--color-error-text)] hover:bg-[var(--color-error-surface)]",
       },
       size: {
-        md: "h-[var(--control-height)] min-h-[var(--control-height)] gap-1.5 px-2.5",
+        md: "h-[var(--control-height)] min-h-[var(--control-height)] gap-[6px] px-[10px]",
         compact: "h-[var(--control-height)] min-h-[var(--control-height)] gap-1 px-2",
         icon: "h-[var(--control-height)] min-h-[var(--control-height)] w-[var(--control-height)] p-0",
       },
