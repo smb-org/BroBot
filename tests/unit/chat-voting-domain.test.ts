@@ -1,3 +1,4 @@
+import { cpuUsage } from "node:process";
 import { describe, expect, it } from "vitest";
 
 import { CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/contracts";
@@ -218,5 +219,29 @@ describe("chat voting normalization with pathological input", () => {
 
     expect(parseVoteCommand(longShortcut)).toMatchObject({ kind: "template", shortcut: "x" });
     expect(parseVoteCommand(longTitle)).toMatchObject({ kind: "start", title: "y" });
+  });
+
+  it("stays linear on 200k-character pathological input", () => {
+    const size = 200_000;
+    const inputs = [
+      " .!?*😀\t".repeat(size / 8),
+      `${"*".repeat(size)}x`,
+      `x${"*".repeat(size)} y`,
+      `${"*".repeat(size)}y${"*".repeat(size)}x`,
+      `!vote${" ".repeat(size)}x`,
+      `!vote text ${"\t ".repeat(size / 2)}y`,
+    ];
+    const started = cpuUsage();
+    for (const input of inputs) {
+      normalizeFreeTextVote(input, "whole_message");
+      normalizeBlockedVoteTerm(input);
+      parseVoteCommand(input);
+    }
+    const elapsed = cpuUsage(started);
+    const cpuMilliseconds = (elapsed.user + elapsed.system) / 1000;
+
+    // Linear code needs about 40 ms CPU for all inputs (measured, cold); a quadratic one needs
+    // many seconds. CPU time rather than wall time, and ~50x headroom, keep this independent of load.
+    expect(cpuMilliseconds).toBeLessThan(2_000);
   });
 });
