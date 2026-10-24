@@ -43,11 +43,10 @@ const validateChatVotingMessages = (settings: z.output<typeof chatVotingSettings
   }
 };
 
-export const chatVotingSettingsReadSchema = chatVotingSettingsObjectSchema.transform((settings) => ({
-  ...settings,
-  // Before result text had a dedicated validation rule, blank result messages were silently suppressed.
-  announceResult: settings.announceResult && settings.resultText.trim().length > 0,
-}));
+// The read schema keeps stored values untouched: a blank global result text with the switch on is a
+// legacy record, and a vote can still carry its own non-empty result template. Close time decides with
+// the effective text; the write schema below asks for the missing text before the next save.
+export const chatVotingSettingsReadSchema = chatVotingSettingsObjectSchema;
 export const chatVotingSettingsSchema = chatVotingSettingsObjectSchema.superRefine(validateChatVotingMessages);
 
 export type ChatVotingSettings = z.output<typeof chatVotingSettingsSchema>;

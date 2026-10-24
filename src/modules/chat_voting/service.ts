@@ -746,9 +746,7 @@ export const closeChatVoteFromAlarm = async (
 
   const settings = await alarmSettings(context);
   const resultTextTemplate = vote.resultText ?? settings.resultText;
-  const resultDeliveryPending = isMessageEnabled(settings, "resultText", "announceResult") &&
-    (vote.resultText === undefined || vote.resultText === null ||
-      isMessageEnabled({ resultText: resultTextTemplate }, "resultText", "resultTextEnabled"));
+  const resultDeliveryPending = settings.announceResult && resultTextTemplate.trim().length > 0;
 
   if (vote.status !== "closed") {
     await repository.finish(

@@ -25,6 +25,8 @@ describe("chat voting close service", () => {
     resultText?: string,
     startText?: string,
     startTextEnabled?: boolean,
+    // undefined: the vote carries the same text as the settings; null: the vote has no snapshot of its own.
+    voteResultText: string | null | undefined = resultText,
   ): Promise<ReturnType<typeof createChatVotingRepository>> => {
     await insertChannel(database, "fictional-channel");
     await database.prepare(
@@ -44,7 +46,7 @@ describe("chat voting close service", () => {
       requestedDurationSeconds: null,
       closeReason: "limit",
       status: "open",
-      ...(resultText === undefined ? {} : { resultText }),
+      ...(voteResultText == null ? {} : { resultText: voteResultText }),
     };
     await repository.insertOpen(vote);
     return repository;
@@ -588,6 +590,26 @@ describe("chat voting close service", () => {
       status: "closed",
       resultDeliveryPending: false,
     });
+  });
+
+  it("sends the result of a vote with its own template although the stored global text is blank", async () => {
+    const repository = await seedOpenVote(true, null, "", undefined, undefined, "Result: {vote.result}");
+    const { context, sendChat } = createAlarmContext([]);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(sendChat).toHaveBeenCalledTimes(1);
+    expect(context.renderTemplate).toHaveBeenCalledWith("Result: {vote.result}", expect.any(Number), expect.any(Object));
+  });
+
+  it("stays silent for a blank global text when the vote has no template of its own", async () => {
+    const repository = await seedOpenVote(true, null, "", undefined, undefined, null);
+    const { context, sendChat } = createAlarmContext([]);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(sendChat).not.toHaveBeenCalled();
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({ resultDeliveryPending: false });
   });
 
   it.each([

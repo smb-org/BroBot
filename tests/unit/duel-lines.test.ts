@@ -118,7 +118,46 @@ describe("duel round chat line budget", () => {
     };
 
     expect(duelTextVariables(data)).toMatchObject({ fight: "", botFight: "" });
-    expect(duelTextVariables(data, { fight: "Override line" })).toMatchObject({ fight: "", botFight: "" });
+    expect(duelTextVariables(data, { fight: "" })).toMatchObject({ fight: "", botFight: "" });
+  });
+
+  it.each([
+    [true, true], [true, false], [false, true], [false, false],
+  ] as const)("keeps each result's fight line behind its own switch (human %s, bot %s)", async (humanOn, botOn) => {
+    const settings = duelSettingsForLanguage("en");
+    const data = {
+      challengerId: "viewer_anna",
+      challengerLogin: "frostfern",
+      targetId: null,
+      targetLogin: null,
+      stake: 100,
+      botEnabled: true,
+      acceptCommand: "!yes",
+      language: "en" as const,
+      chatTarget: null,
+      sourceBroadcasterUserId: null,
+      challengeMessageId: "fictional-challenge-message",
+      fightText: "HUMAN-FIGHT-LINE",
+      fightTextEnabled: humanOn,
+      botFightText: "BOT-FIGHT-LINE",
+      botFightTextEnabled: botOn,
+      texts: { ...settings.texts, result: "{winner} won. {fight}", botResult: "{winner} won. {fight}" },
+    };
+    const humanResult = await duelModule.formatPointRoundResult?.(alarmContext, {
+      roundId: "fictional-round",
+      data,
+      result: { winner: "viewer_ben", winnerLogin: "moonmoss", loserLogin: "frostfern", net: 100, bot: false },
+      resolvedAt: "2100-01-01T00:00:00.000Z",
+    });
+    const botResult = await duelModule.formatPointRoundResult?.(alarmContext, {
+      roundId: "fictional-round",
+      data,
+      result: { winner: "bot", winnerLogin: "BroBot", loserLogin: "frostfern", net: -100, bot: true },
+      resolvedAt: "2100-01-01T00:00:00.000Z",
+    });
+
+    expect(humanResult?.text).toBe(humanOn ? "moonmoss won. HUMAN-FIGHT-LINE" : "moonmoss won. ");
+    expect(botResult?.text).toBe(botOn ? "BroBot won. BOT-FIGHT-LINE" : "BroBot won. ");
   });
 
   it.each([

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { chatVotingSettingsReadSchema, chatVotingSettingsSchema } from "../../src/modules/chat_voting/contracts";
 import { MODULES } from "../../src/modules/registry";
 import { resolveMessageEnabledFlags } from "../../src/contracts/resolve-message-enabled";
 
@@ -123,5 +124,18 @@ describe("legacy message settings", () => {
     expect(resolvedTexts.challengeOpenEnabled).toBe(true);
     expect(resolvedTexts.fightVariantsEnabled).toEqual([true, false]);
     expect(objectAt(resolvedTexts, "errors").notEnoughPointsEnabled).toBe(false);
+  });
+
+  it("keeps the stored chat voting result switch through a read and write of an unrelated field", () => {
+    const stored = { ...settingsFor("chat_voting"), announceResult: true, resultText: "" };
+    const read = chatVotingSettingsReadSchema.parse(stored);
+    expect(read.announceResult).toBe(true);
+
+    // Blank text with the switch on is reported on the next save instead of flipping the switch.
+    const blankWrite = chatVotingSettingsSchema.safeParse({ ...read, autoCloseSeconds: 300 });
+    expect(blankWrite.success).toBe(false);
+
+    const fixedWrite = chatVotingSettingsSchema.parse({ ...read, autoCloseSeconds: 300, resultText: "{vote.result}" });
+    expect(fixedWrite.announceResult).toBe(true);
   });
 });

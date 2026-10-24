@@ -178,9 +178,8 @@ export const duelTextVariables = (
   loser: values.loser ?? "",
   net: values.net ?? "",
   loss: values.loss ?? "",
-  fight: (data.fightTextEnabled ?? data.fightText.trim().length > 0)
-    ? values.fight ?? data.fightText
-    : "",
+  // An explicit line is already the selected variant gated by its own switch (see duelFightLine).
+  fight: values.fight ?? ((data.fightTextEnabled ?? data.fightText.trim().length > 0) ? data.fightText : ""),
   botFight: (data.botFightTextEnabled ?? data.botFightText.trim().length > 0) ? data.botFightText : "",
 });
 
