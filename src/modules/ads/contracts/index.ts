@@ -34,10 +34,13 @@ const validatedAdsSettingsSchema = adsSettingsObjectSchema.superRefine((settings
   }
 });
 
-export const adsSettingsSchema = z.preprocess((input) => {
+const legacyAdsSettingsPreprocess = (input: unknown): unknown => {
   if (typeof input !== "object" || input === null || Array.isArray(input) || Reflect.get(input, "prewarning") !== false) return input;
   return { ...input, prewarningTextEnabled: false };
-}, validatedAdsSettingsSchema);
+};
+
+export const adsSettingsReadSchema = z.preprocess(legacyAdsSettingsPreprocess, adsSettingsObjectSchema);
+export const adsSettingsSchema = z.preprocess(legacyAdsSettingsPreprocess, validatedAdsSettingsSchema);
 
 export type AdsSettings = Omit<z.output<typeof adsSettingsSchema>, "automaticTarget" | "manualTarget" | "prewarningTarget"> & {
   /** Accepted only while older persisted settings are upgraded. */

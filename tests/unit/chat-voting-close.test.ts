@@ -577,6 +577,19 @@ describe("chat voting close service", () => {
     expect(context.sendChat).not.toHaveBeenCalled();
   });
 
+  it("keeps a legacy enabled-but-empty result silent while closing the vote", async () => {
+    const repository = await seedOpenVote(true, null, "");
+    const { context, sendChat } = createAlarmContext([]);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    expect(sendChat).not.toHaveBeenCalled();
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({
+      status: "closed",
+      resultDeliveryPending: false,
+    });
+  });
+
   it.each([
     ["de", "yes_no", 2, ["Ja", "Nein"], null, null, "1 = Ja, 2 = Nein"],
     ["en", "yes_no", 2, ["Yes", "No"], null, "Lunch?", "1 = Yes, 2 = No"],

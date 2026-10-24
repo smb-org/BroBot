@@ -121,7 +121,7 @@ export const findModuleCommandCollision = async (
     const other = modules.find((entry) => entry.id === row.module_id);
     if (other === undefined) continue;
     try {
-      const parsed = other.settingsSchema.safeParse(JSON.parse(row.settings) as unknown);
+      const parsed = (other.settingsReadSchema ?? other.settingsSchema).safeParse(JSON.parse(row.settings) as unknown);
       if (!parsed.success) continue;
       const collision = effectiveModuleCommandTokens(other, parsed.data).find((name) => candidate.has(name));
       if (collision !== undefined) return collision;

@@ -154,6 +154,16 @@ const definition: SettingsEditorDefinition<DuelSettings> = {
   savePosition: "page-header",
   showTitle: false,
   className: "duel-settings-editor",
+  messageFields: [
+    { messagePath: "texts.challengeOpen", enabledPath: "texts.challengeOpenEnabled" },
+    { messagePath: "texts.challengeTargeted", enabledPath: "texts.challengeTargetedEnabled" },
+    { messagePath: "texts.result", enabledPath: "texts.resultEnabled" },
+    { messagePath: "texts.botResult", enabledPath: "texts.botResultEnabled" },
+    { messagePath: "texts.fightVariants", enabledPath: "texts.fightVariantsEnabled" },
+    { messagePath: "texts.botFightVariants", enabledPath: "texts.botFightVariantsEnabled" },
+    ...(["notEnoughPoints", "invalidStake", "unknownUser", "targetBusy", "alreadyChallenging", "cooldown", "noOpenChallenge", "cannotAcceptOwn", "stakeBounds", "tooManyOpen"] as const)
+      .map((key) => ({ messagePath: `texts.errors.${key}`, enabledPath: `texts.errors.${key}Enabled` })),
+  ],
 };
 
 export default definition;

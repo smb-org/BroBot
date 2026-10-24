@@ -1551,6 +1551,26 @@ describe("Blitz Round collection panel", () => {
     await waitFor(() => expect(document.querySelector(".ui-save-bar__status")).toHaveTextContent("Saved"));
   });
 
+  it("keeps disabled round message text editable without changing its switch", async () => {
+    const api = installPanelFetch([sampleQuestion]);
+    api.updateSettingsFromAnotherManager({ ...initialSettings, startText: "Saved start text", startTextEnabled: false }, 1);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.click(screen.getByRole("button", { name: /^Settings$/u }));
+    await screen.findByRole("textbox", { name: "Start message" });
+
+    const toggle = screen.getByRole("switch", { name: "Start message: Send message" });
+    const textbox = screen.getByRole("textbox", { name: "Start message" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect((textbox as HTMLTextAreaElement).disabled).toBe(false);
+    fireEvent.change(textbox, { target: { value: "Edited while disabled" } });
+
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect((textbox as HTMLTextAreaElement).value).toBe("Edited while disabled");
+    expect(api.getSettings().startText).toBe("Saved start text");
+  });
+
   it("validates automatic start settings and saves the switch and interval explicitly", async () => {
     const api = installPanelFetch([sampleQuestion]);
     mountPanel();

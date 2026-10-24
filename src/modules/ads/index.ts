@@ -1,5 +1,5 @@
 import type { BotModule, ModuleTemplateUsageSource } from "../contract";
-import { ADS_TEMPLATE_FIELDS, adsSettingsSchema } from "./contracts";
+import { ADS_TEMPLATE_FIELDS, adsSettingsReadSchema, adsSettingsSchema } from "./contracts";
 import { DEFAULT_AUTOMATIC_TEXT, DEFAULT_MANUAL_TEXT, DEFAULT_PREWARNING_TEXT } from "./contracts/chat-defaults";
 import { processAdBreak } from "./service";
 import { adsRoutes } from "./routes";
@@ -34,6 +34,7 @@ export const adsModule: BotModule<typeof adsSettingsSchema> = {
   panelIcon: adsPanelIcon,
   templateVariableGroup: { label: adsTemplateVariableGroupLabels, icon: adsPanelIcon, order: 70 },
   settingsSchema: adsSettingsSchema,
+  settingsReadSchema: adsSettingsReadSchema,
   templateFields: ADS_TEMPLATE_FIELDS,
   templateContext: "system",
   templateUsageSources,

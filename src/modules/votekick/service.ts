@@ -1,7 +1,7 @@
 import { ballotChoiceFromMessage } from "../contract";
 import type { BallotSnapshot, JsonObject, ModuleAction, ModuleAlarmContext, ModuleDiagnostic, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { formatTimeoutDuration, rollTimeoutSeconds } from "../contracts/moderation";
-import { VOTEKICK_WINDOW_MS, votekickSettingsSchema, type Votekick, type VotekickSettings } from "./contracts";
+import { VOTEKICK_WINDOW_MS, votekickSettingsReadSchema, type Votekick, type VotekickSettings } from "./contracts";
 import { canStartVotekick, isActiveVotekickTarget, votekickThreshold, votekickTimeoutReason, VOTEKICK_COMMAND_PATTERN, wasActiveBeforeVotekick } from "./domain";
 import type { VotekickRepository, VotekickStart } from "./repository";
 import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
@@ -517,7 +517,7 @@ export const closeExpiredVotekick = async (
     const stored = await context.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?")
       .bind(context.channelId, "votekick").first<{ settings: string }>();
     if (stored === null) throw new Error("Votekick settings are unavailable while finalizing its ballot.");
-    const settings = votekickSettingsSchema.parse(JSON.parse(stored.settings));
+    const settings = votekickSettingsReadSchema.parse(JSON.parse(stored.settings));
     const attempt = await finalizeVotekick(context.channelId, running, settings, repository, context);
     if (attempt.outcome === "open") {
       const expiresAt = Date.parse(running.endsAt);
@@ -579,7 +579,7 @@ export const closeExpiredVotekick = async (
     try { await context.clear(`close:${id}`); } catch { /* A stale alarm observes the terminal D1 row. */ }
     return;
   }
-  const settings = votekickSettingsSchema.parse(JSON.parse(stored.settings));
+  const settings = votekickSettingsReadSchema.parse(JSON.parse(stored.settings));
   if (!isMessageEnabled(settings, "expiredText", "expiredTextEnabled")) {
     await bestEffortCloseAlarm(context, id);
     try { await context.clear(`close:${id}`); } catch { /* A stale alarm observes the terminal D1 row. */ }

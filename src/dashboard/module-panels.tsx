@@ -22,6 +22,8 @@ import { moduleDependencyLockReason, moduleParticipatesInDependency } from "./mo
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { isMessageEnabled } from "../contracts/message-enabled";
+import { resolveMessageEnabledFlags } from "../contracts/resolve-message-enabled";
+import type { MessageEnabledField } from "../contracts/resolve-message-enabled";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
 import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, Section, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorCatalog, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
@@ -261,8 +263,24 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, v
   {...(page === undefined ? {} : { page })}
 />;
 
-const withModuleDraftFields = (moduleId: string, settings: Record<string, unknown>): Record<string, unknown> =>
-  moduleId === "belabox" ? { ...settings, belaboxStatsUrl: "" } : settings;
+const messageEnabledFieldsFor = (definition: SettingsEditorDefinition<unknown>): MessageEnabledField[] => {
+  const fields: MessageEnabledField[] = [...(definition.messageFields ?? [])];
+  const visit = (field: SettingsEditorDefinition<unknown>["spec"]["sections"][number]["fields"][number]): void => {
+    if (field.kind === "message") fields.push({ messagePath: field.key, enabledPath: field.enabledKey });
+    if (field.kind === "switchCard") field.children?.forEach(visit);
+  };
+  definition.spec.sections.forEach(({ fields: sectionFields }) => sectionFields.forEach(visit));
+  return fields;
+};
+
+const withModuleDraftFields = (
+  moduleId: string,
+  settings: Record<string, unknown>,
+  definition: SettingsEditorDefinition<unknown>,
+): Record<string, unknown> => resolveMessageEnabledFlags(
+  moduleId === "belabox" ? { ...settings, belaboxStatsUrl: "" } : settings,
+  messageEnabledFieldsFor(definition),
+);
 
 const persistedSettings = (moduleId: string, settings: Record<string, unknown>): Record<string, unknown> => {
   if (moduleId !== "belabox") return settings;
@@ -478,7 +496,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
 }): ReactElement => {
   const queryClient = useDashboardQueryClient();
   const channelSettings = useChannelSettings(channelId);
-  const initialDraft = useMemo(() => withModuleDraftFields(module.id, initial), [initial, module.id]);
+  const initialDraft = useMemo(() => withModuleDraftFields(module.id, initial, definition), [definition, initial, module.id]);
   const { value: currentValue, setValue, dirty, reset, accept } = useDraft(initialDraft);
   const baselineRevision = useRef(initialRevision);
   const [latestSettingsRevision, setLatestSettingsRevision] = useState(initialRevision);
@@ -644,10 +662,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
           }
         }
         if (field.kind === "switchCard" && field.children !== undefined) {
-          const messageEnabled = field.deriveFromTextKey === undefined
-            ? currentValue[field.key] === true
-            : isMessageEnabled(currentValue, field.deriveFromTextKey, field.key);
-          collect(field.children, messageEnabled);
+          collect(field.children, currentValue[field.key] === true);
         }
       }
     };
@@ -787,7 +802,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
           void refetchModuleQueryData<BelaboxStatusResponse>(queryClient, channelId, "belabox", "status").catch(() => undefined);
         }
       }
-      const acceptedDraft = withModuleDraftFields(module.id, acceptedSettings);
+      const acceptedDraft = withModuleDraftFields(module.id, acceptedSettings, definition);
       baselineSettings.current = acceptedDraft;
       accept(acceptedDraft);
       setSaved(true);

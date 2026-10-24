@@ -7,6 +7,7 @@ import {
   BELABOX_MODULE_ID,
   BELABOX_POLL_ALARM_KEY,
   belaboxSettingsSchema,
+  belaboxSettingsReadSchema,
   type BelaboxSample,
 } from "./contracts";
 import { BELABOX_TEMPLATE_VARIABLES, belaboxCatalog } from "./contracts/catalog";
@@ -157,6 +158,7 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
   mandatory: false,
   defaultEnabled: false,
   settingsSchema: belaboxSettingsSchema,
+  settingsReadSchema: belaboxSettingsReadSchema,
   defaultSettings: BELABOX_DEFAULT_SETTINGS,
   templateVariableGroup: {
     label: { de: "BELABOX", en: "BELABOX" },

@@ -5,7 +5,6 @@ import { expectHeadingHeightStable, expectMessageHeadingsCentred, expectSwitchGe
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
 const channelId = "message-switch-ads-channel";
-const module = { id: "ads", enabled: true, settings: "{}" };
 const channel = {
   channelId,
   login: "beispielkanal",
@@ -37,8 +36,9 @@ const schedule = {
 
 interface AdsApiState { settings: Record<string, unknown>; revision: number; patches: number }
 
-/** Mocks the dashboard API for one ads channel; the returned state is updated by settings writes. */
-const mockAdsApi = async (page: Page, settings: Record<string, unknown>): Promise<AdsApiState> => {
+/** Mocks the dashboard API for one channel with one module (ads by default); the returned state is updated by settings writes. */
+const mockAdsApi = async (page: Page, settings: Record<string, unknown>, moduleId = "ads"): Promise<AdsApiState> => {
+  const module = { id: moduleId, enabled: true, settings: "{}" };
   const state: AdsApiState = { settings, revision: 1, patches: 0 };
   await page.route("**/api/**", async (route: Route) => {
     const request = route.request();
@@ -46,13 +46,13 @@ const mockAdsApi = async (page: Page, settings: Record<string, unknown>): Promis
     const json = (value: unknown) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
     if (pathname === "/api/channels") return json({ channels: [{ ...channel, modules: [module] }], bot: channel.bot, platformAdmin: false });
     if (pathname === `/api/channels/${channelId}/overview`) {
-      return json({ ...channel, modules: [module], activeModules: [{ moduleId: "ads", settings: JSON.stringify(state.settings) }] });
+      return json({ ...channel, modules: [module], activeModules: [{ moduleId, settings: JSON.stringify(state.settings) }] });
     }
     if (pathname === `/api/channels/${channelId}/modules`) return json({ modules: [module] });
     if (pathname === `/api/channels/${channelId}/settings`) return json({ defaultChatTarget: "source_only", defaultChatTargetRevision: 1, timeZone: "Europe/Berlin", revision: 1 });
     if (pathname === `/api/channels/${channelId}/revisions`) return json({ revisions: {} });
     if (pathname === "/api/csrf") return json({ token: "message-switch-csrf" });
-    if (pathname === `/api/channels/${channelId}/modules/ads/settings`) {
+    if (pathname === `/api/channels/${channelId}/modules/${moduleId}/settings`) {
       if (request.method() === "PATCH") {
         state.settings = (request.postDataJSON() as { settings: Record<string, unknown> }).settings;
         state.revision += 1;
@@ -121,3 +121,18 @@ for (const width of [390, 768, 1280, 1920, 2560]) {
     await expectMessageHeadingsCentred(page);
   });
 }
+
+test("stored votekick settings with the switch on and an empty text load and report the missing text", async ({ page }) => {
+  const state = await mockAdsApi(page, { startTextEnabled: true, startText: "" }, "votekick");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`/channels/${channelId}/modules/votekick`);
+
+  const startSwitch = page.getByRole("switch", { name: /Nachricht senden/u }).first();
+  await expect(startSwitch).toBeVisible();
+  await expect(startSwitch).toBeChecked();
+  await expect(page.getByText("Text fehlt").first()).toBeVisible();
+  // A pristine draft cannot be saved; any further edit makes it dirty and the save stays blocked by the missing text.
+  await page.getByRole("switch", { name: /Nachricht senden/u }).nth(1).click();
+  await expect(page.getByRole("button", { name: "Speichern" }).first()).toHaveAttribute("aria-disabled", "true");
+  expect(state.patches).toBe(0);
+});

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 
 import type { ModuleRouteEnvironment } from "../contract";
-import { raidSettingsSchema } from "./contracts";
+import { raidSettingsReadSchema } from "./contracts";
 
 interface RaidStateEventRow {
   code: string;
@@ -61,7 +61,7 @@ raidRoutes.get("/state", async (context) => {
   ]);
   const settings = (() => {
     try {
-      return moduleRow === null ? null : raidSettingsSchema.safeParse(JSON.parse(moduleRow.settings));
+      return moduleRow === null ? null : raidSettingsReadSchema.safeParse(JSON.parse(moduleRow.settings));
     } catch {
       return null;
     }

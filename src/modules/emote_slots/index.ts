@@ -1,5 +1,5 @@
 import type { BotModule } from "../contract";
-import { DEFAULT_EMOTE_SLOT_SETTINGS, EMOTE_SLOTS_MODULE_ID, emoteSlotDefaultSettingsForLanguage, emoteSlotSettingsSchema } from "./contracts";
+import { DEFAULT_EMOTE_SLOT_SETTINGS, EMOTE_SLOTS_MODULE_ID, emoteSlotDefaultSettingsForLanguage, emoteSlotSettingsReadSchema, emoteSlotSettingsSchema } from "./contracts";
 import { emoteSlotsCatalog } from "./locale";
 import { emoteSlotsRoutes } from "./routes";
 import { processEmoteSlotMessage } from "./service";
@@ -26,6 +26,7 @@ export const emoteSlotsModule: BotModule<typeof emoteSlotSettingsSchema> = {
     arguments: [{ name: "stake", hint: { de: emoteSlotsCatalog.de.commands.stakeHint, en: emoteSlotsCatalog.en.commands.stakeHint } }],
   }],
   settingsSchema: emoteSlotSettingsSchema,
+  settingsReadSchema: emoteSlotSettingsReadSchema,
   defaultSettings: DEFAULT_EMOTE_SLOT_SETTINGS,
   defaultSettingsForLanguage: emoteSlotDefaultSettingsForLanguage,
   validateSettings: (settings) => {

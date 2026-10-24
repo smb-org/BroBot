@@ -1,9 +1,10 @@
-import { blitzRoundSettingsSchema, BLITZ_GRACE_SECONDS, BLITZ_ROUND_MODULE_ID } from "./contracts";
+import { blitzRoundSettingsReadSchema, BLITZ_GRACE_SECONDS, BLITZ_ROUND_MODULE_ID } from "./contracts";
 import type { BlitzQuestion, BlitzRoundData, BlitzRoundSettings } from "./contracts";
 import type { BlitzQuestionRepository } from "./repository";
 import type { ModuleEvent, ModuleExecutionContext, ModuleLanguage, ModulePointsAccess, ModuleResult } from "../contract";
 import { scrambleBlitzWord } from "./domain/round";
 import { blitzAnswerMatches } from "./domain/chat";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 
 export const loadEnabledBlitzSettings = async (db: D1Database, channelId: string): Promise<BlitzRoundSettings | null> => {
   const row = await db.prepare(
@@ -12,7 +13,7 @@ export const loadEnabledBlitzSettings = async (db: D1Database, channelId: string
   if (row === null) return null;
   try {
     const parsed: unknown = JSON.parse(row.settings);
-    const settings = blitzRoundSettingsSchema.safeParse(parsed);
+    const settings = blitzRoundSettingsReadSchema.safeParse(parsed);
     return settings.success ? settings.data : null;
   } catch {
     return null;
@@ -60,16 +61,23 @@ export const openBlitzRound = async (input: OpenBlitzRoundInput): Promise<Opened
     answers: [...question.answers],
     prize: input.settings.prize,
     seconds: input.settings.answerTimeSeconds,
-    texts: { solvedText: input.settings.solvedText, timeoutText: input.settings.timeoutText },
+    texts: {
+      solvedText: input.settings.solvedText,
+      ...(input.settings.solvedTextEnabled === undefined ? {} : { solvedTextEnabled: input.settings.solvedTextEnabled }),
+      timeoutText: input.settings.timeoutText,
+      ...(input.settings.timeoutTextEnabled === undefined ? {} : { timeoutTextEnabled: input.settings.timeoutTextEnabled }),
+    },
     language: input.language,
     chatTarget: input.settings.chatTarget,
     startText: input.settings.startText,
+    ...(input.settings.startTextEnabled === undefined ? {} : { startTextEnabled: input.settings.startTextEnabled }),
   };
   const roundId = crypto.randomUUID();
   await input.points.rounds.open(roundId, {
     ...data,
     durationS: input.settings.answerTimeSeconds,
-    announceText: input.settings.startText,
+    announceText: isMessageEnabled(input.settings, "startText", "startTextEnabled") ? input.settings.startText : "",
+    silentAnnouncement: !isMessageEnabled(input.settings, "startText", "startTextEnabled"),
     settlement: { kind: "blitz", params: { prize: input.settings.prize } },
   });
   // The persisted announcement also reconciles this write after interruption.

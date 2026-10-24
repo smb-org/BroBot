@@ -40,12 +40,15 @@ const belaboxSettingsInputSchema = z.object({
   recoveryTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
 });
 
-export const belaboxSettingsSchema = belaboxSettingsInputSchema.transform((settings) => ({
+const normalizedBelaboxSettingsSchema = belaboxSettingsInputSchema.transform((settings) => ({
   ...settings,
   // Keep the requested 10/15-second defaults while respecting the selected poll interval.
   holdSeconds: settings.holdSeconds ?? Math.max(10, settings.intervalSeconds),
   recoverHoldSeconds: settings.recoverHoldSeconds ?? Math.max(15, settings.intervalSeconds),
-})).superRefine((settings, context) => {
+}));
+
+const validateBelaboxSettings = (settings: z.output<typeof normalizedBelaboxSettingsSchema>, context: z.RefinementCtx, includeMessages: boolean): void => {
+  if (includeMessages) {
   for (const [messageKey, enabledKey] of [
     ["lowText", "lowTextEnabled"],
     ["disconnectText", "disconnectTextEnabled"],
@@ -54,6 +57,7 @@ export const belaboxSettingsSchema = belaboxSettingsInputSchema.transform((setti
     if (isMessageEnabled(settings, messageKey, enabledKey) && settings[messageKey].trim().length === 0) {
       context.addIssue({ code: "custom", path: [messageKey], message: "message_text_missing" });
     }
+  }
   }
   if (settings.recoverBitrateKbps <= settings.lowBitrateKbps) {
     context.addIssue({ code: "custom", path: ["recoverBitrateKbps"], message: "recover_must_exceed_low" });
@@ -64,6 +68,13 @@ export const belaboxSettingsSchema = belaboxSettingsInputSchema.transform((setti
   if (settings.recoverHoldSeconds < settings.intervalSeconds) {
     context.addIssue({ code: "custom", path: ["recoverHoldSeconds"], message: "recover_hold_must_meet_interval" });
   }
+};
+
+export const belaboxSettingsReadSchema = normalizedBelaboxSettingsSchema.superRefine((settings, context) => {
+  validateBelaboxSettings(settings, context, false);
+});
+export const belaboxSettingsSchema = normalizedBelaboxSettingsSchema.superRefine((settings, context) => {
+  validateBelaboxSettings(settings, context, true);
 });
 export type BelaboxSettings = z.output<typeof belaboxSettingsSchema>;
 export const BELABOX_DEFAULT_SETTINGS: BelaboxSettings = {

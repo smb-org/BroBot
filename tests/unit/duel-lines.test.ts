@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ModuleAlarmContext } from "../../src/modules/contract";
 import { duelModule } from "../../src/modules/duel";
 import { duelSettingsForLanguage } from "../../src/modules/duel/contracts";
+import { duelTextVariables } from "../../src/modules/duel/service";
 
 const alarmContext = {
   renderTemplate: (text: string, values: Record<string, string | number> = {}) => Promise.resolve({
@@ -53,9 +54,9 @@ describe("duel round chat line budget", () => {
       resolvedAt: "2100-01-01T00:00:00.000Z",
     });
 
-    expect([announcement?.text, accepted?.text].filter((line) => line !== undefined)).toHaveLength(2);
-    expect([announcement?.text, botExpired?.text].filter((line) => line !== undefined)).toHaveLength(2);
-    expect(announcement?.text).toContain("challenges chat to a 100 point duel");
+    expect([announcement?.kind === "silent" ? undefined : announcement?.text, accepted?.text].filter((line) => line !== undefined)).toHaveLength(2);
+    expect([announcement?.kind === "silent" ? undefined : announcement?.text, botExpired?.text].filter((line) => line !== undefined)).toHaveLength(2);
+    expect(announcement?.kind === "silent" ? "" : announcement?.text).toContain("challenges chat to a 100 point duel");
     expect(accepted?.text).toContain("moonmoss wins +100 points; frostfern loses −100 points");
     expect(botExpired?.text).toContain("BroBot wins +100 points; frostfern loses −100 points");
     expect(silentExpiry).toBeNull();
@@ -89,10 +90,35 @@ describe("duel round chat line budget", () => {
       resolvedAt: "2100-01-01T00:00:00.000Z",
     });
 
-    expect(announcement).toBeNull();
+    expect(announcement).toEqual({ kind: "silent" });
     expect(result).toBeNull();
     expect(data.texts.challengeOpen).toBe(settings.texts.challengeOpen);
     expect(data.texts.result).toBe(settings.texts.result);
+  });
+
+  it("filters every fight variable when its selected variant is disabled", () => {
+    const settings = duelSettingsForLanguage("en");
+    const data = {
+      challengerId: "viewer_anna",
+      challengerLogin: "frostfern",
+      targetId: null,
+      targetLogin: null,
+      stake: 100,
+      botEnabled: true,
+      acceptCommand: "!yes",
+      language: "en" as const,
+      chatTarget: null,
+      sourceBroadcasterUserId: null,
+      challengeMessageId: "fictional-challenge-message",
+      fightText: "Disabled fight line",
+      fightTextEnabled: false,
+      botFightText: "Disabled bot fight line",
+      botFightTextEnabled: false,
+      texts: settings.texts,
+    };
+
+    expect(duelTextVariables(data)).toMatchObject({ fight: "", botFight: "" });
+    expect(duelTextVariables(data, { fight: "Override line" })).toMatchObject({ fight: "", botFight: "" });
   });
 
   it.each([

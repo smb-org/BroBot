@@ -45,6 +45,10 @@ const definition: SettingsEditorDefinition<EmoteSlotSettings> = {
   savePosition: "page-header",
   showTitle: false,
   className: "slot-settings-editor",
+  messageFields: ["win", "loss", "pair", "jackpot"].map((kind) => ({
+    messagePath: `texts.${kind}`,
+    enabledPath: `texts.${kind}Enabled`,
+  })),
 };
 
 export default definition;

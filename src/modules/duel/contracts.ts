@@ -7,7 +7,7 @@ export const DUEL_MODULE_ID = "duel";
 
 const commandSchema = z.string().trim().regex(/^![a-z0-9_]{2,24}$/u, "invalid_command");
 const textSchema = z.string().trim().max(500);
-const duelTextsSchema = z.object({
+const duelTextsObjectSchema = z.object({
   challengeOpen: textSchema,
   challengeOpenEnabled: z.boolean().optional(),
   challengeTargeted: textSchema,
@@ -42,7 +42,9 @@ const duelTextsSchema = z.object({
     tooManyOpen: textSchema,
     tooManyOpenEnabled: z.boolean().optional(),
   }),
-}).superRefine((texts, context) => {
+});
+
+const validateDuelMessages = (texts: z.output<typeof duelTextsObjectSchema>, context: z.RefinementCtx): void => {
   const addMissingText = (settings: object, key: string, enabledKey: string, path: (string | number)[], index?: number): void => {
     const value = (settings as Record<string, unknown>)[key];
     let text: unknown = value;
@@ -65,9 +67,12 @@ const duelTextsSchema = z.object({
   for (const key of Object.keys(texts.errors) as Array<keyof typeof texts.errors>) {
     if (!key.endsWith("Enabled")) addMissingText(texts.errors, key, `${key}Enabled`, ["errors", key]);
   }
-});
+};
 
-export const duelSettingsSchema = z.object({
+export const duelTextsReadSchema = duelTextsObjectSchema;
+const duelTextsSchema = duelTextsObjectSchema.superRefine(validateDuelMessages);
+
+const duelSettingsObjectSchema = (textsSchema: z.ZodType<z.output<typeof duelTextsReadSchema>>) => z.object({
   challengeCommand: commandSchema,
   acceptCommand: commandSchema,
   defaultStake: z.number().int().min(1).max(100_000),
@@ -78,7 +83,7 @@ export const duelSettingsSchema = z.object({
   botAcceptsOpenDuels: z.boolean(),
   broadcasterModsMayPlay: z.boolean(),
   chatTarget: z.enum(["all_chats", "source_only", "where_asked"]).nullable(),
-  texts: duelTextsSchema,
+  texts: textsSchema,
 }).superRefine((settings, context) => {
   if (settings.minStake > settings.maxStake) {
     context.addIssue({ code: "custom", path: ["maxStake"], message: "minimum_exceeds_maximum" });
@@ -90,6 +95,9 @@ export const duelSettingsSchema = z.object({
     context.addIssue({ code: "custom", path: ["acceptCommand"], message: "commands_must_differ" });
   }
 });
+
+export const duelSettingsReadSchema = duelSettingsObjectSchema(duelTextsReadSchema);
+export const duelSettingsSchema = duelSettingsObjectSchema(duelTextsSchema);
 
 export type DuelSettings = z.output<typeof duelSettingsSchema>;
 type DuelTexts = DuelSettings["texts"];

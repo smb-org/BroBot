@@ -809,7 +809,7 @@ moduleRouter.get("/api/channels/:channelId/modules/:moduleId/settings", async (c
   } catch {
     return context.json({ error: "module_settings_invalid" }, 500);
   }
-  const settings = module.settingsSchema.safeParse(rawSettings);
+  const settings = (module.settingsReadSchema ?? module.settingsSchema).safeParse(rawSettings);
   if (!settings.success) return context.json({ error: "module_settings_invalid" }, 500);
   const channelId = context.req.param("channelId");
   const variables = (await listChannelVariables(context.env.DB, channelId)).map(({ name, value, description }) => ({ name, value, description }));
@@ -896,7 +896,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     } catch {
       return context.json({ error: "module_settings_invalid" }, 500);
     }
-    const storedSettings = module.settingsSchema.safeParse(rawStoredSettings);
+    const storedSettings = (module.settingsReadSchema ?? module.settingsSchema).safeParse(rawStoredSettings);
     if (!storedSettings.success) return context.json({ error: "module_settings_invalid" }, 500);
     const lockedFields = [
       "automaticClipsEnabled",
@@ -964,7 +964,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     if (current !== null) {
       try {
         const parsed: unknown = JSON.parse(current.settings);
-        const validated = module.settingsSchema.safeParse(parsed);
+        const validated = (module.settingsReadSchema ?? module.settingsSchema).safeParse(parsed);
         currentSettings = validated.success ? validated.data : null;
       } catch {
         currentSettings = null;
@@ -1040,7 +1040,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
         currentSettings = null;
       }
     }
-    const parsedSettings = module.settingsSchema.safeParse(currentSettings);
+    const parsedSettings = (module.settingsReadSchema ?? module.settingsSchema).safeParse(currentSettings);
     if (parsedSettings.success) {
       activationCommandTokens = [
         ...effectiveModuleCommandTokens(module, parsedSettings.data),

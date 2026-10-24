@@ -1,7 +1,7 @@
 import type { ModuleRouteVariables } from "../contract";
 import { isMessageEnabled } from "../../../contracts/message-enabled";
 import type { AdsScheduleResponse } from "../contracts";
-import { adsSettingsSchema } from "../contracts";
+import { adsSettingsReadSchema } from "../contracts";
 
 const WARNING_SCOPE = "channel:read:ads";
 
@@ -62,7 +62,7 @@ export const refreshAdPrewarningAlarm = async (
     await clearPrewarning(scheduler);
     return;
   }
-  const settings = adsSettingsSchema.safeParse(rawSettings);
+  const settings = adsSettingsReadSchema.safeParse(rawSettings);
   const warningScopeAvailable = grantedScopes === undefined
     ? await broadcasterHasScope(environment.DB, channelId, WARNING_SCOPE)
     : grantedScopes.includes(WARNING_SCOPE);

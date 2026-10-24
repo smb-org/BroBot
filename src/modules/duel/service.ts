@@ -117,13 +117,16 @@ export const processDuelMessage = async (
       botFightTextEnabled: isMessageEnabled(event.settings.texts, "botFightVariants", "botFightVariantsEnabled", botFightVariantIndex),
       texts: event.settings.texts,
     };
+    const announcementKey = targetLogin === null ? "challengeOpen" : "challengeTargeted";
+    const announcementEnabled = isMessageEnabled(event.settings.texts, announcementKey, `${announcementKey}Enabled`);
     const roundId = crypto.randomUUID();
     try {
       const opened = await context.points.rounds.openWithStake(roundId, {
         ...data,
         lockKeys: [`challenger:${accountId}`, ...(targetId === null ? [] : [`target:${targetId}`])],
         durationS: event.settings.acceptWindowSeconds,
-        announceText: targetLogin === null ? event.settings.texts.challengeOpen : event.settings.texts.challengeTargeted,
+        announceText: announcementEnabled ? event.settings.texts[announcementKey] : "",
+        silentAnnouncement: !announcementEnabled,
         settlement: { kind: "duel", params: { mode: "expire" } },
       }, `msg:${messageId}`, accountId, login, parsed.stake, {
         key: `challenge:${accountId}`,
@@ -175,8 +178,10 @@ export const duelTextVariables = (
   loser: values.loser ?? "",
   net: values.net ?? "",
   loss: values.loss ?? "",
-  fight: values.fight ?? data.fightText,
-  botFight: data.botFightText,
+  fight: (data.fightTextEnabled ?? data.fightText.trim().length > 0)
+    ? values.fight ?? data.fightText
+    : "",
+  botFight: (data.botFightTextEnabled ?? data.botFightText.trim().length > 0) ? data.botFightText : "",
 });
 
 export const duelAnnouncementTemplate = (data: DuelRoundData): string =>

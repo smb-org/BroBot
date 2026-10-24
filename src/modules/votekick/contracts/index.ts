@@ -12,7 +12,7 @@ const VOTEKICK_MIN_WINDOW_SECONDS = 30;
 export const VOTEKICK_HISTORY_DAYS = 14;
 export const VOTEKICK_LIFT_CLAIM_LEASE_MS = 5 * 60 * 1_000;
 
-export const votekickSettingsSchema = z.object({
+const votekickSettingsObjectSchema = z.object({
   starterMinRole: z.enum(["viewer", "subscriber", "vip", "moderator", "broadcaster"]).default("vip"),
   minNetVotes: z.number().int().min(3).max(100_000),
   percent: z.number().int().min(5).max(100),
@@ -33,14 +33,19 @@ export const votekickSettingsSchema = z.object({
   expiredText: z.string().refine((text) => templateTextLength(text) <= 500),
   protectedText: z.string().refine((text) => templateTextLength(text) <= 500),
   busyText: z.string().refine((text) => templateTextLength(text) <= 500),
-}).superRefine((settings, context) => {
+});
+
+const validateVotekickMessages = (settings: z.output<typeof votekickSettingsObjectSchema>, context: z.RefinementCtx): void => {
   for (const key of ["startText", "passText", "failText", "expiredText", "protectedText", "busyText"] as const) {
     const enabledKey = `${key}Enabled`;
     if (isMessageEnabled(settings, key, enabledKey) && settings[key].trim().length === 0) {
       context.addIssue({ code: "custom", path: [key], message: "message_text_missing" });
     }
   }
-});
+};
+
+export const votekickSettingsReadSchema = votekickSettingsObjectSchema;
+export const votekickSettingsSchema = votekickSettingsObjectSchema.superRefine(validateVotekickMessages);
 
 export type VotekickSettings = z.output<typeof votekickSettingsSchema>;
 export const DEFAULT_VOTEKICK_SETTINGS: VotekickSettings = {

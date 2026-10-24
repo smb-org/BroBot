@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { DEFAULT_VOTEKICK_SETTINGS } from "../../src/modules/votekick/contracts";
+import { expectMessageHeadingsCentred } from "./switch-geometry";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
@@ -112,13 +113,14 @@ for (const viewport of viewports) {
     for (const layout of fieldLayouts) expect(layout.controlTop).toBeGreaterThanOrEqual(layout.labelBottom);
     const messageHeight = await editor.locator(".template-text-field__input").first().evaluate((element) => element.getBoundingClientRect().height);
     expect(messageHeight).toBeLessThanOrEqual(80);
-    const previewLayout = await editor.locator(".inspector-field-row:has(.ui-template-text-field__preview)").first().evaluate((row) => {
-      const control = row.querySelector(".inspector-field-row__control");
-      const preview = row.querySelector(".ui-template-text-field__preview");
-      if (!(control instanceof HTMLElement) || !(preview instanceof HTMLElement)) throw new Error("A message preview is missing.");
-      return { controlLeft: control.getBoundingClientRect().left, previewLeft: preview.getBoundingClientRect().left };
+    const previewLayout = await editor.locator(".ui-settings-editor__message").first().evaluate((message) => {
+      const input = message.querySelector(".template-text-field__input");
+      const preview = message.querySelector(".ui-template-text-field__preview");
+      if (!(input instanceof HTMLElement) || !(preview instanceof HTMLElement)) throw new Error("A message preview is missing.");
+      return { controlLeft: input.getBoundingClientRect().left, previewLeft: preview.getBoundingClientRect().left };
     });
     expect(Math.abs(previewLayout.controlLeft - previewLayout.previewLeft)).toBeLessThanOrEqual(2);
+    await expectMessageHeadingsCentred(page);
     if (viewport.width >= 1920) expect(await editor.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(960);
 
     const range = editor.locator(".timeout-duration-range-fields--visible-labels");

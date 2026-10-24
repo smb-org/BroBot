@@ -4,7 +4,7 @@ import { worstCaseTemplateLength } from "../../template";
 import type { PanelTemplateWarning } from "../../panel-contract";
 import type { IconName } from "./Icon";
 import type { ChatOutputTarget } from "../../contracts/values";
-import { isMessageEnabled } from "../../contracts/message-enabled";
+import type { MessageEnabledField } from "../../contracts/resolve-message-enabled";
 import { ChoiceCards } from "./ChoiceCards";
 import { ChatTargetField } from "./ChatTargetField";
 import { Field } from "./Field";
@@ -40,7 +40,7 @@ export type SettingsFieldSpec<Settings> =
   | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string | number }[] }
   | { kind: "choice"; key: keyof Settings & string; options: readonly { value: string; icon?: IconName }[] }
   | { kind: "custom"; key: keyof Settings & string; render: BivariantSettingsCustomFieldRender<Settings> }
-  | { kind: "switchCard"; key: keyof Settings & string; deriveFromTextKey?: keyof Settings & string; children?: readonly SettingsFieldSpec<Settings>[] };
+  | { kind: "switchCard"; key: keyof Settings & string; children?: readonly SettingsFieldSpec<Settings>[] };
 
 export interface SettingsCustomFieldProps<Settings> {
   settings: Settings;
@@ -118,6 +118,8 @@ export interface SettingsEditorDefinition<Settings> {
   savePosition?: "header" | "footer" | "page-header";
   showTitle?: boolean;
   className?: string;
+  /** Message paths handled by a custom field rather than the generic spec. */
+  messageFields?: readonly MessageEnabledField[];
 }
 
 export interface SettingsEditorProps<Settings extends object> {
@@ -292,8 +294,8 @@ export function SettingsEditor<Settings extends object>({
             value={typeof fieldValue === "string" ? fieldValue : ""}
             disabled={disabled}
             onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-            {...(copy.placeholder === undefined ? {} : { placeholder: copy.placeholder })}
             required={!field.optional}
+            {...(copy.placeholder === undefined ? {} : { placeholder: copy.placeholder })}
             {...(field.prefix === undefined ? {} : { prefix: field.prefix })}
             {...(maxLength === undefined ? {} : { countLength: (text: string) => textFieldLength(field, text), maxLength, countLabel: copy.countLabel ?? ((count, maximum) => `${String(count)} / ${String(maximum)}`) })}
           />
@@ -333,7 +335,7 @@ export function SettingsEditor<Settings extends object>({
       const targetKey = field.targetKey;
       const targetCopy = targetKey === undefined ? undefined : texts.fields[targetKey];
       const template = typeof fieldValue === "string" ? fieldValue : "";
-      const messageEnabled = isMessageEnabled(settings, field.key, field.enabledKey);
+      const messageEnabled = settings[field.enabledKey] === true;
       const targetValue = targetKey === undefined ? undefined : settings[targetKey];
       const targetError = targetKey === undefined ? undefined : fieldErrors[targetKey];
       const fieldVariables = variables?.[field.key] ?? templateMetadata?.[field.key]?.map(({ name, description, sample }) => ({ name, description, sample }));
@@ -364,7 +366,7 @@ export function SettingsEditor<Settings extends object>({
           {...(metadata === undefined ? {} : { worstCaseLength: worstCaseTemplateLength(template, metadata) })}
           {...(fieldVariables === undefined ? {} : { variables: fieldVariables })}
           preview={messageEnabled ? field.preview : emptyMessagePreview}
-          required={false}
+          required={messageEnabled}
           onIssuesChange={(issues) => { onIssuesChange?.(field.key, issues); }}
           {...(copy.previewLabel === undefined ? {} : { previewLabel: copy.previewLabel })}
           {...(copy.previewSpeaker === undefined ? {} : { previewSpeaker: copy.previewSpeaker })}
@@ -426,8 +428,7 @@ export function SettingsEditor<Settings extends object>({
     }
     const children = field.children?.map(renderField) ?? [];
     const lockedReason = field.children === undefined ? copy.disabledReason : undefined;
-    const checked = fieldValue === true || (fieldValue === undefined && field.deriveFromTextKey !== undefined &&
-      isMessageEnabled(settings, field.deriveFromTextKey, field.key));
+    const checked = fieldValue === true;
     const onToggle = (next: boolean): void => { onChange(field.key, next as Settings[typeof field.key]); };
     const fieldError = <FieldError className="ui-field__error" message={error} />;
     if (field.children === undefined) return <div key={field.key}>
@@ -470,8 +471,7 @@ export function SettingsEditor<Settings extends object>({
       ...(customContext === undefined ? {} : { context: customContext }),
     })}</Fragment>;
     if (field.kind === "switchCard" && field.children !== undefined) {
-      const switchEnabled = value === true || (value === undefined && field.deriveFromTextKey !== undefined &&
-        isMessageEnabled(settings, field.deriveFromTextKey, field.key));
+      const switchEnabled = value === true;
       return <div key={field.key}>
         <dt>{copy.label}</dt>
         <dd>
@@ -485,7 +485,7 @@ export function SettingsEditor<Settings extends object>({
     if (field.kind === "message") {
       const targetCopy = field.targetKey === undefined ? undefined : texts.fields[field.targetKey];
       const template = typeof value === "string" ? value : "";
-      const messageEnabled = isMessageEnabled(settings, field.key, field.enabledKey);
+      const messageEnabled = settings[field.enabledKey] === true;
       const target = field.targetKey === undefined ? undefined : settings[field.targetKey];
       const targetLabel = targetCopy?.options?.[String(target)]?.label ?? String(target ?? "");
       return <div className="ui-settings-editor__readonly-message" key={field.key}>

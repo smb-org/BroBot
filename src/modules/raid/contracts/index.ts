@@ -16,13 +16,16 @@ const raidSettingsObjectSchema = z.object({
   textShortTarget: z.enum(["all_chats", "source_only", "channel_default"]).default("channel_default"),
 });
 
-export const raidSettingsSchema = raidSettingsObjectSchema.superRefine((settings, context) => {
+const validateRaidMessages = (settings: z.output<typeof raidSettingsObjectSchema>, context: z.RefinementCtx): void => {
   for (const [messageKey, enabledKey] of [["textLong", "textLongEnabled"], ["textShort", "textShortEnabled"]] as const) {
     if (isMessageEnabled(settings, messageKey, enabledKey) && settings[messageKey].trim().length === 0) {
       context.addIssue({ code: "custom", path: [messageKey], message: "message_text_missing" });
     }
   }
-});
+};
+
+export const raidSettingsReadSchema = raidSettingsObjectSchema;
+export const raidSettingsSchema = raidSettingsObjectSchema.superRefine(validateRaidMessages);
 
 export type RaidSettings = Omit<z.output<typeof raidSettingsSchema>, "textLongTarget" | "textShortTarget"> & {
   textLongTarget?: "all_chats" | "source_only" | "channel_default";

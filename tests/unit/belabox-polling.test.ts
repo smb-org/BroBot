@@ -16,7 +16,7 @@ import {
   type BelaboxSettings,
 } from "../../src/modules/belabox/contracts";
 import { BELABOX_TEMPLATE_VARIABLES } from "../../src/modules/belabox/contracts/catalog";
-import { getBelaboxStatus, listBelaboxStreams } from "../../src/modules/belabox/adapters/d1";
+import { getBelaboxStatus, listBelaboxStreams, writeBelaboxAlertState } from "../../src/modules/belabox/adapters/d1";
 import { ensureBelaboxPoll, handleBelaboxPollAlarm, type BelaboxPollRoutineResult } from "../../src/modules/belabox/service";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
 import { writeModuleDiagnostics } from "../../src/worker/event-log";
@@ -688,6 +688,148 @@ describe("BELABOX polling", () => {
       lowText: "Saved low-bitrate text",
       lowTextEnabled: false,
     })).lowText).toBe("Saved low-bitrate text");
+  });
+
+  it.each([
+    ["low", "lowText", "lowTextEnabled"],
+    ["disconnect", "disconnectText", "disconnectTextEnabled"],
+    ["recovery", "recoveryText", "recoveryTextEnabled"],
+  ] as const)("rechecks the refreshed %s message flag after rendering", async (kind, messageKey, enabledKey) => {
+    const settings = {
+      ...BELABOX_DEFAULT_SETTINGS,
+      intervalSeconds: 5 as const,
+      lowBitrateKbps: 2_000,
+      recoverBitrateKbps: 3_000,
+      holdSeconds: 5,
+      recoverHoldSeconds: 5,
+      chatEnabled: true,
+      lowText: "low message",
+      lowTextEnabled: true,
+      disconnectText: "disconnect message",
+      disconnectTextEnabled: true,
+      recoveryText: "recovery message",
+      recoveryTextEnabled: true,
+    };
+    const targetText = settings[messageKey];
+    await insertModule(database, settings);
+    const { context, sendChat } = alarmContext(database);
+    let disabledAfterRender = false;
+    context.renderTemplate = async (text) => {
+      if (text === targetText) {
+        disabledAfterRender = true;
+        await database.prepare(
+          "UPDATE channel_modules SET settings = ?, revision = revision + 1 WHERE channel_id = ? AND module_id = 'belabox'",
+        ).bind(JSON.stringify({ ...settings, [enabledKey]: false }), CHANNEL_ID).run();
+      }
+      return { text };
+    };
+    const poll = (sample: ReturnType<typeof relayPayload> | ReturnType<typeof disconnectedRelayPayload>) =>
+      handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, () => Promise.resolve(jsonResponse(sample)));
+
+    await poll(relayPayload(true, 900));
+    vi.setSystemTime(Date.now() + 5_000);
+    await poll(relayPayload(true, 900));
+    if (kind !== "low") {
+      vi.setSystemTime(Date.now() + 1_000);
+      if (kind === "disconnect") {
+        const status = await getBelaboxStatus(context.DB, CHANNEL_ID);
+        if (status === null) throw new Error("BELABOX status missing before disconnect escalation.");
+        const seeded = await writeBelaboxAlertState(context.DB, CHANNEL_ID, {
+          ...status.alertState,
+          phase: "alarm",
+          kind: "disconnect",
+          since: null,
+          episodeStartedAt: "2026-10-05T11:59:55.000Z",
+          lastChatSentAt: null,
+          chatSentInEpisode: true,
+          pendingChat: {
+            kind: "disconnect", idempotencyKind: "escalate", episodeStartedAt: "2026-10-05T11:59:55.000Z",
+            alertKind: "disconnect", validPhase: "alarm", threshold: 0, seconds: 5,
+          },
+        }, status.revision);
+        expect(seeded).not.toBeNull();
+        await poll(disconnectedRelayPayload(0));
+      } else {
+        await poll(relayPayload(true, 3_200));
+        vi.setSystemTime(Date.now() + 5_000);
+        await poll(relayPayload(true, 3_200));
+      }
+    }
+
+    expect(disabledAfterRender).toBe(true);
+    expect(sendChat.mock.calls.some(([text]) => text === targetText)).toBe(false);
+  });
+
+  it.each([
+    ["low", "lowText", "lowTextEnabled"],
+    ["disconnect", "disconnectText", "disconnectTextEnabled"],
+    ["recovery", "recoveryText", "recoveryTextEnabled"],
+  ] as const)("rechecks the refreshed %s message flag inside stillValid", async (kind, _messageKey, enabledKey) => {
+    const settings = {
+      ...BELABOX_DEFAULT_SETTINGS,
+      intervalSeconds: 5 as const,
+      lowBitrateKbps: 2_000,
+      recoverBitrateKbps: 3_000,
+      holdSeconds: 5,
+      recoverHoldSeconds: 5,
+      chatEnabled: true,
+      lowText: "low message",
+      lowTextEnabled: true,
+      disconnectText: "disconnect message",
+      disconnectTextEnabled: true,
+      recoveryText: "recovery message",
+      recoveryTextEnabled: true,
+    };
+    const targetText = kind === "low" ? settings.lowText : kind === "disconnect" ? settings.disconnectText : settings.recoveryText;
+    await insertModule(database, settings);
+    const { context, sendChat } = alarmContext(database);
+    const checkedTarget: boolean[] = [];
+    sendChat.mockImplementation(async (text, _key, _attributions, stillValid) => {
+      if (text === targetText) {
+        await database.prepare(
+          "UPDATE channel_modules SET settings = ?, revision = revision + 1 WHERE channel_id = ? AND module_id = 'belabox'",
+        ).bind(JSON.stringify({ ...settings, [enabledKey]: false }), CHANNEL_ID).run();
+      }
+      const valid = await (stillValid?.() ?? Promise.resolve(true));
+      if (text === targetText) checkedTarget.push(valid);
+      return valid
+        ? { sent: true, reason: null, retryable: false, delivery: "delivered" }
+        : { sent: false, reason: "stale_before_send", retryable: false, delivery: "failed" };
+    });
+    const poll = (sample: ReturnType<typeof relayPayload> | ReturnType<typeof disconnectedRelayPayload>) =>
+      handleBelaboxPollAlarm(context, BELABOX_POLL_ALARM_KEY, Date.now(), undefined, () => Promise.resolve(jsonResponse(sample)));
+
+    await poll(relayPayload(true, 900));
+    vi.setSystemTime(Date.now() + 5_000);
+    await poll(relayPayload(true, 900));
+    if (kind !== "low") {
+      vi.setSystemTime(Date.now() + 1_000);
+      if (kind === "disconnect") {
+        const status = await getBelaboxStatus(context.DB, CHANNEL_ID);
+        if (status === null) throw new Error("BELABOX status missing before disconnect escalation.");
+        const seeded = await writeBelaboxAlertState(context.DB, CHANNEL_ID, {
+          ...status.alertState,
+          phase: "alarm",
+          kind: "disconnect",
+          since: null,
+          episodeStartedAt: "2026-10-05T11:59:55.000Z",
+          lastChatSentAt: null,
+          chatSentInEpisode: true,
+          pendingChat: {
+            kind: "disconnect", idempotencyKind: "escalate", episodeStartedAt: "2026-10-05T11:59:55.000Z",
+            alertKind: "disconnect", validPhase: "alarm", threshold: 0, seconds: 5,
+          },
+        }, status.revision);
+        expect(seeded).not.toBeNull();
+        await poll(disconnectedRelayPayload(0));
+      } else {
+        await poll(relayPayload(true, 3_200));
+        vi.setSystemTime(Date.now() + 5_000);
+        await poll(relayPayload(true, 3_200));
+      }
+    }
+
+    expect(checkedTarget).toEqual([false]);
   });
 
   it("does not re-enter the serialized poll when a template switches to on-demand", async () => {

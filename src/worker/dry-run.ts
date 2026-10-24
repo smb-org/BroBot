@@ -168,7 +168,7 @@ export const dryRunChatMessage = async (
           throw new Error("Module settings contain invalid JSON.");
         }
       }
-      const settings = module.settingsSchema.parse(rawSettings);
+      const settings = (module.settingsReadSchema ?? module.settingsSchema).parse(rawSettings);
       const event: ModuleEvent = {
         channelId,
         subscriptionType: CHAT_EVENT,

@@ -98,7 +98,7 @@ describe("Ad settings editor declaration", () => {
     expect(messageSwitches[1]?.getAttribute("aria-checked")).toBe("true");
     expect(messageSwitches[2]?.getAttribute("aria-checked")).toBe("false");
     fireEvent.change(prewarning, { target: { value: "Werbung in {ads.seconds} Sekunden." } });
-    expect(messageSwitches[2]?.getAttribute("aria-checked")).toBe("true");
+    expect(messageSwitches[2]?.getAttribute("aria-checked")).toBe("false");
   });
 
   it("requires text when a message is switched on and keeps explicit save", async () => {

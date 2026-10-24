@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { ChatOutputTarget } from "../../contracts/values";
 import { emoteSlotsCatalog } from "./locale";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 
 export const EMOTE_SLOTS_MODULE_ID = "emote_slots";
 export type EmoteSlotTextKind = "win" | "loss" | "pair" | "jackpot";
@@ -30,7 +31,7 @@ const emoteSlotSymbolSchema = z.object({
 
 const textTemplateSchema = z.string().max(500);
 
-export const emoteSlotSettingsSchema = z.object({
+const emoteSlotSettingsObjectSchema = z.object({
   symbols: z.array(emoteSlotSymbolSchema).length(6),
   minStake: z.number().int().min(1).max(10_000),
   defaultStake: z.number().int().min(1).max(100_000),
@@ -42,11 +43,17 @@ export const emoteSlotSettingsSchema = z.object({
   chatTarget: z.enum(["all_chats", "source_only", "where_asked"]),
   texts: z.object({
     win: textTemplateSchema,
+    winEnabled: z.boolean().optional(),
     loss: textTemplateSchema,
+    lossEnabled: z.boolean().optional(),
     pair: textTemplateSchema,
+    pairEnabled: z.boolean().optional(),
     jackpot: textTemplateSchema,
+    jackpotEnabled: z.boolean().optional(),
   }),
-}).superRefine((settings, context) => {
+});
+
+const validateEmoteSlotSettings = (settings: z.output<typeof emoteSlotSettingsObjectSchema>, context: z.RefinementCtx, includeMessages: boolean): void => {
   if (settings.minStake > settings.maxStake) {
     context.addIssue({ code: "custom", path: ["maxStake"], message: "minimum_exceeds_maximum" });
   }
@@ -65,6 +72,20 @@ export const emoteSlotSettingsSchema = z.object({
   if (settings.symbols.filter(({ isJackpot }) => isJackpot).length !== 1) {
     context.addIssue({ code: "custom", path: ["symbols"], message: "exactly_one_jackpot_required" });
   }
+  if (includeMessages) {
+    for (const kind of ["win", "loss", "pair", "jackpot"] as const) {
+      if (isMessageEnabled(settings.texts, kind, `${kind}Enabled`) && settings.texts[kind].trim().length === 0) {
+        context.addIssue({ code: "custom", path: ["texts", kind], message: "message_text_missing" });
+      }
+    }
+  }
+};
+
+export const emoteSlotSettingsReadSchema = emoteSlotSettingsObjectSchema.superRefine((settings, context) => {
+  validateEmoteSlotSettings(settings, context, false);
+});
+export const emoteSlotSettingsSchema = emoteSlotSettingsObjectSchema.superRefine((settings, context) => {
+  validateEmoteSlotSettings(settings, context, true);
 });
 
 export type EmoteSlotSettings = z.output<typeof emoteSlotSettingsSchema>;
@@ -92,9 +113,13 @@ export const DEFAULT_EMOTE_SLOT_SETTINGS: EmoteSlotSettings = {
   chatTarget: "where_asked" satisfies ChatOutputTarget,
   texts: {
     win: emoteSlotsCatalog.en.chat.win,
+    winEnabled: true,
     loss: emoteSlotsCatalog.en.chat.loss,
+    lossEnabled: true,
     pair: emoteSlotsCatalog.en.chat.pair,
+    pairEnabled: true,
     jackpot: emoteSlotsCatalog.en.chat.jackpot,
+    jackpotEnabled: true,
   },
 };
 
@@ -114,9 +139,13 @@ export const emoteSlotDefaultSettingsForLanguage = (language: "de" | "en"): Emot
     symbols: symbols.map((symbol) => ({ ...symbol, name: nameById[symbol.id as keyof typeof nameById] })),
     texts: {
       win: emoteSlotsCatalog[language].chat.win,
+      winEnabled: true,
       loss: emoteSlotsCatalog[language].chat.loss,
+      lossEnabled: true,
       pair: emoteSlotsCatalog[language].chat.pair,
+      pairEnabled: true,
       jackpot: emoteSlotsCatalog[language].chat.jackpot,
+      jackpotEnabled: true,
     },
   };
 };

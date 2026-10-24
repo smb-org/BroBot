@@ -325,6 +325,69 @@ describe("blitz answers in the channel Durable Object", () => {
     expect(audits?.count).toBe(1);
   });
 
+  it("opens the answer deadline without sending a disabled start message", async () => {
+    const channelId = `blitz-silent-start-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const worker = env as unknown as { DB: D1Database; CHANNEL: Env["CHANNEL"] };
+    const settings = { ...blitzRoundDefaultsForLanguage("en"), startText: "Saved start template", startTextEnabled: false };
+    await worker.DB.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'blitz_round', 1, ?, 1)")
+      .bind(channelId, JSON.stringify(settings)).run();
+    const repository = createBlitzQuestionRepository(worker.DB);
+    await repository.create(channelId, { kind: "quiz", prompt: "Which star?", answers: ["Sun"], enabled: true }, new Date().toISOString());
+    const object = blitzObject(pointObject(channelId));
+    const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({ sent: true, retryable: false, reason: null, delivery: "delivered" }));
+    await runPointObject(object, (target) => {
+      const runtime = target as unknown as { moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext };
+      const original = runtime.moduleAlarmContext.bind(target);
+      vi.spyOn(runtime, "moduleAlarmContext").mockImplementation((...args) => ({ ...original(...args), sendChat }));
+    });
+    const points = modulePoints(worker.CHANNEL, channelId, "blitz_round");
+
+    const opened = await openBlitzRound({ channelId, repository, points, settings, language: "en" });
+    await forcePointAlarm(object, opened.roundId);
+
+    await expect(points.rounds.active()).resolves.toMatchObject({ state: "open", deadlineAt: Date.now() + 60_000 });
+    expect(sendChat).not.toHaveBeenCalled();
+  });
+
+  it.each(["solved", "timeout"] as const)("suppresses a disabled %s message after the round resolves", async (resultKind) => {
+    const channelId = `blitz-silent-${resultKind}-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const worker = env as unknown as { DB: D1Database; CHANNEL: Env["CHANNEL"] };
+    const settings = {
+      ...blitzRoundDefaultsForLanguage("en"),
+      ...(resultKind === "solved" ? { solvedText: "Saved solved template", solvedTextEnabled: false } : {}),
+      ...(resultKind === "timeout" ? { timeoutText: "Saved timeout template", timeoutTextEnabled: false } : {}),
+    };
+    await worker.DB.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'blitz_round', 1, ?, 1)")
+      .bind(channelId, JSON.stringify(settings)).run();
+    const repository = createBlitzQuestionRepository(worker.DB);
+    await repository.create(channelId, { kind: "quiz", prompt: "Which star?", answers: ["Sun"], enabled: true }, new Date().toISOString());
+    const object = blitzObject(pointObject(channelId));
+    const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({ sent: true, retryable: false, reason: null, delivery: "delivered" }));
+    await runPointObject(object, (target) => {
+      const runtime = target as unknown as { moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext };
+      const original = runtime.moduleAlarmContext.bind(target);
+      vi.spyOn(runtime, "moduleAlarmContext").mockImplementation((...args) => ({ ...original(...args), sendChat }));
+    });
+    const points = modulePoints(worker.CHANNEL, channelId, "blitz_round");
+    const opened = await openBlitzRound({ channelId, repository, points, settings, language: "en" });
+    await forcePointAlarm(object, opened.roundId);
+
+    if (resultKind === "solved") {
+      await processBlitzMessage({ channelId, subscriptionType: "channel.chat.message", triggerId: "fictional-trigger",
+        receivedAt: new Date().toISOString(), actor: null, chatStatus: ["viewer"], settings,
+        payload: { message_id: "fictional-answer", chatter_user_id: "viewer_one", chatter_user_login: "frostfern", message: { text: "Sun" } },
+      }, { points, botUserId: () => Promise.resolve("fictional_bot") });
+    }
+    await forcePointAlarm(object, opened.roundId, (_target, state) => {
+      state.storage.sql.exec("UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?", Date.now() - 1, opened.roundId);
+    });
+
+    expect(sendChat).toHaveBeenCalledTimes(1);
+    await expect(points.rounds.active()).resolves.toBeNull();
+  });
+
   it("keeps the committed interval when a resolution resumes after reading stale settings", async () => {
     const channelId = `blitz-settings-resolution-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);

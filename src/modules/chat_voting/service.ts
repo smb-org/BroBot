@@ -1,6 +1,6 @@
 import type { BallotTermCount, ModuleEvent, ModuleExecutionContext, ModuleMutationAuthorization, ModuleResult } from "../contract";
 import type { ModuleLanguage, ModuleAlarmContext } from "../contract";
-import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS, DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey, chatVotingStartAnnouncementPollId } from "./contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS, DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN, chatVotingPresetForKind, chatVotingSettingsReadSchema, chatVotingStartAnnouncementAlarmKey, chatVotingStartAnnouncementPollId } from "./contracts";
 import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVoteTemplate, ChatVotingKind, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
 import { chatVoteTemplateConfiguration, configuredLabels, formatFreeTextVoteResult, formatVoteOptions, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, normalizeVoteTitle, parseVoteCommand, templateStartProblem, voteChoiceFromMessage, voteCloseDeadline, voteLabelLength } from "./domain";
 import type { ChatVoteResultTextTemplateSnapshot, ChatVotingRepository } from "./repository";
@@ -599,7 +599,7 @@ const alarmSettings = async (context: ModuleAlarmContext): Promise<ChatVotingSet
   ).bind(context.channelId, CHAT_VOTING_MODULE_ID).first<{ settings: string }>();
   if (row === null) return DEFAULT_CHAT_VOTING_SETTINGS;
   try {
-    const parsed = chatVotingSettingsSchema.safeParse(JSON.parse(row.settings));
+    const parsed = chatVotingSettingsReadSchema.safeParse(JSON.parse(row.settings));
     return parsed.success ? parsed.data : DEFAULT_CHAT_VOTING_SETTINGS;
   } catch { return DEFAULT_CHAT_VOTING_SETTINGS; }
 };
@@ -746,7 +746,9 @@ export const closeChatVoteFromAlarm = async (
 
   const settings = await alarmSettings(context);
   const resultTextTemplate = vote.resultText ?? settings.resultText;
-  const resultDeliveryPending = settings.announceResult && resultTextTemplate.trim().length > 0;
+  const resultDeliveryPending = isMessageEnabled(settings, "resultText", "announceResult") &&
+    (vote.resultText === undefined || vote.resultText === null ||
+      isMessageEnabled({ resultText: resultTextTemplate }, "resultText", "resultTextEnabled"));
 
   if (vote.status !== "closed") {
     await repository.finish(

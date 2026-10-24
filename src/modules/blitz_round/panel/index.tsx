@@ -1009,9 +1009,15 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
       <div className="blitz-panel__auto-start">
         <FieldPair>{autoStartFields}</FieldPair>
       </div>
-      <TemplateSetting language={language} label={labels.startText} value={draft.value.startText} onChange={(startText) => { draft.setValue((current) => ({ ...current, startText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
-      <TemplateSetting language={language} label={labels.solvedText} value={draft.value.solvedText} onChange={(solvedText) => { draft.setValue((current) => ({ ...current, solvedText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
-      <TemplateSetting language={language} label={labels.timeoutText} value={draft.value.timeoutText} onChange={(timeoutText) => { draft.setValue((current) => ({ ...current, timeoutText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
+      <TemplateSetting language={language} label={labels.startText} enabled={draft.value.startTextEnabled ?? draft.value.startText.trim().length > 0}
+        enabledLabel={labels.messageEnabledLabel} onEnabledChange={(startTextEnabled) => { draft.setValue((current) => ({ ...current, startTextEnabled })); }}
+        value={draft.value.startText} onChange={(startText) => { draft.setValue((current) => ({ ...current, startText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
+      <TemplateSetting language={language} label={labels.solvedText} enabled={draft.value.solvedTextEnabled ?? draft.value.solvedText.trim().length > 0}
+        enabledLabel={labels.messageEnabledLabel} onEnabledChange={(solvedTextEnabled) => { draft.setValue((current) => ({ ...current, solvedTextEnabled })); }}
+        value={draft.value.solvedText} onChange={(solvedText) => { draft.setValue((current) => ({ ...current, solvedText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
+      <TemplateSetting language={language} label={labels.timeoutText} enabled={draft.value.timeoutTextEnabled ?? draft.value.timeoutText.trim().length > 0}
+        enabledLabel={labels.messageEnabledLabel} onEnabledChange={(timeoutTextEnabled) => { draft.setValue((current) => ({ ...current, timeoutTextEnabled })); }}
+        value={draft.value.timeoutText} onChange={(timeoutText) => { draft.setValue((current) => ({ ...current, timeoutText })); }} disabled={!canManage || saving} hint={labels.roundTextHint} />
       <div className="blitz-panel__error-slot" role="status" aria-live="polite">{error ?? "\u00a0"}</div>
     </div>
     <ConfirmDialog
@@ -1029,12 +1035,30 @@ function SettingsEditor({ channelId, language, settings, revision, canManage, on
   </div>;
 }
 
-function TemplateSetting({ label, value, onChange, disabled, hint, language }: { label: string; value: string; onChange: (value: string) => void; disabled: boolean; hint: string; language: "de" | "en" }): ReactElement {
-  return <TemplateTextField label={label} value={value} onChange={onChange} disabled={disabled} hint={hint}
-    maxLength={500} minRows={2} messages={blitzTemplateMessages[language]}
-    variables={BLITZ_TEMPLATE_VARIABLES.map((variable) => ({
-      name: variable.name, sample: variable.sample,
-      label: variable.picker?.[language].label ?? variable.name,
-      description: variable.picker?.[language].description ?? variable.name,
-    }))} />;
+function TemplateSetting({ label, value, enabled, enabledLabel, onChange, onEnabledChange, disabled, hint, language }: {
+  label: string;
+  value: string;
+  enabled: boolean;
+  enabledLabel: string;
+  onChange: (value: string) => void;
+  onEnabledChange: (value: boolean) => void;
+  disabled: boolean;
+  hint: string;
+  language: "de" | "en";
+}): ReactElement {
+  return <div className="ui-settings-editor__message">
+    <div className="ui-settings-editor__message-heading">
+      <strong>{label}</strong>
+      <div className="ui-settings-editor__message-toggle">
+        <SwitchRow label={enabledLabel} ariaLabel={`${label}: ${enabledLabel}`} checked={enabled} onChange={onEnabledChange} disabled={disabled} />
+      </div>
+    </div>
+    <TemplateTextField label={label} value={value} onChange={onChange} disabled={disabled} hint={hint}
+      maxLength={500} minRows={2} required={enabled} messages={blitzTemplateMessages[language]}
+      variables={BLITZ_TEMPLATE_VARIABLES.map((variable) => ({
+        name: variable.name, sample: variable.sample,
+        label: variable.picker?.[language].label ?? variable.name,
+        description: variable.picker?.[language].description ?? variable.name,
+      }))} />
+  </div>;
 }

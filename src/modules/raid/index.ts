@@ -1,5 +1,5 @@
 import type { BotModule, ModuleTemplateUsageSource } from "../contract";
-import { RAID_TEMPLATE_FIELDS, raidSettingsSchema } from "./contracts";
+import { RAID_TEMPLATE_FIELDS, raidSettingsReadSchema, raidSettingsSchema } from "./contracts";
 import { DEFAULT_TEXT_LONG, DEFAULT_TEXT_SHORT } from "./contracts/chat-defaults";
 import { processRaid } from "./service";
 import { settingsVariableReferences } from "../contract";
@@ -30,6 +30,7 @@ export const raidModule: BotModule<typeof raidSettingsSchema> = {
   panelIcon: raidPanelIcon,
   templateVariableGroup: { label: raidTemplateVariableGroupLabels, icon: raidPanelIcon, order: 65 },
   settingsSchema: raidSettingsSchema,
+  settingsReadSchema: raidSettingsReadSchema,
   templateFields: RAID_TEMPLATE_FIELDS,
   templateContext: "event",
   templateUsageSources,

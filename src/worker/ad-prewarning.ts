@@ -65,7 +65,7 @@ const moduleSettings = (record: ChannelModuleRecord | null) => {
   } catch {
     return null;
   }
-  const parsed = adsModule.settingsSchema.safeParse(raw);
+  const parsed = (adsModule.settingsReadSchema ?? adsModule.settingsSchema).safeParse(raw);
   return parsed.success ? parsed.data : null;
 };
 

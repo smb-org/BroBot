@@ -4725,6 +4725,12 @@ export class ChannelObject extends DurableObject<Env> {
     const attemptRound = attempt.round;
     const attemptNumber = attempt.attempt;
     await this.scheduleEarliestAlarm();
+    const roundData = JSON.parse(attemptRound.data_json) as unknown;
+    if (formatted?.kind === "silent" || (typeof roundData === "object" && roundData !== null && !Array.isArray(roundData) &&
+        Reflect.get(roundData, "silentAnnouncement") === true)) {
+      await this.recordPointRoundAnnouncement(roundId, "delivered", Date.now());
+      return;
+    }
     const attemptTimestamp = attemptRound.last_attempt_at;
     const stillValid = async (): Promise<boolean> => {
       await this.reconcilePointModuleActivation(attemptRound.module_id, true);

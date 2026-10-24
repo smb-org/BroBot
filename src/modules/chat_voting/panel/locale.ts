@@ -56,7 +56,6 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     fields: {
       autoCloseSeconds: { label: "Standarddauer", hint: "Gilt als Vorbelegung für neue Abstimmungen. Ohne Timer endet die Abstimmung nach vier Stunden.", unit: "s", zeroValueLabel: "Aus" },
       startText: { label: "Starttext", hint: "Wird beim Start im Chat gesendet. Schalte die Meldung über den Schalter aus.", requiredError: "Text fehlt", previewLabel: "Vorschau", previewSpeaker: "Bot", variables: variables("de") },
-      announceResult: { label: "Ergebnis im Chat senden", hint: "Wird über die gemeinsame Chat-Ausgabebegrenzung gesendet.", description: "Sendet das Ergebnis nach dem Schließen im Chat." },
       resultText: { label: "Ergebnistext", hint: "{vote.result} enthält Beschriftung, Stimmenzahl und Prozent je Option. {vote.title} enthält die Frage, {vote.options} erklärt die Abstimmung und {vote.duration} ihre Dauer.", requiredError: "Text eingeben", previewLabel: "Vorschau", previewSpeaker: "Bot", variables: variables("de") },
       resultTarget: { label: "Ziel des Ergebnisses", hint: "Wirkt nur während eines Shared Chats.", options: { all_chats: { label: "Alle Chats" }, source_only: { label: "Nur unser Chat" } } },
     },
@@ -76,7 +75,6 @@ const catalog: LocaleCatalog<SettingsEditorCatalog> = {
     fields: {
       autoCloseSeconds: { label: "Default duration", hint: "Prefills new votes. Without a timer, the vote ends after four hours.", unit: "s", zeroValueLabel: "Off" },
       startText: { label: "Start text", hint: "Sent in chat when a vote starts. Turn it off with the switch.", requiredError: "Text missing", previewLabel: "Preview", previewSpeaker: "Bot", variables: variables("en") },
-      announceResult: { label: "Send the result in chat", hint: "Uses the shared automated chat output limit.", description: "Sends the result to chat after closing." },
       resultText: { label: "Result text", hint: "{vote.result} contains each option label, vote count, and percentage. {vote.title} contains the question, {vote.options} explains how to vote, and {vote.duration} gives its duration.", requiredError: "Enter text", previewLabel: "Preview", previewSpeaker: "Bot", variables: variables("en") },
       resultTarget: { label: "Result target", hint: "Only affects output during Shared Chat.", options: { all_chats: { label: "All chats" }, source_only: { label: "Only our chat" } } },
     },

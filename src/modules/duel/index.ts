@@ -1,5 +1,5 @@
 import type { BotModule, ModuleAlarmContext, ModulePointRoundAnnouncement, ModulePointRoundResult } from "../contract";
-import { DUEL_MODULE_ID, duelSettingsForLanguage, duelSettingsSchema, type DuelRoundData } from "./contracts";
+import { DUEL_MODULE_ID, duelSettingsForLanguage, duelSettingsReadSchema, duelSettingsSchema, type DuelRoundData } from "./contracts";
 import { duelCatalog } from "./locale";
 import { duelAnnouncementTemplate, duelFightLine, duelResultTemplate, duelTextVariables, processDuelMessage } from "./service";
 import { isMessageEnabled } from "../../contracts/message-enabled";
@@ -27,7 +27,7 @@ const formatAnnouncement = async (
   const data = roundData(round.data);
   if (data === null) return null;
   const messageKey = data.targetId === null ? "challengeOpen" : "challengeTargeted";
-  if (!isMessageEnabled(data.texts, messageKey, `${messageKey}Enabled`)) return null;
+  if (!isMessageEnabled(data.texts, messageKey, `${messageKey}Enabled`)) return { kind: "silent" as const };
   const rendered = await context.renderTemplate(duelAnnouncementTemplate(data), duelTextVariables(data));
   return {
     text: rendered.text,
@@ -76,6 +76,7 @@ export const duelModule: BotModule<typeof duelSettingsSchema> = {
   }],
   defaultEnabled: false,
   settingsSchema: duelSettingsSchema,
+  settingsReadSchema: duelSettingsReadSchema,
   defaultSettings: duelSettingsForLanguage("de"),
   defaultSettingsForLanguage: duelSettingsForLanguage,
   settingsEditor: () => import("./panel/settings-editor"),
@@ -86,7 +87,7 @@ export const duelModule: BotModule<typeof duelSettingsSchema> = {
   pointRoundCancellationNotice: false,
   retryPointRoundRateLimitedResults: true,
   chatCommandNames: (settings) => {
-    const parsed = duelSettingsSchema.safeParse(settings);
+    const parsed = duelSettingsReadSchema.safeParse(settings);
     return parsed.success ? [parsed.data.challengeCommand, parsed.data.acceptCommand] : [];
   },
   chatCommandSettingsFields: ["challengeCommand", "acceptCommand"],

@@ -15,7 +15,7 @@ describe("shared message settings editor", () => {
     let latest = adsModule.defaultSettings;
     const copy = adsSettingsEditorCatalog("en");
     const Harness = () => {
-      const [settings, setSettings] = useState(adsModule.defaultSettings);
+      const [settings, setSettings] = useState({ ...adsModule.defaultSettings, automaticEnabled: true });
       latest = settings;
       return <UiProvider><SettingsEditor
         spec={adsSettingsEditor.spec}

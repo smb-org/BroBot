@@ -73,6 +73,7 @@ export interface BlitzTexts {
   startText: string;
   solvedText: string;
   timeoutText: string;
+  messageEnabledLabel: string;
   roundTextHint: string;
   settingsError: string;
   settingsConflict: string;
@@ -186,6 +187,7 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     startText: "Startnachricht",
     solvedText: "Auflösung bei richtigen Antworten",
     timeoutText: "Auflösung ohne Gewinner",
+    messageEnabledLabel: "Nachricht senden",
     roundTextHint: "Variablen: {blitz.type}, {blitz.prompt}, {blitz.answer}, {blitz.prize}, {blitz.seconds}, {blitz.winners}, {blitz.share}",
     settingsError: "Die Einstellungen konnten nicht gespeichert werden.",
     settingsConflict: "Die Rundeneinstellungen wurden anderswo geändert. Lade den gespeicherten Stand, bevor du weiterarbeitest.",
@@ -302,6 +304,7 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     startText: "Start message",
     solvedText: "Result when viewers answer correctly",
     timeoutText: "Result when nobody wins",
+    messageEnabledLabel: "Send message",
     roundTextHint: "Variables: {blitz.type}, {blitz.prompt}, {blitz.answer}, {blitz.prize}, {blitz.seconds}, {blitz.winners}, {blitz.share}",
     settingsError: "The settings could not be saved.",
     settingsConflict: "Round settings changed elsewhere. Load the saved version before continuing.",
@@ -357,8 +360,11 @@ export const blitzRoundDefaultsForLanguage = (language: "de" | "en"): BlitzRound
     autoStart: false,
     autoStartIntervalMinutes: 15,
     startText: labels.startTextDefault,
+    startTextEnabled: true,
     solvedText: labels.solvedTextDefault,
+    solvedTextEnabled: true,
     timeoutText: labels.timeoutTextDefault,
+    timeoutTextEnabled: true,
   });
 };
 

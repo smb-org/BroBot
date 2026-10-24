@@ -34,11 +34,21 @@ const chatVotingSettingsObjectSchema = z.object({
   resultTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
 });
 
-export const chatVotingSettingsSchema = chatVotingSettingsObjectSchema.superRefine((settings, context) => {
+const validateChatVotingMessages = (settings: z.output<typeof chatVotingSettingsObjectSchema>, context: z.RefinementCtx): void => {
   if (isMessageEnabled(settings, "startText", "startTextEnabled") && settings.startText.trim().length === 0) {
     context.addIssue({ code: "custom", path: ["startText"], message: "message_text_missing" });
   }
-});
+  if (isMessageEnabled(settings, "resultText", "announceResult") && settings.resultText.trim().length === 0) {
+    context.addIssue({ code: "custom", path: ["resultText"], message: "message_text_missing" });
+  }
+};
+
+export const chatVotingSettingsReadSchema = chatVotingSettingsObjectSchema.transform((settings) => ({
+  ...settings,
+  // Before result text had a dedicated validation rule, blank result messages were silently suppressed.
+  announceResult: settings.announceResult && settings.resultText.trim().length > 0,
+}));
+export const chatVotingSettingsSchema = chatVotingSettingsObjectSchema.superRefine(validateChatVotingMessages);
 
 export type ChatVotingSettings = z.output<typeof chatVotingSettingsSchema>;
 

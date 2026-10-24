@@ -17,10 +17,7 @@ const spec: SettingsEditorSpec<ChatVotingSettings> = {
     ] },
     { id: "messages", icon: "tabMessages", fields: [
       { kind: "message", key: "startText", enabledKey: "startTextEnabled", preview },
-      { kind: "switchCard", key: "announceResult", children: [
-        { kind: "template", key: "resultText", minRows: 2, preview },
-        { kind: "chatTarget", key: "resultTarget" },
-      ] },
+      { kind: "message", key: "resultText", enabledKey: "announceResult", targetKey: "resultTarget", preview },
     ] },
   ],
 };

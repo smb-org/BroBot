@@ -6,7 +6,7 @@ import { SaveStatus, UiProvider } from "../../src/dashboard/ui";
 import { emoteSlotDefaultSettingsForLanguage, emoteSlotSettingsSchema } from "../../src/modules/emote_slots/contracts";
 import { emoteSlotsCatalog } from "../../src/modules/emote_slots/locale";
 import { emoteSlotSettingsEditorCatalog } from "../../src/modules/emote_slots/panel/locale";
-import { SlotReelTable, SlotShareField } from "../../src/modules/emote_slots/panel/slot-fields";
+import { SlotReelTable, SlotShareField, SlotTextsField } from "../../src/modules/emote_slots/panel/slot-fields";
 import type { EmoteSlotSettings } from "../../src/modules/emote_slots/contracts";
 
 afterEach(() => {
@@ -54,6 +54,23 @@ describe("emote slot settings controls", () => {
 
     expect(Number.isInteger(sent)).toBe(false);
     expect(emoteSlotSettingsSchema.safeParse({ ...settings, jackpotShareBp: sent }).success).toBe(false);
+  });
+
+  it("keeps disabled outcome text editable and saved while hiding only its chat action switch", () => {
+    const base = emoteSlotDefaultSettingsForLanguage("de");
+    const settings = { ...base, texts: { ...base.texts, win: "Saved win text", winEnabled: false } };
+    const onChange = vi.fn();
+    const copy = emoteSlotsCatalog.de.panel;
+    render(<UiProvider><SlotTextsField settings={settings} onChange={onChange} disabled={false} readOnly={false}
+      context={{ channelId: "slot_component_demo", language: "de" }} /></UiProvider>);
+
+    const toggle = screen.getByRole("switch", { name: `${copy.win}: ${copy.messageEnabledLabel}` });
+    const textbox = screen.getByRole("textbox", { name: copy.win });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect((textbox as HTMLTextAreaElement).disabled).toBe(false);
+    fireEvent.change(textbox, { target: { value: "Edited while disabled" } });
+
+    expect(onChange).toHaveBeenLastCalledWith({ ...settings.texts, win: "Edited while disabled" });
   });
 
   it("normalizes a cleared multiplier when its row becomes the jackpot (protects=selecting a row with an invalid hidden multiplier leaves a valid draft; fails_when=the hidden triple stays empty and keeps the settings invalid; no_claim=save button rendering)", () => {
