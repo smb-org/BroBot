@@ -249,15 +249,22 @@ test("cold module navigation keeps the reserved page height and scroll position 
   // While the boundary suspends, React keeps the hidden primary tree next to the fallback.
   const reservedPage = page.locator(".module-route-layout:visible");
   const heightBefore = await reservedPage.evaluate((element) => element.getBoundingClientRect().height);
-  await page.evaluate(() => { window.scrollTo(0, 120); });
-  const scrollBefore = await page.evaluate(() => window.scrollY);
+  // The dashboard scrolls `.dashboard-shell__main`, not the window. The fallback alone does not
+  // overflow it, so append a spacer to guarantee a scroll range.
+  const scrollRoot = page.locator(".dashboard-shell__main");
+  const scrollBefore = await scrollRoot.evaluate((element) => {
+    element.insertAdjacentHTML("beforeend", '<div style="height: 2000px"></div>');
+    element.scrollTop = 120;
+    return element.scrollTop;
+  });
+  expect(scrollBefore, "the scroll container must overflow, or the check compares zero with zero").toBeGreaterThan(0);
 
   releaseRequest();
   await expect(page.locator(".module-view-fallback")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Data sources", level: 1, exact: true })).toBeVisible();
 
   expect(await reservedPage.evaluate((element) => element.getBoundingClientRect().height)).toBe(heightBefore);
-  expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+  expect(await scrollRoot.evaluate((element) => element.scrollTop)).toBe(scrollBefore);
 });
 
 test("native Back and Forward keep the current view visible while a module chunk is held", async ({ page }) => {
