@@ -193,7 +193,8 @@ describe("Raid module", () => {
       shoutoutEnabled: true,
       shoutoutThreshold: 3,
       textThreshold: 3,
-      textLong: "   ",
+      textLong: "Saved full text",
+      textLongEnabled: false,
       textShort: "Danke {channel}",
     };
     expect(raidSettingsSchema.safeParse(settings).success).toBe(true);
@@ -203,5 +204,23 @@ describe("Raid module", () => {
     expect(processRaid(event(incomingRaid(2), settings)).actions).toEqual([
       { kind: "chat", text: "Danke quelle", target: "source_only" },
     ]);
+  });
+
+  it("turns the short message off while preserving its saved text", () => {
+    const settings = {
+      ...raidModule.defaultSettings,
+      textShort: "Saved short text",
+      textShortEnabled: false,
+    };
+
+    expect(processRaid(event(incomingRaid(2), settings)).actions).toEqual([]);
+    expect(settings.textShort).toBe("Saved short text");
+  });
+
+  it("rejects an enabled raid message with no text", () => {
+    const result = raidSettingsSchema.safeParse({ ...raidModule.defaultSettings, textLong: "  ", textLongEnabled: true });
+
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues.map((issue) => issue.path)).toContainEqual(["textLong"]);
   });
 });

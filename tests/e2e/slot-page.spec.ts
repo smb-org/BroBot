@@ -189,6 +189,28 @@ test("slot quote states stay fixed, lock unsafe saves, and persist explicit edit
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test("a cleared enabled outcome text is marked at its own field, keeps the quote and blocks save until text returns", async ({ page }) => {
+  const fixture = await installSlotPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/channels/${CHANNEL_ID}/modules/emote_slots`);
+
+  const pageRoot = page.locator(".module-detail--settings-page");
+  const win = page.getByRole("textbox", { name: SLOT_COPY.win, exact: true });
+  const save = pageRoot.getByRole("button", { name: EDITOR_COPY.saveLabel });
+  await expect(pageRoot.locator(".slot-rate-line")).toContainText(DEFAULT_RATE);
+  await win.fill("");
+
+  await expect(win).toHaveAttribute("aria-invalid", "true");
+  await expect(pageRoot.getByText(SLOT_COPY.messageMissing, { exact: true })).toBeVisible();
+  await expect(pageRoot.locator(".slot-rate-line")).toContainText(DEFAULT_RATE);
+  await expect(save).toHaveAttribute("aria-disabled", "true");
+  expect(fixture.settingsSaves).toHaveLength(0);
+
+  await win.fill("{slot.symbols}  {slot.net}");
+  await expect(win).not.toHaveAttribute("aria-invalid", "true");
+  await expect(pageRoot.getByText(SLOT_COPY.messageMissing, { exact: true })).toHaveCount(0);
+});
+
 test("shows complete full-width slot previews below their textareas at desktop sizes", async ({ page }) => {
   await installSlotPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });

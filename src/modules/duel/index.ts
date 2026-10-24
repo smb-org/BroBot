@@ -1,7 +1,8 @@
 import type { BotModule, ModuleAlarmContext, ModulePointRoundAnnouncement, ModulePointRoundResult } from "../contract";
-import { DUEL_MODULE_ID, duelSettingsForLanguage, duelSettingsSchema, type DuelRoundData } from "./contracts";
+import { DUEL_MODULE_ID, duelSettingsForLanguage, duelSettingsReadSchema, duelSettingsSchema, type DuelRoundData } from "./contracts";
 import { duelCatalog } from "./locale";
 import { duelAnnouncementTemplate, duelFightLine, duelResultTemplate, duelTextVariables, processDuelMessage } from "./service";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 import { duelRoutes } from "./routes";
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -25,6 +26,8 @@ const formatAnnouncement = async (
 ) => {
   const data = roundData(round.data);
   if (data === null) return null;
+  const messageKey = data.targetId === null ? "challengeOpen" : "challengeTargeted";
+  if (!isMessageEnabled(data.texts, messageKey, `${messageKey}Enabled`)) return { kind: "silent" as const };
   const rendered = await context.renderTemplate(duelAnnouncementTemplate(data), duelTextVariables(data));
   return {
     text: rendered.text,
@@ -41,6 +44,8 @@ const formatResult = async (context: ModuleAlarmContext, round: ModulePointRound
   const result = record(round.result);
   if (data === null || result === null || result.expired === true || typeof result.winnerLogin !== "string" ||
       typeof result.loserLogin !== "string" || typeof result.bot !== "boolean") return null;
+  const resultKey = result.bot ? "botResult" : "result";
+  if (!isMessageEnabled(data.texts, resultKey, `${resultKey}Enabled`)) return null;
   const rendered = await context.renderTemplate(duelResultTemplate(data, result.bot), duelTextVariables(data, {
     fight: duelFightLine(data, result.bot),
     winner: result.winnerLogin,
@@ -71,6 +76,7 @@ export const duelModule: BotModule<typeof duelSettingsSchema> = {
   }],
   defaultEnabled: false,
   settingsSchema: duelSettingsSchema,
+  settingsReadSchema: duelSettingsReadSchema,
   defaultSettings: duelSettingsForLanguage("de"),
   defaultSettingsForLanguage: duelSettingsForLanguage,
   settingsEditor: () => import("./panel/settings-editor"),
@@ -81,7 +87,7 @@ export const duelModule: BotModule<typeof duelSettingsSchema> = {
   pointRoundCancellationNotice: false,
   retryPointRoundRateLimitedResults: true,
   chatCommandNames: (settings) => {
-    const parsed = duelSettingsSchema.safeParse(settings);
+    const parsed = duelSettingsReadSchema.safeParse(settings);
     return parsed.success ? [parsed.data.challengeCommand, parsed.data.acceptCommand] : [];
   },
   chatCommandSettingsFields: ["challengeCommand", "acceptCommand"],

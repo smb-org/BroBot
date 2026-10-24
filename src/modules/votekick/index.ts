@@ -3,7 +3,7 @@ import { settingsVariableReferences } from "../contract";
 import { VOTEKICK_TEMPLATE_FIELDS } from "./contracts/template-variable-catalog";
 import { votekickCatalog } from "./contracts/catalog";
 import { VOTEKICK_CHAT_COMMANDS } from "./contracts/chat-commands";
-import { DEFAULT_VOTEKICK_SETTINGS, VOTEKICK_HISTORY_DAYS, VOTEKICK_LIFT_CLAIM_LEASE_MS, VOTEKICK_MODULE_ID, votekickDefaultSettingsForLanguage, votekickSettingsSchema } from "./contracts";
+import { DEFAULT_VOTEKICK_SETTINGS, VOTEKICK_HISTORY_DAYS, VOTEKICK_LIFT_CLAIM_LEASE_MS, VOTEKICK_MODULE_ID, votekickDefaultSettingsForLanguage, votekickSettingsReadSchema, votekickSettingsSchema } from "./contracts";
 import { createVotekickRepository, purgeExpiredVotekickUserIds } from "./adapters/d1";
 import { processVotekickMessage, closeExpiredVotekick, votekickOverlayPayload } from "./service";
 import { dryRunVotekickMessage } from "./dry-run";
@@ -43,6 +43,7 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   chatCommands: VOTEKICK_CHAT_COMMANDS,
   templateVariableGroup: { label: { de: votekickCatalog.de.name, en: votekickCatalog.en.name }, icon: votekickIcon, order: 74 },
   settingsSchema: votekickSettingsSchema,
+  settingsReadSchema: votekickSettingsReadSchema,
   defaultSettings: DEFAULT_VOTEKICK_SETTINGS,
   defaultSettingsForLanguage: votekickDefaultSettingsForLanguage,
   broadcasterScopes: ["moderation:read"],

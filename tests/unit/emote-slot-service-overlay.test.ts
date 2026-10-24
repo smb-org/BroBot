@@ -91,4 +91,22 @@ describe("slot spin overlay messages", () => {
 
     expect(result.actions).toEqual([]);
   });
+
+  it.each([
+    { kind: "win", result: settlement },
+    { kind: "loss", result: { ...settlement, symbols: [0, 1, 2] as [number, number, number], net: -50, triple: false } },
+    { kind: "pair", result: { ...settlement, symbols: [0, 0, 1] as [number, number, number], net: 0, pair: true, triple: false } },
+    { kind: "jackpot", result: { ...settlement, symbols: [5, 5, 5] as [number, number, number], jackpotWin: 500 } },
+  ] as const)("keeps a disabled $kind message saved while delivering the booked spin overlay", async ({ kind, result: outcome }) => {
+    const settings = {
+      ...DEFAULT_EMOTE_SLOT_SETTINGS,
+      texts: { ...DEFAULT_EMOTE_SLOT_SETTINGS.texts, [kind]: `Saved ${kind} message`, [`${kind}Enabled`]: false },
+    };
+
+    const result = await processEmoteSlotMessage(eventFor(settings), contextFor(false, "en", outcome as SlotSettlementResult));
+
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions[0]).toMatchObject({ kind: "overlay", type: "spin", payload: { outcome: kind } });
+    expect(settings.texts[kind]).toBe(`Saved ${kind} message`);
+  });
 });

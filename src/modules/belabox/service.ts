@@ -11,7 +11,7 @@ import {
   BELABOX_SECRET_UNAVAILABLE_STATUS_CODE,
   BELABOX_STATS_URL_SECRET,
   belaboxDefaultAlertTexts,
-  belaboxSettingsSchema,
+  belaboxSettingsReadSchema,
   type BelaboxFetchResult,
   type BelaboxSample,
   type BelaboxSettings,
@@ -57,6 +57,7 @@ import {
 import { validateBelaboxStatsUrl } from "./domain/stats-url";
 import { enrichBelaboxSample, resolvedBelaboxPhase } from "./domain/presentation";
 import { formatTemplateValues } from "./template-values";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 import { BELABOX_TEMPLATE_VARIABLES } from "./contracts/catalog";
 import { prepareChannelModuleSettingsWrite } from "../repository/channel-module-storage";
 
@@ -140,7 +141,7 @@ export const belaboxSettingsForChannel = async (
   ).bind(channelId).first<StoredModuleSettings>();
   if (row === null) return null;
   try {
-    const settings = belaboxSettingsSchema.safeParse(JSON.parse(row.settings) as unknown);
+    const settings = belaboxSettingsReadSchema.safeParse(JSON.parse(row.settings) as unknown);
     return settings.success ? { enabled: row.enabled === 1, settings: settings.data, revision: row.revision } : null;
   } catch {
     return null;
@@ -581,12 +582,14 @@ const storePollResult = async (
 
 const alertTextFor = (settings: BelaboxSettings, output: BelaboxAlertChatOutput): {
   text: string;
+  messageKey: "lowText" | "disconnectText" | "recoveryText";
+  enabledKey: "lowTextEnabled" | "disconnectTextEnabled" | "recoveryTextEnabled";
   target: BelaboxSettings["lowTarget"];
 } => output.kind === "low"
-  ? { text: settings.lowText, target: settings.lowTarget }
+  ? { text: settings.lowText, messageKey: "lowText", enabledKey: "lowTextEnabled", target: settings.lowTarget }
   : output.kind === "disconnect"
-    ? { text: settings.disconnectText, target: settings.disconnectTarget }
-    : { text: settings.recoveryText, target: settings.recoveryTarget };
+    ? { text: settings.disconnectText, messageKey: "disconnectText", enabledKey: "disconnectTextEnabled", target: settings.disconnectTarget }
+    : { text: settings.recoveryText, messageKey: "recoveryText", enabledKey: "recoveryTextEnabled", target: settings.recoveryTarget };
 
 const sendPendingAlert = async (
   context: ModuleAlarmContext,
@@ -612,8 +615,9 @@ const sendPendingAlert = async (
   const beforeRender = await belaboxSettingsForChannel(context.DB, context.channelId);
   if (beforeRender?.enabled !== true || beforeRender.settings.mode !== "interval" ||
       !beforeRender.settings.alertsEnabled || !beforeRender.settings.chatEnabled) return;
-  const settings = moduleState.settings;
+  const settings = beforeRender.settings;
   const message = alertTextFor(settings, output);
+  if (!isMessageEnabled(settings, message.messageKey, message.enabledKey)) return;
   const startedAt = Date.parse(output.episodeStartedAt);
   const downForSeconds = Math.max(0, Math.floor((Date.parse(sample.sample.at) - startedAt) / 1_000));
   // All variables come from the sample captured by this run; the renderer must never
@@ -634,7 +638,8 @@ const sendPendingAlert = async (
   }, Date.parse(sample.sample.at));
   const beforeSend = await belaboxSettingsForChannel(context.DB, context.channelId);
   if (beforeSend?.enabled !== true || beforeSend.settings.mode !== "interval" ||
-      !beforeSend.settings.alertsEnabled || !beforeSend.settings.chatEnabled) return;
+      !beforeSend.settings.alertsEnabled || !beforeSend.settings.chatEnabled ||
+      !isMessageEnabled(beforeSend.settings, message.messageKey, message.enabledKey)) return;
   const idempotencyKey = `belabox:${streamId}:${output.episodeStartedAt}:${output.idempotencyKind}`;
   const result = await context.sendChat(rendered.text, idempotencyKey, rendered.attributions, async () => {
     const [currentModule, currentStatus, live, currentSession, currentSnapshot] = await Promise.all([
@@ -646,6 +651,7 @@ const sendPendingAlert = async (
     ]);
     if (currentModule?.enabled !== true || currentModule.settings.mode !== "interval" ||
         !currentModule.settings.alertsEnabled || !currentModule.settings.chatEnabled ||
+        !isMessageEnabled(currentModule.settings, message.messageKey, message.enabledKey) ||
         live.streamId !== streamId || currentStatus?.streamId !== streamId || currentStatus.belaboxStreamId !== streamId ||
         currentStatus.streamSessionKey !== belaboxStreamSessionKey(expectedSession) ||
         !sameBelaboxStreamSession(expectedSession, currentSession) ||

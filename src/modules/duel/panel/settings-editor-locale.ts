@@ -69,7 +69,11 @@ const catalog = (language: DashboardLanguage): SettingsEditorCatalog => {
         source_only: { label: de ? "Quellkanal" : "Source channel" },
         where_asked: { label: de ? "Wo gefragt wurde" : "Where asked" },
       } },
-      texts: { label: text.texts, hint: de ? "Vorlagen und Fehlermeldungen für Duelle." : "Templates and errors used by duels." },
+      texts: {
+        label: text.texts,
+        hint: de ? "Vorlagen und Fehlermeldungen für Duelle." : "Templates and errors used by duels.",
+        requiredError: copy.messageMissing,
+      },
     },
     warningLabel: (warning: PanelTemplateWarning) => warning.code === "unknown_template_variables"
       ? `${de ? "Unbekannte Variablen" : "Unknown variables"}: ${warning.unknownVariables.join(", ")}`

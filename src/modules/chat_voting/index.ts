@@ -11,7 +11,7 @@ import { createChatVotingRepository } from "./repository";
 import { CHAT_VOTING_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
 import { chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition, processChatVotingMessage } from "./service";
-import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsSchema, type ChatVotingKind } from "./contracts";
+import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsReadSchema, chatVotingSettingsSchema, type ChatVotingKind } from "./contracts";
 import { chatVotingOverlayElements } from "./overlay/element";
 import { chatVotingRoutes } from "./routes";
 import { chatVotingImmediateActionTexts } from "./action-locale";
@@ -188,6 +188,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   panelIcon: { paths: ["M4 5h16v14H4z", "M7 9h3", "M14 9h3", "M7 13h3", "M14 13h3", "M10 17h4"] },
   defaultEnabled: true,
   settingsSchema,
+  settingsReadSchema: chatVotingSettingsReadSchema,
   defaultSettings: DEFAULT_CHAT_VOTING_SETTINGS,
   chatCommands: CHAT_VOTING_CHAT_COMMANDS,
   templateContext: "event",

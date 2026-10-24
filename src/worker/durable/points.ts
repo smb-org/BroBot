@@ -95,6 +95,7 @@ interface PointRoundOpenData {
   duration_s?: number;
   announceText?: string;
   announce_text?: string;
+  silentAnnouncement?: boolean;
   settlement?: { kind: string; params: unknown };
   lockKeys?: string[];
   [key: string]: unknown;
@@ -1128,7 +1129,9 @@ const parseRoundOpenData = (value: unknown): {
   const data = value as PointRoundOpenData;
   const durationS = data.durationS ?? data.duration_s;
   const announceText = data.announceText ?? data.announce_text;
-  if (!Number.isSafeInteger(durationS) || (durationS ?? 0) < 1 || (durationS ?? 0) > 86_400 || typeof announceText !== "string" || announceText.length === 0) {
+  const silentAnnouncement = data.silentAnnouncement === true;
+  if (!Number.isSafeInteger(durationS) || (durationS ?? 0) < 1 || (durationS ?? 0) > 86_400 || typeof announceText !== "string" ||
+      (announceText.length === 0 && !silentAnnouncement)) {
     throw new Error("invalid_round");
   }
   const rawSettlement: unknown = (value as Record<string, unknown>).settlement;

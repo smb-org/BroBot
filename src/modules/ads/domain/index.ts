@@ -1,4 +1,5 @@
 import type { AdsSkippedReason } from "../../../contracts/values";
+import { isMessageEnabled } from "../../../contracts/message-enabled";
 import type { ADS_TEMPLATE_FIELDS, AdBreaksEvent, AdsSettings } from "../contracts";
 import { renderTemplate, templateVariableNames, type ModuleLanguage } from "../contract";
 import type { TemplateValues } from "../contract";
@@ -70,7 +71,7 @@ interface AdPrewarningSchedule {
 }
 
 export interface AdPrewarningInput {
-  settings: Pick<AdsSettings, "leadSeconds" | "prewarningText">;
+  settings: Pick<AdsSettings, "leadSeconds" | "prewarningText" | "prewarningTextEnabled">;
   scopeAvailable: boolean;
   nowAtMs: number;
   plannedAtMs: number;
@@ -106,7 +107,7 @@ const skip = (
 export const decideAdPrewarning = (
   input: AdPrewarningInput,
 ): AdPrewarningDecision => {
-  if (input.settings.prewarningText.trim().length === 0) return skip("disabled");
+  if (!isMessageEnabled(input.settings, "prewarningText", "prewarningTextEnabled")) return skip("disabled");
   if (!input.scopeAvailable) return skip("scope_missing", { scope: "channel:read:ads" });
 
   const nextAdAtMs = dateMs(input.schedule.nextAdAt);

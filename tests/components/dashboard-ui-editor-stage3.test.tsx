@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Button, ChipsInput, ConfirmDialog, EditorShell, Field, FieldPair, GameMultiSelect, SegmentChoice, SettingsEditor, SwitchRow, SwitchSection, TemplateText, TemplateTextField, UiProvider, UnitInput, type GameMultiSelectGame, type GameMultiSelectMessages, type SettingsEditorSpec, type TemplateTextFieldMessages, type TemplateTextFieldVariable } from "../../src/dashboard/ui";
 import { ChoiceCards } from "../../src/dashboard/ui/ChoiceCards";
+import { resolveMessageEnabledFlags } from "../../src/contracts/resolve-message-enabled";
 
 const renderUi = (node: ReactNode): ReturnType<typeof render> => render(<UiProvider>{node}</UiProvider>);
 
@@ -62,6 +63,43 @@ afterEach(() => {
 });
 
 describe("editor field seam", () => {
+  it.each([
+    { initial: "Legacy message", next: "", enabled: true },
+    { initial: "", next: "New message", enabled: false },
+  ])("keeps a legacy message switch stable when its text changes", ({ initial, next, enabled }) => {
+    interface MessageSettings { announcement: string; announcementEnabled?: boolean }
+    const spec: SettingsEditorSpec<MessageSettings> = {
+      sections: [{ id: "messages", icon: "tabMessages", fields: [
+        { kind: "message", key: "announcement", enabledKey: "announcementEnabled", preview: (template) => template },
+      ] }],
+    };
+    const texts = {
+      sections: { messages: "Messages" },
+      fields: { announcement: { label: "Announcement", hint: "What the bot sends.", previewLabel: "Preview" } },
+    };
+    function Harness() {
+      const [settings, setSettings] = useState<MessageSettings>(() => resolveMessageEnabledFlags(
+        { announcement: initial },
+        [{ messagePath: "announcement", enabledPath: "announcementEnabled" }],
+      ));
+      return <SettingsEditor<MessageSettings>
+        spec={spec}
+        sectionId="messages"
+        settings={settings}
+        onChange={(key, value) => { setSettings((current) => ({ ...current, [key]: value })); }}
+        texts={texts}
+        templateMessages={templateTextFieldMessages}
+        messageEnabledLabel="Send message"
+      />;
+    }
+
+    renderUi(<Harness />);
+    const control = screen.getByRole("switch", { name: "Announcement: Send message" });
+    expect(control.getAttribute("aria-checked")).toBe(String(initial.trim().length > 0));
+    fireEvent.change(screen.getByRole("textbox", { name: "Announcement" }), { target: { value: next } });
+    expect(control.getAttribute("aria-checked")).toBe(String(enabled));
+  });
+
   it("shows lazy Twitch box art beside a selected game", async () => {
     const game: GameMultiSelectGame = {
       id: "123",

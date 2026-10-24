@@ -902,6 +902,26 @@ describe("Blitz Round collection panel", () => {
     expect(screen.getByRole("textbox", { name: "Word" })).toHaveValue("");
   });
 
+  it("marks a cleared enabled round message with its error and blocks Save until text returns", async () => {
+    installPanelFetch([sampleQuestion], undefined, false, true);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const startText = await screen.findByRole("textbox", { name: "Start message" });
+    expect(startText).not.toHaveAttribute("aria-invalid");
+
+    fireEvent.change(startText, { target: { value: "" } });
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Start message" })).toHaveAttribute("aria-invalid", "true"));
+    const describedBy = screen.getByRole("textbox", { name: "Start message" }).getAttribute("aria-describedby")?.split(" ").at(-1) ?? "";
+    expect(document.getElementById(describedBy)).toHaveTextContent("Text missing");
+    expect(screen.getByRole("textbox", { name: "Result when viewers answer correctly" })).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByRole("button", { name: /^Save$/u })).toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Start message" }), { target: { value: "Round {blitz.prompt}" } });
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Start message" })).not.toHaveAttribute("aria-invalid"));
+    expect(screen.queryByText("Text missing")).toBeNull();
+  });
+
   it("keeps settings drafts through a conflict and saves with the reloaded revision [protects=the settings conflict choice preserves local edits and reload adopts the latest server revision; fails_when=conflict hides recovery, discards the draft, or retries with the stale revision; no_claim=concurrent saves are simulated by an in-memory HTTP stub]", async () => {
     const api = installPanelFetch([sampleQuestion], undefined, false, true);
     mountPanel();
@@ -1549,6 +1569,26 @@ describe("Blitz Round collection panel", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
     await waitFor(() => expect(api.getSettings().prize).toBe(75));
     await waitFor(() => expect(document.querySelector(".ui-save-bar__status")).toHaveTextContent("Saved"));
+  });
+
+  it("keeps disabled round message text editable without changing its switch", async () => {
+    const api = installPanelFetch([sampleQuestion]);
+    api.updateSettingsFromAnotherManager({ ...initialSettings, startText: "Saved start text", startTextEnabled: false }, 1);
+    mountPanel();
+    await screen.findByRole("button", { name: /Word scramble.*CLOUD/u });
+    await screen.findByRole("textbox", { name: "Word" });
+    fireEvent.click(screen.getByRole("button", { name: /^Settings$/u }));
+    await screen.findByRole("textbox", { name: "Start message" });
+
+    const toggle = screen.getByRole("switch", { name: "Start message: Send message" });
+    const textbox = screen.getByRole("textbox", { name: "Start message" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect((textbox as HTMLTextAreaElement).disabled).toBe(false);
+    fireEvent.change(textbox, { target: { value: "Edited while disabled" } });
+
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect((textbox as HTMLTextAreaElement).value).toBe("Edited while disabled");
+    expect(api.getSettings().startText).toBe("Saved start text");
   });
 
   it("validates automatic start settings and saves the switch and interval explicitly", async () => {

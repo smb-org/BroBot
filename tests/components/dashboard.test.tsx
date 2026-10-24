@@ -2255,7 +2255,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     try {
       await waitFor(() => expect(screen.getByRole("combobox", { name: /Kanal auswählen/u })).toHaveTextContent("Alpha"));
-      await screen.findByRole("switch");
+      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).not.toBeNull());
       const alphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
       expect(alphaSwitch).not.toBeNull();
       fireEvent.click(alphaSwitch as HTMLElement);
@@ -2264,7 +2264,7 @@ describe("Dashboard skeleton", () => {
       navigateToPath("/channels/kanal-b/modules/ads");
       await waitFor(() => expect(screen.getByRole("combobox", { name: /Kanal auswählen/u })).toHaveTextContent("Beta"));
       await waitFor(() => expect(overviewRequests.get("kanal-b")).toBeGreaterThan(0));
-      await screen.findByRole("switch");
+      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).not.toBeNull());
       const betaSwitch = document.querySelector(".module-detail__switch [role='switch']");
       expect(betaSwitch).not.toBeNull();
       fireEvent.click(betaSwitch as HTMLElement);
@@ -2272,7 +2272,7 @@ describe("Dashboard skeleton", () => {
 
       navigateToPath("/channels/kanal-a/modules/ads");
       await waitFor(() => expect(screen.getByRole("combobox", { name: /Kanal auswählen/u })).toHaveTextContent("Alpha"));
-      await screen.findByRole("switch");
+      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).not.toBeNull());
       const returningAlphaSwitch = document.querySelector(".module-detail__switch [role='switch']");
       expect(returningAlphaSwitch).toBeDisabled();
       expect(toggleRequests.get("kanal-a")).toBe(1);
@@ -2280,7 +2280,7 @@ describe("Dashboard skeleton", () => {
       settleToggle("kanal-a");
       await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).toBeEnabled());
       navigateToPath("/channels/kanal-b/modules/ads");
-      await screen.findByRole("switch");
+      await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).not.toBeNull());
       await waitFor(() => expect(document.querySelector(".module-detail__switch [role='switch']")).toBeDisabled());
     } finally {
       settleToggle("kanal-a");

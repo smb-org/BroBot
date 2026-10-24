@@ -153,6 +153,33 @@ describe("votekick starter role setting", () => {
     expect(startMessage).not.toBeNull();
     expect(startMessage).toHaveTextContent("On");
     expect(startMessage).toHaveTextContent(DEFAULT_VOTEKICK_SETTINGS.startText);
-    expect(startMessage).toHaveTextContent("Message text");
+  });
+
+  it("keeps a switched-off message text editable and the switch off while editing", () => {
+    const copy = votekickSettingsEditorCatalog("en");
+    function Harness() {
+      const [settings, setSettings] = useState({ ...DEFAULT_VOTEKICK_SETTINGS, startTextEnabled: false });
+      return <UiProvider>
+        <SettingsEditor
+          spec={settingsEditor.spec}
+          sectionId="messages"
+          settings={settings}
+          onChange={(key, next) => { setSettings((current) => ({ ...current, [key]: next })); }}
+          texts={copy}
+          templateMessages={copy.templateMessages}
+          messageEnabledLabel="Send message"
+        />
+        <output data-testid="saved-start-text">{settings.startText}</output>
+      </UiProvider>;
+    }
+
+    render(<Harness />);
+    const text = screen.getByRole("textbox", { name: "Start message" });
+    const messageSwitch = screen.getByRole("switch", { name: "Start message: Send message" });
+    expect(messageSwitch).toHaveAttribute("aria-checked", "false");
+    expect(text).toBeEnabled();
+    fireEvent.change(text, { target: { value: "Edited while off" } });
+    expect(screen.getByTestId("saved-start-text")).toHaveTextContent("Edited while off");
+    expect(messageSwitch).toHaveAttribute("aria-checked", "false");
   });
 });

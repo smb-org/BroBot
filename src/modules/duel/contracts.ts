@@ -1,33 +1,78 @@
 import { z } from "zod";
 import type { ChatOutputTarget, ModuleLanguage } from "../contract";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 import { duelCatalog } from "./locale";
 
 export const DUEL_MODULE_ID = "duel";
 
 const commandSchema = z.string().trim().regex(/^![a-z0-9_]{2,24}$/u, "invalid_command");
-const textSchema = z.string().trim().min(1).max(500);
-const duelTextsSchema = z.object({
+const textSchema = z.string().trim().max(500);
+const duelTextsObjectSchema = z.object({
   challengeOpen: textSchema,
+  challengeOpenEnabled: z.boolean().optional(),
   challengeTargeted: textSchema,
+  challengeTargetedEnabled: z.boolean().optional(),
   result: textSchema,
+  resultEnabled: z.boolean().optional(),
   botResult: textSchema,
+  botResultEnabled: z.boolean().optional(),
   fightVariants: z.array(textSchema).min(3).max(10),
+  fightVariantsEnabled: z.array(z.boolean()).max(10).optional(),
   botFightVariants: z.array(textSchema).min(3).max(10),
+  botFightVariantsEnabled: z.array(z.boolean()).max(10).optional(),
   errors: z.object({
     notEnoughPoints: textSchema,
+    notEnoughPointsEnabled: z.boolean().optional(),
     invalidStake: textSchema,
+    invalidStakeEnabled: z.boolean().optional(),
     unknownUser: textSchema,
+    unknownUserEnabled: z.boolean().optional(),
     targetBusy: textSchema,
+    targetBusyEnabled: z.boolean().optional(),
     alreadyChallenging: textSchema,
+    alreadyChallengingEnabled: z.boolean().optional(),
     cooldown: textSchema,
+    cooldownEnabled: z.boolean().optional(),
     noOpenChallenge: textSchema,
+    noOpenChallengeEnabled: z.boolean().optional(),
     cannotAcceptOwn: textSchema,
+    cannotAcceptOwnEnabled: z.boolean().optional(),
     stakeBounds: textSchema,
+    stakeBoundsEnabled: z.boolean().optional(),
     tooManyOpen: textSchema,
+    tooManyOpenEnabled: z.boolean().optional(),
   }),
 });
 
-export const duelSettingsSchema = z.object({
+const validateDuelMessages = (texts: z.output<typeof duelTextsObjectSchema>, context: z.RefinementCtx): void => {
+  const addMissingText = (settings: object, key: string, enabledKey: string, path: (string | number)[], index?: number): void => {
+    const value = (settings as Record<string, unknown>)[key];
+    let text: unknown = value;
+    if (index !== undefined) {
+      const values = Array.isArray(value) ? value as unknown[] : null;
+      text = values?.[index];
+    }
+    if (isMessageEnabled(settings, key, enabledKey, index) && typeof text === "string" && text.trim().length === 0) {
+      context.addIssue({ code: "custom", path, message: "message_text_missing" });
+    }
+  };
+  for (const key of ["challengeOpen", "challengeTargeted", "result", "botResult"] as const) {
+    addMissingText(texts, key, `${key}Enabled`, [key]);
+  }
+  for (const key of ["fightVariants", "botFightVariants"] as const) {
+    texts[key].forEach((_text, index) => {
+      addMissingText(texts, key, `${key}Enabled`, [key, index], index);
+    });
+  }
+  for (const key of Object.keys(texts.errors) as Array<keyof typeof texts.errors>) {
+    if (!key.endsWith("Enabled")) addMissingText(texts.errors, key, `${key}Enabled`, ["errors", key]);
+  }
+};
+
+export const duelTextsReadSchema = duelTextsObjectSchema;
+const duelTextsSchema = duelTextsObjectSchema.superRefine(validateDuelMessages);
+
+const duelSettingsObjectSchema = (textsSchema: z.ZodType<z.output<typeof duelTextsReadSchema>>) => z.object({
   challengeCommand: commandSchema,
   acceptCommand: commandSchema,
   defaultStake: z.number().int().min(1).max(100_000),
@@ -38,7 +83,7 @@ export const duelSettingsSchema = z.object({
   botAcceptsOpenDuels: z.boolean(),
   broadcasterModsMayPlay: z.boolean(),
   chatTarget: z.enum(["all_chats", "source_only", "where_asked"]).nullable(),
-  texts: duelTextsSchema,
+  texts: textsSchema,
 }).superRefine((settings, context) => {
   if (settings.minStake > settings.maxStake) {
     context.addIssue({ code: "custom", path: ["maxStake"], message: "minimum_exceeds_maximum" });
@@ -51,8 +96,12 @@ export const duelSettingsSchema = z.object({
   }
 });
 
+export const duelSettingsReadSchema = duelSettingsObjectSchema(duelTextsReadSchema);
+export const duelSettingsSchema = duelSettingsObjectSchema(duelTextsSchema);
+
 export type DuelSettings = z.output<typeof duelSettingsSchema>;
-export type DuelTexts = DuelSettings["texts"];
+type DuelTexts = DuelSettings["texts"];
+export type DuelErrorMessageKey = Exclude<keyof DuelTexts["errors"], `${string}Enabled`>;
 
 export interface DuelRoundData {
   challengerId: string;
@@ -69,6 +118,8 @@ export interface DuelRoundData {
   acceptMessageId?: string;
   fightText: string;
   botFightText: string;
+  fightTextEnabled?: boolean;
+  botFightTextEnabled?: boolean;
   texts: DuelTexts;
 }
 

@@ -1,6 +1,6 @@
 import type { BallotTermCount, ModuleEvent, ModuleExecutionContext, ModuleMutationAuthorization, ModuleResult } from "../contract";
 import type { ModuleLanguage, ModuleAlarmContext } from "../contract";
-import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS, DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey, chatVotingStartAnnouncementPollId } from "./contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_BALLOT_RETENTION_MS, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTING_TITLE_MAX_LENGTH, DEFAULT_CHAT_VOTING_SETTINGS, DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN, chatVotingPresetForKind, chatVotingSettingsReadSchema, chatVotingStartAnnouncementAlarmKey, chatVotingStartAnnouncementPollId } from "./contracts";
 import type { ChatVote, ChatVoteDraft, ChatVotePreset, ChatVoteTemplate, ChatVotingKind, ChatVotingSettings, ChatVotingTextMode } from "./contracts";
 import { chatVoteTemplateConfiguration, configuredLabels, formatFreeTextVoteResult, formatVoteOptions, formatVoteResult, labelsForVote, normalizeBlockedVoteTerm, normalizeFreeTextVote, normalizeFreeTextVoteForMatching, normalizeVoteTitle, parseVoteCommand, templateStartProblem, voteChoiceFromMessage, voteCloseDeadline, voteLabelLength } from "./domain";
 import type { ChatVoteResultTextTemplateSnapshot, ChatVotingRepository } from "./repository";
@@ -11,6 +11,7 @@ import { blockReferencesInText } from "../contracts/text-block-references";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../contracts/text-block-write-guard";
 import type { TextBlockWriteGuard } from "../contracts/text-block-write-guard";
 import { omitUnresolvedChatTemplateReferences } from "../../contracts/chat-template-references";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 import { chatVoteAnswerColorsSchema } from "./contracts/chat-vote-colors-schema";
 import { chatVoteDefaultColors } from "./contracts/vote-colors";
 
@@ -151,7 +152,7 @@ export const startChatVote = async (
       return insertStatus === "reference_conflict" ? { status: "reference_conflict" } : { status: "busy" };
     }
     await scheduleClose(vote.id, deadline.closesAt, 0);
-    if (input.settings.startText.trim().length > 0) {
+    if (isMessageEnabled(input.settings, "startText", "startTextEnabled")) {
       await scheduleStartAnnouncement?.(vote.id, openedAt, 0);
     }
   } catch (error: unknown) {
@@ -598,7 +599,7 @@ const alarmSettings = async (context: ModuleAlarmContext): Promise<ChatVotingSet
   ).bind(context.channelId, CHAT_VOTING_MODULE_ID).first<{ settings: string }>();
   if (row === null) return DEFAULT_CHAT_VOTING_SETTINGS;
   try {
-    const parsed = chatVotingSettingsSchema.safeParse(JSON.parse(row.settings));
+    const parsed = chatVotingSettingsReadSchema.safeParse(JSON.parse(row.settings));
     return parsed.success ? parsed.data : DEFAULT_CHAT_VOTING_SETTINGS;
   } catch { return DEFAULT_CHAT_VOTING_SETTINGS; }
 };
@@ -631,7 +632,7 @@ export const announceChatVoteStartFromAlarm = async (
   const vote = await repository.byId(context.channelId, pollId);
   if (vote === null || vote.status !== "open") return;
   const settings = await alarmSettings(context);
-  if (settings.startText.trim().length === 0) return;
+  if (!isMessageEnabled(settings, "startText", "startTextEnabled")) return;
   const language = await context.channelLanguage();
   const values = chatVotingTemplateValues(vote, language);
   const template = startAnnouncementTemplate(settings.startText, vote.title, values["vote.duration"] ?? "", language);

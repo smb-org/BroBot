@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { calculateSlotPayoutRateForDraft, formatSlotPayoutRate } from "../domain/payout-rate";
-import { DEFAULT_EMOTE_SLOT_SETTINGS, type EmoteSlotSettings, type EmoteSlotSymbol } from "../contracts";
+import { DEFAULT_EMOTE_SLOT_SETTINGS, emoteSlotSettingsReadSchema, type EmoteSlotSettings, type EmoteSlotSymbol, type EmoteSlotTextKind } from "../contracts";
 import { isSevenTvSymbolMissing } from "../domain/seven-tv";
 import { emoteSlotsCatalog } from "../locale";
 import { emoteSlotTemplateMessages } from "./locale";
-import { Button, Dialog, FieldError, GroupedPicker, Icon, NativeRadio, StatusLed, TemplateTextField, UnitInput, type GroupedPickerEntry, type GroupedPickerGroup } from "../../../dashboard/ui";
+import { Button, Dialog, FieldError, GroupedPicker, Icon, NativeRadio, StatusLed, SwitchRow, TemplateTextField, UnitInput, type GroupedPickerEntry, type GroupedPickerGroup } from "../../../dashboard/ui";
+import { isMessageEnabled } from "../../../contracts/message-enabled";
 
 import "./slot-fields.css";
 
@@ -172,7 +173,7 @@ export function SlotReelTable({
     return () => { active = false; };
   }, [parsedContext?.channelId]);
 
-  const rate = useMemo(() => calculateSlotPayoutRateForDraft(parsedSettings ?? DEFAULT_EMOTE_SLOT_SETTINGS), [parsedSettings]);
+  const rate = useMemo(() => calculateSlotPayoutRateForDraft(parsedSettings ?? DEFAULT_EMOTE_SLOT_SETTINGS, emoteSlotSettingsReadSchema), [parsedSettings]);
   if (parsedSettings === null || !Array.isArray(value)) return null;
   const emojiEntries: GroupedPickerEntry<SlotEmote>[] = (emotes?.emoji.items ?? []).map((emote) => ({
     id: emote.code,
@@ -357,7 +358,7 @@ export function SlotShareField({
   const language = (context as SlotFieldContext | undefined)?.language ?? "de";
   const copy = copyFor(language);
   const value = typeof settings.jackpotShareBp === "number" ? settings.jackpotShareBp / 100 : "";
-  const rate = calculateSlotPayoutRateForDraft(settings);
+  const rate = calculateSlotPayoutRateForDraft(settings, emoteSlotSettingsReadSchema);
   const rateLocked = rate?.status === "locked";
   const fieldError = rateLocked && (context as SlotFieldContext | undefined)?.lastTouchedField === "jackpotShareBp"
     ? copy.quoteFieldError
@@ -385,6 +386,7 @@ export function SlotTextsField({
   disabled,
   readOnly,
   error,
+  fieldErrors,
   context,
 }: {
   settings: EmoteSlotSettings;
@@ -392,6 +394,7 @@ export function SlotTextsField({
   disabled: boolean;
   readOnly: boolean;
   error?: string;
+  fieldErrors?: Readonly<Record<string, string>>;
   context?: unknown;
 }): ReactElement {
   const language = (context as SlotFieldContext | undefined)?.language ?? "de";
@@ -412,7 +415,7 @@ export function SlotTextsField({
     group: "event" as const,
     kind: "module" as const,
   }));
-  const preview = (template: string, kind: keyof EmoteSlotSettings["texts"]): string => template.replace(/\{([^{}]+)\}/gu, (token, name: string) => {
+  const preview = (template: string, kind: EmoteSlotTextKind): string => template.replace(/\{([^{}]+)\}/gu, (token, name: string) => {
     const outcomes = {
       win: { "slot.symbols": "🔔 | 🔔 | 🔔", "slot.net": "+550", "slot.payout": "600" },
       loss: { "slot.symbols": "🍒 | 🍋 | 💎", "slot.net": "−50", "slot.payout": "0" },
@@ -423,27 +426,44 @@ export function SlotTextsField({
     return typeof sample === "string" ? sample : token;
   });
   const messages = emoteSlotTemplateMessages[language];
-  const fields = [
+  const fields: readonly (readonly [EmoteSlotTextKind, string])[] = [
     ["win", copy.win], ["loss", copy.loss], ["pair", copy.pair], ["jackpot", copy.jackpotText],
   ] as const;
   return <div className="slot-texts-field">
-    {fields.map(([kind, fieldLabel]) => <TemplateTextField
-      key={kind}
-      id={`slot-text-${kind}`}
-      name={`texts.${kind}`}
-      label={fieldLabel}
-      hint=""
-      value={settings.texts[kind]}
-      disabled={disabled || readOnly}
-      onChange={(next) => onChange({ ...settings.texts, [kind]: next })}
-      maxLength={500}
-      variables={variables}
-      preview={(template) => preview(template, kind)}
-      previewLabel={copy.preview}
-      previewSpeaker={copy.previewSpeaker}
-      insertVariableLabel={copy.insertVariable}
-      messages={messages}
-    />)}
+    {fields.map(([kind, fieldLabel]) => <div key={kind} className="ui-settings-editor__message">
+      <div className="ui-settings-editor__message-heading">
+        <strong>{fieldLabel}</strong>
+        {readOnly
+          ? <strong className="ui-settings-editor__message-state">{isMessageEnabled(settings.texts, kind, `${kind}Enabled`) ? copy.messageOn : copy.messageOff}</strong>
+          : <div className="ui-settings-editor__message-toggle">
+            <SwitchRow
+              label={copy.messageEnabledLabel}
+              ariaLabel={`${fieldLabel}: ${copy.messageEnabledLabel}`}
+              checked={isMessageEnabled(settings.texts, kind, `${kind}Enabled`)}
+              disabled={disabled}
+              onChange={(next) => onChange({ ...settings.texts, [`${kind}Enabled`]: next })}
+            />
+          </div>}
+      </div>
+      <TemplateTextField
+        id={`settings-texts-${kind}`}
+        name={`texts.${kind}`}
+        label={fieldLabel}
+        hint=""
+        value={settings.texts[kind]}
+        disabled={disabled || readOnly}
+        onChange={(next) => onChange({ ...settings.texts, [kind]: next })}
+        maxLength={500}
+        required={isMessageEnabled(settings.texts, kind, `${kind}Enabled`)}
+        variables={variables}
+        preview={(template) => preview(template, kind)}
+        previewLabel={copy.preview}
+        previewSpeaker={copy.previewSpeaker}
+        insertVariableLabel={copy.insertVariable}
+        messages={messages}
+        {...(fieldErrors?.[`texts.${kind}`] === undefined ? {} : { error: fieldErrors[`texts.${kind}`] })}
+      />
+    </div>)}
     <FieldError message={error} />
   </div>;
 }

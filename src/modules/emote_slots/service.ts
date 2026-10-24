@@ -6,6 +6,7 @@ import { slotSettlementTable, type SlotSettlementResult } from "./domain/settlem
 import { isSevenTvSymbolMissing } from "./domain/seven-tv";
 import { fetchSevenTvEmotes } from "./seven-tv";
 import { EMOTE_SLOT_OVERLAY_ELEMENT_KIND } from "./overlay/kinds";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -108,9 +109,11 @@ export const processEmoteSlotMessage = async (
   const textKind = isJackpot ? "jackpot" : result.pair ? "pair" : result.net > 0 ? "win" : "loss";
   const reply = formatSlotReply(result, event.settings.symbols, language, login, textKind,
     event.settings.texts[textKind]);
-  const action = isJackpot && event.settings.announceJackpot
-    ? { kind: "announcement" as const, text: reply, target: event.settings.chatTarget, automated: false }
-    : { kind: "chat" as const, text: reply, target: event.settings.chatTarget, replyToMessageId: messageId, automated: false };
+  const action = isMessageEnabled(event.settings.texts, textKind, `${textKind}Enabled`)
+    ? isJackpot && event.settings.announceJackpot
+      ? { kind: "announcement" as const, text: reply, target: event.settings.chatTarget, automated: false }
+      : { kind: "chat" as const, text: reply, target: event.settings.chatTarget, replyToMessageId: messageId, automated: false }
+    : null;
   const sevenTvSymbols = event.settings.symbols.filter(({ source }) => source === "seven_tv");
   const activeSevenTv = sevenTvSymbols.length === 0 ? null : await fetchSevenTvEmotes(event.channelId);
   const overlaySymbols = result.symbols.map((symbolIndex) => {
@@ -142,6 +145,6 @@ export const processEmoteSlotMessage = async (
       jackpotHit: result.jackpotWin > 0,
     },
   };
-  return { actions: [action, overlayAction], diagnostics: [] };
+  return { actions: [...(action === null ? [] : [action]), overlayAction], diagnostics: [] };
 };
 

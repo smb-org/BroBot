@@ -4,6 +4,7 @@ import { worstCaseTemplateLength } from "../../template";
 import type { PanelTemplateWarning } from "../../panel-contract";
 import type { IconName } from "./Icon";
 import type { ChatOutputTarget } from "../../contracts/values";
+import type { MessageEnabledField } from "../../contracts/resolve-message-enabled";
 import { ChoiceCards } from "./ChoiceCards";
 import { ChatTargetField } from "./ChatTargetField";
 import { Field } from "./Field";
@@ -21,6 +22,8 @@ import { TimeoutDurationRangeFields, type TimeoutDurationRangeValue } from "./Ti
 import { RoleThreshold } from "./RoleThreshold";
 import { RuleNote } from "./RuleNote";
 
+const emptyMessagePreview = (): string => "";
+
 type BivariantSettingsCustomFieldRender<Settings> = {
   bivarianceHack(args: SettingsCustomFieldProps<Settings>): ReactElement | null;
 }["bivarianceHack"];
@@ -31,7 +34,7 @@ export type SettingsFieldSpec<Settings> =
   | { kind: "text"; key: keyof Settings & string; prefix?: string; maxLength?: number; lengthUnit?: "utf16" | "codePoints"; optional?: boolean; validate?: (value: string) => boolean }
   | { kind: "template"; key: keyof Settings & string; minRows?: number; optional?: boolean; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
   | { kind: "chatTarget"; key: keyof Settings & string; allowed?: readonly (ChatOutputTarget | "channel_default")[] }
-  | { kind: "message"; key: keyof Settings & string; targetKey: keyof Settings & string; allowedTargets?: readonly (ChatOutputTarget | "channel_default")[]; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
+  | { kind: "message"; key: keyof Settings & string; enabledKey: keyof Settings & string; targetKey?: keyof Settings & string; allowedTargets?: readonly (ChatOutputTarget | "channel_default")[]; preview: (template: string, samples: Readonly<Record<string, string>>) => string }
   | { kind: "select"; key: keyof Settings & string; options: readonly { value: string }[] }
   | { kind: "roleThreshold"; key: keyof Settings & string; options: readonly { value: string }[] }
   | { kind: "segment"; key: keyof Settings & string; options: readonly { value: string | number }[] }
@@ -46,6 +49,7 @@ export interface SettingsCustomFieldProps<Settings> {
   disabled: boolean;
   readOnly: boolean;
   error?: string;
+  fieldErrors?: Readonly<Record<string, string>>;
   label: string;
   hint: string;
   context?: unknown;
@@ -99,6 +103,7 @@ export interface SettingsEditorCatalog extends SettingsEditorTexts {
   reloadLabel: string;
   enabledLabel: string;
   disabledLabel: string;
+  messageEnabledLabel?: string;
   templateMessages: TemplateTextFieldMessages;
   warningLabel: (warning: PanelTemplateWarning) => string;
 }
@@ -113,6 +118,8 @@ export interface SettingsEditorDefinition<Settings> {
   savePosition?: "header" | "footer" | "page-header";
   showTitle?: boolean;
   className?: string;
+  /** Message paths handled by a custom field rather than the generic spec. */
+  messageFields?: readonly MessageEnabledField[];
 }
 
 export interface SettingsEditorProps<Settings extends object> {
@@ -130,6 +137,7 @@ export interface SettingsEditorProps<Settings extends object> {
   clampNumberOnBlur?: boolean;
   enabledLabel?: string;
   disabledLabel?: string;
+  messageEnabledLabel?: string;
   fieldErrors?: Readonly<Record<string, string>>;
   onIssuesChange?: (key: keyof Settings & string, issues: { unknown: readonly string[]; worstCaseExceeded: boolean }) => void;
   idPrefix?: string;
@@ -153,6 +161,7 @@ export function SettingsEditor<Settings extends object>({
   clampNumberOnBlur = true,
   enabledLabel,
   disabledLabel,
+  messageEnabledLabel,
   fieldErrors = {},
   onIssuesChange,
   idPrefix = "settings",
@@ -175,6 +184,7 @@ export function SettingsEditor<Settings extends object>({
       disabled,
       readOnly,
       ...(error === undefined ? {} : { error }),
+      fieldErrors,
       label: copy.label,
       hint: copy.hint,
       ...(customContext === undefined ? {} : { context: customContext }),
@@ -284,8 +294,8 @@ export function SettingsEditor<Settings extends object>({
             value={typeof fieldValue === "string" ? fieldValue : ""}
             disabled={disabled}
             onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
-            {...(copy.placeholder === undefined ? {} : { placeholder: copy.placeholder })}
             required={!field.optional}
+            {...(copy.placeholder === undefined ? {} : { placeholder: copy.placeholder })}
             {...(field.prefix === undefined ? {} : { prefix: field.prefix })}
             {...(maxLength === undefined ? {} : { countLength: (text: string) => textFieldLength(field, text), maxLength, countLabel: copy.countLabel ?? ((count, maximum) => `${String(count)} / ${String(maximum)}`) })}
           />
@@ -322,16 +332,26 @@ export function SettingsEditor<Settings extends object>({
       );
     }
     if (field.kind === "message") {
-      const targetCopy = texts.fields[field.targetKey];
+      const targetKey = field.targetKey;
+      const targetCopy = targetKey === undefined ? undefined : texts.fields[targetKey];
       const template = typeof fieldValue === "string" ? fieldValue : "";
-      const targetValue = settings[field.targetKey];
-      const targetError = fieldErrors[field.targetKey];
+      const messageEnabled = settings[field.enabledKey] === true;
+      const targetValue = targetKey === undefined ? undefined : settings[targetKey];
+      const targetError = targetKey === undefined ? undefined : fieldErrors[targetKey];
       const fieldVariables = variables?.[field.key] ?? templateMetadata?.[field.key]?.map(({ name, description, sample }) => ({ name, description, sample }));
       const metadata = templateMetadata?.[field.key];
-      return <div key={field.key} className="ui-settings-editor__message" data-enabled={template.trim().length > 0}>
+      return <div key={field.key} className="ui-settings-editor__message">
         <div className="ui-settings-editor__message-heading">
           <strong>{copy.label}</strong>
-          <span>{template.trim().length > 0 ? enabledLabel : disabledLabel}</span>
+          <div className="ui-settings-editor__message-toggle">
+            <SwitchRow
+              label={messageEnabledLabel ?? copy.label}
+              ariaLabel={`${copy.label}: ${messageEnabledLabel ?? copy.label}`}
+              checked={messageEnabled}
+              onChange={(next) => { onChange(field.enabledKey, next as Settings[typeof field.enabledKey]); }}
+              disabled={disabled}
+            />
+          </div>
         </div>
         <TemplateTextField
           id={id}
@@ -345,8 +365,8 @@ export function SettingsEditor<Settings extends object>({
           maxLength={500}
           {...(metadata === undefined ? {} : { worstCaseLength: worstCaseTemplateLength(template, metadata) })}
           {...(fieldVariables === undefined ? {} : { variables: fieldVariables })}
-          preview={field.preview}
-          required={false}
+          preview={messageEnabled ? field.preview : emptyMessagePreview}
+          required={messageEnabled}
           onIssuesChange={(issues) => { onIssuesChange?.(field.key, issues); }}
           {...(copy.previewLabel === undefined ? {} : { previewLabel: copy.previewLabel })}
           {...(copy.previewSpeaker === undefined ? {} : { previewSpeaker: copy.previewSpeaker })}
@@ -354,10 +374,10 @@ export function SettingsEditor<Settings extends object>({
           minRows={2}
           messages={templateMessages}
         />
-        {targetCopy === undefined ? null : <ChatTargetField
+        {targetCopy === undefined || targetKey === undefined ? null : <ChatTargetField
           label={targetCopy.label}
           value={targetValue === null || targetValue === undefined || targetValue === "channel_default" ? null : String(targetValue) as ChatOutputTarget}
-          onChange={(next) => { onChange(field.targetKey, (next ?? (field.allowedTargets?.includes("channel_default") ? "channel_default" : null)) as Settings[typeof field.targetKey]); }}
+          onChange={(next) => { onChange(targetKey, (next ?? (field.allowedTargets?.includes("channel_default") ? "channel_default" : null)) as Settings[typeof targetKey]); }}
           allowed={field.allowedTargets ?? ["all_chats", "source_only"]}
           {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefault: effectiveDefaultChatTarget })}
           disabled={disabled}
@@ -440,7 +460,7 @@ export function SettingsEditor<Settings extends object>({
     const copy = texts.fields[field.key];
     if (copy === undefined) return null;
     const value = settings[field.key];
-    if (field.kind === "custom") return field.render({
+    if (field.kind === "custom") return <Fragment key={field.key}>{field.render({
       settings,
       value,
       onChange: () => undefined,
@@ -449,12 +469,13 @@ export function SettingsEditor<Settings extends object>({
       label: copy.label,
       hint: copy.hint,
       ...(customContext === undefined ? {} : { context: customContext }),
-    });
+    })}</Fragment>;
     if (field.kind === "switchCard" && field.children !== undefined) {
+      const switchEnabled = value === true;
       return <div key={field.key}>
         <dt>{copy.label}</dt>
         <dd>
-          <span className="ui-settings-editor__readonly-switch">{value === true ? enabledLabel : disabledLabel}</span>
+          <span className="ui-settings-editor__readonly-switch">{switchEnabled ? enabledLabel : disabledLabel}</span>
           <dl className="ui-settings-editor__readonly-children">
             {field.children.map(renderReadOnlyProperty)}
           </dl>
@@ -462,16 +483,17 @@ export function SettingsEditor<Settings extends object>({
       </div>;
     }
     if (field.kind === "message") {
-      const targetCopy = texts.fields[field.targetKey];
+      const targetCopy = field.targetKey === undefined ? undefined : texts.fields[field.targetKey];
       const template = typeof value === "string" ? value : "";
-      const target = settings[field.targetKey];
+      const messageEnabled = settings[field.enabledKey] === true;
+      const target = field.targetKey === undefined ? undefined : settings[field.targetKey];
       const targetLabel = targetCopy?.options?.[String(target)]?.label ?? String(target ?? "");
       return <div className="ui-settings-editor__readonly-message" key={field.key}>
         <dt>{copy.label}</dt>
         <dd>
-          <strong>{template.trim().length > 0 ? enabledLabel : disabledLabel}</strong>
+          <strong>{messageEnabled ? enabledLabel : disabledLabel}</strong>
           <TemplateText value={template} variables={copy.variables ?? []} />
-          {targetCopy === undefined ? null : <span>{targetCopy.label}: {targetLabel}</span>}
+          {targetCopy === undefined || field.targetKey === undefined ? null : <span>{targetCopy.label}: {targetLabel}</span>}
         </dd>
       </div>;
     }

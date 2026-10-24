@@ -1024,7 +1024,7 @@ export const dispatchEventSubNotification = async (
     try {
       const botUserId = await getCachedBotUserId(environment.DB);
       if (chatterUserId !== botUserId) {
-        const settings = pointsMatch.module.settingsSchema.parse(JSON.parse(pointsMatch.settings)) as { startBonus: number; currencyName: string };
+        const settings = (pointsMatch.module.settingsReadSchema ?? pointsMatch.module.settingsSchema).parse(JSON.parse(pointsMatch.settings)) as { startBonus: number; currencyName: string };
         const access = modulePoints(environment.CHANNEL, event.channelId, "points");
         const touched = await access.touchAccount(chatterUserId, chatterLogin, settings.startBonus);
         if (touched.welcomePending && touched.startBonus !== null) {
@@ -1054,7 +1054,7 @@ export const dispatchEventSubNotification = async (
       if (module.requiresModules?.includes("points") === true && activation !== undefined) {
         await points.rounds.setGate(!activation.enabled, activation.revision, activation.lastDisabledRevision);
       }
-      const validatedSettings: unknown = module.settingsSchema.parse(JSON.parse(settings));
+      const validatedSettings: unknown = (module.settingsReadSchema ?? module.settingsSchema).parse(JSON.parse(settings));
       isCommandResponseHandler = commandRouteMatchesModule(module, event, validatedSettings);
       const moduleEvent: ModuleEvent = {
         channelId: event.channelId,

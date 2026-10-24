@@ -4,7 +4,7 @@ import {
   BLITZ_AUTO_START_MAX_MINUTES,
   BLITZ_AUTO_START_MINUTES,
   BLITZ_ROUND_MODULE_ID,
-  blitzRoundSettingsSchema,
+  blitzRoundSettingsReadSchema,
   type BlitzRoundSettings,
 } from "./contracts";
 import { openBlitzRound } from "./service";
@@ -82,7 +82,7 @@ const readConfig = async (context: ModuleAlarmContext): Promise<BlitzAutoStartCo
   } catch {
     return null;
   }
-  const settings = blitzRoundSettingsSchema.safeParse(parsed);
+  const settings = blitzRoundSettingsReadSchema.safeParse(parsed);
   if (!settings.success || !Number.isSafeInteger(row.revision) || !Number.isSafeInteger(row.settings_revision) ||
       row.revision < row.settings_revision) return null;
   return {

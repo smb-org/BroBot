@@ -1,5 +1,7 @@
 import { emoteSlotSettingsSchema, type EmoteSlotSettings } from "../contracts";
 
+type SettingsParser = Pick<typeof emoteSlotSettingsSchema, "safeParse">;
+
 interface ExactRate {
   numerator: bigint;
   denominator: bigint;
@@ -69,8 +71,9 @@ export const calculateSlotPayoutRate = (settings: Pick<EmoteSlotSettings,
 };
 
 /** Calculates the rate only when the complete draft satisfies the settings schema. */
-export const calculateSlotPayoutRateForDraft = (draft: unknown): SlotPayoutRate | null => {
-  const parsed = emoteSlotSettingsSchema.safeParse(draft);
+/** The payout maths ignores message texts; the editor passes the read schema so an empty message keeps the quote. */
+export const calculateSlotPayoutRateForDraft = (draft: unknown, schema: SettingsParser = emoteSlotSettingsSchema): SlotPayoutRate | null => {
+  const parsed = schema.safeParse(draft);
   return parsed.success ? calculateSlotPayoutRate(parsed.data) : null;
 };
 

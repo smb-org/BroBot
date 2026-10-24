@@ -7,6 +7,7 @@ import type { ModulePanelProperties, ModuleRegisteredTemplateVariable } from "..
 import type { BelaboxSettings } from "../modules/belabox/contracts";
 import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
 import { calculateSlotPayoutRateForDraft } from "../modules/emote_slots/domain/payout-rate";
+import { emoteSlotSettingsReadSchema } from "../modules/emote_slots/contracts";
 import { textCommandListChatCommand } from "../modules/text_commands/contracts/chat-commands";
 import type { TextCommandPanelData } from "../modules/text_commands/panel/service";
 import { loadModulePanel, loadModuleSettingsEditor, ModuleChunkLoadError, retryModuleChunkLoad } from "./module-panel-loaders";
@@ -21,6 +22,9 @@ import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts
 import { moduleDependencyLockReason, moduleParticipatesInDependency } from "./module-dependencies";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
+import { isMessageEnabled } from "../contracts/message-enabled";
+import { resolveMessageEnabledFlags } from "../contracts/resolve-message-enabled";
+import type { MessageEnabledField } from "../contracts/resolve-message-enabled";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
 import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, Section, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorCatalog, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
@@ -260,8 +264,24 @@ const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, v
   {...(page === undefined ? {} : { page })}
 />;
 
-const withModuleDraftFields = (moduleId: string, settings: Record<string, unknown>): Record<string, unknown> =>
-  moduleId === "belabox" ? { ...settings, belaboxStatsUrl: "" } : settings;
+const messageEnabledFieldsFor = (definition: SettingsEditorDefinition<unknown>): MessageEnabledField[] => {
+  const fields: MessageEnabledField[] = [...(definition.messageFields ?? [])];
+  const visit = (field: SettingsEditorDefinition<unknown>["spec"]["sections"][number]["fields"][number]): void => {
+    if (field.kind === "message") fields.push({ messagePath: field.key, enabledPath: field.enabledKey });
+    if (field.kind === "switchCard") field.children?.forEach(visit);
+  };
+  definition.spec.sections.forEach(({ fields: sectionFields }) => sectionFields.forEach(visit));
+  return fields;
+};
+
+const withModuleDraftFields = (
+  moduleId: string,
+  settings: Record<string, unknown>,
+  definition: SettingsEditorDefinition<unknown>,
+): Record<string, unknown> => resolveMessageEnabledFlags(
+  moduleId === "belabox" ? { ...settings, belaboxStatsUrl: "" } : settings,
+  messageEnabledFieldsFor(definition),
+);
 
 const persistedSettings = (moduleId: string, settings: Record<string, unknown>): Record<string, unknown> => {
   if (moduleId !== "belabox") return settings;
@@ -477,7 +497,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
 }): ReactElement => {
   const queryClient = useDashboardQueryClient();
   const channelSettings = useChannelSettings(channelId);
-  const initialDraft = useMemo(() => withModuleDraftFields(module.id, initial), [initial, module.id]);
+  const initialDraft = useMemo(() => withModuleDraftFields(module.id, initial, definition), [definition, initial, module.id]);
   const { value: currentValue, setValue, dirty, reset, accept } = useDraft(initialDraft);
   const baselineRevision = useRef(initialRevision);
   const [latestSettingsRevision, setLatestSettingsRevision] = useState(initialRevision);
@@ -547,7 +567,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     })];
   })) as Readonly<Partial<Record<string, readonly (TemplateTextFieldVariable & { maxLength: number; fallbackWhenAbsent?: number })[]>>>;
   const templateVariableOptions: Readonly<Partial<Record<string, readonly TemplateTextFieldVariable[]>>> = templateMetadata;
-  const slotRate = module.id === "emote_slots" ? calculateSlotPayoutRateForDraft(currentValue) : null;
+  const slotRate = module.id === "emote_slots" ? calculateSlotPayoutRateForDraft(currentValue, emoteSlotSettingsReadSchema) : null;
   const votekickThresholdExample = (sectionId: string): ReactElement | undefined =>
     module.id === "votekick" && sectionId === "settings"
       ? <VotekickThresholdExample minNetVotes={currentValue.minNetVotes} percent={currentValue.percent} language={language} />
@@ -581,6 +601,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       readOnlySectionOnly={page !== undefined}
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
+      {...(copy.messageEnabledLabel === undefined ? {} : { messageEnabledLabel: copy.messageEnabledLabel })}
       {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
       afterNote={votekickThresholdExample(sectionId)}
       onIssuesChange={reportTemplateIssues}
@@ -600,13 +621,17 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       readOnly
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
+      {...(copy.messageEnabledLabel === undefined ? {} : { messageEnabledLabel: copy.messageEnabledLabel })}
       {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
       afterNote={votekickThresholdExample(spec.sections[0]?.id ?? "")}
     />,
   } : undefined;
   const collectErrors = (includeUntouched = false): Record<string, string> => {
     const errors: Record<string, string> = {};
-    const collect = (fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"]): void => {
+    const collect = (
+      fields: SettingsEditorSpec<Record<string, unknown>>["sections"][number]["fields"],
+      parentMessageEnabled = false,
+    ): void => {
       for (const field of fields) {
         const current = currentValue[field.key];
         if (field.kind === "number" && (typeof current !== "number" || !Number.isInteger(current) || current < field.min || current > field.max)) {
@@ -621,7 +646,12 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
               (range.minSeconds as number) < field.min || (range.minSeconds as number) > (range.maxSeconds as number) ||
               (range.maxSeconds as number) > field.max) errors[field.key] = copy.invalidMessage;
         } else if (field.kind === "text" || field.kind === "template" || field.kind === "message") {
-          if (typeof current !== "string" || (field.kind !== "message" && !field.optional && current.trim().length === 0)) {
+          const required = field.kind === "message"
+            ? isMessageEnabled(currentValue, field.key, field.enabledKey)
+            : field.kind === "template" && field.optional
+              ? parentMessageEnabled
+              : !field.optional;
+          if (typeof current !== "string" || (required && current.trim().length === 0)) {
             errors[field.key] = copy.fields[field.key]?.requiredError ?? copy.invalidMessage;
           } else if (field.kind === "text" && field.maxLength !== undefined && textFieldLength(field, current) > field.maxLength) {
             errors[field.key] = copy.invalidMessage;
@@ -632,14 +662,32 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
             errors[field.key] = copy.invalidMessage;
           }
         }
-        if (field.kind === "switchCard" && field.children !== undefined) collect(field.children);
+        if (field.kind === "switchCard" && field.children !== undefined) {
+          collect(field.children, currentValue[field.key] === true);
+        }
       }
     };
     collect(spec.sections.flatMap((section) => section.fields));
+    if (module.id === "duel") {
+      const parsed = module.settingsSchema.safeParse(currentValue);
+      if (!parsed.success) {
+        const requiredError = copy.fields.texts?.requiredError ?? copy.invalidMessage;
+        for (const issue of parsed.error.issues) {
+          if (issue.message === "message_text_missing") {
+            errors[`texts.${issue.path.slice(1).join(".")}`] = requiredError;
+          }
+        }
+      }
+    }
     if (module.id === "emote_slots") {
       const parsed = module.settingsSchema.safeParse(currentValue);
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
+          if (issue.message === "message_text_missing") {
+            // Keep the nested path so the affected message is marked and the payout quote stays visible.
+            errors[`texts.${String(issue.path[1])}`] = copy.fields.texts?.requiredError ?? copy.invalidMessage;
+            continue;
+          }
           const key = typeof issue.path[0] === "string" ? issue.path[0] : "symbols";
           const slotCopy = emoteSlotsCatalog[language].panel;
           const nestedField = issue.path[2];
@@ -674,6 +722,11 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       })] : []),
     ]),
   ];
+  const nestedFieldLabel = (errorKey: string): string | undefined => {
+    if (module.id !== "emote_slots") return undefined;
+    const panel = emoteSlotsCatalog[language].panel;
+    return ({ "texts.win": panel.win, "texts.loss": panel.loss, "texts.pair": panel.pair, "texts.jackpot": panel.jackpotText } as Readonly<Record<string, string>>)[errorKey];
+  };
   const invalidFields: EditorInvalidField[] = [];
   const sections: EditorSection[] = spec.sections.map((section) => {
     const sectionKeys = new Set<string>();
@@ -693,6 +746,18 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
             message: fieldError,
             sectionId: section.id,
           });
+        }
+        if (field.kind === "custom") {
+          // Custom editors mark nested fields (for example texts.win); their text areas use the id settings-<path>.
+          for (const [errorKey, message] of Object.entries(fieldErrors)) {
+            if (!errorKey.startsWith(`${field.key}.`)) continue;
+            sectionInvalidFields.push({
+              id: `settings-${errorKey.replaceAll(".", "-")}`,
+              label: nestedFieldLabel(errorKey) ?? copy.fields[field.key]?.label ?? field.key,
+              message,
+              sectionId: section.id,
+            });
+          }
         }
         if (field.kind === "switchCard" && field.children !== undefined) {
           const childFocusId = disabledBySwitch ?? (currentValue[field.key] === true ? undefined : `settings-${field.key}`);
@@ -760,7 +825,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
           void refetchModuleQueryData<BelaboxStatusResponse>(queryClient, channelId, "belabox", "status").catch(() => undefined);
         }
       }
-      const acceptedDraft = withModuleDraftFields(module.id, acceptedSettings);
+      const acceptedDraft = withModuleDraftFields(module.id, acceptedSettings, definition);
       baselineSettings.current = acceptedDraft;
       accept(acceptedDraft);
       setSaved(true);

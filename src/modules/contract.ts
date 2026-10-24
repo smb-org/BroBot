@@ -1854,6 +1854,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   /** Tracks per-user chat activity for the current stream while this module is enabled. */
   needsActiveChatters?: boolean;
   settingsSchema: SettingsSchema;
+  /** Lenient validator for persisted settings written before current message rules existed. */
+  settingsReadSchema?: z.ZodType<z.output<SettingsSchema>>;
   defaultSettings: z.output<SettingsSchema>;
   /** Optional channel-language defaults for modules whose initial messages are localized. */
   defaultSettingsForLanguage?: (language: ModuleLanguage) => z.output<SettingsSchema>;
@@ -1962,13 +1964,14 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     context: ModuleAlarmContext,
     round: ModulePointRoundAnnouncement,
   ) => Promise<{
+    kind?: "message";
     text: string;
     attributions?: readonly string[];
     target?: ChatOutputTarget;
     replyToMessageId?: string;
     sourceBroadcasterUserId?: string;
     automated?: boolean;
-  } | null>;
+  } | { kind: "silent" } | null>;
   /** Retries this module's result after shared automated-output limit rejections until delivered. */
   retryPointRoundRateLimitedResults?: boolean;
   /** Hourly module-owned cleanup run by the host through the registry. */

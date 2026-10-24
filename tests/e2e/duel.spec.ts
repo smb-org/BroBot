@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import { duelSettingsForLanguage, type DuelSettings } from "../../src/modules/duel/contracts";
 import { installLiveCockpitMocks } from "./live-cockpit-regression-fixtures";
+import { expectMessageHeadingsCentred } from "./switch-geometry";
 import { waitForWebFonts } from "./web-fonts";
 
 const channelId = "fictional_duel_channel";
@@ -74,6 +75,7 @@ test("duel settings save the bot rule and stake bounds at desktop widths and per
     await expect(page.locator(".settings-page__columns")).toBeVisible();
     const botSwitch = page.getByRole("switch", { name: "Bot accepts open duels" });
     await expect(botSwitch).toBeChecked();
+    await expectMessageHeadingsCentred(page);
     await botSwitch.click();
     await page.getByLabel("Minimum stake").fill("20");
     await page.getByLabel("Maximum stake").fill("400");

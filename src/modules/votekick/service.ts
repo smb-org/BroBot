@@ -1,11 +1,12 @@
 import { ballotChoiceFromMessage } from "../contract";
 import type { BallotSnapshot, JsonObject, ModuleAction, ModuleAlarmContext, ModuleDiagnostic, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { formatTimeoutDuration, rollTimeoutSeconds } from "../contracts/moderation";
-import { VOTEKICK_WINDOW_MS, votekickSettingsSchema, type Votekick, type VotekickSettings } from "./contracts";
+import { VOTEKICK_WINDOW_MS, votekickSettingsReadSchema, type Votekick, type VotekickSettings } from "./contracts";
 import { canStartVotekick, isActiveVotekickTarget, votekickThreshold, votekickTimeoutReason, VOTEKICK_COMMAND_PATTERN, wasActiveBeforeVotekick } from "./domain";
 import type { VotekickRepository, VotekickStart } from "./repository";
 import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
 import { omitUnresolvedChatTemplateReferences } from "../../contracts/chat-template-references";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 
 const emptyResult = (): ModuleResult => ({ actions: [], diagnostics: [] });
 const textFromEvent = (event: ModuleEvent): string | null => {
@@ -121,8 +122,8 @@ const preparePass = async (
     return { ...safe, diagnostics: [...(rendered.diagnostics ?? []), ...safe.diagnostics] };
   };
   const [pass, fail] = await Promise.all([
-    renderChatMessage(settings.passTextEnabled ? settings.passText : ""),
-    renderChatMessage(settings.failTextEnabled ? settings.failText : ""),
+    renderChatMessage(isMessageEnabled(settings, "passText", "passTextEnabled") ? settings.passText : ""),
+    renderChatMessage(isMessageEnabled(settings, "failText", "failTextEnabled") ? settings.failText : ""),
   ]);
   return {
     action: {
@@ -250,7 +251,7 @@ const commandResult = async (
   let window = "";
   const reject = (reason: string, target?: string, includeProtectedText = false, displayTarget = login): Promise<ModuleResult> => {
     if (!includeProtectedText) return Promise.resolve(rejection(reason, target));
-    return renderChat(context, event.settings.protectedTextEnabled ? event.settings.protectedText : "", {
+    return renderChat(context, isMessageEnabled(event.settings, "protectedText", "protectedTextEnabled") ? event.settings.protectedText : "", {
       "votekick.target": displayTarget,
       "votekick.yes": 0,
       "votekick.no": 0,
@@ -292,7 +293,7 @@ const commandResult = async (
     const endsAtMs = startedAtMs + event.settings.windowSeconds * 1000;
     const endsAt = new Date(endsAtMs).toISOString();
     id = crypto.randomUUID();
-    const startMessage = await renderChat(context, event.settings.startTextEnabled ? event.settings.startText : "", {
+    const startMessage = await renderChat(context, isMessageEnabled(event.settings, "startText", "startTextEnabled") ? event.settings.startText : "", {
       "votekick.target": lookup.login,
       "votekick.yes": 1,
       "votekick.no": 0,
@@ -308,7 +309,7 @@ const commandResult = async (
     const opened = await context.ballots.open(id, 2, endsAtMs, votekickFinalizeRule(threshold));
     if (opened.status === "busy") {
       await bestEffortClear(context, `close:${id}`);
-      const busy = await renderChat(context, event.settings.busyTextEnabled ? event.settings.busyText : "", {
+      const busy = await renderChat(context, isMessageEnabled(event.settings, "busyText", "busyTextEnabled") ? event.settings.busyText : "", {
         "votekick.target": lookup.login,
         "votekick.yes": 0,
         "votekick.no": 0,
@@ -359,7 +360,7 @@ const commandResult = async (
       ballotOpened = false;
       alarmScheduled = false;
       if (admitted === "busy") {
-        const busy = await renderChat(context, event.settings.busyTextEnabled ? event.settings.busyText : "", {
+        const busy = await renderChat(context, isMessageEnabled(event.settings, "busyText", "busyTextEnabled") ? event.settings.busyText : "", {
           "votekick.target": lookup.login,
           "votekick.yes": 0,
           "votekick.no": 0,
@@ -449,7 +450,7 @@ export const processVotekickMessage = async (
     }
     if (attempt.outcome === "expired") {
       await bestEffortClose(context, running.id);
-      if (!event.settings.expiredTextEnabled || event.settings.expiredText.length === 0) await bestEffortClear(context, `close:${running.id}`);
+      if (!isMessageEnabled(event.settings, "expiredText", "expiredTextEnabled")) await bestEffortClear(context, `close:${running.id}`);
       else await context.scheduleAlarm("close", `close:${running.id}`, Date.now());
       let expired: Votekick | null = null;
       try { expired = await repository.byId(event.channelId, running.id); } catch { /* Overlay presentation is best-effort. */ }
@@ -516,7 +517,7 @@ export const closeExpiredVotekick = async (
     const stored = await context.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?")
       .bind(context.channelId, "votekick").first<{ settings: string }>();
     if (stored === null) throw new Error("Votekick settings are unavailable while finalizing its ballot.");
-    const settings = votekickSettingsSchema.parse(JSON.parse(stored.settings));
+    const settings = votekickSettingsReadSchema.parse(JSON.parse(stored.settings));
     const attempt = await finalizeVotekick(context.channelId, running, settings, repository, context);
     if (attempt.outcome === "open") {
       const expiresAt = Date.parse(running.endsAt);
@@ -578,8 +579,8 @@ export const closeExpiredVotekick = async (
     try { await context.clear(`close:${id}`); } catch { /* A stale alarm observes the terminal D1 row. */ }
     return;
   }
-  const settings = votekickSettingsSchema.parse(JSON.parse(stored.settings));
-  if (!settings.expiredTextEnabled || settings.expiredText.length === 0) {
+  const settings = votekickSettingsReadSchema.parse(JSON.parse(stored.settings));
+  if (!isMessageEnabled(settings, "expiredText", "expiredTextEnabled")) {
     await bestEffortCloseAlarm(context, id);
     try { await context.clear(`close:${id}`); } catch { /* A stale alarm observes the terminal D1 row. */ }
     return;

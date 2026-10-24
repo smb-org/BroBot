@@ -10,9 +10,11 @@ interface DeclarationProbe {
   panelManagesSettings: boolean;
   schemaKeys: readonly string[];
   declaredKeys: readonly string[];
+  implicitKeys: readonly string[];
   templateKeys: readonly string[];
   templateFieldKeys: readonly string[];
   locales: Readonly<Record<"de" | "en", Readonly<Record<string, { label?: string; hint?: string }>>>>;
+  messageEnabledLabels: Readonly<Record<"de" | "en", string | undefined>>;
 }
 
 const flatten = <Settings,>(fields: readonly SettingsFieldSpec<Settings>[]): SettingsFieldSpec<Settings>[] =>
@@ -32,10 +34,17 @@ const declarationProblems = (probe: DeclarationProbe): string[] => {
     problems.push(`${probe.id} template fields do not match templateFields`);
   }
   for (const key of schemaKeys) {
+    if (probe.implicitKeys.includes(key)) continue;
     for (const language of ["de", "en"] as const) {
       const copy = probe.locales[language][key];
       if (copy?.label === undefined || copy.label.trim().length === 0) problems.push(`${probe.id}.${key} ${language} missing label`);
       if (copy?.hint === undefined || copy.hint.trim().length === 0) problems.push(`${probe.id}.${key} ${language} missing hint`);
+    }
+  }
+  if (probe.implicitKeys.length > 0) {
+    for (const language of ["de", "en"] as const) {
+      const label = probe.messageEnabledLabels[language];
+      if (label === undefined || label.trim().length === 0) problems.push(`${probe.id} messageEnabledLabel ${language} missing label`);
     }
   }
   return problems;
@@ -56,9 +65,11 @@ describe("module settings editor declarations", () => {
           panelManagesSettings: module.panelManagesSettings === true,
           schemaKeys,
           declaredKeys: [],
+          implicitKeys: [],
           templateKeys: [],
           templateFieldKeys: Object.keys(module.templateFields ?? {}),
           locales: { de: {}, en: {} },
+          messageEnabledLabels: { de: undefined, en: undefined },
         }), module.id).toEqual([]);
         continue;
       }
@@ -75,10 +86,17 @@ describe("module settings editor declarations", () => {
         hasPanel: module.panel !== undefined,
         panelManagesSettings: module.panelManagesSettings === true,
         schemaKeys,
-        declaredKeys: fields.flatMap((field) => field.kind === "message" ? [field.key, field.targetKey] : [field.key]),
+        declaredKeys: fields.flatMap((field) => field.kind === "message"
+          ? [field.key, field.enabledKey, ...(field.targetKey === undefined ? [] : [field.targetKey])]
+          : [field.key]),
+        implicitKeys: fields.filter((field) => field.kind === "message").map((field) => field.enabledKey),
         templateKeys: fields.filter((field) => field.kind === "template" || field.kind === "message").map((field) => field.key),
         templateFieldKeys: Object.keys(module.templateFields ?? {}),
         locales,
+        messageEnabledLabels: {
+          de: definition.locales.de.messageEnabledLabel,
+          en: definition.locales.en.messageEnabledLabel,
+        },
       };
       expect(declarationProblems(probe), module.id).toEqual([]);
     }
@@ -92,8 +110,10 @@ describe("module settings editor declarations", () => {
       panelManagesSettings: false,
       schemaKeys: ["value"],
       declaredKeys: ["value"],
+      implicitKeys: [],
       templateKeys: [],
       templateFieldKeys: [],
+      messageEnabledLabels: { de: undefined, en: undefined },
       locales: {
         de: { value: { label: "Wert", hint: "Ein Wert." } },
         en: { value: { label: "Value", hint: "A value." } },
@@ -115,8 +135,10 @@ describe("module settings editor declarations", () => {
       panelManagesSettings: false,
       schemaKeys: ["message"],
       declaredKeys: ["message"],
+      implicitKeys: [],
       templateKeys: ["message"],
       templateFieldKeys: ["message"],
+      messageEnabledLabels: { de: undefined, en: undefined },
       locales: {
         de: { message: { label: "Nachricht", hint: "Eine Vorlage." } },
         en: { message: { label: "Message", hint: "A template." } },
@@ -137,9 +159,11 @@ describe("module settings editor declarations", () => {
       panelManagesSettings: false,
       schemaKeys: [],
       declaredKeys: [],
+      implicitKeys: [],
       templateKeys: [],
       templateFieldKeys: [],
       locales: { de: {}, en: {} },
+      messageEnabledLabels: { de: undefined, en: undefined },
     })).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 
 import type { AuditAction } from "../../contracts/values";
 import type { BallotSnapshot, ModuleRouteEnvironment } from "../contract";
-import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTE_TEMPLATE_MAXIMUM, DEFAULT_CHAT_VOTING_SETTINGS, chatVoteTemplateDraftSchema, chatVotingPresetForKind, chatVotingSettingsSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, CHAT_VOTE_TEMPLATE_MAXIMUM, DEFAULT_CHAT_VOTING_SETTINGS, chatVoteTemplateDraftSchema, chatVotingPresetForKind, chatVotingSettingsReadSchema, chatVotingStartAnnouncementAlarmKey } from "./contracts";
 import type { ChatVote, ChatVotePreset, ChatVoteTemplate, ChatVoteTemplateDraft, ChatVotingKind } from "./contracts";
 import { createChatVotingRepository } from "./repository";
 import { requestChatVoteClose, requestChatVoteExtension, startChatVote } from "./service";
@@ -46,7 +46,7 @@ const getEnabledSettings = async (db: D1Database, channelId: string) => {
   ).bind(channelId, CHAT_VOTING_MODULE_ID).first<{ settings: string }>();
   if (row === null) return null;
   try {
-    const parsed = chatVotingSettingsSchema.safeParse(JSON.parse(row.settings));
+    const parsed = chatVotingSettingsReadSchema.safeParse(JSON.parse(row.settings));
     return parsed.success ? parsed.data : null;
   } catch { return null; }
 };

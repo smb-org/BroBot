@@ -215,6 +215,14 @@ describe("Votekick module", () => {
     expect(votekickSettingsSchema.parse(legacySettings).starterMinRole).toBe("vip");
   });
 
+  it("requires text when a Votekick message switch is on", () => {
+    const parsed = votekickSettingsSchema.safeParse({ ...settings, startText: "", startTextEnabled: true });
+
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error.issues).toContainEqual(expect.objectContaining({ path: ["startText"], message: "message_text_missing" }));
+  });
+
   it("registers the formatted ballot window as a bilingual template variable", () => {
     const variable = VOTEKICK_TEMPLATE_VARIABLES.find(({ name }) => name === "votekick.window");
     expect(variable).toMatchObject({
@@ -270,6 +278,14 @@ describe("Votekick module", () => {
     const failed = await processVotekickMessage(eventFor("!votekick sampleviewer"), repositoryFor(), failedLookup);
     expect(failed.actions).toEqual([]);
     expect(failed.diagnostics[0]).toMatchObject({ code: "votekick.rejected", detail: { reason: "lookup_failure" } });
+
+    const disabledEvent = {
+      ...eventFor("!votekick sampleviewer"),
+      settings: { ...settings, protectedText: "Saved protected reply", protectedTextEnabled: false },
+    };
+    const disabled = await processVotekickMessage(disabledEvent, repositoryFor(), contextFor({ isChannelModerator: vi.fn(() => Promise.resolve(true)) }));
+    expect(disabled.actions).toEqual([]);
+    expect(disabledEvent.settings.protectedText).toBe("Saved protected reply");
   });
 
   it("counts the starter's yes vote and uses the active chatter threshold", async () => {
@@ -339,6 +355,16 @@ describe("Votekick module", () => {
     expect(startMessage.text).toContain("for 1 min");
   });
 
+  it("starts a ballot without announcing when the start switch is off", async () => {
+    const savedText = "Saved start announcement";
+    const event = { ...eventFor("!votekick sampleviewer"), settings: { ...settings, startText: savedText, startTextEnabled: false } };
+    const result = await processVotekickMessage(event, repositoryFor(), contextFor());
+
+    expect(result.actions.some((action) => action.kind === "chat")).toBe(false);
+    expect(result.actions.some((action) => action.kind === "overlay" && action.type === "opened")).toBe(true);
+    expect(event.settings.startText).toBe(savedText);
+  });
+
   it("admits a target seen one millisecond after the lookup started", async () => {
     const admit = vi.fn(() => Promise.resolve("admitted" as const));
     const context = contextFor({ activeChatters: {
@@ -400,6 +426,38 @@ describe("Votekick module", () => {
       { code: "template.chat_reference_dropped", detail: { name: "text.deleted_result" } },
       { code: "template.chat_reference_dropped", detail: { name: "api.deleted_source" } },
     ]);
+  });
+
+  it("omits disabled pass and fail follow-up messages from the timeout action", async () => {
+    const running = runningVotekick();
+    const repository = repositoryFor({ running: vi.fn(() => Promise.resolve(running)), finalize: vi.fn(() => Promise.resolve(true)) });
+    const context = contextFor({ ballots: {
+      open: vi.fn(() => Promise.resolve({ status: "opened" as const })),
+      cast: vi.fn(() => Promise.resolve({ status: "counted" as const, counts: [3, 0], revision: 3 })),
+      read: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 4 })),
+      close: vi.fn(() => Promise.resolve({ counts: [3, 0], revision: 3 })),
+      finalize: vi.fn(() => Promise.resolve({ outcome: "passed" as const, counts: [3, 0], revision: 4 })),
+    } });
+    const event = {
+      ...eventFor("1", ["viewer"], "voter-user"),
+      settings: {
+        ...settings,
+        passText: "Saved pass text",
+        passTextEnabled: false,
+        failText: "Saved fail text",
+        failTextEnabled: false,
+      },
+    };
+
+    const result = await processVotekickMessage(event, repository, context);
+    const timeout = result.actions.find((action) => action.kind === "timeout");
+
+    expect(timeout).toMatchObject({ kind: "timeout", userId: "sampleviewer-id" });
+    if (timeout?.kind !== "timeout") throw new Error("The timeout action is missing.");
+    expect(timeout).not.toHaveProperty("onSuccess");
+    expect(timeout).not.toHaveProperty("onFailure");
+    expect(event.settings.passText).toBe("Saved pass text");
+    expect(event.settings.failText).toBe("Saved fail text");
   });
 
   it("does not pass when an opposing Durable Object vote commits before the D1 snapshot update", async () => {
@@ -923,6 +981,33 @@ describe("Votekick module", () => {
       [settings.expiredText, "votekick:ballot-1:expired"],
     ]);
     expect(byId).toHaveBeenCalledTimes(2);
+    expect(clear).toHaveBeenCalledOnce();
+  });
+
+  it("clears a disabled expiry announcement without rendering or sending it", async () => {
+    const expired = runningVotekick({ status: "expired", endedAt: new Date().toISOString() });
+    const repository = repositoryFor({ byId: vi.fn(() => Promise.resolve(expired)) });
+    const clear = vi.fn(() => Promise.resolve());
+    const renderTemplate = vi.fn((text: string) => Promise.resolve({ text }));
+    const sendChat = vi.fn();
+    const db = { prepare: vi.fn(() => ({
+      bind: vi.fn().mockReturnThis(),
+      first: vi.fn(() => Promise.resolve({ settings: JSON.stringify({ ...settings, expiredText: "Saved expiry text", expiredTextEnabled: false }) })),
+    })) };
+    const context = {
+      channelId: "channel-a",
+      DB: db,
+      ballots: { close: vi.fn(() => Promise.resolve(null)) },
+      schedule: vi.fn(() => Promise.resolve()),
+      clear,
+      renderTemplate,
+      sendChat,
+    } as unknown as ModuleAlarmContext;
+
+    await closeExpiredVotekick(context, "close:ballot-1", repository);
+
+    expect(renderTemplate).not.toHaveBeenCalled();
+    expect(sendChat).not.toHaveBeenCalled();
     expect(clear).toHaveBeenCalledOnce();
   });
 

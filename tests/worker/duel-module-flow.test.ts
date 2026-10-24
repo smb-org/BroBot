@@ -153,6 +153,30 @@ describe("duel module worker flow", () => {
     expect(sendChat.mock.calls[1]?.[5]).toMatchObject({ replyToMessageId: "fictional-accept", automated: false });
   });
 
+  it.each(["", "Saved {challenger} challenge template"])("opens a silent challenge when its saved announcement is disabled, even when the template is %j [protects=a disabled duel announcement still opens its escrowed round and deadline without exposing raw template text; fails_when=the round is rejected or any chat delivery is attempted; no_claim=uses the real ChannelObject point-round alarm and stubs only the transport]", async (challengeText) => {
+    const channelId = `duel-silent-announcement-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const settings = duelSettings();
+    settings.texts.challengeOpen = challengeText;
+    settings.texts.challengeOpenEnabled = false;
+    await insertDuelModule(channelId, settings);
+    const object = pointObject(channelId);
+    const points = modulePoints((testEnvironment as unknown as { CHANNEL: Env["CHANNEL"] }).CHANNEL, channelId, "duel");
+    const sendChat = await stubAlarmChat(object);
+    await addBalance(points, "viewer_anna", "frostfern");
+
+    await processDuelMessage(eventFor(channelId, "!duel 100", "viewer_anna", "frostfern", "fictional-silent-challenge", settings), contextFor(points));
+    const opening = (await points.rounds.listOpen())[0];
+    expect(opening).toMatchObject({ state: "announcing", data: { silentAnnouncement: true } });
+    if (opening === undefined) throw new Error("challenge_not_open");
+    await forcePointAlarm(object, opening.roundId);
+
+    const activated = (await points.rounds.listOpen())[0];
+    expect(activated?.state).toBe("open");
+    expect(typeof activated?.deadlineAt).toBe("number");
+    expect(sendChat).not.toHaveBeenCalled();
+  });
+
   it("keeps a house result pending through repeated limiter rejections until delivery", async () => {
     const channelId = `duel-house-result-limiter-${crypto.randomUUID()}`;
     const { object, points } = await setup(channelId);

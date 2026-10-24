@@ -1,7 +1,7 @@
 import { createBlitzQuestionRepository } from "./adapters/d1";
 import type { BotModule, ModuleAlarmContext, ModulePointRoundAnnouncement, ModulePointRoundResult } from "../contract";
 import { BLITZ_TEMPLATE_FIELDS, BLITZ_TEMPLATE_VARIABLES, blitzTemplateVariableGroup } from "./contracts/template-variables";
-import { BLITZ_ROUND_MODULE_ID, blitzRoundSettingsSchema } from "./contracts";
+import { BLITZ_ROUND_MODULE_ID, blitzRoundSettingsReadSchema, blitzRoundSettingsSchema } from "./contracts";
 import { blitzActionTexts, blitzRoundDefaultsForLanguage, blitzRoundTypeLabel, blitzTexts, formatBlitzResolutionLine } from "./locale";
 import { blitzRoundRoutes } from "./routes";
 import { processBlitzMessage } from "./service";
@@ -9,6 +9,7 @@ import { blitzAutoStartAlarm, onBlitzPointRoundOpened, onBlitzPointRoundResolved
 import { blitzStarterSeedStatement } from "./seed-words";
 import type { BlitzRoundData } from "./contracts";
 import { type BlitzWinner } from "./domain/round";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -38,9 +39,10 @@ const roundVariables = (data: BlitzRoundData, winners = "", share = 0): Record<s
 const announcementText = async (
   context: ModuleAlarmContext,
   round: ModulePointRoundAnnouncement,
-): Promise<{ text: string; attributions?: readonly string[]; target?: Exclude<BlitzRoundData["chatTarget"], null> } | null> => {
+): Promise<{ kind: "silent" } | { text: string; attributions?: readonly string[]; target?: Exclude<BlitzRoundData["chatTarget"], null> } | null> => {
   const data = roundData(round.data);
   if (data === null) return null;
+  if (!isMessageEnabled(data, "startText", "startTextEnabled")) return { kind: "silent" as const };
   const rendered = await context.renderTemplate(round.text, roundVariables(data));
   return { text: rendered.text, ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }), ...(data.chatTarget === null ? {} : { target: data.chatTarget }) };
 };
@@ -71,6 +73,8 @@ const resultText = async (
   const winners = result.winners as BlitzWinner[];
   const defaultLine = formatBlitzResolutionLine({ language: data.language, answer: result.answer, winners, share: result.share as number });
   const template = winners.length === 0 ? data.texts.timeoutText : data.texts.solvedText;
+  const messageKey = winners.length === 0 ? "timeoutText" : "solvedText";
+  if (!isMessageEnabled(data.texts, messageKey, `${messageKey}Enabled`)) return null;
   const rendered = await context.renderTemplate(template || defaultLine, roundVariables(
     { ...data, answer: result.answer },
     blitzTexts(data.language).winnerNames(winners),
@@ -94,6 +98,7 @@ export const blitzRoundModule: BotModule<typeof blitzRoundSettingsSchema> = {
   defaultEnabled: false,
   dryRunSilentReason: "round_answers",
   settingsSchema: blitzRoundSettingsSchema,
+  settingsReadSchema: blitzRoundSettingsReadSchema,
   defaultSettings: blitzRoundDefaultsForLanguage("de"),
   defaultSettingsForLanguage: blitzRoundDefaultsForLanguage,
   templateFields: BLITZ_TEMPLATE_FIELDS,

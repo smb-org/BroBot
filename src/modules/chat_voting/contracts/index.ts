@@ -2,6 +2,7 @@ import { z } from "zod";
 import { DEFAULT_CHAT_VOTING_START_TEXT } from "./chat-defaults";
 import { templateTextLength } from "../../../contracts/template-text-length";
 import { chatVoteAnswerColorsSchema } from "./chat-vote-colors-schema";
+import { isMessageEnabled } from "../../../contracts/message-enabled";
 
 export { DEFAULT_CHAT_VOTING_START_TEXT, DEFAULT_CHAT_VOTING_START_TEXT_EN } from "./chat-defaults";
 
@@ -24,13 +25,29 @@ export const CHAT_VOTING_TITLE_MAX_LENGTH = 80;
 export const CHAT_VOTING_HARD_LIMIT_MS = 4 * 60 * 60 * 1_000;
 export const CHAT_VOTING_BALLOT_RETENTION_MS = 24 * 60 * 60 * 1_000 - 60_000;
 
-export const chatVotingSettingsSchema = z.object({
+const chatVotingSettingsObjectSchema = z.object({
   autoCloseSeconds: z.number().int().min(0).max(CHAT_VOTING_HARD_LIMIT_MS / 1_000).default(120),
   startText: z.string().refine((text) => templateTextLength(text) <= 500).default(DEFAULT_CHAT_VOTING_START_TEXT),
+  startTextEnabled: z.boolean().optional(),
   announceResult: z.boolean().default(true),
   resultText: z.string().refine((text) => templateTextLength(text) <= 500).default("{vote.result}"),
   resultTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
 });
+
+const validateChatVotingMessages = (settings: z.output<typeof chatVotingSettingsObjectSchema>, context: z.RefinementCtx): void => {
+  if (isMessageEnabled(settings, "startText", "startTextEnabled") && settings.startText.trim().length === 0) {
+    context.addIssue({ code: "custom", path: ["startText"], message: "message_text_missing" });
+  }
+  if (isMessageEnabled(settings, "resultText", "announceResult") && settings.resultText.trim().length === 0) {
+    context.addIssue({ code: "custom", path: ["resultText"], message: "message_text_missing" });
+  }
+};
+
+// The read schema keeps stored values untouched: a blank global result text with the switch on is a
+// legacy record, and a vote can still carry its own non-empty result template. Close time decides with
+// the effective text; the write schema below asks for the missing text before the next save.
+export const chatVotingSettingsReadSchema = chatVotingSettingsObjectSchema;
+export const chatVotingSettingsSchema = chatVotingSettingsObjectSchema.superRefine(validateChatVotingMessages);
 
 export type ChatVotingSettings = z.output<typeof chatVotingSettingsSchema>;
 

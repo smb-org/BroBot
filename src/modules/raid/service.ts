@@ -1,4 +1,5 @@
 import type { EventCode, ShoutoutSuppressedReason } from "../../contracts/values";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 import { hasChatMessage, type ModuleDiagnostic, type ModuleEvent, type ModuleResult } from "../contract";
 import type { RaidSettings } from "./contracts";
 import { decideRaid, renderRaidText } from "./domain";
@@ -33,7 +34,9 @@ export function processRaid(
     return { actions: [], diagnostics: [{ code: "raid.invalid" satisfies EventCode, detail: { reason: decision.reason } }] };
   }
 
-  const template = decision.aboveThreshold ? event.settings.textLong : event.settings.textShort;
+  const messageKey = decision.aboveThreshold ? "textLong" : "textShort";
+  const enabledKey = decision.aboveThreshold ? "textLongEnabled" : "textShortEnabled";
+  const template = event.settings[messageKey];
   const configuredTarget = (decision.aboveThreshold ? event.settings.textLongTarget : event.settings.textShortTarget) ?? "source_only";
   const chatTarget = configuredTarget === "channel_default" ? undefined : configuredTarget;
   const moduleValues = { channel: decision.sourceChannelName, viewers: decision.viewers };
@@ -69,7 +72,7 @@ export function processRaid(
       }],
     };
   };
-  if (!hasChatMessage(template)) return makeResult("");
+  if (!isMessageEnabled(event.settings, messageKey, enabledKey) || !hasChatMessage(template)) return makeResult("");
   if (render !== undefined) return render(template, moduleValues).then(({ text, diagnostics }) => makeResult(text, diagnostics));
   return makeResult(renderRaidText(template, moduleValues));
 }

@@ -1,5 +1,6 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import { blitzRoundSettingsSchema, type BlitzQuestion, type BlitzQuestionInput, type BlitzQuestionPage, type BlitzRoundSettings } from "../contracts";
+import { blitzRoundSettingsReadSchema, type BlitzQuestion, type BlitzQuestionInput, type BlitzQuestionPage, type BlitzRoundSettings } from "../contracts";
+import { resolveMessageEnabledFlags } from "../../../contracts/resolve-message-enabled";
 
 const basePath = (channelId: string): string => `/api/channels/${encodeURIComponent(channelId)}/modules/blitz_round`;
 
@@ -28,9 +29,14 @@ export const loadBlitzQuestion = async (channelId: string, questionId: string, s
 
 export const loadBlitzSettings = async (channelId: string, signal?: AbortSignal): Promise<{ settings: BlitzRoundSettings; revision: number }> => {
   const parsed = await readJson<{ settings: unknown; revision: number }>(await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/blitz_round/settings`, signal === undefined ? {} : { signal }));
-  const settings = blitzRoundSettingsSchema.safeParse(parsed.settings);
+  const settings = blitzRoundSettingsReadSchema.safeParse(parsed.settings);
   if (!settings.success) throw new Error("settings_invalid");
-  return { settings: settings.data, revision: parsed.revision };
+  const normalizedSettings = resolveMessageEnabledFlags(settings.data, [
+    { messagePath: "startText", enabledPath: "startTextEnabled" },
+    { messagePath: "solvedText", enabledPath: "solvedTextEnabled" },
+    { messagePath: "timeoutText", enabledPath: "timeoutTextEnabled" },
+  ]);
+  return { settings: normalizedSettings, revision: parsed.revision };
 };
 
 const mutate = async <Value,>(channelId: string, path: string, method: "POST" | "PATCH" | "DELETE", value?: unknown): Promise<Value> => {

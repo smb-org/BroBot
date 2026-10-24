@@ -380,8 +380,11 @@ const expectedModuleSettings = {
   blitz_round: {
     prize: 50, answerTimeSeconds: 60, autoStart: false, autoStartIntervalMinutes: 15, chatTarget: null,
     startText: blitzTexts("de").startTextDefault,
+    startTextEnabled: true,
     solvedText: blitzTexts("de").solvedTextDefault,
+    solvedTextEnabled: true,
     timeoutText: blitzTexts("de").timeoutTextDefault,
+    timeoutTextEnabled: true,
   },
   channel_events: {},
   emote_slots: {
@@ -403,9 +406,13 @@ const expectedModuleSettings = {
     chatTarget: "where_asked",
     texts: {
       win: "{slot.symbols}  {slot.net} · Balance {slot.balance} · Jackpot {slot.jackpot}",
+      winEnabled: true,
       loss: "{slot.symbols}  {slot.net} · Balance {slot.balance} · Jackpot {slot.jackpot}",
+      lossEnabled: true,
       pair: "{slot.symbols}  Stake back · {slot.net} · Balance {slot.balance} · Jackpot {slot.jackpot}",
+      pairEnabled: true,
       jackpot: "{slot.symbols}  JACKPOT! {user} wins {slot.net} · Jackpot now {slot.jackpot}",
+      jackpotEnabled: true,
     },
   },
   chat_voting: {
