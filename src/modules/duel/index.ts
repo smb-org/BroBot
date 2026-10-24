@@ -2,6 +2,7 @@ import type { BotModule, ModuleAlarmContext, ModulePointRoundAnnouncement, Modul
 import { DUEL_MODULE_ID, duelSettingsForLanguage, duelSettingsSchema, type DuelRoundData } from "./contracts";
 import { duelCatalog } from "./locale";
 import { duelAnnouncementTemplate, duelFightLine, duelResultTemplate, duelTextVariables, processDuelMessage } from "./service";
+import { isMessageEnabled } from "../../contracts/message-enabled";
 import { duelRoutes } from "./routes";
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -25,6 +26,8 @@ const formatAnnouncement = async (
 ) => {
   const data = roundData(round.data);
   if (data === null) return null;
+  const messageKey = data.targetId === null ? "challengeOpen" : "challengeTargeted";
+  if (!isMessageEnabled(data.texts, messageKey, `${messageKey}Enabled`)) return null;
   const rendered = await context.renderTemplate(duelAnnouncementTemplate(data), duelTextVariables(data));
   return {
     text: rendered.text,
@@ -41,6 +44,8 @@ const formatResult = async (context: ModuleAlarmContext, round: ModulePointRound
   const result = record(round.result);
   if (data === null || result === null || result.expired === true || typeof result.winnerLogin !== "string" ||
       typeof result.loserLogin !== "string" || typeof result.bot !== "boolean") return null;
+  const resultKey = result.bot ? "botResult" : "result";
+  if (!isMessageEnabled(data.texts, resultKey, `${resultKey}Enabled`)) return null;
   const rendered = await context.renderTemplate(duelResultTemplate(data, result.bot), duelTextVariables(data, {
     fight: duelFightLine(data, result.bot),
     winner: result.winnerLogin,

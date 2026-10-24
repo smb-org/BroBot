@@ -1,4 +1,5 @@
 import type { EventCode } from "../contracts/values";
+import { isMessageEnabled } from "../contracts/message-enabled";
 import type { ModuleDiagnostic } from "../modules/contract";
 import { adsModule } from "../modules/ads";
 import { decideAdPrewarning, type AdPrewarningDecision } from "../modules/ads/domain";
@@ -260,7 +261,7 @@ export const refreshAdPrewarning = async (
     await clear(scheduler);
     return;
   }
-  const prewarningEnabled = configured.settings.prewarningText.trim().length > 0;
+  const prewarningEnabled = isMessageEnabled(configured.settings, "prewarningText", "prewarningTextEnabled");
   if (!prewarningEnabled) await clear(scheduler);
 
   const scheduleGeneration = await scheduler?.readScheduleGeneration?.();
@@ -316,7 +317,7 @@ export const processAdPrewarning = async (
 ): Promise<void> => {
   const scheduler = schedulerFor(environment, channelId, ownScheduler);
   const configured = await settingRecord(environment, channelId, triggerId, now, scheduler);
-  if (configured === null || configured.settings.prewarningText.trim().length === 0) return;
+  if (configured === null || !isMessageEnabled(configured.settings, "prewarningText", "prewarningTextEnabled")) return;
 
   const scheduleGeneration = await scheduler?.readScheduleGeneration?.();
   const result = await getAdSchedule(

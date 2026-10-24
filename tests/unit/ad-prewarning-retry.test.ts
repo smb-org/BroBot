@@ -22,6 +22,37 @@ import type { AdSchedule } from "../../src/modules/ads/adapters/ad-schedule";
 describe("ad prewarning retry before chat POST", () => {
   afterEach(() => vi.clearAllMocks());
 
+  it("does not send a scheduled prewarning when its switch is off", async () => {
+    mocks.getChannelModuleForChannel.mockResolvedValue({
+      channelId: "kanal-a",
+      moduleId: "ads",
+      enabled: true,
+      revision: 1,
+      settings: JSON.stringify({
+        automatic: "Automatic ad message",
+        manual: "Manual ad message",
+        leadSeconds: 60,
+        prewarningText: "Saved warning text",
+        prewarningTextEnabled: false,
+      }),
+    });
+    mocks.moduleBroadcasterScopeState.mockResolvedValue({ required: ["channel:read:ads"], missing: [] });
+    const fetcher = vi.fn<typeof fetch>();
+
+    await processAdPrewarning(
+      { DB: {} as D1Database, TWITCH_CLIENT_ID: "client", TWITCH_CLIENT_SECRET: "secret" },
+      "kanal-a",
+      Date.parse("2026-09-24T12:03:00.000Z"),
+      "alarm-1",
+      "2026-09-24T12:03:00.000Z",
+      fetcher,
+    );
+
+    expect(mocks.getAdSchedule).not.toHaveBeenCalled();
+    expect(mocks.getBotIdentity).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("leaves the occurrence claim available when bot identity lookup fails before POST", async () => {
     const dueAt = Date.parse("2026-09-24T12:03:00.000Z");
     const schedule: AdSchedule = {

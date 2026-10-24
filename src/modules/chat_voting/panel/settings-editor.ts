@@ -16,7 +16,7 @@ const spec: SettingsEditorSpec<ChatVotingSettings> = {
       { kind: "number", key: "autoCloseSeconds", min: 0, max: 14_400, step: 30, unit: "s" },
     ] },
     { id: "messages", icon: "tabMessages", fields: [
-      { kind: "template", key: "startText", optional: true, minRows: 2, preview },
+      { kind: "message", key: "startText", enabledKey: "startTextEnabled", preview },
       { kind: "switchCard", key: "announceResult", children: [
         { kind: "template", key: "resultText", minRows: 2, preview },
         { kind: "chatTarget", key: "resultTarget" },

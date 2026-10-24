@@ -28,6 +28,11 @@ describe("ad prewarning decision", () => {
       .toMatchObject({ kind: "skip", reason: "disabled" });
   });
 
+  it("does not announce a saved prewarning when its explicit switch is off", () => {
+    expect(decideAdPrewarning(input({ settings: { ...settings, prewarningTextEnabled: false } })))
+      .toMatchObject({ kind: "skip", reason: "disabled" });
+  });
+
   it("announces the unchanged schedule with the placeholder", () => {
     expect(decideAdPrewarning(input())).toEqual({
       kind: "announce",

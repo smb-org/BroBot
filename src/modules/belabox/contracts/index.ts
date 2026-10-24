@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { belaboxDefaultAlertTexts } from "./alert-texts";
 import { templateTextLength } from "../../../contracts/template-text-length";
+import { isMessageEnabled } from "../../../contracts/message-enabled";
 
 export { BELABOX_ALERT_TEMPLATE_FIELDS, belaboxDefaultAlertTexts } from "./alert-texts";
 
@@ -29,8 +30,11 @@ const belaboxSettingsInputSchema = z.object({
   chatCooldownSeconds: z.number().int().min(0).max(86_400).default(300),
   chatEnabled: z.boolean().default(false),
   lowText: z.string().refine((text) => templateTextLength(text) <= 500).default(belaboxDefaultAlertTexts("en").lowText),
+  lowTextEnabled: z.boolean().optional(),
   disconnectText: z.string().refine((text) => templateTextLength(text) <= 500).default(belaboxDefaultAlertTexts("en").disconnectText),
+  disconnectTextEnabled: z.boolean().optional(),
   recoveryText: z.string().refine((text) => templateTextLength(text) <= 500).default(belaboxDefaultAlertTexts("en").recoveryText),
+  recoveryTextEnabled: z.boolean().optional(),
   lowTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
   disconnectTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
   recoveryTarget: z.enum(["all_chats", "source_only"]).default("source_only"),
@@ -42,6 +46,15 @@ export const belaboxSettingsSchema = belaboxSettingsInputSchema.transform((setti
   holdSeconds: settings.holdSeconds ?? Math.max(10, settings.intervalSeconds),
   recoverHoldSeconds: settings.recoverHoldSeconds ?? Math.max(15, settings.intervalSeconds),
 })).superRefine((settings, context) => {
+  for (const [messageKey, enabledKey] of [
+    ["lowText", "lowTextEnabled"],
+    ["disconnectText", "disconnectTextEnabled"],
+    ["recoveryText", "recoveryTextEnabled"],
+  ] as const) {
+    if (isMessageEnabled(settings, messageKey, enabledKey) && settings[messageKey].trim().length === 0) {
+      context.addIssue({ code: "custom", path: [messageKey], message: "message_text_missing" });
+    }
+  }
   if (settings.recoverBitrateKbps <= settings.lowBitrateKbps) {
     context.addIssue({ code: "custom", path: ["recoverBitrateKbps"], message: "recover_must_exceed_low" });
   }

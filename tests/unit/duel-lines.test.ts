@@ -61,6 +61,40 @@ describe("duel round chat line budget", () => {
     expect(silentExpiry).toBeNull();
   });
 
+  it("suppresses disabled saved announcements and results while keeping their templates", async () => {
+    const settings = duelSettingsForLanguage("en");
+    const data = {
+      challengerId: "viewer_anna",
+      challengerLogin: "frostfern",
+      targetId: null,
+      targetLogin: null,
+      stake: 100,
+      botEnabled: true,
+      acceptCommand: "!yes",
+      language: "en" as const,
+      chatTarget: null,
+      sourceBroadcasterUserId: null,
+      challengeMessageId: "fictional-challenge-message",
+      fightText: settings.texts.fightVariants[0] ?? "",
+      botFightText: settings.texts.botFightVariants[0] ?? "",
+      texts: { ...settings.texts, challengeOpenEnabled: false, resultEnabled: false },
+    };
+    const announcement = await duelModule.formatPointRoundAnnouncement?.(alarmContext, {
+      roundId: "fictional-round", data, text: settings.texts.challengeOpen,
+    });
+    const result = await duelModule.formatPointRoundResult?.(alarmContext, {
+      roundId: "fictional-round",
+      data,
+      result: { winner: "viewer_ben", winnerLogin: "moonmoss", loserLogin: "frostfern", net: 100, bot: false },
+      resolvedAt: "2100-01-01T00:00:00.000Z",
+    });
+
+    expect(announcement).toBeNull();
+    expect(result).toBeNull();
+    expect(data.texts.challengeOpen).toBe(settings.texts.challengeOpen);
+    expect(data.texts.result).toBe(settings.texts.result);
+  });
+
   it.each([
     ["de", "🧹"],
     ["en", "janitor"],

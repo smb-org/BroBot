@@ -2,15 +2,26 @@ import { z } from "zod";
 import type { TemplateFields, TemplateVariable } from "../contract";
 import { raidTemplateVariableCatalog } from "./template-variable-catalog";
 import { templateTextLength } from "../../../contracts/template-text-length";
+import { isMessageEnabled } from "../../../contracts/message-enabled";
 
-export const raidSettingsSchema = z.object({
+const raidSettingsObjectSchema = z.object({
   shoutoutEnabled: z.boolean().default(true),
   shoutoutThreshold: z.number().int().min(0).max(100000).default(3),
   textThreshold: z.number().int().min(0).max(100000).default(3),
   textLong: z.string().trim().refine((text) => templateTextLength(text) <= 500),
+  textLongEnabled: z.boolean().optional(),
   textShort: z.string().trim().refine((text) => templateTextLength(text) <= 500),
+  textShortEnabled: z.boolean().optional(),
   textLongTarget: z.enum(["all_chats", "source_only", "channel_default"]).default("channel_default"),
   textShortTarget: z.enum(["all_chats", "source_only", "channel_default"]).default("channel_default"),
+});
+
+export const raidSettingsSchema = raidSettingsObjectSchema.superRefine((settings, context) => {
+  for (const [messageKey, enabledKey] of [["textLong", "textLongEnabled"], ["textShort", "textShortEnabled"]] as const) {
+    if (isMessageEnabled(settings, messageKey, enabledKey) && settings[messageKey].trim().length === 0) {
+      context.addIssue({ code: "custom", path: [messageKey], message: "message_text_missing" });
+    }
+  }
 });
 
 export type RaidSettings = Omit<z.output<typeof raidSettingsSchema>, "textLongTarget" | "textShortTarget"> & {

@@ -151,8 +151,8 @@ describe("votekick starter role setting", () => {
     expect(properties).not.toBeNull();
     const startMessage = within(properties as HTMLElement).getByText("Start message").closest("div");
     expect(startMessage).not.toBeNull();
-    expect(startMessage).toHaveTextContent("On");
-    expect(startMessage).toHaveTextContent(DEFAULT_VOTEKICK_SETTINGS.startText);
-    expect(startMessage).toHaveTextContent("Message text");
+    expect(startMessage?.textContent).toContain("On");
+    expect(startMessage?.textContent).toContain(DEFAULT_VOTEKICK_SETTINGS.startText);
+    expect(startMessage?.textContent).toContain("Message text");
   });
 });

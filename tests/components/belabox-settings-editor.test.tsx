@@ -34,7 +34,7 @@ describe("BELABOX settings editor", () => {
     expect(latest).toMatchObject({ mode: "on_demand", intervalSeconds: 30 });
   });
 
-  it("shows empty alert templates as off using the shared message pattern", () => {
+  it("shows empty alert templates as switched off while keeping their fields available", () => {
     const copy = belaboxSettingsEditorCatalog("en");
     render(<UiProvider><SettingsEditor
       spec={settingsEditor.spec}
@@ -51,14 +51,16 @@ describe("BELABOX settings editor", () => {
       templateMessages={copy.templateMessages}
       enabledLabel={copy.enabledLabel}
       disabledLabel={copy.disabledLabel}
+      {...(copy.messageEnabledLabel === undefined ? {} : { messageEnabledLabel: copy.messageEnabledLabel })}
     /></UiProvider>);
 
     expect(document.querySelectorAll(".ui-settings-editor__message")).toHaveLength(3);
-    expect(Array.from(document.querySelectorAll(".ui-settings-editor__message-heading span"), (element) => element.textContent))
-      .toEqual(["Off", "Off", "Off"]);
-    expect(screen.getByText("Low bitrate target")).toBeInTheDocument();
-    expect(screen.getByText("Disconnect target")).toBeInTheDocument();
-    expect(screen.getByText("Recovery target")).toBeInTheDocument();
+    for (const messageSwitch of screen.getAllByRole("switch", { name: /Send message/u })) {
+      expect(messageSwitch.getAttribute("aria-checked")).toBe("false");
+    }
+    expect(screen.queryByText("Low bitrate target")).not.toBeNull();
+    expect(screen.queryByText("Disconnect target")).not.toBeNull();
+    expect(screen.queryByText("Recovery target")).not.toBeNull();
   });
 
   it("shows nested chat alert settings in operator properties", () => {

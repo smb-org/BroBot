@@ -1,4 +1,5 @@
 import type { ModuleRouteVariables } from "../contract";
+import { isMessageEnabled } from "../../../contracts/message-enabled";
 import type { AdsScheduleResponse } from "../contracts";
 import { adsSettingsSchema } from "../contracts";
 
@@ -65,7 +66,7 @@ export const refreshAdPrewarningAlarm = async (
   const warningScopeAvailable = grantedScopes === undefined
     ? await broadcasterHasScope(environment.DB, channelId, WARNING_SCOPE)
     : grantedScopes.includes(WARNING_SCOPE);
-  if (!settings.success || settings.data.prewarningText.trim().length === 0 || !warningScopeAvailable) {
+  if (!settings.success || !isMessageEnabled(settings.data, "prewarningText", "prewarningTextEnabled") || !warningScopeAvailable) {
     await clearPrewarning(scheduler);
     return;
   }

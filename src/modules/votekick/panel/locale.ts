@@ -186,6 +186,7 @@ const makeSettingsCatalog = (language: DashboardLanguage): SettingsEditorCatalog
   const templateField = (hint: string) => ({
     label: words.messageBody,
     hint,
+    requiredError: de ? "Text fehlt" : "Text missing",
     previewLabel: words.preview,
     previewSpeaker: words.bot,
     variables: variables.map(({ name, label, description, sample }) => ({ name, label, description, sample })),

@@ -80,21 +80,37 @@ describe("Ad settings editor declaration", () => {
     expect(document.querySelector(".page-header__save .ui-save-bar")).not.toBeNull();
   });
 
-  it("previews the duration fallback and uses blank text as the only message switch", async () => {
+  it("previews the duration fallback and renders independent switches for saved messages", async () => {
     renderAds(adsFetch());
 
     await screen.findByRole("textbox", { name: "Automatische Werbepause" });
-    expect(screen.getByText("Werbepause beginnt (90 Sekunden)")).toBeInTheDocument();
+    expect(screen.queryByText("Werbepause beginnt (90 Sekunden)")).not.toBeNull();
     const automatic = screen.getByRole("textbox", { name: "Automatische Werbepause" });
     fireEvent.change(automatic, { target: { value: "x".repeat(486) } });
-    expect(await screen.findByText(/bis zu 501 Zeichen/)).toBeInTheDocument();
+    expect((await screen.findByText(/bis zu 501 Zeichen/u)).textContent).toMatch(/bis zu 501 Zeichen/u);
 
     const prewarning = screen.getByRole("textbox", { name: "Vorwarnung" });
-    expect(prewarning).toHaveValue("");
-    expect(screen.getByText("Nachricht ausgeschaltet")).toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: /Vorwarnung/ })).not.toBeInTheDocument();
+    expect((prewarning as HTMLTextAreaElement).value).toBe("");
+    expect(screen.queryByText("Nachricht ausgeschaltet")).not.toBeNull();
+    const messageSwitches = screen.getAllByRole("switch", { name: /Nachricht senden/u });
+    expect(messageSwitches).toHaveLength(3);
+    expect(messageSwitches[0]?.getAttribute("aria-checked")).toBe("true");
+    expect(messageSwitches[1]?.getAttribute("aria-checked")).toBe("true");
+    expect(messageSwitches[2]?.getAttribute("aria-checked")).toBe("false");
     fireEvent.change(prewarning, { target: { value: "Werbung in {ads.seconds} Sekunden." } });
-    expect(document.querySelector('.ui-settings-editor__message[data-enabled="true"]')).toHaveTextContent("An");
+    expect(messageSwitches[2]?.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("requires text when a message is switched on and keeps explicit save", async () => {
+    const fetcher = adsFetch();
+    renderAds(fetcher);
+
+    await screen.findByRole("textbox", { name: "Vorwarnung" });
+    fireEvent.click(screen.getAllByRole("switch", { name: /Nachricht senden/u })[2] as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+
+    expect((await screen.findAllByText("Text fehlt")).length).toBe(1);
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(0);
   });
 
   it("keeps the announcement draft after a 409 and lists settings for operators", async () => {

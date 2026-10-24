@@ -19,11 +19,17 @@ describe("chat voting close service", () => {
   beforeEach(() => { database = new TestD1Database(); });
   afterEach(() => { database.close(); });
 
-  const seedOpenVote = async (announceResult: boolean, title: string | null = null, resultText?: string, startText?: string): Promise<ReturnType<typeof createChatVotingRepository>> => {
+  const seedOpenVote = async (
+    announceResult: boolean,
+    title: string | null = null,
+    resultText?: string,
+    startText?: string,
+    startTextEnabled?: boolean,
+  ): Promise<ReturnType<typeof createChatVotingRepository>> => {
     await insertChannel(database, "fictional-channel");
     await database.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat_voting', 1, ?)",
-    ).bind("fictional-channel", JSON.stringify({ announceResult, ...(resultText === undefined ? {} : { resultText }), ...(startText === undefined ? {} : { startText }) })).run();
+    ).bind("fictional-channel", JSON.stringify({ announceResult, ...(resultText === undefined ? {} : { resultText }), ...(startText === undefined ? {} : { startText }), ...(startTextEnabled === undefined ? {} : { startTextEnabled }) })).run();
     const repository = createChatVotingRepository(database as unknown as D1Database);
     const vote: ChatVoteDraft = {
       id: "fictional-poll",
@@ -553,6 +559,16 @@ describe("chat voting close service", () => {
 
   it("sends nothing when the optional start template is empty", async () => {
     const repository = await seedOpenVote(false, null, undefined, "");
+    const { context } = createAlarmContext([]);
+
+    await announceChatVoteStartFromAlarm(context, repository, "fictional-poll");
+
+    expect(context.renderTemplate).not.toHaveBeenCalled();
+    expect(context.sendChat).not.toHaveBeenCalled();
+  });
+
+  it("keeps a disabled start announcement saved without rendering or sending it", async () => {
+    const repository = await seedOpenVote(false, null, undefined, "Saved announcement", false);
     const { context } = createAlarmContext([]);
 
     await announceChatVoteStartFromAlarm(context, repository, "fictional-poll");

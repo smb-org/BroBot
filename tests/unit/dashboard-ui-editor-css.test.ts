@@ -50,10 +50,11 @@ describe("editor seam styles", () => {
 
   it("aligns the SwitchRow control to the right column and distinguishes checked, invalid, and disabled states", () => {
     expect(styles).toContain(".ui-switch-row [data-slot=\"switch\"] { grid-column: 2; grid-row: 1; }");
-    const row = styles.match(/\.ui-switch-row\s*\{([^}]+)\}/u)?.[1] ?? "";
+    const row = styles.match(/^\.ui-switch-row\s*\{([^}]+)\}/mu)?.[1] ?? "";
     expect(row).toContain("padding-inline-end: 8px;");
     expect(switchStyles).toContain("data-checked:bg-[var(--color-brand)]");
-    expect(switchStyles).toContain("data-checked:bg-[var(--color-brand-on)]");
+    expect(switchStyles).not.toContain("color-brand-on");
+    expect(switchStyles).toContain("bg-[var(--color-text)]");
     expect(switchStyles).toContain("data-disabled:opacity-70");
     expect(switchStyles).toContain("aria-invalid:border-[var(--color-error)]");
     expect(switchStyles).toContain("focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]");

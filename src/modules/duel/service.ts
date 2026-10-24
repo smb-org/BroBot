@@ -1,14 +1,15 @@
 import type { ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
-import type { DuelRoundData, DuelSettings } from "./contracts";
+import { isMessageEnabled } from "../../contracts/message-enabled";
+import type { DuelErrorMessageKey, DuelRoundData, DuelSettings } from "./contracts";
 import { parseDuelAcceptCommand, parseDuelChallengeCommand, validateDuelTarget } from "./domain/command";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
-const textVariant = (items: readonly string[], seed: string): string => {
+const textVariantIndex = (items: readonly string[], seed: string): number => {
   let hash = 0;
   for (const character of seed) hash = (Math.imul(hash, 31) + character.charCodeAt(0)) >>> 0;
-  return items[hash % items.length] ?? items[0] ?? "";
+  return hash % items.length;
 };
 
 const interpolate = (template: string, variables: Readonly<Record<string, string | number>>): string =>
@@ -28,8 +29,9 @@ const throttledError = async (
   settings: DuelSettings,
   accountId: string,
   messageId: string,
-  key: keyof DuelSettings["texts"]["errors"],
+  key: DuelErrorMessageKey,
 ): Promise<ModuleResult> => {
+  if (!isMessageEnabled(settings.texts.errors, key, `${key}Enabled`)) return { actions: [], diagnostics: [] };
   if (!await context.points.claimCooldown(`error:${accountId}`, 60)) return { actions: [], diagnostics: [] };
   return {
     actions: [{
@@ -95,6 +97,8 @@ export const processDuelMessage = async (
       targetId = target.userId;
       targetLogin = target.login;
     }
+    const fightVariantIndex = textVariantIndex(event.settings.texts.fightVariants, messageId);
+    const botFightVariantIndex = textVariantIndex(event.settings.texts.botFightVariants, messageId);
     const data: DuelRoundData = {
       challengerId: accountId,
       challengerLogin: login,
@@ -107,8 +111,10 @@ export const processDuelMessage = async (
       chatTarget: event.settings.chatTarget,
       sourceBroadcasterUserId: typeof sourceBroadcasterUserId === "string" ? sourceBroadcasterUserId : null,
       challengeMessageId: messageId,
-      fightText: textVariant(event.settings.texts.fightVariants, messageId),
-      botFightText: textVariant(event.settings.texts.botFightVariants, messageId),
+      fightText: event.settings.texts.fightVariants[fightVariantIndex] ?? "",
+      botFightText: event.settings.texts.botFightVariants[botFightVariantIndex] ?? "",
+      fightTextEnabled: isMessageEnabled(event.settings.texts, "fightVariants", "fightVariantsEnabled", fightVariantIndex),
+      botFightTextEnabled: isMessageEnabled(event.settings.texts, "botFightVariants", "botFightVariantsEnabled", botFightVariantIndex),
       texts: event.settings.texts,
     };
     const roundId = crypto.randomUUID();
@@ -178,5 +184,9 @@ export const duelAnnouncementTemplate = (data: DuelRoundData): string =>
 
 export const duelResultTemplate = (data: DuelRoundData, bot: boolean): string => bot ? data.texts.botResult : data.texts.result;
 
-export const duelFightLine = (data: DuelRoundData, bot: boolean): string => bot ? data.botFightText : data.fightText;
+export const duelFightLine = (data: DuelRoundData, bot: boolean): string => {
+  const text = bot ? data.botFightText : data.fightText;
+  const enabled = bot ? data.botFightTextEnabled : data.fightTextEnabled;
+  return (enabled ?? text.trim().length > 0) ? text : "";
+};
 

@@ -52,4 +52,18 @@ describe("duel settings", () => {
     expect(duelSettingsSchema.safeParse({ ...defaults, maxStake: 100_001 }).success).toBe(false);
     expect(duelSettingsSchema.safeParse({ ...defaults, acceptCommand: defaults.challengeCommand }).success).toBe(false);
   });
+
+  it("keeps message text when disabled and rejects enabled empty text", () => {
+    const defaults = duelSettingsForLanguage("en");
+    const disabled = duelSettingsSchema.parse({
+      ...defaults,
+      texts: { ...defaults.texts, challengeOpen: "Saved challenge", challengeOpenEnabled: false },
+    });
+
+    expect(disabled.texts.challengeOpen).toBe("Saved challenge");
+    expect(duelSettingsSchema.safeParse({
+      ...defaults,
+      texts: { ...defaults.texts, challengeOpen: "", challengeOpenEnabled: true },
+    }).error?.issues).toContainEqual(expect.objectContaining({ path: ["texts", "challengeOpen"], message: "message_text_missing" }));
+  });
 });

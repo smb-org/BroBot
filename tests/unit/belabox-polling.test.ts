@@ -663,6 +663,33 @@ describe("BELABOX polling", () => {
     expect(diagnostics.map(({ code }) => code)).toEqual(["belabox.alert_started"]);
   });
 
+  it("keeps a switched-off low-bitrate message saved without sending it", async () => {
+    await insertModule(database, {
+      ...BELABOX_DEFAULT_SETTINGS,
+      mode: "interval",
+      intervalSeconds: 5,
+      holdSeconds: 5,
+      recoverHoldSeconds: 5,
+      chatEnabled: true,
+      lowText: "Saved low-bitrate text",
+      lowTextEnabled: false,
+    });
+    const { context, sendChat } = alarmContext(database);
+    const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(relayPayload(true, 900))));
+
+    await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
+    vi.setSystemTime(Date.now() + 5_000);
+    await handleBelaboxPollAlarm(context, "poll", Date.now(), undefined, fetcher);
+
+    expect(sendChat).not.toHaveBeenCalled();
+    expect((await getBelaboxStatus(context.DB, CHANNEL_ID))?.alertState).toMatchObject({ phase: "alarm", kind: "low", chatSentInEpisode: false });
+    expect((await belaboxModule.settingsSchema.parseAsync({
+      ...BELABOX_DEFAULT_SETTINGS,
+      lowText: "Saved low-bitrate text",
+      lowTextEnabled: false,
+    })).lowText).toBe("Saved low-bitrate text");
+  });
+
   it("does not re-enter the serialized poll when a template switches to on-demand", async () => {
     const settings = {
       ...BELABOX_DEFAULT_SETTINGS,
