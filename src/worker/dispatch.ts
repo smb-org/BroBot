@@ -39,6 +39,8 @@ import { moduleBallots } from "./module-ballots";
 import { modulePoints } from "./module-points";
 import { createModuleSecretReadAccess } from "./module-secrets";
 import { recordChannelGameHistory } from "./db/game-search-cache";
+import { broadcasterHasScope } from "./broadcaster-scope";
+import { writeChannelTimelineEvent } from "./db/timeline-events";
 import { notifyModuleScheduleInputsChanged } from "./module-schedules";
 import { pointsCatalog } from "../modules/points/locale";
 import { appendPointWelcome, type PendingPointWelcome } from "./point-welcome";
@@ -682,10 +684,58 @@ export const dispatchEventSubNotification = async (
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
   const externalFetchBudget = createModuleExternalFetchBudget();
+  if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
+    const online = event.subscriptionType === "stream.online";
+    if (online) {
+      await writeChannelTimelineEvent(environment.DB, event.channelId, {
+        kind: "stream_online",
+        identity: event.triggerId,
+        occurredAt: event.eventSubTimestamp ?? event.receivedAt,
+        streamId: textValue(event.payload.id),
+        detail: { startedAt: textValue(event.payload.started_at) },
+      });
+    } else {
+      await writeChannelTimelineEvent(environment.DB, event.channelId, {
+        kind: "stream_offline",
+        identity: event.triggerId,
+        occurredAt: event.eventSubTimestamp ?? event.receivedAt,
+        detail: {},
+      });
+    }
+  }
+  if (event.subscriptionType === "channel.ad_break.begin") {
+    const startedAt = textValue(event.payload.started_at);
+    const durationSeconds = event.payload.duration_seconds;
+    if (startedAt !== null && Number.isSafeInteger(durationSeconds) && (durationSeconds as number) >= 0) {
+      try {
+        if (await broadcasterHasScope(environment.DB, event.channelId, "channel:read:ads")) {
+          await writeChannelTimelineEvent(environment.DB, event.channelId, {
+            kind: "ad_break",
+            identity: event.triggerId,
+            occurredAt: startedAt,
+            detail: { durationSeconds: durationSeconds as number, startedAt },
+          });
+        }
+      } catch (error: unknown) {
+        console.warn("Ad-break timeline eligibility could not be checked.", error);
+      }
+    }
+  }
   // `channel.update` already carries the new category, so the shared game-id
   // cache (FAQ and text-command game filters) can be corrected immediately
   // instead of serving the old game until its TTL expires.
   if (event.subscriptionType === "channel.update") {
+    const occurredAt = event.eventSubTimestamp ?? event.receivedAt;
+    const title = typeof event.payload.title === "string" ? event.payload.title : null;
+    const categoryId = textValue(event.payload.category_id);
+    const categoryName = textValue(event.payload.category_name);
+    const category = categoryId === null ? null : { id: categoryId, name: categoryName };
+    await writeChannelTimelineEvent(environment.DB, event.channelId, {
+      kind: "channel_metadata",
+      identity: event.triggerId,
+      occurredAt,
+      detail: { title, category },
+    });
     if (environment.CHANNEL !== undefined) {
       try {
         const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
@@ -694,11 +744,11 @@ export const dispatchEventSubNotification = async (
         console.warn("Channel game cache could not be updated.", error);
       }
     }
-    const gameId = textValue(event.payload.category_id);
-    const gameName = textValue(event.payload.category_name);
+    const gameId = categoryId;
+    const gameName = categoryName;
     if (gameId !== null && gameName !== null) {
       try {
-        await recordChannelGameHistory(environment.DB, event.channelId, gameId, gameName, event.receivedAt);
+        await recordChannelGameHistory(environment.DB, event.channelId, gameId, gameName, occurredAt);
       } catch (error: unknown) {
         console.warn("Channel game history could not be recorded.", error);
       }

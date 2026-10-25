@@ -1595,6 +1595,7 @@ describe("panel resource revisions", () => {
         "bot_channel_status_check_locks",
         "channel_game_history",
         "channel_statistics",
+        "channel_timeline_events",
         "channel_variable_stream_resets",
         "chat_vote_result_delivery_reconciliation",
         "currency_rate_cache",

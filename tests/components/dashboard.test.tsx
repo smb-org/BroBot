@@ -2889,7 +2889,9 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => expect(screen.getByRole("switch", { name: /Textbefehle:/i })).toBeEnabled());
 
     navigateToPath("/channels/kanal-a/modules/text_commands");
-    expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
+    // The detail page mounts through a lazy panel import whose first transform alone can exceed the
+    // 1 s default on a loaded runner; the assertion is about the mount, not about speed.
+    expect(await screen.findByRole("button", { name: "Befehl anlegen" }, { timeout: 5_000 })).toBeInTheDocument();
   });
 
   it("ignores a late overview response that predates a module toggle", async () => {

@@ -558,10 +558,10 @@ und Fenster bleiben unbegrenzt, weil sie aggregiert sind und keine
 Personendaten enthalten (Entscheidung 0003). Routenabfragen binden
 `channel_id`; `/history` liefert pro Messpunkt nur numerische Werte.
 
-### Kanalstatistiken (#557)
+### Kanalstatistiken und Stream-Timeline (#557/#558)
 
 Das verpflichtende `statistics`-Modul abonniert `channel.chat.message`,
-und `stream.online` für jeden Kanal. Es zählt im Channel
+`stream.online` und `channel.update` für jeden Kanal. Es zählt im Channel
 Durable Object Nachrichten und Emote-Fragmente, ohne je Nachricht eine
 D1-Zeile zu schreiben. Die Fenster beginnen an UTC-Vielfachen von 300 s
 (`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
@@ -590,6 +590,33 @@ ein Fenster ohne Abtastung an seiner Grenze hat `NULL`. Es gibt
 keine per-window Personen-Hashes oder neue personenbezogene Speicherung.
 `channel_statistics` enthält nur Summen und wird unbegrenzt aufbewahrt; beim
 Löschen des Kanals greift `ON DELETE CASCADE` (Entscheidung 0003, Abschnitt 6).
+
+Die Worker-Host-Tabelle `channel_timeline_events` speichert rohe
+Stream-Lifecycle-Ereignisse (`stream.online` mit Stream-ID und `started_at`,
+`stream.offline`), jeweils eine aktuelle Metadatenbeobachtung aus
+`channel.update` (Titel und Kategorie, fehlende Kategorie als `NULL`),
+bestätigte Clip-IDs, autorisierte Werbepausen und Emote-Spitzen. Nur
+`stream.online` trägt eine Stream-ID; andere Ereignisse werden in der Analyse
+anhand ihrer Zeitpunkte Lifecycle-Zeilen zugeordnet.
+
+Drops und Titel-/Kategorieübergänge werden nicht beim Schreiben abgeleitet.
+Ein Drop ist ein Offline-Ereignis, auf das innerhalb von zehn Minuten ein
+Online-Ereignis folgt. Eine Analyse kann Offline-/Online-Zeitpunkte mit einem
+`JOIN` und einem Zeitfenster von `offline.occurred_at` bis
+`offline.occurred_at + 10 Minuten` verknüpfen. Änderungen an Titel und Kategorie
+ergeben sich durch den Vergleich sortierter Metadatenbeobachtungen, etwa mit
+`LAG(...) OVER (PARTITION BY channel_id ORDER BY occurred_at)`. Wiederholungen
+sind bei Lifecycle-Einträgen anhand von Ereignisart und Zeit idempotent; bei
+`stream.online` gehört zusätzlich die Stream-ID zum Schlüssel. Metadaten
+verwenden Ereignisart, Zeitstempel und Inhalts-Hash. Clips, Werbepausen und
+Emote-Spitzen behalten ihre bisherigen stabilen Ereignisschlüssel.
+
+Emote-Spitzen verwenden mindestens 10 Emotes und mindestens das Dreifache des
+Medians der bis zu zwölf vorigen Fenster. Werbepausen gibt es nur bei
+Broadcaster-Zustimmung für `channel:read:ads`; Creator- und Nutzer-IDs werden
+nicht gespeichert. Beide D1-Tabellen sind unbegrenzt und mit
+`ON DELETE CASCADE` kanalgebunden. Module greifen auf die Timeline nur über den
+Host-Kontrakt zu.
 
 ### Modulaktionen (`actions`)
 

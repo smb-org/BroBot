@@ -80,6 +80,27 @@ describe("EventSub reconciliation", () => {
     });
   });
 
+  it("subscribes to ad breaks from broadcaster consent even when ads is disabled", async () => {
+    await insertChannel(database, "ad-connected");
+    await insertChannel(database, "ad-connected-no-scope");
+    await insertChannel(database, "ad-unconnected");
+    await insertLoginIdentityAndSession(database, "ad-connected", ["channel:read:ads"]);
+    await insertLoginIdentityAndSession(database, "ad-connected-no-scope");
+
+    const connectedTargets = await listDesiredEventSubTargets(asD1(database), "ad-connected");
+    const connectedWithoutScopeTargets = await listDesiredEventSubTargets(asD1(database), "ad-connected-no-scope");
+    const unconnectedTargets = await listDesiredEventSubTargets(asD1(database), "ad-unconnected");
+
+    expect(connectedTargets).toContainEqual({
+      channelId: "ad-connected",
+      subscriptionType: "channel.ad_break.begin",
+      variant: "",
+      version: "1",
+    });
+    expect(connectedWithoutScopeTargets).not.toContainEqual(expect.objectContaining({ subscriptionType: "channel.ad_break.begin" }));
+    expect(unconnectedTargets).not.toContainEqual(expect.objectContaining({ subscriptionType: "channel.ad_break.begin" }));
+  });
+
   it("includes only enabled modules with channel:bot consent in the target state", async () => {
     await insertChannel(database, "kanal-a");
     await insertChannel(database, "kanal-b");
