@@ -59,7 +59,25 @@ describe("statistics trends page", () => {
     renderPanel(trends(0));
 
     expect(await screen.findByText("No streams in this period", { selector: "strong" })).toBeTruthy();
-    expect(document.querySelectorAll(".statistics-trends__empty").length).toBeGreaterThanOrEqual(2);
+    // The banner says it once; the dashed placeholders stay silent.
+    expect(screen.getAllByText("No streams in this period")).toHaveLength(1);
+    const placeholders = document.querySelectorAll(".statistics-trends__empty");
+    expect(placeholders).toHaveLength(3);
+    placeholders.forEach((placeholder) => { expect(placeholder.textContent).toBe(""); });
+  });
+
+  it("shows a neutral label instead of a percentage when the previous period is empty", async () => {
+    const none = { streams: 0, streamHours: 0, averageViewers: null, messagesPerMinute: null };
+    const { unmount } = renderPanel({ ...trends(), previousKpis: none });
+
+    expect(await screen.findAllByText("new")).toHaveLength(2);
+    expect(document.body.textContent).not.toContain("∞");
+    unmount();
+
+    renderPanel({ ...trends(0), previousKpis: none });
+    await screen.findByText("No streams in this period", { selector: "strong" });
+    expect(document.querySelectorAll(".statistics-trends__delta")).toHaveLength(4);
+    document.querySelectorAll(".statistics-trends__delta").forEach((delta) => { expect(delta.textContent).toBe("–"); });
   });
 
   it("sorts category rows and exposes the current order with aria-sort", async () => {

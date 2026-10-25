@@ -51,18 +51,18 @@ const labelForEvent = (event: Pick<StatisticsStreamEvent, "type">, labels: Stati
   return labels.start;
 };
 
-const eventDetail = (event: StatisticsStreamEvent, labels: StatisticsPanelTexts): string => {
+const eventDetail = (event: StatisticsStreamEvent, labels: StatisticsPanelTexts, language: string): string => {
   if (event.type === "metadata") {
     const title = event.oldTitle === event.title ? "" : `${event.oldTitle ?? "—"} → ${event.title ?? "—"}`;
     const category = event.oldCategory === event.category ? "" : `${event.oldCategory ?? "—"} → ${event.category ?? "—"}`;
     return [category, title].filter(Boolean).join(" · ");
   }
   if (event.type === "clip") return event.text ?? labels.clip;
-  if (event.type === "ad") return `${String(event.durationSeconds ?? 0)} s`;
-  if (event.type === "drop") return `${String(event.durationSeconds ?? 0)} s`;
-  if (event.type === "emoteSpike") return labels.emotesInWindow(String(event.emotes ?? 0));
+  if (event.type === "ad") return `${valueLabel(event.durationSeconds ?? 0, language)} s`;
+  if (event.type === "drop") return `${valueLabel(event.durationSeconds ?? 0, language)} s`;
+  if (event.type === "emoteSpike") return labels.emotesInWindow(valueLabel(event.emotes ?? 0, language));
   if (event.type === "raidIncoming" || event.type === "raidOutgoing") {
-    return (event.type === "raidIncoming" ? labels.raidFrom : labels.raidTo)(event.partnerName ?? "—", String(event.raidViewers ?? 0));
+    return (event.type === "raidIncoming" ? labels.raidFrom : labels.raidTo)(event.partnerName ?? "—", event.raidViewers ?? 0);
   }
   return labelForEvent(event, labels);
 };
@@ -212,7 +212,7 @@ export function StatisticsHistoryChart({ summary, windows, bitrateWindows, event
         <strong>{labelForEvent(focusedMarker.event, labels)}</strong>
         <span>
           {timeZone === null ? <span className="statistics-chart__timestamp-placeholder" aria-hidden="true">00:00 AM</span> : <>
-            {timeLabel(focusedMarker.event.at, language, timeZone)}{timeZoneFallbackLabel === null ? "" : ` · ${timeZoneFallbackLabel}`} · {eventDetail(focusedMarker.event, labels)}
+            {timeLabel(focusedMarker.event.at, language, timeZone)}{timeZoneFallbackLabel === null ? "" : ` · ${timeZoneFallbackLabel}`} · {eventDetail(focusedMarker.event, labels, language)}
           </>}
         </span>
       </div>}
@@ -256,7 +256,7 @@ export function StatisticsHistoryChart({ summary, windows, bitrateWindows, event
         {markers.map(({ event, x, lane, color, label }) => {
           const y = STATISTICS_CHART_PLOT.bottom + 35 + lane * 20;
           const active = event.id === highlightedEventId;
-          const accessibleLabel = `${label}: ${eventDetail(event, labels)}${timeZone === null ? "" : ` ${labels.at} ${timeLabel(event.at, language, timeZone)}${timeZoneFallbackLabel === null ? "" : ` · ${timeZoneFallbackLabel}`}`}`;
+          const accessibleLabel = `${label}: ${eventDetail(event, labels, language)}${timeZone === null ? "" : ` ${labels.at} ${timeLabel(event.at, language, timeZone)}${timeZoneFallbackLabel === null ? "" : ` · ${timeZoneFallbackLabel}`}`}`;
           return <g
             key={event.id}
             className="statistics-chart__marker"

@@ -163,7 +163,8 @@
   .statistics-trends__kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--spacing-s4); min-width: 0; }
   .statistics-trends__kpi { display: grid; min-width: 0; min-height: 102px; align-content: start; gap: var(--spacing-s1); padding: var(--spacing-s4); border-radius: var(--radius-container); background: var(--color-inspector); }
   .statistics-trends__kpi h3 { margin: 0; color: var(--color-text-3); font-size: 12px; font-weight: 500; line-height: 1.4; }
-  .statistics-trends__kpi > p { overflow: hidden; margin: 0; color: var(--color-text); font-size: 23px; font-variant-numeric: tabular-nums; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  .statistics-trends__kpi > p { overflow: hidden; margin: 0; color: var(--color-text); font-family: var(--font-mono); font-size: 23px; font-variant-numeric: tabular-nums; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  .statistics-trends__kpi > p small { margin-left: var(--spacing-s1); color: var(--color-text-3); font-size: var(--text-number); }
   .statistics-trends__delta { display: flex; min-width: 0; align-items: center; gap: var(--spacing-s1); color: var(--color-text-3); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.4; white-space: nowrap; }
   .statistics-trends__delta span:last-child { overflow: hidden; text-overflow: ellipsis; }
   .statistics-trends__empty-period { display: grid; min-height: 62px; align-content: center; gap: 2px; margin: 0; padding: var(--spacing-s3) var(--spacing-s4); border: 1px dashed var(--color-border-strong); border-radius: var(--radius-container); color: var(--color-text-3); font-size: 12px; }
@@ -225,8 +226,8 @@
   .statistics-trends__mobile-label { display: none; }
   .statistics-trends__table-wrap tbody tr { border-bottom: 1px solid var(--color-border); }
   .statistics-trends__table-wrap tbody tr:last-child { border-bottom: 0; }
-  .statistics-trends__table-wrap tbody th, .statistics-trends__table-wrap tbody td { overflow: hidden; padding: var(--spacing-s2); color: var(--color-text); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-  .statistics-trends__table-wrap tbody th { padding-left: 0; font-weight: 500; text-align: left; }
+  .statistics-trends__table-wrap tbody th, .statistics-trends__table-wrap tbody td { overflow: hidden; padding: var(--spacing-s2); color: var(--color-text); font-family: var(--font-mono); font-size: var(--text-number); font-variant-numeric: tabular-nums; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+  .statistics-trends__table-wrap tbody th { padding-left: 0; font-family: inherit; font-weight: 500; text-align: left; }
   .statistics-trends__hours-cell { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: var(--spacing-s2); }
   .statistics-trends__hours-cell i { display: block; max-width: 58%; height: 8px; flex: 0 1 auto; border-radius: 999px; background: var(--color-chart-1); }
   .statistics-trends__hours-cell > span { min-width: 4ch; text-align: right; }

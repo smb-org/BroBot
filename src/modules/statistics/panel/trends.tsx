@@ -55,23 +55,22 @@ const metricDelta = (
   current: number | null,
   previous: number | null,
   language: "de" | "en",
-): { percent: string; direction: "up" | "down" | "same"; previous: string } => {
+): { percent: string; direction: "up" | "down" | "same" | "none"; previous: string } => {
   const texts = statisticsTrendsTexts(language);
+  if ((current ?? 0) === 0 && (previous ?? 0) === 0) return { percent: "–", direction: "none", previous: "" };
   if (current === null || previous === null) {
     return { percent: texts.noPrevious, direction: "same", previous: "" };
   }
   const delta = current - previous;
   const direction = delta > 0 ? "up" : delta < 0 ? "down" : "same";
-  const percent = previous === 0
-    ? delta === 0 ? 0 : null
-    : (delta / Math.abs(previous)) * 100;
-  const signed = percent === null
-    ? language === "de" ? "+∞ %" : "+∞%"
-    : `${delta > 0 ? "+" : delta < 0 ? "−" : ""}${numberText(Math.abs(percent), language, 1)}${language === "de" ? " %" : "%"}`;
+  const previousText = texts.previous(numberText(previous, language, 1));
+  // A zero base has no meaningful percentage.
+  if (previous === 0) return { percent: texts.newPeriod, direction, previous: previousText };
+  const percent = Math.abs(delta / previous) * 100;
   return {
-    percent: signed,
+    percent: `${delta > 0 ? "+" : delta < 0 ? "−" : ""}${numberText(percent, language, 1)}${language === "de" ? " %" : "%"}`,
     direction,
-    previous: texts.previous(numberText(previous, language, 1)),
+    previous: previousText,
   };
 };
 
@@ -79,21 +78,22 @@ const Delta = ({ current, previous, language }: { current: number | null; previo
   const delta = metricDelta(current, previous, language);
   const iconName = delta.direction === "up" ? "trendUp" : delta.direction === "down" ? "trendDown" : "minus";
   return <span className="statistics-trends__delta">
-    <Icon name={iconName} size={16} />
+    {delta.direction === "none" ? null : <Icon name={iconName} size={16} />}
     <span>{delta.percent}</span>
     {delta.previous.length === 0 ? null : <span>{delta.previous}</span>}
   </span>;
 };
 
-const Kpi = ({ label, value, current, previous, language }: {
+const Kpi = ({ label, value, unit, current, previous, language }: {
   label: string;
   value: string;
+  unit?: string;
   current: number | null;
   previous: number | null;
   language: "de" | "en";
 }): ReactElement => <article className="statistics-trends__kpi">
   <h3>{label}</h3>
-  <p>{value}</p>
+  <p>{value}{unit === undefined ? null : <small>{unit}</small>}</p>
   <Delta current={current} previous={previous} language={language} />
 </article>;
 
@@ -178,7 +178,7 @@ const WeekChart = ({ data, language, labels }: {
         <span><i className="statistics-trends__legend-line" />{labels.hours} ({labels.rightAxis})</span>
         <span><i className="statistics-trends__legend-empty" />{labels.emptyWeek}</span>
       </div>
-    </div> : <EmptyChart label={labels.noStreamsInPeriod} />}
+    </div> : <EmptyChart />}
   </section>;
 };
 
@@ -240,12 +240,13 @@ const Heatmap = ({ data, language, labels }: {
         <span className="statistics-trends__scale-empty"><i />{labels.noStream}</span>
       </div>
       <p className="statistics-trends__scale-description">{labels.minViewers} · {labels.maxViewers}</p>
-    </div> : <EmptyChart label={labels.noStreamsInPeriod} />}
+    </div> : <EmptyChart />}
   </section>;
 };
 
-const EmptyChart = ({ label }: { label: string }): ReactElement => <div className="statistics-trends__empty">
-  <span>{label}</span>
+/** Quiet dashed placeholder; the text is optional because the page banner already explains an empty period. */
+const EmptyChart = ({ label }: { label?: string }): ReactElement => <div className="statistics-trends__empty" aria-hidden={label === undefined ? true : undefined}>
+  {label === undefined ? null : <span>{label}</span>}
 </div>;
 
 const categorySortValue = (category: StatisticsTrendCategory, sort: CategorySort): string | number | null => {
@@ -267,8 +268,9 @@ const sortedCategories = (categories: readonly StatisticsTrendCategory[], sort: 
     return comparison === 0 ? left.name.localeCompare(right.name) : direction === "ascending" ? comparison : -comparison;
   });
 
-const CategoryTable = ({ categories, language, labels }: {
+const CategoryTable = ({ categories, hasStreams, language, labels }: {
   categories: readonly StatisticsTrendCategory[];
+  hasStreams: boolean;
   language: "de" | "en";
   labels: ReturnType<typeof statisticsTrendsTexts>;
 }): ReactElement => {
@@ -297,7 +299,7 @@ const CategoryTable = ({ categories, language, labels }: {
       <h2 id="statistics-trends-categories-title">{labels.categories}</h2>
       <p>{heading}</p>
     </div>
-    {rows.length === 0 ? <EmptyChart label={labels.noCategories} /> : <div className="statistics-trends__table-wrap">
+    {rows.length === 0 ? <EmptyChart {...(hasStreams ? { label: labels.noCategories } : {})} /> : <div className="statistics-trends__table-wrap">
       <table aria-label={labels.categories}>
         <colgroup><col className="statistics-trends__column-name" /><col className="statistics-trends__column-streams" /><col className="statistics-trends__column-hours" /><col className="statistics-trends__column-viewers" /><col className="statistics-trends__column-messages" /></colgroup>
         <thead><tr>{headers.map((header) => <th key={header.id} scope="col" aria-sort={sort === header.id ? direction : "none"}>
@@ -359,7 +361,7 @@ export const StatisticsTrendsPanel = ({ channelId, language = "de" }: ModulePane
     {data === undefined ? <LoadingShell /> : <>
       <section className="statistics-trends__kpis" aria-label={labels.kpis}>
         <Kpi label={labels.streams} value={numberText(current.streams, language)} current={current.streams} previous={previous.streams} language={language} />
-        <Kpi label={labels.streamHours} value={`${numberText(current.streamHours, language, 1)} h`} current={current.streamHours} previous={previous.streamHours} language={language} />
+        <Kpi label={labels.streamHours} value={numberText(current.streamHours, language, 1)} unit="h" current={current.streamHours} previous={previous.streamHours} language={language} />
         <Kpi label={labels.averageViewers} value={numberText(current.averageViewers, language)} current={current.averageViewers} previous={previous.averageViewers} language={language} />
         <Kpi label={labels.messagesPerMinute} value={numberText(current.messagesPerMinute, language, 1)} current={current.messagesPerMinute} previous={previous.messagesPerMinute} language={language} />
       </section>
@@ -368,7 +370,7 @@ export const StatisticsTrendsPanel = ({ channelId, language = "de" }: ModulePane
         <WeekChart data={data} language={language} labels={labels} />
         <Heatmap data={data} language={language} labels={labels} />
       </div>
-      <CategoryTable categories={data.categories} language={language} labels={labels} />
+      <CategoryTable categories={data.categories} hasStreams={current.streams > 0} language={language} labels={labels} />
     </>}
   </div>;
 };

@@ -1,5 +1,10 @@
 import type { ModuleLanguage } from "../../contract";
 
+const germanViewers = (count: number): string =>
+  `${new Intl.NumberFormat("de-DE").format(count)} ${count === 1 ? "Zuschauer" : "Zuschauern"}`;
+const englishViewers = (count: number): string =>
+  `${new Intl.NumberFormat("en-US").format(count)} ${count === 1 ? "viewer" : "viewers"}`;
+
 export interface StatisticsPanelTexts {
   streams: string;
   older: string;
@@ -48,8 +53,9 @@ export interface StatisticsPanelTexts {
   emotesInWindow: (count: string) => string;
   raidIncoming: string;
   raidOutgoing: string;
-  raidFrom: (name: string, viewers: string) => string;
-  raidTo: (name: string, viewers: string) => string;
+  /** Raid sentences take the raw viewer count: the locale formats it and picks singular or plural. */
+  raidFrom: (name: string, viewers: number) => string;
+  raidTo: (name: string, viewers: number) => string;
   title: string;
   category: string;
   at: string;
@@ -105,8 +111,8 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsPanelTexts>> = {
     emotesInWindow: (count) => `${count} Emotes in 5 Minuten`,
     raidIncoming: "Eingehender Raid",
     raidOutgoing: "Ausgehender Raid",
-    raidFrom: (name, viewers) => `Raid von ${name} mit ${viewers} Zuschauern`,
-    raidTo: (name, viewers) => `Raid zu ${name} mit ${viewers} Zuschauern`,
+    raidFrom: (name, viewers) => `Raid von ${name} mit ${germanViewers(viewers)}`,
+    raidTo: (name, viewers) => `Raid zu ${name} mit ${germanViewers(viewers)}`,
     title: "Titel",
     category: "Kategorie",
     at: "um",
@@ -160,8 +166,8 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsPanelTexts>> = {
     emotesInWindow: (count) => `${count} emotes in 5 minutes`,
     raidIncoming: "Incoming raid",
     raidOutgoing: "Outgoing raid",
-    raidFrom: (name, viewers) => `Raid from ${name} with ${viewers} viewers`,
-    raidTo: (name, viewers) => `Raid to ${name} with ${viewers} viewers`,
+    raidFrom: (name, viewers) => `Raid from ${name} with ${englishViewers(viewers)}`,
+    raidTo: (name, viewers) => `Raid to ${name} with ${englishViewers(viewers)}`,
     title: "Title",
     category: "Category",
     at: "at",
@@ -183,6 +189,7 @@ export interface StatisticsTrendsTexts {
   messagesPerMinute: string;
   previous: (value: string) => string;
   noPrevious: string;
+  newPeriod: string;
   weekPrefix: string;
   weeklyTitle: string;
   weeklyDescription: string;
@@ -227,6 +234,7 @@ const trendsTexts: Readonly<Record<ModuleLanguage, StatisticsTrendsTexts>> = {
     messagesPerMinute: "Nachrichten / Min",
     previous: (value) => `vorher ${value}`,
     noPrevious: "kein Vergleichswert",
+    newPeriod: "neu",
     weekPrefix: "KW",
     weeklyTitle: "Wochenverlauf",
     weeklyDescription: "Ø Viewer je Woche und Streamstunden",
@@ -269,6 +277,7 @@ const trendsTexts: Readonly<Record<ModuleLanguage, StatisticsTrendsTexts>> = {
     messagesPerMinute: "Messages / min",
     previous: (value) => `before ${value}`,
     noPrevious: "no comparison value",
+    newPeriod: "new",
     weekPrefix: "Week",
     weeklyTitle: "Weekly activity",
     weeklyDescription: "Avg viewers per week and stream hours",
