@@ -15,7 +15,10 @@ adding a row to the `channels` table, not by changing configuration.
   per-channel timeline stores raw stream lifecycle events and current
   title/category observations, confirmed clip IDs, consented ad breaks, and
   emote spikes with unlimited retention and channel deletion cascade. Analysis
-  derives drops and metadata transitions from those observations.
+  derives drops and metadata transitions from those observations. Fifteen
+  minutes after a stream ends, the statistics alarm imports up to two pages
+  (200 clips) for that stream; clips outside that cap or available later may be
+  omitted.
   The statistics module also keeps a bounded, channel-wide word-frequency
   baseline in D1, without storing chat text or usernames; the baseline
   retains the top 5,000 words.

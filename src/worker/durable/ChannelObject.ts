@@ -82,6 +82,7 @@ import type {
   ModulePointRoundAnnouncement,
   ModulePointRoundResult,
   ModuleScheduleInputChangeReason,
+  ModuleStatisticsClipImport,
   ModuleStatisticsStreamState,
   ModuleStatisticsWordCount,
   ModuleStatisticsWordBucket,
@@ -97,6 +98,7 @@ import type {
 } from "../../modules/contract";
 import {
   admitStatisticsWordCounts,
+  STATISTICS_WORD_STREAM_IDLE_MILLISECONDS,
   STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS,
   STATISTICS_WINDOW_MILLISECONDS,
   statisticsWindowStartMs,
@@ -129,6 +131,7 @@ import { getAppAccessToken } from "../app-token";
 import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { fetchLiveChattersTotal, fetchLiveViewerCount } from "../twitch/aggregate-counts";
+import { fetchStreamClips as fetchTwitchStreamClips } from "../twitch/stream-clips";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 import {
@@ -142,7 +145,7 @@ import { createModuleSecretAccess } from "../module-secrets";
 import { sendChatMessage } from "../chat";
 import { sendModerationBan } from "../moderation";
 import { readChannelStreamState } from "../db/stream-state";
-import { writeChannelTimelineEvent } from "../db/timeline-events";
+import { writeChannelTimelineEvent, writeChannelTimelineEventOrThrow } from "../db/timeline-events";
 import { readChannelDefaultChatTarget } from "../db/channel-settings";
 import { moduleEnabledForChannel, readDispatchChannelState } from "../db/channel-controls";
 import { chatOutputSuppressionReason } from "../chat-output-gate";
@@ -345,6 +348,7 @@ const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
 const STATISTICS_CHAT_WINDOW_TABLE = "statistics_chat_windows";
 const STATISTICS_WORD_STREAM_TABLE = "statistics_word_streams";
+const STATISTICS_CLIP_IMPORT_TABLE = "statistics_clip_imports";
 const STATISTICS_WORD_COUNT_TABLE = "statistics_word_counts";
 const STATISTICS_WORD_SEEN_TABLE = "statistics_word_seen";
 const STATISTICS_WINDOW_RETENTION_MS = 60 * 60 * 1_000;
@@ -987,6 +991,19 @@ export class ChannelObject extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       `CREATE INDEX IF NOT EXISTS statistics_word_streams_expiry_idx
        ON ${STATISTICS_WORD_STREAM_TABLE} (expires_at)`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${STATISTICS_CLIP_IMPORT_TABLE} (
+        stream_id TEXT PRIMARY KEY,
+        started_at TEXT,
+        ended_at INTEGER NOT NULL,
+        ready_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE INDEX IF NOT EXISTS statistics_clip_imports_ready_idx
+       ON ${STATISTICS_CLIP_IMPORT_TABLE} (ready_at, expires_at)`,
     );
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ${STATISTICS_WORD_COUNT_TABLE} (
@@ -1882,6 +1899,16 @@ export class ChannelObject extends DurableObject<Env> {
   public async transitionTimerStream(stream: DurableTimerStream): Promise<void> {
     await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
+    if (stream.endedSession !== undefined &&
+        !(stream.state === "online" && stream.streamId === stream.endedSession.streamId &&
+          sameStreamStartedAt(stream.startedAt, stream.endedSession.startedAt))) {
+      await this.markStatisticsClipImportPending(
+        stream.endedSession.streamId,
+        stream.endedSession.startedAt,
+        stream.endedSession.endedAt,
+      );
+      await this.ensureStatisticsWindowAlarmScheduled(Date.now());
+    }
     const now = Date.now();
     const changedTimerIds: string[] = [];
     this.ctx.storage.transactionSync(() => {
@@ -1891,7 +1918,12 @@ export class ChannelObject extends DurableObject<Env> {
         stream.streamId !== state.stream.streamId || !sameStreamStartedAt(stream.startedAt, state.stream.startedAt);
       if (!streamChanged) return;
       this.timerScheduleInputGeneration += 1;
-      state.stream = stream;
+      state.stream = {
+        state: stream.state,
+        streamId: stream.streamId,
+        startedAt: stream.startedAt,
+        generation: stream.generation,
+      };
       if (stream.state === "online") state.activityCounts.live = 0;
       if (stream.state === "offline") state.activityCounts.offline = 0;
       const inputs: TimerScheduleInputs = { now, timeZone: "Europe/Berlin", eventTimes: [] };
@@ -3359,11 +3391,26 @@ export class ChannelObject extends DurableObject<Env> {
         deleteWordBucket: (bucket) => this.deleteStatisticsWordBucket(bucket),
         pruneExpiredWordStreams: (now) => this.pruneExpiredStatisticsWordStreams(now),
         hasWordStreams: () => this.hasStatisticsWordStreams(),
+        markClipImportPending: (streamId, startedAt, endedAt) =>
+          this.markStatisticsClipImportPending(streamId, startedAt, endedAt),
+        listReadyClipImports: (now) => this.listReadyStatisticsClipImports(now),
+        completeClipImport: (streamId) => this.completeStatisticsClipImport(streamId),
+        pruneExpiredClipImports: (now) => this.pruneExpiredStatisticsClipImports(now),
+        hasClipImports: () => this.hasStatisticsClipImports(),
       },
       recordTimelineEvent: (event: ModuleTimelineEvent) =>
         writeChannelTimelineEvent(this.env.DB, channelId, event),
+      recordTimelineEventStrict: (event: ModuleTimelineEvent) =>
+        writeChannelTimelineEventOrThrow(this.env.DB, channelId, event),
       fetchViewerCount: () => fetchLiveViewerCount(this.env, channelId, externalFetchBudget),
       fetchChattersTotal: () => fetchLiveChattersTotal(this.env, channelId, externalFetchBudget),
+      fetchStreamClips: (startedAt, endedAt) => fetchTwitchStreamClips(
+        this.env,
+        channelId,
+        startedAt,
+        endedAt,
+        externalFetchBudget,
+      ),
       ballots: this.ballotAccess(moduleId),
       points: this.pointAccess(moduleId),
       secrets: createModuleSecretAccess(this.env, channelId, moduleId),
@@ -3987,6 +4034,70 @@ export class ChannelObject extends DurableObject<Env> {
     this.ensureStatisticsSchema();
     const present = this.ctx.storage.sql.exec<{ present: number }>(
       `SELECT EXISTS (SELECT 1 FROM ${STATISTICS_CHAT_WINDOW_TABLE}) AS present`,
+    ).one().present;
+    return Promise.resolve(present === 1);
+  }
+
+  public markStatisticsClipImportPending(
+    streamId: string,
+    startedAt: string | null,
+    endedAt: string,
+  ): Promise<void> {
+    const endedAtMs = Date.parse(endedAt);
+    if (streamId.length === 0 || !Number.isSafeInteger(endedAtMs)) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO ${STATISTICS_CLIP_IMPORT_TABLE}
+         (stream_id, started_at, ended_at, ready_at, expires_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      streamId,
+      startedAt !== null && Number.isFinite(Date.parse(startedAt)) ? startedAt : null,
+      endedAtMs,
+      endedAtMs + STATISTICS_WORD_STREAM_IDLE_MILLISECONDS,
+      endedAtMs + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS,
+    );
+    return Promise.resolve();
+  }
+
+  public listReadyStatisticsClipImports(now: number): Promise<readonly ModuleStatisticsClipImport[]> {
+    if (!Number.isSafeInteger(now)) return Promise.resolve([]);
+    this.ensureStatisticsSchema();
+    const rows = this.ctx.storage.sql.exec<{ stream_id: string; started_at: string | null; ended_at: number }>(
+      `SELECT stream_id, started_at, ended_at FROM ${STATISTICS_CLIP_IMPORT_TABLE}
+        WHERE ready_at <= ? AND expires_at > ? ORDER BY ended_at ASC`,
+      now,
+      now,
+    ).toArray();
+    return Promise.resolve(rows.map(({ stream_id: streamId, started_at: startedAt, ended_at: endedAt }) => ({
+      streamId,
+      startedAt,
+      endedAt: new Date(endedAt).toISOString(),
+    })));
+  }
+
+  public completeStatisticsClipImport(streamId: string): Promise<void> {
+    this.ensureStatisticsSchema();
+    this.ctx.storage.sql.exec(
+      `DELETE FROM ${STATISTICS_CLIP_IMPORT_TABLE} WHERE stream_id = ?`,
+      streamId,
+    );
+    return Promise.resolve();
+  }
+
+  public pruneExpiredStatisticsClipImports(now: number): Promise<void> {
+    if (!Number.isSafeInteger(now)) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.sql.exec(
+      `DELETE FROM ${STATISTICS_CLIP_IMPORT_TABLE} WHERE expires_at <= ?`,
+      now,
+    );
+    return Promise.resolve();
+  }
+
+  public hasStatisticsClipImports(): Promise<boolean> {
+    this.ensureStatisticsSchema();
+    const present = this.ctx.storage.sql.exec<{ present: number }>(
+      `SELECT EXISTS (SELECT 1 FROM ${STATISTICS_CLIP_IMPORT_TABLE}) AS present`,
     ).one().present;
     return Promise.resolve(present === 1);
   }

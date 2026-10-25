@@ -257,8 +257,8 @@ den fünf Minuten vor der Fenstergrenze lag. Für Fenster ohne Stichprobe an der
 Grenze, etwa ein Fenster nach `stream.offline`, bleibt der Wert `NULL`. Es gibt
 keine zusätzliche HMAC-Mitgliedschaft je Statistikfenster. Der nächste Alarm
 schreibt noch geänderte Fenster. Der Alarm bleibt aktiv, solange der Stream
-online ist, Fensterzustand im DO besteht oder Streamwörter auf Merge oder
-Alterslöschung warten. Fensterzustand wird nach einem letzten
+online ist, Fensterzustand im DO besteht, Streamwörter auf Merge oder
+Alterslöschung warten oder ein Clipimport noch aussteht. Fensterzustand wird nach einem letzten
 Schreibversuch gelöscht, sobald das Fensterende mehr als 60 Minuten zurückliegt.
 Ein D1-Ausfall länger als 60 Minuten kann deshalb noch nicht geschriebene
 Statistikzeilen verlieren; DO-Speicher und Wiederholungsdauer bleiben begrenzt.
@@ -316,6 +316,27 @@ späteren Analyse anhand ihrer Zeitpunkte den Lifecycle-Zeilen zugeordnet. Die
 Tabelle wird unbegrenzt aufbewahrt, löscht mit `ON DELETE CASCADE` und isoliert
 Schreibfehler: Ein fehlender Timeline-Eintrag wird protokolliert, Dispatch und
 Streamzustands-Updates laufen weiter.
+
+15 Minuten nach bestätigtem oder bei einer Zustandswiederherstellung erkanntem
+Streamende ruft derselbe Statistik-Alarm Helix Get Clips für den Zeitraum vom
+gespeicherten Streamstart bis zum Streamende ab und schreibt
+die Clip-ID, den öffentlichen Titel, den Erstellungszeitpunkt sowie Momentaufnahmen
+von Aufrufen und Dauer. Die ID ist derselbe natürliche Schlüssel wie bei Bot-Clips,
+damit Wiederholungen keine zweite Zeile erzeugen. Gespeichert werden weder Creator-
+noch Broadcaster- oder Spiel-IDs. Ein fehlgeschlagener Timeline-D1-Schreibversuch
+lässt den Abruf für einen späteren Fünf-Minuten-Alarm offen; ein erfolgreicher
+Import löscht den DO-Eintrag. Unvollständige Importe laufen 24 Stunden nach
+Streamende ab. Alle Weckzeiten bleiben auf UTC-Fünf-Minuten-Grenzen. Pro Stream
+werden höchstens zwei Seiten beziehungsweise 200 Clips abgerufen, passend zum
+externen Anfragebudget eines Alarmlaufs inklusive Tokenabruf. Clips über diesem
+Limit oder Clips, die Twitch erst später verfügbar macht, können in der Timeline
+fehlen. Scheitert der `ChannelObject`-RPC `transitionTimerStream`, der
+`endedSession` überträgt, wird dieser Aufruf nicht wiederholt. Ebenso kann die
+Wiederherstellung nach einem Helix-Abgleich die Sitzung aus dem Zustand vor der
+Anfrage übernehmen; ersetzt ein gleichzeitiger EventSub-Schreibvorgang die
+Sitzung dazwischen, wird möglicherweise die ältere Sitzung eingereiht. Viewer-Clips
+eines Streams können also fehlen, wenn die Übergabe des Sitzungsendes verloren
+geht oder mit einem Schreibvorgang konkurriert; Bot-Clips sind davon nicht betroffen.
 
 Lifecycle-Wiederholungen sind über Art, Ereigniszeit und — bei `stream.online`
 — Stream-ID idempotent. Metadatenbeobachtungen verwenden Art, Ereigniszeit und
