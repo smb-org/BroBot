@@ -982,14 +982,6 @@ export class ChannelObject extends DurableObject<Env> {
         current_batch INTEGER NOT NULL DEFAULT 1
       )`,
     );
-    const streamColumns = new Set(this.ctx.storage.sql.exec<{ name: string }>(
-      `PRAGMA table_info(${STATISTICS_WORD_STREAM_TABLE})`,
-    ).toArray().map(({ name }) => name));
-    if (!streamColumns.has("current_batch")) {
-      this.ctx.storage.sql.exec(
-        `ALTER TABLE ${STATISTICS_WORD_STREAM_TABLE} ADD COLUMN current_batch INTEGER NOT NULL DEFAULT 1`,
-      );
-    }
     this.ctx.storage.sql.exec(
       `CREATE INDEX IF NOT EXISTS statistics_word_streams_expiry_idx
        ON ${STATISTICS_WORD_STREAM_TABLE} (expires_at)`,
@@ -1005,38 +997,6 @@ export class ChannelObject extends DurableObject<Env> {
         PRIMARY KEY (stream_id, batch, word)
       ) WITHOUT ROWID`,
     );
-    const countColumns = new Set(this.ctx.storage.sql.exec<{ name: string }>(
-      `PRAGMA table_info(${STATISTICS_WORD_COUNT_TABLE})`,
-    ).toArray().map(({ name }) => name));
-    if (!countColumns.has("batch")) {
-      this.ctx.storage.transactionSync(() => {
-        this.ctx.storage.sql.exec(
-          `ALTER TABLE ${STATISTICS_WORD_COUNT_TABLE} RENAME TO ${STATISTICS_WORD_COUNT_TABLE}_legacy`,
-        );
-        this.ctx.storage.sql.exec(
-          `CREATE TABLE ${STATISTICS_WORD_COUNT_TABLE} (
-            stream_id TEXT NOT NULL,
-            batch INTEGER NOT NULL,
-            word TEXT NOT NULL,
-            count INTEGER NOT NULL CHECK (count > 0),
-            last_seen_at TEXT NOT NULL,
-            last_increment_at INTEGER NOT NULL,
-            PRIMARY KEY (stream_id, batch, word)
-          ) WITHOUT ROWID`,
-        );
-        this.ctx.storage.sql.exec(
-          `INSERT INTO ${STATISTICS_WORD_COUNT_TABLE}
-             (stream_id, batch, word, count, last_seen_at, last_increment_at)
-           SELECT stream_id, 1, word, count, last_seen_at, ? FROM ${STATISTICS_WORD_COUNT_TABLE}_legacy`,
-          Date.now(),
-        );
-        this.ctx.storage.sql.exec(`DROP TABLE ${STATISTICS_WORD_COUNT_TABLE}_legacy`);
-      });
-    } else if (!countColumns.has("last_increment_at")) {
-      this.ctx.storage.sql.exec(
-        `ALTER TABLE ${STATISTICS_WORD_COUNT_TABLE} ADD COLUMN last_increment_at INTEGER NOT NULL DEFAULT 0`,
-      );
-    }
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ${STATISTICS_WORD_SEEN_TABLE} (
         stream_id TEXT NOT NULL,
