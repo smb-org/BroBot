@@ -177,6 +177,21 @@ const objectFor = (
 ): ChannelObject => {
   let transactionQueue = Promise.resolve();
   const chatterRows = new Map<string, { hmac: string; first_seen_at: string; last_seen_at: string }>();
+  const statisticsChatWindows = new Map<number, {
+    stream_id: string | null;
+    messages: number;
+    emotes: number;
+    viewer_count: number | null;
+    chatters: number | null;
+    active_chatters: number | null;
+    metrics_sampled: number;
+    active_chatters_sampled: number;
+    revision: number;
+    dirty: number;
+    complete: number;
+  }>();
+  const eventSubMessageIds = new Map<string, number>();
+  let lastSqlChanges = 0;
   let chatterKey: { key_hex: string; created_at: string } | undefined;
   let failNextChatterDelete = false;
   const listValues = (options?: { prefix?: string; startAfter?: string; limit?: number }): Map<string, unknown> => {
@@ -200,7 +215,10 @@ const objectFor = (
     transactionSync: <T>(closure: () => T): T => {
       const valuesBefore = new Map(values);
       const rowsBefore = new Map(chatterRows);
+      const statisticsBefore = new Map([...statisticsChatWindows].map(([start, row]) => [start, { ...row }]));
+      const eventSubBefore = new Map(eventSubMessageIds);
       const keyBefore = chatterKey;
+      const changesBefore = lastSqlChanges;
       try {
         return closure();
       } catch (error: unknown) {
@@ -208,7 +226,12 @@ const objectFor = (
         for (const [key, value] of valuesBefore) values.set(key, value);
         chatterRows.clear();
         for (const [key, value] of rowsBefore) chatterRows.set(key, value);
+        statisticsChatWindows.clear();
+        for (const [start, row] of statisticsBefore) statisticsChatWindows.set(start, row);
+        eventSubMessageIds.clear();
+        for (const [messageId, receivedAt] of eventSubBefore) eventSubMessageIds.set(messageId, receivedAt);
         chatterKey = keyBefore;
+        lastSqlChanges = changesBefore;
         throw error;
       }
     },
@@ -227,6 +250,144 @@ const objectFor = (
     }
     if (/^\s*CREATE INDEX\b/iu.test(query)) {
       return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*CREATE TRIGGER\b|^\s*DROP TABLE\b|^\s*ALTER TABLE\b/iu.test(query)) {
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*INSERT OR IGNORE INTO statistics_chat_windows\b/iu.test(query)) {
+      const [windowStart, streamId] = bindings as [number, string | null];
+      if (!statisticsChatWindows.has(windowStart)) {
+        statisticsChatWindows.set(windowStart, {
+          stream_id: streamId,
+          messages: 0,
+          emotes: 0,
+          viewer_count: null,
+          chatters: null,
+          active_chatters: null,
+          metrics_sampled: 0,
+          active_chatters_sampled: 0,
+          revision: 0,
+          dirty: 1,
+          complete: 0,
+        });
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*INSERT INTO statistics_chat_windows\b/iu.test(query)) {
+      // The real statement counts one message per call with a literal; only the emote count is bound.
+      const [windowStart, streamId, emotes] = bindings as [number, string | null, number];
+      const messages = 1;
+      const previous = statisticsChatWindows.get(windowStart);
+      statisticsChatWindows.set(windowStart, {
+        stream_id: previous?.stream_id ?? streamId,
+        messages: (previous?.messages ?? 0) + messages,
+        emotes: (previous?.emotes ?? 0) + emotes,
+        viewer_count: previous?.viewer_count ?? null,
+        chatters: previous?.chatters ?? null,
+        active_chatters: previous?.active_chatters ?? null,
+        metrics_sampled: previous?.metrics_sampled ?? 0,
+        active_chatters_sampled: previous?.active_chatters_sampled ?? 0,
+        revision: (previous?.revision ?? 0) + 1,
+        dirty: 1,
+        complete: previous?.complete ?? 0,
+      });
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*UPDATE statistics_chat_windows\s+SET complete = 1, dirty = 1/iu.test(query)) {
+      const [windowMilliseconds, boundary] = bindings as [number, number];
+      for (const [start, row] of statisticsChatWindows) {
+        const complete = start + windowMilliseconds <= boundary;
+        if (complete && row.complete === 0) {
+          row.complete = 1;
+          row.dirty = 1;
+          row.revision += 1;
+        }
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT active_chatters_sampled FROM statistics_chat_windows/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      const row = statisticsChatWindows.get(windowStart);
+      const rows = row === undefined ? [] : [{ active_chatters_sampled: row.active_chatters_sampled }];
+      return { toArray: () => rows, one: () => rows[0] };
+    }
+    if (/^\s*UPDATE statistics_chat_windows\s+SET active_chatters = \?/iu.test(query)) {
+      const [activeChatters, windowStart] = bindings as [number | null, number];
+      const row = statisticsChatWindows.get(windowStart);
+      if (row !== undefined && row.active_chatters_sampled === 0) {
+        row.active_chatters = activeChatters;
+        row.active_chatters_sampled = 1;
+        row.dirty = 1;
+        row.revision += 1;
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*UPDATE statistics_chat_windows SET complete = 0 WHERE window_start = \?/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      const row = statisticsChatWindows.get(windowStart);
+      if (row !== undefined) row.complete = 0;
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT window_start FROM statistics_chat_windows/iu.test(query)) {
+      const rows = [...statisticsChatWindows.entries()]
+        .filter(([, row]) => row.dirty === 1 && row.complete === 1)
+        .sort(([left], [right]) => left - right)
+        .map(([window_start]) => ({ window_start }));
+      return { toArray: () => rows, one: () => rows[0] };
+    }
+    if (/^\s*SELECT stream_id, window_start, messages, emotes,/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      const row = statisticsChatWindows.get(windowStart);
+      const rows = row === undefined ? [] : [{ ...row, window_start: windowStart }];
+      return { toArray: () => rows, one: () => rows[0] };
+    }
+    if (/^\s*UPDATE statistics_chat_windows\s+SET viewer_count = \?/iu.test(query)) {
+      const [viewerCount, chatters, windowStart] = bindings as [number | null, number | null, number];
+      const row = statisticsChatWindows.get(windowStart);
+      if (row !== undefined && row.metrics_sampled === 0) {
+        row.viewer_count = viewerCount;
+        row.chatters = chatters;
+        row.metrics_sampled = 1;
+        row.dirty = 1;
+        row.revision += 1;
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*UPDATE statistics_chat_windows SET dirty = 0/iu.test(query)) {
+      const [windowStart, revision] = bindings as [number, number];
+      const row = statisticsChatWindows.get(windowStart);
+      if (row !== undefined && row.revision === revision) row.dirty = 0;
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*DELETE FROM statistics_chat_windows\s+WHERE window_start \+/iu.test(query)) {
+      const [windowMilliseconds, retentionMilliseconds, now] = bindings as [number, number, number];
+      for (const start of statisticsChatWindows.keys()) {
+        if (start + windowMilliseconds + retentionMilliseconds < now) statisticsChatWindows.delete(start);
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT EXISTS \(SELECT 1 FROM statistics_chat_windows\) AS present/iu.test(query)) {
+      const present = Number(statisticsChatWindows.size > 0);
+      return { toArray: () => [{ present }], one: () => ({ present }) };
+    }
+    if (/^\s*DELETE FROM eventsub_message_ids\s+WHERE received_at < \?/iu.test(query)) {
+      const [cutoff] = bindings as [number];
+      for (const [messageId, receivedAt] of eventSubMessageIds) {
+        if (receivedAt < cutoff) eventSubMessageIds.delete(messageId);
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*INSERT OR IGNORE INTO eventsub_message_ids/iu.test(query)) {
+      const [messageId, receivedAt] = bindings as [string, number];
+      lastSqlChanges = eventSubMessageIds.has(messageId) ? 0 : 1;
+      if (lastSqlChanges > 0) eventSubMessageIds.set(messageId, receivedAt);
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT changes\(\) AS changes/iu.test(query)) {
+      return { toArray: () => [{ changes: lastSqlChanges }], one: () => ({ changes: lastSqlChanges }) };
+    }
+    if (/^\s*SELECT message_id, received_at FROM eventsub_message_ids/iu.test(query)) {
+      return { toArray: () => [...eventSubMessageIds.entries()].map(([message_id, received_at]) => ({ message_id, received_at })), one: () => undefined };
     }
     if (/^\s*DELETE FROM active_chatter_key\b/iu.test(query)) {
       chatterKey = undefined;
@@ -274,8 +435,10 @@ const objectFor = (
     }
     if (/^\s*SELECT COUNT\(\*\) AS count FROM active_chatters\b/iu.test(query)) {
       const cutoff = bindings[0];
+      const end = bindings[1];
       const count = typeof cutoff === "string"
-        ? [...chatterRows.values()].filter((row) => row.last_seen_at >= cutoff).length
+        ? [...chatterRows.values()].filter((row) => row.last_seen_at >= cutoff &&
+          (typeof end !== "string" || row.last_seen_at < end)).length
         : chatterRows.size;
       return { toArray: () => [{ count }], one: () => ({ count }) };
     }
@@ -1395,6 +1558,137 @@ describe("ChannelObject realtime path", () => {
     expect(await object.getChatActivityCount()).toBe(3);
   });
 
+  it("stores only absolute aggregate counters and no per-window chatter identity", async () => {
+    const object = objectFor([]);
+    const window = {
+      windowStart: "2026-09-27T12:00:00.000Z",
+      receivedAt: "2026-09-27T12:01:00.000Z",
+      emotes: 2,
+      streamId: "stream-1",
+    };
+    vi.spyOn(object, "getModuleAlarmDeadline").mockResolvedValue(null);
+    vi.spyOn(object, "scheduleModuleAlarm").mockResolvedValue();
+
+    await object.recordChatActivity("viewer-1", true, window);
+    await object.recordChatActivity("viewer-1", true, window);
+
+    await expect(object.readStatisticsWindow(window.windowStart)).resolves.toMatchObject({ messages: 2, emotes: 4 });
+    const sql = storageOf(object).sql.exec.mock.calls.map(([query]) => query).join("\n");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS active_chatters");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS statistics_chat_windows");
+  });
+
+  it("initializes rolling-chatter and statistics schemas independently", async () => {
+    const rolling = objectFor([]);
+    await rolling.recordChatActivity("viewer-1", true);
+    const rollingSql = storageOf(rolling).sql.exec.mock.calls.map(([query]) => query).join("\n");
+    expect(rollingSql).toContain("CREATE TABLE IF NOT EXISTS active_chatters");
+    expect(rollingSql).not.toContain("CREATE TABLE IF NOT EXISTS statistics_chat_windows");
+
+    const statistics = objectFor([]);
+    vi.spyOn(statistics, "getModuleAlarmDeadline").mockResolvedValue(null);
+    vi.spyOn(statistics, "scheduleModuleAlarm").mockResolvedValue();
+    await statistics.recordChatActivity(null, false, {
+      windowStart: "2026-09-27T12:00:00.000Z",
+      receivedAt: "2026-09-27T12:01:00.000Z",
+      emotes: 0,
+      streamId: "stream-1",
+    });
+    const statisticsSql = storageOf(statistics).sql.exec.mock.calls.map(([query]) => query).join("\n");
+    expect(statisticsSql).toContain("CREATE TABLE IF NOT EXISTS statistics_chat_windows");
+    expect(statisticsSql).not.toContain("CREATE TABLE IF NOT EXISTS active_chatters");
+  });
+
+  it("merges an offline/online flap into one absolute window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-09-27T12:04:00.000Z"));
+    const object = objectFor([]);
+    vi.spyOn(object, "getModuleAlarmDeadline").mockResolvedValue(null);
+    vi.spyOn(object, "scheduleModuleAlarm").mockResolvedValue();
+    const window = {
+      windowStart: "2026-09-27T12:00:00.000Z",
+      receivedAt: "2026-09-27T12:01:00.000Z",
+      emotes: 1,
+      streamId: "stream-1",
+    };
+
+    await object.recordChatActivity(null, false, window);
+    await object.recordChatActivity(null, false, { ...window, receivedAt: "2026-09-27T12:03:30.000Z", emotes: 2, streamId: "stream-2" });
+    await object.advanceStatisticsToBoundary(Date.parse("2026-09-27T12:05:00.000Z"), false, null);
+
+    const rows = await object.listDirtyCompletedStatisticsWindows();
+    expect(rows).toEqual([window.windowStart]);
+    await expect(object.readStatisticsWindow(window.windowStart)).resolves.toMatchObject({
+      messages: 2,
+      emotes: 3,
+    });
+  });
+
+  it("samples approximate distinct chatters at a window boundary and leaves an unsampled partial window null", async () => {
+    vi.useFakeTimers();
+    const windowStart = "2026-09-27T12:00:00.000Z";
+    const boundary = "2026-09-27T12:05:00.000Z";
+    const object = objectFor([]);
+    vi.setSystemTime(Date.parse("2026-09-27T12:04:59.000Z"));
+    await object.recordChatActivity("viewer-1", true);
+    await object.recordChatActivity("viewer-1", true);
+    await object.recordChatActivity("viewer-2", true);
+    await object.advanceStatisticsToBoundary(Date.parse(boundary), true, "stream-1");
+
+    await expect(object.readStatisticsWindow(windowStart)).resolves.toMatchObject({ activeChatters: 2 });
+
+    const offline = objectFor([]);
+    vi.spyOn(offline, "getModuleAlarmDeadline").mockResolvedValue(Date.parse(boundary));
+    await offline.recordChatActivity(null, false, {
+      windowStart,
+      receivedAt: "2026-09-27T12:02:17.000Z",
+      emotes: 0,
+      streamId: "stream-1",
+    });
+    await offline.advanceStatisticsToBoundary(Date.parse(boundary), false, null);
+
+    await expect(offline.readStatisticsWindow(windowStart)).resolves.toMatchObject({
+      activeChatters: null,
+    });
+  });
+
+  it("self-heals the window alarm when live statistics chat arrives without an online event", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-27T12:01:00.000Z");
+    vi.setSystemTime(now);
+    const object = objectFor([]);
+    const getDeadline = vi.spyOn(object, "getModuleAlarmDeadline").mockResolvedValue(null);
+    const schedule = vi.spyOn(object, "scheduleModuleAlarm").mockResolvedValue();
+
+    await object.recordChatActivity(null, false, {
+      windowStart: "2026-09-27T12:00:00.000Z",
+      receivedAt: new Date(now).toISOString(),
+      emotes: 0,
+      streamId: "stream-1",
+    });
+
+    expect(getDeadline).toHaveBeenCalledWith("statistics", "window");
+    expect(schedule).toHaveBeenCalledWith("statistics", "window", "window", Date.parse("2026-09-27T12:05:00.000Z"));
+  });
+
+  it("prunes only after the 60-minute window horizon", async () => {
+    const object = objectFor([]);
+    const start = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.spyOn(object, "getModuleAlarmDeadline").mockResolvedValue(start + 300_000);
+    await object.recordChatActivity(null, false, {
+      windowStart: new Date(start).toISOString(),
+      receivedAt: new Date(start + 137_000).toISOString(),
+      emotes: 0,
+      streamId: "stream-1",
+    });
+    const expiresAt = start + 300_000 + 60 * 60_000;
+
+    await object.pruneExpiredStatisticsWindows(expiresAt);
+    await expect(object.hasStatisticsWindows()).resolves.toBe(true);
+    await object.pruneExpiredStatisticsWindows(expiresAt + 1);
+    await expect(object.hasStatisticsWindows()).resolves.toBe(false);
+  });
+
   it("tracks unique chatters in a rolling window without storing their ids", async () => {
     vi.useFakeTimers();
     const startedAt = "2026-09-27T12:00:00.000Z";
@@ -1426,6 +1720,24 @@ describe("ChannelObject realtime path", () => {
     expect(JSON.stringify(chatterRows)).not.toContain("viewer-1");
     expect(JSON.stringify(chatterRows)).not.toContain("viewer-2");
     expect(storage.list).not.toHaveBeenCalledWith(expect.objectContaining({ prefix: "chatter:" }));
+  });
+
+  it("retains EventSub IDs for the full ten minute replay window at ten messages per second", async () => {
+    vi.useFakeTimers();
+    const base = Date.parse("2026-09-27T12:00:00.000Z");
+    const object = objectFor([]);
+
+    for (let index = 0; index < 6_000; index += 1) {
+      await expect(object.claimEventSubMessage(`chat-message-${String(index)}`, base + index * 100)).resolves.toBe("claimed");
+    }
+    await expect(object.claimEventSubMessage("chat-message-0", base + 10 * 60_000)).resolves.toBe("duplicate");
+    const retained = storageOf(object).sql.exec("SELECT message_id, received_at FROM eventsub_message_ids").toArray();
+    expect(retained).toHaveLength(6_000);
+
+    await object.claimEventSubMessage("after-replay", base + 11 * 60_000 + 1);
+    const pruned = storageOf(object).sql.exec("SELECT message_id, received_at FROM eventsub_message_ids").toArray() as Array<{ message_id: string }>;
+    expect(pruned.some(({ message_id }) => message_id === "chat-message-0")).toBe(false);
+    expect(pruned).toHaveLength(6_000);
   });
 
   it("schedules the keyed sweep in the same transaction as its first chatter row", async () => {
@@ -1678,6 +1990,19 @@ describe("ChannelObject realtime path", () => {
 
     expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
       [alarmKey]: { deadline: 40_000, ownerRevision: 1, streamGeneration: 9 },
+    });
+  });
+
+  it("keeps a newer statistics window alarm when an older offline transition clears", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:statistics:window";
+    const alarmTableKey = "channel:alarm_schedule";
+
+    await object.scheduleModuleAlarm("statistics", "window", "window", 30_000, undefined, 3);
+    await object.clearModuleAlarm("statistics", "window", undefined, 2);
+
+    expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
+      [alarmKey]: { deadline: 30_000, streamGeneration: 3 },
     });
   });
 

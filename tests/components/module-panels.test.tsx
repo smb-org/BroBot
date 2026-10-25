@@ -371,6 +371,22 @@ describe("Module panel loader", () => {
     expect(screen.queryByText("Für dieses aktive Modul gibt es noch keine Panel-Ansicht.")).toBeNull();
   });
 
+  it("shows the aggregate-only explanation for the mandatory statistics module", () => {
+    render(<ModulePage
+      channelId="kanal-a"
+      moduleId="statistics"
+      ownRole="manager"
+      modules={[{ id: "statistics", enabled: true, mandatory: true, settings: "{}" }]}
+      activeModules={[{ moduleId: "statistics", settings: "{}" }]}
+      onNavigate={vi.fn()}
+      onToggle={vi.fn()}
+    />);
+
+    expect(screen.getByText(/aggregierte Chat-, Viewer- und Chatter-Zahlen/u)).toBeDefined();
+    expect(screen.getByText(/nur Fenstersummen/u)).toBeDefined();
+    expect(screen.queryByRole("switch")).toBeNull();
+  });
+
   it("uses the module list as the source and does not claim inactive when the overview is missing", () => {
     render(<ModulePage
       channelId="kanal-a"

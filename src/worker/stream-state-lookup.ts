@@ -133,7 +133,9 @@ export const lookupAndRefreshStreamState = async (
     }
     refreshedStored = await readChannelStreamState(env.DB, channelId);
   }
-  if (refreshedStored !== null && stored?.transitionGeneration !== refreshedStored.transitionGeneration) {
+  const generationChanged = refreshedStored !== null &&
+    stored?.transitionGeneration !== refreshedStored.transitionGeneration;
+  if (refreshedStored !== null && generationChanged) {
     try {
       await env.CHANNEL.get(env.CHANNEL.idFromName(channelId)).transitionTimerStream({
         state: refreshedStored.state,
@@ -144,6 +146,8 @@ export const lookupAndRefreshStreamState = async (
     } catch (error: unknown) {
       console.warn("Timer stream state could not be updated after Helix refresh.", error);
     }
+  }
+  if (refreshedStored?.state === "online" || generationChanged) {
     await notifyModuleScheduleInputsChanged(env.CHANNEL, channelId, "stream_state");
   }
   if (refreshedStored !== null &&

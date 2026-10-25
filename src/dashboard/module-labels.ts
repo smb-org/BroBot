@@ -27,6 +27,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     currency: "Währung",
     api_source: "Datenquellen",
     belabox: "BELABOX",
+    statistics: "Statistiken",
   },
   en: {
     host: "System",
@@ -42,6 +43,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     currency: "Currency",
     api_source: "Data sources",
     belabox: "BELABOX",
+    statistics: "Statistics",
   },
 };
 
@@ -154,6 +156,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     currency: "Wandelt Beträge mit dem aktuellen Wechselkurs um.",
     api_source: "Liest öffentliche Webadressen aus und stellt ihre Werte für Chatbefehle bereit.",
     belabox: "Verwaltet die BELABOX-Relay-Statistikverbindung.",
+    statistics: "Erfasst während des Livestreams alle fünf Minuten aggregierte Chat-, Viewer- und Chatter-Zahlen. Aktive Chatter sind die ungefähre Zahl unterschiedlicher Chatter, die in den fünf Minuten vor der Fenstergrenze geschrieben haben; ohne Stichprobe an der Grenze kann der Wert fehlen. Dafür nutzt der Bot die bestehende kurzlebige, pseudonyme Chatter-Verfolgung. Dauerhaft gespeichert werden nur Fenstersummen, keine Namen, Roh-IDs oder einzelnen Nachrichten.",
   },
   en: {
     text_commands: "Replies to short commands in chat.",
@@ -168,6 +171,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     currency: "Converts amounts using the current exchange rate.",
     api_source: "Reads public web addresses and makes their values available to chat commands.",
     belabox: "Manages the BELABOX relay stats connection.",
+    statistics: "Collects aggregate chat, viewer, and chatter counts every five minutes during a live stream. Active chatters approximates distinct chatters who sent a message in the five minutes before each window boundary; the value may be missing when no boundary sample was taken. It relies on the existing short-lived pseudonymous chatter tracking. Only window totals are retained, with no names, raw IDs, or individual messages stored in the statistics.",
   },
 };
 

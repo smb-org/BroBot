@@ -116,6 +116,7 @@ Für aktive Chatter (#292) gilt eine bewusst kürzere Regel: Der kanalgebundene 
 | BELABOX-Bitratefenster je Kanal, Stream und 5-Minuten-Fenster | unbegrenzt | Aggregierte Encoder-Messwerte ohne Personenbezug |
 | Modul-Ereignisse mit roher `actor_user_id` | **14 Tage** | Betriebliche Fehlersuche; die Ausnahme bleibt wegen der kurzen Frist begrenzt |
 | Audit-Einträge | **24 Monate** | Administrative Nachvollziehbarkeit; betrifft Bedienende, nicht Zuschauer |
+| Kanalstatistiken je Fünf-Minuten-Fenster (Nachrichten, Emotes, Viewer, Chatters, aktive Chatter) | unbegrenzt | Ausschließlich Summen ohne Namen, IDs oder Nutzerlisten |
 | Aggregate ohne Personenbezug | unbegrenzt | siehe Abschnitt 6 |
 
 Die Fristen werden durch einen Lauf durchgesetzt, nicht durch Vorsatz. Der stündliche Cron-Trigger aus #18 ist der naheliegende Ort.
@@ -129,6 +130,7 @@ Die Fristen werden durch einen Lauf durchgesetzt, nicht durch Vorsatz. Der stün
 Unbegrenzt bleiben dürfen ausschließlich Werte **ohne jeden Bezug zu einer einzelnen Person**:
 
 - Nachrichten pro Zeitfenster, Zuschauerzahl, Emote-Spitzen
+- Aktive Chatter in Kanalstatistiken sind eine ungefähre Aggregatanzahl aus dem bestehenden rollierenden Chatter-Tracking: unterschiedliche Chatter, die in den fünf Minuten vor der Fenstergrenze gesehen wurden. Dafür werden keine zusätzlichen Personen-Hashes je Statistikfenster gespeichert; Fenster ohne Stichprobe an ihrer Grenze erhalten `NULL`.
 - BELABOX-Bitrate-Min/Max, Mittelwert und P10, RTT-Mittelwert, Paketverlustdelta und Stichprobenzahl je Stream-Zeitfenster
 - Wortfrequenz-Baseline aus #12 — aggregiert über alle Nutzer, ohne Zuordnung
 - Ergebnisse abgeschlossener Votings und Quizrunden

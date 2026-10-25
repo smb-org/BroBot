@@ -592,6 +592,8 @@ export interface ModuleAlarmIdentity {
 export interface ModuleAlarmPlan {
   identity: ModuleAlarmIdentity | null;
   planSequence: number | null;
+  /** Stream generation attached to this alarm, when it is stream-scoped. */
+  streamGeneration?: number | null;
 }
 
 /** Infrastructure the host gives a module for its own adapter. */
@@ -678,6 +680,8 @@ export interface ModuleExecutionContext {
   getAlarmDeadline?: (alarmKey: string) => Promise<number | null>;
   /** Reads the identity and plan sequence for a module-owned alarm key, if scheduled. */
   getAlarmPlan?: (alarmKey: string) => Promise<ModuleAlarmPlan | null>;
+  /** Runs one of this module's registered alarm handlers synchronously from its event handler. */
+  runModuleAlarm?: (handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>;
 }
 
 export interface ModuleDryRunBallotSnapshot extends BallotSnapshot {
@@ -753,6 +757,11 @@ export interface ModuleAlarmContext {
   reconcileTimerSchedules?: (reason: ModuleScheduleInputChangeReason) => Promise<void>;
   /** Shared per-dispatch allowance for external provider requests. */
   externalFetchBudget?: ModuleExternalFetchBudget;
+  /** Absolute window counters, online time, and boundary samples held in the channel Durable Object. */
+  statisticsChat?: ModuleStatisticsChat;
+  /** Host-authenticated Helix counts; unavailable sources return null. */
+  fetchViewerCount?: () => Promise<number | null>;
+  fetchChattersTotal?: () => Promise<number | null>;
   /** Secret access bound to this alarm's channel and module. */
   secrets: ModuleSecretAccess;
   /** Ephemeral ballot access bound to this alarm's channel and module. */
@@ -768,6 +777,7 @@ export interface ModuleAlarmContext {
     get(key: string): Promise<unknown>;
     put(key: string, value: unknown): Promise<void>;
     delete(key: string): Promise<boolean>;
+    list?(prefix: string, limit: number, startAfter?: string): Promise<ReadonlyMap<string, unknown>>;
   };
   /** Null streamGeneration marks a stream-independent timer alarm; undefined keeps legacy version guards. */
   schedule: (
@@ -827,6 +837,28 @@ export interface ModuleAlarmContext {
   streamStartedAt: () => Promise<{ streamId: string | null; startedAt: string | null }>;
   /** Writes diagnostics through the host event-log boundary. */
   writeDiagnostics?: (triggerId: string, diagnostics: readonly ModuleDiagnostic[], now: string) => Promise<unknown>;
+}
+
+export interface ModuleStatisticsWindow {
+  streamId: string | null;
+  windowStart: string;
+  messages: number;
+  emotes: number;
+  viewerCount: number | null;
+  chatters: number | null;
+  activeChatters: number | null;
+  metricsSampled: boolean;
+  revision: number;
+}
+
+interface ModuleStatisticsChat {
+  advanceToBoundary: (boundary: number, streamIsOnline: boolean, streamId: string | null) => Promise<void>;
+  listDirtyCompletedWindows: () => Promise<readonly string[]>;
+  readWindow: (windowStart: string) => Promise<ModuleStatisticsWindow | null>;
+  saveWindowMetrics: (windowStart: string, viewerCount: number | null, chatters: number | null) => Promise<void>;
+  markWindowClean: (windowStart: string, revision: number) => Promise<void>;
+  pruneExpiredWindows: (now: number) => Promise<void>;
+  hasWindows: () => Promise<boolean>;
 }
 
 type ModuleTimeoutOutcome = "applied" | "rejected" | "ambiguous" | "suppressed";

@@ -34,7 +34,12 @@ describe("mandatory EventSub targets", () => {
         version: "1",
         deferredReason: "moderator_required",
       });
-      expect(targets.some((target) => target.subscriptionType === "channel.chat.message")).toBe(false);
+      expect(targets).toContainEqual({
+        channelId: "kanal-a",
+        subscriptionType: "channel.chat.message",
+        variant: "",
+        version: "1",
+      });
       await expect(database.prepare("SELECT COUNT(*) AS count FROM channel_modules WHERE channel_id = 'kanal-a'").first())
         .resolves.toEqual({ count: 0 });
     } finally {

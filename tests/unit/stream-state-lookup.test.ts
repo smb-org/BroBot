@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
+import type { ModuleAlarmContext } from "../../src/modules/contract";
+import { reconcileStatisticsSchedule } from "../../src/modules/statistics/service";
 import { listChannelIdsNeedingStreamStateRefresh } from "../../src/worker/db/channels";
 import { lookupAndRefreshStreamState, maintainStreamStates } from "../../src/worker/stream-state-lookup";
 import { readDispatchChannelState, readChannelControls, setChannelControl } from "../../src/worker/db/channel-controls";
@@ -362,6 +364,46 @@ describe("lookupAndRefreshStreamState", () => {
       await expect(database.prepare(
         "SELECT state, transition_generation FROM channel_stream_state WHERE channel_id = 'kanal-a'",
       ).first()).resolves.toEqual({ state: "offline", transition_generation: 2 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("reconciles statistics scheduling when Helix confirms an unchanged online stream", async () => {
+    const database = new TestD1Database();
+    try {
+      const startedAt = "2026-09-23T09:00:00.000Z";
+      await insertChannel(database, "kanal-a");
+      await insertStreamState(database, "kanal-a", "online", STALE, "helix", startedAt);
+      await withAppToken(database);
+      let alarmDeadline: number | null = null;
+      const schedule = vi.fn((_key: string, deadline: number) => {
+        alarmDeadline = deadline;
+        return Promise.resolve();
+      });
+      const statisticsContext = {
+        DB: database as unknown as D1Database,
+        channelId: "kanal-a",
+        getAlarmDeadline: vi.fn(() => Promise.resolve(alarmDeadline)),
+        schedule,
+        statisticsChat: { hasWindows: vi.fn(() => Promise.resolve(false)) },
+      } as unknown as ModuleAlarmContext;
+      const notifyScheduleInputsChanged = vi.fn(() =>
+        reconcileStatisticsSchedule(statisticsContext, "stream_state"));
+
+      await lookupAndRefreshStreamState(
+        environment(database, vi.fn(), notifyScheduleInputsChanged),
+        "kanal-a",
+        NOW,
+        helixResponse(true, startedAt),
+      );
+
+      expect(notifyScheduleInputsChanged).toHaveBeenCalledExactlyOnceWith("stream_state");
+      expect(schedule).toHaveBeenCalledOnce();
+      expect(schedule).toHaveBeenCalledWith("window", expect.any(Number));
+      await expect(database.prepare(
+        "SELECT state, transition_generation FROM channel_stream_state WHERE channel_id = 'kanal-a'",
+      ).first()).resolves.toEqual({ state: "online", transition_generation: 1 });
     } finally {
       database.close();
     }

@@ -33,6 +33,8 @@ import type { TemplateVariable } from "../template";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { chatOutputSuppressionReason } from "./chat-output-gate";
 import { createModuleExternalFetchBudget } from "./external-fetch-budget";
+import { countStatisticsEmotes, statisticsWindowStart } from "../modules/statistics/domain";
+import { botAccessTokenFor } from "./twitch/bot-access";
 import { moduleBallots } from "./module-ballots";
 import { modulePoints } from "./module-points";
 import { createModuleSecretReadAccess } from "./module-secrets";
@@ -140,15 +142,6 @@ const channelInfoFor = async (
     streamDetailsFor(environment, channelId, accessTokenFor, fetcher),
   ]);
   return channel === null || stream === null ? null : { ...channel, ...stream };
-};
-
-const botAccessTokenFor = async (environment: DispatchEnvironment): Promise<{ userId: string; accessToken: string } | null> => {
-  const identity = await getBotIdentity(environment.DB);
-  if (identity === null) return null;
-  const value = await decryptJson<{ token?: unknown }>(identity.accessTokenCiphertext, parseKeyRing(getTokenEncryptionKeys(environment)));
-  return value !== null && typeof value.token === "string" && value.token.length > 0
-    ? { userId: identity.userId, accessToken: value.token }
-    : null;
 };
 
 const totalFor = async (
@@ -828,17 +821,22 @@ export const dispatchEventSubNotification = async (
         const chatterUserId = textValue(event.payload.chatter_user_id);
         const isBotMessage = chatterUserId !== null && chatterUserId === await getCachedBotUserId(environment.DB);
         if (belongsToChannel && !isBotMessage) {
-          await object.recordChatActivity(chatterUserId, trackActiveChatters);
+          const windowStart = dispatchState.streamState === "online"
+            ? statisticsWindowStart(event.receivedAt)
+            : null;
+          if (windowStart === null) {
+            await object.recordChatActivity(chatterUserId, trackActiveChatters);
+          } else {
+            await object.recordChatActivity(chatterUserId, trackActiveChatters, {
+              windowStart: new Date(windowStart).toISOString(),
+              receivedAt: event.receivedAt,
+              emotes: countStatisticsEmotes(event.payload),
+              streamId: dispatchState.streamId,
+            });
+          }
         }
       } catch (error: unknown) {
         console.warn("Channel chat activity could not be counted.", error);
-      }
-    }
-    if (event.subscriptionType === "stream.offline") {
-      try {
-        await object.clearActiveChatters();
-      } catch (error: unknown) {
-        console.warn("Active chatter tracking could not be cleared.", error);
       }
     }
   }
@@ -1186,6 +1184,13 @@ export const dispatchEventSubNotification = async (
               const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
               return await object.getModuleAlarmPlan(module.id, alarmKey);
             },
+            runModuleAlarm: (handlerKey, alarmKey, invocation) => {
+              if (environment.CHANNEL === undefined) return Promise.resolve(undefined);
+              const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+              return invocation === undefined
+                ? object.runModuleAlarm(module.id, handlerKey, alarmKey)
+                : object.runModuleAlarm(module.id, handlerKey, alarmKey, invocation);
+            },
           });
     } catch (error: unknown) {
       // A module that throws doesn't take down the worker or the other
@@ -1235,6 +1240,14 @@ export const dispatchEventSubNotification = async (
       diagnostics,
       event.receivedAt,
     ));
+  }
+
+  if (event.subscriptionType === "stream.offline" && environment.CHANNEL !== undefined) {
+    try {
+      await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId)).clearActiveChatters();
+    } catch (error: unknown) {
+      console.warn("Active chatter tracking could not be cleared.", error);
+    }
   }
 
   if (newEntries.length === 0 && changedVariables.size === 0 && streamStateChanged === null) return;

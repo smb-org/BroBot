@@ -558,6 +558,39 @@ und Fenster bleiben unbegrenzt, weil sie aggregiert sind und keine
 Personendaten enthalten (Entscheidung 0003). Routenabfragen binden
 `channel_id`; `/history` liefert pro Messpunkt nur numerische Werte.
 
+### Kanalstatistiken (#557)
+
+Das verpflichtende `statistics`-Modul abonniert `channel.chat.message`,
+und `stream.online` für jeden Kanal. Es zählt im Channel
+Durable Object Nachrichten und Emote-Fragmente, ohne je Nachricht eine
+D1-Zeile zu schreiben. Die Fenster beginnen an UTC-Vielfachen von 300 s
+(`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
+Nachrichten- und Emote-Zähler. Jede Zeile beschreibt das vollständige
+UTC-Epoch-Fenster; Streamstart, Streamende und die Abdeckung angeschnittener
+Fenster kommen aus der Stream-Timeline (#558). Online-/Offline-Flaps im selben
+Fenster zählen in denselben Zustand.
+
+Ein einzelner keyed Alarm läuft alle fünf Minuten, solange der Stream online
+ist oder Fensterzustand im DO liegt. Er speichert absolute Werte für geänderte,
+abgeschlossene Fenster per Upsert. Erfolgreich geschriebene Fenster bleiben
+dirty, bis D1 bestätigt; ein Retry schreibt daher dieselben oder größere
+Zähler. Viewer- und `chatters`-Werte sowie `active_chatters` werden einmal an
+der Fenstergrenze erfasst und mit dem Fenster gespeichert, damit Retries sie
+wiederverwenden. Zuschauer kommen aus Helix Get Streams, `chatters` ist `total`
+aus Get Chatters mit Bot-Token und `moderator:read:chatters`. Nicht verfügbare
+Quellen bleiben `NULL`. Ein bereits laufender Stream wird durch Zustandswiederherstellung
+oder die nächste gezählte Chatnachricht neu eingeplant.
+
+DO-Fensterzustand wird nach einem letzten Schreibversuch gelöscht, wenn
+`window_end + 60 Minuten < Alarmzeit`. Ein D1-Ausfall länger als 60 Minuten
+kann deshalb ungeflushte Fenster verlieren. `active_chatters` ist die
+ungefähre Anzahl unterschiedlicher Chatter, die in den fünf Minuten vor der
+Fenstergrenze im bestehenden rollierenden Chatter-Tracking gesehen wurden;
+ein Fenster ohne Abtastung an seiner Grenze hat `NULL`. Es gibt
+keine per-window Personen-Hashes oder neue personenbezogene Speicherung.
+`channel_statistics` enthält nur Summen und wird unbegrenzt aufbewahrt; beim
+Löschen des Kanals greift `ON DELETE CASCADE` (Entscheidung 0003, Abschnitt 6).
+
 ### Modulaktionen (`actions`)
 
 **Zweck:** Ein Modul deklariert jede direkt ausführbare Aktion. Das Dashboard

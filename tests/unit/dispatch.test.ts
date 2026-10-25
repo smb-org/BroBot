@@ -10,6 +10,7 @@ import { DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/cont
 import { pointsModule } from "../../src/modules/points";
 import { DEFAULT_POINTS_SETTINGS } from "../../src/modules/points/contracts";
 import { pointsCatalog } from "../../src/modules/points/locale";
+import { statisticsModule } from "../../src/modules/statistics";
 import { dispatchEventSubNotification, needsActiveChatterTracking, selectModulesForEvent } from "../../src/worker/dispatch";
 import {
   upsertBotIdentity,
@@ -639,6 +640,54 @@ describe("dispatch and execution", () => {
       };
       expect(object.recordChatActivity).toHaveBeenCalledTimes(1);
       expect(object.recordChatActivity).toHaveBeenCalledWith("viewer-1", true);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("counts live chat messages and emote fragments while excluding bot echoes", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await writeEventSubStreamState(
+        database as unknown as D1Database,
+        "kanal-a",
+        "online",
+        NOW,
+        NOW,
+        "live-1",
+      );
+      const runtime = environment(database);
+      const event = (triggerId: string, chatterId: string) => ({
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId,
+        payload: {
+          chatter_user_id: chatterId,
+          message: {
+            fragments: [
+              { type: "text", text: "hi" },
+              { type: "emote", text: "Kappa" },
+              { type: "emote", text: "Pog" },
+            ],
+          },
+        },
+        receivedAt: "2026-09-19T12:07:41.000Z",
+      });
+
+      await dispatchEventSubNotification(runtime, event("bot-echo", "bot-1"), vi.fn<typeof fetch>(), [statisticsModule]);
+      await dispatchEventSubNotification(runtime, event("viewer-message", "viewer-1"), vi.fn<typeof fetch>(), [statisticsModule]);
+
+      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        recordChatActivity: ReturnType<typeof vi.fn>;
+      };
+      expect(object.recordChatActivity).toHaveBeenCalledTimes(1);
+      expect(object.recordChatActivity).toHaveBeenCalledWith("viewer-1", true, {
+        windowStart: "2026-09-19T12:05:00.000Z",
+        receivedAt: "2026-09-19T12:07:41.000Z",
+        emotes: 2,
+        streamId: "live-1",
+      });
     } finally {
       database.close();
     }

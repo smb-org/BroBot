@@ -82,6 +82,7 @@ import type {
   ModulePointRoundAnnouncement,
   ModulePointRoundResult,
   ModuleScheduleInputChangeReason,
+  ModuleStatisticsWindow,
   PointActiveRound,
   PointJoinResult,
   PointRoundAnswerResult,
@@ -90,6 +91,11 @@ import type {
   PointsKind,
   PointsMovement,
 } from "../../modules/contract";
+import { STATISTICS_WINDOW_MILLISECONDS, statisticsWindowStartMs, type StatisticsChatActivity } from "../../modules/statistics/domain";
+import {
+  EVENTSUB_REPLAY_WINDOW_MILLISECONDS,
+  EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS,
+} from "../eventsub-constants";
 import { MODULES } from "../../modules/registry";
 import {
   ACTIVE_CHATTER_EXPIRY_HANDLER,
@@ -111,6 +117,7 @@ import type { AdPrewarningScheduler } from "../../modules/ads/adapters/prewarnin
 import { getAppAccessToken } from "../app-token";
 import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
+import { fetchLiveChattersTotal, fetchLiveViewerCount } from "../twitch/aggregate-counts";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 import {
@@ -324,6 +331,10 @@ const timerSkipReceiptsForSchedule = (
 };
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
+const STATISTICS_CHAT_WINDOW_TABLE = "statistics_chat_windows";
+const STATISTICS_WINDOW_RETENTION_MS = 60 * 60 * 1_000;
+const EVENTSUB_MESSAGE_ID_TABLE = "eventsub_message_ids";
+const EVENTSUB_MESSAGE_ID_RETENTION_MS = EVENTSUB_REPLAY_WINDOW_MILLISECONDS + 2 * EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS;
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
 const ACTIVE_CHATTER_EXPIRY_KEY = "host:active_chatters_expiry";
 const ACTIVE_CHATTER_RETENTION_MS = 60 * 60 * 1_000;
@@ -735,12 +746,15 @@ export class ChannelObject extends DurableObject<Env> {
   private adScheduleOperationQueue: Promise<void> = Promise.resolve();
   private belaboxPollQueue: Promise<void> = Promise.resolve();
   private moduleLifecycleMutationQueue: Promise<void> = Promise.resolve();
+  private statisticsWindowAlarmQueue: Promise<void> = Promise.resolve();
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
   private timerScheduleInputGeneration = 0;
   private timerScheduleInitialization: Promise<void> | null = null;
   private timerOccurrenceQueues = new Map<string, Promise<void>>();
   private activeChatterSchemaReady = false;
+  private statisticsSchemaReady = false;
+  private eventSubMessageIdSchemaReady = false;
   private pointsSchemaReady = false;
   private pointsInitialized = false;
   private pointsInitialization: Promise<void> | null = null;
@@ -854,10 +868,23 @@ export class ChannelObject extends DurableObject<Env> {
     operation: () => Promise<Result>,
   ): Promise<Result> {
     if (moduleId === "belabox" && handlerKey === "poll") return await this.serializeBelaboxPoll(operation);
+    if (moduleId === "statistics") return await this.serializeStatisticsWindowAlarm(operation);
     if (MODULES.find((module) => module.id === moduleId)?.serializeLifecycleMutations === true) {
       return await this.serializeModuleLifecycleMutation(operation);
     }
     return await operation();
+  }
+
+  private async serializeStatisticsWindowAlarm<Result>(operation: () => Promise<Result>): Promise<Result> {
+    const previous = this.statisticsWindowAlarmQueue;
+    let release!: () => void;
+    this.statisticsWindowAlarmQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   private async serializeModuleLifecycleMutation<Result>(operation: () => Promise<Result>): Promise<Result> {
@@ -894,6 +921,46 @@ export class ChannelObject extends DurableObject<Env> {
       )`,
     );
     this.activeChatterSchemaReady = true;
+  }
+
+  private ensureStatisticsSchema(): void {
+    if (this.statisticsSchemaReady) return;
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${STATISTICS_CHAT_WINDOW_TABLE} (
+        window_start INTEGER PRIMARY KEY,
+        stream_id TEXT,
+        messages INTEGER NOT NULL DEFAULT 0,
+        emotes INTEGER NOT NULL DEFAULT 0,
+        viewer_count INTEGER,
+        chatters INTEGER,
+        active_chatters INTEGER,
+        metrics_sampled INTEGER NOT NULL DEFAULT 0,
+        active_chatters_sampled INTEGER NOT NULL DEFAULT 0,
+        revision INTEGER NOT NULL DEFAULT 0,
+        dirty INTEGER NOT NULL DEFAULT 1,
+        complete INTEGER NOT NULL DEFAULT 0
+      )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE INDEX IF NOT EXISTS statistics_chat_windows_flush_idx
+       ON ${STATISTICS_CHAT_WINDOW_TABLE} (dirty, complete, window_start)`,
+    );
+    this.statisticsSchemaReady = true;
+  }
+
+  private ensureEventSubMessageIdTable(): void {
+    if (this.eventSubMessageIdSchemaReady) return;
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${EVENTSUB_MESSAGE_ID_TABLE} (
+        message_id TEXT PRIMARY KEY,
+        received_at INTEGER NOT NULL
+      )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE INDEX IF NOT EXISTS eventsub_message_ids_received_idx
+       ON ${EVENTSUB_MESSAGE_ID_TABLE} (received_at)`,
+    );
+    this.eventSubMessageIdSchemaReady = true;
   }
 
   private reconcileLegacyActiveChatterStream(): void {
@@ -2327,6 +2394,41 @@ export class ChannelObject extends DurableObject<Env> {
     );
   }
 
+  private ensureStatisticsWindowSync(windowStart: number, streamId: string | null): void {
+    this.ensureStatisticsSchema();
+    this.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO ${STATISTICS_CHAT_WINDOW_TABLE} (window_start, stream_id)
+       VALUES (?, ?)`,
+      windowStart,
+      streamId,
+    );
+  }
+
+  private activeChattersAtBoundarySync(boundary: number): number | null {
+    this.ensureActiveChatterTable();
+    const key = this.activeChatterKeyRowSync();
+    if (key === null || key.createdAt > boundary || boundary - key.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS) {
+      return null;
+    }
+    return this.ctx.storage.sql.exec<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM ${ACTIVE_CHATTER_TABLE}
+        WHERE last_seen_at >= ? AND last_seen_at < ?`,
+      new Date(boundary - STATISTICS_WINDOW_MILLISECONDS).toISOString(),
+      new Date(boundary).toISOString(),
+    ).one().count;
+  }
+
+  private async ensureStatisticsWindowAlarmScheduled(now: number): Promise<void> {
+    const deadline = await this.getModuleAlarmDeadline("statistics", "window");
+    if (deadline !== null) return;
+    await this.scheduleModuleAlarm(
+      "statistics",
+      "window",
+      "window",
+      statisticsWindowStartMs(now) + STATISTICS_WINDOW_MILLISECONDS,
+    );
+  }
+
   /** Arm a physical alarm before committing a new or earlier sweep deadline. */
   private async ensurePlatformActiveChatterAlarm(deadline: number): Promise<void> {
     const platformAlarm = await this.ctx.storage.getAlarm();
@@ -3171,6 +3273,19 @@ export class ChannelObject extends DurableObject<Env> {
       ...(alarmPlanSequence === undefined ? {} : { alarmPlanSequence }),
       ...(streamGeneration === undefined ? {} : { streamGeneration }),
       externalFetchBudget,
+      statisticsChat: {
+        advanceToBoundary: (boundary, streamIsOnline, streamId) =>
+          this.advanceStatisticsToBoundary(boundary, streamIsOnline, streamId),
+        listDirtyCompletedWindows: () => this.listDirtyCompletedStatisticsWindows(),
+        readWindow: (windowStart) => this.readStatisticsWindow(windowStart),
+        saveWindowMetrics: (windowStart, viewerCount, chatters) =>
+          this.saveStatisticsWindowMetrics(windowStart, viewerCount, chatters),
+        markWindowClean: (windowStart, revision) => this.markStatisticsWindowClean(windowStart, revision),
+        pruneExpiredWindows: (now) => this.pruneExpiredStatisticsWindows(now),
+        hasWindows: () => this.hasStatisticsWindows(),
+      },
+      fetchViewerCount: () => fetchLiveViewerCount(this.env, channelId, externalFetchBudget),
+      fetchChattersTotal: () => fetchLiveChattersTotal(this.env, channelId, externalFetchBudget),
       ballots: this.ballotAccess(moduleId),
       points: this.pointAccess(moduleId),
       secrets: createModuleSecretAccess(this.env, channelId, moduleId),
@@ -3208,6 +3323,15 @@ export class ChannelObject extends DurableObject<Env> {
           });
           if (deleted) await this.notifyCommittedPanelResources();
           return deleted;
+        },
+        list: async (prefix: string, limit: number, startAfter?: string) => {
+          if (!Number.isSafeInteger(limit) || limit < 1) return new Map<string, unknown>();
+          const entries = await this.ctx.storage.list({
+            prefix: `${storagePrefix}${prefix}`,
+            limit,
+            ...(startAfter === undefined ? {} : { startAfter: `${storagePrefix}${startAfter}` }),
+          });
+          return new Map([...entries].map(([key, value]) => [key.slice(storagePrefix.length), value]));
         },
       },
       schedule: async (key, deadline, ownerRevision, scheduledStreamGeneration, identity, planSequence) => {
@@ -3349,21 +3473,55 @@ export class ChannelObject extends DurableObject<Env> {
   public async recordChatActivity(
     chatterUserId: string | null = null,
     needsActiveChatters = false,
+    statistics?: StatisticsChatActivity,
   ): Promise<number> {
     await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
     this.reconcileLegacyActiveChatterStream();
-    const now = Date.now();
+    const statisticsReceivedAt = statistics === undefined ? Number.NaN : Date.parse(statistics.receivedAt);
+    const now = Number.isFinite(statisticsReceivedAt) ? statisticsReceivedAt : Date.now();
     const nowIso = new Date(now).toISOString();
     const userIdForTracking = needsActiveChatters && typeof chatterUserId === "string" && chatterUserId.length > 0
       ? chatterUserId
       : null;
+    const statisticsWindowStart = statistics === undefined ? Number.NaN : Date.parse(statistics.windowStart);
+    const statisticsEmotesValid = statistics !== undefined && Number.isSafeInteger(statistics.emotes) && statistics.emotes >= 0;
+    const recordStatistics = (): void => {
+      if (statistics === undefined) return;
+      if (!Number.isFinite(statisticsWindowStart) || !statisticsEmotesValid) return;
+      this.ensureStatisticsSchema();
+      this.ensureStatisticsWindowSync(statisticsWindowStart, statistics.streamId);
+      this.ctx.storage.sql.exec(
+        `INSERT INTO ${STATISTICS_CHAT_WINDOW_TABLE}
+          (window_start, stream_id, messages, emotes, revision, dirty)
+         VALUES (?, ?, 1, ?, 1, 1)
+         ON CONFLICT(window_start) DO UPDATE SET
+           stream_id = COALESCE(statistics_chat_windows.stream_id, excluded.stream_id),
+           messages = statistics_chat_windows.messages + 1,
+           emotes = statistics_chat_windows.emotes + excluded.emotes,
+           revision = statistics_chat_windows.revision + 1,
+           dirty = 1`,
+        statisticsWindowStart,
+        statistics.streamId,
+        statistics.emotes,
+      );
+    };
     if (userIdForTracking === null) {
-      return this.ctx.storage.transactionSync(() => this.incrementChatActivityCountSync());
+      const activityCount = this.ctx.storage.transactionSync(() => {
+        recordStatistics();
+        return this.incrementChatActivityCountSync();
+      });
+      if (statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid) {
+        await this.ensureStatisticsWindowAlarmScheduled(now);
+      }
+      return activityCount;
     }
 
-    return await this.ctx.blockConcurrencyWhile(async () => {
+    const activityCount = await this.ctx.blockConcurrencyWhile(async () => {
       this.ensureActiveChatterTable();
+      if (statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid) {
+        this.ensureStatisticsSchema();
+      }
       const current = this.activeChatterKeyRowSync();
       const rotating = current === null || now - current.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS;
       const keyHex = rotating
@@ -3381,7 +3539,13 @@ export class ChannelObject extends DurableObject<Env> {
       try {
         await this.ensurePlatformActiveChatterAlarm(preflightDeadline);
       } catch (error: unknown) {
-        this.ctx.storage.transactionSync(() => this.incrementChatActivityCountSync());
+        this.ctx.storage.transactionSync(() => {
+          recordStatistics();
+          this.incrementChatActivityCountSync();
+        });
+        if (statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid) {
+          await this.ensureStatisticsWindowAlarmScheduled(now);
+        }
         throw error;
       }
       return this.ctx.storage.transactionSync(() => {
@@ -3402,9 +3566,177 @@ export class ChannelObject extends DurableObject<Env> {
         const nextSweep = this.activeChatterNextSweepSync(keyCreatedAt);
         if (nextSweep === null) this.clearActiveChatterExpiryEntrySync();
         else this.writeActiveChatterExpiryEntrySync(nextSweep);
+        recordStatistics();
         return this.incrementChatActivityCountSync();
       });
     });
+    if (statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid) {
+      await this.ensureStatisticsWindowAlarmScheduled(now);
+    }
+    return activityCount;
+  }
+
+  public advanceStatisticsToBoundary(
+    boundary: number,
+    streamIsOnline: boolean,
+    streamId: string | null,
+  ): Promise<void> {
+    if (!Number.isSafeInteger(boundary) || boundary % STATISTICS_WINDOW_MILLISECONDS !== 0) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.transactionSync(() => {
+      const completedWindowStart = boundary - STATISTICS_WINDOW_MILLISECONDS;
+      if (streamIsOnline) this.ensureStatisticsWindowSync(completedWindowStart, streamId);
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
+            SET complete = 1, dirty = 1, revision = revision + 1
+          WHERE complete = 0 AND window_start + ? <= ?`,
+        STATISTICS_WINDOW_MILLISECONDS,
+        boundary,
+      );
+      if (!streamIsOnline) return;
+      const completed = this.ctx.storage.sql.exec<{ active_chatters_sampled: number }>(
+        `SELECT active_chatters_sampled FROM ${STATISTICS_CHAT_WINDOW_TABLE} WHERE window_start = ?`,
+        completedWindowStart,
+      ).toArray()[0];
+      if (completed !== undefined && completed.active_chatters_sampled === 0) {
+        const activeChatters = this.activeChattersAtBoundarySync(boundary);
+        this.ctx.storage.sql.exec(
+          `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
+              SET active_chatters = ?, active_chatters_sampled = 1,
+                  dirty = 1, revision = revision + 1
+            WHERE window_start = ? AND active_chatters_sampled = 0`,
+          activeChatters,
+          completedWindowStart,
+        );
+      }
+      this.ensureStatisticsWindowSync(boundary, streamId);
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE} SET complete = 0 WHERE window_start = ?`,
+        boundary,
+      );
+    });
+    return Promise.resolve();
+  }
+
+  public listDirtyCompletedStatisticsWindows(): Promise<readonly string[]> {
+    this.ensureStatisticsSchema();
+    const rows = this.ctx.storage.sql.exec<{ window_start: number }>(
+      `SELECT window_start FROM ${STATISTICS_CHAT_WINDOW_TABLE}
+        WHERE dirty = 1 AND complete = 1
+        ORDER BY window_start ASC`,
+    ).toArray();
+    return Promise.resolve(rows.map(({ window_start: start }) => new Date(start).toISOString()));
+  }
+
+  public readStatisticsWindow(windowStart: string): Promise<ModuleStatisticsWindow | null> {
+    const parsed = Date.parse(windowStart);
+    if (!Number.isSafeInteger(parsed)) return Promise.resolve(null);
+    this.ensureStatisticsSchema();
+    const row = this.ctx.storage.sql.exec<{
+      stream_id: string | null;
+      window_start: number;
+      messages: number;
+      emotes: number;
+      viewer_count: number | null;
+      chatters: number | null;
+      active_chatters: number | null;
+      metrics_sampled: number;
+      revision: number;
+    }>(
+      `SELECT stream_id, window_start, messages, emotes,
+              viewer_count, chatters, active_chatters, metrics_sampled, revision
+         FROM ${STATISTICS_CHAT_WINDOW_TABLE} WHERE window_start = ?`,
+      parsed,
+    ).toArray()[0];
+    if (row === undefined) return Promise.resolve(null);
+    return Promise.resolve({
+      streamId: row.stream_id,
+      windowStart: new Date(row.window_start).toISOString(),
+      messages: row.messages,
+      emotes: row.emotes,
+      viewerCount: row.viewer_count,
+      chatters: row.chatters,
+      activeChatters: row.active_chatters,
+      metricsSampled: row.metrics_sampled === 1,
+      revision: row.revision,
+    });
+  }
+
+  public saveStatisticsWindowMetrics(
+    windowStart: string,
+    viewerCount: number | null,
+    chatters: number | null,
+  ): Promise<void> {
+    const parsed = Date.parse(windowStart);
+    if (!Number.isSafeInteger(parsed)) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.sql.exec(
+      `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
+          SET viewer_count = ?, chatters = ?, metrics_sampled = 1,
+              dirty = 1, revision = revision + 1
+        WHERE window_start = ? AND metrics_sampled = 0`,
+      viewerCount,
+      chatters,
+      parsed,
+    );
+    return Promise.resolve();
+  }
+
+  public markStatisticsWindowClean(windowStart: string, revision: number): Promise<void> {
+    const parsed = Date.parse(windowStart);
+    if (!Number.isSafeInteger(parsed) || !Number.isSafeInteger(revision)) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.sql.exec(
+      `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE} SET dirty = 0
+        WHERE window_start = ? AND revision = ?`,
+      parsed,
+      revision,
+    );
+    return Promise.resolve();
+  }
+
+  public pruneExpiredStatisticsWindows(now: number): Promise<void> {
+    if (!Number.isSafeInteger(now)) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.sql.exec(
+      `DELETE FROM ${STATISTICS_CHAT_WINDOW_TABLE}
+        WHERE window_start + ? + ? < ?`,
+      STATISTICS_WINDOW_MILLISECONDS,
+      STATISTICS_WINDOW_RETENTION_MS,
+      now,
+    );
+    return Promise.resolve();
+  }
+
+  public hasStatisticsWindows(): Promise<boolean> {
+    this.ensureStatisticsSchema();
+    const present = this.ctx.storage.sql.exec<{ present: number }>(
+      `SELECT EXISTS (SELECT 1 FROM ${STATISTICS_CHAT_WINDOW_TABLE}) AS present`,
+    ).one().present;
+    return Promise.resolve(present === 1);
+  }
+
+  /** Claims a verified channel.chat.message ID in the time-bounded replay set. */
+  public claimEventSubMessage(messageId: string, receivedAt = Date.now()): Promise<"claimed" | "duplicate"> {
+    if (messageId.length === 0 || messageId.length > 512 || !Number.isSafeInteger(receivedAt)) {
+      return Promise.resolve("duplicate");
+    }
+    this.ensureEventSubMessageIdTable();
+    return Promise.resolve(this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `DELETE FROM ${EVENTSUB_MESSAGE_ID_TABLE} WHERE received_at < ?`,
+        receivedAt - EVENTSUB_MESSAGE_ID_RETENTION_MS,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO ${EVENTSUB_MESSAGE_ID_TABLE} (message_id, received_at) VALUES (?, ?)`,
+        messageId,
+        receivedAt,
+      );
+      const isNew = this.ctx.storage.sql.exec<{ changes: number }>(
+        "SELECT changes() AS changes",
+      ).one().changes > 0;
+      return isNew ? "claimed" : "duplicate";
+    }));
   }
 
   public async clearActiveChatters(): Promise<void> {
@@ -5992,6 +6324,7 @@ export class ChannelObject extends DurableObject<Env> {
     return {
       identity: entry.identity ?? null,
       planSequence: entry.planSequence ?? null,
+      streamGeneration: entry.streamGeneration ?? null,
     };
   }
 

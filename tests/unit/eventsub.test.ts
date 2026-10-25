@@ -250,19 +250,64 @@ describe("EventSub inbound", () => {
       subscription: { type: "channel.chat.message", condition: { broadcaster_user_id: "channel-replay" } },
       event: {},
     });
+    const remembered = new Set<string>();
+    const claimEventSubMessage = vi.fn((messageId: string) => {
+      if (remembered.has(messageId)) return Promise.resolve("duplicate" as const);
+      remembered.add(messageId);
+      return Promise.resolve("claimed" as const);
+    });
+    const recordChatActivity = vi.fn(() => Promise.resolve(0));
+    const channel = {
+      idFromName: (channelId: string) => channelId,
+      get: () => ({
+        claimEventSubMessage,
+        recordChatActivity,
+        reconcilePanelResources: () => Promise.resolve(),
+      }),
+    } as unknown as Env["CHANNEL"];
     const first = await eventSubRouter.fetch(
       signedRequest(secret, "notification", body, "message-replay"),
-      environment(),
+      environment(channel),
     );
     vi.setSystemTime(new Date("2026-09-19T10:00:01.000Z"));
     const repeat = await eventSubRouter.fetch(
       signedRequest(secret, "notification", body, "message-replay", "2026-09-19T10:00:00.000Z"),
-      environment(),
+      environment(channel),
     );
 
     expect(first.status).toBe(204);
     expect(repeat.status).toBe(204);
-    await expect(database.prepare("SELECT COUNT(*) AS count FROM eventsub_messages").first()).resolves.toEqual({ count: 1 });
+    expect(claimEventSubMessage).toHaveBeenCalledTimes(2);
+    expect(recordChatActivity).toHaveBeenCalledOnce();
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM eventsub_messages").first()).resolves.toEqual({ count: 0 });
+  });
+
+  it("processes a redelivery once after Durable Object eviction, then deduplicates its retry", async () => {
+    await insertChannel(database, "channel-dedup-evicted");
+    const body = JSON.stringify({
+      subscription: { type: "channel.chat.message", condition: { broadcaster_user_id: "channel-dedup-evicted" } },
+      event: {},
+    });
+    let remembered = new Set<string>();
+    const claimEventSubMessage = vi.fn((messageId: string) => {
+      if (remembered.has(messageId)) return Promise.resolve("duplicate" as const);
+      remembered.add(messageId);
+      return Promise.resolve("claimed" as const);
+    });
+    const recordChatActivity = vi.fn(() => Promise.resolve(0));
+    const channel = {
+      idFromName: (channelId: string) => channelId,
+      get: () => ({ claimEventSubMessage, recordChatActivity, reconcilePanelResources: () => Promise.resolve() }),
+    } as unknown as Env["CHANNEL"];
+    const request = () => signedRequest(secret, "notification", body, "message-after-eviction");
+
+    expect((await eventSubRouter.fetch(request(), environment(channel))).status).toBe(204);
+    remembered = new Set();
+    expect((await eventSubRouter.fetch(request(), environment(channel))).status).toBe(204);
+    expect((await eventSubRouter.fetch(request(), environment(channel))).status).toBe(204);
+
+    expect(recordChatActivity).toHaveBeenCalledTimes(2);
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM eventsub_messages").first()).resolves.toEqual({ count: 0 });
   });
 
   it("accepts a signed channel.update notification and records its category for the subscribed channel", async () => {

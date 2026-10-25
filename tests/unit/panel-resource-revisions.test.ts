@@ -1594,6 +1594,7 @@ describe("panel resource revisions", () => {
         "belabox_bitrate_windows",
         "bot_channel_status_check_locks",
         "channel_game_history",
+        "channel_statistics",
         "channel_variable_stream_resets",
         "chat_vote_result_delivery_reconciliation",
         "currency_rate_cache",
