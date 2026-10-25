@@ -619,7 +619,8 @@ Wörter pro Kanal.
 Nach erfolgreichem Merge löscht das DO nur den jeweiligen Bucket. Nach
 24 Stunden ab bestätigtem Streamende oder Offline-Erkennung löscht der nächste
 Statistik-Alarm alle Streamdaten, unabhängig von D1-Erfolg. Ein Merge-Batch
-umfasst vier D1-Anweisungen; pro geändertem Statistikfenster kommt ein
+umfasst fünf D1-Anweisungen (vier Schreibvorgänge und ein bestätigendes
+SELECT); pro geändertem Statistikfenster kommt ein
 absoluter Fenster-Upsert hinzu. Wortzählungen schreiben nicht pro Nachricht
 nach DO-SQLite.
 

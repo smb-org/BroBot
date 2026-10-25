@@ -298,7 +298,8 @@ Gesamtzahl und letzten Zeitpunkt.
 Ein erfolgreicher Merge löscht nur den jeweiligen DO-Bucket. Nach 24 Stunden
 ab bestätigtem `stream.offline` oder erkannter Offline-Zeit löscht der nächste
 Statistik-Alarm alle Streamdaten, auch wenn D1 weiter fehlschlägt. Ein
-Merge-Batch umfasst vier D1-Anweisungen; zusätzlich schreibt der Alarm je
+Merge-Batch umfasst fünf D1-Anweisungen (vier Schreibvorgänge und ein
+bestätigendes SELECT); zusätzlich schreibt der Alarm je
 geändertem Statistikfenster einen absoluten Fenster-Upsert. Wortzählungen
 verursachen keine DO-SQL-Schreibvorgänge pro Nachricht.
 Nicht verfügbare Stichproben bleiben `NULL`. D1 enthält nur Aggregate, keine
