@@ -51,7 +51,7 @@ interface StatisticsWordObject {
 interface StatisticsClipImportObject {
   markStatisticsClipImportPending(streamId: string, startedAt: string | null, endedAt: string): Promise<void>;
   listReadyStatisticsClipImports(now: number): Promise<readonly { streamId: string; startedAt: string | null; endedAt: string }[]>;
-  completeStatisticsClipImport(streamId: string): Promise<void>;
+  completeStatisticsClipImport(streamId: string, endedAt: string): Promise<void>;
   pruneExpiredStatisticsClipImports(now: number): Promise<void>;
   hasStatisticsClipImports(): Promise<boolean>;
 }
@@ -609,39 +609,63 @@ describe("statistics windows in the channel object", () => {
     await expect(object.getModuleAlarmDeadline("statistics", "window")).resolves.toBe(deadline);
   });
 
-  it("keeps pending clip imports durable, delays readiness, and prunes them by age", async () => {
+  it("advances same-id reconnect cutoffs and preserves the earliest start", async () => {
     const channelId = "statistics-clip-import-state";
     await insertPointChannel(channelId);
     const stub = statisticsObject(channelId);
     const object = stub as unknown as StatisticsClipImportObject;
-    const endedAt = Date.now() - 15 * 60_000;
-    const duplicateEnd = endedAt + 60_000;
-    const expiresAt = endedAt + 24 * 60 * 60_000;
+    vi.setSystemTime(Date.parse("2026-10-25T10:30:00.000Z"));
+    const startedAt = "2026-10-25T08:00:00.000Z";
+    const firstEnd = "2026-10-25T10:06:00.000Z";
+    const reconnectEnd = "2026-10-25T10:08:00.000Z";
+    const finalEnd = "2026-10-25T10:12:00.000Z";
+    const expiresAt = Date.parse(finalEnd) + 24 * 60 * 60_000;
 
-    const startedAt = iso(endedAt - 60 * 60_000);
-    await object.markStatisticsClipImportPending("clip-stream-state", startedAt, iso(endedAt));
-    await object.markStatisticsClipImportPending("clip-stream-state", iso(endedAt - 30 * 60_000), iso(duplicateEnd));
+    await object.markStatisticsClipImportPending("clip-stream-state", startedAt, firstEnd);
+    await object.markStatisticsClipImportPending("clip-stream-state", "2026-10-25T09:00:00.000Z", reconnectEnd);
+    await object.markStatisticsClipImportPending("clip-stream-state", "2026-10-25T09:30:00.000Z", finalEnd);
+    await object.markStatisticsClipImportPending("clip-stream-state", "2026-10-25T10:00:00.000Z", finalEnd);
 
     await expect(object.hasStatisticsClipImports()).resolves.toBe(true);
-    await expect(object.listReadyStatisticsClipImports(Date.now() - 1)).resolves.toEqual([]);
-    await expect(object.listReadyStatisticsClipImports(Date.now())).resolves.toEqual([
-      { streamId: "clip-stream-state", startedAt, endedAt: iso(endedAt) },
+    await expect(object.listReadyStatisticsClipImports(Date.parse("2026-10-25T10:26:59.999Z"))).resolves.toEqual([]);
+    await expect(object.listReadyStatisticsClipImports(Date.parse("2026-10-25T10:27:00.000Z"))).resolves.toEqual([
+      { streamId: "clip-stream-state", startedAt, endedAt: finalEnd },
     ]);
-    await object.completeStatisticsClipImport("clip-stream-state");
+    await object.pruneExpiredStatisticsClipImports(Date.parse("2026-10-26T10:06:00.000Z"));
+    await expect(object.hasStatisticsClipImports()).resolves.toBe(true);
+    await object.completeStatisticsClipImport("clip-stream-state", finalEnd);
     await expect(object.hasStatisticsClipImports()).resolves.toBe(false);
     const storedRowsAfterCompletion = await runInDurableObject(stub, (_instance, state) =>
       state.storage.sql.exec("SELECT COUNT(*) AS count FROM statistics_clip_imports").one(),
     ) as { count: number };
     expect(storedRowsAfterCompletion.count).toBe(0);
-    await object.markStatisticsClipImportPending("clip-stream-state", startedAt, iso(endedAt));
-    await expect(object.listReadyStatisticsClipImports(Date.now())).resolves.toEqual([
-      { streamId: "clip-stream-state", startedAt, endedAt: iso(endedAt) },
-    ]);
+    await object.markStatisticsClipImportPending("clip-stream-state", startedAt, finalEnd);
     await object.pruneExpiredStatisticsClipImports(expiresAt - 1);
     await expect(object.hasStatisticsClipImports()).resolves.toBe(true);
     await object.pruneExpiredStatisticsClipImports(expiresAt);
     await expect(object.listReadyStatisticsClipImports(expiresAt)).resolves.toEqual([]);
     await expect(object.hasStatisticsClipImports()).resolves.toBe(false);
+  });
+
+  it("does not delete a newer pending cutoff when an older import completes", async () => {
+    const channelId = "statistics-clip-import-completion-race";
+    await insertPointChannel(channelId);
+    const object = statisticsObject(channelId) as unknown as StatisticsClipImportObject;
+    vi.setSystemTime(Date.parse("2026-10-25T10:30:00.000Z"));
+    const startedAt = "2026-10-25T08:00:00.000Z";
+    const importedEnd = "2026-10-25T10:06:00.000Z";
+    const newerEnd = "2026-10-25T10:12:00.000Z";
+
+    await object.markStatisticsClipImportPending("clip-stream-race", startedAt, importedEnd);
+    await expect(object.listReadyStatisticsClipImports(Date.parse("2026-10-25T10:21:00.000Z"))).resolves.toEqual([
+      { streamId: "clip-stream-race", startedAt, endedAt: importedEnd },
+    ]);
+    await object.markStatisticsClipImportPending("clip-stream-race", "2026-10-25T09:00:00.000Z", newerEnd);
+    await object.completeStatisticsClipImport("clip-stream-race", importedEnd);
+
+    await expect(object.listReadyStatisticsClipImports(Date.parse("2026-10-25T10:27:00.000Z"))).resolves.toEqual([
+      { streamId: "clip-stream-race", startedAt, endedAt: newerEnd },
+    ]);
   });
 
   it("enqueues a recovered ended stream with its original start", async () => {
