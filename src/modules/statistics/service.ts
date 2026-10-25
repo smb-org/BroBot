@@ -98,6 +98,42 @@ export const reconcileStatisticsSchedule = async (
   await context.schedule("window", nextBoundary(now));
 };
 
+/** Reads the stream state, advances the window clock and writes every completed dirty window. */
+const flushCompletedWindows = async (
+  context: ModuleAlarmContext,
+  statisticsChat: NonNullable<ModuleAlarmContext["statisticsChat"]>,
+  deadline: number,
+): Promise<{ streamIsOnline: boolean; writeFailure: unknown }> => {
+  const stream = await context.DB.prepare(
+    "SELECT state, stream_id, started_at FROM channel_stream_state WHERE channel_id = ?",
+  ).bind(context.channelId).first<StoredStreamState>();
+  const streamIsOnline = stream?.state === "online" && stream.started_at !== null;
+  await statisticsChat.advanceToBoundary(deadline, streamIsOnline, stream?.stream_id ?? null);
+
+  const boundaryWindowStart = new Date(deadline - STATISTICS_WINDOW_MILLISECONDS).toISOString();
+  const boundaryWindow = streamIsOnline ? await statisticsChat.readWindow(boundaryWindowStart) : null;
+  if (boundaryWindow !== null && !boundaryWindow.metricsSampled) {
+    const [viewerCount, chatters] = await Promise.all([
+      sampledCount(context.fetchViewerCount),
+      sampledCount(context.fetchChattersTotal),
+    ]);
+    await statisticsChat.saveWindowMetrics(boundaryWindowStart, viewerCount, chatters);
+  }
+
+  let writeFailure: unknown;
+  for (const windowStart of await statisticsChat.listDirtyCompletedWindows()) {
+    const window = await statisticsChat.readWindow(windowStart);
+    if (window === null) continue;
+    try {
+      await writeAbsoluteWindow(context, window);
+      await statisticsChat.markWindowClean(windowStart, window.revision);
+    } catch (error: unknown) {
+      writeFailure ??= error;
+    }
+  }
+  return { streamIsOnline, writeFailure };
+};
+
 export const handleStatisticsWindowAlarm = async (
   context: ModuleAlarmContext,
   alarmKey: string,
@@ -106,48 +142,22 @@ export const handleStatisticsWindowAlarm = async (
   if (alarmKey !== "window") return;
   if (context.statisticsChat === undefined) throw new Error("Statistics chat storage is unavailable.");
 
-  const stream = await context.DB.prepare(
-    "SELECT state, stream_id, started_at FROM channel_stream_state WHERE channel_id = ?",
-  ).bind(context.channelId).first<StoredStreamState>();
-  const streamIsOnline = stream?.state === "online" && stream.started_at !== null;
-  await context.statisticsChat.advanceToBoundary(deadline, streamIsOnline, stream?.stream_id ?? null);
-
-  const boundaryWindowStart = new Date(deadline - STATISTICS_WINDOW_MILLISECONDS).toISOString();
-  const boundaryWindow = streamIsOnline
-    ? await context.statisticsChat.readWindow(boundaryWindowStart)
-    : null;
-  if (boundaryWindow !== null && !boundaryWindow.metricsSampled) {
-    const [viewerCount, chatters] = await Promise.all([
-      sampledCount(context.fetchViewerCount),
-      sampledCount(context.fetchChattersTotal),
-    ]);
-    await context.statisticsChat.saveWindowMetrics(boundaryWindowStart, viewerCount, chatters);
+  let outcome: Awaited<ReturnType<typeof flushCompletedWindows>>;
+  try {
+    outcome = await flushCompletedWindows(context, context.statisticsChat, deadline);
+  } finally {
+    // Age-based pruning must not depend on the state read or the D1 writes succeeding.
+    await context.statisticsChat.pruneExpiredWindows(Date.now());
   }
-
-  let writeFailure: unknown;
-  const dirtyWindows = await context.statisticsChat.listDirtyCompletedWindows();
-  for (const windowStart of dirtyWindows) {
-    const window = await context.statisticsChat.readWindow(windowStart);
-    if (window === null) continue;
-    try {
-      await writeAbsoluteWindow(context, window);
-      await context.statisticsChat.markWindowClean(windowStart, window.revision);
-    } catch (error: unknown) {
-      writeFailure ??= error;
-    }
-  }
-
-  const now = Date.now();
-  await context.statisticsChat.pruneExpiredWindows(now);
   const hasWindows = await context.statisticsChat.hasWindows();
-  if (writeFailure !== undefined) {
-    if (writeFailure instanceof Error) throw writeFailure;
-    throw new Error("Statistics window write failed.", { cause: writeFailure });
+  if (outcome.writeFailure !== undefined) {
+    if (outcome.writeFailure instanceof Error) throw outcome.writeFailure;
+    throw new Error("Statistics window write failed.", { cause: outcome.writeFailure });
   }
 
-  if (streamIsOnline || hasWindows) {
+  // Without a reschedule the host retires this occurrence only if it is still the stored entry, so a
+  // newer alarm armed by a concurrent stream.online is never cleared from here.
+  if (outcome.streamIsOnline || hasWindows) {
     await context.schedule("window", deadline + STATISTICS_WINDOW_MILLISECONDS);
-  } else {
-    await context.clear("window");
   }
 };

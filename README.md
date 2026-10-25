@@ -11,8 +11,9 @@ adding a row to the `channels` table, not by changing configuration.
   [Durable Object](https://developers.cloudflare.com/durable-objects/)
   (`ChannelObject`, SQLite-backed) per channel handles the realtime
   WebSocket connection to the dashboard. Aggregate channel statistics use
-  one D1 row per UTC-aligned five-minute window; stream coverage comes from
-  the stream timeline.
+  one D1 row per UTC-aligned five-minute window; a per-stream coverage
+  timeline is planned in
+  [#558](https://github.com/smb-org/BroBot/issues/558).
 - **Dashboard**: React 19 + Base UI, built with Vite,
   served as static assets by the same Worker.
 - **Overlay**: a small, transparent, lazily-loaded React view for OBS or

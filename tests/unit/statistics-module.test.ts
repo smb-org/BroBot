@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { statisticsModule } from "../../src/modules/statistics";
@@ -215,6 +215,12 @@ const failFirstStatisticsWrite = (database: TestD1Database): { DB: D1Database; b
 describe("statistics window alarm", () => {
   let database: TestD1Database | null = null;
 
+  beforeEach(() => {
+    // Pruning compares window ends with the wall clock; keep the fixed test windows "just completed".
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(WINDOW_END) + 1_000);
+  });
+
   afterEach(() => {
     database?.close();
     database = null;
@@ -378,7 +384,6 @@ describe("statistics window alarm", () => {
     const { context } = createContext(database, chat, { state: "offline" });
     context.DB = failing.DB;
     const expiredAt = Date.parse(WINDOW_END) + RETENTION_MS + 1;
-    vi.useFakeTimers();
     vi.setSystemTime(expiredAt);
 
     await expect(windowAlarm().handle(context, "window", expiredAt)).rejects.toThrow("Injected temporary D1 failure.");
@@ -387,7 +392,66 @@ describe("statistics window alarm", () => {
     expect(chat.windows.size).toBe(0);
     expect(chat.calls.prune).toHaveBeenCalledWith(expiredAt);
     await windowAlarm().handle(context, "window", expiredAt);
-    expect(context.clear).toHaveBeenCalledWith("window");
+    // The chain ends by not rescheduling; the host retires the occurrence, the handler never clears.
+    expect(context.schedule).not.toHaveBeenCalled();
+    expect(context.clear).not.toHaveBeenCalled();
+  });
+
+  it("prunes expired windows even when the stream-state read keeps failing", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    const chat = createStatisticsChat([windowState({ dirty: false })]);
+    const { context } = createContext(database, chat);
+    context.DB = {
+      prepare: () => ({ bind: () => ({ first: () => Promise.reject(new Error("Injected state read failure.")) }) }),
+    } as unknown as D1Database;
+    const expiredAt = Date.parse(WINDOW_END) + RETENTION_MS + 1;
+    vi.setSystemTime(expiredAt);
+
+    await expect(windowAlarm().handle(context, "window", expiredAt)).rejects.toThrow("Injected state read failure.");
+
+    expect(chat.calls.prune).toHaveBeenCalledWith(expiredAt);
+    expect(chat.windows.size).toBe(0);
+  });
+
+  it("leaves a newer alarm armed by stream.online while an older offline snapshot is in flight", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    const chat = createStatisticsChat([]);
+    const { context } = createContext(database, chat, { state: "offline" });
+    // A minimal host alarm table: schedule replaces the entry, clear deletes it, and completion only
+    // retires the occurrence that is still the stored entry (the revision guard of the real host).
+    const alarms = new Map<string, number>([["window", Date.parse(WINDOW_END)]]);
+    context.schedule = vi.fn((key: string, deadline: number) => {
+      alarms.set(key, deadline);
+      return Promise.resolve();
+    });
+    context.clear = vi.fn((key: string) => {
+      alarms.delete(key);
+      return Promise.resolve();
+    });
+    let releaseRead!: () => void;
+    const readReleased = new Promise<void>((resolve) => { releaseRead = resolve; });
+    context.DB = {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => {
+            await readReleased;
+            return { state: "offline", stream_id: null, started_at: null };
+          },
+        }),
+      }),
+    } as unknown as D1Database;
+
+    const running = windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
+    // stream.online arms the next boundary while the stale offline read is still pending.
+    alarms.set("window", Date.parse(WINDOW_END) + 300_000);
+    releaseRead();
+    await running;
+    if (alarms.get("window") === Date.parse(WINDOW_END)) alarms.delete("window");
+
+    expect(alarms.get("window")).toBe(Date.parse(WINDOW_END) + 300_000);
+    expect(context.clear).not.toHaveBeenCalled();
   });
 
   it("starts the live sampler without a transition generation", async () => {
