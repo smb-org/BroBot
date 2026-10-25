@@ -48,6 +48,14 @@ interface StatisticsWordObject {
   hasStatisticsWordStreams(): Promise<boolean>;
 }
 
+interface StatisticsClipImportObject {
+  markStatisticsClipImportPending(streamId: string, endedAt: string): Promise<void>;
+  listReadyStatisticsClipImports(now: number): Promise<readonly { streamId: string; endedAt: string }[]>;
+  completeStatisticsClipImport(streamId: string): Promise<void>;
+  pruneExpiredStatisticsClipImports(now: number): Promise<void>;
+  hasStatisticsClipImports(): Promise<boolean>;
+}
+
 // The RPC type of an `unknown` result is not thenable for the linter, but the call is a promise.
 const runWindowAlarm = async (object: ReturnType<typeof statisticsObject>): Promise<void> => {
   await (object.runModuleAlarm("statistics", "window", "window") as unknown as Promise<unknown>);
@@ -585,5 +593,32 @@ describe("statistics windows in the channel object", () => {
     await runDurableObjectAlarm(object);
     await settleScheduleRefresh(object);
     await expect(object.getModuleAlarmDeadline("statistics", "window")).resolves.toBe(deadline);
+  });
+
+  it("keeps pending clip imports durable, delays readiness, and prunes them by age", async () => {
+    const channelId = "statistics-clip-import-state";
+    await insertPointChannel(channelId);
+    const object = statisticsObject(channelId) as unknown as StatisticsClipImportObject;
+    const endedAt = Date.now() - 15 * 60_000;
+    const duplicateEnd = endedAt + 60_000;
+    const expiresAt = endedAt + 24 * 60 * 60_000;
+
+    await object.markStatisticsClipImportPending("clip-stream-state", iso(endedAt));
+    await object.markStatisticsClipImportPending("clip-stream-state", iso(duplicateEnd));
+
+    await expect(object.hasStatisticsClipImports()).resolves.toBe(true);
+    await expect(object.listReadyStatisticsClipImports(Date.now() - 1)).resolves.toEqual([]);
+    await expect(object.listReadyStatisticsClipImports(Date.now())).resolves.toEqual([
+      { streamId: "clip-stream-state", endedAt: iso(endedAt) },
+    ]);
+    await object.completeStatisticsClipImport("clip-stream-state");
+    await expect(object.hasStatisticsClipImports()).resolves.toBe(false);
+    await object.markStatisticsClipImportPending("clip-stream-state", iso(duplicateEnd));
+    await expect(object.listReadyStatisticsClipImports(Date.now())).resolves.toEqual([]);
+    await object.pruneExpiredStatisticsClipImports(expiresAt - 1);
+    await expect(object.hasStatisticsClipImports()).resolves.toBe(false);
+    await object.pruneExpiredStatisticsClipImports(expiresAt);
+    await expect(object.listReadyStatisticsClipImports(expiresAt)).resolves.toEqual([]);
+    await expect(object.hasStatisticsClipImports()).resolves.toBe(false);
   });
 });

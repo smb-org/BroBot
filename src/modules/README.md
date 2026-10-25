@@ -627,7 +627,14 @@ Die Worker-Host-Tabelle `channel_timeline_events` speichert rohe
 Stream-Lifecycle-Ereignisse (`stream.online` mit Stream-ID und `started_at`,
 `stream.offline`), jeweils eine aktuelle Metadatenbeobachtung aus
 `channel.update` (Titel und Kategorie, fehlende Kategorie als `NULL`),
-bestätigte Clip-IDs, autorisierte Werbepausen und Emote-Spitzen. Nur
+bestätigte Clips, autorisierte Werbepausen und Emote-Spitzen. Bot-Clips und
+nach Streamende importierte Clips verwenden die Clip-ID als natürlichen
+Schlüssel. Der Statistik-Alarm fragt Get Clips einmal 15 Minuten nach dem
+Streamende ab, höchstens fünf Seiten beziehungsweise 500 Clips. Ein fehlgeschlagener
+Abruf bleibt bis zu 24 Stunden für spätere Alarme vorgemerkt. Die Timeline
+enthält bei Clips Clip-ID, Titel, Erstellungszeitpunkt, Aufruf-Snapshot und
+gegebenenfalls Dauer; Creator-, Broadcaster- und Spiel-IDs werden ausgelassen.
+Clips, die Twitch nach dem letzten Abruf verfügbar macht, können fehlen. Nur
 `stream.online` trägt eine Stream-ID; andere Ereignisse werden in der Analyse
 anhand ihrer Zeitpunkte Lifecycle-Zeilen zugeordnet.
 

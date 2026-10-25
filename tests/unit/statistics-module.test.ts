@@ -1,17 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
+import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext, ModuleTimelineEvent } from "../../src/modules/contract";
 import { statisticsModule } from "../../src/modules/statistics";
 import { processStatisticsEvent, reconcileStatisticsSchedule } from "../../src/modules/statistics/service";
 import { insertChannel } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
+import { writeChannelTimelineEvent } from "../../src/worker/db/timeline-events";
 
 const CHANNEL_ID = "statistics-channel";
 const STREAM_ID = "stream-1";
 const WINDOW_START = "2026-10-25T12:00:00.000Z";
 const WINDOW_END = "2026-10-25T12:05:00.000Z";
 const RETENTION_MS = 60 * 60_000;
+const CLIP_IMPORT_DELAY_MS = 15 * 60_000;
+const CLIP_IMPORT_RETENTION_MS = 24 * 60 * 60_000;
+
+interface TestClip {
+  clipId: string;
+  title: string;
+  createdAt: string;
+  viewCount: number;
+  durationSeconds?: number;
+}
 
 interface WindowState {
   streamId: string | null;
@@ -37,6 +48,7 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
     batch?: number;
     lastIncrementAt?: number;
   }>();
+  const clipImports = new Map<string, { endedAt: string; readyAt: number; expiresAt: number; completed: boolean }>();
   const calls = {
     flushWordCounts: vi.fn(() => Promise.resolve()),
     advance: vi.fn((boundary: number, streamIsOnline: boolean, streamId: string | null) => {
@@ -131,6 +143,33 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       return Promise.resolve();
     }),
     hasWordStreams: vi.fn(() => Promise.resolve(wordStreams.size > 0)),
+    markClipImportPending: vi.fn((streamId: string, endedAt: string) => {
+      if (!clipImports.has(streamId)) {
+        const endedAtMs = Date.parse(endedAt);
+        clipImports.set(streamId, {
+          endedAt,
+          readyAt: endedAtMs + CLIP_IMPORT_DELAY_MS,
+          expiresAt: endedAtMs + CLIP_IMPORT_RETENTION_MS,
+          completed: false,
+        });
+      }
+      return Promise.resolve();
+    }),
+    listReadyClipImports: vi.fn((now: number) => Promise.resolve([...clipImports]
+      .filter(([, pending]) => !pending.completed && pending.readyAt <= now && pending.expiresAt > now)
+      .map(([streamId, pending]) => ({ streamId, endedAt: pending.endedAt })))),
+    completeClipImport: vi.fn((streamId: string) => {
+      const pending = clipImports.get(streamId);
+      if (pending !== undefined) pending.completed = true;
+      return Promise.resolve();
+    }),
+    pruneExpiredClipImports: vi.fn((now: number) => {
+      for (const [streamId, pending] of clipImports) {
+        if (pending.expiresAt <= now) clipImports.delete(streamId);
+      }
+      return Promise.resolve();
+    }),
+    hasClipImports: vi.fn(() => Promise.resolve([...clipImports.values()].some(({ completed }) => !completed))),
   };
   return {
     windows,
@@ -151,8 +190,14 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       deleteWordBucket: calls.deleteWordBucket,
       pruneExpiredWordStreams: calls.pruneExpiredWordStreams,
       hasWordStreams: calls.hasWordStreams,
+      markClipImportPending: calls.markClipImportPending,
+      listReadyClipImports: calls.listReadyClipImports,
+      completeClipImport: calls.completeClipImport,
+      pruneExpiredClipImports: calls.pruneExpiredClipImports,
+      hasClipImports: calls.hasClipImports,
     },
     wordStreams,
+    clipImports,
     recordChat(windowStart: string, messages: number, emotes: number): void {
       const window = windows.get(windowStart);
       if (window === undefined) throw new Error("Test window is missing.");
@@ -176,6 +221,7 @@ const createContext = (
     viewer: ReturnType<typeof vi.fn>;
     chatters: ReturnType<typeof vi.fn>;
     timeline: ReturnType<typeof vi.fn>;
+    fetchStreamClips: ReturnType<typeof vi.fn>;
   };
 } => {
   const calls = {
@@ -184,6 +230,7 @@ const createContext = (
     viewer: vi.fn(() => Promise.resolve(options.viewerCount === undefined ? 42 : options.viewerCount)),
     chatters: vi.fn(() => Promise.resolve(options.chatters === undefined ? 7 : options.chatters)),
     timeline: vi.fn(() => Promise.resolve()),
+    fetchStreamClips: vi.fn<() => Promise<readonly TestClip[] | null>>(() => Promise.resolve([])),
   };
   const context = {
     DB: database as unknown as D1Database,
@@ -193,6 +240,7 @@ const createContext = (
     statisticsChat: chat.api,
     fetchViewerCount: calls.viewer,
     fetchChattersTotal: calls.chatters,
+    fetchStreamClips: calls.fetchStreamClips,
     recordTimelineEvent: calls.timeline,
     secrets: {} as ModuleAlarmContext["secrets"],
     ballots: {} as ModuleAlarmContext["ballots"],
@@ -814,8 +862,9 @@ describe("statistics window alarm", () => {
     expect(clearAlarm).not.toHaveBeenCalled();
   });
 
-  it("marks only the accepted ending stream as ready for a baseline merge", async () => {
+  it("uses late offline payloads for clip imports and ends word counts only on an accepted transition", async () => {
     const markWordStreamEnded = vi.fn(() => Promise.resolve());
+    const markClipImportPending = vi.fn(() => Promise.resolve());
     const scheduleAlarm = vi.fn(() => Promise.resolve());
     const offline: ModuleEvent = {
       channelId: CHANNEL_ID,
@@ -829,7 +878,7 @@ describe("statistics window alarm", () => {
       chatStatus: null,
     };
     const execution = {
-      statisticsChat: { markWordStreamEnded },
+      statisticsChat: { markWordStreamEnded, markClipImportPending },
       scheduleAlarm,
       streamStateTransitionAccepted: true,
       streamSession: { streamId: STREAM_ID, startedAt: WINDOW_START },
@@ -838,11 +887,180 @@ describe("statistics window alarm", () => {
     await processStatisticsEvent(offline, execution);
 
     expect(markWordStreamEnded).toHaveBeenCalledWith(STREAM_ID, WINDOW_END);
-    expect(scheduleAlarm).toHaveBeenCalledWith("window", "window", Date.parse(WINDOW_END) + 300_000);
+    expect(markClipImportPending).toHaveBeenCalledWith(STREAM_ID, WINDOW_END);
+    expect(scheduleAlarm).toHaveBeenCalledWith("window", "window", Date.parse(WINDOW_END) + CLIP_IMPORT_DELAY_MS);
     execution.streamStateTransitionAccepted = false;
     await processStatisticsEvent(offline, execution);
     expect(markWordStreamEnded).toHaveBeenCalledTimes(1);
-    expect(scheduleAlarm).toHaveBeenCalledTimes(1);
+    expect(markClipImportPending).toHaveBeenCalledTimes(2);
+    expect(scheduleAlarm).toHaveBeenCalledTimes(2);
+  });
+
+  it("imports ready stream clips once, stores only approved details, and deduplicates bot clips by id", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await writeStreamState(database, "offline", WINDOW_END);
+    await writeChannelTimelineEvent(database as unknown as D1Database, CHANNEL_ID, {
+      kind: "stream_online",
+      identity: STREAM_ID,
+      streamId: STREAM_ID,
+      occurredAt: WINDOW_START,
+      detail: { startedAt: WINDOW_START },
+    });
+    await writeChannelTimelineEvent(database as unknown as D1Database, CHANNEL_ID, {
+      kind: "clip_created",
+      identity: "same-clip",
+      occurredAt: "2026-10-25T12:03:00.000Z",
+      detail: { clipId: "same-clip" },
+    });
+    const chat = createStatisticsChat();
+    chat.clipImports.set(STREAM_ID, {
+      endedAt: WINDOW_END,
+      readyAt: Date.parse(WINDOW_END) + CLIP_IMPORT_DELAY_MS,
+      expiresAt: Date.parse(WINDOW_END) + CLIP_IMPORT_RETENTION_MS,
+      completed: false,
+    });
+    const { context, calls } = createContext(database, chat);
+    const fetchedClips = [
+      {
+        clipId: "same-clip",
+        title: "Bot made this clip",
+        createdAt: "2026-10-25T12:03:00.000Z",
+        viewCount: 4,
+        durationSeconds: 30,
+        creatorId: "must-not-store",
+        creatorName: "Must Not Store",
+        broadcasterId: "must-not-store-either",
+        gameId: "must-not-store-either",
+      },
+      {
+        clipId: "viewer-clip",
+        title: "Viewer clip",
+        createdAt: "2026-10-25T12:04:00.000Z",
+        viewCount: 17,
+        durationSeconds: 32.5,
+        creatorId: "must-not-store",
+        creatorName: "Must Not Store",
+      },
+    ] as unknown as TestClip[];
+    calls.fetchStreamClips.mockResolvedValue(fetchedClips);
+    const timelineCalls: ModuleTimelineEvent[] = [];
+    context.recordTimelineEvent = async (event) => {
+      timelineCalls.push(event);
+      await writeChannelTimelineEvent(database as unknown as D1Database, CHANNEL_ID, event);
+    };
+    vi.setSystemTime(Date.parse(WINDOW_END) + CLIP_IMPORT_DELAY_MS + 1_000);
+
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END) + CLIP_IMPORT_DELAY_MS);
+
+    expect(calls.fetchStreamClips).toHaveBeenCalledWith(WINDOW_START, WINDOW_END);
+    expect(timelineCalls).toContainEqual({
+      kind: "clip_created",
+      identity: "viewer-clip",
+      occurredAt: "2026-10-25T12:04:00.000Z",
+      detail: {
+        clipId: "viewer-clip",
+        title: "Viewer clip",
+        createdAt: "2026-10-25T12:04:00.000Z",
+        viewCount: 17,
+        durationSeconds: 32.5,
+      },
+    });
+    expect(chat.clipImports.get(STREAM_ID)?.completed).toBe(true);
+    expect(await chat.api.hasClipImports()).toBe(false);
+
+    const savedClips = await database.prepare(
+      "SELECT event_key, detail_json FROM channel_timeline_events WHERE channel_id = ? AND kind = 'clip_created' ORDER BY event_key",
+    ).bind(CHANNEL_ID).all<{ event_key: string; detail_json: string }>();
+    expect(savedClips.results).toHaveLength(2);
+    expect(savedClips.results.map(({ event_key }) => event_key)).toEqual([
+      "clip_created:same-clip",
+      "clip_created:viewer-clip",
+    ]);
+    expect(savedClips.results.map(({ detail_json }) => JSON.parse(detail_json) as unknown)).toEqual([
+      { clipId: "same-clip" },
+      {
+        clipId: "viewer-clip",
+        title: "Viewer clip",
+        createdAt: "2026-10-25T12:04:00.000Z",
+        viewCount: 17,
+        durationSeconds: 32.5,
+      },
+    ]);
+
+    await chat.api.markClipImportPending(STREAM_ID, WINDOW_END);
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END) + CLIP_IMPORT_DELAY_MS);
+    expect(calls.fetchStreamClips).toHaveBeenCalledTimes(1);
+    const repeated = await database.prepare(
+      "SELECT COUNT(*) AS count FROM channel_timeline_events WHERE channel_id = ? AND kind = 'clip_created'",
+    ).bind(CHANNEL_ID).first<{ count: number }>();
+    expect(repeated?.count).toBe(2);
+  });
+
+  it("keeps a failed clip fetch pending for the next statistics alarm", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await writeStreamState(database, "offline", WINDOW_END);
+    await writeChannelTimelineEvent(database as unknown as D1Database, CHANNEL_ID, {
+      kind: "stream_online",
+      identity: STREAM_ID,
+      streamId: STREAM_ID,
+      occurredAt: WINDOW_START,
+      detail: { startedAt: WINDOW_START },
+    });
+    const chat = createStatisticsChat();
+    chat.clipImports.set(STREAM_ID, {
+      endedAt: WINDOW_END,
+      readyAt: Date.parse(WINDOW_END) + CLIP_IMPORT_DELAY_MS,
+      expiresAt: Date.parse(WINDOW_END) + CLIP_IMPORT_RETENTION_MS,
+      completed: false,
+    });
+    const { context, calls } = createContext(database, chat);
+    calls.fetchStreamClips.mockResolvedValueOnce(null).mockResolvedValueOnce([{
+      clipId: "retry-clip",
+      title: "Retry clip",
+      createdAt: "2026-10-25T12:04:00.000Z",
+      viewCount: 1,
+    }]);
+    vi.setSystemTime(Date.parse(WINDOW_END) + CLIP_IMPORT_DELAY_MS + 1_000);
+
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END) + CLIP_IMPORT_DELAY_MS);
+
+    expect(chat.clipImports.has(STREAM_ID)).toBe(true);
+    expect(calls.schedule).toHaveBeenCalledWith(
+      "window",
+      Date.parse(WINDOW_END) + CLIP_IMPORT_DELAY_MS + 300_000,
+    );
+
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END) + CLIP_IMPORT_DELAY_MS + 300_000);
+
+    expect(calls.fetchStreamClips).toHaveBeenCalledTimes(2);
+    expect(chat.clipImports.get(STREAM_ID)?.completed).toBe(true);
+    expect(await chat.api.hasClipImports()).toBe(false);
+    expect(calls.timeline).toHaveBeenCalledWith(expect.objectContaining({ identity: "retry-clip" }));
+  });
+
+  it("gives up on pending clip imports after 24 hours", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await writeStreamState(database, "offline", WINDOW_END);
+    const chat = createStatisticsChat();
+    chat.clipImports.set(STREAM_ID, {
+      endedAt: WINDOW_END,
+      readyAt: Date.parse(WINDOW_END) + CLIP_IMPORT_DELAY_MS,
+      expiresAt: Date.parse(WINDOW_END) + CLIP_IMPORT_RETENTION_MS,
+      completed: false,
+    });
+    const { context, calls } = createContext(database, chat);
+    const expiredAt = Date.parse(WINDOW_END) + CLIP_IMPORT_RETENTION_MS;
+    vi.setSystemTime(expiredAt);
+
+    await windowAlarm().handle(context, "window", expiredAt);
+
+    expect(chat.calls.pruneExpiredClipImports).toHaveBeenCalledWith(expiredAt);
+    expect(calls.fetchStreamClips).not.toHaveBeenCalled();
+    expect(chat.clipImports.size).toBe(0);
+    expect(calls.schedule).not.toHaveBeenCalled();
   });
 
   it("restores the shared alarm while offline stream words still need merge or pruning", async () => {

@@ -389,6 +389,7 @@ describe("lookupAndRefreshStreamState", () => {
         statisticsChat: {
           hasWindows: vi.fn(() => Promise.resolve(false)),
           hasWordStreams: vi.fn(() => Promise.resolve(false)),
+          hasClipImports: vi.fn(() => Promise.resolve(false)),
         },
       } as unknown as ModuleAlarmContext;
       const notifyScheduleInputsChanged = vi.fn(() =>

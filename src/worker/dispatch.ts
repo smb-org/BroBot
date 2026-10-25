@@ -1111,6 +1111,9 @@ export const dispatchEventSubNotification = async (
           markWordStreamEnded: (streamId: string, endedAt: string) =>
             channelNamespace.get(channelNamespace.idFromName(event.channelId))
               .markStatisticsWordStreamEnded(streamId, endedAt),
+          markClipImportPending: (streamId: string, endedAt: string) =>
+            channelNamespace.get(channelNamespace.idFromName(event.channelId))
+              .markStatisticsClipImportPending(streamId, endedAt),
         }
         : undefined;
       const moduleEvent: ModuleEvent = {

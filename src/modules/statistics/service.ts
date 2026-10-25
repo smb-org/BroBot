@@ -35,6 +35,12 @@ const validCount = (value: unknown): value is number => Number.isSafeInteger(val
 const nextBoundary = (time: number): number =>
   statisticsWindowStartMs(time) + STATISTICS_WINDOW_MILLISECONDS;
 
+// Windows and word streams catch up on a past deadline immediately; a clip import only waits, so it never spins.
+const retryAt = (deadline: number, clipImportOnly: boolean): number =>
+  clipImportOnly
+    ? Math.max(deadline + STATISTICS_WINDOW_MILLISECONDS, nextBoundary(Date.now()))
+    : deadline + STATISTICS_WINDOW_MILLISECONDS;
+
 const sampledCount = async (read: (() => Promise<number | null>) | undefined): Promise<number | null> => {
   if (read === undefined) return null;
   try {
@@ -194,13 +200,22 @@ export const processStatisticsEvent = async (
     return emptyResult();
   }
   if (event.subscriptionType === "stream.offline") {
-    const streamId = context.streamSession?.streamId;
+    const streamId = context.streamSession?.streamId ?? textValue(event.payload.id);
+    let alarmAt = nextBoundary(Date.now());
     if (context.streamStateTransitionAccepted === true) {
-      if (streamId !== null && streamId !== undefined) {
+      if (streamId !== null) {
         await context.statisticsChat?.markWordStreamEnded(streamId, event.eventSubTimestamp ?? event.receivedAt);
       }
-      await context.scheduleAlarm("window", "window", nextBoundary(Date.now()));
     }
+    if (streamId !== null) {
+      const endedAt = event.eventSubTimestamp ?? event.receivedAt;
+      await context.statisticsChat?.markClipImportPending(streamId, endedAt);
+      const endedAtMs = Date.parse(endedAt);
+      const clipImportReadyAt = (Number.isFinite(endedAtMs) ? endedAtMs : Date.now()) +
+          STATISTICS_WORD_STREAM_IDLE_MILLISECONDS;
+      alarmAt = Math.max(alarmAt, clipImportReadyAt);
+    }
+    await context.scheduleAlarm("window", "window", alarmAt);
     return emptyResult();
   }
   return emptyResult();
@@ -215,13 +230,65 @@ export const reconcileStatisticsSchedule = async (
     "SELECT state, stream_id, started_at FROM channel_stream_state WHERE channel_id = ?",
   ).bind(context.channelId).first<StoredStreamState>();
   const now = Date.now();
-  const [deadline, hasWindows, hasWordStreams] = await Promise.all([
+  const [deadline, hasWindows, hasWordStreams, hasClipImports] = await Promise.all([
     context.getAlarmDeadline?.("window") ?? Promise.resolve(null),
     context.statisticsChat.hasWindows(),
     context.statisticsChat.hasWordStreams(),
+    context.statisticsChat.hasClipImports(),
   ]);
-  if (deadline !== null || stream?.state !== "online" && !hasWindows && !hasWordStreams) return;
+  if (deadline !== null || stream?.state !== "online" && !hasWindows && !hasWordStreams && !hasClipImports) return;
   await context.schedule("window", nextBoundary(now));
+};
+
+const streamStartedAt = async (context: ModuleAlarmContext, streamId: string): Promise<string | null> => {
+  const row = await context.DB.prepare(
+    `SELECT COALESCE(
+       (SELECT json_extract(detail_json, '$.startedAt')
+          FROM channel_timeline_events
+         WHERE channel_id = ? AND kind = 'stream_online' AND stream_id = ?
+           AND json_extract(detail_json, '$.startedAt') IS NOT NULL
+         ORDER BY occurred_at ASC LIMIT 1),
+       (SELECT MIN(window_start) FROM channel_statistics
+         WHERE channel_id = ? AND stream_id = ?)
+     ) AS started_at`,
+  ).bind(context.channelId, streamId, context.channelId, streamId).first<{ started_at: string | null }>();
+  return typeof row?.started_at === "string" && Number.isFinite(Date.parse(row.started_at))
+    ? row.started_at
+    : null;
+};
+
+const importReadyStreamClips = async (
+  context: ModuleAlarmContext,
+  now: number,
+): Promise<void> => {
+  const statisticsChat = context.statisticsChat;
+  if (statisticsChat === undefined || context.fetchStreamClips === undefined ||
+      context.recordTimelineEvent === undefined) return;
+  for (const pending of await statisticsChat.listReadyClipImports(now)) {
+    try {
+      const startedAt = await streamStartedAt(context, pending.streamId);
+      if (startedAt === null) continue;
+      const clips = await context.fetchStreamClips(startedAt, pending.endedAt);
+      if (clips === null) continue;
+      for (const clip of clips) {
+        await context.recordTimelineEvent({
+          kind: "clip_created",
+          identity: clip.clipId,
+          occurredAt: clip.createdAt,
+          detail: {
+            clipId: clip.clipId,
+            title: clip.title,
+            createdAt: clip.createdAt,
+            ...(clip.viewCount === undefined ? {} : { viewCount: clip.viewCount }),
+            ...(clip.durationSeconds === undefined ? {} : { durationSeconds: clip.durationSeconds }),
+          },
+        });
+      }
+      await statisticsChat.completeClipImport(pending.streamId);
+    } catch (error: unknown) {
+      console.warn("Statistics clip import failed; the pending import will retry.", error);
+    }
+  }
 };
 
 /** Reads the stream state, advances the window clock and writes every completed dirty window. */
@@ -304,16 +371,29 @@ export const handleStatisticsWindowAlarm = async (
   } catch (error: unknown) {
     maintenanceFailure ??= error;
   }
-  const hasWindows = await context.statisticsChat.hasWindows();
-  const hasWordStreams = await context.statisticsChat.hasWordStreams();
+  try {
+    await context.statisticsChat.pruneExpiredClipImports(now);
+  } catch (error: unknown) {
+    maintenanceFailure ??= error;
+  }
+  const [hasWindows, hasWordStreams, hasClipImports] = await Promise.all([
+    context.statisticsChat.hasWindows(),
+    context.statisticsChat.hasWordStreams(),
+    context.statisticsChat.hasClipImports(),
+  ]);
   if (flushFailed) {
-    if (hasWindows || hasWordStreams) await context.schedule("window", deadline + STATISTICS_WINDOW_MILLISECONDS);
+    if (hasWindows || hasWordStreams || hasClipImports) {
+      await context.schedule("window", retryAt(deadline, !hasWindows && !hasWordStreams));
+    }
     if (flushFailure instanceof Error) throw flushFailure;
     throw new Error("Statistics state read failed.", { cause: flushFailure });
   }
   if (maintenanceFailure !== undefined) {
-    if (outcome?.streamState === "online" || hasWindows || hasWordStreams) {
-      await context.schedule("window", deadline + STATISTICS_WINDOW_MILLISECONDS);
+    if (outcome?.streamState === "online" || hasWindows || hasWordStreams || hasClipImports) {
+      await context.schedule(
+        "window",
+        retryAt(deadline, outcome?.streamState !== "online" && !hasWindows && !hasWordStreams),
+      );
     }
     if (maintenanceFailure instanceof Error) throw maintenanceFailure;
     throw new Error("Statistics retention pruning failed.", { cause: maintenanceFailure });
@@ -360,11 +440,17 @@ export const handleStatisticsWindowAlarm = async (
     wordMergeFailure ??= error;
   }
 
+  await importReadyStreamClips(context, now);
+
   const pendingWordStreams = await context.statisticsChat.hasWordStreams();
-  if (outcome.streamState === "online" || hasWindows || pendingWordStreams) {
+  const pendingClipImports = await context.statisticsChat.hasClipImports();
+  if (outcome.streamState === "online" || hasWindows || pendingWordStreams || pendingClipImports) {
     // The host retires an occurrence only if it is still the stored entry; scheduling the same key
     // also keeps D1 retries alive while the age-based pruning bound remains independent.
-    await context.schedule("window", deadline + STATISTICS_WINDOW_MILLISECONDS);
+    await context.schedule(
+      "window",
+      retryAt(deadline, outcome.streamState !== "online" && !hasWindows && !pendingWordStreams),
+    );
   }
 
   if (outcome.writeFailure !== undefined) {

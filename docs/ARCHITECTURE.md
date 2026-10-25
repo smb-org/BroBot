@@ -316,6 +316,17 @@ Tabelle wird unbegrenzt aufbewahrt, löscht mit `ON DELETE CASCADE` und isoliert
 Schreibfehler: Ein fehlender Timeline-Eintrag wird protokolliert, Dispatch und
 Streamzustands-Updates laufen weiter.
 
+15 Minuten nach bestätigtem Streamende ruft derselbe Statistik-Alarm Helix
+Get Clips für den Zeitraum vom Streamstart bis zum Streamende ab und schreibt
+die Clip-ID, den öffentlichen Titel, den Erstellungszeitpunkt sowie Momentaufnahmen
+von Aufrufen und Dauer. Die ID ist derselbe natürliche Schlüssel wie bei Bot-Clips,
+damit Wiederholungen keine zweite Zeile erzeugen. Gespeichert werden weder Creator-
+noch Broadcaster- oder Spiel-IDs. Fehler lassen den Abruf für einen späteren
+Fünf-Minuten-Alarm offen; nach 24 Stunden wird der DO-Eintrag altersbasiert
+entfernt. Pro Stream werden höchstens fünf Seiten beziehungsweise 500 Clips
+abgerufen. Clips, die Twitch erst nach diesem begrenzten Abruf verfügbar macht,
+können in der Timeline fehlen.
+
 Lifecycle-Wiederholungen sind über Art, Ereigniszeit und — bei `stream.online`
 — Stream-ID idempotent. Metadatenbeobachtungen verwenden Art, Ereigniszeit und
 einen Inhalts-Hash; EventSub-Nachrichten-IDs sind kein Ereignisschlüssel.

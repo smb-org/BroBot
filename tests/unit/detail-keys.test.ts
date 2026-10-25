@@ -68,11 +68,11 @@ const detailKeys = (): string[] => {
 describe("diagnostic detail keys", () => {
   it("freezes the set of keys that land on the wire", () => {
     expect(detailKeys()).toEqual([
-      "action", "alias", "allowed", "arguments", "art", "baselineWindows", "byEntryId", "commercialCooldownUntil", "count", "current", "currentTier", "duration", "emotes", "endsAt", "gifter", "kind", "medianEmotes",
+      "action", "alias", "allowed", "arguments", "art", "baselineWindows", "byEntryId", "clipId", "commercialCooldownUntil", "count", "createdAt", "current", "currentTier", "duration", "durationSeconds", "emotes", "endsAt", "gifter", "kind", "medianEmotes",
       "message", "minimumEmotes", "moderator", "multiplier", "name", "person", "reason", "recipient",
       "remainingSeconds", "requiredTier", "response", "retryAfter", "scope", "seconds", "source",
       "sourceChannelId", "startedAt", "status", "streamState", "target", "targetChannelId", "text",
-      "threshold", "tier", "twitchMessage", "variable", "viewers", "windowStart",
+      "threshold", "tier", "title", "twitchMessage", "variable", "viewCount", "viewers", "windowStart",
     ]);
   });
 
