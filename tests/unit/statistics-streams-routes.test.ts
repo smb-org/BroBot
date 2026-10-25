@@ -167,6 +167,9 @@ describe("statistics stream routes", () => {
     await putTimeline(database, "spike-last-window", "emote_spike", "2026-10-25T12:10:00.000000000Z", {
       windowStart: "2026-10-25T12:05:00.000Z", emotes: 40,
     });
+    await putTimeline(database, "raid-in", "raid_incoming", "2026-10-25T12:04:00.000000000Z", {
+      viewers: 9, partner: { id: "partner-1", login: "partner_one", displayName: "Partner One" },
+    });
     await putTimeline(database, "spike-other-window", "emote_spike", "2026-10-25T12:08:00.000000000Z", {
       windowStart: "2026-10-25T12:04:00.000Z", emotes: 99,
     });
@@ -190,6 +193,7 @@ describe("statistics stream routes", () => {
     expect(detail.events).toContainEqual(expect.objectContaining({ type: "drop", at: "2026-10-25T12:01:00.000Z", recoveredAt: "2026-10-25T12:02:00.000Z" }));
     expect(detail.events.filter(({ type }) => type === "clip").map(({ clipId }) => clipId)).toEqual(["clip-before-end", "clip-at-end"]);
     expect(detail.events.filter(({ type }) => type === "emoteSpike").map(({ emotes }) => emotes)).toEqual([40]);
+    expect(detail.events).toContainEqual(expect.objectContaining({ type: "raidIncoming", partnerName: "Partner One", raidViewers: 9 }));
   });
 
   it("seeds list and detail metadata from the latest observation before the stream", async () => {

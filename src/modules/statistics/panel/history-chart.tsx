@@ -5,7 +5,7 @@ import type { StatisticsPanelTexts } from "./locale";
 import { STATISTICS_CHART_PLOT, statisticsChartAreaPath, statisticsChartAxisTicks, statisticsChartLinePath, statisticsChartScaleY } from "./chart-primitives";
 
 type Metric = "viewer-chat" | "chatter" | "bitrate";
-type MarkerType = Extract<StatisticsStreamEvent["type"], "metadata" | "clip" | "ad" | "drop" | "emoteSpike">;
+type MarkerType = Extract<StatisticsStreamEvent["type"], "metadata" | "clip" | "ad" | "drop" | "emoteSpike" | "raidIncoming" | "raidOutgoing">;
 
 interface ChartSeries {
   name: string;
@@ -38,13 +38,15 @@ interface StatisticsHistoryChartProps {
 
 const CHART_HEIGHT = 218;
 const LANE_STRIP_TOP = STATISTICS_CHART_PLOT.bottom + 20;
-const MARKER_TYPES: readonly MarkerType[] = ["metadata", "clip", "ad", "drop", "emoteSpike"];
+const MARKER_TYPES: readonly MarkerType[] = ["metadata", "clip", "ad", "drop", "emoteSpike", "raidIncoming", "raidOutgoing"];
 const labelForEvent = (event: Pick<StatisticsStreamEvent, "type">, labels: StatisticsPanelTexts): string => {
   if (event.type === "metadata") return labels.metadata;
   if (event.type === "clip") return labels.clip;
   if (event.type === "ad") return labels.ad;
   if (event.type === "drop") return labels.drop;
   if (event.type === "emoteSpike") return labels.emoteSpike;
+  if (event.type === "raidIncoming") return labels.raidIncoming;
+  if (event.type === "raidOutgoing") return labels.raidOutgoing;
   if (event.type === "offline") return labels.offline;
   return labels.start;
 };
@@ -59,6 +61,9 @@ const eventDetail = (event: StatisticsStreamEvent, labels: StatisticsPanelTexts)
   if (event.type === "ad") return `${String(event.durationSeconds ?? 0)} s`;
   if (event.type === "drop") return `${String(event.durationSeconds ?? 0)} s`;
   if (event.type === "emoteSpike") return labels.emotesInWindow(String(event.emotes ?? 0));
+  if (event.type === "raidIncoming" || event.type === "raidOutgoing") {
+    return (event.type === "raidIncoming" ? labels.raidFrom : labels.raidTo)(event.partnerName ?? "—", String(event.raidViewers ?? 0));
+  }
   return labelForEvent(event, labels);
 };
 
@@ -79,6 +84,8 @@ const markerShape = (type: MarkerType, x: number, y: number): ReactElement => {
   if (type === "clip") return <circle cx={x} cy={y} r="5.5" />;
   if (type === "ad") return <rect x={x - 5} y={y - 5} width="10" height="10" rx="1" />;
   if (type === "drop") return <path d={`M ${String(x)} ${String(y - 6)} l 6 11 h -12 z`} />;
+  if (type === "raidIncoming") return <path d={`M ${String(x + 6)} ${String(y - 6)} v 12 l -12 -6 z`} />;
+  if (type === "raidOutgoing") return <path d={`M ${String(x - 6)} ${String(y - 6)} v 12 l 12 -6 z`} />;
   return <path d={`M ${String(x)} ${String(y - 7)} l 2 5 5 -2 -3 4 4 3 -5 1 -1 5 -3 -4 -4 3 1 -5 -4 -3 5 -1 z`} />;
 };
 
@@ -95,13 +102,15 @@ const markerColor = (type: MarkerType): string => {
   if (type === "clip") return "var(--color-chart-3)";
   if (type === "ad") return "var(--color-chart-5)";
   if (type === "drop") return "var(--color-chart-2)";
+  if (type === "raidIncoming") return "var(--color-chart-6)";
+  if (type === "raidOutgoing") return "var(--color-chart-7)";
   return "var(--color-chart-4)";
 };
 
 const markerCandidates = (events: readonly StatisticsStreamEvent[], labels: StatisticsPanelTexts, start: number, end: number, width: number): ChartMarker[] => {
   const plotWidth = Math.max(1, width - STATISTICS_CHART_PLOT.left - STATISTICS_CHART_PLOT.right);
   const candidates = events.flatMap((event) => {
-    if (event.type !== "metadata" && event.type !== "clip" && event.type !== "ad" && event.type !== "drop" && event.type !== "emoteSpike") return [];
+    if (event.type !== "metadata" && event.type !== "clip" && event.type !== "ad" && event.type !== "drop" && event.type !== "emoteSpike" && event.type !== "raidIncoming" && event.type !== "raidOutgoing") return [];
     const timestamp = Date.parse(event.at);
     if (!Number.isFinite(timestamp) || timestamp < start || timestamp > end) return [];
     return [{ event: event as StatisticsStreamEvent & { type: MarkerType }, x: STATISTICS_CHART_PLOT.left + ((timestamp - start) / Math.max(1, end - start)) * plotWidth, color: markerColor(event.type), label: labelForEvent(event, labels), lane: 0 }];

@@ -358,6 +358,8 @@
   --color-chart-3: var(--content-bitrate-recover);
   --color-chart-4: var(--content-vote-1);
   --color-chart-5: var(--content-vote-2);
+  --color-chart-6: var(--content-vote-4);
+  --color-chart-7: var(--content-vote-6);
   --color-sidebar: var(--color-rail);
   --color-sidebar-foreground: var(--color-text);
   --color-sidebar-primary: var(--color-brand);

@@ -63,6 +63,10 @@ const eventText = (event: StatisticsStreamEvent, labels: ReturnType<typeof stati
   if (event.type === "ad") return `${number(event.durationSeconds ?? 0, "en")} s`;
   if (event.type === "drop") return `${number(event.durationSeconds ?? 0, "en")} s`;
   if (event.type === "emoteSpike") return labels.emotesInWindow(number(event.emotes ?? 0, "en"));
+  if (event.type === "raidIncoming" || event.type === "raidOutgoing") {
+    const describe = event.type === "raidIncoming" ? labels.raidFrom : labels.raidTo;
+    return describe(event.partnerName ?? "—", number(event.raidViewers ?? 0, "en"));
+  }
   if (event.type === "offline") return labels.streamEnded;
   return labels.streamStarted;
 };
@@ -81,6 +85,8 @@ const eventLabel = (event: StatisticsStreamEvent, labels: ReturnType<typeof stat
   if (event.type === "clip") return labels.clip;
   if (event.type === "ad") return labels.ad;
   if (event.type === "drop") return labels.drop;
+  if (event.type === "raidIncoming") return labels.raidIncoming;
+  if (event.type === "raidOutgoing") return labels.raidOutgoing;
   return labels.emoteSpike;
 };
 
