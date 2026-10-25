@@ -65,7 +65,7 @@ describe("Module labels", () => {
     expect(module?.mandatory).toBe(true);
     expect(module?.navigationCategory).toBe("data");
     expect(module?.needsActiveChatters).toBe(true);
-    expect(module?.eventSubTypes).toEqual(["channel.chat.message", "stream.online", "stream.offline"]);
+    expect(module?.eventSubTypes).toEqual(["channel.chat.message", "stream.online", "stream.offline", "channel.update"]);
     expect(moduleName("statistics", "de")).toBe("Statistiken");
     expect(moduleName("statistics", "en")).toBe("Statistics");
     expect(moduleDescription("statistics", "de")).toContain("ungefähre Zahl unterschiedlicher Chatter");

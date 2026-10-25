@@ -304,6 +304,17 @@ export const listDesiredEventSubTargets = async (
         }
       }
     }
+    // Ad-break history is a host timeline concern, so it remains subscribed
+    // when the ads feature module is off, but only after broadcaster consent.
+    if (row.broadcaster_status === "connected" && parseScopes(row.broadcaster_scopes_json).includes("channel:read:ads")) {
+      const target: EventSubTarget = {
+        channelId: id,
+        subscriptionType: "channel.ad_break.begin",
+        variant: "",
+        version: "1",
+      };
+      targets.set(eventSubTargetKey(target), target);
+    }
   }
   return [...targets.values()];
 };

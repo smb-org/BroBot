@@ -761,6 +761,8 @@ export interface ModuleAlarmContext {
   externalFetchBudget?: ModuleExternalFetchBudget;
   /** Absolute statistics windows and age-bounded word counts held in the channel Durable Object. */
   statisticsChat?: ModuleStatisticsChat;
+  /** Writes one privacy-safe host timeline observation with host-managed idempotency. */
+  recordTimelineEvent?: (event: ModuleTimelineEvent) => Promise<void>;
   /** Host-authenticated Helix counts; unavailable sources return null. */
   fetchViewerCount?: () => Promise<number | null>;
   fetchChattersTotal?: () => Promise<number | null>;
@@ -865,6 +867,32 @@ export interface ModuleStatisticsWordBucket {
 }
 
 export type ModuleStatisticsStreamState = "online" | "offline" | "unknown";
+
+interface ModuleTimelineEventBase {
+  identity: string;
+  occurredAt: string;
+}
+
+export type ModuleTimelineEvent =
+  | (ModuleTimelineEventBase & { kind: "stream_online"; streamId: string | null; detail: { startedAt: string | null } })
+  | (ModuleTimelineEventBase & { kind: "stream_offline"; detail: Record<string, never> })
+  | (ModuleTimelineEventBase & {
+      kind: "channel_metadata";
+      detail: { title: string | null; category: { id: string; name: string | null } | null };
+    })
+  | (ModuleTimelineEventBase & { kind: "clip_created"; detail: { clipId: string } })
+  | (ModuleTimelineEventBase & { kind: "ad_break"; detail: { durationSeconds: number; startedAt: string } })
+  | (ModuleTimelineEventBase & {
+      kind: "emote_spike";
+      detail: {
+        windowStart: string;
+        emotes: number;
+        medianEmotes: number;
+        baselineWindows: number;
+        minimumEmotes: number;
+        multiplier: number;
+      };
+    });
 
 interface ModuleStatisticsChat {
   advanceToBoundary: (boundary: number, streamIsOnline: boolean, streamId: string | null) => Promise<void>;

@@ -4,6 +4,7 @@ import type {
   ModuleExecutionContext,
   ModuleResult,
   ModuleScheduleInputChangeReason,
+  ModuleTimelineEvent,
   ModuleStatisticsWindow,
 } from "../contract";
 import {
@@ -13,6 +14,10 @@ import {
   STATISTICS_WINDOW_MILLISECONDS,
   statisticsWindowStartMs,
 } from "./domain";
+
+const EMOTE_SPIKE_BASELINE_WINDOWS = 12;
+const EMOTE_SPIKE_MINIMUM_COUNT = 10;
+const EMOTE_SPIKE_MULTIPLIER = 3;
 
 interface StoredStreamState {
   state: string;
@@ -133,6 +138,44 @@ export const mergeStatisticsWordBatch = async (
   return (results.at(-1)?.results.length ?? 0) > 0;
 };
 
+const recordEmoteSpike = async (
+  context: ModuleAlarmContext,
+  window: ModuleStatisticsWindow,
+): Promise<void> => {
+  if (context.recordTimelineEvent === undefined) return;
+  const previous = await context.DB.prepare(
+    `SELECT emotes FROM channel_statistics
+      WHERE channel_id = ? AND window_start < ?
+      ORDER BY window_start DESC LIMIT ?`,
+  ).bind(context.channelId, window.windowStart, EMOTE_SPIKE_BASELINE_WINDOWS)
+    .all<{ emotes: number }>();
+  if (previous.results.length === 0 || window.emotes < EMOTE_SPIKE_MINIMUM_COUNT) return;
+
+  const counts = previous.results.map(({ emotes }) => emotes).sort((left, right) => left - right);
+  const middle = Math.floor(counts.length / 2);
+  const medianEmotes = counts.length % 2 === 0
+    ? ((counts[middle - 1] ?? 0) + (counts[middle] ?? 0)) / 2
+    : counts[middle] ?? 0;
+  if (window.emotes < medianEmotes * EMOTE_SPIKE_MULTIPLIER) return;
+
+  const windowEnd = Date.parse(window.windowStart) + STATISTICS_WINDOW_MILLISECONDS;
+  if (!Number.isFinite(windowEnd)) return;
+  const timelineEvent: ModuleTimelineEvent = {
+    kind: "emote_spike",
+    identity: window.windowStart,
+    occurredAt: new Date(windowEnd).toISOString(),
+    detail: {
+      windowStart: window.windowStart,
+      emotes: window.emotes,
+      medianEmotes,
+      baselineWindows: counts.length,
+      minimumEmotes: EMOTE_SPIKE_MINIMUM_COUNT,
+      multiplier: EMOTE_SPIKE_MULTIPLIER,
+    },
+  };
+  await context.recordTimelineEvent(timelineEvent);
+};
+
 export const processStatisticsEvent = async (
   event: ModuleEvent,
   context: ModuleExecutionContext,
@@ -217,6 +260,12 @@ const flushCompletedWindows = async (
     if (window === null) continue;
     try {
       await writeAbsoluteWindow(context, window);
+      try {
+        await recordEmoteSpike(context, window);
+      } catch (error: unknown) {
+        // The window is already persisted; a lost spike must not keep it dirty or block the reschedule.
+        console.warn("Emote spike could not be evaluated.", error);
+      }
       await statisticsChat.markWindowClean(windowStart, window.revision);
     } catch (error: unknown) {
       writeFailure ??= error;

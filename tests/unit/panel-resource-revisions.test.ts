@@ -1597,6 +1597,7 @@ describe("panel resource revisions", () => {
         "channel_statistics",
         "channel_word_frequency_baseline",
         "channel_word_frequency_streams",
+        "channel_timeline_events",
         "channel_variable_stream_resets",
         "chat_vote_result_delivery_reconciliation",
         "currency_rate_cache",

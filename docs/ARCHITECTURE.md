@@ -305,6 +305,57 @@ Nicht verfügbare Stichproben bleiben `NULL`. D1 enthält nur Aggregate, keine
 Nutzerkennungen oder einzelnen Nachrichten. Die Aggregate bleiben unbegrenzt
 erhalten (Entscheidung 0003).
 
+`channel_timeline_events` ergänzt diese Fenster um rohe Fakten: `stream.online`
+schreibt die Ereigniszeit, Stream-ID und `started_at`; `stream.offline` schreibt
+seine Ereigniszeit; `channel.update` schreibt eine Beobachtung aus aktuellem
+Titel und Kategorie, wobei eine fehlende Kategorie `NULL` bleibt. Dazu kommen
+bestätigte Clips, autorisierte Werbepausen und Emote-Spitzen. Nur ein
+`stream.online`-Eintrag trägt eine Stream-ID. Andere Ereignisse werden bei einer
+späteren Analyse anhand ihrer Zeitpunkte den Lifecycle-Zeilen zugeordnet. Die
+Tabelle wird unbegrenzt aufbewahrt, löscht mit `ON DELETE CASCADE` und isoliert
+Schreibfehler: Ein fehlender Timeline-Eintrag wird protokolliert, Dispatch und
+Streamzustands-Updates laufen weiter.
+
+Lifecycle-Wiederholungen sind über Art, Ereigniszeit und — bei `stream.online`
+— Stream-ID idempotent. Metadatenbeobachtungen verwenden Art, Ereigniszeit und
+einen Inhalts-Hash; EventSub-Nachrichten-IDs sind kein Ereignisschlüssel.
+Übergänge und Drops entstehen erst bei der Analyse. Ein Drop bedeutet ein
+Offline-Ereignis, auf das innerhalb von zehn Minuten ein Online-Ereignis folgt.
+`occurred_at` ist UTC-RFC-3339 mit festen neun Nachkommastellen
+(`2026-10-25T12:05:00.123456789Z`); die Nanosekundenreihenfolge von Twitch
+bleibt erhalten und der Text ist unmittelbar sortier- und vergleichbar. Eine
+Analyse kann die Kandidaten beispielsweise so ermitteln, ohne die indizierten
+Spalten in Funktionen zu kapseln (beide Seiten nutzen
+`channel_timeline_events_channel_kind_occurred_idx`; die Untergrenze wird aus
+dem Online-Zeitpunkt berechnet, die Nachkommastellen bleiben erhalten):
+
+```sql
+SELECT offline.occurred_at AS offline_at, online.occurred_at AS online_at
+FROM channel_timeline_events AS online
+JOIN channel_timeline_events AS offline
+  ON offline.channel_id = online.channel_id
+ AND offline.kind = 'stream_offline'
+ AND offline.occurred_at <= online.occurred_at
+ AND offline.occurred_at >= strftime('%Y-%m-%dT%H:%M:%S', substr(online.occurred_at, 1, 19), '-10 minutes')
+                            || substr(online.occurred_at, 20)
+WHERE online.channel_id = :channel_id
+  AND online.kind = 'stream_online'
+  AND online.occurred_at >= :from AND online.occurred_at < :to;
+```
+
+Titel- und Kategorieänderungen leitet die Analyse aus zeitlich sortierten
+`channel_metadata`-Beobachtungen ab, zum Beispiel mit
+`LAG(...) OVER (PARTITION BY channel_id ORDER BY occurred_at)`; Übergangszeilen
+mit alten und neuen Werten gibt es nicht. `channel.update` kommt über den
+verpflichtenden Statistics-EventSub-Zielpfad ohne zusätzlichen Broadcaster-Scope.
+Clips werden erst nach bestätigter Verfügbarkeit mit Clip-ID erfasst.
+Werbepausen werden nur bei verbundener Broadcaster-Zustimmung für
+`channel:read:ads` abonniert. Emote-Spitzen entstehen beim Schreiben eines
+Fünf-Minuten-Fensters, wenn mindestens 10 Emotes gezählt wurden und der Wert
+mindestens dreimal so hoch ist wie der Median der bis zu zwölf vorherigen
+Fenster. Der Zeitstempel der Spitze ist das Ende ihres Fensters. Details
+enthalten keine Nutzer- oder Creator-IDs.
+
 `channel.chat.message`-IDs werden im Channel Durable Object nach Empfangszeit
 für die gesamte von EventSub akzeptierte Replaydauer aufbewahrt: bis zu elf
 Minuten einschließlich der beidseitigen 30-Sekunden-Uhrabweichung. IDs werden

@@ -86,6 +86,7 @@ import type {
   ModuleStatisticsWordCount,
   ModuleStatisticsWordBucket,
   ModuleStatisticsWindow,
+  ModuleTimelineEvent,
   PointActiveRound,
   PointJoinResult,
   PointRoundAnswerResult,
@@ -141,6 +142,7 @@ import { createModuleSecretAccess } from "../module-secrets";
 import { sendChatMessage } from "../chat";
 import { sendModerationBan } from "../moderation";
 import { readChannelStreamState } from "../db/stream-state";
+import { writeChannelTimelineEvent } from "../db/timeline-events";
 import { readChannelDefaultChatTarget } from "../db/channel-settings";
 import { moduleEnabledForChannel, readDispatchChannelState } from "../db/channel-controls";
 import { chatOutputSuppressionReason } from "../chat-output-gate";
@@ -3358,6 +3360,8 @@ export class ChannelObject extends DurableObject<Env> {
         pruneExpiredWordStreams: (now) => this.pruneExpiredStatisticsWordStreams(now),
         hasWordStreams: () => this.hasStatisticsWordStreams(),
       },
+      recordTimelineEvent: (event: ModuleTimelineEvent) =>
+        writeChannelTimelineEvent(this.env.DB, channelId, event),
       fetchViewerCount: () => fetchLiveViewerCount(this.env, channelId, externalFetchBudget),
       fetchChattersTotal: () => fetchLiveChattersTotal(this.env, channelId, externalFetchBudget),
       ballots: this.ballotAccess(moduleId),

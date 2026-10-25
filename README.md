@@ -11,11 +11,14 @@ adding a row to the `channels` table, not by changing configuration.
   [Durable Object](https://developers.cloudflare.com/durable-objects/)
   (`ChannelObject`, SQLite-backed) per channel handles the realtime
   WebSocket connection to the dashboard. Aggregate channel statistics use
-  one D1 row per UTC-aligned five-minute window; a per-stream coverage
-  timeline is planned in [#558](https://github.com/smb-org/BroBot/issues/558).
-  The same module keeps a bounded, channel-wide word-frequency baseline in
-  D1, without storing chat text or usernames; the baseline retains the top
-  5,000 words.
+  one D1 row per UTC-aligned five-minute window. A separate, aggregate-only
+  per-channel timeline stores raw stream lifecycle events and current
+  title/category observations, confirmed clip IDs, consented ad breaks, and
+  emote spikes with unlimited retention and channel deletion cascade. Analysis
+  derives drops and metadata transitions from those observations.
+  The statistics module also keeps a bounded, channel-wide word-frequency
+  baseline in D1, without storing chat text or usernames; the baseline
+  retains the top 5,000 words.
 - **Dashboard**: React 19 + Base UI, built with Vite,
   served as static assets by the same Worker.
 - **Overlay**: a small, transparent, lazily-loaded React view for OBS or

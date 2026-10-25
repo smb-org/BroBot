@@ -175,6 +175,7 @@ const createContext = (
     clear: ReturnType<typeof vi.fn>;
     viewer: ReturnType<typeof vi.fn>;
     chatters: ReturnType<typeof vi.fn>;
+    timeline: ReturnType<typeof vi.fn>;
   };
 } => {
   const calls = {
@@ -182,6 +183,7 @@ const createContext = (
     clear: vi.fn(() => Promise.resolve()),
     viewer: vi.fn(() => Promise.resolve(options.viewerCount === undefined ? 42 : options.viewerCount)),
     chatters: vi.fn(() => Promise.resolve(options.chatters === undefined ? 7 : options.chatters)),
+    timeline: vi.fn(() => Promise.resolve()),
   };
   const context = {
     DB: database as unknown as D1Database,
@@ -191,6 +193,7 @@ const createContext = (
     statisticsChat: chat.api,
     fetchViewerCount: calls.viewer,
     fetchChattersTotal: calls.chatters,
+    recordTimelineEvent: calls.timeline,
     secrets: {} as ModuleAlarmContext["secrets"],
     ballots: {} as ModuleAlarmContext["ballots"],
     points: {} as ModuleAlarmContext["points"],
@@ -275,6 +278,13 @@ const failFirstStatisticsWrite = (database: TestD1Database): { DB: D1Database; b
   };
 };
 
+describe("statistics timeline intake", () => {
+  it("subscribes to channel updates without requiring a broadcaster scope", () => {
+    expect(statisticsModule.eventSubTypes).toContain("channel.update");
+    expect(statisticsModule.broadcasterScopes ?? []).toEqual([]);
+  });
+});
+
 describe("statistics window alarm", () => {
   let database: TestD1Database | null = null;
 
@@ -341,6 +351,64 @@ describe("statistics window alarm", () => {
     ).bind(CHANNEL_ID, WINDOW_START).first<{ messages: number }>();
 
     expect([firstWrite?.messages, secondWrite?.messages]).toEqual([10, 12]);
+  });
+
+  it("records an emote spike at three times the median of the previous twelve windows", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await writeStreamState(database, "online");
+    for (let index = 1; index <= 12; index += 1) {
+      const windowStart = new Date(Date.parse(WINDOW_START) - index * 300_000).toISOString();
+      await database.prepare(
+        `INSERT INTO channel_statistics (channel_id, stream_id, window_start, messages, emotes)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind(CHANNEL_ID, STREAM_ID, windowStart, 20, 5).run();
+    }
+    const chat = createStatisticsChat([windowState({ emotes: 15 })]);
+    const { context, calls } = createContext(database, chat);
+
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
+
+    expect(calls.timeline).toHaveBeenCalledWith({
+      kind: "emote_spike",
+      identity: WINDOW_START,
+      occurredAt: WINDOW_END,
+      detail: {
+        windowStart: WINDOW_START,
+        emotes: 15,
+        medianEmotes: 5,
+        baselineWindows: 12,
+        minimumEmotes: 10,
+        multiplier: 3,
+      },
+    });
+  });
+
+  it("drops the spike but cleans the window and reschedules when the baseline read fails", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await writeStreamState(database, "online");
+    const chat = createStatisticsChat([windowState({ emotes: 15 })]);
+    const { context, calls } = createContext(database, chat);
+    const activeDatabase = database;
+    context.DB = {
+      prepare: (sql: string) => {
+        if (sql.includes("SELECT emotes FROM channel_statistics")) throw new Error("Injected baseline failure.");
+        return activeDatabase.prepare(sql);
+      },
+    } as unknown as D1Database;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
+
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+    expect(chat.windows.get(WINDOW_START)?.dirty).toBe(false);
+    expect(calls.schedule).toHaveBeenCalledWith("window", Date.parse(WINDOW_END) + 300_000);
+    expect(calls.timeline).not.toHaveBeenCalled();
+    await expect(database.prepare(
+      "SELECT emotes FROM channel_statistics WHERE channel_id = ? AND window_start = ?",
+    ).bind(CHANNEL_ID, WINDOW_START).first()).resolves.toEqual({ emotes: 15 });
   });
 
   it("keeps the window dirty when a late increment lands during the D1 write", async () => {
