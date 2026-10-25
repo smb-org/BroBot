@@ -220,7 +220,7 @@ describe("AuditPage diff list", () => {
     personSearch.focus();
     fireEvent.change(personSearch, { target: { value: "alice" } });
 
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1), { timeout: 2_000 });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     expect(document.activeElement).toBe(personSearch);
     expect(screen.queryByText(/Alice.*Bob/u, { selector: ".audit-sentence" })).not.toBeInTheDocument();
     releaseFilteredResponse?.(new Response(JSON.stringify({ entries: [filteredEntry], nextCursor: null }), {

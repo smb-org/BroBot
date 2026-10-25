@@ -741,7 +741,7 @@ describe("EventsPage failure cause icon", () => {
     fetcher.mockClear();
     serverEntries = [newEntry, additionalEntry, oldEntry];
     emitEventHint(socket, `top-hint-${action}`, newEntry);
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1), { timeout: 2_000 });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
     const refreshedEvents = rendered.queryClient.getQueryData<{ pages: { entries: PanelEventEntry[] }[] }>(queryKey);
     expect(refreshedEvents?.pages.flatMap((page) => page.entries).map((event) => event.eventId)).toEqual([
