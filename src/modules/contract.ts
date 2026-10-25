@@ -619,8 +619,6 @@ export interface ModuleExecutionContext {
   isRecentBotMessage?: (senderId: string | null, text: string) => Promise<boolean>;
   /** True only when this EventSub notification committed a real stream-state transition. */
   streamStateTransitionAccepted?: boolean;
-  /** Window accounting held by the channel Durable Object. */
-  statisticsChat?: Pick<ModuleStatisticsChat, "startOnlineSegment" | "stopOnlineSegment">;
   /** Stream identity captured before an accepted offline transition changed channel state. */
   streamSession?: { streamId: string | null; startedAt: string | null };
   streamState: () => Promise<ModuleStreamState>;
@@ -844,7 +842,6 @@ export interface ModuleAlarmContext {
 export interface ModuleStatisticsWindow {
   streamId: string | null;
   windowStart: string;
-  windowSeconds: number;
   messages: number;
   emotes: number;
   viewerCount: number | null;
@@ -855,9 +852,7 @@ export interface ModuleStatisticsWindow {
 }
 
 interface ModuleStatisticsChat {
-  startOnlineSegment: (startedAt: string, streamId: string | null) => Promise<void>;
-  stopOnlineSegment: (endedAt: string) => Promise<void>;
-  advanceToBoundary: (boundary: number, streamIsOnline: boolean) => Promise<void>;
+  advanceToBoundary: (boundary: number, streamIsOnline: boolean, streamId: string | null) => Promise<void>;
   listDirtyCompletedWindows: () => Promise<readonly string[]>;
   readWindow: (windowStart: string) => Promise<ModuleStatisticsWindow | null>;
   saveWindowMetrics: (windowStart: string, viewerCount: number | null, chatters: number | null) => Promise<void>;

@@ -29,8 +29,9 @@ für HTTP und die Module.
 Wiederholte `channel.chat.message`-Notifications werden vor dem Dispatch mit
 einem zeitbasierten ID-Satz im Channel Durable Object dedupliziert. IDs bleiben
 bis zu elf Minuten erhalten, passend zum akzeptierten Ingress-Replayfenster
-einschließlich Uhrabweichung. Bei 100.000 IDs verwendet Ingress D1-Belege für
-neue IDs, statt noch gültige Einträge zu verdrängen. Dadurch gilt die
+einschließlich Uhrabweichung und werden ausschließlich nach Alter gelöscht.
+Das Volumen ist dadurch natürlich begrenzt: Selbst 150 Nachrichten pro Sekunde
+ergeben in elf Minuten nur rund 99.000 kleine SQLite-Zeilen. Dadurch gilt die
 Einmalverarbeitung für Chatmodule ohne einen D1-Beleg pro Nachricht. Andere
 EventSub-Typen verwenden weiterhin D1-Belege.
 
@@ -234,9 +235,10 @@ Das verpflichtende `statistics`-Modul zählt während eines Livestreams Chat-
 Nachrichten und Emote-Fragmente pro Fünf-Minuten-Fenster im Channel Durable
 Object. Die Fenster sind an UTC-Vielfache von 300 s ausgerichtet
 (`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
-Nachrichten- und Emote-Summen sowie die aufsummierte Onlinezeit. `window_seconds`
-ist die Onlinezeit, auf ganze Sekunden aufgerundet; Offline-/Online-Wechsel im
-selben Fenster bleiben eine Zeile und addieren nur die Onlineabschnitte.
+Nachrichten- und Emote-Summen. Jede Zeile beschreibt das vollständige
+UTC-Epoch-Fenster; Start, Ende und Abdeckung eines Streams kommen aus der
+Stream-Timeline (#558). Offline-/Online-Wechsel im selben Fenster bleiben eine
+Zeile.
 
 Ein keyed Alarm läuft an jeder Fünf-Minuten-Grenze und schreibt alle
 abgeschlossenen, geänderten Fenster als absolute Werte nach `channel_statistics`.
@@ -252,10 +254,9 @@ verringert.
 `active_chatters` ist eine Näherung aus dem vorhandenen rollierenden
 Chatter-Tracking: Anzahl unterschiedlicher Chatter, deren letzte Nachricht in
 den fünf Minuten vor der Fenstergrenze lag. Für Fenster ohne Stichprobe an der
-Grenze, etwa das letzte Teilfenster nach `stream.offline`, bleibt der Wert
-`NULL`. Es gibt keine zusätzliche HMAC-Mitgliedschaft je Statistikfenster.
-Offline beendet nur die Onlinezeit; der nächste Alarm schreibt das letzte
-Teilfenster. Der Alarm bleibt aktiv, solange der Stream online ist oder
+Grenze, etwa ein Fenster nach `stream.offline`, bleibt der Wert `NULL`. Es gibt
+keine zusätzliche HMAC-Mitgliedschaft je Statistikfenster. Der nächste Alarm
+schreibt noch geänderte Fenster. Der Alarm bleibt aktiv, solange der Stream online ist oder
 Fensterzustand im DO besteht. Fensterzustand wird nach einem letzten
 Schreibversuch gelöscht, sobald das Fensterende mehr als 60 Minuten zurückliegt.
 Ein D1-Ausfall länger als 60 Minuten kann deshalb noch nicht geschriebene
@@ -273,10 +274,10 @@ erhalten (Entscheidung 0003).
 
 `channel.chat.message`-IDs werden im Channel Durable Object nach Empfangszeit
 für die gesamte von EventSub akzeptierte Replaydauer aufbewahrt: bis zu elf
-Minuten einschließlich der beidseitigen 30-Sekunden-Uhrabweichung. Der Satz
-ist auf 100.000 IDs begrenzt; bei voller Kapazität verwendet die Ingress-Route
-D1-Belege, statt noch gültige IDs zu verdrängen. Andere EventSub-Typen
-verwenden weiterhin D1.
+Minuten einschließlich der beidseitigen 30-Sekunden-Uhrabweichung. IDs werden
+nur nach Alter entfernt; 150 Nachrichten pro Sekunde entsprechen über elf
+Minuten rund 99.000 kleinen SQLite-Zeilen. Andere EventSub-Typen verwenden
+weiterhin D1.
 Die ID wird vor dem Dispatch beansprucht. Scheitert die Verarbeitung danach,
 überspringt eine EventSub-Wiederholung die Verarbeitung; dieses bereits bei den
 D1-Belegen bestehende Verlustfenster bleibt unverändert.

@@ -561,13 +561,14 @@ Personendaten enthalten (Entscheidung 0003). Routenabfragen binden
 ### Kanalstatistiken (#557)
 
 Das verpflichtende `statistics`-Modul abonniert `channel.chat.message`,
-`stream.online` und `stream.offline` für jeden Kanal. Es zählt im Channel
+und `stream.online` für jeden Kanal. Es zählt im Channel
 Durable Object Nachrichten und Emote-Fragmente, ohne je Nachricht eine
 D1-Zeile zu schreiben. Die Fenster beginnen an UTC-Vielfachen von 300 s
 (`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
-Nachrichten- und Emote-Zähler sowie die während des Streams abgedeckten
-Millisekunden. Online-/Offline-Flaps im selben Fenster zählen in denselben
-Zustand; `window_seconds` ist die Onlinezeit, auf ganze Sekunden aufgerundet.
+Nachrichten- und Emote-Zähler. Jede Zeile beschreibt das vollständige
+UTC-Epoch-Fenster; Streamstart, Streamende und die Abdeckung angeschnittener
+Fenster kommen aus der Stream-Timeline (#558). Online-/Offline-Flaps im selben
+Fenster zählen in denselben Zustand.
 
 Ein einzelner keyed Alarm läuft alle fünf Minuten, solange der Stream online
 ist oder Fensterzustand im DO liegt. Er speichert absolute Werte für geänderte,
@@ -577,9 +578,7 @@ Zähler. Viewer- und `chatters`-Werte sowie `active_chatters` werden einmal an
 der Fenstergrenze erfasst und mit dem Fenster gespeichert, damit Retries sie
 wiederverwenden. Zuschauer kommen aus Helix Get Streams, `chatters` ist `total`
 aus Get Chatters mit Bot-Token und `moderator:read:chatters`. Nicht verfügbare
-Quellen bleiben `NULL`. Offline stoppt die Onlinezeit und zählt nicht mehr;
-der Alarm schreibt das letzte Teilfenster, ohne beim Offline-Ereignis direkt
-zu flushen. Ein bereits laufender Stream wird durch Zustandswiederherstellung
+Quellen bleiben `NULL`. Ein bereits laufender Stream wird durch Zustandswiederherstellung
 oder die nächste gezählte Chatnachricht neu eingeplant.
 
 DO-Fensterzustand wird nach einem letzten Schreibversuch gelöscht, wenn
@@ -587,7 +586,7 @@ DO-Fensterzustand wird nach einem letzten Schreibversuch gelöscht, wenn
 kann deshalb ungeflushte Fenster verlieren. `active_chatters` ist die
 ungefähre Anzahl unterschiedlicher Chatter, die in den fünf Minuten vor der
 Fenstergrenze im bestehenden rollierenden Chatter-Tracking gesehen wurden;
-ein finales Teilfenster ohne Abtastung an seiner Grenze hat `NULL`. Es gibt
+ein Fenster ohne Abtastung an seiner Grenze hat `NULL`. Es gibt
 keine per-window Personen-Hashes oder neue personenbezogene Speicherung.
 `channel_statistics` enthält nur Summen und wird unbegrenzt aufbewahrt; beim
 Löschen des Kanals greift `ON DELETE CASCADE` (Entscheidung 0003, Abschnitt 6).

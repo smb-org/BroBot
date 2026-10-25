@@ -332,12 +332,9 @@ const timerSkipReceiptsForSchedule = (
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
 const STATISTICS_CHAT_WINDOW_TABLE = "statistics_chat_windows";
-const STATISTICS_STREAM_STATE_TABLE = "statistics_stream_state";
 const STATISTICS_WINDOW_RETENTION_MS = 60 * 60 * 1_000;
 const EVENTSUB_MESSAGE_ID_TABLE = "eventsub_message_ids";
-const EVENTSUB_MESSAGE_ID_COUNT_TABLE = "eventsub_message_id_count";
 const EVENTSUB_MESSAGE_ID_RETENTION_MS = EVENTSUB_REPLAY_WINDOW_MILLISECONDS + 2 * EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS;
-const EVENTSUB_MESSAGE_ID_LIMIT = 100_000;
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
 const ACTIVE_CHATTER_EXPIRY_KEY = "host:active_chatters_expiry";
 const ACTIVE_CHATTER_RETENTION_MS = 60 * 60 * 1_000;
@@ -934,7 +931,6 @@ export class ChannelObject extends DurableObject<Env> {
         stream_id TEXT,
         messages INTEGER NOT NULL DEFAULT 0,
         emotes INTEGER NOT NULL DEFAULT 0,
-        online_milliseconds INTEGER NOT NULL DEFAULT 0,
         viewer_count INTEGER,
         chatters INTEGER,
         active_chatters INTEGER,
@@ -945,58 +941,10 @@ export class ChannelObject extends DurableObject<Env> {
         complete INTEGER NOT NULL DEFAULT 0
       )`,
     );
-    const columns = new Set(this.ctx.storage.sql.exec<{ name: string }>(
-      `PRAGMA table_info(${STATISTICS_CHAT_WINDOW_TABLE})`,
-    ).toArray().map(({ name }) => name));
-    const requiredColumns = [
-      ["stream_id", "TEXT"],
-      ["messages", "INTEGER NOT NULL DEFAULT 0"],
-      ["emotes", "INTEGER NOT NULL DEFAULT 0"],
-      ["online_milliseconds", "INTEGER NOT NULL DEFAULT 0"],
-      ["viewer_count", "INTEGER"],
-      ["chatters", "INTEGER"],
-      ["active_chatters", "INTEGER"],
-      ["metrics_sampled", "INTEGER NOT NULL DEFAULT 0"],
-      ["active_chatters_sampled", "INTEGER NOT NULL DEFAULT 0"],
-      ["revision", "INTEGER NOT NULL DEFAULT 0"],
-      ["dirty", "INTEGER NOT NULL DEFAULT 1"],
-      ["complete", "INTEGER NOT NULL DEFAULT 0"],
-    ] as const;
-    for (const [name, definition] of requiredColumns) {
-      if (!columns.has(name)) {
-        this.ctx.storage.sql.exec(
-          `ALTER TABLE ${STATISTICS_CHAT_WINDOW_TABLE} ADD COLUMN ${name} ${definition}`,
-        );
-      }
-    }
-    if (columns.has("active_messages") && columns.has("pending_messages") &&
-        columns.has("active_emotes") && columns.has("pending_emotes")) {
-      this.ctx.storage.sql.exec(
-        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
-            SET messages = active_messages + pending_messages,
-                emotes = active_emotes + pending_emotes,
-                online_milliseconds = CASE WHEN active_messages + pending_messages > 0 THEN 1000 ELSE 0 END,
-                dirty = CASE WHEN active_messages + pending_messages > 0 OR pending_messages > 0 THEN 1 ELSE dirty END,
-                complete = CASE WHEN window_start + ? <= ? THEN 1 ELSE complete END`,
-        STATISTICS_WINDOW_MILLISECONDS,
-        Date.now(),
-      );
-    }
-    this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${STATISTICS_STREAM_STATE_TABLE} (
-        slot INTEGER PRIMARY KEY CHECK (slot = 1),
-        online_since INTEGER,
-        stream_id TEXT
-      )`,
-    );
     this.ctx.storage.sql.exec(
       `CREATE INDEX IF NOT EXISTS statistics_chat_windows_flush_idx
        ON ${STATISTICS_CHAT_WINDOW_TABLE} (dirty, complete, window_start)`,
     );
-    this.ctx.storage.sql.exec(
-      "DROP TABLE IF EXISTS statistics_window_chatters",
-    );
-    this.ctx.storage.sql.exec("DROP TABLE IF EXISTS statistics_window_chatter_keys");
     this.statisticsSchemaReady = true;
   }
 
@@ -1011,26 +959,6 @@ export class ChannelObject extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       `CREATE INDEX IF NOT EXISTS eventsub_message_ids_received_idx
        ON ${EVENTSUB_MESSAGE_ID_TABLE} (received_at)`,
-    );
-    this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${EVENTSUB_MESSAGE_ID_COUNT_TABLE} (
-        slot INTEGER PRIMARY KEY CHECK (slot = 1),
-        count INTEGER NOT NULL CHECK (count >= 0)
-      )`,
-    );
-    this.ctx.storage.sql.exec(
-      `INSERT OR IGNORE INTO ${EVENTSUB_MESSAGE_ID_COUNT_TABLE} (slot, count)
-       VALUES (1, (SELECT COUNT(*) FROM ${EVENTSUB_MESSAGE_ID_TABLE}))`,
-    );
-    this.ctx.storage.sql.exec(
-      `CREATE TRIGGER IF NOT EXISTS eventsub_message_ids_count_insert
-       AFTER INSERT ON ${EVENTSUB_MESSAGE_ID_TABLE}
-       BEGIN UPDATE ${EVENTSUB_MESSAGE_ID_COUNT_TABLE} SET count = count + 1 WHERE slot = 1; END`,
-    );
-    this.ctx.storage.sql.exec(
-      `CREATE TRIGGER IF NOT EXISTS eventsub_message_ids_count_delete
-       AFTER DELETE ON ${EVENTSUB_MESSAGE_ID_TABLE}
-       BEGIN UPDATE ${EVENTSUB_MESSAGE_ID_COUNT_TABLE} SET count = count - 1 WHERE slot = 1; END`,
     );
     this.eventSubMessageIdSchemaReady = true;
   }
@@ -2476,39 +2404,6 @@ export class ChannelObject extends DurableObject<Env> {
     );
   }
 
-  private statisticsStreamStateSync(): { onlineSince: number | null; streamId: string | null } | null {
-    this.ensureStatisticsSchema();
-    const row = this.ctx.storage.sql.exec<{ online_since: number | null; stream_id: string | null }>(
-      `SELECT online_since, stream_id FROM ${STATISTICS_STREAM_STATE_TABLE} WHERE slot = 1`,
-    ).toArray()[0];
-    return row === undefined ? null : { onlineSince: row.online_since, streamId: row.stream_id };
-  }
-
-  private accumulateStatisticsOnlineTimeSync(start: number, end: number, streamId: string | null): void {
-    if (end <= start) return;
-    let cursor = start;
-    while (cursor < end) {
-      const windowStart = statisticsWindowStartMs(cursor);
-      const segmentEnd = Math.min(end, windowStart + STATISTICS_WINDOW_MILLISECONDS);
-      this.ensureStatisticsWindowSync(windowStart, streamId);
-      this.ctx.storage.sql.exec(
-        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
-            SET online_milliseconds = online_milliseconds + ?,
-                stream_id = COALESCE(stream_id, ?),
-                dirty = 1,
-                revision = revision + 1,
-                complete = CASE WHEN ? >= window_start + ? THEN 1 ELSE complete END
-          WHERE window_start = ?`,
-        segmentEnd - cursor,
-        streamId,
-        segmentEnd,
-        STATISTICS_WINDOW_MILLISECONDS,
-        windowStart,
-      );
-      cursor = segmentEnd;
-    }
-  }
-
   private activeChattersAtBoundarySync(boundary: number): number | null {
     this.ensureActiveChatterTable();
     const key = this.activeChatterKeyRowSync();
@@ -3379,9 +3274,8 @@ export class ChannelObject extends DurableObject<Env> {
       ...(streamGeneration === undefined ? {} : { streamGeneration }),
       externalFetchBudget,
       statisticsChat: {
-        startOnlineSegment: (startedAt, streamId) => this.startStatisticsOnlineSegment(startedAt, streamId),
-        stopOnlineSegment: (endedAt) => this.stopStatisticsOnlineSegment(endedAt),
-        advanceToBoundary: (boundary, streamIsOnline) => this.advanceStatisticsToBoundary(boundary, streamIsOnline),
+        advanceToBoundary: (boundary, streamIsOnline, streamId) =>
+          this.advanceStatisticsToBoundary(boundary, streamIsOnline, streamId),
         listDirtyCompletedWindows: () => this.listDirtyCompletedStatisticsWindows(),
         readWindow: (windowStart) => this.readStatisticsWindow(windowStart),
         saveWindowMetrics: (windowStart, viewerCount, chatters) =>
@@ -3597,19 +3491,10 @@ export class ChannelObject extends DurableObject<Env> {
       if (!Number.isFinite(statisticsWindowStart) || !statisticsEmotesValid) return;
       this.ensureStatisticsSchema();
       this.ensureStatisticsWindowSync(statisticsWindowStart, statistics.streamId);
-      const stream = this.statisticsStreamStateSync();
-      if (stream?.onlineSince === null || stream === null) {
-        this.ctx.storage.sql.exec(
-          `INSERT OR REPLACE INTO ${STATISTICS_STREAM_STATE_TABLE} (slot, online_since, stream_id)
-           VALUES (1, ?, ?)`,
-          now,
-          statistics.streamId,
-        );
-      }
       this.ctx.storage.sql.exec(
         `INSERT INTO ${STATISTICS_CHAT_WINDOW_TABLE}
-          (window_start, stream_id, messages, emotes, online_milliseconds, revision, dirty)
-         VALUES (?, ?, 1, ?, 0, 1, 1)
+          (window_start, stream_id, messages, emotes, revision, dirty)
+         VALUES (?, ?, 1, ?, 1, 1)
          ON CONFLICT(window_start) DO UPDATE SET
            stream_id = COALESCE(statistics_chat_windows.stream_id, excluded.stream_id),
            messages = statistics_chat_windows.messages + 1,
@@ -3691,71 +3576,16 @@ export class ChannelObject extends DurableObject<Env> {
     return activityCount;
   }
 
-  public startStatisticsOnlineSegment(startedAt: string, streamId: string | null): Promise<void> {
-    const start = Date.parse(startedAt);
-    if (!Number.isFinite(start)) return Promise.resolve();
-    this.ensureStatisticsSchema();
-    this.ctx.storage.transactionSync(() => {
-      const current = this.statisticsStreamStateSync();
-      if (current?.onlineSince !== null && current?.onlineSince !== undefined && current.streamId === streamId) return;
-      const windowStart = statisticsWindowStartMs(start);
-      this.ensureStatisticsWindowSync(windowStart, streamId);
-      this.ctx.storage.sql.exec(
-        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
-            SET stream_id = ?, complete = 0, dirty = 1, revision = revision + 1
-          WHERE window_start = ?`,
-        streamId,
-        windowStart,
-      );
-      this.ctx.storage.sql.exec(
-        `INSERT OR REPLACE INTO ${STATISTICS_STREAM_STATE_TABLE} (slot, online_since, stream_id)
-         VALUES (1, ?, ?)`,
-        start,
-        streamId,
-      );
-    });
-    return Promise.resolve();
-  }
-
-  public stopStatisticsOnlineSegment(endedAt: string): Promise<void> {
-    const end = Date.parse(endedAt);
-    if (!Number.isFinite(end)) return Promise.resolve();
-    this.ensureStatisticsSchema();
-    this.ctx.storage.transactionSync(() => {
-      const current = this.statisticsStreamStateSync();
-      if (current === null || current.onlineSince === null) return;
-      const clippedEnd = Math.max(current.onlineSince, end);
-      this.accumulateStatisticsOnlineTimeSync(current.onlineSince, clippedEnd, current.streamId);
-      this.ctx.storage.sql.exec(
-        `UPDATE ${STATISTICS_STREAM_STATE_TABLE} SET online_since = NULL WHERE slot = 1`,
-      );
-      const currentWindowStart = statisticsWindowStartMs(clippedEnd);
-      this.ctx.storage.sql.exec(
-        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
-            SET complete = 1, dirty = 1, revision = revision + 1
-          WHERE complete = 0 AND (window_start + ? <= ? OR (window_start = ? AND ? > ?))`,
-        STATISTICS_WINDOW_MILLISECONDS,
-        clippedEnd,
-        currentWindowStart,
-        clippedEnd,
-        currentWindowStart,
-      );
-    });
-    return Promise.resolve();
-  }
-
-  public advanceStatisticsToBoundary(boundary: number, streamIsOnline: boolean): Promise<void> {
+  public advanceStatisticsToBoundary(
+    boundary: number,
+    streamIsOnline: boolean,
+    streamId: string | null,
+  ): Promise<void> {
     if (!Number.isSafeInteger(boundary) || boundary % STATISTICS_WINDOW_MILLISECONDS !== 0) return Promise.resolve();
     this.ensureStatisticsSchema();
     this.ctx.storage.transactionSync(() => {
-      const current = this.statisticsStreamStateSync();
-      if (streamIsOnline && current?.onlineSince !== null && current?.onlineSince !== undefined) {
-        this.accumulateStatisticsOnlineTimeSync(current.onlineSince, boundary, current.streamId);
-        this.ctx.storage.sql.exec(
-          `UPDATE ${STATISTICS_STREAM_STATE_TABLE} SET online_since = ? WHERE slot = 1`,
-          boundary,
-        );
-      }
+      const completedWindowStart = boundary - STATISTICS_WINDOW_MILLISECONDS;
+      if (streamIsOnline) this.ensureStatisticsWindowSync(completedWindowStart, streamId);
       this.ctx.storage.sql.exec(
         `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
             SET complete = 1, dirty = 1, revision = revision + 1
@@ -3764,8 +3594,6 @@ export class ChannelObject extends DurableObject<Env> {
         boundary,
       );
       if (!streamIsOnline) return;
-      const completedWindowStart = boundary - STATISTICS_WINDOW_MILLISECONDS;
-      this.ensureStatisticsWindowSync(completedWindowStart, current?.streamId ?? null);
       const completed = this.ctx.storage.sql.exec<{ active_chatters_sampled: number }>(
         `SELECT active_chatters_sampled FROM ${STATISTICS_CHAT_WINDOW_TABLE} WHERE window_start = ?`,
         completedWindowStart,
@@ -3781,7 +3609,7 @@ export class ChannelObject extends DurableObject<Env> {
           completedWindowStart,
         );
       }
-      this.ensureStatisticsWindowSync(boundary, current?.streamId ?? null);
+      this.ensureStatisticsWindowSync(boundary, streamId);
       this.ctx.storage.sql.exec(
         `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE} SET complete = 0 WHERE window_start = ?`,
         boundary,
@@ -3794,7 +3622,7 @@ export class ChannelObject extends DurableObject<Env> {
     this.ensureStatisticsSchema();
     const rows = this.ctx.storage.sql.exec<{ window_start: number }>(
       `SELECT window_start FROM ${STATISTICS_CHAT_WINDOW_TABLE}
-        WHERE dirty = 1 AND complete = 1 AND (online_milliseconds > 0 OR messages > 0)
+        WHERE dirty = 1 AND complete = 1
         ORDER BY window_start ASC`,
     ).toArray();
     return Promise.resolve(rows.map(({ window_start: start }) => new Date(start).toISOString()));
@@ -3809,14 +3637,13 @@ export class ChannelObject extends DurableObject<Env> {
       window_start: number;
       messages: number;
       emotes: number;
-      online_milliseconds: number;
       viewer_count: number | null;
       chatters: number | null;
       active_chatters: number | null;
       metrics_sampled: number;
       revision: number;
     }>(
-      `SELECT stream_id, window_start, messages, emotes, online_milliseconds,
+      `SELECT stream_id, window_start, messages, emotes,
               viewer_count, chatters, active_chatters, metrics_sampled, revision
          FROM ${STATISTICS_CHAT_WINDOW_TABLE} WHERE window_start = ?`,
       parsed,
@@ -3825,8 +3652,6 @@ export class ChannelObject extends DurableObject<Env> {
     return Promise.resolve({
       streamId: row.stream_id,
       windowStart: new Date(row.window_start).toISOString(),
-      windowSeconds: Math.min(STATISTICS_WINDOW_MILLISECONDS / 1_000,
-        Math.max(1, Math.ceil(row.online_milliseconds / 1_000))),
       messages: row.messages,
       emotes: row.emotes,
       viewerCount: row.viewer_count,
@@ -3873,20 +3698,13 @@ export class ChannelObject extends DurableObject<Env> {
   public pruneExpiredStatisticsWindows(now: number): Promise<void> {
     if (!Number.isSafeInteger(now)) return Promise.resolve();
     this.ensureStatisticsSchema();
-    this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.sql.exec(
-        `DELETE FROM ${STATISTICS_CHAT_WINDOW_TABLE}
-          WHERE window_start + ? + ? < ?`,
-        STATISTICS_WINDOW_MILLISECONDS,
-        STATISTICS_WINDOW_RETENTION_MS,
-        now,
-      );
-      this.ctx.storage.sql.exec(
-        `DELETE FROM ${STATISTICS_STREAM_STATE_TABLE}
-          WHERE slot = 1 AND online_since IS NULL
-            AND NOT EXISTS (SELECT 1 FROM ${STATISTICS_CHAT_WINDOW_TABLE})`,
-      );
-    });
+    this.ctx.storage.sql.exec(
+      `DELETE FROM ${STATISTICS_CHAT_WINDOW_TABLE}
+        WHERE window_start + ? + ? < ?`,
+      STATISTICS_WINDOW_MILLISECONDS,
+      STATISTICS_WINDOW_RETENTION_MS,
+      now,
+    );
     return Promise.resolve();
   }
 
@@ -3898,8 +3716,8 @@ export class ChannelObject extends DurableObject<Env> {
     return Promise.resolve(present === 1);
   }
 
-  /** Claims a verified channel.chat.message ID or requests D1 fallback when the bounded set is full. */
-  public claimEventSubMessage(messageId: string, receivedAt = Date.now()): Promise<"claimed" | "duplicate" | "overflow"> {
+  /** Claims a verified channel.chat.message ID in the time-bounded replay set. */
+  public claimEventSubMessage(messageId: string, receivedAt = Date.now()): Promise<"claimed" | "duplicate"> {
     if (messageId.length === 0 || messageId.length > 512 || !Number.isSafeInteger(receivedAt)) {
       return Promise.resolve("duplicate");
     }
@@ -3909,17 +3727,8 @@ export class ChannelObject extends DurableObject<Env> {
         `DELETE FROM ${EVENTSUB_MESSAGE_ID_TABLE} WHERE received_at < ?`,
         receivedAt - EVENTSUB_MESSAGE_ID_RETENTION_MS,
       );
-      const existing = this.ctx.storage.sql.exec<{ present: number }>(
-        `SELECT EXISTS (SELECT 1 FROM ${EVENTSUB_MESSAGE_ID_TABLE} WHERE message_id = ?) AS present`,
-        messageId,
-      ).one().present;
-      if (existing === 1) return "duplicate";
-      const count = this.ctx.storage.sql.exec<{ count: number }>(
-        `SELECT count FROM ${EVENTSUB_MESSAGE_ID_COUNT_TABLE} WHERE slot = 1`,
-      ).one().count;
-      if (count >= EVENTSUB_MESSAGE_ID_LIMIT) return "overflow";
       this.ctx.storage.sql.exec(
-        `INSERT INTO ${EVENTSUB_MESSAGE_ID_TABLE} (message_id, received_at) VALUES (?, ?)`,
+        `INSERT OR IGNORE INTO ${EVENTSUB_MESSAGE_ID_TABLE} (message_id, received_at) VALUES (?, ?)`,
         messageId,
         receivedAt,
       );

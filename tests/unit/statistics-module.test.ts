@@ -16,7 +16,6 @@ const RETENTION_MS = 60 * 60_000;
 interface WindowState {
   streamId: string | null;
   windowStart: string;
-  windowSeconds: number;
   messages: number;
   emotes: number;
   viewerCount: number | null;
@@ -32,10 +31,11 @@ interface WindowState {
 const createStatisticsChat = (initial: WindowState[] = []) => {
   const windows = new Map(initial.map((window) => [window.windowStart, { ...window }]));
   const calls = {
-    start: vi.fn(() => Promise.resolve()),
-    stop: vi.fn(() => Promise.resolve()),
-    advance: vi.fn((boundary: number, streamIsOnline: boolean) => {
+    advance: vi.fn((boundary: number, streamIsOnline: boolean, streamId: string | null) => {
       const windowStart = new Date(boundary - 300_000).toISOString();
+      if (streamIsOnline && !windows.has(windowStart)) {
+        windows.set(windowStart, windowState({ streamId, messages: 0, emotes: 0 }));
+      }
       const window = windows.get(windowStart);
       if (window !== undefined) {
         window.complete = true;
@@ -49,7 +49,7 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       return Promise.resolve();
     }),
     listDirty: vi.fn(() => Promise.resolve([...windows.values()]
-      .filter((window) => window.dirty && window.complete && window.windowSeconds > 0)
+      .filter((window) => window.dirty && window.complete)
       .map((window) => window.windowStart))),
     read: vi.fn((windowStart: string) => {
       const window = windows.get(windowStart);
@@ -82,8 +82,6 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
     windows,
     calls,
     api: {
-      startOnlineSegment: calls.start,
-      stopOnlineSegment: calls.stop,
       advanceToBoundary: calls.advance,
       listDirtyCompletedWindows: calls.listDirty,
       readWindow: calls.read,
@@ -170,7 +168,6 @@ const writeStreamState = async (
 const windowState = (overrides: Partial<WindowState> = {}): WindowState => ({
   streamId: STREAM_ID,
   windowStart: WINDOW_START,
-  windowSeconds: 300,
   messages: 12,
   emotes: 5,
   viewerCount: 42,
@@ -323,9 +320,9 @@ describe("statistics window alarm", () => {
     await writeStreamState(database, "online");
     await database.prepare(
       `INSERT INTO channel_statistics
-         (channel_id, stream_id, window_start, window_seconds, messages, emotes)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).bind(CHANNEL_ID, STREAM_ID, WINDOW_START, 300, 15, 6).run();
+         (channel_id, stream_id, window_start, messages, emotes)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).bind(CHANNEL_ID, STREAM_ID, WINDOW_START, 15, 6).run();
     const chat = createStatisticsChat([windowState({ messages: 10, emotes: 4 })]);
     const { context } = createContext(database, chat);
 
@@ -336,12 +333,11 @@ describe("statistics window alarm", () => {
     ).bind(CHANNEL_ID, WINDOW_START).first()).resolves.toEqual({ messages: 15 });
   });
 
-  it("writes an offline partial window on the next alarm without sampling its boundary metrics", async () => {
+  it("writes an offline window on the next alarm without sampling its boundary metrics", async () => {
     database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);
     await writeStreamState(database, "offline", "2026-10-25T12:02:17.000Z");
     const chat = createStatisticsChat([windowState({
-      windowSeconds: 137,
       viewerCount: null,
       chatters: null,
       activeChatters: null,
@@ -353,10 +349,9 @@ describe("statistics window alarm", () => {
     await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
 
     await expect(database.prepare(
-      `SELECT window_seconds, messages, emotes, viewer_count, chatters, active_chatters
+      `SELECT messages, emotes, viewer_count, chatters, active_chatters
          FROM channel_statistics WHERE channel_id = ? AND window_start = ?`,
     ).bind(CHANNEL_ID, WINDOW_START).first()).resolves.toEqual({
-      window_seconds: 137,
       messages: 12,
       emotes: 5,
       viewer_count: null,
@@ -373,7 +368,6 @@ describe("statistics window alarm", () => {
     await insertChannel(database, CHANNEL_ID);
     await writeStreamState(database, "offline", WINDOW_END);
     const chat = createStatisticsChat([windowState({
-      windowSeconds: 137,
       viewerCount: null,
       chatters: null,
       activeChatters: null,
@@ -396,15 +390,12 @@ describe("statistics window alarm", () => {
     expect(context.clear).toHaveBeenCalledWith("window");
   });
 
-  it("starts the live sampler without a transition generation and leaves offline cleanup to the alarm", async () => {
+  it("starts the live sampler without a transition generation", async () => {
     const scheduleAlarm = vi.fn(() => Promise.resolve());
     const clearAlarm = vi.fn(() => Promise.resolve());
-    const startOnlineSegment = vi.fn(() => Promise.resolve());
-    const stopOnlineSegment = vi.fn(() => Promise.resolve());
     const execution = {
       scheduleAlarm,
       clearAlarm,
-      statisticsChat: { startOnlineSegment, stopOnlineSegment },
       streamStateTransitionAccepted: true,
       getAlarmDeadline: vi.fn(() => Promise.resolve(Date.parse(WINDOW_END))),
       streamSession: { streamId: STREAM_ID, startedAt: WINDOW_START },
@@ -421,18 +412,6 @@ describe("statistics window alarm", () => {
     };
     await processStatisticsEvent(online, execution);
 
-    const offline: ModuleEvent = {
-      ...online,
-      subscriptionType: "stream.offline",
-      triggerId: "offline",
-      payload: {},
-      receivedAt: "2026-10-25T12:02:17.000Z",
-      eventSubTimestamp: "2026-10-25T12:02:17.000Z",
-    };
-    await processStatisticsEvent(offline, execution);
-
-    expect(startOnlineSegment).toHaveBeenCalledWith(WINDOW_START, STREAM_ID);
-    expect(stopOnlineSegment).toHaveBeenCalledWith("2026-10-25T12:02:17.000Z");
     expect(scheduleAlarm).toHaveBeenCalledWith("window", "window", Date.parse(WINDOW_END));
     expect(clearAlarm).not.toHaveBeenCalled();
   });

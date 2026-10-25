@@ -1101,7 +1101,6 @@ export const dispatchEventSubNotification = async (
         channelLanguage,
         readChannelVariables: channelVariables,
       });
-        const statisticsChannel = environment.CHANNEL?.get(environment.CHANNEL.idFromName(event.channelId));
         result = module.handleEvent === undefined
           ? null
           : await module.handleEvent(moduleEvent, {
@@ -1123,13 +1122,6 @@ export const dispatchEventSubNotification = async (
             isRecentBotMessage,
             streamState,
             streamStateTransitionAccepted,
-            ...(statisticsChannel === undefined ? {} : {
-              statisticsChat: {
-                startOnlineSegment: (startedAt, streamId) =>
-                  statisticsChannel.startStatisticsOnlineSegment(startedAt, streamId),
-                stopOnlineSegment: (endedAt) => statisticsChannel.stopStatisticsOnlineSegment(endedAt),
-              },
-            }),
             ...(streamStateTransitionAccepted && streamStateTransitionGeneration !== undefined
               ? { streamStateTransitionGeneration }
               : {}),

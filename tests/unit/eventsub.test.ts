@@ -310,36 +310,6 @@ describe("EventSub inbound", () => {
     await expect(database.prepare("SELECT COUNT(*) AS count FROM eventsub_messages").first()).resolves.toEqual({ count: 0 });
   });
 
-  it("falls back to D1 receipts when the live Durable Object dedup set reaches its safety cap", async () => {
-    await insertChannel(database, "channel-dedup-overflow");
-    const body = JSON.stringify({
-      subscription: { type: "channel.chat.message", condition: { broadcaster_user_id: "channel-dedup-overflow" } },
-      event: {},
-    });
-    const claimEventSubMessage = vi.fn(() => Promise.resolve("overflow" as const));
-    const recordChatActivity = vi.fn(() => Promise.resolve(0));
-    const channel = {
-      idFromName: (channelId: string) => channelId,
-      get: () => ({ claimEventSubMessage, recordChatActivity, reconcilePanelResources: () => Promise.resolve() }),
-    } as unknown as Env["CHANNEL"];
-
-    const first = await eventSubRouter.fetch(
-      signedRequest(secret, "notification", body, "message-overflow"),
-      environment(channel),
-    );
-    const retry = await eventSubRouter.fetch(
-      signedRequest(secret, "notification", body, "message-overflow"),
-      environment(channel),
-    );
-
-    expect(first.status).toBe(204);
-    expect(retry.status).toBe(204);
-    expect(claimEventSubMessage).toHaveBeenCalledTimes(2);
-    expect(recordChatActivity).toHaveBeenCalledOnce();
-    await expect(database.prepare("SELECT COUNT(*) AS count FROM eventsub_messages").first())
-      .resolves.toEqual({ count: 1 });
-  });
-
   it("accepts a signed channel.update notification and records its category for the subscribed channel", async () => {
     await insertChannel(database, "channel-game-history");
     await insertChannel(database, "channel-other");

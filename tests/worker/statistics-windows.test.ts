@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
+import { notifyModuleScheduleInputsChanged } from "../../src/worker/module-schedules";
 import { insertPointChannel, runMigrations } from "./points-test-helpers";
 
 // These tests run the real Durable Object SQLite statements and the real module alarm handler; only
@@ -26,7 +27,7 @@ const runWindowAlarm = async (object: ReturnType<typeof statisticsObject>): Prom
 const pastWindowStart = (): number => Math.floor((Date.now() - 20 * 60_000) / WINDOW_MS) * WINDOW_MS;
 
 const statisticsRows = async (channelId: string) => (await worker.DB.prepare(
-  `SELECT stream_id, window_start, window_seconds, messages, emotes, viewer_count, chatters, active_chatters
+  `SELECT stream_id, window_start, messages, emotes, viewer_count, chatters, active_chatters
      FROM channel_statistics WHERE channel_id = ? ORDER BY window_start`,
 ).bind(channelId).all()).results;
 
@@ -43,11 +44,10 @@ describe("statistics windows in the channel object", () => {
     stubs.clear();
   });
 
-  it("writes the offline partial window with absolute totals and raises it for a late message", async () => {
+  it("writes an offline window with absolute totals and raises it for a late message", async () => {
     const channelId = "statistics-window-offline";
     await insertPointChannel(channelId);
     const windowStart = pastWindowStart();
-    const startedAt = windowStart + 60_000;
     const endedAt = windowStart + 200_000;
     await writeEventSubStreamState(worker.DB, channelId, "offline", iso(endedAt), null);
     const object = statisticsObject(channelId);
@@ -58,7 +58,6 @@ describe("statistics windows in the channel object", () => {
       streamId: "stream-1",
     });
 
-    await object.startStatisticsOnlineSegment(iso(startedAt), "stream-1");
     await object.recordChatActivity("viewer-1", true, message(90_000, 2));
     await object.recordChatActivity("viewer-2", true, message(120_000, 2));
     await runWindowAlarm(object);
@@ -67,7 +66,6 @@ describe("statistics windows in the channel object", () => {
     expect(first).toEqual([{
       stream_id: "stream-1",
       window_start: iso(windowStart),
-      window_seconds: 140,
       messages: 2,
       emotes: 4,
       viewer_count: null,
@@ -83,10 +81,9 @@ describe("statistics windows in the channel object", () => {
     await runWindowAlarm(object);
     const [late] = await statisticsRows(channelId);
     expect(late).toMatchObject({ messages: 3, emotes: 5 });
-    expect(Number(late?.window_seconds)).toBeGreaterThanOrEqual(140);
   });
 
-  it("keeps one window per epoch slot across an offline/online flap and sums the online seconds", async () => {
+  it("keeps one window per epoch slot across an offline/online flap", async () => {
     const channelId = "statistics-window-flap";
     await insertPointChannel(channelId);
     const windowStart = pastWindowStart();
@@ -99,17 +96,33 @@ describe("statistics windows in the channel object", () => {
       streamId: "stream-2",
     });
 
-    await object.startStatisticsOnlineSegment(iso(windowStart + 10_000), "stream-1");
     await object.recordChatActivity(null, false, message(20_000));
-    await object.stopStatisticsOnlineSegment(iso(windowStart + 110_000));
-    await object.startStatisticsOnlineSegment(iso(windowStart + 150_000), "stream-2");
     await object.recordChatActivity(null, false, message(160_000));
     await runWindowAlarm(object);
 
     expect(await statisticsRows(channelId)).toMatchObject([{
       window_start: iso(windowStart),
-      window_seconds: 100 + 100,
       messages: 2,
     }]);
+  });
+
+  it("arms exactly one window alarm for an already-live channel from the stream-state refresh", async () => {
+    const channelId = "statistics-window-refresh";
+    await insertPointChannel(channelId);
+    const startedAt = Date.now() - 20 * 60_000;
+    await writeEventSubStreamState(worker.DB, channelId, "online", iso(startedAt), iso(startedAt), "stream-1");
+    const object = statisticsObject(channelId);
+
+    await expect(object.getModuleAlarmDeadline("statistics", "window")).resolves.toBeNull();
+    await notifyModuleScheduleInputsChanged(worker.CHANNEL, channelId, "stream_state");
+    await runDurableObjectAlarm(object);
+    const deadline = await object.getModuleAlarmDeadline("statistics", "window");
+    expect(deadline).not.toBeNull();
+    expect((deadline ?? 1) % WINDOW_MS).toBe(0);
+
+    // A second refresh with the alarm already armed leaves the deadline untouched.
+    await notifyModuleScheduleInputsChanged(worker.CHANNEL, channelId, "stream_state");
+    await runDurableObjectAlarm(object);
+    await expect(object.getModuleAlarmDeadline("statistics", "window")).resolves.toBe(deadline);
   });
 });

@@ -331,10 +331,6 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     const channel = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(target.channelId));
     const claim = await channel.claimEventSubMessage(messageId, Date.parse(now));
     if (claim === "duplicate") return response(null, 204);
-    if (claim === "overflow") {
-      const isNew = await rememberEventSubMessage(context.env.DB, messageId, now);
-      if (!isNew) return response(null, 204);
-    }
   } else {
     const isNew = await rememberEventSubMessage(context.env.DB, messageId, now);
     if (!isNew) return response(null, 204);

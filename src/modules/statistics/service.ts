@@ -12,7 +12,6 @@ interface StoredStreamState {
   state: string;
   stream_id: string | null;
   started_at: string | null;
-  changed_at: string;
 }
 
 const emptyResult = (): ModuleResult => ({ actions: [], diagnostics: [] });
@@ -41,11 +40,10 @@ const writeAbsoluteWindow = async (
 ): Promise<void> => {
   await context.DB.prepare(
     `INSERT INTO channel_statistics
-       (channel_id, stream_id, window_start, window_seconds, messages, emotes, viewer_count, chatters, active_chatters)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (channel_id, stream_id, window_start, messages, emotes, viewer_count, chatters, active_chatters)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (channel_id, window_start) DO UPDATE SET
        stream_id = excluded.stream_id,
-       window_seconds = MAX(channel_statistics.window_seconds, excluded.window_seconds),
        messages = MAX(channel_statistics.messages, excluded.messages),
        emotes = MAX(channel_statistics.emotes, excluded.emotes),
        viewer_count = excluded.viewer_count,
@@ -55,7 +53,6 @@ const writeAbsoluteWindow = async (
     context.channelId,
     window.streamId,
     window.windowStart,
-    window.windowSeconds,
     window.messages,
     window.emotes,
     window.viewerCount,
@@ -72,9 +69,7 @@ export const processStatisticsEvent = async (
     if (context.streamStateTransitionAccepted !== true) return emptyResult();
     const startedAt = textValue(event.payload.started_at);
     const startedAtMs = startedAt === null ? Number.NaN : Date.parse(startedAt);
-    const streamId = textValue(event.payload.id);
     if (!Number.isFinite(startedAtMs)) return emptyResult();
-    await context.statisticsChat?.startOnlineSegment(startedAt as string, streamId);
     const receivedAtMs = Date.parse(event.receivedAt);
     await context.scheduleAlarm(
       "window",
@@ -83,12 +78,6 @@ export const processStatisticsEvent = async (
     );
     return emptyResult();
   }
-
-  if (event.subscriptionType !== "stream.offline" || context.streamStateTransitionAccepted !== true) {
-    return emptyResult();
-  }
-  const endedAt = event.eventSubTimestamp ?? event.receivedAt;
-  if (Number.isFinite(Date.parse(endedAt))) await context.statisticsChat?.stopOnlineSegment(endedAt);
   return emptyResult();
 };
 
@@ -98,12 +87,9 @@ export const reconcileStatisticsSchedule = async (
 ): Promise<void> => {
   if (reason !== "stream_state" || context.statisticsChat === undefined) return;
   const stream = await context.DB.prepare(
-    "SELECT state, stream_id, started_at, changed_at FROM channel_stream_state WHERE channel_id = ?",
+    "SELECT state, stream_id, started_at FROM channel_stream_state WHERE channel_id = ?",
   ).bind(context.channelId).first<StoredStreamState>();
   const now = Date.now();
-  if (stream?.state === "online") {
-    await context.statisticsChat.startOnlineSegment(new Date(now).toISOString(), stream.stream_id);
-  }
   const [deadline, hasWindows] = await Promise.all([
     context.getAlarmDeadline?.("window") ?? Promise.resolve(null),
     context.statisticsChat.hasWindows(),
@@ -121,13 +107,10 @@ export const handleStatisticsWindowAlarm = async (
   if (context.statisticsChat === undefined) throw new Error("Statistics chat storage is unavailable.");
 
   const stream = await context.DB.prepare(
-    "SELECT state, stream_id, started_at, changed_at FROM channel_stream_state WHERE channel_id = ?",
+    "SELECT state, stream_id, started_at FROM channel_stream_state WHERE channel_id = ?",
   ).bind(context.channelId).first<StoredStreamState>();
   const streamIsOnline = stream?.state === "online" && stream.started_at !== null;
-  if (stream?.state === "offline" && stream.changed_at.length > 0) {
-    await context.statisticsChat.stopOnlineSegment(stream.changed_at);
-  }
-  await context.statisticsChat.advanceToBoundary(deadline, streamIsOnline);
+  await context.statisticsChat.advanceToBoundary(deadline, streamIsOnline, stream?.stream_id ?? null);
 
   const boundaryWindowStart = new Date(deadline - STATISTICS_WINDOW_MILLISECONDS).toISOString();
   const boundaryWindow = streamIsOnline

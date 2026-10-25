@@ -181,7 +181,6 @@ const objectFor = (
     stream_id: string | null;
     messages: number;
     emotes: number;
-    online_milliseconds: number;
     viewer_count: number | null;
     chatters: number | null;
     active_chatters: number | null;
@@ -191,7 +190,6 @@ const objectFor = (
     dirty: number;
     complete: number;
   }>();
-  let statisticsStreamState: { online_since: number | null; stream_id: string | null } | undefined;
   const eventSubMessageIds = new Map<string, number>();
   let lastSqlChanges = 0;
   let chatterKey: { key_hex: string; created_at: string } | undefined;
@@ -219,7 +217,6 @@ const objectFor = (
       const rowsBefore = new Map(chatterRows);
       const statisticsBefore = new Map([...statisticsChatWindows].map(([start, row]) => [start, { ...row }]));
       const eventSubBefore = new Map(eventSubMessageIds);
-      const statisticsStreamBefore = statisticsStreamState === undefined ? undefined : { ...statisticsStreamState };
       const keyBefore = chatterKey;
       const changesBefore = lastSqlChanges;
       try {
@@ -233,7 +230,6 @@ const objectFor = (
         for (const [start, row] of statisticsBefore) statisticsChatWindows.set(start, row);
         eventSubMessageIds.clear();
         for (const [messageId, receivedAt] of eventSubBefore) eventSubMessageIds.set(messageId, receivedAt);
-        statisticsStreamState = statisticsStreamBefore;
         chatterKey = keyBefore;
         lastSqlChanges = changesBefore;
         throw error;
@@ -248,12 +244,6 @@ const objectFor = (
   storage.sql.exec.mockImplementation((query: string, ...bindings: unknown[]) => {
     if (/SELECT EXISTS\(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'game_rounds'\) AS present/iu.test(query)) {
       return { toArray: () => [{ present: 0 }], one: () => ({ present: 0 }) };
-    }
-    if (/^\s*PRAGMA table_info\(statistics_chat_windows\)/iu.test(query)) {
-      const names = ["window_start", "stream_id", "messages", "emotes", "online_milliseconds", "viewer_count",
-        "chatters", "active_chatters", "metrics_sampled", "active_chatters_sampled", "revision", "dirty", "complete"];
-      const rows = names.map((name) => ({ name }));
-      return { toArray: () => rows, one: () => rows[0] };
     }
     if (/^\s*CREATE TABLE\b/iu.test(query)) {
       return { toArray: () => [], one: () => undefined };
@@ -271,7 +261,6 @@ const objectFor = (
           stream_id: streamId,
           messages: 0,
           emotes: 0,
-          online_milliseconds: 0,
           viewer_count: null,
           chatters: null,
           active_chatters: null,
@@ -293,7 +282,6 @@ const objectFor = (
         stream_id: previous?.stream_id ?? streamId,
         messages: (previous?.messages ?? 0) + messages,
         emotes: (previous?.emotes ?? 0) + emotes,
-        online_milliseconds: previous?.online_milliseconds ?? 0,
         viewer_count: previous?.viewer_count ?? null,
         chatters: previous?.chatters ?? null,
         active_chatters: previous?.active_chatters ?? null,
@@ -305,58 +293,10 @@ const objectFor = (
       });
       return { toArray: () => [], one: () => undefined };
     }
-    if (/^\s*SELECT online_since, stream_id FROM statistics_stream_state/iu.test(query)) {
-      const rows = statisticsStreamState === undefined ? [] : [{ ...statisticsStreamState }];
-      return { toArray: () => rows, one: () => rows[0] };
-    }
-    if (/^\s*INSERT OR REPLACE INTO statistics_stream_state/iu.test(query)) {
-      const [onlineSince, streamId] = bindings as [number | null, string | null];
-      statisticsStreamState = { online_since: onlineSince, stream_id: streamId };
-      return { toArray: () => [], one: () => undefined };
-    }
-    if (/^\s*UPDATE statistics_stream_state SET online_since = NULL/iu.test(query)) {
-      if (statisticsStreamState !== undefined) statisticsStreamState.online_since = null;
-      return { toArray: () => [], one: () => undefined };
-    }
-    if (/^\s*UPDATE statistics_stream_state SET online_since = \?/iu.test(query)) {
-      const [onlineSince] = bindings as [number];
-      if (statisticsStreamState !== undefined) statisticsStreamState.online_since = onlineSince;
-      return { toArray: () => [], one: () => undefined };
-    }
-    if (/^\s*UPDATE statistics_chat_windows\s+SET online_milliseconds = online_milliseconds \+/iu.test(query)) {
-      const [delta, streamId, segmentEnd, windowMilliseconds, windowStart] = bindings as [number, string | null, number, number, number];
-      const row = statisticsChatWindows.get(windowStart);
-      if (row !== undefined) {
-        row.online_milliseconds += delta;
-        row.stream_id ??= streamId;
-        row.dirty = 1;
-        row.revision += 1;
-        if (segmentEnd >= windowStart + windowMilliseconds) row.complete = 1;
-      }
-      return { toArray: () => [], one: () => undefined };
-    }
-    if (/^\s*UPDATE statistics_chat_windows\s+SET stream_id = \?, complete = 0/iu.test(query)) {
-      const [streamId, windowStart] = bindings as [string | null, number];
-      const row = statisticsChatWindows.get(windowStart);
-      if (row !== undefined) {
-        row.stream_id = streamId;
-        row.complete = 0;
-        row.dirty = 1;
-        row.revision += 1;
-      }
-      return { toArray: () => [], one: () => undefined };
-    }
     if (/^\s*UPDATE statistics_chat_windows\s+SET complete = 1, dirty = 1/iu.test(query)) {
-      const isPartialStop = query.includes("OR (window_start = ?");
-      const values = bindings as [number, number, number?, number?, number?];
-      const windowMilliseconds = values[0];
-      const boundaryOrEnd = values[1];
-      const partialStart = isPartialStop ? values[2] : null;
-      const partialEnd = isPartialStop ? values[3] : null;
-      const partialBound = isPartialStop ? values[4] : null;
+      const [windowMilliseconds, boundary] = bindings as [number, number];
       for (const [start, row] of statisticsChatWindows) {
-        const complete = start + windowMilliseconds <= boundaryOrEnd ||
-          isPartialStop && start === partialStart && (partialEnd ?? 0) > (partialBound ?? 0);
+        const complete = start + windowMilliseconds <= boundary;
         if (complete && row.complete === 0) {
           row.complete = 1;
           row.dirty = 1;
@@ -390,12 +330,12 @@ const objectFor = (
     }
     if (/^\s*SELECT window_start FROM statistics_chat_windows/iu.test(query)) {
       const rows = [...statisticsChatWindows.entries()]
-        .filter(([, row]) => row.dirty === 1 && row.complete === 1 && (row.online_milliseconds > 0 || row.messages > 0))
+        .filter(([, row]) => row.dirty === 1 && row.complete === 1)
         .sort(([left], [right]) => left - right)
         .map(([window_start]) => ({ window_start }));
       return { toArray: () => rows, one: () => rows[0] };
     }
-    if (/^\s*SELECT stream_id, window_start, messages, emotes, online_milliseconds/iu.test(query)) {
+    if (/^\s*SELECT stream_id, window_start, messages, emotes,/iu.test(query)) {
       const [windowStart] = bindings as [number];
       const row = statisticsChatWindows.get(windowStart);
       const rows = row === undefined ? [] : [{ ...row, window_start: windowStart }];
@@ -426,25 +366,9 @@ const objectFor = (
       }
       return { toArray: () => [], one: () => undefined };
     }
-    if (/^\s*DELETE FROM statistics_stream_state\b/iu.test(query)) {
-      if (statisticsChatWindows.size === 0 && statisticsStreamState?.online_since === null) statisticsStreamState = undefined;
-      return { toArray: () => [], one: () => undefined };
-    }
     if (/^\s*SELECT EXISTS \(SELECT 1 FROM statistics_chat_windows\) AS present/iu.test(query)) {
       const present = Number(statisticsChatWindows.size > 0);
       return { toArray: () => [{ present }], one: () => ({ present }) };
-    }
-    if (/^\s*INSERT OR IGNORE INTO eventsub_message_id_count/iu.test(query)) {
-      return { toArray: () => [], one: () => undefined };
-    }
-    if (/^\s*SELECT EXISTS \(SELECT 1 FROM eventsub_message_ids WHERE message_id = \?\) AS present/iu.test(query)) {
-      const [messageId] = bindings as [string];
-      const present = Number(eventSubMessageIds.has(messageId));
-      return { toArray: () => [{ present }], one: () => ({ present }) };
-    }
-    if (/^\s*SELECT count FROM eventsub_message_id_count/iu.test(query)) {
-      const count = eventSubMessageIds.size;
-      return { toArray: () => [{ count }], one: () => ({ count }) };
     }
     if (/^\s*DELETE FROM eventsub_message_ids\s+WHERE received_at < \?/iu.test(query)) {
       const [cutoff] = bindings as [number];
@@ -453,7 +377,7 @@ const objectFor = (
       }
       return { toArray: () => [], one: () => undefined };
     }
-    if (/^\s*INSERT INTO eventsub_message_ids/iu.test(query)) {
+    if (/^\s*INSERT OR IGNORE INTO eventsub_message_ids/iu.test(query)) {
       const [messageId, receivedAt] = bindings as [string, number];
       lastSqlChanges = eventSubMessageIds.has(messageId) ? 0 : 1;
       if (lastSqlChanges > 0) eventSubMessageIds.set(messageId, receivedAt);
@@ -1650,9 +1574,6 @@ describe("ChannelObject realtime path", () => {
 
     await expect(object.readStatisticsWindow(window.windowStart)).resolves.toMatchObject({ messages: 2, emotes: 4 });
     const sql = storageOf(object).sql.exec.mock.calls.map(([query]) => query).join("\n");
-    // Legacy per-window membership tables are only ever dropped, never created or written.
-    expect(sql).not.toMatch(/(CREATE|INSERT|UPDATE)[^\n]*statistics_window_chatter/iu);
-    expect(sql).toContain("DROP TABLE IF EXISTS statistics_window_chatters");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS active_chatters");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS statistics_chat_windows");
   });
@@ -1678,7 +1599,7 @@ describe("ChannelObject realtime path", () => {
     expect(statisticsSql).not.toContain("CREATE TABLE IF NOT EXISTS active_chatters");
   });
 
-  it("merges an offline/online flap into one absolute window and sums online time", async () => {
+  it("merges an offline/online flap into one absolute window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse("2026-09-27T12:04:00.000Z"));
     const object = objectFor([]);
@@ -1691,18 +1612,13 @@ describe("ChannelObject realtime path", () => {
       streamId: "stream-1",
     };
 
-    await object.startStatisticsOnlineSegment("2026-09-27T12:00:00.000Z", "stream-1");
     await object.recordChatActivity(null, false, window);
-    await object.stopStatisticsOnlineSegment("2026-09-27T12:02:00.000Z");
-    await object.startStatisticsOnlineSegment("2026-09-27T12:03:00.000Z", "stream-2");
     await object.recordChatActivity(null, false, { ...window, receivedAt: "2026-09-27T12:03:30.000Z", emotes: 2, streamId: "stream-2" });
-    await object.stopStatisticsOnlineSegment("2026-09-27T12:04:00.000Z");
+    await object.advanceStatisticsToBoundary(Date.parse("2026-09-27T12:05:00.000Z"), false, null);
 
     const rows = await object.listDirtyCompletedStatisticsWindows();
     expect(rows).toEqual([window.windowStart]);
     await expect(object.readStatisticsWindow(window.windowStart)).resolves.toMatchObject({
-      streamId: "stream-2",
-      windowSeconds: 180,
       messages: 2,
       emotes: 3,
     });
@@ -1717,18 +1633,21 @@ describe("ChannelObject realtime path", () => {
     await object.recordChatActivity("viewer-1", true);
     await object.recordChatActivity("viewer-1", true);
     await object.recordChatActivity("viewer-2", true);
-    await object.startStatisticsOnlineSegment(windowStart, "stream-1");
-    await object.advanceStatisticsToBoundary(Date.parse(boundary), true);
+    await object.advanceStatisticsToBoundary(Date.parse(boundary), true, "stream-1");
 
     await expect(object.readStatisticsWindow(windowStart)).resolves.toMatchObject({ activeChatters: 2 });
 
     const offline = objectFor([]);
-    await offline.startStatisticsOnlineSegment(windowStart, "stream-1");
-    await offline.stopStatisticsOnlineSegment("2026-09-27T12:02:17.000Z");
-    await offline.advanceStatisticsToBoundary(Date.parse(boundary), false);
+    vi.spyOn(offline, "getModuleAlarmDeadline").mockResolvedValue(Date.parse(boundary));
+    await offline.recordChatActivity(null, false, {
+      windowStart,
+      receivedAt: "2026-09-27T12:02:17.000Z",
+      emotes: 0,
+      streamId: "stream-1",
+    });
+    await offline.advanceStatisticsToBoundary(Date.parse(boundary), false, null);
 
     await expect(offline.readStatisticsWindow(windowStart)).resolves.toMatchObject({
-      windowSeconds: 137,
       activeChatters: null,
     });
   });
@@ -1755,8 +1674,13 @@ describe("ChannelObject realtime path", () => {
   it("prunes only after the 60-minute window horizon", async () => {
     const object = objectFor([]);
     const start = Date.parse("2026-09-27T12:00:00.000Z");
-    await object.startStatisticsOnlineSegment(new Date(start).toISOString(), "stream-1");
-    await object.stopStatisticsOnlineSegment("2026-09-27T12:02:17.000Z");
+    vi.spyOn(object, "getModuleAlarmDeadline").mockResolvedValue(start + 300_000);
+    await object.recordChatActivity(null, false, {
+      windowStart: new Date(start).toISOString(),
+      receivedAt: new Date(start + 137_000).toISOString(),
+      emotes: 0,
+      streamId: "stream-1",
+    });
     const expiresAt = start + 300_000 + 60 * 60_000;
 
     await object.pruneExpiredStatisticsWindows(expiresAt);
