@@ -9,6 +9,9 @@ export default defineConfig({
     // Steht hier und nicht nur im npm-Skript, damit es auch gilt, wenn jemand
     // Vitest direkt aus der Entwicklungsumgebung startet.
     env: { TZ: "UTC" },
+    // Must stay well above the 5 s async wait in tests/setup.ts, or a slow
+    // wait would end as a generic test timeout instead of a clear failure.
+    testTimeout: 15_000,
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/unit/**/*.test.{ts,tsx}", "tests/components/**/*.test.tsx"],

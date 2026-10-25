@@ -48,6 +48,28 @@ interface StatisticsWordObject {
   hasStatisticsWordStreams(): Promise<boolean>;
 }
 
+interface StatisticsClipImportObject {
+  markStatisticsClipImportPending(streamId: string, startedAt: string | null, endedAt: string): Promise<void>;
+  listReadyStatisticsClipImports(now: number): Promise<readonly { streamId: string; startedAt: string | null; endedAt: string }[]>;
+  completeStatisticsClipImport(streamId: string): Promise<void>;
+  pruneExpiredStatisticsClipImports(now: number): Promise<void>;
+  hasStatisticsClipImports(): Promise<boolean>;
+}
+
+interface StatisticsStreamTransitionObject {
+  getModuleAlarmDeadline(moduleId: string, alarmKey: string): Promise<number | null>;
+  scheduleModuleAlarm(moduleId: string, handlerKey: string, alarmKey: string, deadline: number): Promise<void>;
+  transitionTimerStream(stream: {
+    state: "offline";
+    streamId: null;
+    startedAt: null;
+    generation: number;
+    endedSession: { streamId: string; startedAt: string | null; endedAt: string };
+  }): Promise<void>;
+  listReadyStatisticsClipImports(now: number): Promise<readonly { streamId: string; startedAt: string | null; endedAt: string }[]>;
+  hasStatisticsClipImports(): Promise<boolean>;
+}
+
 // The RPC type of an `unknown` result is not thenable for the linter, but the call is a promise.
 const runWindowAlarm = async (object: ReturnType<typeof statisticsObject>): Promise<void> => {
   await (object.runModuleAlarm("statistics", "window", "window") as unknown as Promise<unknown>);
@@ -585,5 +607,83 @@ describe("statistics windows in the channel object", () => {
     await runDurableObjectAlarm(object);
     await settleScheduleRefresh(object);
     await expect(object.getModuleAlarmDeadline("statistics", "window")).resolves.toBe(deadline);
+  });
+
+  it("keeps pending clip imports durable, delays readiness, and prunes them by age", async () => {
+    const channelId = "statistics-clip-import-state";
+    await insertPointChannel(channelId);
+    const stub = statisticsObject(channelId);
+    const object = stub as unknown as StatisticsClipImportObject;
+    const endedAt = Date.now() - 15 * 60_000;
+    const duplicateEnd = endedAt + 60_000;
+    const expiresAt = endedAt + 24 * 60 * 60_000;
+
+    const startedAt = iso(endedAt - 60 * 60_000);
+    await object.markStatisticsClipImportPending("clip-stream-state", startedAt, iso(endedAt));
+    await object.markStatisticsClipImportPending("clip-stream-state", iso(endedAt - 30 * 60_000), iso(duplicateEnd));
+
+    await expect(object.hasStatisticsClipImports()).resolves.toBe(true);
+    await expect(object.listReadyStatisticsClipImports(Date.now() - 1)).resolves.toEqual([]);
+    await expect(object.listReadyStatisticsClipImports(Date.now())).resolves.toEqual([
+      { streamId: "clip-stream-state", startedAt, endedAt: iso(endedAt) },
+    ]);
+    await object.completeStatisticsClipImport("clip-stream-state");
+    await expect(object.hasStatisticsClipImports()).resolves.toBe(false);
+    const storedRowsAfterCompletion = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec("SELECT COUNT(*) AS count FROM statistics_clip_imports").one(),
+    ) as { count: number };
+    expect(storedRowsAfterCompletion.count).toBe(0);
+    await object.markStatisticsClipImportPending("clip-stream-state", startedAt, iso(endedAt));
+    await expect(object.listReadyStatisticsClipImports(Date.now())).resolves.toEqual([
+      { streamId: "clip-stream-state", startedAt, endedAt: iso(endedAt) },
+    ]);
+    await object.pruneExpiredStatisticsClipImports(expiresAt - 1);
+    await expect(object.hasStatisticsClipImports()).resolves.toBe(true);
+    await object.pruneExpiredStatisticsClipImports(expiresAt);
+    await expect(object.listReadyStatisticsClipImports(expiresAt)).resolves.toEqual([]);
+    await expect(object.hasStatisticsClipImports()).resolves.toBe(false);
+  });
+
+  it("enqueues a recovered ended stream with its original start", async () => {
+    const channelId = "statistics-recovered-clip-import";
+    await insertPointChannel(channelId);
+    const object = statisticsObject(channelId) as unknown as StatisticsStreamTransitionObject;
+    const startedAt = iso(Date.now() - 60 * 60_000);
+    const endedAt = iso(Date.now());
+
+    await object.transitionTimerStream({
+      state: "offline",
+      streamId: null,
+      startedAt: null,
+      generation: 2,
+      endedSession: { streamId: "recovered-stream", startedAt, endedAt },
+    });
+
+    expect(await object.hasStatisticsClipImports()).toBe(true);
+    expect(await object.listReadyStatisticsClipImports(Date.now())).toEqual([]);
+    const scheduledAt = await object.getModuleAlarmDeadline("statistics", "window");
+    expect(scheduledAt).not.toBeNull();
+    expect((scheduledAt ?? 1) % WINDOW_MS).toBe(0);
+  });
+
+  it("keeps an existing statistics deadline when a clip import is enqueued", async () => {
+    const channelId = "statistics-clip-enqueue-keeps-deadline";
+    await insertPointChannel(channelId);
+    const object = statisticsObject(channelId) as unknown as StatisticsStreamTransitionObject;
+    // A real overdue alarm would fire at once and replace itself, so the stored deadline lies ahead;
+    // an overwrite to the next boundary is observable either way.
+    const overdue = Math.floor((Date.now() + 30 * 60_000) / WINDOW_MS) * WINDOW_MS;
+    await object.scheduleModuleAlarm("statistics", "window", "window", overdue);
+
+    await object.transitionTimerStream({
+      state: "offline",
+      streamId: null,
+      startedAt: null,
+      generation: 3,
+      endedSession: { streamId: "kept-deadline-stream", startedAt: iso(overdue - 60 * 60_000), endedAt: iso(overdue) },
+    });
+
+    expect(await object.hasStatisticsClipImports()).toBe(true);
+    expect(await object.getModuleAlarmDeadline("statistics", "window")).toBe(overdue);
   });
 });

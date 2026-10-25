@@ -84,7 +84,7 @@ it.each(["events", "audit"] as const)("keeps the %s person filter mounted and fo
   personFilter.focus();
   fireEvent.change(personFilter, { target: { value: "alice" } });
 
-  await waitFor(() => expect(window.location.search).toContain("actor=alice"), { timeout: 2_000 });
+  await waitFor(() => expect(window.location.search).toContain("actor=alice"));
   expect(screen.getByRole("textbox", { name: "Person" })).toBe(personFilter);
   expect(personFilter).toHaveFocus();
 });

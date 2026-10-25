@@ -120,7 +120,7 @@ Für aktive Chatter (#292) gilt eine bewusst kürzere Regel: Der kanalgebundene 
 | DO-Wort-Buckets je Stream | Zähler eines erfolgreichen Batches sofort; übrige Streamdaten beim ersten Statistik-Alarm ab **24 Stunden nach bestätigtem Streamende** (regulär innerhalb weiterer fünf Minuten) | Kurzlebige Grundlage für die Wortfrequenz-Baseline; Alterslöschung läuft unabhängig von D1-Erfolg. Fehlt `stream.offline`, beginnt die Frist mit der Offline-Erkennung durch den Statistik-Alarm |
 | Kanalweite Wortfrequenz-Baseline | unbegrenzt; höchstens **5.000 Wörter je Kanal** | Aggregat ohne Namen, Nutzer-IDs oder Nachrichtentexte; je Batch (ein Stream kann mehrere Batches haben) werden höchstens die 1.000 häufigsten Wörter übernommen; je Wort nur Gesamtzahl und letzter Zeitpunkt |
 | Marker zusammengeführter Stream-Batches | unbegrenzt | Eine kleine personenfreie Zeile je Stream und Batch verhindert Doppelzählung nach einem Retry mit unklarem D1-Ergebnis |
-| Stream-Timeline-Ereignisse (Lifecycle-Zeitpunkte, Metadatenbeobachtungen, Clip-ID, Werbepause, Emote-Spitze) | unbegrenzt | Keine Nutzer- oder Creator-ID; Löschung mit dem Kanal |
+| Stream-Timeline-Ereignisse (Lifecycle-Zeitpunkte, Metadatenbeobachtungen, Clip-ID und öffentlicher Clip-Titel, Aufruf-/Dauer-Snapshot, Werbepause, Emote-Spitze) | unbegrenzt | Keine Creator-, Broadcaster- oder Spiel-ID; Titel sind öffentliche Twitch-Inhalte und können Namen enthalten; Löschung mit dem Kanal |
 | Aggregate ohne Personenbezug | unbegrenzt | siehe Abschnitt 6 |
 
 Die Fristen werden durch einen Lauf durchgesetzt, nicht durch Vorsatz. Der stündliche Cron-Trigger aus #18 ist der naheliegende Ort.
@@ -138,8 +138,8 @@ oder eine andere Live-Stream-ID meldet und seit mindestens 15 Minuten kein
 Zuwachs erfolgte; auch ein noch nicht geschriebener, gepufferter Zuwachs zählt
 als Aktivität. Der Merge hängt nicht von vorhandenen Statistikfenstern ab.
 Vor dem D1-Aufruf rotiert das DO zur nächsten Bucket-Nummer; ein später Zuwachs
-landet dadurch in einem neuen Batch. Je Batch schreibt D1 vier Anweisungen,
-während jedes geänderte Statistikfenster seinen eigenen absoluten Upsert erhält.
+landet dadurch in einem neuen Batch. Je Batch führt D1 fünf Anweisungen aus (vier Schreibvorgänge und ein
+bestätigendes SELECT), während jedes geänderte Statistikfenster seinen eigenen absoluten Upsert erhält.
 
 **180 Tage ist eine Setzung, keine Ableitung.** Sie lässt sich verkürzen, ohne dass etwas kaputtgeht — verlängern dagegen nicht, weil die Daten dann schon weg sind. Im Zweifel also kürzer.
 
@@ -150,7 +150,7 @@ während jedes geänderte Statistikfenster seinen eigenen absoluten Upsert erhä
 Unbegrenzt bleiben dürfen ausschließlich Werte **ohne jeden Bezug zu einer einzelnen Person**:
 
 - Nachrichten pro Zeitfenster, Zuschauerzahl, Emote-Spitzen
-- Stream-Online-/Offline-Zeitpunkte, aktuelle Titel-/Kategoriebeobachtungen, bestätigte Clip-IDs und Werbepausen. Drops und Titel-/Kategorieübergänge werden erst bei einer Analyse aus den gespeicherten Ereigniszeitpunkten und geordneten Metadatenbeobachtungen abgeleitet; beim Schreiben entstehen keine Übergangszeilen. Clip-Creator-IDs werden nicht gespeichert.
+- Stream-Online-/Offline-Zeitpunkte, aktuelle Titel-/Kategoriebeobachtungen, Clip-IDs und öffentliche Clip-Titel mit Erstellungszeitpunkt sowie Aufruf-/Dauer-Snapshot und Werbepausen. Öffentliche Titel können Namen enthalten; Creator-, Broadcaster- und Spiel-IDs werden nicht gespeichert. Drops und Titel-/Kategorieübergänge werden erst bei einer Analyse aus den gespeicherten Ereigniszeitpunkten und geordneten Metadatenbeobachtungen abgeleitet; beim Schreiben entstehen keine Übergangszeilen.
 - Aktive Chatter in Kanalstatistiken sind eine ungefähre Aggregatanzahl aus dem bestehenden rollierenden Chatter-Tracking: unterschiedliche Chatter, die in den fünf Minuten vor der Fenstergrenze gesehen wurden. Dafür werden keine zusätzlichen Personen-Hashes je Statistikfenster gespeichert; Fenster ohne Stichprobe an ihrer Grenze erhalten `NULL`.
 - BELABOX-Bitrate-Min/Max, Mittelwert und P10, RTT-Mittelwert, Paketverlustdelta und Stichprobenzahl je Stream-Zeitfenster
 - Wortfrequenz-Baseline aus #12 — aggregiert über alle Nutzer, ohne Zuordnung. Das DO zählt nur Textfragmente, hält höchstens 20.000 verschiedene Wörter je Stream und löscht Bucket-Zähler nach dem Merge oder übrige Streamdaten nach der Frist aus Abschnitt 5. D1 übernimmt je Batch höchstens die 1.000 häufigsten Wörter; die kanalweite Baseline enthält höchstens 5.000 Wörter. Die Marker für Stream-Batches bleiben dauerhaft.

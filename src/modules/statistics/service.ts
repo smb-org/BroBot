@@ -215,13 +215,64 @@ export const reconcileStatisticsSchedule = async (
     "SELECT state, stream_id, started_at FROM channel_stream_state WHERE channel_id = ?",
   ).bind(context.channelId).first<StoredStreamState>();
   const now = Date.now();
-  const [deadline, hasWindows, hasWordStreams] = await Promise.all([
+  const [deadline, hasWindows, hasWordStreams, hasClipImports] = await Promise.all([
     context.getAlarmDeadline?.("window") ?? Promise.resolve(null),
     context.statisticsChat.hasWindows(),
     context.statisticsChat.hasWordStreams(),
+    context.statisticsChat.hasClipImports(),
   ]);
-  if (deadline !== null || stream?.state !== "online" && !hasWindows && !hasWordStreams) return;
+  if (deadline !== null || stream?.state !== "online" && !hasWindows && !hasWordStreams && !hasClipImports) return;
   await context.schedule("window", nextBoundary(now));
+};
+
+const streamStartedAt = async (
+  context: ModuleAlarmContext,
+  pending: { streamId: string; startedAt: string | null },
+): Promise<string | null> => {
+  if (typeof pending.startedAt === "string" && Number.isFinite(Date.parse(pending.startedAt))) {
+    return pending.startedAt;
+  }
+  const row = await context.DB.prepare(
+    `SELECT MIN(window_start) AS started_at FROM channel_statistics
+      WHERE channel_id = ? AND stream_id = ?`,
+  ).bind(context.channelId, pending.streamId).first<{ started_at: string | null }>();
+  return typeof row?.started_at === "string" && Number.isFinite(Date.parse(row.started_at))
+    ? row.started_at
+    : null;
+};
+
+const importReadyStreamClips = async (
+  context: ModuleAlarmContext,
+  now: number,
+): Promise<void> => {
+  const statisticsChat = context.statisticsChat;
+  const recordTimelineEvent = context.recordTimelineEventStrict;
+  if (statisticsChat === undefined || context.fetchStreamClips === undefined || recordTimelineEvent === undefined) return;
+  for (const pending of await statisticsChat.listReadyClipImports(now)) {
+    try {
+      const startedAt = await streamStartedAt(context, pending);
+      if (startedAt === null) continue;
+      const clips = await context.fetchStreamClips(startedAt, pending.endedAt);
+      if (clips === null) continue;
+      for (const clip of clips) {
+        await recordTimelineEvent({
+          kind: "clip_created",
+          identity: clip.clipId,
+          occurredAt: clip.createdAt,
+          detail: {
+            clipId: clip.clipId,
+            title: clip.title,
+            createdAt: clip.createdAt,
+            ...(clip.viewCount === undefined ? {} : { viewCount: clip.viewCount }),
+            ...(clip.durationSeconds === undefined ? {} : { durationSeconds: clip.durationSeconds }),
+          },
+        });
+      }
+      await statisticsChat.completeClipImport(pending.streamId);
+    } catch (error: unknown) {
+      console.warn("Statistics clip import failed; the pending import will retry.", error);
+    }
+  }
 };
 
 /** Reads the stream state, advances the window clock and writes every completed dirty window. */
@@ -304,15 +355,25 @@ export const handleStatisticsWindowAlarm = async (
   } catch (error: unknown) {
     maintenanceFailure ??= error;
   }
-  const hasWindows = await context.statisticsChat.hasWindows();
-  const hasWordStreams = await context.statisticsChat.hasWordStreams();
+  try {
+    await context.statisticsChat.pruneExpiredClipImports(now);
+  } catch (error: unknown) {
+    maintenanceFailure ??= error;
+  }
+  const [hasWindows, hasWordStreams, hasClipImports] = await Promise.all([
+    context.statisticsChat.hasWindows(),
+    context.statisticsChat.hasWordStreams(),
+    context.statisticsChat.hasClipImports(),
+  ]);
   if (flushFailed) {
-    if (hasWindows || hasWordStreams) await context.schedule("window", deadline + STATISTICS_WINDOW_MILLISECONDS);
+    if (hasWindows || hasWordStreams || hasClipImports) {
+      await context.schedule("window", deadline + STATISTICS_WINDOW_MILLISECONDS);
+    }
     if (flushFailure instanceof Error) throw flushFailure;
     throw new Error("Statistics state read failed.", { cause: flushFailure });
   }
   if (maintenanceFailure !== undefined) {
-    if (outcome?.streamState === "online" || hasWindows || hasWordStreams) {
+    if (outcome?.streamState === "online" || hasWindows || hasWordStreams || hasClipImports) {
       await context.schedule("window", deadline + STATISTICS_WINDOW_MILLISECONDS);
     }
     if (maintenanceFailure instanceof Error) throw maintenanceFailure;
@@ -360,8 +421,11 @@ export const handleStatisticsWindowAlarm = async (
     wordMergeFailure ??= error;
   }
 
+  await importReadyStreamClips(context, now);
+
   const pendingWordStreams = await context.statisticsChat.hasWordStreams();
-  if (outcome.streamState === "online" || hasWindows || pendingWordStreams) {
+  const pendingClipImports = await context.statisticsChat.hasClipImports();
+  if (outcome.streamState === "online" || hasWindows || pendingWordStreams || pendingClipImports) {
     // The host retires an occurrence only if it is still the stored entry; scheduling the same key
     // also keeps D1 retries alive while the age-based pruning bound remains independent.
     await context.schedule("window", deadline + STATISTICS_WINDOW_MILLISECONDS);

@@ -763,9 +763,13 @@ export interface ModuleAlarmContext {
   statisticsChat?: ModuleStatisticsChat;
   /** Writes one privacy-safe host timeline observation with host-managed idempotency. */
   recordTimelineEvent?: (event: ModuleTimelineEvent) => Promise<void>;
+  /** Writes one privacy-safe host timeline observation and throws when D1 fails. */
+  recordTimelineEventStrict?: (event: ModuleTimelineEvent) => Promise<void>;
   /** Host-authenticated Helix counts; unavailable sources return null. */
   fetchViewerCount?: () => Promise<number | null>;
   fetchChattersTotal?: () => Promise<number | null>;
+  /** Fetches privacy-safe clips for one completed stream; unavailable sources return null for retry. */
+  fetchStreamClips?: (startedAt: string, endedAt: string) => Promise<readonly ModuleStreamClip[] | null>;
   /** Secret access bound to this alarm's channel and module. */
   secrets: ModuleSecretAccess;
   /** Ephemeral ballot access bound to this alarm's channel and module. */
@@ -866,6 +870,21 @@ export interface ModuleStatisticsWordBucket {
   batch: number;
 }
 
+export interface ModuleStatisticsClipImport {
+  streamId: string;
+  startedAt: string | null;
+  endedAt: string;
+}
+
+/** Clip fields safe for long-term timeline storage. Twitch creator and game metadata is excluded. */
+export interface ModuleStreamClip {
+  clipId: string;
+  title: string;
+  createdAt: string;
+  viewCount?: number;
+  durationSeconds?: number;
+}
+
 export type ModuleStatisticsStreamState = "online" | "offline" | "unknown";
 
 interface ModuleTimelineEventBase {
@@ -880,7 +899,16 @@ export type ModuleTimelineEvent =
       kind: "channel_metadata";
       detail: { title: string | null; category: { id: string; name: string | null } | null };
     })
-  | (ModuleTimelineEventBase & { kind: "clip_created"; detail: { clipId: string } })
+  | (ModuleTimelineEventBase & {
+      kind: "clip_created";
+      detail: {
+        clipId: string;
+        title?: string;
+        createdAt?: string;
+        viewCount?: number;
+        durationSeconds?: number;
+      };
+    })
   | (ModuleTimelineEventBase & { kind: "ad_break"; detail: { durationSeconds: number; startedAt: string } })
   | (ModuleTimelineEventBase & {
       kind: "emote_spike";
@@ -919,6 +947,11 @@ interface ModuleStatisticsChat {
   deleteWordBucket: (bucket: ModuleStatisticsWordBucket) => Promise<void>;
   pruneExpiredWordStreams: (now: number) => Promise<void>;
   hasWordStreams: () => Promise<boolean>;
+  markClipImportPending: (streamId: string, startedAt: string | null, endedAt: string) => Promise<void>;
+  listReadyClipImports: (now: number) => Promise<readonly ModuleStatisticsClipImport[]>;
+  completeClipImport: (streamId: string) => Promise<void>;
+  pruneExpiredClipImports: (now: number) => Promise<void>;
+  hasClipImports: () => Promise<boolean>;
 }
 
 type ModuleTimeoutOutcome = "applied" | "rejected" | "ambiguous" | "suppressed";
