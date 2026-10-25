@@ -65,13 +65,13 @@ describe("Module labels", () => {
     expect(module?.mandatory).toBe(true);
     expect(module?.navigationCategory).toBe("data");
     expect(module?.needsActiveChatters).toBe(true);
-    expect(module?.eventSubTypes).toEqual(["channel.chat.message", "stream.online", "channel.update"]);
+    expect(module?.eventSubTypes).toEqual(["channel.chat.message", "stream.online", "stream.offline", "channel.update"]);
     expect(moduleName("statistics", "de")).toBe("Statistiken");
     expect(moduleName("statistics", "en")).toBe("Statistics");
     expect(moduleDescription("statistics", "de")).toContain("ungefähre Zahl unterschiedlicher Chatter");
-    expect(moduleDescription("statistics", "de")).toContain("Dauerhaft gespeichert werden nur Fenstersummen");
+    expect(moduleDescription("statistics", "de")).toContain("Dauerhaft gespeichert werden Fenstersummen und eine kanalweite Liste der häufigsten Wörter");
     expect(moduleDescription("statistics", "en")).toContain("approximates distinct chatters");
-    expect(moduleDescription("statistics", "en")).toContain("Only window totals are retained");
+    expect(moduleDescription("statistics", "en")).toContain("Retained are window totals and a channel-wide list of the most frequent words");
     expect(module?.mandatoryReason?.de).toContain("immer aktiv");
     expect(module?.mandatoryReason?.en).toContain("always active");
   });

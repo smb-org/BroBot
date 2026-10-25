@@ -18,7 +18,7 @@ export const statisticsModule: BotModule<typeof settingsSchema> = {
   needsActiveChatters: true,
   settingsSchema,
   defaultSettings: {},
-  eventSubTypes: ["channel.chat.message", "stream.online", "channel.update"],
+  eventSubTypes: ["channel.chat.message", "stream.online", "stream.offline", "channel.update"],
   handleEvent: processStatisticsEvent,
   dryRunSilentReason: "activity_tracking",
   alarms: [{

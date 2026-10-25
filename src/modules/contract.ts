@@ -621,6 +621,8 @@ export interface ModuleExecutionContext {
   streamStateTransitionAccepted?: boolean;
   /** Stream identity captured before an accepted offline transition changed channel state. */
   streamSession?: { streamId: string | null; startedAt: string | null };
+  /** Marks this stream's anonymous word counts as ended after an accepted offline transition. */
+  statisticsChat?: Pick<ModuleStatisticsChat, "markWordStreamEnded">;
   streamState: () => Promise<ModuleStreamState>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
@@ -757,7 +759,7 @@ export interface ModuleAlarmContext {
   reconcileTimerSchedules?: (reason: ModuleScheduleInputChangeReason) => Promise<void>;
   /** Shared per-dispatch allowance for external provider requests. */
   externalFetchBudget?: ModuleExternalFetchBudget;
-  /** Absolute window counters, online time, and boundary samples held in the channel Durable Object. */
+  /** Absolute statistics windows and age-bounded word counts held in the channel Durable Object. */
   statisticsChat?: ModuleStatisticsChat;
   /** Writes one privacy-safe host timeline observation with host-managed idempotency. */
   recordTimelineEvent?: (event: ModuleTimelineEvent) => Promise<void>;
@@ -853,6 +855,19 @@ export interface ModuleStatisticsWindow {
   revision: number;
 }
 
+export interface ModuleStatisticsWordCount {
+  word: string;
+  count: number;
+  lastSeenAt: string;
+}
+
+export interface ModuleStatisticsWordBucket {
+  streamId: string;
+  batch: number;
+}
+
+export type ModuleStatisticsStreamState = "online" | "offline" | "unknown";
+
 interface ModuleTimelineEventBase {
   identity: string;
   occurredAt: string;
@@ -887,6 +902,23 @@ interface ModuleStatisticsChat {
   markWindowClean: (windowStart: string, revision: number) => Promise<void>;
   pruneExpiredWindows: (now: number) => Promise<void>;
   hasWindows: () => Promise<boolean>;
+  flushWordCounts: () => Promise<void>;
+  markWordStreamEnded: (streamId: string, endedAt: string) => Promise<void>;
+  reconcileWordStreams: (streamState: ModuleStatisticsStreamState, streamId: string | null, observedAt: number) => Promise<void>;
+  listMergeableWordBuckets: (
+    streamState: ModuleStatisticsStreamState,
+    streamId: string | null,
+    idleBefore: number,
+  ) => Promise<readonly ModuleStatisticsWordBucket[]>;
+  prepareWordBucketForMerge: (
+    bucket: ModuleStatisticsWordBucket,
+    streamState: ModuleStatisticsStreamState,
+    streamId: string | null,
+    idleBefore: number,
+  ) => Promise<readonly ModuleStatisticsWordCount[]>;
+  deleteWordBucket: (bucket: ModuleStatisticsWordBucket) => Promise<void>;
+  pruneExpiredWordStreams: (now: number) => Promise<void>;
+  hasWordStreams: () => Promise<boolean>;
 }
 
 type ModuleTimeoutOutcome = "applied" | "rejected" | "ambiguous" | "suppressed";

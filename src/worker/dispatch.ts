@@ -33,7 +33,7 @@ import type { TemplateVariable } from "../template";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { chatOutputSuppressionReason } from "./chat-output-gate";
 import { createModuleExternalFetchBudget } from "./external-fetch-budget";
-import { countStatisticsEmotes, statisticsWindowStart } from "../modules/statistics/domain";
+import { countStatisticsEmotes, statisticsTextFragments, statisticsWindowStart } from "../modules/statistics/domain";
 import { botAccessTokenFor } from "./twitch/bot-access";
 import { moduleBallots } from "./module-ballots";
 import { modulePoints } from "./module-points";
@@ -882,6 +882,7 @@ export const dispatchEventSubNotification = async (
               receivedAt: event.receivedAt,
               emotes: countStatisticsEmotes(event.payload),
               streamId: dispatchState.streamId,
+              textFragments: statisticsTextFragments(event.payload),
             });
           }
         }
@@ -1104,6 +1105,14 @@ export const dispatchEventSubNotification = async (
       }
       const validatedSettings: unknown = (module.settingsReadSchema ?? module.settingsSchema).parse(JSON.parse(settings));
       isCommandResponseHandler = commandRouteMatchesModule(module, event, validatedSettings);
+      const channelNamespace = environment.CHANNEL;
+      const statisticsChat = module.id === "statistics" && channelNamespace !== undefined
+        ? {
+          markWordStreamEnded: (streamId: string, endedAt: string) =>
+            channelNamespace.get(channelNamespace.idFromName(event.channelId))
+              .markStatisticsWordStreamEnded(streamId, endedAt),
+        }
+        : undefined;
       const moduleEvent: ModuleEvent = {
         channelId: event.channelId,
         subscriptionType: event.subscriptionType,
@@ -1175,6 +1184,7 @@ export const dispatchEventSubNotification = async (
             ...(streamStateTransitionAccepted && streamStateTransitionGeneration !== undefined
               ? { streamStateTransitionGeneration }
               : {}),
+            ...(statisticsChat === undefined ? {} : { statisticsChat }),
             ...(streamStateTransitionAccepted && event.subscriptionType === "stream.offline" && endingStreamDispatchState !== null
               ? { streamSession: { streamId: endingStreamDispatchState.streamId, startedAt: endingStreamDispatchState.streamStartedAt } }
               : {}),

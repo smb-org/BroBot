@@ -386,7 +386,10 @@ describe("lookupAndRefreshStreamState", () => {
         channelId: "kanal-a",
         getAlarmDeadline: vi.fn(() => Promise.resolve(alarmDeadline)),
         schedule,
-        statisticsChat: { hasWindows: vi.fn(() => Promise.resolve(false)) },
+        statisticsChat: {
+          hasWindows: vi.fn(() => Promise.resolve(false)),
+          hasWordStreams: vi.fn(() => Promise.resolve(false)),
+        },
       } as unknown as ModuleAlarmContext;
       const notifyScheduleInputsChanged = vi.fn(() =>
         reconcileStatisticsSchedule(statisticsContext, "stream_state"));

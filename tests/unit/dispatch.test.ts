@@ -852,6 +852,7 @@ describe("dispatch and execution", () => {
         receivedAt: "2026-09-19T12:07:41.000Z",
         emotes: 2,
         streamId: "live-1",
+        textFragments: ["hi"],
       });
     } finally {
       database.close();

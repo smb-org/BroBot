@@ -558,10 +558,10 @@ und Fenster bleiben unbegrenzt, weil sie aggregiert sind und keine
 Personendaten enthalten (Entscheidung 0003). Routenabfragen binden
 `channel_id`; `/history` liefert pro Messpunkt nur numerische Werte.
 
-### Kanalstatistiken und Stream-Timeline (#557/#558)
+### Kanalstatistiken, Stream-Timeline und Wortbaseline (#557/#558/#559)
 
 Das verpflichtende `statistics`-Modul abonniert `channel.chat.message`,
-`stream.online` und `channel.update` für jeden Kanal. Es zählt im Channel
+`stream.online`, `stream.offline` und `channel.update` für jeden Kanal. Es zählt im Channel
 Durable Object Nachrichten und Emote-Fragmente, ohne je Nachricht eine
 D1-Zeile zu schreiben. Die Fenster beginnen an UTC-Vielfachen von 300 s
 (`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
@@ -590,6 +590,38 @@ ein Fenster ohne Abtastung an seiner Grenze hat `NULL`. Es gibt
 keine per-window Personen-Hashes oder neue personenbezogene Speicherung.
 `channel_statistics` enthält nur Summen und wird unbegrenzt aufbewahrt; beim
 Löschen des Kanals greift `ON DELETE CASCADE` (Entscheidung 0003, Abschnitt 6).
+
+Für die Themen-Erkennung tokenisiert das DO ausschließlich Textfragmente und
+zählt Wörter je Stream. NFKC-Normalisierung, Kleinschreibung und das Entfernen
+von Satzzeichen, Links, Mentions und Emote-Codes laufen vor einer gepflegten
+deutschen/englischen Stopwortliste; Emote-, Mention- und Cheermote-Fragmente
+werden übersprungen. Tokens mit weniger als drei oder mehr als 40 Zeichen,
+Zahlen und Stopwörter werden ausgelassen; kombinierende Unicode-Zeichen
+bleiben in Wörtern erhalten. Jedes normalisierte Wort zählt höchstens einmal
+pro Nachricht über alle Textfragmente hinweg, maximal 20 verschiedene Wörter
+pro Nachricht. Nachrichten, Nutzernamen und Mentions werden nicht gespeichert.
+
+Das DO puffert Wortzähler in einer instanzgebundenen Map und schreibt sie erst
+beim Fünf-Minuten-Statistik-Alarm mit mehrzeiligen SQLite-Upserts. Eine Eviction
+vor dem Alarm kann ungefähr das ungeflushte Intervall verlieren. Je Stream
+speichert das DO höchstens 20.000 verschiedene Wörter und erhöht bei erreichtem
+Limit nur bekannte Wörter. Der Alarm merged einen Bucket nur, wenn D1 den Kanal
+als offline oder mit einer anderen Stream-ID meldet und seit mindestens
+15 Minuten kein Zuwachs im Bucket erfolgte. Fensterzustand ist dafür nicht
+erforderlich. Vor jedem D1-Aufruf rotiert das DO zur nächsten Bucket-Nummer;
+späte Zähler bleiben so für einen späteren Merge erhalten. Höchstens die 1.000
+häufigsten Wörter eines Buckets gelangen in die kanalweite Baseline. Marker je
+Stream und Batch machen Wiederholungen idempotent; je Wort speichert die
+Baseline nur Gesamtzahl und letzten Zeitpunkt. Ein noch gepufferter Zuwachs
+zählt für die 15-Minuten-Ruhe mit. Die Baseline behält dauerhaft die 5.000 häufigsten
+Wörter pro Kanal.
+
+Nach erfolgreichem Merge löscht das DO nur den jeweiligen Bucket. Nach
+24 Stunden ab bestätigtem Streamende oder Offline-Erkennung löscht der nächste
+Statistik-Alarm alle Streamdaten, unabhängig von D1-Erfolg. Ein Merge-Batch
+umfasst vier D1-Anweisungen; pro geändertem Statistikfenster kommt ein
+absoluter Fenster-Upsert hinzu. Wortzählungen schreiben nicht pro Nachricht
+nach DO-SQLite.
 
 Die Worker-Host-Tabelle `channel_timeline_events` speichert rohe
 Stream-Lifecycle-Ereignisse (`stream.online` mit Stream-ID und `started_at`,

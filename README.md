@@ -16,6 +16,9 @@ adding a row to the `channels` table, not by changing configuration.
   title/category observations, confirmed clip IDs, consented ad breaks, and
   emote spikes with unlimited retention and channel deletion cascade. Analysis
   derives drops and metadata transitions from those observations.
+  The statistics module also keeps a bounded, channel-wide word-frequency
+  baseline in D1, without storing chat text or usernames; the baseline
+  retains the top 5,000 words.
 - **Dashboard**: React 19 + Base UI, built with Vite,
   served as static assets by the same Worker.
 - **Overlay**: a small, transparent, lazily-loaded React view for OBS or
