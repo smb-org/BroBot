@@ -75,3 +75,26 @@ export interface StatisticsStreamDetailResponse {
   bitrateWindows: readonly StatisticsBitrateWindow[];
   events: readonly StatisticsStreamEvent[];
 }
+
+interface StatisticsWordFrequency {
+  /** Position within the current filtered result set, ordered by count and word. */
+  rank: number;
+  word: string;
+  count: number;
+  /** Share of every stored word count for this channel, before display filters. */
+  share: number;
+  lastSeenAt: string;
+}
+
+export interface StatisticsWordsResponse {
+  words: readonly StatisticsWordFrequency[];
+  page: number;
+  pageSize: number;
+  /** Number of words after search and filler filters. */
+  total: number;
+  totalPages: number;
+  /** Sum of all stored counts, before search and filler filters. */
+  totalCount: number;
+  /** Highest count among all stored words, used to scale the share bars. */
+  maxCount: number;
+}

@@ -63,6 +63,8 @@ const iconNames: Readonly<Record<IconName, true>> = {
   "player-pause": true,
   "player-play": true,
   "clock-hour-4": true,
+  "chevron-left": true,
+  "chevron-right": true,
   info: true,
   eye: true,
   cause: true,

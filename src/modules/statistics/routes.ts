@@ -4,8 +4,12 @@ import { z } from "zod";
 import type { ModuleRouteEnvironment } from "../contract";
 import type { StatisticsBitrateWindow, StatisticsStreamWindow, StatisticsTimelineEvent } from "./contracts";
 import { decodeStreamCursor, deriveStreamEvents, encodeStreamCursor, groupStatisticsWindows, matchBitrateWindows, paginateStreamSummaries } from "./streams-domain";
+import { STATISTICS_CHAT_FILLER_WORDS } from "./filler-words";
 
 const WINDOW_MILLISECONDS = 5 * 60_000;
+const WORD_PAGE_SIZE = 100;
+const WORD_MAX_PAGE = 50;
+const WORD_MAX_SEARCH_LENGTH = 80;
 
 const listParamsSchema = z.object({ channelId: z.string().trim().min(1).max(128) });
 const listQuerySchema = z.object({
@@ -15,6 +19,11 @@ const listQuerySchema = z.object({
 const streamParamsSchema = z.object({
   channelId: z.string().trim().min(1).max(128),
   streamId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/u),
+});
+const wordsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(WORD_MAX_PAGE).default(1),
+  search: z.string().trim().max(WORD_MAX_SEARCH_LENGTH).default(""),
+  hideFillers: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
 });
 
 interface StreamCandidateRow {
@@ -45,6 +54,21 @@ interface BitrateWindowRow {
   bitrate_min: number;
   bitrate_max: number;
   bitrate_p10: number;
+}
+
+interface WordFrequencyRow {
+  word: string;
+  total_count: number;
+  last_seen_at: string;
+}
+
+interface WordFrequencyTotalsRow {
+  total_count: number;
+  max_count: number;
+}
+
+interface WordFrequencyCountRow {
+  total: number;
 }
 
 const statisticsWindow = (row: StreamWindowRow): StatisticsStreamWindow => ({
@@ -219,5 +243,65 @@ statisticsRoutes.get("/streams/:streamId", async (context) => {
     windows,
     bitrateWindows: matchBitrateWindows(bitrateWindows, startedAt, endedAt),
     events: deriveStreamEvents(timeline, startedAt, endedAt, windows),
+  });
+});
+
+statisticsRoutes.get("/words", async (context) => {
+  const params = listParamsSchema.safeParse({ channelId: context.req.param("channelId") });
+  const query = wordsQuerySchema.safeParse({
+    ...(context.req.query("page") === undefined ? {} : { page: context.req.query("page") }),
+    search: context.req.query("search") ?? "",
+    hideFillers: context.req.query("hideFillers") ?? "true",
+  });
+  if (!params.success || !query.success) return context.json({ error: "statistics_words_query_invalid" }, 400);
+
+  const { channelId } = params.data;
+  const search = query.data.search.normalize("NFKC").toLowerCase();
+  // Static SQL: an empty search or a disabled filler filter switches its condition off.
+  const filters = [
+    channelId, search, search, query.data.hideFillers ? 1 : 0, JSON.stringify(STATISTICS_CHAT_FILLER_WORDS),
+  ];
+  const offset = (query.data.page - 1) * WORD_PAGE_SIZE;
+  const [countRow, totalRow, wordRows] = await Promise.all([
+    context.env.DB.prepare(
+      `SELECT COUNT(*) AS total
+         FROM channel_word_frequency_baseline
+        WHERE channel_id = ?
+          AND (? = '' OR instr(word, ?) > 0)
+          AND (? = 0 OR word NOT IN (SELECT value FROM json_each(?)))`,
+    ).bind(...filters).first<WordFrequencyCountRow>(),
+    context.env.DB.prepare(
+      `SELECT COALESCE(SUM(total_count), 0) AS total_count,
+              COALESCE(MAX(total_count), 0) AS max_count
+         FROM channel_word_frequency_baseline
+        WHERE channel_id = ?`,
+    ).bind(channelId).first<WordFrequencyTotalsRow>(),
+    context.env.DB.prepare(
+      `SELECT word, total_count, last_seen_at
+         FROM channel_word_frequency_baseline
+        WHERE channel_id = ?
+          AND (? = '' OR instr(word, ?) > 0)
+          AND (? = 0 OR word NOT IN (SELECT value FROM json_each(?)))
+        ORDER BY total_count DESC, word ASC
+        LIMIT ? OFFSET ?`,
+    ).bind(...filters, WORD_PAGE_SIZE, offset).all<WordFrequencyRow>(),
+  ]);
+  const total = countRow?.total ?? 0;
+  const totalCount = totalRow?.total_count ?? 0;
+  const maxCount = totalRow?.max_count ?? 0;
+  return context.json({
+    words: wordRows.results.map((row, index) => ({
+      rank: offset + index + 1,
+      word: row.word,
+      count: row.total_count,
+      share: totalCount === 0 ? 0 : row.total_count / totalCount,
+      lastSeenAt: row.last_seen_at,
+    })),
+    page: query.data.page,
+    pageSize: WORD_PAGE_SIZE,
+    total,
+    totalPages: Math.ceil(total / WORD_PAGE_SIZE),
+    totalCount,
+    maxCount,
   });
 });

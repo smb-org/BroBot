@@ -227,7 +227,7 @@ const registeredModuleEntries = (
         sidebarVisible: visibleModules.has(module.id),
       }];
     }
-    return entries.map((entry) => ({
+    return entries.map((entry, index) => ({
       id: `module:${module.id}:${entry.id}`,
       moduleId: module.id,
       category,
@@ -236,7 +236,7 @@ const registeredModuleEntries = (
       ...(entry.description === undefined ? {} : { description: entry.description[language] }),
       iconKind: entry.iconKind,
       keywords: entry.keywords ?? [],
-      route,
+      route: entries.length > 1 && index > 0 ? { ...route, pageId: entry.id } : route,
       sidebarVisible: visibleModules.has(module.id),
     }));
   });
