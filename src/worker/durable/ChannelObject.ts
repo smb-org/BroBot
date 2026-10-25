@@ -82,6 +82,7 @@ import type {
   ModulePointRoundAnnouncement,
   ModulePointRoundResult,
   ModuleScheduleInputChangeReason,
+  ModuleStatisticsWindow,
   PointActiveRound,
   PointJoinResult,
   PointRoundAnswerResult,
@@ -90,7 +91,11 @@ import type {
   PointsKind,
   PointsMovement,
 } from "../../modules/contract";
-import type { StatisticsChatActivity } from "../../modules/statistics/domain";
+import { STATISTICS_WINDOW_MILLISECONDS, statisticsWindowStartMs, type StatisticsChatActivity } from "../../modules/statistics/domain";
+import {
+  EVENTSUB_REPLAY_WINDOW_MILLISECONDS,
+  EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS,
+} from "../eventsub-constants";
 import { MODULES } from "../../modules/registry";
 import {
   ACTIVE_CHATTER_EXPIRY_HANDLER,
@@ -327,11 +332,12 @@ const timerSkipReceiptsForSchedule = (
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
 const STATISTICS_CHAT_WINDOW_TABLE = "statistics_chat_windows";
-const STATISTICS_WINDOW_CHATTER_TABLE = "statistics_window_chatters";
-const STATISTICS_WINDOW_CHATTER_KEY_TABLE = "statistics_window_chatter_keys";
+const STATISTICS_STREAM_STATE_TABLE = "statistics_stream_state";
+const STATISTICS_WINDOW_RETENTION_MS = 60 * 60 * 1_000;
 const EVENTSUB_MESSAGE_ID_TABLE = "eventsub_message_ids";
-const EVENTSUB_MESSAGE_ID_RETENTION_MS = 20 * 60 * 1_000;
-const EVENTSUB_MESSAGE_ID_LIMIT = 4_096;
+const EVENTSUB_MESSAGE_ID_COUNT_TABLE = "eventsub_message_id_count";
+const EVENTSUB_MESSAGE_ID_RETENTION_MS = EVENTSUB_REPLAY_WINDOW_MILLISECONDS + 2 * EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS;
+const EVENTSUB_MESSAGE_ID_LIMIT = 100_000;
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
 const ACTIVE_CHATTER_EXPIRY_KEY = "host:active_chatters_expiry";
 const ACTIVE_CHATTER_RETENTION_MS = 60 * 60 * 1_000;
@@ -750,6 +756,7 @@ export class ChannelObject extends DurableObject<Env> {
   private timerScheduleInitialization: Promise<void> | null = null;
   private timerOccurrenceQueues = new Map<string, Promise<void>>();
   private activeChatterSchemaReady = false;
+  private statisticsSchemaReady = false;
   private eventSubMessageIdSchemaReady = false;
   private pointsSchemaReady = false;
   private pointsInitialized = false;
@@ -916,33 +923,81 @@ export class ChannelObject extends DurableObject<Env> {
         created_at TEXT NOT NULL
       )`,
     );
+    this.activeChatterSchemaReady = true;
+  }
+
+  private ensureStatisticsSchema(): void {
+    if (this.statisticsSchemaReady) return;
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ${STATISTICS_CHAT_WINDOW_TABLE} (
         window_start INTEGER PRIMARY KEY,
-        active_messages INTEGER NOT NULL DEFAULT 0,
-        active_emotes INTEGER NOT NULL DEFAULT 0,
-        pending_messages INTEGER NOT NULL DEFAULT 0,
-        pending_emotes INTEGER NOT NULL DEFAULT 0
+        stream_id TEXT,
+        messages INTEGER NOT NULL DEFAULT 0,
+        emotes INTEGER NOT NULL DEFAULT 0,
+        online_milliseconds INTEGER NOT NULL DEFAULT 0,
+        viewer_count INTEGER,
+        chatters INTEGER,
+        active_chatters INTEGER,
+        metrics_sampled INTEGER NOT NULL DEFAULT 0,
+        active_chatters_sampled INTEGER NOT NULL DEFAULT 0,
+        revision INTEGER NOT NULL DEFAULT 0,
+        dirty INTEGER NOT NULL DEFAULT 1,
+        complete INTEGER NOT NULL DEFAULT 0
+      )`,
+    );
+    const columns = new Set(this.ctx.storage.sql.exec<{ name: string }>(
+      `PRAGMA table_info(${STATISTICS_CHAT_WINDOW_TABLE})`,
+    ).toArray().map(({ name }) => name));
+    const requiredColumns = [
+      ["stream_id", "TEXT"],
+      ["messages", "INTEGER NOT NULL DEFAULT 0"],
+      ["emotes", "INTEGER NOT NULL DEFAULT 0"],
+      ["online_milliseconds", "INTEGER NOT NULL DEFAULT 0"],
+      ["viewer_count", "INTEGER"],
+      ["chatters", "INTEGER"],
+      ["active_chatters", "INTEGER"],
+      ["metrics_sampled", "INTEGER NOT NULL DEFAULT 0"],
+      ["active_chatters_sampled", "INTEGER NOT NULL DEFAULT 0"],
+      ["revision", "INTEGER NOT NULL DEFAULT 0"],
+      ["dirty", "INTEGER NOT NULL DEFAULT 1"],
+      ["complete", "INTEGER NOT NULL DEFAULT 0"],
+    ] as const;
+    for (const [name, definition] of requiredColumns) {
+      if (!columns.has(name)) {
+        this.ctx.storage.sql.exec(
+          `ALTER TABLE ${STATISTICS_CHAT_WINDOW_TABLE} ADD COLUMN ${name} ${definition}`,
+        );
+      }
+    }
+    if (columns.has("active_messages") && columns.has("pending_messages") &&
+        columns.has("active_emotes") && columns.has("pending_emotes")) {
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
+            SET messages = active_messages + pending_messages,
+                emotes = active_emotes + pending_emotes,
+                online_milliseconds = CASE WHEN active_messages + pending_messages > 0 THEN 1000 ELSE 0 END,
+                dirty = CASE WHEN active_messages + pending_messages > 0 OR pending_messages > 0 THEN 1 ELSE dirty END,
+                complete = CASE WHEN window_start + ? <= ? THEN 1 ELSE complete END`,
+        STATISTICS_WINDOW_MILLISECONDS,
+        Date.now(),
+      );
+    }
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${STATISTICS_STREAM_STATE_TABLE} (
+        slot INTEGER PRIMARY KEY CHECK (slot = 1),
+        online_since INTEGER,
+        stream_id TEXT
       )`,
     );
     this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${STATISTICS_WINDOW_CHATTER_TABLE} (
-        window_start INTEGER NOT NULL,
-        hmac TEXT NOT NULL,
-        PRIMARY KEY (window_start, hmac)
-      )`,
+      `CREATE INDEX IF NOT EXISTS statistics_chat_windows_flush_idx
+       ON ${STATISTICS_CHAT_WINDOW_TABLE} (dirty, complete, window_start)`,
     );
     this.ctx.storage.sql.exec(
-      `CREATE INDEX IF NOT EXISTS statistics_window_chatters_window_idx
-       ON ${STATISTICS_WINDOW_CHATTER_TABLE} (window_start)`,
+      "DROP TABLE IF EXISTS statistics_window_chatters",
     );
-    this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${STATISTICS_WINDOW_CHATTER_KEY_TABLE} (
-        window_start INTEGER PRIMARY KEY,
-        key_hex TEXT NOT NULL
-      )`,
-    );
-    this.activeChatterSchemaReady = true;
+    this.ctx.storage.sql.exec("DROP TABLE IF EXISTS statistics_window_chatter_keys");
+    this.statisticsSchemaReady = true;
   }
 
   private ensureEventSubMessageIdTable(): void {
@@ -956,6 +1011,26 @@ export class ChannelObject extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       `CREATE INDEX IF NOT EXISTS eventsub_message_ids_received_idx
        ON ${EVENTSUB_MESSAGE_ID_TABLE} (received_at)`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${EVENTSUB_MESSAGE_ID_COUNT_TABLE} (
+        slot INTEGER PRIMARY KEY CHECK (slot = 1),
+        count INTEGER NOT NULL CHECK (count >= 0)
+      )`,
+    );
+    this.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO ${EVENTSUB_MESSAGE_ID_COUNT_TABLE} (slot, count)
+       VALUES (1, (SELECT COUNT(*) FROM ${EVENTSUB_MESSAGE_ID_TABLE}))`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TRIGGER IF NOT EXISTS eventsub_message_ids_count_insert
+       AFTER INSERT ON ${EVENTSUB_MESSAGE_ID_TABLE}
+       BEGIN UPDATE ${EVENTSUB_MESSAGE_ID_COUNT_TABLE} SET count = count + 1 WHERE slot = 1; END`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TRIGGER IF NOT EXISTS eventsub_message_ids_count_delete
+       AFTER DELETE ON ${EVENTSUB_MESSAGE_ID_TABLE}
+       BEGIN UPDATE ${EVENTSUB_MESSAGE_ID_COUNT_TABLE} SET count = count - 1 WHERE slot = 1; END`,
     );
     this.eventSubMessageIdSchemaReady = true;
   }
@@ -2355,28 +2430,6 @@ export class ChannelObject extends DurableObject<Env> {
     return Number.isFinite(createdAt) ? { keyHex: row.key_hex, createdAt } : null;
   }
 
-  private statisticsWindowChatterKeySync(windowStart: number): string {
-    const existing = this.ctx.storage.sql.exec<{ key_hex: string }>(
-      `SELECT key_hex FROM ${STATISTICS_WINDOW_CHATTER_KEY_TABLE} WHERE window_start = ?`,
-      windowStart,
-    ).toArray()[0];
-    if (existing !== undefined && /^[0-9a-f]{64}$/iu.test(existing.key_hex)) return existing.key_hex;
-    const keyHex = Array.from(crypto.getRandomValues(new Uint8Array(32)),
-      (byte) => byte.toString(16).padStart(2, "0")).join("");
-    this.ctx.storage.sql.exec(
-      `INSERT OR REPLACE INTO ${STATISTICS_WINDOW_CHATTER_KEY_TABLE} (window_start, key_hex) VALUES (?, ?)`,
-      windowStart,
-      keyHex,
-    );
-    this.ctx.storage.sql.exec(
-      `INSERT OR IGNORE INTO ${STATISTICS_CHAT_WINDOW_TABLE}
-        (window_start, active_messages, active_emotes, pending_messages, pending_emotes)
-       VALUES (?, 0, 0, 0, 0)`,
-      windowStart,
-    );
-    return keyHex;
-  }
-
   private activeChatterKeyRowSnapshot(): { keyHex: string; createdAt: number } | null {
     try {
       const row = this.ctx.storage.sql.exec<{ key_hex: string; created_at: string }>(
@@ -2410,6 +2463,74 @@ export class ChannelObject extends DurableObject<Env> {
       hmac,
       seenAt,
       seenAt,
+    );
+  }
+
+  private ensureStatisticsWindowSync(windowStart: number, streamId: string | null): void {
+    this.ensureStatisticsSchema();
+    this.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO ${STATISTICS_CHAT_WINDOW_TABLE} (window_start, stream_id)
+       VALUES (?, ?)`,
+      windowStart,
+      streamId,
+    );
+  }
+
+  private statisticsStreamStateSync(): { onlineSince: number | null; streamId: string | null } | null {
+    this.ensureStatisticsSchema();
+    const row = this.ctx.storage.sql.exec<{ online_since: number | null; stream_id: string | null }>(
+      `SELECT online_since, stream_id FROM ${STATISTICS_STREAM_STATE_TABLE} WHERE slot = 1`,
+    ).toArray()[0];
+    return row === undefined ? null : { onlineSince: row.online_since, streamId: row.stream_id };
+  }
+
+  private accumulateStatisticsOnlineTimeSync(start: number, end: number, streamId: string | null): void {
+    if (end <= start) return;
+    let cursor = start;
+    while (cursor < end) {
+      const windowStart = statisticsWindowStartMs(cursor);
+      const segmentEnd = Math.min(end, windowStart + STATISTICS_WINDOW_MILLISECONDS);
+      this.ensureStatisticsWindowSync(windowStart, streamId);
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
+            SET online_milliseconds = online_milliseconds + ?,
+                stream_id = COALESCE(stream_id, ?),
+                dirty = 1,
+                revision = revision + 1,
+                complete = CASE WHEN ? >= window_start + ? THEN 1 ELSE complete END
+          WHERE window_start = ?`,
+        segmentEnd - cursor,
+        streamId,
+        segmentEnd,
+        STATISTICS_WINDOW_MILLISECONDS,
+        windowStart,
+      );
+      cursor = segmentEnd;
+    }
+  }
+
+  private activeChattersAtBoundarySync(boundary: number): number | null {
+    this.ensureActiveChatterTable();
+    const key = this.activeChatterKeyRowSync();
+    if (key === null || key.createdAt > boundary || boundary - key.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS) {
+      return null;
+    }
+    return this.ctx.storage.sql.exec<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM ${ACTIVE_CHATTER_TABLE}
+        WHERE last_seen_at >= ? AND last_seen_at < ?`,
+      new Date(boundary - STATISTICS_WINDOW_MILLISECONDS).toISOString(),
+      new Date(boundary).toISOString(),
+    ).one().count;
+  }
+
+  private async ensureStatisticsWindowAlarmScheduled(now: number): Promise<void> {
+    const deadline = await this.getModuleAlarmDeadline("statistics", "window");
+    if (deadline !== null) return;
+    await this.scheduleModuleAlarm(
+      "statistics",
+      "window",
+      "window",
+      statisticsWindowStartMs(now) + STATISTICS_WINDOW_MILLISECONDS,
     );
   }
 
@@ -3257,15 +3378,17 @@ export class ChannelObject extends DurableObject<Env> {
       ...(alarmPlanSequence === undefined ? {} : { alarmPlanSequence }),
       ...(streamGeneration === undefined ? {} : { streamGeneration }),
       externalFetchBudget,
-      activeChatters: {
-        countBetween: (windowStart, windowEnd) => this.getActiveChatterCountBetween(windowStart, windowEnd),
-      },
       statisticsChat: {
-        beginWindowFlush: (windowStart) => this.beginStatisticsChatWindowFlush(windowStart),
-        finishWindowFlush: (windowStart) => this.finishStatisticsChatWindowFlush(windowStart),
-        listDirtyWindowsBefore: (windowStart, limit) => this.listDirtyStatisticsWindowsBefore(windowStart, limit),
-        pruneRetiredWindowsBefore: (cutoff, limit) => this.pruneRetiredStatisticsWindowsBefore(cutoff, limit),
-        clearWindowChattersThrough: (windowEnd) => this.clearStatisticsWindowChattersThrough(windowEnd),
+        startOnlineSegment: (startedAt, streamId) => this.startStatisticsOnlineSegment(startedAt, streamId),
+        stopOnlineSegment: (endedAt) => this.stopStatisticsOnlineSegment(endedAt),
+        advanceToBoundary: (boundary, streamIsOnline) => this.advanceStatisticsToBoundary(boundary, streamIsOnline),
+        listDirtyCompletedWindows: () => this.listDirtyCompletedStatisticsWindows(),
+        readWindow: (windowStart) => this.readStatisticsWindow(windowStart),
+        saveWindowMetrics: (windowStart, viewerCount, chatters) =>
+          this.saveStatisticsWindowMetrics(windowStart, viewerCount, chatters),
+        markWindowClean: (windowStart, revision) => this.markStatisticsWindowClean(windowStart, revision),
+        pruneExpiredWindows: (now) => this.pruneExpiredStatisticsWindows(now),
+        hasWindows: () => this.hasStatisticsWindows(),
       },
       fetchViewerCount: () => fetchLiveViewerCount(this.env, channelId, externalFetchBudget),
       fetchChattersTotal: () => fetchLiveChattersTotal(this.env, channelId, externalFetchBudget),
@@ -3469,41 +3592,51 @@ export class ChannelObject extends DurableObject<Env> {
       : null;
     const statisticsWindowStart = statistics === undefined ? Number.NaN : Date.parse(statistics.windowStart);
     const statisticsEmotesValid = statistics !== undefined && Number.isSafeInteger(statistics.emotes) && statistics.emotes >= 0;
-    const recordStatistics = (chatterHmac?: string): void => {
+    const recordStatistics = (): void => {
       if (statistics === undefined) return;
       if (!Number.isFinite(statisticsWindowStart) || !statisticsEmotesValid) return;
-      this.ctx.storage.sql.exec(
-        `INSERT INTO ${STATISTICS_CHAT_WINDOW_TABLE}
-          (window_start, active_messages, active_emotes, pending_messages, pending_emotes)
-         VALUES (?, 1, ?, 0, 0)
-         ON CONFLICT(window_start) DO UPDATE SET
-           active_messages = active_messages + 1,
-           active_emotes = active_emotes + excluded.active_emotes`,
-        statisticsWindowStart,
-        statistics.emotes,
-      );
-      if (chatterHmac !== undefined) {
+      this.ensureStatisticsSchema();
+      this.ensureStatisticsWindowSync(statisticsWindowStart, statistics.streamId);
+      const stream = this.statisticsStreamStateSync();
+      if (stream?.onlineSince === null || stream === null) {
         this.ctx.storage.sql.exec(
-          `INSERT OR IGNORE INTO ${STATISTICS_WINDOW_CHATTER_TABLE} (window_start, hmac) VALUES (?, ?)`,
-          statisticsWindowStart,
-          chatterHmac,
+          `INSERT OR REPLACE INTO ${STATISTICS_STREAM_STATE_TABLE} (slot, online_since, stream_id)
+           VALUES (1, ?, ?)`,
+          now,
+          statistics.streamId,
         );
       }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO ${STATISTICS_CHAT_WINDOW_TABLE}
+          (window_start, stream_id, messages, emotes, online_milliseconds, revision, dirty)
+         VALUES (?, ?, 1, ?, 0, 1, 1)
+         ON CONFLICT(window_start) DO UPDATE SET
+           stream_id = COALESCE(statistics_chat_windows.stream_id, excluded.stream_id),
+           messages = statistics_chat_windows.messages + 1,
+           emotes = statistics_chat_windows.emotes + excluded.emotes,
+           revision = statistics_chat_windows.revision + 1,
+           dirty = 1`,
+        statisticsWindowStart,
+        statistics.streamId,
+        statistics.emotes,
+      );
     };
     if (userIdForTracking === null) {
-      // The window counters live in the same SQLite schema; messages without statistics need no tables.
-      if (statistics !== undefined) this.ensureActiveChatterTable();
-      return this.ctx.storage.transactionSync(() => {
+      const activityCount = this.ctx.storage.transactionSync(() => {
         recordStatistics();
         return this.incrementChatActivityCountSync();
       });
+      if (statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid) {
+        await this.ensureStatisticsWindowAlarmScheduled(now);
+      }
+      return activityCount;
     }
 
-    return await this.ctx.blockConcurrencyWhile(async () => {
+    const activityCount = await this.ctx.blockConcurrencyWhile(async () => {
       this.ensureActiveChatterTable();
-      const statisticsWindowKey = statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid
-        ? this.ctx.storage.transactionSync(() => this.statisticsWindowChatterKeySync(statisticsWindowStart))
-        : null;
+      if (statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid) {
+        this.ensureStatisticsSchema();
+      }
       const current = this.activeChatterKeyRowSync();
       const rotating = current === null || now - current.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS;
       const keyHex = rotating
@@ -3511,9 +3644,6 @@ export class ChannelObject extends DurableObject<Env> {
         : current.keyHex;
       const keyCreatedAt = rotating ? now : current.createdAt;
       const hmac = await activeChatterKey(keyHex, this.ownChannelId() ?? "", userIdForTracking);
-      const statisticsHmac = statisticsWindowKey === null
-        ? undefined
-        : await activeChatterKey(statisticsWindowKey, this.ownChannelId() ?? "", userIdForTracking);
       const currentSweep = rotating ? null : this.activeChatterNextSweepSync(keyCreatedAt);
       const preflightDeadline = Math.min(
         currentSweep ?? Number.POSITIVE_INFINITY,
@@ -3525,9 +3655,12 @@ export class ChannelObject extends DurableObject<Env> {
         await this.ensurePlatformActiveChatterAlarm(preflightDeadline);
       } catch (error: unknown) {
         this.ctx.storage.transactionSync(() => {
-          recordStatistics(statisticsHmac);
+          recordStatistics();
           this.incrementChatActivityCountSync();
         });
+        if (statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid) {
+          await this.ensureStatisticsWindowAlarmScheduled(now);
+        }
         throw error;
       }
       return this.ctx.storage.transactionSync(() => {
@@ -3548,203 +3681,252 @@ export class ChannelObject extends DurableObject<Env> {
         const nextSweep = this.activeChatterNextSweepSync(keyCreatedAt);
         if (nextSweep === null) this.clearActiveChatterExpiryEntrySync();
         else this.writeActiveChatterExpiryEntrySync(nextSweep);
-        recordStatistics(statisticsHmac);
+        recordStatistics();
         return this.incrementChatActivityCountSync();
       });
     });
-  }
-
-  public getStatisticsChatWindow(
-    windowStart: string,
-  ): Promise<{ messages: number; emotes: number }> {
-    const parsed = Date.parse(windowStart);
-    if (!Number.isFinite(parsed)) return Promise.resolve({ messages: 0, emotes: 0 });
-    this.ensureActiveChatterTable();
-    const row = this.ctx.storage.sql.exec<{
-      active_messages: number;
-      active_emotes: number;
-      pending_messages: number;
-      pending_emotes: number;
-    }>(
-      `SELECT active_messages, active_emotes, pending_messages, pending_emotes
-         FROM ${STATISTICS_CHAT_WINDOW_TABLE} WHERE window_start = ?`,
-      parsed,
-    ).toArray()[0];
-    return Promise.resolve(row === undefined
-      ? { messages: 0, emotes: 0 }
-      : {
-        messages: row.active_messages + row.pending_messages,
-        emotes: row.active_emotes + row.pending_emotes,
-      });
-  }
-
-  public clearStatisticsChatWindow(windowStart: string): Promise<void> {
-    const parsed = Date.parse(windowStart);
-    if (!Number.isFinite(parsed)) return Promise.resolve();
-    this.ensureActiveChatterTable();
-    this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.sql.exec(
-        `DELETE FROM ${STATISTICS_CHAT_WINDOW_TABLE} WHERE window_start = ?`,
-        parsed,
-      );
-      this.ctx.storage.sql.exec(
-        `DELETE FROM ${STATISTICS_WINDOW_CHATTER_TABLE} WHERE window_start = ?`,
-        parsed,
-      );
-      this.ctx.storage.sql.exec(
-        `DELETE FROM ${STATISTICS_WINDOW_CHATTER_KEY_TABLE} WHERE window_start = ?`,
-        parsed,
-      );
-    });
-    return Promise.resolve();
-  }
-
-  public beginStatisticsChatWindowFlush(windowStart: string): Promise<{
-    messages: number;
-    emotes: number;
-    activeChatters: number | null;
-    hasNew: boolean;
-  }> {
-    const parsed = Date.parse(windowStart);
-    if (!Number.isFinite(parsed)) {
-      return Promise.resolve({ messages: 0, emotes: 0, activeChatters: null, hasNew: false });
+    if (statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid) {
+      await this.ensureStatisticsWindowAlarmScheduled(now);
     }
-    this.ensureActiveChatterTable();
-    return Promise.resolve(this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.sql.exec(
-        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
-            SET pending_messages = pending_messages + active_messages,
-                pending_emotes = pending_emotes + active_emotes,
-                active_messages = 0,
-                active_emotes = 0
-          WHERE window_start = ?`,
-        parsed,
-      );
-      const counters = this.ctx.storage.sql.exec<{
-        pending_messages: number;
-        pending_emotes: number;
-      }>(
-        `SELECT pending_messages, pending_emotes
-           FROM ${STATISTICS_CHAT_WINDOW_TABLE} WHERE window_start = ?`,
-        parsed,
-      ).toArray()[0];
-      const activeChatters = this.ctx.storage.sql.exec<{ count: number }>(
-        `SELECT COUNT(*) AS count FROM ${STATISTICS_WINDOW_CHATTER_TABLE} WHERE window_start = ?`,
-        parsed,
-      ).one().count;
-      const messages = counters?.pending_messages ?? 0;
-      const emotes = counters?.pending_emotes ?? 0;
-      const currentActiveChatters = activeChatters > 0
-        ? activeChatters
-        : messages > 0 && this.activeChatterKeyRowSync() === null ? null : 0;
-      return { messages, emotes, activeChatters: currentActiveChatters, hasNew: messages > 0 };
-    }));
+    return activityCount;
   }
 
-  public finishStatisticsChatWindowFlush(windowStart: string): Promise<void> {
-    const parsed = Date.parse(windowStart);
-    if (!Number.isFinite(parsed)) return Promise.resolve();
-    this.ensureActiveChatterTable();
+  public startStatisticsOnlineSegment(startedAt: string, streamId: string | null): Promise<void> {
+    const start = Date.parse(startedAt);
+    if (!Number.isFinite(start)) return Promise.resolve();
+    this.ensureStatisticsSchema();
     this.ctx.storage.transactionSync(() => {
+      const current = this.statisticsStreamStateSync();
+      if (current?.onlineSince !== null && current?.onlineSince !== undefined && current.streamId === streamId) return;
+      const windowStart = statisticsWindowStartMs(start);
+      this.ensureStatisticsWindowSync(windowStart, streamId);
       this.ctx.storage.sql.exec(
         `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
-            SET pending_messages = 0, pending_emotes = 0
+            SET stream_id = ?, complete = 0, dirty = 1, revision = revision + 1
           WHERE window_start = ?`,
-        parsed,
+        streamId,
+        windowStart,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT OR REPLACE INTO ${STATISTICS_STREAM_STATE_TABLE} (slot, online_since, stream_id)
+         VALUES (1, ?, ?)`,
+        start,
+        streamId,
       );
     });
     return Promise.resolve();
   }
 
-  public listDirtyStatisticsWindowsBefore(windowStart: string, limit: number): Promise<readonly string[]> {
-    const parsed = Date.parse(windowStart);
-    if (!Number.isFinite(parsed) || !Number.isSafeInteger(limit) || limit < 1) return Promise.resolve([]);
-    this.ensureActiveChatterTable();
+  public stopStatisticsOnlineSegment(endedAt: string): Promise<void> {
+    const end = Date.parse(endedAt);
+    if (!Number.isFinite(end)) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.transactionSync(() => {
+      const current = this.statisticsStreamStateSync();
+      if (current === null || current.onlineSince === null) return;
+      const clippedEnd = Math.max(current.onlineSince, end);
+      this.accumulateStatisticsOnlineTimeSync(current.onlineSince, clippedEnd, current.streamId);
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_STREAM_STATE_TABLE} SET online_since = NULL WHERE slot = 1`,
+      );
+      const currentWindowStart = statisticsWindowStartMs(clippedEnd);
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
+            SET complete = 1, dirty = 1, revision = revision + 1
+          WHERE complete = 0 AND (window_start + ? <= ? OR (window_start = ? AND ? > ?))`,
+        STATISTICS_WINDOW_MILLISECONDS,
+        clippedEnd,
+        currentWindowStart,
+        clippedEnd,
+        currentWindowStart,
+      );
+    });
+    return Promise.resolve();
+  }
+
+  public advanceStatisticsToBoundary(boundary: number, streamIsOnline: boolean): Promise<void> {
+    if (!Number.isSafeInteger(boundary) || boundary % STATISTICS_WINDOW_MILLISECONDS !== 0) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.transactionSync(() => {
+      const current = this.statisticsStreamStateSync();
+      if (streamIsOnline && current?.onlineSince !== null && current?.onlineSince !== undefined) {
+        this.accumulateStatisticsOnlineTimeSync(current.onlineSince, boundary, current.streamId);
+        this.ctx.storage.sql.exec(
+          `UPDATE ${STATISTICS_STREAM_STATE_TABLE} SET online_since = ? WHERE slot = 1`,
+          boundary,
+        );
+      }
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
+            SET complete = 1, dirty = 1, revision = revision + 1
+          WHERE complete = 0 AND window_start + ? <= ?`,
+        STATISTICS_WINDOW_MILLISECONDS,
+        boundary,
+      );
+      if (!streamIsOnline) return;
+      const completedWindowStart = boundary - STATISTICS_WINDOW_MILLISECONDS;
+      this.ensureStatisticsWindowSync(completedWindowStart, current?.streamId ?? null);
+      const completed = this.ctx.storage.sql.exec<{ active_chatters_sampled: number }>(
+        `SELECT active_chatters_sampled FROM ${STATISTICS_CHAT_WINDOW_TABLE} WHERE window_start = ?`,
+        completedWindowStart,
+      ).toArray()[0];
+      if (completed !== undefined && completed.active_chatters_sampled === 0) {
+        const activeChatters = this.activeChattersAtBoundarySync(boundary);
+        this.ctx.storage.sql.exec(
+          `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
+              SET active_chatters = ?, active_chatters_sampled = 1,
+                  dirty = 1, revision = revision + 1
+            WHERE window_start = ? AND active_chatters_sampled = 0`,
+          activeChatters,
+          completedWindowStart,
+        );
+      }
+      this.ensureStatisticsWindowSync(boundary, current?.streamId ?? null);
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE} SET complete = 0 WHERE window_start = ?`,
+        boundary,
+      );
+    });
+    return Promise.resolve();
+  }
+
+  public listDirtyCompletedStatisticsWindows(): Promise<readonly string[]> {
+    this.ensureStatisticsSchema();
     const rows = this.ctx.storage.sql.exec<{ window_start: number }>(
       `SELECT window_start FROM ${STATISTICS_CHAT_WINDOW_TABLE}
-        WHERE window_start < ? AND (active_messages > 0 OR pending_messages > 0)
-        ORDER BY window_start ASC LIMIT ?`,
-      parsed,
-      limit,
+        WHERE dirty = 1 AND complete = 1 AND (online_milliseconds > 0 OR messages > 0)
+        ORDER BY window_start ASC`,
     ).toArray();
     return Promise.resolve(rows.map(({ window_start: start }) => new Date(start).toISOString()));
   }
 
-  public pruneRetiredStatisticsWindowsBefore(cutoff: string, limit: number): Promise<void> {
-    const parsed = Date.parse(cutoff);
-    if (!Number.isFinite(parsed) || !Number.isSafeInteger(limit) || limit < 1) return Promise.resolve();
-    this.ensureActiveChatterTable();
-    const retired = this.ctx.storage.sql.exec<{ window_start: number }>(
-      `SELECT window_start FROM ${STATISTICS_CHAT_WINDOW_TABLE}
-        WHERE window_start < ? AND active_messages = 0 AND pending_messages = 0
-        ORDER BY window_start ASC LIMIT ?`,
+  public readStatisticsWindow(windowStart: string): Promise<ModuleStatisticsWindow | null> {
+    const parsed = Date.parse(windowStart);
+    if (!Number.isSafeInteger(parsed)) return Promise.resolve(null);
+    this.ensureStatisticsSchema();
+    const row = this.ctx.storage.sql.exec<{
+      stream_id: string | null;
+      window_start: number;
+      messages: number;
+      emotes: number;
+      online_milliseconds: number;
+      viewer_count: number | null;
+      chatters: number | null;
+      active_chatters: number | null;
+      metrics_sampled: number;
+      revision: number;
+    }>(
+      `SELECT stream_id, window_start, messages, emotes, online_milliseconds,
+              viewer_count, chatters, active_chatters, metrics_sampled, revision
+         FROM ${STATISTICS_CHAT_WINDOW_TABLE} WHERE window_start = ?`,
       parsed,
-      limit,
-    ).toArray();
+    ).toArray()[0];
+    if (row === undefined) return Promise.resolve(null);
+    return Promise.resolve({
+      streamId: row.stream_id,
+      windowStart: new Date(row.window_start).toISOString(),
+      windowSeconds: Math.min(STATISTICS_WINDOW_MILLISECONDS / 1_000,
+        Math.max(1, Math.ceil(row.online_milliseconds / 1_000))),
+      messages: row.messages,
+      emotes: row.emotes,
+      viewerCount: row.viewer_count,
+      chatters: row.chatters,
+      activeChatters: row.active_chatters,
+      metricsSampled: row.metrics_sampled === 1,
+      revision: row.revision,
+    });
+  }
+
+  public saveStatisticsWindowMetrics(
+    windowStart: string,
+    viewerCount: number | null,
+    chatters: number | null,
+  ): Promise<void> {
+    const parsed = Date.parse(windowStart);
+    if (!Number.isSafeInteger(parsed)) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.sql.exec(
+      `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE}
+          SET viewer_count = ?, chatters = ?, metrics_sampled = 1,
+              dirty = 1, revision = revision + 1
+        WHERE window_start = ? AND metrics_sampled = 0`,
+      viewerCount,
+      chatters,
+      parsed,
+    );
+    return Promise.resolve();
+  }
+
+  public markStatisticsWindowClean(windowStart: string, revision: number): Promise<void> {
+    const parsed = Date.parse(windowStart);
+    if (!Number.isSafeInteger(parsed) || !Number.isSafeInteger(revision)) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.sql.exec(
+      `UPDATE ${STATISTICS_CHAT_WINDOW_TABLE} SET dirty = 0
+        WHERE window_start = ? AND revision = ?`,
+      parsed,
+      revision,
+    );
+    return Promise.resolve();
+  }
+
+  public pruneExpiredStatisticsWindows(now: number): Promise<void> {
+    if (!Number.isSafeInteger(now)) return Promise.resolve();
+    this.ensureStatisticsSchema();
     this.ctx.storage.transactionSync(() => {
-      for (const { window_start: start } of retired) {
-        this.ctx.storage.sql.exec(
-          `DELETE FROM ${STATISTICS_WINDOW_CHATTER_TABLE} WHERE window_start = ?`,
-          start,
-        );
-        this.ctx.storage.sql.exec(
-          `DELETE FROM ${STATISTICS_WINDOW_CHATTER_KEY_TABLE} WHERE window_start = ?`,
-          start,
-        );
-        this.ctx.storage.sql.exec(
-          `DELETE FROM ${STATISTICS_CHAT_WINDOW_TABLE} WHERE window_start = ?`,
-          start,
-        );
-      }
+      this.ctx.storage.sql.exec(
+        `DELETE FROM ${STATISTICS_CHAT_WINDOW_TABLE}
+          WHERE window_start + ? + ? < ?`,
+        STATISTICS_WINDOW_MILLISECONDS,
+        STATISTICS_WINDOW_RETENTION_MS,
+        now,
+      );
+      this.ctx.storage.sql.exec(
+        `DELETE FROM ${STATISTICS_STREAM_STATE_TABLE}
+          WHERE slot = 1 AND online_since IS NULL
+            AND NOT EXISTS (SELECT 1 FROM ${STATISTICS_CHAT_WINDOW_TABLE})`,
+      );
     });
     return Promise.resolve();
   }
 
-  public clearStatisticsWindowChattersThrough(windowEnd: string): Promise<void> {
-    const parsed = Date.parse(windowEnd);
-    if (!Number.isFinite(parsed)) return Promise.resolve();
-    this.ensureActiveChatterTable();
-    this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.sql.exec(
-        `DELETE FROM ${STATISTICS_WINDOW_CHATTER_TABLE} WHERE window_start < ?`,
-        parsed,
-      );
-      this.ctx.storage.sql.exec(
-        `DELETE FROM ${STATISTICS_WINDOW_CHATTER_KEY_TABLE} WHERE window_start < ?`,
-        parsed,
-      );
-    });
-    return Promise.resolve();
+  public hasStatisticsWindows(): Promise<boolean> {
+    this.ensureStatisticsSchema();
+    const present = this.ctx.storage.sql.exec<{ present: number }>(
+      `SELECT EXISTS (SELECT 1 FROM ${STATISTICS_CHAT_WINDOW_TABLE}) AS present`,
+    ).one().present;
+    return Promise.resolve(present === 1);
   }
 
-  /** Claims a verified channel.chat.message ID without writing a D1 receipt per chat message. */
-  public claimEventSubMessage(messageId: string, receivedAt = Date.now()): Promise<boolean> {
+  /** Claims a verified channel.chat.message ID or requests D1 fallback when the bounded set is full. */
+  public claimEventSubMessage(messageId: string, receivedAt = Date.now()): Promise<"claimed" | "duplicate" | "overflow"> {
     if (messageId.length === 0 || messageId.length > 512 || !Number.isSafeInteger(receivedAt)) {
-      return Promise.resolve(false);
+      return Promise.resolve("duplicate");
     }
     this.ensureEventSubMessageIdTable();
     return Promise.resolve(this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec(
-        `DELETE FROM ${EVENTSUB_MESSAGE_ID_TABLE} WHERE received_at <= ?`,
+        `DELETE FROM ${EVENTSUB_MESSAGE_ID_TABLE} WHERE received_at < ?`,
         receivedAt - EVENTSUB_MESSAGE_ID_RETENTION_MS,
       );
+      const existing = this.ctx.storage.sql.exec<{ present: number }>(
+        `SELECT EXISTS (SELECT 1 FROM ${EVENTSUB_MESSAGE_ID_TABLE} WHERE message_id = ?) AS present`,
+        messageId,
+      ).one().present;
+      if (existing === 1) return "duplicate";
+      const count = this.ctx.storage.sql.exec<{ count: number }>(
+        `SELECT count FROM ${EVENTSUB_MESSAGE_ID_COUNT_TABLE} WHERE slot = 1`,
+      ).one().count;
+      if (count >= EVENTSUB_MESSAGE_ID_LIMIT) return "overflow";
       this.ctx.storage.sql.exec(
-        `INSERT OR IGNORE INTO ${EVENTSUB_MESSAGE_ID_TABLE} (message_id, received_at) VALUES (?, ?)`,
+        `INSERT INTO ${EVENTSUB_MESSAGE_ID_TABLE} (message_id, received_at) VALUES (?, ?)`,
         messageId,
         receivedAt,
       );
       const isNew = this.ctx.storage.sql.exec<{ changes: number }>(
         "SELECT changes() AS changes",
       ).one().changes > 0;
-      this.ctx.storage.sql.exec(
-        `DELETE FROM ${EVENTSUB_MESSAGE_ID_TABLE}
-          WHERE message_id IN (
-            SELECT message_id FROM ${EVENTSUB_MESSAGE_ID_TABLE}
-             ORDER BY received_at DESC, rowid DESC LIMIT -1 OFFSET ?
-          )`,
-        EVENTSUB_MESSAGE_ID_LIMIT,
-      );
-      return isNew;
+      return isNew ? "claimed" : "duplicate";
     }));
   }
 
@@ -3769,25 +3951,6 @@ export class ChannelObject extends DurableObject<Env> {
     const result = this.ctx.storage.sql.exec<{ count: number }>(
       `SELECT COUNT(*) AS count FROM ${ACTIVE_CHATTER_TABLE} WHERE last_seen_at >= ?`,
       new Date(cutoff).toISOString(),
-    ).one();
-    return Promise.resolve(result.count);
-  }
-
-  public async getActiveChatterCountBetween(windowStart: string, windowEnd: string): Promise<number | null> {
-    await this.ensurePointRoundRecovery();
-    const start = Date.parse(windowStart);
-    const end = Date.parse(windowEnd);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
-    const now = Date.now();
-    const key = this.activeChatterKeyRowSync();
-    if (key === null || now - key.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS) return null;
-    const cutoff = Math.max(start, now - ACTIVE_CHATTER_RETENTION_MS);
-    if (end <= cutoff) return null;
-    this.ensureActiveChatterTable();
-    const result = this.ctx.storage.sql.exec<{ count: number }>(
-      `SELECT COUNT(*) AS count FROM ${ACTIVE_CHATTER_TABLE} WHERE last_seen_at >= ? AND last_seen_at < ?`,
-      new Date(cutoff).toISOString(),
-      new Date(end).toISOString(),
     ).one();
     return Promise.resolve(result.count);
   }

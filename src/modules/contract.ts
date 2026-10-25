@@ -619,6 +619,8 @@ export interface ModuleExecutionContext {
   isRecentBotMessage?: (senderId: string | null, text: string) => Promise<boolean>;
   /** True only when this EventSub notification committed a real stream-state transition. */
   streamStateTransitionAccepted?: boolean;
+  /** Window accounting held by the channel Durable Object. */
+  statisticsChat?: Pick<ModuleStatisticsChat, "startOnlineSegment" | "stopOnlineSegment">;
   /** Stream identity captured before an accepted offline transition changed channel state. */
   streamSession?: { streamId: string | null; startedAt: string | null };
   streamState: () => Promise<ModuleStreamState>;
@@ -757,23 +759,8 @@ export interface ModuleAlarmContext {
   reconcileTimerSchedules?: (reason: ModuleScheduleInputChangeReason) => Promise<void>;
   /** Shared per-dispatch allowance for external provider requests. */
   externalFetchBudget?: ModuleExternalFetchBudget;
-  /** Bounded count reads and cleanup for the host's ephemeral active-chatter tracker. */
-  activeChatters?: {
-    countBetween: (windowStart: string, windowEnd: string) => Promise<number | null>;
-  };
-  /** Aggregate-only window counters and short-lived pseudonymous membership held in the channel Durable Object. */
-  statisticsChat?: {
-    beginWindowFlush: (windowStart: string) => Promise<{
-      messages: number;
-      emotes: number;
-      activeChatters: number | null;
-      hasNew: boolean;
-    }>;
-    finishWindowFlush: (windowStart: string) => Promise<void>;
-    listDirtyWindowsBefore: (windowStart: string, limit: number) => Promise<readonly string[]>;
-    pruneRetiredWindowsBefore: (cutoff: string, limit: number) => Promise<void>;
-    clearWindowChattersThrough: (windowEnd: string) => Promise<void>;
-  };
+  /** Absolute window counters, online time, and boundary samples held in the channel Durable Object. */
+  statisticsChat?: ModuleStatisticsChat;
   /** Host-authenticated Helix counts; unavailable sources return null. */
   fetchViewerCount?: () => Promise<number | null>;
   fetchChattersTotal?: () => Promise<number | null>;
@@ -852,6 +839,31 @@ export interface ModuleAlarmContext {
   streamStartedAt: () => Promise<{ streamId: string | null; startedAt: string | null }>;
   /** Writes diagnostics through the host event-log boundary. */
   writeDiagnostics?: (triggerId: string, diagnostics: readonly ModuleDiagnostic[], now: string) => Promise<unknown>;
+}
+
+export interface ModuleStatisticsWindow {
+  streamId: string | null;
+  windowStart: string;
+  windowSeconds: number;
+  messages: number;
+  emotes: number;
+  viewerCount: number | null;
+  chatters: number | null;
+  activeChatters: number | null;
+  metricsSampled: boolean;
+  revision: number;
+}
+
+interface ModuleStatisticsChat {
+  startOnlineSegment: (startedAt: string, streamId: string | null) => Promise<void>;
+  stopOnlineSegment: (endedAt: string) => Promise<void>;
+  advanceToBoundary: (boundary: number, streamIsOnline: boolean) => Promise<void>;
+  listDirtyCompletedWindows: () => Promise<readonly string[]>;
+  readWindow: (windowStart: string) => Promise<ModuleStatisticsWindow | null>;
+  saveWindowMetrics: (windowStart: string, viewerCount: number | null, chatters: number | null) => Promise<void>;
+  markWindowClean: (windowStart: string, revision: number) => Promise<void>;
+  pruneExpiredWindows: (now: number) => Promise<void>;
+  hasWindows: () => Promise<boolean>;
 }
 
 type ModuleTimeoutOutcome = "applied" | "rejected" | "ambiguous" | "suppressed";

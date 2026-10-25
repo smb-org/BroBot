@@ -563,26 +563,34 @@ Personendaten enthalten (Entscheidung 0003). Routenabfragen binden
 Das verpflichtende `statistics`-Modul abonniert `channel.chat.message`,
 `stream.online` und `stream.offline` für jeden Kanal. Es zählt im Channel
 Durable Object Nachrichten und Emote-Fragmente, ohne je Nachricht eine
-D1-Zeile zu schreiben. Der keyed Modul-Alarm schließt Fünf-Minuten-Fenster ab,
-die an UTC-Vielfachen von 300 s ausgerichtet sind (`window_start =
-floor(t / 300 s) * 300 s`); das erste Fenster nach `stream.online` und das
-letzte vor `stream.offline` sind Teilfenster, `window_seconds` nennt die
-abgedeckten Sekunden. Ein Offline/Online-Wechsel im selben Fenster ergibt
-weiter genau eine Zeile (Zähler zusammengeführt, `active_chatters` dann
-`NULL`). Pro Fenster wird eine Zeile in `channel_statistics`
-geschrieben: `channel_id`, `stream_id`, `window_start`, `window_seconds`,
-`messages`, `emotes`, `viewer_count`, `chatters` und `active_chatters`. Der
-Primärschlüssel `(channel_id, window_start)` macht Alarmwiederholungen
-idempotent. Zuschauer kommen aus Helix Get Streams, `chatters` ist `total` aus
-Get Chatters mit Bot-Token und `moderator:read:chatters`, und
-`active_chatters` ist eine Anzahl aus der vorhandenen flüchtigen
-DO-Verfolgung. Nicht verfügbare Quellen bleiben `NULL`. Das Offline-Ereignis
-schreibt das letzte Teilfenster vor dem Löschen der DO-Chatterdaten; offline
-finden keine Helix-Abfragen statt. `channel_statistics` enthält nur Summen,
-keine Namen, Roh-IDs, Nutzerlisten oder Chatnachrichten. Für die Zählung
-aktiver Chatter fragt das Modul die bestehende kurzlebige pseudonyme
-DO-Verfolgung ab. Die Aggregattabelle wird unbegrenzt aufbewahrt und beim
-Löschen des Kanals kaskadiert entfernt (Entscheidung 0003, Abschnitt 6).
+D1-Zeile zu schreiben. Die Fenster beginnen an UTC-Vielfachen von 300 s
+(`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
+Nachrichten- und Emote-Zähler sowie die während des Streams abgedeckten
+Millisekunden. Online-/Offline-Flaps im selben Fenster zählen in denselben
+Zustand; `window_seconds` ist die Onlinezeit, auf ganze Sekunden aufgerundet.
+
+Ein einzelner keyed Alarm läuft alle fünf Minuten, solange der Stream online
+ist oder Fensterzustand im DO liegt. Er speichert absolute Werte für geänderte,
+abgeschlossene Fenster per Upsert. Erfolgreich geschriebene Fenster bleiben
+dirty, bis D1 bestätigt; ein Retry schreibt daher dieselben oder größere
+Zähler. Viewer- und `chatters`-Werte sowie `active_chatters` werden einmal an
+der Fenstergrenze erfasst und mit dem Fenster gespeichert, damit Retries sie
+wiederverwenden. Zuschauer kommen aus Helix Get Streams, `chatters` ist `total`
+aus Get Chatters mit Bot-Token und `moderator:read:chatters`. Nicht verfügbare
+Quellen bleiben `NULL`. Offline stoppt die Onlinezeit und zählt nicht mehr;
+der Alarm schreibt das letzte Teilfenster, ohne beim Offline-Ereignis direkt
+zu flushen. Ein bereits laufender Stream wird durch Zustandswiederherstellung
+oder die nächste gezählte Chatnachricht neu eingeplant.
+
+DO-Fensterzustand wird nach einem letzten Schreibversuch gelöscht, wenn
+`window_end + 60 Minuten < Alarmzeit`. Ein D1-Ausfall länger als 60 Minuten
+kann deshalb ungeflushte Fenster verlieren. `active_chatters` ist die
+ungefähre Anzahl unterschiedlicher Chatter, die in den fünf Minuten vor der
+Fenstergrenze im bestehenden rollierenden Chatter-Tracking gesehen wurden;
+ein finales Teilfenster ohne Abtastung an seiner Grenze hat `NULL`. Es gibt
+keine per-window Personen-Hashes oder neue personenbezogene Speicherung.
+`channel_statistics` enthält nur Summen und wird unbegrenzt aufbewahrt; beim
+Löschen des Kanals greift `ON DELETE CASCADE` (Entscheidung 0003, Abschnitt 6).
 
 ### Modulaktionen (`actions`)
 

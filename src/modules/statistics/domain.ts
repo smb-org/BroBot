@@ -1,10 +1,11 @@
-export const STATISTICS_WINDOW_SECONDS = 5 * 60;
+const STATISTICS_WINDOW_SECONDS = 5 * 60;
 export const STATISTICS_WINDOW_MILLISECONDS = STATISTICS_WINDOW_SECONDS * 1_000;
 
 export interface StatisticsChatActivity {
   windowStart: string;
   receivedAt: string;
   emotes: number;
+  streamId: string | null;
 }
 
 /** Start of the UTC-epoch-aligned five-minute window containing `timeMs` (shared with other window series). */

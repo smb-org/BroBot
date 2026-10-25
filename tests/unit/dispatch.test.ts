@@ -686,6 +686,7 @@ describe("dispatch and execution", () => {
         windowStart: "2026-09-19T12:05:00.000Z",
         receivedAt: "2026-09-19T12:07:41.000Z",
         emotes: 2,
+        streamId: "live-1",
       });
     } finally {
       database.close();

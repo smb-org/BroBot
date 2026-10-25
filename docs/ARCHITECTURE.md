@@ -27,11 +27,12 @@ bleibt für die spätere Echtzeitstrecke zuständig. Der Worker bleibt das Gatew
 für HTTP und die Module.
 
 Wiederholte `channel.chat.message`-Notifications werden vor dem Dispatch mit
-einem begrenzten TTL-Satz aus Nachrichten-IDs im Channel Durable Object
-dedupliziert. Die IDs verfallen nach 20 Minuten; der Satz ist auf 4.096 Einträge
-begrenzt. Dadurch gilt die Einmalverarbeitung für alle Chatmodule, ohne für jede
-Nachricht einen D1-Beleg zu schreiben. Andere EventSub-Typen verwenden weiterhin
-die D1-Belege.
+einem zeitbasierten ID-Satz im Channel Durable Object dedupliziert. IDs bleiben
+bis zu elf Minuten erhalten, passend zum akzeptierten Ingress-Replayfenster
+einschließlich Uhrabweichung. Bei 100.000 IDs verwendet Ingress D1-Belege für
+neue IDs, statt noch gültige Einträge zu verdrängen. Dadurch gilt die
+Einmalverarbeitung für Chatmodule ohne einen D1-Beleg pro Nachricht. Andere
+EventSub-Typen verwenden weiterhin D1-Belege.
 
 ### Flüchtige Abstimmungen
 
@@ -232,39 +233,53 @@ weder Minutenzeilen noch Zusammenfassungen.
 Das verpflichtende `statistics`-Modul zählt während eines Livestreams Chat-
 Nachrichten und Emote-Fragmente pro Fünf-Minuten-Fenster im Channel Durable
 Object. Die Fenster sind an UTC-Vielfache von 300 s ausgerichtet
-(`window_start = floor(t / 300 s) * 300 s`), damit sich Zeitreihen
-verschiedener Module über denselben Schlüssel verbinden lassen; das erste
-Fenster nach `stream.online` und das letzte vor `stream.offline` sind
-Teilfenster, `window_seconds` hält die tatsächlich abgedeckten Sekunden. Ein
-keyed Modul-Alarm läuft an jeder Fenstergrenze und liest Zuschauerzahl über Helix
-Get Streams, Chatters über Get Chatters mit dem Bot-Token und aktive Chatter
-als Anzahl aus der pseudonymen DO-Mitgliedschaft des jeweiligen Fensters.
-`channel_statistics` erhält genau
-eine Aggregatzeile pro Kanal und Fenster; Upserts auf
-`(channel_id, window_start)` machen Wiederholungen idempotent. Zähler werden im
-DO synchron in einen dauerhaften Pending-Zähler übergeben, bevor der Alarm
-Helix oder D1 abwartet. Nachrichten mit älterem Empfangszeitpunkt können danach
-noch als Korrektur in ihr Fenster einfließen; ein späterer Flush addiert diese
-Delta idempotent. Alte Zählerfenster und Carry-Snapshots werden pro Flush mit
-einem begrenzten Scan bereinigt.
+(`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
+Nachrichten- und Emote-Summen sowie die aufsummierte Onlinezeit. `window_seconds`
+ist die Onlinezeit, auf ganze Sekunden aufgerundet; Offline-/Online-Wechsel im
+selben Fenster bleiben eine Zeile und addieren nur die Onlineabschnitte.
 
-Aktive Chatter werden anhand eines zufälligen HMAC-Schlüssels pro Fenster und
-Nutzer in DO-SQL gezählt. Das trennt die Fenstergrenze exakt: dieselbe Person
-kann in beiden Fenstern zählen, auch wenn der rollierende Chatter-Schlüssel
-wechselt. HMAC-Mitgliedschaften bleiben nur für das
-20-Minuten-Korrekturfenster im DO, damit verspätet verarbeitete Nachrichten
-keine doppelten oder fehlenden Chatter erzeugen; sie werden danach und bei
-Streamende gelöscht. Namen und Nutzerkennungen verlassen das DO nicht.
+Ein keyed Alarm läuft an jeder Fünf-Minuten-Grenze und schreibt alle
+abgeschlossenen, geänderten Fenster als absolute Werte nach `channel_statistics`.
+`(channel_id, window_start)` ist der Primärschlüssel. Der Alarm speichert
+Viewer-, Chatters- und Active-Chatter-Stichproben im DO einmal an der Grenze;
+Wiederholungen verwenden dieselben Werte. Nach erfolgreichem D1-Upsert wird ein
+Fenster nur dann als sauber markiert, wenn es seit der geschriebenen Revision
+unverändert blieb. Späte Zähler erhöhen die absoluten Summen und werden beim
+nächsten Lauf erneut geschrieben. Upserts verwenden zusätzlich `MAX` für
+Nachrichten und Emotes, damit ein verspäteter Versuch die gespeicherte Summe nie
+verringert.
 
-Ein beim Start bereits laufender Stream erhält seinen Alarm auch über die
-Streamzustands-Wiederherstellung. Jeder Alarm ist an die
-Stream-Übergangsgeneration gebunden; ein alter Offline-Übergang kann so keinen
-Alarm des neueren Streams löschen. `stream.offline` plant den letzten Flush als
-dauerhafte Arbeit im gemeinsamen Alarmscheduler. D1-Fehler wiederholen diese
-Arbeit auch dann, wenn der Kanal offline bleibt. Offline laufen keine
-Helix-Abfragen. Fehlende API-Werte bleiben `NULL`; D1 enthält nur Aggregate,
-keine Nutzerkennungen oder einzelnen Nachrichten. Die Aggregate bleiben
-unbegrenzt erhalten (Entscheidung 0003).
+`active_chatters` ist eine Näherung aus dem vorhandenen rollierenden
+Chatter-Tracking: Anzahl unterschiedlicher Chatter, deren letzte Nachricht in
+den fünf Minuten vor der Fenstergrenze lag. Für Fenster ohne Stichprobe an der
+Grenze, etwa das letzte Teilfenster nach `stream.offline`, bleibt der Wert
+`NULL`. Es gibt keine zusätzliche HMAC-Mitgliedschaft je Statistikfenster.
+Offline beendet nur die Onlinezeit; der nächste Alarm schreibt das letzte
+Teilfenster. Der Alarm bleibt aktiv, solange der Stream online ist oder
+Fensterzustand im DO besteht. Fensterzustand wird nach einem letzten
+Schreibversuch gelöscht, sobald das Fensterende mehr als 60 Minuten zurückliegt.
+Ein D1-Ausfall länger als 60 Minuten kann deshalb noch nicht geschriebene
+Statistikzeilen verlieren; DO-Speicher und Wiederholungsdauer bleiben begrenzt.
+
+Ein bereits laufender Stream erhält Stichproben auch ohne Chat über die
+Streamzustands-Wiederherstellung. Zusätzlich stellt eine gezählte Chatnachricht
+den Alarm wieder her, falls keiner geplant ist. Der Alarm hängt nicht an einer
+Stream-Übergangsgeneration; dieselbe Fensterzeile nimmt Zähler nach einem
+Offline-/Online-Flap weiter auf. Zuschauer stammen aus Helix Get Streams,
+`chatters` aus Get Chatters mit Bot-Token und `moderator:read:chatters`.
+Nicht verfügbare Stichproben bleiben `NULL`. D1 enthält nur Aggregate, keine
+Nutzerkennungen oder einzelnen Nachrichten. Die Aggregate bleiben unbegrenzt
+erhalten (Entscheidung 0003).
+
+`channel.chat.message`-IDs werden im Channel Durable Object nach Empfangszeit
+für die gesamte von EventSub akzeptierte Replaydauer aufbewahrt: bis zu elf
+Minuten einschließlich der beidseitigen 30-Sekunden-Uhrabweichung. Der Satz
+ist auf 100.000 IDs begrenzt; bei voller Kapazität verwendet die Ingress-Route
+D1-Belege, statt noch gültige IDs zu verdrängen. Andere EventSub-Typen
+verwenden weiterhin D1.
+Die ID wird vor dem Dispatch beansprucht. Scheitert die Verarbeitung danach,
+überspringt eine EventSub-Wiederholung die Verarbeitung; dieses bereits bei den
+D1-Belegen bestehende Verlustfenster bleibt unverändert.
 
 Migration `0016_text_library.sql` führte Textblöcke und zunächst eine
 Bibliothekszeitzone ein. `0017_text_library_variant_choices.sql` ergänzte den

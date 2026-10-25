@@ -4,6 +4,10 @@ import { hmacSha256, parseKeyRing } from "./auth/crypto";
 import { confirmBotIdentityAuthorization } from "./bot-maintenance";
 import { confirmLoginIdentityAuthorization } from "./login-maintenance";
 import { dispatchEventSubNotification } from "./dispatch";
+import {
+  EVENTSUB_REPLAY_WINDOW_MILLISECONDS,
+  EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS,
+} from "./eventsub-constants";
 import { refreshAdPrewarning, isAdPrewarningTrigger } from "./ad-prewarning";
 import { eventSubDefinitionForCondition } from "./eventsub-subscriptions";
 import { notifyCommittedResources } from "./panel-resources";
@@ -19,7 +23,7 @@ import {
 
 export { listDesiredEventSubTargets } from "./eventsub-subscriptions";
 
-const EVENTSUB_REPLAY_WINDOW_MS = 10 * 60 * 1000;
+const EVENTSUB_REPLAY_WINDOW_MS = EVENTSUB_REPLAY_WINDOW_MILLISECONDS;
 /** Retain twice the replay window: the second window is a clock-skew reserve. */
 const EVENTSUB_REPLAY_RETENTION_FACTOR = 2;
 export const eventSubMessageCutoff = (
@@ -31,7 +35,7 @@ export const eventSubMessageCutoff = (
 // Twitch payloads are small; 64 KiB leaves plenty of headroom for metadata
 // while still preventing the unauthenticated input from growing unbounded.
 export const EVENTSUB_MAX_BODY_BYTES = 64 * 1024;
-const EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MS = 30 * 1000;
+const EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MS = EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -325,8 +329,12 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
       return response("Invalid EventSub notification.", 400);
     }
     const channel = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(target.channelId));
-    const isNew = await channel.claimEventSubMessage(messageId, Date.parse(now));
-    if (!isNew) return response(null, 204);
+    const claim = await channel.claimEventSubMessage(messageId, Date.parse(now));
+    if (claim === "duplicate") return response(null, 204);
+    if (claim === "overflow") {
+      const isNew = await rememberEventSubMessage(context.env.DB, messageId, now);
+      if (!isNew) return response(null, 204);
+    }
   } else {
     const isNew = await rememberEventSubMessage(context.env.DB, messageId, now);
     if (!isNew) return response(null, 204);

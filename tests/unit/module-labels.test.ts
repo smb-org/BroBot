@@ -68,10 +68,10 @@ describe("Module labels", () => {
     expect(module?.eventSubTypes).toEqual(["channel.chat.message", "stream.online", "stream.offline"]);
     expect(moduleName("statistics", "de")).toBe("Statistiken");
     expect(moduleName("statistics", "en")).toBe("Statistics");
-    expect(moduleDescription("statistics", "de")).toContain("kurzzeitig pseudonyme Aktivitätsdaten");
-    expect(moduleDescription("statistics", "de")).toContain("dauerhaft gespeichert werden nur Fenstersummen");
-    expect(moduleDescription("statistics", "en")).toContain("Short-lived pseudonymous activity tracking");
-    expect(moduleDescription("statistics", "en")).toContain("only window totals are retained");
+    expect(moduleDescription("statistics", "de")).toContain("ungefähre Zahl unterschiedlicher Chatter");
+    expect(moduleDescription("statistics", "de")).toContain("Dauerhaft gespeichert werden nur Fenstersummen");
+    expect(moduleDescription("statistics", "en")).toContain("approximates distinct chatters");
+    expect(moduleDescription("statistics", "en")).toContain("Only window totals are retained");
     expect(module?.mandatoryReason?.de).toContain("immer aktiv");
     expect(module?.mandatoryReason?.en).toContain("always active");
   });

@@ -68,7 +68,7 @@ describe("EventSub awaited dispatch", () => {
         claimEventSubMessage: (messageId: string) => {
           const isNew = !claimed.has(messageId);
           claimed.add(messageId);
-          return Promise.resolve(isNew);
+          return Promise.resolve(isNew ? "claimed" as const : "duplicate" as const);
         },
       }),
     } as unknown as Env["CHANNEL"];
