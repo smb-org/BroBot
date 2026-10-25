@@ -857,7 +857,15 @@ export interface ModuleStatisticsWordCount {
   word: string;
   count: number;
   lastSeenAt: string;
+  firstInStream: boolean;
 }
+
+export interface ModuleStatisticsWordBucket {
+  streamId: string;
+  batch: number;
+}
+
+export type ModuleStatisticsStreamState = "online" | "offline" | "unknown";
 
 interface ModuleStatisticsChat {
   advanceToBoundary: (boundary: number, streamIsOnline: boolean, streamId: string | null) => Promise<void>;
@@ -867,11 +875,21 @@ interface ModuleStatisticsChat {
   markWindowClean: (windowStart: string, revision: number) => Promise<void>;
   pruneExpiredWindows: (now: number) => Promise<void>;
   hasWindows: () => Promise<boolean>;
+  flushWordCounts: () => Promise<void>;
   markWordStreamEnded: (streamId: string, endedAt: string) => Promise<void>;
-  reconcileWordStreams: (streamIsOnline: boolean, streamId: string | null, observedAt: number) => Promise<void>;
-  listEndedWordStreams: () => Promise<readonly string[]>;
-  readWordCounts: (streamId: string) => Promise<readonly ModuleStatisticsWordCount[]>;
-  deleteWordStream: (streamId: string) => Promise<void>;
+  reconcileWordStreams: (streamState: ModuleStatisticsStreamState, streamId: string | null, observedAt: number) => Promise<void>;
+  listMergeableWordBuckets: (
+    streamState: ModuleStatisticsStreamState,
+    streamId: string | null,
+    idleBefore: number,
+  ) => Promise<readonly ModuleStatisticsWordBucket[]>;
+  prepareWordBucketForMerge: (
+    bucket: ModuleStatisticsWordBucket,
+    streamState: ModuleStatisticsStreamState,
+    streamId: string | null,
+    idleBefore: number,
+  ) => Promise<readonly ModuleStatisticsWordCount[]>;
+  deleteWordBucket: (bucket: ModuleStatisticsWordBucket) => Promise<void>;
   pruneExpiredWordStreams: (now: number) => Promise<void>;
   hasWordStreams: () => Promise<boolean>;
 }

@@ -3,9 +3,12 @@ import { STATISTICS_STOP_WORDS } from "./stop-words";
 const STATISTICS_WINDOW_SECONDS = 5 * 60;
 export const STATISTICS_WINDOW_MILLISECONDS = STATISTICS_WINDOW_SECONDS * 1_000;
 const STATISTICS_WORD_STREAM_DISTINCT_LIMIT = 20_000;
+const STATISTICS_WORD_MESSAGE_DISTINCT_LIMIT = 20;
+const STATISTICS_WORD_TOKEN_LENGTH_LIMIT = 40;
 export const STATISTICS_WORD_STREAM_MERGE_LIMIT = 1_000;
 export const STATISTICS_WORD_BASELINE_LIMIT = 5_000;
 export const STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS = 24 * 60 * 60 * 1_000;
+export const STATISTICS_WORD_STREAM_IDLE_MILLISECONDS = 15 * 60 * 1_000;
 
 export const admitStatisticsWordCounts = (
   candidates: ReadonlyMap<string, number>,
@@ -61,17 +64,20 @@ export const statisticsTextFragments = (payload: Readonly<Record<string, unknown
 /** Tokenises text for the anonymous per-stream word-frequency baseline. */
 export const tokenizeStatisticsWords = (textFragments: readonly string[]): Map<string, number> => {
   const counts = new Map<string, number>();
-  for (const fragment of textFragments) {
+  fragments: for (const fragment of textFragments) {
     const text = fragment.normalize("NFKC").toLowerCase()
       .replace(/(?:https?:\/\/|www\.)[^\s]+/gu, " ")
-      .replace(/@[\p{L}\p{N}_-]+/gu, " ")
-      .replace(/:[\p{L}\p{N}_+-]+:/gu, " ");
+      .replace(/@[\p{L}\p{M}\p{N}_-]+/gu, " ")
+      .replace(/:[\p{L}\p{M}\p{N}_+-]+:/gu, " ");
     for (const rawToken of text.split(/\s+/u)) {
-      const trimmed = rawToken.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+      const trimmed = rawToken.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{M}\p{N}]+$/gu, "");
       if (trimmed.length === 0 || /[./]/u.test(trimmed)) continue;
-      for (const token of trimmed.match(/[\p{L}\p{N}]+/gu) ?? []) {
-        if (Array.from(token).length < 3 || /^\p{N}+$/u.test(token) || STATISTICS_STOP_WORDS.has(token)) continue;
-        counts.set(token, (counts.get(token) ?? 0) + 1);
+      for (const token of trimmed.match(/(?:\p{L}[\p{L}\p{M}\p{N}]*|\p{N}+)/gu) ?? []) {
+        const length = Array.from(token).length;
+        if (length < 3 || length > STATISTICS_WORD_TOKEN_LENGTH_LIMIT ||
+            /^\p{N}+$/u.test(token) || STATISTICS_STOP_WORDS.has(token) || counts.has(token)) continue;
+        if (counts.size === STATISTICS_WORD_MESSAGE_DISTINCT_LIMIT) break fragments;
+        counts.set(token, 1);
       }
     }
   }

@@ -8,6 +8,7 @@ import type {
 } from "../contract";
 import {
   STATISTICS_WORD_BASELINE_LIMIT,
+  STATISTICS_WORD_STREAM_IDLE_MILLISECONDS,
   STATISTICS_WORD_STREAM_MERGE_LIMIT,
   STATISTICS_WINDOW_MILLISECONDS,
   statisticsWindowStartMs,
@@ -66,11 +67,12 @@ const writeAbsoluteWindow = async (
   ).run();
 };
 
-export const mergeStatisticsWordStream = async (
+export const mergeStatisticsWordBatch = async (
   db: D1Database,
   channelId: string,
   streamId: string,
-  wordCounts: readonly { word: string; count: number; lastSeenAt: string }[],
+  batch: number,
+  wordCounts: readonly { word: string; count: number; lastSeenAt: string; firstInStream?: boolean }[],
   mergedAt: string,
 ): Promise<void> => {
   const topWords = [...wordCounts]
@@ -78,12 +80,13 @@ export const mergeStatisticsWordStream = async (
     .slice(0, STATISTICS_WORD_STREAM_MERGE_LIMIT);
   if (topWords.length === 0) return;
 
-  const wordPayload = JSON.stringify(topWords.map(({ word, count, lastSeenAt }) => ({ word, count, lastSeenAt })));
+  const firstWords = topWords.filter(({ firstInStream }) => firstInStream !== false);
+  const laterWords = topWords.filter(({ firstInStream }) => firstInStream === false);
   await db.batch([
     db.prepare(
-      `INSERT OR IGNORE INTO channel_word_frequency_streams (channel_id, stream_id, merged_at)
-       VALUES (?, ?, NULL)`,
-    ).bind(channelId, streamId),
+      `INSERT OR IGNORE INTO channel_word_frequency_streams (channel_id, stream_id, batch, merged_at)
+       VALUES (?, ?, ?, NULL)`,
+    ).bind(channelId, streamId, batch),
     db.prepare(
       `INSERT INTO channel_word_frequency_baseline
          (channel_id, word, total_count, streams_seen, last_seen_at)
@@ -92,13 +95,27 @@ export const mergeStatisticsWordStream = async (
          FROM json_each(?)
         WHERE EXISTS (
           SELECT 1 FROM channel_word_frequency_streams
-           WHERE channel_id = ? AND stream_id = ? AND merged_at IS NULL
+           WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL
         )
        ON CONFLICT (channel_id, word) DO UPDATE SET
          total_count = channel_word_frequency_baseline.total_count + excluded.total_count,
          streams_seen = channel_word_frequency_baseline.streams_seen + 1,
          last_seen_at = MAX(channel_word_frequency_baseline.last_seen_at, excluded.last_seen_at)`,
-    ).bind(channelId, wordPayload, channelId, streamId),
+    ).bind(channelId, JSON.stringify(firstWords), channelId, streamId, batch),
+    db.prepare(
+      `INSERT INTO channel_word_frequency_baseline
+         (channel_id, word, total_count, streams_seen, last_seen_at)
+       SELECT ?, json_extract(value, '$.word'), CAST(json_extract(value, '$.count') AS INTEGER), 1,
+              json_extract(value, '$.lastSeenAt')
+         FROM json_each(?)
+        WHERE EXISTS (
+          SELECT 1 FROM channel_word_frequency_streams
+           WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL
+        )
+       ON CONFLICT (channel_id, word) DO UPDATE SET
+         total_count = channel_word_frequency_baseline.total_count + excluded.total_count,
+         last_seen_at = MAX(channel_word_frequency_baseline.last_seen_at, excluded.last_seen_at)`,
+    ).bind(channelId, JSON.stringify(laterWords), channelId, streamId, batch),
     db.prepare(
       `DELETE FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word NOT IN (
@@ -110,8 +127,8 @@ export const mergeStatisticsWordStream = async (
     ).bind(channelId, channelId, STATISTICS_WORD_BASELINE_LIMIT),
     db.prepare(
       `UPDATE channel_word_frequency_streams SET merged_at = ?
-        WHERE channel_id = ? AND stream_id = ? AND merged_at IS NULL`,
-    ).bind(mergedAt, channelId, streamId),
+        WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL`,
+    ).bind(mergedAt, channelId, streamId, batch),
   ]);
 };
 
@@ -168,12 +185,19 @@ const flushCompletedWindows = async (
   context: ModuleAlarmContext,
   statisticsChat: NonNullable<ModuleAlarmContext["statisticsChat"]>,
   deadline: number,
-): Promise<{ streamIsOnline: boolean; streamId: string | null; writeFailure: unknown }> => {
+): Promise<{
+  streamIsOnline: boolean;
+  streamState: "online" | "offline" | "unknown";
+  streamId: string | null;
+  writeFailure: unknown;
+}> => {
+  await statisticsChat.flushWordCounts();
   const stream = await context.DB.prepare(
     "SELECT state, stream_id, started_at FROM channel_stream_state WHERE channel_id = ?",
   ).bind(context.channelId).first<StoredStreamState>();
   const streamIsOnline = stream?.state === "online" && stream.started_at !== null;
-  await statisticsChat.reconcileWordStreams(stream?.state === "online", stream?.stream_id ?? null, Date.now());
+  const streamState = stream?.state === "online" ? "online" : stream?.state === "offline" ? "offline" : "unknown";
+  await statisticsChat.reconcileWordStreams(streamState, stream?.stream_id ?? null, Date.now());
   await statisticsChat.advanceToBoundary(deadline, streamIsOnline, stream?.stream_id ?? null);
 
   const boundaryWindowStart = new Date(deadline - STATISTICS_WINDOW_MILLISECONDS).toISOString();
@@ -197,7 +221,7 @@ const flushCompletedWindows = async (
       writeFailure ??= error;
     }
   }
-  return { streamIsOnline, streamId: stream?.stream_id ?? null, writeFailure };
+  return { streamIsOnline, streamState, streamId: stream?.stream_id ?? null, writeFailure };
 };
 
 export const handleStatisticsWindowAlarm = async (
@@ -238,7 +262,7 @@ export const handleStatisticsWindowAlarm = async (
     throw new Error("Statistics state read failed.", { cause: flushFailure });
   }
   if (maintenanceFailure !== undefined) {
-    if (outcome?.streamIsOnline === true || hasWindows || hasWordStreams) {
+    if (outcome?.streamState === "online" || hasWindows || hasWordStreams) {
       await context.schedule("window", deadline + STATISTICS_WINDOW_MILLISECONDS);
     }
     if (maintenanceFailure instanceof Error) throw maintenanceFailure;
@@ -247,25 +271,44 @@ export const handleStatisticsWindowAlarm = async (
   if (outcome === undefined) throw new Error("Statistics window alarm did not finish.");
 
   let wordMergeFailure: unknown;
-  if (outcome.streamIsOnline || !hasWindows) {
-    try {
-      const endedStreams = await context.statisticsChat.listEndedWordStreams();
-      for (const streamId of endedStreams) {
-        try {
-          const words = await context.statisticsChat.readWordCounts(streamId);
-          await mergeStatisticsWordStream(context.DB, context.channelId, streamId, words, new Date(now).toISOString());
-          await context.statisticsChat.deleteWordStream(streamId);
-        } catch (error: unknown) {
-          wordMergeFailure ??= error;
-        }
+  try {
+    const idleBefore = now - STATISTICS_WORD_STREAM_IDLE_MILLISECONDS;
+    const buckets = await context.statisticsChat.listMergeableWordBuckets(
+      outcome.streamState,
+      outcome.streamId,
+      idleBefore,
+    );
+    const blockedStreams = new Set<string>();
+    for (const bucket of buckets) {
+      if (blockedStreams.has(bucket.streamId)) continue;
+      try {
+        const words = await context.statisticsChat.prepareWordBucketForMerge(
+          bucket,
+          outcome.streamState,
+          outcome.streamId,
+          idleBefore,
+        );
+        if (words.length === 0) continue;
+        await mergeStatisticsWordBatch(
+          context.DB,
+          context.channelId,
+          bucket.streamId,
+          bucket.batch,
+          words,
+          new Date(now).toISOString(),
+        );
+        await context.statisticsChat.deleteWordBucket(bucket);
+      } catch (error: unknown) {
+        blockedStreams.add(bucket.streamId);
+        wordMergeFailure ??= error;
       }
-    } catch (error: unknown) {
-      wordMergeFailure ??= error;
     }
+  } catch (error: unknown) {
+    wordMergeFailure ??= error;
   }
 
   const pendingWordStreams = await context.statisticsChat.hasWordStreams();
-  if (outcome.streamIsOnline || hasWindows || pendingWordStreams) {
+  if (outcome.streamState === "online" || hasWindows || pendingWordStreams) {
     // The host retires an occurrence only if it is still the stored entry; scheduling the same key
     // also keeps D1 retries alive while the age-based pruning bound remains independent.
     await context.schedule("window", deadline + STATISTICS_WINDOW_MILLISECONDS);

@@ -273,22 +273,34 @@ Offline-/Online-Flap weiter auf. Zuschauer stammen aus Helix Get Streams,
 Für die Themen-Erkennung zählt dasselbe Modul Textfragmente im Channel DO zu
 einer Wortfrequenz je Stream. Es normalisiert Unicode mit NFKC, schreibt alles
 klein, entfernt Links, Mentions, Emote-Codes und Satzzeichen und ignoriert
-deutsche und englische Stopwörter, Zahlen sowie Tokens unter drei Zeichen.
-Emote-, Mention- und Cheermote-Fragmente werden vollständig übersprungen.
-Nachrichten und Nutzernamen werden nicht gespeichert. Das DO begrenzt jeden
-Stream auf 20.000 verschiedene Wörter; bei Erreichen der Grenze steigen nur
-bereits vorhandene Zähler weiter. Beim Streamende werden höchstens die 1.000
-häufigsten Wörter in einem D1-Batch zusammengeführt. Der kanalweite Bestand
-behält die 5.000 häufigsten Wörter. Der Streamzähler wird nach erfolgreichem
-Merge gelöscht; nach 24 Stunden löscht ihn der nächste Statistik-Alarm
-(regulär innerhalb weiterer fünf Minuten). Die Frist beginnt mit einem
-bestätigten `stream.offline`; fehlt das Event, beginnt sie bei der
-Offline-Erkennung durch den Alarm. Die Alterslöschung läuft auch bei
-D1-Fehlern. Ein keyed Statistik-Alarm führt Merge und Wiederholung aus. Die
-D1-Tabelle merkt sich zusammengeführte Stream-IDs dauerhaft, damit ein
-unklarer Batch-Ausgang bei Wiederholung keine Zähler verdoppelt. Dadurch kann
-ein längerer D1-Ausfall nach der 24-Stunden-Frist noch nicht zusammengeführte
-Streamwörter verlieren.
+deutsche und englische Stopwörter, Zahlen sowie Tokens unter drei Zeichen oder
+über 40 Zeichen. Kombinierende Unicode-Zeichen bleiben Teil des Wortes.
+Emote-, Mention- und Cheermote-Fragmente werden vollständig übersprungen. Pro
+Nachricht zählt jedes normalisierte Wort höchstens einmal über alle
+Textfragmente; maximal 20 verschiedene Wörter gelangen aus einer Nachricht in
+den Zähler. Nachrichten, Nutzernamen und Mentions werden nicht gespeichert.
+
+Das DO hält Wortzähler zunächst in einer instanzgebundenen Map und schreibt sie
+erst mit dem Fünf-Minuten-Statistik-Alarm als mehrzeilige Upserts in sein
+SQLite, in Gruppen von höchstens 100 Wörtern mit je drei Bindings. Bei einer vorzeitigen Eviction kann deshalb höchstens ungefähr das
+ungeflushte Intervall verloren gehen. Persistiert sind höchstens 20.000
+verschiedene Wörter je Stream; bei Erreichen der Grenze steigen nur bekannte
+Wörter weiter. Der Alarm führt einen Stream-Bucket erst zusammen, wenn D1 den
+Kanal als offline oder mit einer anderen Stream-ID meldet und der Bucket seit
+mindestens 15 Minuten keinen Zuwachs hatte. Fensterzustand ist dafür nicht
+erforderlich. Jedes Zusammenführen rotiert atomar zur nächsten Bucket-Nummer;
+späte Zähler landen dort und können später erneut zusammengeführt werden. Je
+Bucket gehen höchstens die 1.000 häufigsten Wörter in einem D1-Batch in die
+Baseline, die die 5.000 häufigsten Wörter pro Kanal behält. Marker je Stream
+und Bucket machen Wiederholungen idempotent; `streams_seen` zählt jedes Wort
+je Stream nur einmal.
+
+Ein erfolgreicher Merge löscht nur den jeweiligen DO-Bucket. Nach 24 Stunden
+ab bestätigtem `stream.offline` oder erkannter Offline-Zeit löscht der nächste
+Statistik-Alarm alle Streamdaten, auch wenn D1 weiter fehlschlägt. Ein
+Merge-Batch umfasst fünf D1-Anweisungen; zusätzlich schreibt der Alarm je
+geändertem Statistikfenster einen absoluten Fenster-Upsert. Wortzählungen
+verursachen keine DO-SQL-Schreibvorgänge pro Nachricht.
 Nicht verfügbare Stichproben bleiben `NULL`. D1 enthält nur Aggregate, keine
 Nutzerkennungen oder einzelnen Nachrichten. Die Aggregate bleiben unbegrenzt
 erhalten (Entscheidung 0003).

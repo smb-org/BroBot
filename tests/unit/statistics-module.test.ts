@@ -31,11 +31,14 @@ interface WindowState {
 const createStatisticsChat = (initial: WindowState[] = []) => {
   const windows = new Map(initial.map((window) => [window.windowStart, { ...window }]));
   const wordStreams = new Map<string, {
-    words: Array<{ word: string; count: number; lastSeenAt: string }>;
+    words: Array<{ word: string; count: number; lastSeenAt: string; firstInStream?: boolean }>;
     endedAt: string | null;
     expiresAt: number;
+    batch?: number;
+    lastIncrementAt?: number;
   }>();
   const calls = {
+    flushWordCounts: vi.fn(() => Promise.resolve()),
     advance: vi.fn((boundary: number, streamIsOnline: boolean, streamId: string | null) => {
       const windowStart = new Date(boundary - 300_000).toISOString();
       if (streamIsOnline && !windows.has(windowStart)) {
@@ -90,10 +93,11 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       }
       return Promise.resolve();
     }),
-    reconcileWordStreams: vi.fn((streamIsOnline: boolean, streamId: string | null, observedAt: number) => {
+    reconcileWordStreams: vi.fn((streamState: "online" | "offline" | "unknown", streamId: string | null, observedAt: number) => {
       for (const [id, stream] of wordStreams) {
         if (stream.endedAt !== null) continue;
-        if (!streamIsOnline || streamId !== null && id !== streamId) {
+        if (streamState === "unknown") continue;
+        if (streamState === "offline" || streamId !== null && id !== streamId) {
           stream.endedAt = new Date(observedAt).toISOString();
           stream.expiresAt = observedAt + 24 * 60 * 60_000;
         } else {
@@ -102,11 +106,22 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       }
       return Promise.resolve();
     }),
-    listEndedWordStreams: vi.fn(() => Promise.resolve([...wordStreams]
-      .filter(([, stream]) => stream.endedAt !== null).map(([streamId]) => streamId))),
-    readWordCounts: vi.fn((streamId: string) => Promise.resolve(wordStreams.get(streamId)?.words ?? [])),
-    deleteWordStream: vi.fn((streamId: string) => {
-      wordStreams.delete(streamId);
+    listMergeableWordBuckets: vi.fn((streamState: "online" | "offline" | "unknown", streamId: string | null, idleBefore: number) =>
+      Promise.resolve([...wordStreams].filter(([id, stream]) =>
+        (streamState === "offline" || streamState === "online" && id !== streamId) &&
+        (stream.lastIncrementAt ?? Date.parse(WINDOW_END) - 15 * 60_000) <= idleBefore)
+        .map(([id, stream]) => ({ streamId: id, batch: stream.batch ?? 1 })))),
+    prepareWordBucketForMerge: vi.fn((bucket: { streamId: string; batch: number }, streamState: "online" | "offline" | "unknown",
+      streamId: string | null, idleBefore: number) => {
+      const stream = wordStreams.get(bucket.streamId);
+      if (stream === undefined || streamState !== "offline" && bucket.streamId === streamId ||
+          (stream.lastIncrementAt ?? Date.parse(WINDOW_END) - 15 * 60_000) > idleBefore) return Promise.resolve([]);
+      if ((stream.batch ?? 1) === bucket.batch) stream.batch = bucket.batch + 1;
+      return Promise.resolve(stream.words.map((word) => ({ ...word, firstInStream: word.firstInStream ?? true })));
+    }),
+    deleteWordBucket: vi.fn((bucket: { streamId: string; batch: number }) => {
+      const stream = wordStreams.get(bucket.streamId);
+      if (stream !== undefined) stream.words = [];
       return Promise.resolve();
     }),
     pruneExpiredWordStreams: vi.fn((now: number) => {
@@ -128,11 +143,12 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       markWindowClean: calls.markClean,
       pruneExpiredWindows: calls.prune,
       hasWindows: calls.hasWindows,
+      flushWordCounts: calls.flushWordCounts,
       markWordStreamEnded: calls.markWordStreamEnded,
       reconcileWordStreams: calls.reconcileWordStreams,
-      listEndedWordStreams: calls.listEndedWordStreams,
-      readWordCounts: calls.readWordCounts,
-      deleteWordStream: calls.deleteWordStream,
+      listMergeableWordBuckets: calls.listMergeableWordBuckets,
+      prepareWordBucketForMerge: calls.prepareWordBucketForMerge,
+      deleteWordBucket: calls.deleteWordBucket,
       pruneExpiredWordStreams: calls.pruneExpiredWordStreams,
       hasWordStreams: calls.hasWordStreams,
     },
@@ -416,11 +432,11 @@ describe("statistics window alarm", () => {
     expect(calls.schedule).toHaveBeenCalledWith("window", Date.parse(WINDOW_END) + 300_000);
   });
 
-  it("merges ended stream words in one D1 batch and deletes the DO stream after success", async () => {
+  it("merges an idle ended bucket despite a recent clean window", async () => {
     database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);
     await writeStreamState(database, "offline", WINDOW_END);
-    const chat = createStatisticsChat();
+    const chat = createStatisticsChat([windowState({ dirty: false })]);
     chat.wordStreams.set(STREAM_ID, {
       words: [{ word: "hallo", count: 4, lastSeenAt: WINDOW_END }],
       endedAt: WINDOW_END,
@@ -440,8 +456,40 @@ describe("statistics window alarm", () => {
       `SELECT total_count, streams_seen FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word = ?`,
     ).bind(CHANNEL_ID, "hallo").first()).resolves.toEqual({ total_count: 4, streams_seen: 1 });
-    expect(chat.calls.deleteWordStream).toHaveBeenCalledWith(STREAM_ID);
-    expect(chat.wordStreams.has(STREAM_ID)).toBe(false);
+    expect(chat.calls.deleteWordBucket).toHaveBeenCalledWith({ streamId: STREAM_ID, batch: 1 });
+    expect(chat.wordStreams.get(STREAM_ID)?.words).toEqual([]);
+  });
+
+  it("does not merge a later batch while an earlier batch for that stream is retrying", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await writeStreamState(database, "offline", WINDOW_END);
+    const chat = createStatisticsChat();
+    chat.wordStreams.set(STREAM_ID, { words: [], endedAt: WINDOW_END, expiresAt: Date.parse(WINDOW_END) + 24 * 60 * 60_000 });
+    const buckets = [{ streamId: STREAM_ID, batch: 1 }, { streamId: STREAM_ID, batch: 2 }];
+    chat.calls.listMergeableWordBuckets.mockResolvedValue(buckets);
+    chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve([{
+      word: bucket.batch === 1 ? "firstword" : "laterword",
+      count: 1,
+      lastSeenAt: WINDOW_END,
+      firstInStream: bucket.batch === 1,
+    }]));
+    const { context } = createContext(database, chat);
+    let attempts = 0;
+    context.DB = {
+      prepare: (sql: string) => database?.prepare(sql),
+      batch: () => {
+        attempts += 1;
+        return Promise.reject(new Error("Injected first-batch failure."));
+      },
+    } as unknown as D1Database;
+
+    await expect(windowAlarm().handle(context, "window", Date.parse(WINDOW_END)))
+      .rejects.toThrow("Injected first-batch failure.");
+
+    expect(attempts).toBe(1);
+    expect(chat.calls.prepareWordBucketForMerge).toHaveBeenCalledTimes(1);
+    expect(chat.calls.prepareWordBucketForMerge).toHaveBeenCalledWith(buckets[0], "offline", null, expect.any(Number));
   });
 
   it("prunes expired word data after a failed D1 merge and keeps the existing alarm retrying meanwhile", async () => {
@@ -471,7 +519,7 @@ describe("statistics window alarm", () => {
 
     expect(chat.calls.pruneExpiredWordStreams).toHaveBeenLastCalledWith(Date.parse(WINDOW_END) + 10_001);
     expect(chat.wordStreams.has(STREAM_ID)).toBe(false);
-    expect(chat.calls.deleteWordStream).not.toHaveBeenCalled();
+    expect(chat.calls.deleteWordBucket).not.toHaveBeenCalled();
   });
 
   it("prunes an expired window after its final failed write attempt", async () => {

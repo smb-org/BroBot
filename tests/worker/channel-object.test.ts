@@ -251,6 +251,19 @@ const objectFor = (
     if (/^\s*CREATE INDEX\b/iu.test(query)) {
       return { toArray: () => [], one: () => undefined };
     }
+    if (/^\s*PRAGMA table_info\(statistics_word_/iu.test(query)) {
+      // Report the current word-count schema so the in-place upgrade path stays idle.
+      const columns = /statistics_word_seen/iu.test(query)
+        ? ["stream_id", "word", "first_batch"]
+        : /statistics_word_counts/iu.test(query)
+          ? ["stream_id", "batch", "word", "count", "last_seen_at", "last_increment_at"]
+          : ["stream_id", "distinct_words", "ended_at", "expires_at", "current_batch"];
+      const rows = columns.map((name) => ({ name }));
+      return { toArray: () => rows, one: () => rows[0] };
+    }
+    if (/^\s*INSERT OR IGNORE INTO statistics_word_seen\b/iu.test(query)) {
+      return { toArray: () => [], one: () => undefined };
+    }
     if (/^\s*CREATE TRIGGER\b|^\s*DROP TABLE\b|^\s*ALTER TABLE\b/iu.test(query)) {
       return { toArray: () => [], one: () => undefined };
     }
