@@ -70,7 +70,9 @@ const writeAbsoluteWindow = async (
 /**
  * Merges one word bucket into the channel baseline in a single D1 batch and returns whether the bucket
  * is now confirmed merged (this batch or an earlier attempt). The batch itself refuses a stream that D1
- * reports as live at write time, so a stream switch after the caller's state read cannot merge a busy bucket.
+ * reports as live at write time (an online row without a stream id counts as live for every stream), so a
+ * state change after the caller's read cannot merge a busy bucket. The confirmation SELECT ignores the live
+ * state on purpose, so a retry after a lost response still confirms.
  */
 export const mergeStatisticsWordBatch = async (
   db: D1Database,
@@ -89,7 +91,7 @@ export const mergeStatisticsWordBatch = async (
     db.prepare(
       `INSERT OR IGNORE INTO channel_word_frequency_streams (channel_id, stream_id, batch, merged_at)
        SELECT ?, ?, ?, NULL WHERE NOT EXISTS (
-          SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?
+          SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND (stream_id IS NULL OR stream_id = ?)
         )`,
     ).bind(channelId, streamId, batch, channelId, streamId),
     db.prepare(
@@ -102,7 +104,7 @@ export const mergeStatisticsWordBatch = async (
           SELECT 1 FROM channel_word_frequency_streams
            WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL
         ) AND NOT EXISTS (
-          SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?
+          SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND (stream_id IS NULL OR stream_id = ?)
         )
        ON CONFLICT (channel_id, word) DO UPDATE SET
          total_count = channel_word_frequency_baseline.total_count + excluded.total_count,
@@ -120,7 +122,7 @@ export const mergeStatisticsWordBatch = async (
     db.prepare(
       `UPDATE channel_word_frequency_streams SET merged_at = ?
         WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL AND NOT EXISTS (
-          SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?
+          SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND (stream_id IS NULL OR stream_id = ?)
         )`,
     ).bind(mergedAt, channelId, streamId, batch, channelId, streamId),
     db.prepare(
@@ -296,8 +298,10 @@ export const handleStatisticsWindowAlarm = async (
           words,
           new Date(now).toISOString(),
         );
-        // A refused merge (stream turned live meanwhile) keeps the bucket for a later alarm.
+        // A refused merge (stream turned live meanwhile) keeps the bucket for a later alarm and blocks
+        // the stream's later batches so they cannot overtake it and reorder the capped baseline.
         if (merged) await context.statisticsChat.deleteWordBucket(bucket);
+        else blockedStreams.add(bucket.streamId);
       } catch (error: unknown) {
         blockedStreams.add(bucket.streamId);
         wordMergeFailure ??= error;

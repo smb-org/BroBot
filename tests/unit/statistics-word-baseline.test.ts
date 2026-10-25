@@ -160,6 +160,35 @@ describe("statistics word baseline merge", () => {
       .bind(channelId).first()).resolves.toEqual({ total_count: 6 });
   });
 
+  it("treats an online row without a stream id as live for every stream", async () => {
+    const database = new TestD1Database();
+    const channelId = "word-baseline-unknown-live";
+    await insertChannel(database, channelId);
+    const db = database as unknown as D1Database;
+    const words = [{ word: "bonjour", count: 3, lastSeenAt: "2026-10-25T12:00:00.000Z" }];
+    await writeEventSubStreamState(db, channelId, "offline", "2026-10-25T10:00:00.000Z", null);
+    const setState = (state: "online" | "offline") => database.prepare(
+      "UPDATE channel_stream_state SET state = ?, stream_id = NULL, started_at = ? WHERE channel_id = ?",
+    ).bind(state, state === "online" ? "2026-10-25T11:00:00.000Z" : null, channelId).run();
+
+    await setState("online");
+    await expect(mergeStatisticsWordBatch(db, channelId, "any-stream", 1, words, "2026-10-25T12:05:00.000Z"))
+      .resolves.toBe(false);
+    await expect(database.prepare(
+      "SELECT (SELECT COUNT(*) FROM channel_word_frequency_baseline) AS baseline, (SELECT COUNT(*) FROM channel_word_frequency_streams) AS markers",
+    ).first()).resolves.toEqual({ baseline: 0, markers: 0 });
+
+    await setState("offline");
+    await expect(mergeStatisticsWordBatch(db, channelId, "any-stream", 1, words, "2026-10-25T12:06:00.000Z"))
+      .resolves.toBe(true);
+    // The confirmation does not depend on the live state, so a lost-response retry still confirms.
+    await setState("online");
+    await expect(mergeStatisticsWordBatch(db, channelId, "any-stream", 1, words, "2026-10-25T12:07:00.000Z"))
+      .resolves.toBe(true);
+    await expect(database.prepare("SELECT total_count FROM channel_word_frequency_baseline WHERE channel_id = ?")
+      .bind(channelId).first()).resolves.toEqual({ total_count: 3 });
+  });
+
   it("merges only the top 1,000 words from a stream", async () => {
     const database = new TestD1Database();
     await insertChannel(database, "word-baseline-stream-cap");
