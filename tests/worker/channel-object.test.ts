@@ -1829,6 +1829,7 @@ describe("ChannelObject realtime path", () => {
         channel_id TEXT NOT NULL, minute_at TEXT NOT NULL, stream_id TEXT NOT NULL, samples INTEGER NOT NULL,
         connected_samples INTEGER NOT NULL, bitrate_min REAL NOT NULL, bitrate_max REAL NOT NULL,
         bitrate_sum REAL NOT NULL, rtt_max REAL NOT NULL, rtt_sum REAL NOT NULL, dropped_delta REAL NOT NULL,
+        rolled_up_at TEXT,
         PRIMARY KEY (channel_id, minute_at, stream_id)
       )`,
     ).run();

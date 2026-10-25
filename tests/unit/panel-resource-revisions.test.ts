@@ -1591,6 +1591,7 @@ describe("panel resource revisions", () => {
       const nonPanelTables = new Set([
         "api_source_quota",
         "auth_sessions",
+        "belabox_bitrate_windows",
         "bot_channel_status_check_locks",
         "channel_game_history",
         "channel_variable_stream_resets",

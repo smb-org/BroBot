@@ -721,15 +721,120 @@ export const belaboxStreamExists = async (
   "SELECT 1 AS present FROM belabox_streams WHERE channel_id = ? AND stream_id = ?",
 ).bind(channelId, streamId).first<{ present: number }>()) !== null;
 
-export const purgeExpiredBelaboxMinutes = async (db: D1Database, now: string): Promise<void> => {
+const BELABOX_BITRATE_WINDOW_MS = 5 * 60_000;
+const BELABOX_BITRATE_ROLLUP_WRITE_BUDGET = 2_000;
+// An hourly run reserves about 48k of D1 Free's 100k daily row writes.
+// Each window costs ~16 writes for five minute-row updates, its upsert and triggers,
+// plus ~15 row deletes and delete-trigger writes when expired; indexes add load.
+// 2,000 / 31 caps a run at 64 windows.
+const BELABOX_BITRATE_ROLLUP_MAX_WINDOWS = Math.floor(BELABOX_BITRATE_ROLLUP_WRITE_BUDGET / 31);
+const BELABOX_BITRATE_ROLLUP_BATCH_STATEMENTS = 100;
+
+interface BelaboxMinuteRollupWindow {
+  channel_id: string;
+  stream_id: string;
+  window_start: number;
+}
+
+const rollupBelaboxMinuteWindows = async (db: D1Database, now: string): Promise<void> => {
+  const nowMs = Date.parse(now);
+  if (!Number.isFinite(nowMs)) return;
+  const completedBeforeMs = Math.floor((nowMs - BELABOX_BITRATE_WINDOW_MS) / BELABOX_BITRATE_WINDOW_MS) *
+    BELABOX_BITRATE_WINDOW_MS;
+  const windows = await db.prepare(
+    `WITH candidate_windows AS (
+       SELECT CAST(strftime('%s', minute_at) AS INTEGER) / 300 * 300000 AS window_start,
+              channel_id, stream_id
+         FROM belabox_minutes
+        WHERE rolled_up_at IS NULL
+          AND CAST(strftime('%s', minute_at) AS INTEGER) / 300 * 300000 < ?
+        GROUP BY window_start, channel_id, stream_id
+        ORDER BY window_start, channel_id, stream_id
+        LIMIT ?
+     )
+     SELECT channel_id, stream_id, window_start FROM candidate_windows`,
+  ).bind(completedBeforeMs, BELABOX_BITRATE_ROLLUP_MAX_WINDOWS).all<BelaboxMinuteRollupWindow>();
+  if (windows.results.length === 0) return;
+
+  let batch: D1PreparedStatement[] = [];
+  const flush = async (): Promise<void> => {
+    if (batch.length === 0) return;
+    await db.batch(batch);
+    batch = [];
+  };
+  for (const window of windows.results) {
+    const windowStartAt = new Date(window.window_start).toISOString();
+    const windowEndAt = new Date(window.window_start + BELABOX_BITRATE_WINDOW_MS).toISOString();
+    const aggregate = db.prepare(
+      `WITH ranked_minutes AS (
+         SELECT samples, bitrate_min, bitrate_max, bitrate_sum, rtt_sum, dropped_delta,
+                bitrate_sum / samples AS minute_average,
+                ROW_NUMBER() OVER (ORDER BY bitrate_sum / samples) AS minute_rank,
+                COUNT(*) OVER () AS minute_count
+           FROM belabox_minutes
+          WHERE channel_id = ? AND stream_id = ?
+            AND minute_at >= ? AND minute_at < ?
+       ), window_metrics AS (
+         SELECT MIN(bitrate_min) AS bitrate_min,
+                MAX(bitrate_max) AS bitrate_max,
+                SUM(bitrate_sum) / SUM(samples) AS bitrate_avg,
+                MAX(CASE WHEN minute_rank = CAST((minute_count + 9) / 10 AS INTEGER)
+                         THEN minute_average END) AS bitrate_p10,
+                SUM(rtt_sum) / SUM(samples) AS rtt_avg,
+                SUM(dropped_delta) AS dropped_delta,
+                SUM(samples) AS sample_count
+           FROM ranked_minutes
+       )
+       INSERT INTO belabox_bitrate_windows
+        (channel_id, stream_id, window_start, bitrate_min, bitrate_max, bitrate_avg, bitrate_p10,
+         rtt_avg, dropped_delta, sample_count)
+       SELECT ?, ?, ?, bitrate_min, bitrate_max, bitrate_avg, bitrate_p10,
+              rtt_avg, dropped_delta, sample_count
+         FROM window_metrics
+        WHERE sample_count > 0
+       ON CONFLICT (channel_id, stream_id, window_start) DO UPDATE SET
+         bitrate_min = excluded.bitrate_min,
+         bitrate_max = excluded.bitrate_max,
+         bitrate_avg = excluded.bitrate_avg,
+         bitrate_p10 = excluded.bitrate_p10,
+         rtt_avg = excluded.rtt_avg,
+         dropped_delta = excluded.dropped_delta,
+         sample_count = excluded.sample_count`,
+    ).bind(
+      window.channel_id,
+      window.stream_id,
+      windowStartAt,
+      windowEndAt,
+      window.channel_id,
+      window.stream_id,
+      window.window_start,
+    );
+    const markSourceRows = db.prepare(
+      `UPDATE belabox_minutes SET rolled_up_at = ?
+        WHERE rolled_up_at IS NULL AND channel_id = ? AND stream_id = ?
+          AND minute_at >= ? AND minute_at < ?`,
+    ).bind(now, window.channel_id, window.stream_id, windowStartAt, windowEndAt);
+    if (batch.length + 2 > BELABOX_BITRATE_ROLLUP_BATCH_STATEMENTS) await flush();
+    batch.push(aggregate, markSourceRows);
+  }
+  await flush();
+};
+
+const purgeExpiredBelaboxMinutes = async (db: D1Database, now: string): Promise<void> => {
   const cutoff = new Date(Date.parse(now) - 30 * 24 * 60 * 60_000).toISOString();
   const channels = await db.prepare("SELECT channel_id FROM channels").all<{ channel_id: string }>();
   const batchSize = 50;
   for (let offset = 0; offset < channels.results.length; offset += batchSize) {
     const deletes = channels.results.slice(offset, offset + batchSize).map(({ channel_id }) =>
-      db.prepare("DELETE FROM belabox_minutes WHERE channel_id = ? AND minute_at < ?").bind(channel_id, cutoff));
+      db.prepare("DELETE FROM belabox_minutes WHERE channel_id = ? AND minute_at < ? AND rolled_up_at IS NOT NULL")
+        .bind(channel_id, cutoff));
     await db.batch(deletes);
   }
+};
+
+export const maintainBelaboxHistory = async (db: D1Database, now: string): Promise<void> => {
+  await rollupBelaboxMinuteWindows(db, now);
+  await purgeExpiredBelaboxMinutes(db, now);
 };
 
 const encodedRecent = (recent: readonly BelaboxRecentPoint[]): string => JSON.stringify(
@@ -951,6 +1056,7 @@ export const writeBelaboxFetch = async (
          bitrate_sum = belabox_minutes.bitrate_sum + excluded.bitrate_sum,
          rtt_max = MAX(belabox_minutes.rtt_max, excluded.rtt_max),
          rtt_sum = belabox_minutes.rtt_sum + excluded.rtt_sum,
+         rolled_up_at = NULL,
          dropped_delta = belabox_minutes.dropped_delta + excluded.dropped_delta`,
     ).bind(
       input.channelId,

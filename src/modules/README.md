@@ -546,11 +546,17 @@ er, zählt der neue Stand als Reset.
 Die Live-Panelreihe kommt aus dem begrenzten Zehn-Minuten-Puffer in
 `belabox_status`; die Streamreihe kommt aus Minutenmittelwerten. Ein
 angenommener `stream.offline`-Übergang finalisiert die Zusammenfassung und
-berechnet P10 aus den Minutenmittelwerten. Stundenwartung löscht nur
-Minutenzeilen nach 30 Tagen. Streamzusammenfassungen bleiben unbegrenzt, weil
-sie aggregiert sind und keine Personendaten enthalten (Entscheidung 0003).
-Routenabfragen binden `channel_id`; `/history` liefert pro Messpunkt nur
-numerische Werte.
+berechnet P10 aus den Minutenmittelwerten. Vor dem Löschen nach 30 Tagen rollt
+die Stundenwartung abgeschlossene Minuten in permanente Fünf-Minuten-Fenster
+pro Kanal und Stream. Die Fensterstarts werden als UTC-Epoch-Millisekunden
+gespeichert und sind durch 300.000 teilbar. Die Fenster enthalten Min/Max,
+gewichteten Mittelwert, P10 aus den
+Minutenmittelwerten, RTT-Mittelwert, Paketverlustdelta und Stichprobenzahl. Pro
+Wartungslauf werden höchstens 64 Fenster (Schreibbudget gegen das tägliche D1-Limit) verarbeitet; noch nicht gerollte
+Minuten bleiben bis zu einem späteren Lauf erhalten. Streamzusammenfassungen
+und Fenster bleiben unbegrenzt, weil sie aggregiert sind und keine
+Personendaten enthalten (Entscheidung 0003). Routenabfragen binden
+`channel_id`; `/history` liefert pro Messpunkt nur numerische Werte.
 
 ### Modulaktionen (`actions`)
 
