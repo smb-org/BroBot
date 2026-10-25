@@ -69,9 +69,13 @@ describe("Module labels", () => {
     expect(moduleName("statistics", "de")).toBe("Statistiken");
     expect(moduleName("statistics", "en")).toBe("Statistics");
     expect(moduleDescription("statistics", "de")).toContain("ungefähre Zahl unterschiedlicher Chatter");
-    expect(moduleDescription("statistics", "de")).toContain("Dauerhaft gespeichert werden Fenstersummen und eine kanalweite Liste der häufigsten Wörter");
+    expect(moduleDescription("statistics", "de")).toContain("Dauerhaft gespeichert werden Fenstersummen, eine kanalweite Liste der häufigsten Wörter");
+    expect(moduleDescription("statistics", "de")).toContain("Zeitleisten-Ereignisse je Stream");
+    expect(moduleDescription("statistics", "de")).toContain("keine Namen oder Kennungen von Zuschauern oder Clip-Erstellern");
     expect(moduleDescription("statistics", "en")).toContain("approximates distinct chatters");
-    expect(moduleDescription("statistics", "en")).toContain("Retained are window totals and a channel-wide list of the most frequent words");
+    expect(moduleDescription("statistics", "en")).toContain("Retained are window totals, a channel-wide list of the most frequent words");
+    expect(moduleDescription("statistics", "en")).toContain("stream timeline events");
+    expect(moduleDescription("statistics", "en")).toContain("no names or IDs of viewers or clip creators");
     expect(module?.mandatoryReason?.de).toContain("immer aktiv");
     expect(module?.mandatoryReason?.en).toContain("always active");
   });
