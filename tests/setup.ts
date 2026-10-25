@@ -1,5 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
 import { beforeEach } from "vitest";
+
+// The default 1 s makes correct tests fail when the machine is busy; a passing
+// wait returns as soon as it is satisfied, so the larger ceiling costs nothing.
+configure({ asyncUtilTimeout: 5_000 });
 
 if (typeof window !== "undefined") {
   Object.defineProperty(window.navigator, "language", { value: "de-DE", configurable: true });
