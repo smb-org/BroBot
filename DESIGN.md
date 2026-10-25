@@ -103,7 +103,7 @@ Inhaltsfarben gehören zum dargestellten Gegenstand, nicht zum Chrom. **Nie** au
 
 - **Abstimmungsfarben:** geplante Standardpalette aus 6 Farben, je Antwort änderbar („Farbe für Antwort N“ + eigene Hex-Farbe). Gleiche Farbe in Panel-Vorschau, Cockpit-Ergebnis und Overlay. Ziel: jede Farbe ≥ 3:1 gegen die Balkenspur und alle 6 unterscheidbar; ein automatischer Test ist geplant.
 - Inhaltsfarben verwenden die `--content-*`-Tokens. Frei gewählte Overlay-Farben sind Nutzereingaben und werden getrennt vom UI-Chrom behandelt.
-- `--color-chart-1` bis `--color-chart-5` mappen auf Inhaltsfarben, nie auf Rollenfarben.
+- `--color-chart-1` bis `--color-chart-7` mappen auf Inhaltsfarben, nie auf Rollenfarben.
 
 ## 5. Farb-Tokens
 

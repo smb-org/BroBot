@@ -236,7 +236,7 @@ const registeredModuleEntries = (
       ...(entry.description === undefined ? {} : { description: entry.description[language] }),
       iconKind: entry.iconKind,
       keywords: entry.keywords ?? [],
-      route: index === 0 ? route : { ...route, pageId: entry.id },
+      route: entries.length > 1 && index > 0 ? { ...route, pageId: entry.id } : route,
       sidebarVisible: visibleModules.has(module.id),
     }));
   });

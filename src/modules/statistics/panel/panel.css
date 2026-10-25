@@ -82,6 +82,8 @@
   .statistics-inspector__event-marker--clip { border-radius: 50%; color: var(--color-chart-3); }
   .statistics-inspector__event-marker--ad { border-radius: 1px; color: var(--color-chart-5); }
   .statistics-inspector__event-marker--drop { color: var(--color-chart-2); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+  .statistics-inspector__event-marker--raidIncoming { color: var(--color-chart-6); clip-path: polygon(100% 0, 100% 100%, 0 50%); }
+  .statistics-inspector__event-marker--raidOutgoing { color: var(--color-chart-7); clip-path: polygon(0 0, 100% 50%, 0 100%); }
   .statistics-inspector__event-marker--emoteSpike { color: var(--color-chart-4); clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); }
   .statistics-inspector__no-events { display: flex; min-height: 120px; align-items: center; margin: 0; color: var(--text-3); font-size: 12px; }
   .statistics-inspector--loading { min-height: 820px; align-content: start; }

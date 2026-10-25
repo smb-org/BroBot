@@ -43,7 +43,7 @@ const insertTimelineRow = async (
   ).bind(channelId, eventKey, streamId, occurredAt, kind, JSON.stringify(detail)).run();
 };
 
-/** Writes an aggregate-only observation and lets D1 failures reach retryable callers. */
+/** Writes a timeline event and lets D1 failures reach retryable callers. */
 export const writeChannelTimelineEventOrThrow = async (
   database: D1Database,
   channelId: string,
@@ -57,7 +57,7 @@ export const writeChannelTimelineEventOrThrow = async (
   await insertTimelineRow(database, channelId, eventKey, streamId, occurredAt, event.kind, event.detail);
 };
 
-/** Writes an aggregate-only observation; timeline failures never affect event processing. */
+/** Writes a timeline event; failures never affect event processing. */
 export const writeChannelTimelineEvent = async (
   database: D1Database,
   channelId: string,

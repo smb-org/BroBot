@@ -200,6 +200,8 @@ export const seedE2EStatisticsStreams = (channelId = e2eChannelId): void => {
       VALUES
       ('${channelId}', 'e2e-statistics-online', '${streamId}', '${windowStart(0)}', 'stream_online', '{}'),
       ('${channelId}', 'e2e-statistics-meta-one', NULL, '${windowStart(60_000)}', 'channel_metadata', '{"title":"E2E Stream","category":{"id":"game-1","name":"Game One"}}'),
+      ('${channelId}', 'raid_incoming:e2e-raid-in', NULL, '${windowStart(150_000)}', 'raid_incoming', '{"viewers":37,"partner":{"id":"e2e-partner-a","login":"e2e_partner_a","displayName":"E2E Partner A"}}'),
+      ('${channelId}', 'raid_outgoing:e2e-raid-out', NULL, '${windowStart(300_000)}', 'raid_outgoing', '{"viewers":52,"partner":{"id":"e2e-partner-b","login":"e2e_partner_b","displayName":"E2E Partner B"}}'),
       ('${channelId}', 'e2e-statistics-clip', NULL, '${windowStart(420_000)}', 'clip_created', '{"clipId":"e2e-clip","title":"E2E highlight"}'),
       ('${channelId}', 'e2e-statistics-meta-two', NULL, '${windowStart(480_000)}', 'channel_metadata', '{"title":"E2E Stream","category":{"id":"game-2","name":"Game Two"}}'),
       ('${channelId}', 'e2e-statistics-offline', NULL, '${windowStart(540_000)}', 'stream_offline', '{}'),
@@ -219,5 +221,27 @@ export const seedE2EStatisticsStreams = (channelId = e2eChannelId): void => {
   });
   if (result.status !== 0) {
     throw new Error(`Statistics streams e2e setup failed.\n${result.stdout}\n${result.stderr}`);
+  }
+};
+
+export const seedE2EStatisticsWords = (channelId = e2eChannelId): void => {
+  seedE2EStatisticsStreams(channelId);
+  const observedAt = new Date().toISOString();
+  const sql = `
+    INSERT OR REPLACE INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+      VALUES
+      ('${channelId}', 'halloween', 20, '${observedAt}'),
+      ('${channelId}', 'hallway', 12, '${observedAt}'),
+      ('${channelId}', 'lol', 10, '${observedAt}');
+  `;
+  const result = spawnSync("./node_modules/.bin/wrangler", [
+    "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes",
+    "--persist-to", e2eWorkerPersist, "--command", sql,
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
+  });
+  if (result.status !== 0) {
+    throw new Error(`Statistics words e2e setup failed.\n${result.stdout}\n${result.stderr}`);
   }
 };

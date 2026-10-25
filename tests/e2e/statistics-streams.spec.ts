@@ -48,6 +48,11 @@ test("shows seeded stream history, changes metrics, and links a chart marker to 
   await bitrate.click();
   await expect(bitrate).toHaveAttribute("aria-pressed", "true");
 
+  await expect(page.getByRole("listitem", { name: /raid from e2e partner a with 37 viewers/iu })).toBeVisible();
+  await expect(page.getByRole("listitem", { name: /raid to e2e partner b with 52 viewers/iu })).toBeVisible();
+  await expect(page.getByRole("button", { name: /incoming raid: raid from e2e partner a/iu })).toBeVisible();
+  await expect(page.getByRole("button", { name: /outgoing raid: raid to e2e partner b/iu })).toBeVisible();
+
   const clipMarker = page.getByRole("button", { name: /clip: e2e highlight/iu });
   // Keep the pointer off the event list so hover cannot take over the highlight while the page scrolls.
   await page.mouse.move(0, 0);

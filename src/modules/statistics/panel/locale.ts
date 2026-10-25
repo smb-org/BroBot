@@ -46,6 +46,10 @@ export interface StatisticsPanelTexts {
   drop: string;
   emoteSpike: string;
   emotesInWindow: (count: string) => string;
+  raidIncoming: string;
+  raidOutgoing: string;
+  raidFrom: (name: string, viewers: string) => string;
+  raidTo: (name: string, viewers: string) => string;
   title: string;
   category: string;
   at: string;
@@ -99,6 +103,10 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsPanelTexts>> = {
     drop: "Verbindungsabbruch",
     emoteSpike: "Emote-Spitze",
     emotesInWindow: (count) => `${count} Emotes in 5 Minuten`,
+    raidIncoming: "Eingehender Raid",
+    raidOutgoing: "Ausgehender Raid",
+    raidFrom: (name, viewers) => `Raid von ${name} mit ${viewers} Zuschauern`,
+    raidTo: (name, viewers) => `Raid zu ${name} mit ${viewers} Zuschauern`,
     title: "Titel",
     category: "Kategorie",
     at: "um",
@@ -150,6 +158,10 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsPanelTexts>> = {
     drop: "Connection drop",
     emoteSpike: "Emote spike",
     emotesInWindow: (count) => `${count} emotes in 5 minutes`,
+    raidIncoming: "Incoming raid",
+    raidOutgoing: "Outgoing raid",
+    raidFrom: (name, viewers) => `Raid from ${name} with ${viewers} viewers`,
+    raidTo: (name, viewers) => `Raid to ${name} with ${viewers} viewers`,
     title: "Title",
     category: "Category",
     at: "at",

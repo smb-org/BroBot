@@ -3394,7 +3394,7 @@ export class ChannelObject extends DurableObject<Env> {
         markClipImportPending: (streamId, startedAt, endedAt) =>
           this.markStatisticsClipImportPending(streamId, startedAt, endedAt),
         listReadyClipImports: (now) => this.listReadyStatisticsClipImports(now),
-        completeClipImport: (streamId) => this.completeStatisticsClipImport(streamId),
+        completeClipImport: (streamId, endedAt) => this.completeStatisticsClipImport(streamId, endedAt),
         pruneExpiredClipImports: (now) => this.pruneExpiredStatisticsClipImports(now),
         hasClipImports: () => this.hasStatisticsClipImports(),
       },
@@ -4047,9 +4047,19 @@ export class ChannelObject extends DurableObject<Env> {
     if (streamId.length === 0 || !Number.isSafeInteger(endedAtMs)) return Promise.resolve();
     this.ensureStatisticsSchema();
     this.ctx.storage.sql.exec(
-      `INSERT OR IGNORE INTO ${STATISTICS_CLIP_IMPORT_TABLE}
+      `INSERT INTO ${STATISTICS_CLIP_IMPORT_TABLE}
          (stream_id, started_at, ended_at, ready_at, expires_at)
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(stream_id) DO UPDATE SET
+         started_at = CASE
+           WHEN started_at IS NULL THEN excluded.started_at
+           WHEN excluded.started_at IS NULL THEN started_at
+           WHEN julianday(excluded.started_at) < julianday(started_at) THEN excluded.started_at
+           ELSE started_at
+         END,
+         ended_at = MAX(ended_at, excluded.ended_at),
+         ready_at = MAX(ready_at, excluded.ready_at),
+         expires_at = MAX(expires_at, excluded.expires_at)`,
       streamId,
       startedAt !== null && Number.isFinite(Date.parse(startedAt)) ? startedAt : null,
       endedAtMs,
@@ -4075,11 +4085,14 @@ export class ChannelObject extends DurableObject<Env> {
     })));
   }
 
-  public completeStatisticsClipImport(streamId: string): Promise<void> {
+  public completeStatisticsClipImport(streamId: string, endedAt: string): Promise<void> {
+    const endedAtMs = Date.parse(endedAt);
+    if (!Number.isSafeInteger(endedAtMs)) return Promise.resolve();
     this.ensureStatisticsSchema();
     this.ctx.storage.sql.exec(
-      `DELETE FROM ${STATISTICS_CLIP_IMPORT_TABLE} WHERE stream_id = ?`,
+      `DELETE FROM ${STATISTICS_CLIP_IMPORT_TABLE} WHERE stream_id = ? AND ended_at = ?`,
       streamId,
+      endedAtMs,
     );
     return Promise.resolve();
   }

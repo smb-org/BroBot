@@ -268,7 +268,7 @@ const importReadyStreamClips = async (
           },
         });
       }
-      await statisticsChat.completeClipImport(pending.streamId);
+      await statisticsChat.completeClipImport(pending.streamId, pending.endedAt);
     } catch (error: unknown) {
       console.warn("Statistics clip import failed; the pending import will retry.", error);
     }

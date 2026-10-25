@@ -60,7 +60,7 @@ describe("Module labels", () => {
     expect(moduleDescription("raid", "en")).toContain("manual shoutouts");
   });
 
-  it("explains that statistics stores only aggregate metrics in both languages", () => {
+  it("explains retained aggregate metrics and partner-channel raid details in both languages", () => {
     const module = MODULES.find((candidate) => candidate.id === "statistics");
     expect(module?.mandatory).toBe(true);
     expect(module?.navigationCategory).toBe("data");
@@ -71,11 +71,13 @@ describe("Module labels", () => {
     expect(moduleDescription("statistics", "de")).toContain("ungefähre Zahl unterschiedlicher Chatter");
     expect(moduleDescription("statistics", "de")).toContain("Dauerhaft gespeichert werden Fenstersummen, eine kanalweite Liste der häufigsten Wörter");
     expect(moduleDescription("statistics", "de")).toContain("Zeitleisten-Ereignisse je Stream");
-    expect(moduleDescription("statistics", "de")).toContain("keine Namen oder Kennungen von Zuschauern oder Clip-Erstellern");
+    expect(moduleDescription("statistics", "de")).toContain("eingehende und ausgehende Raids mit Kennung, Login und Anzeigenamen des Partnerkanals");
+    expect(moduleDescription("statistics", "de")).toContain("keine Namen oder Kennungen einzelner Zuschauer oder Clip-Ersteller und keine einzelnen Nachrichten");
     expect(moduleDescription("statistics", "en")).toContain("approximates distinct chatters");
     expect(moduleDescription("statistics", "en")).toContain("Retained are window totals, a channel-wide list of the most frequent words");
     expect(moduleDescription("statistics", "en")).toContain("stream timeline events");
-    expect(moduleDescription("statistics", "en")).toContain("no names or IDs of viewers or clip creators");
+    expect(moduleDescription("statistics", "en")).toContain("incoming and outgoing raids with the partner channel's ID, login, and display name");
+    expect(moduleDescription("statistics", "en")).toContain("no names or IDs of individual viewers or clip creators, and no individual messages");
     expect(module?.mandatoryReason?.de).toContain("immer aktiv");
     expect(module?.mandatoryReason?.en).toContain("always active");
   });

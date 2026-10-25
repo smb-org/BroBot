@@ -900,6 +900,14 @@ export type ModuleTimelineEvent =
       detail: { title: string | null; category: { id: string; name: string | null } | null };
     })
   | (ModuleTimelineEventBase & {
+      kind: "raid_incoming";
+      detail: { viewers: number; partner: { id: string; login: string; displayName: string } };
+    })
+  | (ModuleTimelineEventBase & {
+      kind: "raid_outgoing";
+      detail: { viewers: number; partner: { id: string; login: string; displayName: string } };
+    })
+  | (ModuleTimelineEventBase & {
       kind: "clip_created";
       detail: {
         clipId: string;
@@ -949,7 +957,7 @@ interface ModuleStatisticsChat {
   hasWordStreams: () => Promise<boolean>;
   markClipImportPending: (streamId: string, startedAt: string | null, endedAt: string) => Promise<void>;
   listReadyClipImports: (now: number) => Promise<readonly ModuleStatisticsClipImport[]>;
-  completeClipImport: (streamId: string) => Promise<void>;
+  completeClipImport: (streamId: string, endedAt: string) => Promise<void>;
   pruneExpiredClipImports: (now: number) => Promise<void>;
   hasClipImports: () => Promise<boolean>;
 }
@@ -1601,8 +1609,8 @@ export interface ModuleEnableContext {
 /** Shared props for lazily loaded panel views. */
 export interface ModulePanelProperties {
   channelId: string;
-  /** Selected module-owned navigation entry, when the host routes module pages separately. */
-  navigationPageId?: string;
+  /** Active module navigation page, when a module exposes more than one page. */
+  pageId?: string;
   /** The panel language resolved by the host; optional for legacy modules. */
   language?: ModuleLanguage;
   /** Resolves other registered module names for collection rows and history. */

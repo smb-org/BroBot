@@ -248,6 +248,17 @@ export const deriveStreamEvents = (
         at: event.occurredAt,
         ...(typeof detail.durationSeconds === "number" ? { durationSeconds: detail.durationSeconds } : {}),
       });
+    } else if (event.kind === "raid_incoming" || event.kind === "raid_outgoing") {
+      const detail = record(event.detail) ?? {};
+      const partner = record(detail.partner) ?? {};
+      const partnerName = text(partner.displayName) ?? text(partner.login);
+      result.push({
+        id: `raid:${event.kind}:${event.occurredAt}:${String(index)}`,
+        type: event.kind === "raid_incoming" ? "raidIncoming" : "raidOutgoing",
+        at: event.occurredAt,
+        ...(partnerName === null ? {} : { partnerName }),
+        ...(typeof detail.viewers === "number" ? { raidViewers: detail.viewers } : {}),
+      });
     } else {
       const detail = record(event.detail) ?? {};
       result.push({

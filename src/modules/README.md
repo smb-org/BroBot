@@ -691,6 +691,26 @@ Baseline nur Gesamtzahl und letzten Zeitpunkt. Ein noch gepufferter Zuwachs
 zählt für die 15-Minuten-Ruhe mit. Die Baseline behält dauerhaft die 5.000 häufigsten
 Wörter pro Kanal.
 
+#### Wörter-Seite (#576)
+
+Die Statistiknavigation öffnet Streams und Wörter als eigene Seiten desselben
+Moduls. `GET /api/channels/:channelId/modules/statistics/words` liefert 100
+Einträge je Seite (`page` 1–50), sortiert nach `total_count DESC, word ASC`.
+`search` ist auf 80 Zeichen begrenzt, normalisiert und sucht als
+case-insensitive Teilzeichenfolge. `hideFillers` ist standardmäßig `true` und
+blendet eine kurze Liste deutscher und englischer Chat-Füllwörter nur beim Lesen
+aus; Baseline und Zähler bleiben unverändert. Die Rangnummer zählt innerhalb
+der aktuell gefilterten Ergebnisliste. `share` verwendet die Summe aller
+gespeicherten Wortzählungen des Kanals als Nenner, auch wenn Suche oder
+Füllwortfilter aktiv sind. Die Antwort liefert diese Summe und die höchste
+Zählerzahl für die Balkenskalierung.
+
+Die Wörter-Seite hält Suche, Füllwortschalter und Seitennavigation über der
+intern scrollbaren Tabelle. Das Suchfeld wartet vor einer neuen Anfrage kurz
+ab; Tabellenplatz und Ladezeilen bleiben dabei reserviert. Ab 1.280 Pixeln ist
+der Tabellenkopf im Scrollbereich fixiert. Auf schmalen Ansichten erscheint
+„Zuletzt gesehen“ unter dem Wort.
+
 Nach erfolgreichem Merge löscht das DO nur den jeweiligen Bucket. Nach
 24 Stunden ab bestätigtem Streamende oder Offline-Erkennung löscht der nächste
 Statistik-Alarm alle Streamdaten, unabhängig von D1-Erfolg. Ein Merge-Batch
@@ -703,9 +723,12 @@ Die Worker-Host-Tabelle `channel_timeline_events` speichert rohe
 Stream-Lifecycle-Ereignisse (`stream.online` mit Stream-ID und `started_at`,
 `stream.offline`), jeweils eine aktuelle Metadatenbeobachtung aus
 `channel.update` (Titel und Kategorie, fehlende Kategorie als `NULL`),
-bestätigte Clips, autorisierte Werbepausen und Emote-Spitzen. Bot-Clips und
-nach Streamende importierte Clips verwenden die Clip-ID als natürlichen
-Schlüssel. Der Statistik-Alarm fragt Get Clips einmal 15 Minuten nach dem
+eingehende und ausgehende `channel.raid`-Ereignisse sowie bestätigte Clips,
+autorisierte Werbepausen und Emote-Spitzen. Raid-Einträge speichern die
+Zuschauerzahl und die öffentliche ID, den Login und den Anzeigenamen des
+Partnerkanals, aber keine Zuschauer-IDs; die EventSub-Nachrichten-ID ist ihr
+natürlicher Schlüssel. Bot-Clips und nach Streamende importierte Clips
+verwenden die Clip-ID als natürlichen Schlüssel. Der Statistik-Alarm fragt Get Clips einmal 15 Minuten nach dem
 Streamende ab, höchstens zwei Seiten beziehungsweise 200 Clips. Ein fehlgeschlagener
 Abruf bleibt bis zu 24 Stunden für spätere Alarme vorgemerkt. Die Timeline
 enthält bei Clips Clip-ID, Titel, Erstellungszeitpunkt, Aufruf-Snapshot und

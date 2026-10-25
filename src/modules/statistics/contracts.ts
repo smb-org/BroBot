@@ -14,7 +14,9 @@ type StatisticsTimelineEventKind =
   | "channel_metadata"
   | "clip_created"
   | "ad_break"
-  | "emote_spike";
+  | "emote_spike"
+  | "raid_incoming"
+  | "raid_outgoing";
 
 export interface StatisticsTimelineEvent {
   kind: StatisticsTimelineEventKind;
@@ -52,7 +54,7 @@ export interface StatisticsBitrateWindow {
   bitrateP10: number;
 }
 
-type StatisticsStreamEventType = "start" | "offline" | "metadata" | "clip" | "ad" | "drop" | "emoteSpike";
+type StatisticsStreamEventType = "start" | "offline" | "metadata" | "clip" | "ad" | "drop" | "emoteSpike" | "raidIncoming" | "raidOutgoing";
 
 export interface StatisticsStreamEvent {
   id: string;
@@ -66,6 +68,9 @@ export interface StatisticsStreamEvent {
   oldCategory?: string | null;
   clipId?: string;
   emotes?: number;
+  /** Public display name of the raid partner channel. */
+  partnerName?: string;
+  raidViewers?: number;
   text?: string;
 }
 
@@ -117,4 +122,27 @@ export interface StatisticsTrendsResponse {
   weekly: readonly StatisticsTrendWeek[];
   heatmap: readonly StatisticsTrendHeatmapCell[];
   categories: readonly StatisticsTrendCategory[];
+}
+
+interface StatisticsWordFrequency {
+  /** Position within the current filtered result set, ordered by count and word. */
+  rank: number;
+  word: string;
+  count: number;
+  /** Share of every stored word count for this channel, before display filters. */
+  share: number;
+  lastSeenAt: string;
+}
+
+export interface StatisticsWordsResponse {
+  words: readonly StatisticsWordFrequency[];
+  page: number;
+  pageSize: number;
+  /** Number of words after search and filler filters. */
+  total: number;
+  totalPages: number;
+  /** Sum of all stored counts, before search and filler filters. */
+  totalCount: number;
+  /** Highest count among all stored words, used to scale the share bars. */
+  maxCount: number;
 }

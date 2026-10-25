@@ -13,6 +13,7 @@ import { loadStatisticsStream, loadStatisticsStreams } from "./service";
 import { statisticsPanelTexts } from "./locale";
 import { StatisticsHistoryChart } from "./history-chart";
 import { StatisticsTrendsPanel } from "./trends";
+import { StatisticsWordsPanel } from "./words-panel";
 
 const number = (value: number | null, language: "de" | "en", digits = 0): string => value === null
   ? "—"
@@ -64,6 +65,10 @@ const eventText = (event: StatisticsStreamEvent, labels: ReturnType<typeof stati
   if (event.type === "ad") return `${number(event.durationSeconds ?? 0, "en")} s`;
   if (event.type === "drop") return `${number(event.durationSeconds ?? 0, "en")} s`;
   if (event.type === "emoteSpike") return labels.emotesInWindow(number(event.emotes ?? 0, "en"));
+  if (event.type === "raidIncoming" || event.type === "raidOutgoing") {
+    const describe = event.type === "raidIncoming" ? labels.raidFrom : labels.raidTo;
+    return describe(event.partnerName ?? "—", number(event.raidViewers ?? 0, "en"));
+  }
   if (event.type === "offline") return labels.streamEnded;
   return labels.streamStarted;
 };
@@ -82,6 +87,8 @@ const eventLabel = (event: StatisticsStreamEvent, labels: ReturnType<typeof stat
   if (event.type === "clip") return labels.clip;
   if (event.type === "ad") return labels.ad;
   if (event.type === "drop") return labels.drop;
+  if (event.type === "raidIncoming") return labels.raidIncoming;
+  if (event.type === "raidOutgoing") return labels.raidOutgoing;
   return labels.emoteSpike;
 };
 
@@ -359,6 +366,11 @@ export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePan
   return <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />;
 }
 
-export const StatisticsPanel = (properties: ModulePanelProperties): ReactElement => properties.navigationPageId === "trends"
-  ? <StatisticsTrendsPanel {...properties} />
-  : <StatisticsStreamsPanel {...properties} />;
+const STATISTICS_PAGES: Readonly<Record<string, (properties: ModulePanelProperties) => ReactElement>> = {
+  trends: (properties) => <StatisticsTrendsPanel {...properties} />,
+  words: (properties) => <StatisticsWordsPanel {...properties} />,
+};
+
+export function StatisticsPanel(properties: ModulePanelProperties): ReactElement {
+  return (STATISTICS_PAGES[properties.pageId ?? ""] ?? ((streams) => <StatisticsStreamsPanel {...streams} />))(properties);
+}
