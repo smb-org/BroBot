@@ -1,10 +1,10 @@
 import "./panel.css";
 
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { EmptyState, Icon, ListDetail, LoadState, SubInspector } from "../../../dashboard/ui";
 import { dashboardCommonTexts, dashboardTexts } from "../../../dashboard/locale";
-import { useModuleQuery } from "../../../dashboard/data/module-query";
+import { useModulePagesQuery, useModuleQuery } from "../../../dashboard/data/module-query";
 import { useChannelSettings } from "../../../dashboard/data/channel-settings";
 import { browserTimeZone } from "../../../dashboard/ui/format-relative-time";
 import type { ModulePanelProperties } from "../../contract";
@@ -222,33 +222,31 @@ export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePan
   const [selectedStreamId, setSelectedStreamId] = useState<string | null>(null);
   const [selectionClosed, setSelectionClosed] = useState(false);
   const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 1280);
-  const [olderPages, setOlderPages] = useState<readonly StatisticsStreamListResponse[]>([]);
-  const [olderLoading, setOlderLoading] = useState(false);
-  const [olderError, setOlderError] = useState(false);
-  const olderRequest = useRef<AbortController | null>(null);
   const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
-  const listQuery = useModuleQuery(channelId, "statistics", "streams:first",
-    (signal) => loadStatisticsStreams(channelId, signal));
+  const listQuery = useModulePagesQuery(
+    channelId,
+    "statistics",
+    "streams:pages",
+    (cursor, signal) => loadStatisticsStreams(channelId, signal, cursor ?? undefined),
+    (page: StatisticsStreamListResponse) => page.nextCursor,
+  );
 
   useEffect(() => {
     const updateNarrow = (): void => { setNarrow(window.innerWidth < 1280); };
     window.addEventListener("resize", updateNarrow);
-    return () => {
-      window.removeEventListener("resize", updateNarrow);
-      olderRequest.current?.abort();
-    };
+    return () => { window.removeEventListener("resize", updateNarrow); };
   }, []);
 
   const streams = useMemo(() => {
     const rows = new Map<string, StatisticsStreamSummary>();
-    for (const stream of listQuery.data?.streams ?? []) rows.set(stream.streamId, stream);
-    for (const page of olderPages) {
+    for (const page of listQuery.data?.pages ?? []) {
       for (const stream of page.streams) rows.set(stream.streamId, stream);
     }
     return [...rows.values()];
-  }, [listQuery.data, olderPages]);
-  const lastPage = olderPages.at(-1);
-  const nextCursor = olderPages.length === 0 ? listQuery.data?.nextCursor ?? null : lastPage?.nextCursor ?? null;
+  }, [listQuery.data]);
+  const hasOlder = listQuery.hasNextPage;
+  const olderLoading = listQuery.isFetchingNextPage;
+  const olderError = listQuery.isFetchNextPageError;
   const activeStreamId = selectedStreamId ?? (selectionClosed || narrow ? null : streams[0]?.streamId ?? null);
 
   const detailQuery = useModuleQuery(channelId, "statistics", `stream:${activeStreamId ?? "none"}`,
@@ -266,24 +264,9 @@ export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePan
     setSelectedStreamId(null);
     setSelectionClosed(true);
   };
-  const loadOlder = async (): Promise<void> => {
-    if (nextCursor === null || olderLoading || listQuery.isFetching) return;
-    olderRequest.current?.abort();
-    const controller = new AbortController();
-    olderRequest.current = controller;
-    setOlderLoading(true);
-    setOlderError(false);
-    try {
-      const response = await loadStatisticsStreams(channelId, controller.signal, nextCursor);
-      if (!controller.signal.aborted) setOlderPages((previous) => [...previous, response]);
-    } catch {
-      if (!controller.signal.aborted) setOlderError(true);
-    } finally {
-      if (olderRequest.current === controller) {
-        olderRequest.current = null;
-        if (!controller.signal.aborted) setOlderLoading(false);
-      }
-    }
+  const loadOlder = (): void => {
+    if (!hasOlder || listQuery.isFetching) return;
+    void listQuery.fetchNextPage();
   };
   const reloadStreams = (): void => { void listQuery.refetch(); };
   const listStatus = streams.length > 0 ? "success" : listQuery.isLoading ? "loading" : listQuery.isError ? "error" : "empty";
@@ -320,10 +303,10 @@ export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePan
     <header className="statistics-streams__list-header">
       <div><h2>{labels.streams}</h2><p>{labels.loadedCount(number(streams.length, language))}</p></div>
       <div className="statistics-streams__list-status" aria-live="polite">
-        {nextCursor === null ? null : olderError ? <div className="statistics-streams__list-error" role="alert">
+        {!hasOlder ? null : olderError ? <div className="statistics-streams__list-error" role="alert">
           <span>{labels.loadError}</span>
-          <button type="button" className="statistics-streams__older" onClick={() => { void loadOlder(); }}>{labels.retry}</button>
-        </div> : <button type="button" className="statistics-streams__older" disabled={olderLoading || listQuery.isFetching} onClick={() => { void loadOlder(); }}>
+          <button type="button" className="statistics-streams__older" onClick={loadOlder}>{labels.retry}</button>
+        </div> : <button type="button" className="statistics-streams__older" disabled={olderLoading || listQuery.isFetching} onClick={loadOlder}>
           <Icon name="clock-hour-4" />{olderLoading ? labels.loading : labels.older}
         </button>}
       </div>

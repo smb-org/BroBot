@@ -153,10 +153,15 @@ const dropPairs = (events: readonly StatisticsTimelineEvent[]): Map<number, numb
   const pairs = new Map<number, number>();
   ordered.forEach((event, offlineIndex) => {
     if (event.kind !== "stream_offline") return;
-    const offlineTime = Date.parse(event.occurredAt);
-    const onlineIndex = ordered.findIndex((candidate, candidateIndex) => candidateIndex > offlineIndex &&
-      !usedOnline.has(candidateIndex) && candidate.kind === "stream_online" &&
-      Date.parse(candidate.occurredAt) >= offlineTime && Date.parse(candidate.occurredAt) - offlineTime <= DROP_WINDOW_MILLISECONDS);
+    // Nanosecond resolution: ten minutes and one nanosecond is not a drop.
+    const offlineTime = instantNanoseconds(event.occurredAt);
+    if (offlineTime === null) return;
+    const dropWindow = BigInt(DROP_WINDOW_MILLISECONDS) * 1_000_000n;
+    const onlineIndex = ordered.findIndex((candidate, candidateIndex) => {
+      if (candidateIndex <= offlineIndex || usedOnline.has(candidateIndex) || candidate.kind !== "stream_online") return false;
+      const onlineTime = instantNanoseconds(candidate.occurredAt);
+      return onlineTime !== null && onlineTime >= offlineTime && onlineTime - offlineTime <= dropWindow;
+    });
     if (onlineIndex < 0) return;
     pairs.set(offlineIndex, onlineIndex);
     usedOnline.add(onlineIndex);

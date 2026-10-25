@@ -103,6 +103,20 @@ describe("statistics stream derivation", () => {
     expect(second.nextCursor).toBeNull();
   });
 
+  it("does not count ten minutes plus one nanosecond as a drop", () => {
+    const within = deriveStreamEvents([
+      event("stream_offline", "2026-10-25T12:00:00.000000001Z"),
+      event("stream_online", "2026-10-25T12:10:00.000000001Z"),
+    ], "2026-10-25T12:00:00.000Z", "2026-10-25T12:20:00.000Z");
+    const beyond = deriveStreamEvents([
+      event("stream_offline", "2026-10-25T12:00:00.000000001Z"),
+      event("stream_online", "2026-10-25T12:10:00.000000002Z"),
+    ], "2026-10-25T12:00:00.000Z", "2026-10-25T12:20:00.000Z");
+
+    expect(within.map(({ type }) => type)).toEqual(["drop"]);
+    expect(beyond.map(({ type }) => type)).toEqual(["offline", "start"]);
+  });
+
   it("derives a drop only when an offline event is followed by an online event within ten minutes", () => {
     const events = deriveStreamEvents([
       event("stream_online", "2026-10-25T12:00:00.000Z"),

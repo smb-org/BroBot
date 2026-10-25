@@ -189,6 +189,29 @@ describe("statistics streams page", () => {
       .toContain("Using browser time zone");
   });
 
+  it("rebuilds the loaded pages in order when a refresh finds a new stream", async () => {
+    const streamsFrom = (first: number, last: number) => Array.from({ length: last - first + 1 }, (_, index) => ({
+      ...summary,
+      streamId: `stream-${String(first + index)}`,
+      title: `Evening ${String(first + index)}`,
+    }));
+    const list: StatisticsStreamListResponse = { streams: streamsFrom(1, 20), nextCursor: "cursor-one" };
+    const olderPage: StatisticsStreamListResponse = { streams: streamsFrom(21, 40), nextCursor: null };
+    const { queryClient } = renderPanel(list, detail(), olderPage);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
+    expect(await screen.findByRole("button", { name: /evening 40,/iu })).toBeTruthy();
+
+    // A new stream shifts every page boundary by one before the refresh.
+    list.streams = [{ ...summary, streamId: "stream-new", title: "Evening new" }, ...streamsFrom(1, 19)];
+    olderPage.streams = streamsFrom(20, 40);
+    await queryClient.refetchQueries();
+
+    expect(await screen.findByRole("button", { name: /evening new,/iu })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /evening 20,/iu })).toBeTruthy();
+    expect(document.querySelectorAll(".statistics-streams__row")).toHaveLength(41);
+  });
+
   it("hides the average line and label when every primary-series value is null", async () => {
     const loadedDetail = detail();
     const allNullViewers = { ...loadedDetail, windows: loadedDetail.windows.map((window) => ({ ...window, viewerCount: null })) };

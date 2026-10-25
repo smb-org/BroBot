@@ -236,9 +236,10 @@ Nachrichten und Emote-Fragmente pro Fünf-Minuten-Fenster im Channel Durable
 Object. Die Fenster sind an UTC-Vielfache von 300 s ausgerichtet
 (`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
 Nachrichten- und Emote-Summen. Jede Zeile beschreibt das vollständige
-UTC-Epoch-Fenster; Start, Ende und Abdeckung eines Streams kommen aus der
-Stream-Timeline (#558). Offline-/Online-Wechsel im selben Fenster bleiben eine
-Zeile.
+UTC-Epoch-Fenster; Start und Ende eines Streams ergeben sich aus dem ersten
+und letzten Fenster mit seiner Stream-ID (Fünf-Minuten-Präzision). Die
+Stream-Timeline (#558) liefert nur Ereignisse, Titel und Kategorie.
+Offline-/Online-Wechsel im selben Fenster bleiben eine Zeile.
 
 Ein keyed Alarm läuft an jeder Fünf-Minuten-Grenze und schreibt alle
 abgeschlossenen, geänderten Fenster als absolute Werte nach `channel_statistics`.
@@ -311,7 +312,8 @@ seine Ereigniszeit; `channel.update` schreibt eine Beobachtung aus aktuellem
 Titel und Kategorie, wobei eine fehlende Kategorie `NULL` bleibt. Dazu kommen
 bestätigte Clips, autorisierte Werbepausen und Emote-Spitzen. Nur ein
 `stream.online`-Eintrag trägt eine Stream-ID. Andere Ereignisse werden bei einer
-späteren Analyse anhand ihrer Zeitpunkte den Lifecycle-Zeilen zugeordnet. Die
+späteren Analyse anhand ihrer Zeitpunkte der Fensterspanne eines Streams
+zugeordnet. Die
 Tabelle wird unbegrenzt aufbewahrt, löscht mit `ON DELETE CASCADE` und isoliert
 Schreibfehler: Ein fehlender Timeline-Eintrag wird protokolliert, Dispatch und
 Streamzustands-Updates laufen weiter.

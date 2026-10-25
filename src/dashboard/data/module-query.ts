@@ -1,4 +1,4 @@
-import { hashKey, keepPreviousData, useQuery, useQueryClient, type Query, type QueryClient } from "@tanstack/react-query";
+import { hashKey, keepPreviousData, useInfiniteQuery, useQuery, useQueryClient, type Query, type QueryClient } from "@tanstack/react-query";
 import { queryKeys } from "./keys";
 
 export type ModuleQueryFunction<Value> = (signal: AbortSignal) => Promise<Value>;
@@ -145,6 +145,24 @@ export const useModuleQuery = <Value,>(
     },
   });
 };
+
+/**
+ * Cursor-paged module read. All loaded pages live in one query, so a refetch
+ * rebuilds the chain from page one and never leaves a gap between pages.
+ */
+export const useModulePagesQuery = <Page,>(
+  channelId: string,
+  moduleId: string,
+  part: string,
+  fetchPage: (cursor: string | null, signal: AbortSignal) => Promise<Page>,
+  nextCursor: (page: Page) => string | null,
+) => useInfiniteQuery({
+  queryKey: moduleQueryKey(channelId, moduleId, part),
+  initialPageParam: null as string | null,
+  queryFn: ({ pageParam, signal }) => fetchPage(pageParam, signal),
+  getNextPageParam: (lastPage: Page) => nextCursor(lastPage) ?? undefined,
+  refetchOnWindowFocus: false,
+});
 
 /**
  * Own the complete write lifecycle for a module resource. Reads are cancelled
