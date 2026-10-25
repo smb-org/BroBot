@@ -299,6 +299,58 @@ const hasSchemaException = (query: SqlContractQuery): boolean => schemaException
   exception.fileName === query.fileName && query.sql.includes(exception.tableName));
 
 describe("SQL contract", () => {
+  it("rebuilds the timeline with raid kinds while preserving rows and constraints", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec("PRAGMA foreign_keys = ON; CREATE TABLE channels (channel_id TEXT PRIMARY KEY);");
+      database.exec(readFileSync(path.resolve(import.meta.dirname, "../../migrations/0079_channel_timeline.sql"), "utf8"));
+      database.prepare("INSERT INTO channels (channel_id) VALUES (?)").run("channel-a");
+      database.prepare(
+        `INSERT INTO channel_timeline_events (channel_id, event_key, stream_id, occurred_at, kind, detail_json)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run("channel-a", "stream_online:2026-10-25T12:00:00.000000000Z:stream-1", "stream-1", "2026-10-25T12:00:00.000000000Z", "stream_online", "{}");
+
+      database.exec(readFileSync(path.resolve(import.meta.dirname, "../../migrations/0081_channel_timeline_raids.sql"), "utf8"));
+
+      expect(database.prepare(
+        "SELECT event_key, stream_id, occurred_at, kind, detail_json FROM channel_timeline_events",
+      ).all()).toEqual([{
+        event_key: "stream_online:2026-10-25T12:00:00.000000000Z:stream-1",
+        stream_id: "stream-1",
+        occurred_at: "2026-10-25T12:00:00.000000000Z",
+        kind: "stream_online",
+        detail_json: "{}",
+      }]);
+      database.prepare(
+        `INSERT INTO channel_timeline_events (channel_id, event_key, stream_id, occurred_at, kind, detail_json)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run("channel-a", "raid_incoming:message-1", null, "2026-10-25T12:03:00.000000000Z", "raid_incoming", "{}");
+      expect(() => database.prepare(
+        `INSERT INTO channel_timeline_events (channel_id, event_key, stream_id, occurred_at, kind, detail_json)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run("channel-a", "raid_incoming:message-1", null, "2026-10-25T12:03:00.000000000Z", "raid_outgoing", "{}")).toThrow();
+      expect(() => database.prepare(
+        `INSERT INTO channel_timeline_events (channel_id, event_key, stream_id, occurred_at, kind, detail_json)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run("channel-a", "invalid-kind", null, "2026-10-25T12:04:00.000000000Z", "unsupported", "{}")).toThrow();
+      expect(() => database.prepare(
+        `INSERT INTO channel_timeline_events (channel_id, event_key, stream_id, occurred_at, kind, detail_json)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run("channel-a", "invalid-json", null, "2026-10-25T12:04:00.000000000Z", "raid_outgoing", "{" )).toThrow();
+      expect(database.prepare("PRAGMA index_list(channel_timeline_events)").all()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "channel_timeline_events_channel_occurred_idx" }),
+        expect.objectContaining({ name: "channel_timeline_events_channel_kind_occurred_idx" }),
+      ]));
+      expect(database.prepare("PRAGMA foreign_key_list(channel_timeline_events)").all()).toEqual([
+        expect.objectContaining({ table: "channels", from: "channel_id", to: "channel_id", on_delete: "CASCADE" }),
+      ]);
+      expect(() => database.prepare("DELETE FROM channels WHERE channel_id = ?").run("channel-a")).not.toThrow();
+      expect(database.prepare("SELECT COUNT(*) AS count FROM channel_timeline_events").get()).toEqual({ count: 0 });
+    } finally {
+      database.close();
+    }
+  });
+
   it("produces the expected baseline from all migrations [protects=blitz_questions has its channel cascade and persisted search_text column; fails_when=the foreign key is absent or the search column is missing; no_claim=does not exercise channel deletion in the worker D1 runtime]", () => {
     const database = prepareBaseline();
     try {

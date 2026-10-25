@@ -305,4 +305,35 @@ describe("stream timeline against D1 and the channel object", () => {
     });
     expect(rows[0]?.detail_json).not.toContain("viewer-1");
   });
+
+  it("writes incoming and outgoing raids once per message and ignores raids of other channels", async () => {
+    const channelId = "timeline-raid";
+    await insertPointChannel(channelId);
+    const now = Date.now();
+    const raid = (from: string, to: string) => ({
+      from_broadcaster_user_id: from, from_broadcaster_user_login: `${from}_login`, from_broadcaster_user_name: `${from} Name`,
+      to_broadcaster_user_id: to, to_broadcaster_user_login: `${to}_login`, to_broadcaster_user_name: `${to} Name`,
+      viewers: 42,
+    });
+    const dispatch = (triggerId: string, payload: Record<string, unknown>) => dispatchEventSubNotification(worker, {
+      channelId, subscriptionType: "channel.raid", triggerId, payload, receivedAt: iso(now), eventSubTimestamp: iso(now - 1_000),
+    });
+
+    await dispatch("raid-in-1", raid("partner-a", channelId));
+    await dispatch("raid-in-1", raid("partner-a", channelId));
+    await dispatch("raid-out-1", raid(channelId, "partner-b"));
+    await dispatch("raid-foreign", raid("partner-c", "partner-d"));
+
+    const incoming = await timelineRows(channelId, "raid_incoming");
+    expect(incoming).toHaveLength(1);
+    expect(JSON.parse(incoming[0]?.detail_json ?? "{}")).toEqual({
+      viewers: 42, partner: { id: "partner-a", login: "partner-a_login", displayName: "partner-a Name" },
+    });
+    const outgoing = await timelineRows(channelId, "raid_outgoing");
+    expect(outgoing).toHaveLength(1);
+    expect(JSON.parse(outgoing[0]?.detail_json ?? "{}")).toMatchObject({ partner: { id: "partner-b" } });
+    const total = await worker.DB.prepare("SELECT COUNT(*) AS count FROM channel_timeline_events WHERE channel_id = ?")
+      .bind(channelId).first<{ count: number }>();
+    expect(total?.count).toBe(2);
+  });
 });

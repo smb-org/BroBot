@@ -703,6 +703,24 @@ export const dispatchEventSubNotification = async (
       });
     }
   }
+  if (event.subscriptionType === "channel.raid") {
+    const sourceId = textValue(event.payload.from_broadcaster_user_id);
+    const targetId = textValue(event.payload.to_broadcaster_user_id);
+    const viewers = event.payload.viewers;
+    const incoming = targetId === event.channelId && sourceId !== null && sourceId !== event.channelId;
+    const outgoing = sourceId === event.channelId && targetId !== null && targetId !== event.channelId;
+    if ((incoming || outgoing) && typeof viewers === "number" && Number.isSafeInteger(viewers) && viewers >= 0) {
+      const partnerId = incoming ? sourceId : targetId;
+      const partnerLogin = textValue(event.payload[incoming ? "from_broadcaster_user_login" : "to_broadcaster_user_login"]) ?? partnerId;
+      const partnerDisplayName = textValue(event.payload[incoming ? "from_broadcaster_user_name" : "to_broadcaster_user_name"]) ?? partnerLogin;
+      await writeChannelTimelineEvent(environment.DB, event.channelId, {
+        kind: incoming ? "raid_incoming" : "raid_outgoing",
+        identity: event.triggerId,
+        occurredAt: event.eventSubTimestamp ?? event.receivedAt,
+        detail: { viewers, partner: { id: partnerId, login: partnerLogin, displayName: partnerDisplayName } },
+      });
+    }
+  }
   if (event.subscriptionType === "channel.ad_break.begin") {
     const startedAt = textValue(event.payload.started_at);
     const durationSeconds = event.payload.duration_seconds;

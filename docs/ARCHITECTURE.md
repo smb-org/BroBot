@@ -310,7 +310,12 @@ erhalten (Entscheidung 0003).
 schreibt die Ereigniszeit, Stream-ID und `started_at`; `stream.offline` schreibt
 seine Ereigniszeit; `channel.update` schreibt eine Beobachtung aus aktuellem
 Titel und Kategorie, wobei eine fehlende Kategorie `NULL` bleibt. Dazu kommen
-bestätigte Clips, autorisierte Werbepausen und Emote-Spitzen. Nur ein
+bestätigte Clips, autorisierte Werbepausen, Emote-Spitzen und
+`channel.raid`-Ereignisse. Raids schreiben `raid_incoming` oder `raid_outgoing`,
+wenn die Kanal-ID als Ziel- oder Quell-Broadcaster-ID im EventSub-Payload steht;
+gespeichert werden die Zuschauerzahl und die öffentliche ID, der Login und der
+Anzeigename des Partnerkanals. Die EventSub-Nachrichten-ID ist der natürliche
+Schlüssel, sodass eine redelieferte Raid-Nachricht keine weitere Zeile anlegt. Nur ein
 `stream.online`-Eintrag trägt eine Stream-ID. Andere Ereignisse werden bei einer
 späteren Analyse anhand ihrer Zeitpunkte den Lifecycle-Zeilen zugeordnet. Die
 Tabelle wird unbegrenzt aufbewahrt, löscht mit `ON DELETE CASCADE` und isoliert
