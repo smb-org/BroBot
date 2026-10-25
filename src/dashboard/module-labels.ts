@@ -57,7 +57,7 @@ const moduleText = (catalog: Record<string, string>, moduleId: string): string |
 
 export const moduleName = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): string => {
   const registered = MODULES.find((module) => module.id === moduleId)?.navigationEntries?.[0]?.label[language];
-  return registered ?? moduleText(moduleNames[language], moduleId) ?? moduleId;
+  return moduleText(moduleNames[language], moduleId) ?? registered ?? moduleId;
 };
 
 export const moduleNavigationName = (moduleId: string, language: DashboardLanguage = dashboardLanguage()): string =>
@@ -180,7 +180,7 @@ export const moduleDescription = (
   language: DashboardLanguage = dashboardLanguage(),
 ): string | null => {
   const registered = MODULES.find((module) => module.id === moduleId)?.navigationEntries?.[0]?.description?.[language];
-  return registered ?? moduleText(moduleDescriptions[language], moduleId);
+  return moduleText(moduleDescriptions[language], moduleId) ?? registered ?? null;
 };
 
 export const moduleScopePurpose = (

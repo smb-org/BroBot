@@ -236,9 +236,10 @@ Nachrichten und Emote-Fragmente pro Fünf-Minuten-Fenster im Channel Durable
 Object. Die Fenster sind an UTC-Vielfache von 300 s ausgerichtet
 (`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
 Nachrichten- und Emote-Summen. Jede Zeile beschreibt das vollständige
-UTC-Epoch-Fenster; Start, Ende und Abdeckung eines Streams kommen aus der
-Stream-Timeline (#558). Offline-/Online-Wechsel im selben Fenster bleiben eine
-Zeile.
+UTC-Epoch-Fenster; Start und Ende eines Streams ergeben sich aus dem ersten
+und letzten Fenster mit seiner Stream-ID (Fünf-Minuten-Präzision). Die
+Stream-Timeline (#558) liefert nur Ereignisse, Titel und Kategorie.
+Offline-/Online-Wechsel im selben Fenster bleiben eine Zeile.
 
 Ein keyed Alarm läuft an jeder Fünf-Minuten-Grenze und schreibt alle
 abgeschlossenen, geänderten Fenster als absolute Werte nach `channel_statistics`.
@@ -312,12 +313,14 @@ seine Ereigniszeit; `channel.update` schreibt eine Beobachtung aus aktuellem
 Titel und Kategorie, wobei eine fehlende Kategorie `NULL` bleibt. Dazu kommen
 bestätigte Clips, autorisierte Werbepausen und Emote-Spitzen. Nur ein
 `stream.online`-Eintrag trägt eine Stream-ID. Andere Ereignisse werden bei einer
-späteren Analyse anhand ihrer Zeitpunkte den Lifecycle-Zeilen zugeordnet. Die
+späteren Analyse anhand ihrer Zeitpunkte der Fensterspanne eines Streams
+zugeordnet. Die
 Tabelle wird unbegrenzt aufbewahrt, löscht mit `ON DELETE CASCADE` und isoliert
 Schreibfehler: Ein fehlender Timeline-Eintrag wird protokolliert, Dispatch und
 Streamzustands-Updates laufen weiter.
 
-15 Minuten nach bestätigtem oder bei einer Zustandswiederherstellung erkanntem
+Viewer-Clips importiert der Statistik-Alarm nachträglich: 15 Minuten nach
+bestätigtem oder bei einer Zustandswiederherstellung erkanntem
 Streamende ruft derselbe Statistik-Alarm Helix Get Clips für den Zeitraum vom
 gespeicherten Streamstart bis zum Streamende ab und schreibt
 die Clip-ID, den öffentlichen Titel, den Erstellungszeitpunkt sowie Momentaufnahmen
@@ -337,6 +340,42 @@ Anfrage übernehmen; ersetzt ein gleichzeitiger EventSub-Schreibvorgang die
 Sitzung dazwischen, wird möglicherweise die ältere Sitzung eingereiht. Viewer-Clips
 eines Streams können also fehlen, wenn die Übergabe des Sitzungsendes verloren
 geht oder mit einem Schreibvorgang konkurriert; Bot-Clips sind davon nicht betroffen.
+
+Die Streams-Ansicht liest diese Aggregate über
+`GET /api/channels/:channelId/modules/statistics/streams` und
+`GET /api/channels/:channelId/modules/statistics/streams/:streamId`; beide
+Routen hängen hinter der Kanalautorisierung. `channel_statistics` ist die
+Quelle für Streamauswahl und Kennzahlen: ein Stream existiert, wenn mindestens
+ein Fenster eine nicht-NULL `stream_id` trägt. Die Liste gruppiert alle
+Statistikfenster des Kanals nach Stream-ID und ordnet nach dem letzten
+`window_start`, bevor sie Cursor und Seitenlimit anwendet. Diese Auswahl
+scannt alle Statistikzeilen des Kanals; ein vorhandener Index deckt Gruppierung
+und Sortierung nicht ab. Danach liest die Liste sämtliche Fenster der
+ausgewählten IDs für vollständige Aggregate. Der Zeitraum eines Streams
+beginnt bei `window_start` des ersten Fensters und endet fünf Minuten nach dem
+`window_start` des letzten Fensters. Start, Ende und Ereigniszuordnung haben
+Fünf-Minuten-Präzision. Ein Timeline-Ereignis gehört zum Stream, wenn
+`occurred_at` innerhalb des inklusiven Bereichs `[start, end]` liegt; der
+Vergleich behält neun Nachkommastellen. Teilen zwei Streams denselben
+Fünf-Minuten-Bucket, können Ereignisse dieses Buckets beiden zugeordnet werden.
+Metadaten beginnen mit der letzten Beobachtung vor dem Streamstart als Seed und
+folgen dann den Beobachtungen im Fensterzeitraum.
+
+Das Detail liest alle Fenster der angefragten Stream-ID und benötigt keinen
+Timeline-Start. Die Listen- und Detailrouten lesen Timeline-Zeilen nur für den
+Fensterzeitraum sowie den bestehenden Metadaten-Seed davor. Emote-Spitzen
+werden über `detail.windowStart` dem passenden Streamfenster zugeordnet; ihr
+`occurred_at` liegt am Fensterende. Ein Drop ist ein Offline-Ereignis, auf das
+innerhalb von zehn Minuten ein Online-Ereignis folgt; beide Ereignisse müssen
+im Fensterzeitraum liegen. Die Timeline-Abfragen nutzen den Kanal-/Zeitindex
+und normalisieren UTC-Grenzen auf neun Nachkommastellen wie gespeicherte
+`occurred_at`-Werte. Domain-Filter vergleichen Zeitpunkte mit Nanosekunden-
+auflösung. BELABOX-Bitratefenster verwenden den Kanal-/Fensterindex und werden
+per Zeitbereich zugeordnet, da BELABOX- und Twitch-IDs verschieden sind.
+Antworten enthalten keine Nutzerkennungen oder Logins. Das Modul liest
+BELABOX-Daten direkt per SQL und importiert keinen anderen Modulcode. Die
+Streams-Ansicht zeigt den Titel eines importierten Clips; Bot-Clips ohne Titel
+fallen auf ihren bisherigen Text zurück.
 
 Lifecycle-Wiederholungen sind über Art, Ereigniszeit und — bei `stream.online`
 — Stream-ID idempotent. Metadatenbeobachtungen verwenden Art, Ereigniszeit und
