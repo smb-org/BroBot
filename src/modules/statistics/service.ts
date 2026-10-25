@@ -67,6 +67,11 @@ const writeAbsoluteWindow = async (
   ).run();
 };
 
+/**
+ * Merges one word bucket into the channel baseline in a single D1 batch and returns whether the bucket
+ * is now confirmed merged (this batch or an earlier attempt). The batch itself refuses a stream that D1
+ * reports as live at write time, so a stream switch after the caller's state read cannot merge a busy bucket.
+ */
 export const mergeStatisticsWordBatch = async (
   db: D1Database,
   channelId: string,
@@ -74,17 +79,19 @@ export const mergeStatisticsWordBatch = async (
   batch: number,
   wordCounts: readonly { word: string; count: number; lastSeenAt: string }[],
   mergedAt: string,
-): Promise<void> => {
+): Promise<boolean> => {
   const topWords = [...wordCounts]
     .sort((left, right) => right.count - left.count || (left.word < right.word ? -1 : left.word > right.word ? 1 : 0))
     .slice(0, STATISTICS_WORD_STREAM_MERGE_LIMIT);
-  if (topWords.length === 0) return;
+  if (topWords.length === 0) return false;
 
-  await db.batch([
+  const results = await db.batch([
     db.prepare(
       `INSERT OR IGNORE INTO channel_word_frequency_streams (channel_id, stream_id, batch, merged_at)
-       VALUES (?, ?, ?, NULL)`,
-    ).bind(channelId, streamId, batch),
+       SELECT ?, ?, ?, NULL WHERE NOT EXISTS (
+          SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?
+        )`,
+    ).bind(channelId, streamId, batch, channelId, streamId),
     db.prepare(
       `INSERT INTO channel_word_frequency_baseline
          (channel_id, word, total_count, last_seen_at)
@@ -94,11 +101,13 @@ export const mergeStatisticsWordBatch = async (
         WHERE EXISTS (
           SELECT 1 FROM channel_word_frequency_streams
            WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL
+        ) AND NOT EXISTS (
+          SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?
         )
        ON CONFLICT (channel_id, word) DO UPDATE SET
          total_count = channel_word_frequency_baseline.total_count + excluded.total_count,
          last_seen_at = MAX(channel_word_frequency_baseline.last_seen_at, excluded.last_seen_at)`,
-    ).bind(channelId, JSON.stringify(topWords), channelId, streamId, batch),
+    ).bind(channelId, JSON.stringify(topWords), channelId, streamId, batch, channelId, streamId),
     db.prepare(
       `DELETE FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word NOT IN (
@@ -110,9 +119,16 @@ export const mergeStatisticsWordBatch = async (
     ).bind(channelId, channelId, STATISTICS_WORD_BASELINE_LIMIT),
     db.prepare(
       `UPDATE channel_word_frequency_streams SET merged_at = ?
-        WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL`,
-    ).bind(mergedAt, channelId, streamId, batch),
+        WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL AND NOT EXISTS (
+          SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?
+        )`,
+    ).bind(mergedAt, channelId, streamId, batch, channelId, streamId),
+    db.prepare(
+      `SELECT 1 AS merged FROM channel_word_frequency_streams
+        WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NOT NULL`,
+    ).bind(channelId, streamId, batch),
   ]);
+  return (results.at(-1)?.results.length ?? 0) > 0;
 };
 
 export const processStatisticsEvent = async (
@@ -272,7 +288,7 @@ export const handleStatisticsWindowAlarm = async (
           idleBefore,
         );
         if (words.length === 0) continue;
-        await mergeStatisticsWordBatch(
+        const merged = await mergeStatisticsWordBatch(
           context.DB,
           context.channelId,
           bucket.streamId,
@@ -280,7 +296,8 @@ export const handleStatisticsWindowAlarm = async (
           words,
           new Date(now).toISOString(),
         );
-        await context.statisticsChat.deleteWordBucket(bucket);
+        // A refused merge (stream turned live meanwhile) keeps the bucket for a later alarm.
+        if (merged) await context.statisticsChat.deleteWordBucket(bucket);
       } catch (error: unknown) {
         blockedStreams.add(bucket.streamId);
         wordMergeFailure ??= error;

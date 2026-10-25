@@ -11,7 +11,10 @@ import { insertPointChannel, runMigrations } from "./points-test-helpers";
 // These tests run the real Durable Object SQLite statements and the real module alarm handler.
 const worker = env as unknown as Env;
 const WINDOW_MS = 300_000;
-const TEST_NOW = Date.parse("2026-10-25T12:20:00.000Z");
+// The faked clock sits in the platform's near future, so an alarm armed for "the next boundary" or for the
+// current window is never already due and cannot fire between two steps of a test; only explicit runs flush.
+const TEST_NOW = (Math.floor(Date.now() / WINDOW_MS) + 1) * WINDOW_MS + 60_000;
+const currentWindowStart = (): number => Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
 const iso = (time: number): string => new Date(time).toISOString();
 const stubs = new Set<DurableObjectStub>();
 
@@ -264,7 +267,7 @@ describe("statistics windows in the channel object", () => {
     const object = stub as unknown as StatisticsWordObject;
     const streamId = "word-stream-buffered-idle";
     const record = (text: string) => object.recordChatActivity(null, false, {
-      windowStart: iso(pastWindowStart()), receivedAt: iso(Date.now()), emotes: 0, streamId, textFragments: [text],
+      windowStart: iso(currentWindowStart()), receivedAt: iso(Date.now()), emotes: 0, streamId, textFragments: [text],
     });
     await writeEventSubStreamState(worker.DB, channelId, "offline", iso(Date.now()), null);
     await record("oldword");
@@ -437,7 +440,7 @@ describe("statistics windows in the channel object", () => {
     await insertPointChannel(channelId);
     const stub = statisticsObject(channelId);
     const object = stub as unknown as StatisticsWordObject;
-    const windowStart = pastWindowStart();
+    const windowStart = currentWindowStart();
     const textFragments = statisticsTextFragments({
       message: {
         fragments: [

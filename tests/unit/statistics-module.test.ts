@@ -460,6 +460,40 @@ describe("statistics window alarm", () => {
     expect(chat.wordStreams.get(STREAM_ID)?.words).toEqual([]);
   });
 
+  it("keeps the bucket when D1 reports the stream live between the state read and the merge", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await writeStreamState(database, "offline", WINDOW_END);
+    const chat = createStatisticsChat([windowState({ dirty: false })]);
+    chat.wordStreams.set(STREAM_ID, {
+      words: [{ word: "livewords", count: 4, lastSeenAt: WINDOW_END }],
+      endedAt: WINDOW_END,
+      expiresAt: Date.parse(WINDOW_END) + 24 * 60 * 60_000,
+    });
+    const { context } = createContext(database, chat);
+    context.DB = {
+      prepare: (sql: string) => database?.prepare(sql),
+      batch: async (statements: TestPreparedStatement[]) => {
+        // The stream goes live after the alarm read the channel as offline.
+        await database?.prepare(
+          "UPDATE channel_stream_state SET state = 'online', stream_id = ?, started_at = ? WHERE channel_id = ?",
+        ).bind(STREAM_ID, WINDOW_START, CHANNEL_ID).run();
+        return database?.batch(statements) ?? [];
+      },
+    } as unknown as D1Database;
+
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
+
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM channel_word_frequency_baseline WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ count: 0 });
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM channel_word_frequency_streams WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ count: 0 });
+    expect(chat.calls.deleteWordBucket).not.toHaveBeenCalled();
+    expect(chat.wordStreams.get(STREAM_ID)?.words).toHaveLength(1);
+  });
+
   it("does not merge a later batch while an earlier batch for that stream is retrying", async () => {
     database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);
