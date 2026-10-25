@@ -957,7 +957,7 @@ interface ModuleStatisticsChat {
   hasWordStreams: () => Promise<boolean>;
   markClipImportPending: (streamId: string, startedAt: string | null, endedAt: string) => Promise<void>;
   listReadyClipImports: (now: number) => Promise<readonly ModuleStatisticsClipImport[]>;
-  completeClipImport: (streamId: string) => Promise<void>;
+  completeClipImport: (streamId: string, endedAt: string) => Promise<void>;
   pruneExpiredClipImports: (now: number) => Promise<void>;
   hasClipImports: () => Promise<boolean>;
 }
