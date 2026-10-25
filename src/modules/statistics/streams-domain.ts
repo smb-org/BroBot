@@ -16,7 +16,7 @@ const record = (value: unknown): Readonly<Record<string, unknown>> | null =>
 
 const text = (value: unknown): string | null => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
-const metadataValues = (event: StatisticsTimelineEvent): { title: string | null; category: string | null } => {
+export const statisticsMetadataValues = (event: StatisticsTimelineEvent): { title: string | null; category: string | null } => {
   const detail = record(event.detail) ?? {};
   const category = record(detail.category);
   return { title: text(detail.title), category: text(category?.name) };
@@ -35,7 +35,7 @@ const instantNanoseconds = (value: string): bigint | null => {
   return BigInt(milliseconds) * 1_000_000n + BigInt((match[2] ?? "").padEnd(9, "0"));
 };
 
-const compareInstants = (left: string, right: string): number => {
+export const compareStatisticsInstants = (left: string, right: string): number => {
   const leftInstant = instantNanoseconds(left);
   const rightInstant = instantNanoseconds(right);
   if (leftInstant !== null && rightInstant !== null) return leftInstant < rightInstant ? -1 : leftInstant > rightInstant ? 1 : 0;
@@ -43,10 +43,10 @@ const compareInstants = (left: string, right: string): number => {
 };
 
 const eventInRange = (event: StatisticsTimelineEvent, start: string, end: string): boolean =>
-  compareInstants(event.occurredAt, start) >= 0 && compareInstants(event.occurredAt, end) <= 0;
+  compareStatisticsInstants(event.occurredAt, start) >= 0 && compareStatisticsInstants(event.occurredAt, end) <= 0;
 
 const compareNewestFirst = (left: StatisticsStreamSummary, right: StatisticsStreamSummary): number =>
-  compareInstants(right.cursorAt ?? right.endedAt, left.cursorAt ?? left.endedAt) || right.streamId.localeCompare(left.streamId);
+  compareStatisticsInstants(right.cursorAt ?? right.endedAt, left.cursorAt ?? left.endedAt) || right.streamId.localeCompare(left.streamId);
 
 interface StreamCursor {
   cursorAt: string;
@@ -92,13 +92,13 @@ export const groupStatisticsWindows = (
     const endedAt = windowEnd;
     const metadataEvents = timelineEvents
       .filter((event) => event.kind === "channel_metadata")
-      .sort((left, right) => compareInstants(left.occurredAt, right.occurredAt));
-    const metadataBefore = metadataEvents.filter((event) => compareInstants(event.occurredAt, startedAt) < 0).at(-1);
+      .sort((left, right) => compareStatisticsInstants(left.occurredAt, right.occurredAt));
+    const metadataBefore = metadataEvents.filter((event) => compareStatisticsInstants(event.occurredAt, startedAt) < 0).at(-1);
     const inRangeMetadata = metadataEvents.filter((event) => eventInRange(event, startedAt, endedAt));
     const observedMetadata = [...(metadataBefore === undefined ? [] : [metadataBefore]), ...inRangeMetadata];
     const latestMetadata = observedMetadata.at(-1);
     const categories = [...new Set(observedMetadata.flatMap((event) => {
-      const category = metadataValues(event).category;
+      const category = statisticsMetadataValues(event).category;
       return category === null ? [] : [category];
     }))];
     const viewers = ordered.filter((row) => row.viewerCount !== null);
@@ -110,7 +110,7 @@ export const groupStatisticsWindows = (
       startedAt,
       endedAt,
       durationSeconds: Math.max(0, Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 1_000)),
-      title: latestMetadata === undefined ? null : metadataValues(latestMetadata).title,
+      title: latestMetadata === undefined ? null : statisticsMetadataValues(latestMetadata).title,
       categories,
       averageViewers: average(ordered.map((row) => row.viewerCount)),
       peakViewers: peak?.viewerCount ?? null,
@@ -135,7 +135,7 @@ export const paginateStreamSummaries = (
   const ordered = [...summaries].sort(compareNewestFirst).filter((summary) => {
     if (parsedCursor === null) return true;
     const cursorAt = summary.cursorAt ?? summary.endedAt;
-    const comparison = compareInstants(cursorAt, parsedCursor.cursorAt);
+    const comparison = compareStatisticsInstants(cursorAt, parsedCursor.cursorAt);
     return comparison < 0 || (comparison === 0 && summary.streamId < parsedCursor.streamId);
   });
   const streams = ordered.slice(0, limit);
@@ -148,7 +148,7 @@ export const paginateStreamSummaries = (
 };
 
 const dropPairs = (events: readonly StatisticsTimelineEvent[]): Map<number, number> => {
-  const ordered = [...events].sort((left, right) => compareInstants(left.occurredAt, right.occurredAt));
+  const ordered = [...events].sort((left, right) => compareStatisticsInstants(left.occurredAt, right.occurredAt));
   const usedOnline = new Set<number>();
   const pairs = new Map<number, number>();
   ordered.forEach((event, offlineIndex) => {
@@ -176,9 +176,9 @@ export const deriveStreamEvents = (
   endedAt: string,
   windows: readonly StatisticsStreamWindow[] = [],
 ): StatisticsStreamEvent[] => {
-  const ordered = [...timelineEvents].sort((left, right) => compareInstants(left.occurredAt, right.occurredAt));
-  const metadataSeed = ordered.findLast((event) => event.kind === "channel_metadata" && compareInstants(event.occurredAt, startedAt) < 0);
-  let metadataBefore = metadataSeed === undefined ? null : metadataValues(metadataSeed);
+  const ordered = [...timelineEvents].sort((left, right) => compareStatisticsInstants(left.occurredAt, right.occurredAt));
+  const metadataSeed = ordered.findLast((event) => event.kind === "channel_metadata" && compareStatisticsInstants(event.occurredAt, startedAt) < 0);
+  let metadataBefore = metadataSeed === undefined ? null : statisticsMetadataValues(metadataSeed);
   const windowStarts = new Set(windows.map(({ windowStart }) => Date.parse(windowStart)).filter(Number.isFinite));
   const inRangeEvents = ordered.filter((event) => {
     if (!eventInRange(event, startedAt, endedAt)) return false;
@@ -192,7 +192,7 @@ export const deriveStreamEvents = (
 
   inRangeEvents.forEach((event, index) => {
     if (event.kind === "channel_metadata") {
-      const current = metadataValues(event);
+      const current = statisticsMetadataValues(event);
       if (metadataBefore !== null && (current.title !== metadataBefore.title || current.category !== metadataBefore.category)) {
         const transitionText = current.title ?? current.category;
         result.push({
@@ -259,7 +259,7 @@ export const deriveStreamEvents = (
     }
   });
 
-  return result.sort((left, right) => compareInstants(left.at, right.at) || left.id.localeCompare(right.id));
+  return result.sort((left, right) => compareStatisticsInstants(left.at, right.at) || left.id.localeCompare(right.id));
 };
 
 /** BELABOX stream ids are independent of Twitch ids, so only the UTC range is compared. */

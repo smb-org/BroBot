@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { dashboardRouteFocusKey, parseDashboardRoute } from "../../src/dashboard/router";
+import { dashboardRouteFocusKey, dashboardRoutePath, parseDashboardRoute } from "../../src/dashboard/router";
 
 describe("dashboard route focus identity", () => {
   it("ignores event filters and selected overlay state within the same page", () => {
@@ -15,5 +15,14 @@ describe("dashboard route focus identity", () => {
       .not.toBe(dashboardRouteFocusKey(parseDashboardRoute("/channels/a/events")));
     expect(dashboardRouteFocusKey(parseDashboardRoute("/channels/a/overlays")))
       .not.toBe(dashboardRouteFocusKey(parseDashboardRoute("/channels/a/overlays/editor")));
+  });
+
+  it("keeps module navigation pages addressable and focused independently", () => {
+    const streams = parseDashboardRoute("/channels/a/modules/statistics");
+    const trends = parseDashboardRoute("/channels/a/modules/statistics", "?page=trends");
+
+    expect(trends).toEqual({ kind: "module", channelId: "a", moduleId: "statistics", pageId: "trends" });
+    expect(dashboardRoutePath(trends)).toBe("/channels/a/modules/statistics?page=trends");
+    expect(dashboardRouteFocusKey(trends)).not.toBe(dashboardRouteFocusKey(streams));
   });
 });

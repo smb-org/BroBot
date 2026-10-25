@@ -158,3 +158,135 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsPanelTexts>> = {
 };
 
 export const statisticsPanelTexts = (language: ModuleLanguage): StatisticsPanelTexts => texts[language];
+
+export interface StatisticsTrendsTexts {
+  rangeSwitch: string;
+  weeks: (count: number) => string;
+  rangeSummary: (current: string, previous: string) => string;
+  kpis: string;
+  categories: string;
+  streams: string;
+  streamHours: string;
+  averageViewers: string;
+  messagesPerMinute: string;
+  previous: (value: string) => string;
+  noPrevious: string;
+  weekPrefix: string;
+  weeklyTitle: string;
+  weeklyDescription: string;
+  viewers: string;
+  hours: string;
+  leftAxis: string;
+  rightAxis: string;
+  emptyWeek: string;
+  noStreamsInPeriod: string;
+  noStreamsDescription: string;
+  heatmapTitle: string;
+  heatmapDescription: string;
+  noStream: string;
+  minViewers: string;
+  maxViewers: string;
+  categoriesTitle: (count: number) => string;
+  category: string;
+  categoryShort: string;
+  categoryStreams: string;
+  categoryStreamsShort: string;
+  categoryHours: string;
+  categoryViewers: string;
+  categoryMessagesPerMinute: string;
+  categoryHoursShort: string;
+  categoryViewersShort: string;
+  categoryMessagesShort: string;
+  noCategories: string;
+  loadError: string;
+  retry: string;
+}
+
+const trendsTexts: Readonly<Record<ModuleLanguage, StatisticsTrendsTexts>> = {
+  de: {
+    rangeSwitch: "Zeitraum",
+    weeks: (count) => `${String(count)} Wochen`,
+    rangeSummary: (current, previous) => `${current} · verglichen mit ${previous}`,
+    kpis: "Kennzahlen",
+    categories: "Kategorien",
+    streams: "Streams",
+    streamHours: "Streamstunden",
+    averageViewers: "Ø Viewer",
+    messagesPerMinute: "Nachrichten / Min",
+    previous: (value) => `vorher ${value}`,
+    noPrevious: "kein Vergleichswert",
+    weekPrefix: "KW",
+    weeklyTitle: "Wochenverlauf",
+    weeklyDescription: "Ø Viewer je Woche und Streamstunden",
+    viewers: "Ø Viewer",
+    hours: "Streamstunden",
+    leftAxis: "linke Achse",
+    rightAxis: "rechte Achse",
+    emptyWeek: "Woche ohne Stream",
+    noStreamsInPeriod: "Keine Streams in diesem Zeitraum",
+    noStreamsDescription: "Hier erscheinen Wochenverlauf, Startzeiten und Kategorien, sobald Streams erfasst wurden.",
+    heatmapTitle: "Wochentag × Startstunde",
+    heatmapDescription: "Ø Viewer je Streamstart",
+    noStream: "Kein Stream",
+    minViewers: "Weniger Viewer",
+    maxViewers: "Mehr Viewer",
+    categoriesTitle: (count) => `${String(count)} Kategorien im Zeitraum`,
+    category: "Kategorie",
+    categoryShort: "Kat.",
+    categoryStreams: "Streams",
+    categoryStreamsShort: "St.",
+    categoryHours: "Stunden",
+    categoryViewers: "Ø Viewer",
+    categoryMessagesPerMinute: "Ø Nachrichten / Min",
+    categoryHoursShort: "Std.",
+    categoryViewersShort: "Ø View.",
+    categoryMessagesShort: "Ø N/Min",
+    noCategories: "Keine Kategorien in diesem Zeitraum erfasst.",
+    loadError: "Die Trends konnten nicht geladen werden.",
+    retry: "Erneut laden",
+  },
+  en: {
+    rangeSwitch: "Date range",
+    weeks: (count) => `${String(count)} weeks`,
+    rangeSummary: (current, previous) => `${current} · compared with ${previous}`,
+    kpis: "Key metrics",
+    categories: "Categories",
+    streams: "Streams",
+    streamHours: "Stream hours",
+    averageViewers: "Avg viewers",
+    messagesPerMinute: "Messages / min",
+    previous: (value) => `before ${value}`,
+    noPrevious: "no comparison value",
+    weekPrefix: "Week",
+    weeklyTitle: "Weekly activity",
+    weeklyDescription: "Avg viewers per week and stream hours",
+    viewers: "Avg viewers",
+    hours: "Stream hours",
+    leftAxis: "left axis",
+    rightAxis: "right axis",
+    emptyWeek: "Week without streams",
+    noStreamsInPeriod: "No streams in this period",
+    noStreamsDescription: "Weekly activity, start times, and categories will appear here once streams are recorded.",
+    heatmapTitle: "Weekday × start hour",
+    heatmapDescription: "Avg viewers by stream start",
+    noStream: "No stream",
+    minViewers: "Fewer viewers",
+    maxViewers: "More viewers",
+    categoriesTitle: (count) => `${String(count)} categories in this period`,
+    category: "Category",
+    categoryShort: "Cat.",
+    categoryStreams: "Streams",
+    categoryStreamsShort: "Str.",
+    categoryHours: "Hours",
+    categoryViewers: "Avg viewers",
+    categoryMessagesPerMinute: "Avg messages / min",
+    categoryHoursShort: "h",
+    categoryViewersShort: "Avg.",
+    categoryMessagesShort: "Msg/min",
+    noCategories: "No categories recorded in this period.",
+    loadError: "Could not load trends.",
+    retry: "Reload",
+  },
+};
+
+export const statisticsTrendsTexts = (language: ModuleLanguage): StatisticsTrendsTexts => trendsTexts[language];

@@ -21,7 +21,7 @@ export type DashboardRoute =
     auditFilters?: PanelAuditFilters;
     only?: DryRunRequest["only"];
   }
-  | { kind: "module"; channelId: string; moduleId: string };
+  | { kind: "module"; channelId: string; moduleId: string; pageId?: string };
 
 export type DashboardMode = "live" | "setup";
 
@@ -154,7 +154,8 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     const channelId = decodeSegment(segments[1] ?? "");
     const moduleId = decodeSegment(segments[3] ?? "");
     if (channelId === null || moduleId === null) return { kind: "overview" };
-    return { kind: "module", channelId, moduleId };
+    const pageId = new URLSearchParams(search).get("page");
+    return { kind: "module", channelId, moduleId, ...(pageId !== null && /^[a-z0-9_-]{1,64}$/u.test(pageId) ? { pageId } : {}) };
   }
   if (segments.length === 4 && segments[0] === "channels" && segments[2] === "overlays") {
     const channelId = decodeSegment(segments[1] ?? "");
@@ -211,7 +212,10 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   if (route.kind === "overview") return "/";
   if (route.kind === "platform") return "/platform";
   const base = `/channels/${encodeURIComponent(route.channelId)}`;
-  if (route.kind === "module") return `${base}/modules/${encodeURIComponent(route.moduleId)}`;
+  if (route.kind === "module") {
+    const path = `${base}/modules/${encodeURIComponent(route.moduleId)}`;
+    return route.pageId === undefined ? path : `${path}?${new URLSearchParams({ page: route.pageId }).toString()}`;
+  }
   if (route.section === "overview") return base;
   const path = `${base}/${route.section}`;
   if (route.section === "overlays" && route.editorOverlayId !== undefined) {
@@ -251,10 +255,10 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   return path;
 };
 
-/** Stable page identity for shell focus; excludes query state managed within a page. */
+/** Stable shell focus identity; module-owned navigation pages are distinct views. */
 export const dashboardRouteFocusKey = (route: DashboardRoute): string => {
   if (route.kind === "overview" || route.kind === "platform") return route.kind;
-  if (route.kind === "module") return `module:${route.channelId}:${route.moduleId}`;
+  if (route.kind === "module") return `module:${route.channelId}:${route.moduleId}:${route.pageId ?? ""}`;
   const editor = route.section === "overlays" && route.editorOverlayId !== undefined
     ? `:editor:${route.editorOverlayId}`
     : "";

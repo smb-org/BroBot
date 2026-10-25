@@ -632,6 +632,40 @@ Das Seitenlimit begrenzt Antwort und Zahl ausgewählter Streams, nicht deren
 Dauer oder Zahl der Fünf-Minuten-Fenster. Die Ansicht formatiert Zeitpunkte in
 der Kanalzeitzone aus den Kanaleinstellungen.
 
+#### Trends-Seite (#575)
+
+Der Navigationseintrag „Trends“ öffnet dieselbe Statistikmodulansicht mit der
+eigenen Modul-Seitenkennung. `GET /api/channels/:channelId/modules/statistics/trends?weeks=4|12|52` ist wie die
+Streams-Routen nur für Kanalmitglieder verfügbar; ohne Parameter gilt ein
+Zeitraum von zwölf Wochen. Die aktuelle Periode ist `[now − weeks, now)`, die
+Vergleichsperiode ist die gleich lange direkt davor. Fenster bleiben
+Fünf-Minuten-Daten: Streamstunden summieren Fensterdauer, Viewer-Mittel lassen
+`NULL`-Stichproben aus, und Nachrichten pro Minute teilen die Nachrichtensumme
+durch die beobachteten Fensterminuten.
+
+Beide Perioden verwenden die Streamableitung aus `streams-domain.ts` auf den
+Fenstern ihrer jeweiligen Periode. Wochen werden nach ISO-Wochen (Montag bis
+Montag) in der Kanalzeitzone gebildet; auch Wochen ohne Fenster stehen im
+Ergebnis. Für die Start-Heatmap zählen Wochentag und Stunde des ersten Fensters
+eines Streams in der Periode, ebenfalls lokal im Kanal. Wiederholte Stunden bei
+der Zeitumstellung bleiben dieselbe lokale Startstunde.
+
+Kategorien stammen aus `channel_metadata`. Für jedes Fünf-Minuten-Fenster wird
+die aktive Metadatenbeobachtung zeitlich angewendet: Stunden und Nachrichten
+werden proportional zu den Abschnitten je Kategorie geteilt; vorhandene
+Viewer-Stichproben werden nach Abschnittsdauer gewichtet. Ein Stream zählt pro
+Kategorie höchstens einmal. Das hält Kategorienwechsel innerhalb eines
+Fensters abgebildet, obwohl die Chat- und Viewerwerte selbst nur auf
+Fensterpräzision vorliegen.
+
+Der Leseweg führt eine indizierte `channel_statistics`-Bereichsabfrage über
+beide Perioden aus und begrenzt damit den Scan auf höchstens 104 Wochen (bei
+vollständiger Belegung rund 209.664 Fünf-Minuten-Zeilen). Eine einzelne
+Timeline-Abfrage liest Metadaten im selben Zeitraum plus genau eine vorherige
+Beobachtung als Seed; eine kleine Kanalabfrage liefert die Zeitzone. Die
+`(channel_id, window_start)`-Primärschlüsselreihenfolge deckt den Statistik-
+Zeitbereich ab. Die Antwort enthält nur Aggregate und Kategoriebezeichnungen.
+
 Für die Themen-Erkennung tokenisiert das DO ausschließlich Textfragmente und
 zählt Wörter je Stream. NFKC-Normalisierung, Kleinschreibung und das Entfernen
 von Satzzeichen, Links, Mentions und Emote-Codes laufen vor einer gepflegten

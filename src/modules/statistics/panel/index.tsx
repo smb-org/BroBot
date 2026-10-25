@@ -12,6 +12,7 @@ import type { StatisticsStreamDetailResponse, StatisticsStreamEvent, StatisticsS
 import { loadStatisticsStream, loadStatisticsStreams } from "./service";
 import { statisticsPanelTexts } from "./locale";
 import { StatisticsHistoryChart } from "./history-chart";
+import { StatisticsTrendsPanel } from "./trends";
 
 const number = (value: number | null, language: "de" | "en", digits = 0): string => value === null
   ? "—"
@@ -357,3 +358,7 @@ export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePan
 
   return <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />;
 }
+
+export const StatisticsPanel = (properties: ModulePanelProperties): ReactElement => properties.navigationPageId === "trends"
+  ? <StatisticsTrendsPanel {...properties} />
+  : <StatisticsStreamsPanel {...properties} />;

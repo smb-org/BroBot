@@ -1,5 +1,5 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { StatisticsStreamDetailResponse, StatisticsStreamListResponse } from "../contracts";
+import type { StatisticsStreamDetailResponse, StatisticsStreamListResponse, StatisticsTrendsResponse, StatisticsTrendsWeeks } from "../contracts";
 
 const modulePath = (channelId: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/statistics/streams`;
@@ -31,3 +31,15 @@ export const loadStatisticsStream = async (
   `${modulePath(channelId)}/${encodeURIComponent(streamId)}`,
   { signal },
 ));
+
+export const loadStatisticsTrends = async (
+  channelId: string,
+  weeks: StatisticsTrendsWeeks,
+  signal: AbortSignal,
+): Promise<StatisticsTrendsResponse> => {
+  const query = new URLSearchParams({ weeks: String(weeks) });
+  return readJson<StatisticsTrendsResponse>(await fetch(
+    `/api/channels/${encodeURIComponent(channelId)}/modules/statistics/trends?${query.toString()}`,
+    { signal },
+  ));
+};

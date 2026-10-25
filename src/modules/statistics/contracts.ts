@@ -75,3 +75,46 @@ export interface StatisticsStreamDetailResponse {
   bitrateWindows: readonly StatisticsBitrateWindow[];
   events: readonly StatisticsStreamEvent[];
 }
+
+export type StatisticsTrendsWeeks = 4 | 12 | 52;
+
+export interface StatisticsTrendKpis {
+  streams: number;
+  streamHours: number;
+  averageViewers: number | null;
+  messagesPerMinute: number | null;
+}
+
+export interface StatisticsTrendWeek {
+  weekStart: string;
+  isoWeek: number;
+  averageViewers: number | null;
+  streamHours: number;
+}
+
+export interface StatisticsTrendHeatmapCell {
+  weekday: number;
+  hour: number;
+  averageViewers: number | null;
+  streams: number;
+}
+
+export interface StatisticsTrendCategory {
+  name: string;
+  streams: number;
+  streamHours: number;
+  averageViewers: number | null;
+  messagesPerMinute: number | null;
+}
+
+export interface StatisticsTrendsResponse {
+  weeks: StatisticsTrendsWeeks;
+  timeZone: string;
+  range: { start: string; end: string };
+  previousRange: { start: string; end: string };
+  kpis: StatisticsTrendKpis;
+  previousKpis: StatisticsTrendKpis;
+  weekly: readonly StatisticsTrendWeek[];
+  heatmap: readonly StatisticsTrendHeatmapCell[];
+  categories: readonly StatisticsTrendCategory[];
+}

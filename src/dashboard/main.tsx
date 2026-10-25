@@ -258,7 +258,7 @@ const PanelSidebar = ({ route, channels, platformAdmin: platform, moduleStates, 
       href: dashboardRoutePath(entry.route),
       active: entry.pageId !== undefined
         ? dashboardRoutePath(entry.route) === dashboardRoutePath(route)
-        : route.kind === "module" && route.moduleId === entry.moduleId,
+        : route.kind === "module" && route.moduleId === entry.moduleId && route.pageId === (entry.route.kind === "module" ? entry.route.pageId : undefined),
       onNavigate: () => { onNavigate(entry.route); },
       ...(entry.moduleId === undefined ? {} : {
         onPreload: () => { void preloadModulePanel(entry.moduleId as string).catch(() => undefined); },
@@ -1611,7 +1611,7 @@ export const DashboardApp = (): ReactElement => {
               loading={<LoadStateLines rows={8} height={58} />}
               empty={<LoadStateLines rows={8} height={58} />}
               error={<LoadStateLines rows={8} height={58} />}
-            >{overviewMatchesRoute && overview.data !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} streamSessionIdentity={JSON.stringify([overview.data.streamState ?? null, overview.data.streamStartedAt ?? null, overview.data.streamStateChangedAt ?? null])} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} viewerIsBot={viewerIsBot} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} suspendPanelUntilReady
+            >{overviewMatchesRoute && overview.data !== null ? <ModulePage channelId={route.channelId} moduleId={route.moduleId} {...(route.pageId === undefined ? {} : { navigationPageId: route.pageId })} ownRole={selectedChannel.role} modules={selectedChannel.modules ?? modules.data?.modules ?? overview.data.modules ?? []} activeModules={overview.data.activeModules} streamSessionIdentity={JSON.stringify([overview.data.streamState ?? null, overview.data.streamStartedAt ?? null, overview.data.streamStateChangedAt ?? null])} loading={overview.status === "loading" || modules.status === "loading"} error={overview.error ?? modules.error} busy={headerModuleBusy} botIsModerator={overview.data.moderator?.isModerator ?? null} viewerIsBot={viewerIsBot} onNavigate={navigate} onToggle={() => { void toggleHeaderModule(); }} suspendPanelUntilReady
               {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId && pendingModuleSelection.initialCommand === undefined ? { initialSelection: pendingModuleSelection.value } : {})}
               {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId && pendingModuleSelection.initialCommand !== undefined ? { initialCommand: pendingModuleSelection.initialCommand } : {})}
               {...(pendingModuleSelection?.channelId === route.channelId && pendingModuleSelection.moduleId === route.moduleId && pendingModuleSelection.initialCommand !== undefined ? { onInitialCommandConsumed: () => { setPendingModuleSelection((pending) => pending?.channelId === route.channelId && pending.moduleId === route.moduleId && pending.initialCommand?.name === pendingModuleSelection.initialCommand?.name ? null : pending); } } : {})}

@@ -20,18 +20,28 @@ const navigationFor = (moduleStates: { id: string; enabled: boolean }[], role: C
   );
 
 describe("dashboard navigation", () => {
-  it("registers Streams as the first statistics page under data", () => {
+  it("registers Streams and Trends as separate statistics pages under data", () => {
     const groups = navigationFor(MODULES.map(({ id }) => ({ id, enabled: true })));
     const entries = groups.flatMap(({ entries: groupEntries }) => groupEntries).filter(({ moduleId }) => moduleId === "statistics");
 
-    expect(entries).toEqual([expect.objectContaining({
-      id: "module:statistics:streams",
-      moduleId: "statistics",
-      category: "data",
-      area: "setup",
-      label: "Streams",
-      route: { kind: "module", channelId: "channel-a", moduleId: "statistics" },
-    })]);
+    expect(entries).toEqual([
+      expect.objectContaining({
+        id: "module:statistics:streams",
+        moduleId: "statistics",
+        category: "data",
+        area: "setup",
+        label: "Streams",
+        route: { kind: "module", channelId: "channel-a", moduleId: "statistics" },
+      }),
+      expect.objectContaining({
+        id: "module:statistics:trends",
+        moduleId: "statistics",
+        category: "data",
+        area: "setup",
+        label: "Trends",
+        route: { kind: "module", channelId: "channel-a", moduleId: "statistics", pageId: "trends" },
+      }),
+    ]);
   });
 
   it("maps every module navigation category to one of the six shell groups", () => {
