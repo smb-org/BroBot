@@ -205,8 +205,15 @@ Zusammenfassung in `belabox_streams`. Beide Tabellen sind mit `channel_id`
 mandantengebunden. Sinkt der kumulative Zähler `dropped_pkts`, zählt der neue
 Wert als Delta nach einem Encoder-Reset. `stream.offline` setzt Endzeit und
 P10 aus den Minutenmittelwerten; die Zusammenfassung bleibt dauerhaft erhalten,
-weil sie keine Personendaten enthält (Entscheidung 0003). Die stündliche
-Modulwartung löscht Minutenzeilen älter als 30 Tage.
+weil sie keine Personendaten enthält (Entscheidung 0003). Vor dem Löschen
+rollt die stündliche Modulwartung abgeschlossene Minuten in
+`belabox_bitrate_windows` hoch. Die fünfminütigen UTC-Fenster beginnen bei
+Epoch-Millisekunden, die durch 300.000 teilbar sind, und werden je Kanal,
+Stream und Fenster eindeutig gespeichert. Sie enthalten Bitrate-Min/Max,
+gewichteten Mittelwert, P10 aus den Minutenmittelwerten, RTT-Mittelwert,
+Paketverlustdelta und Stichprobenzahl. Pro Lauf werden höchstens 1.000 Fenster
+verarbeitet; Minuten ohne abgeschlossenen Roll-up werden nicht gelöscht und
+bleiben für den nächsten Lauf vorgemerkt.
 
 Das Panel liest für „Live“ den Zehn-Minuten-Ringpuffer und für „Stream“ die
 Minutenmittelwerte. Die `/history`-Route gibt je Messpunkt ausschließlich die
