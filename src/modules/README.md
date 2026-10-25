@@ -591,6 +591,33 @@ keine per-window Personen-Hashes oder neue personenbezogene Speicherung.
 `channel_statistics` enthält nur Summen und wird unbegrenzt aufbewahrt; beim
 Löschen des Kanals greift `ON DELETE CASCADE` (Entscheidung 0003, Abschnitt 6).
 
+#### Streams-Seite (#574)
+
+Die lazy geladene Modulansicht zeigt Streams mit Kennzahlen und einem
+Fünf-Minuten-Verlauf. `GET /api/channels/:channelId/modules/statistics/streams`
+liefert höchstens 50 Einträge (Standard 20) mit undurchsichtigem Cursor. Die
+Liste gruppiert ausschließlich Fenster mit nicht-NULL `stream_id`; Start und
+Ende stammen aus dem ersten beziehungsweise letzten Fenster. Titel und
+Kategorien kommen aus den `channel_metadata`-Beobachtungen im Zeitbereich.
+`GET /api/channels/:channelId/modules/statistics/streams/:streamId` liefert die
+Fenster, passende Timeline-Ereignisse und BELABOX-Bitratefenster im selben
+UTC-Zeitraum. BELABOX-Stream-IDs werden dafür nicht mit Twitch-IDs verglichen.
+Antworten enthalten nur Aggregate und Stream-Metadaten.
+
+Die Stream-Auswahl gruppiert die Streamstart-Ereignisse dieses Kanals über den
+vorhandenen Kanal-/Ereignisart-/Zeitindex der Timeline. Dafür werden die
+Lifecycle-Zeilen des Kanals gelesen; Cursor und `LIMIT` begrenzen das Ergebnis
+auf die angeforderte Seite plus einen Eintrag. Statistikfenster werden danach
+über den Primärschlüssel `(channel_id, window_start)` in einem Zeitbereich vom
+ältesten Stream der Seite bis zur aktuellen beziehungsweise vorherigen
+Cursorgrenze abgefragt und auf die ausgewählten `stream_id`-Werte gefiltert.
+Der Indexweg hängt von den Statistikzeilen dieses Kanals im Seitenzeitraum ab
+und kann Lücken zwischen ausgewählten Streams einschließen. Detailfenster,
+Timeline-Ereignisse und BELABOX-Daten sind auf den Stream-Zeitraum begrenzt;
+ihre Abfragen nutzen vorhandene Kanal-/Zeitindizes. Das Seitenlimit begrenzt
+die Antwort und Zahl der ausgewählten Streams, nicht deren Dauer oder Zahl
+der Fünf-Minuten-Fenster.
+
 Für die Themen-Erkennung tokenisiert das DO ausschließlich Textfragmente und
 zählt Wörter je Stream. NFKC-Normalisierung, Kleinschreibung und das Entfernen
 von Satzzeichen, Links, Mentions und Emote-Codes laufen vor einer gepflegten

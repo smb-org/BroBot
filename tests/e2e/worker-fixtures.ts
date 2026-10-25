@@ -173,3 +173,51 @@ export const seedE2ETestArea = (channelId = e2eChannelId): void => {
     throw new Error(`Wrangler test area setup failed.\n${result.stdout}\n${result.stderr}`);
   }
 };
+
+export const seedE2EStatisticsStreams = (channelId = e2eChannelId): void => {
+  seedE2EOverlay(channelId);
+  const streamId = "e2e-stream-574";
+  const firstWindow = Math.floor((Date.now() - 15 * 60_000) / 300_000) * 300_000;
+  const windowStart = (offset: number): string => new Date(firstWindow + offset).toISOString();
+  const startMillis = firstWindow;
+  const createdAt = new Date().toISOString();
+  const sql = `
+    INSERT OR REPLACE INTO bot_identity
+      (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, created_at, updated_at)
+      VALUES (1, 'bot-e2e', 'brobot-e2e', '[]', 'test-access', 'test-refresh', '2099-01-01T00:00:00.000Z', '${createdAt}', '${createdAt}');
+    INSERT OR REPLACE INTO bot_identity_status (id, status, reason, updated_at)
+      VALUES (1, 'connected', NULL, '${createdAt}');
+    INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+      VALUES ('${channelId}', 'statistics', 1, '{}')
+      ON CONFLICT(channel_id, module_id) DO UPDATE SET enabled = 1;
+    INSERT INTO channel_statistics
+      (channel_id, stream_id, window_start, messages, emotes, viewer_count, chatters, active_chatters)
+      VALUES
+      ('${channelId}', '${streamId}', '${windowStart(0)}', 84, 12, 105, 31, 24),
+      ('${channelId}', '${streamId}', '${windowStart(300_000)}', 132, 25, 148, 44, 37),
+      ('${channelId}', '${streamId}', '${windowStart(600_000)}', 119, 18, 181, 51, 42);
+    INSERT INTO channel_timeline_events (channel_id, event_key, stream_id, occurred_at, kind, detail_json)
+      VALUES
+      ('${channelId}', 'e2e-statistics-online', '${streamId}', '${windowStart(0)}', 'stream_online', '{}'),
+      ('${channelId}', 'e2e-statistics-meta-one', NULL, '${windowStart(60_000)}', 'channel_metadata', '{"title":"E2E Stream","category":{"id":"game-1","name":"Game One"}}'),
+      ('${channelId}', 'e2e-statistics-clip', NULL, '${windowStart(420_000)}', 'clip_created', '{"clipId":"e2e-clip","title":"E2E highlight"}'),
+      ('${channelId}', 'e2e-statistics-meta-two', NULL, '${windowStart(480_000)}', 'channel_metadata', '{"title":"E2E Stream","category":{"id":"game-2","name":"Game Two"}}'),
+      ('${channelId}', 'e2e-statistics-offline', NULL, '${windowStart(540_000)}', 'stream_offline', '{}'),
+      ('${channelId}', 'e2e-statistics-reconnect', '${streamId}', '${windowStart(780_000)}', 'stream_online', '{}');
+    INSERT INTO belabox_bitrate_windows
+      (channel_id, stream_id, window_start, bitrate_min, bitrate_max, bitrate_avg, bitrate_p10, rtt_avg, dropped_delta, sample_count)
+      VALUES
+      ('${channelId}', 'e2e-belabox-stream', ${String(startMillis)}, 4000, 6000, 5400, 5000, 40, 0, 6),
+      ('${channelId}', 'e2e-belabox-stream', ${String(startMillis + 300_000)}, 4100, 6100, 5500, 5100, 42, 1, 6);
+  `;
+  const result = spawnSync("./node_modules/.bin/wrangler", [
+    "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes",
+    "--persist-to", e2eWorkerPersist, "--command", sql,
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
+  });
+  if (result.status !== 0) {
+    throw new Error(`Statistics streams e2e setup failed.\n${result.stdout}\n${result.stderr}`);
+  }
+};

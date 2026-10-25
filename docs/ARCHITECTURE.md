@@ -316,6 +316,26 @@ Tabelle wird unbegrenzt aufbewahrt, löscht mit `ON DELETE CASCADE` und isoliert
 Schreibfehler: Ein fehlender Timeline-Eintrag wird protokolliert, Dispatch und
 Streamzustands-Updates laufen weiter.
 
+Die Streams-Ansicht liest diese Aggregate über
+`GET /api/channels/:channelId/modules/statistics/streams` und
+`GET /api/channels/:channelId/modules/statistics/streams/:streamId`; beide
+Routen hängen hinter der Kanalautorisierung. Die Liste gruppiert alle
+Timeline-Streamstarts dieses Kanals über den Kanal-/Ereignisart-/Zeitindex,
+beschränkt das Ergebnis auf die Seite plus einen Cursor-Eintrag und fragt
+Statistikfenster anschließend in einem begrenzten Zeitbereich für diese
+Stream-IDs ab. Das Detail nutzt den
+`channel_statistics`-Primärschlüssel `(channel_id, window_start)` für den
+Streamzeitraum, den Kanal-/Zeitindex der Timeline für Ereignisse und den
+Kanal-/Fensterindex von `belabox_bitrate_windows` für Bitrate. Die
+Fensterabfrage der Liste läuft vom ältesten ausgewählten Stream bis zur
+Cursorgrenze; der Indexweg kann Statistikzeilen in Lücken zwischen Streams
+einschließen. Die Lifecycle-Gruppierung liest alle entsprechenden
+Ereigniszeilen dieses Kanals. Detailabfragen wachsen mit dem Streamzeitraum.
+Die BELABOX-Reihe wird per Zeitbereich zugeordnet, da BELABOX- und Twitch-IDs
+verschiedene Werte haben. Antworten enthalten keine Nutzerkennungen oder
+Logins. Das Modul liest BELABOX-Daten direkt per SQL und importiert keinen
+anderen Modulcode.
+
 Lifecycle-Wiederholungen sind über Art, Ereigniszeit und — bei `stream.online`
 — Stream-ID idempotent. Metadatenbeobachtungen verwenden Art, Ereigniszeit und
 einen Inhalts-Hash; EventSub-Nachrichten-IDs sind kein Ereignisschlüssel.
