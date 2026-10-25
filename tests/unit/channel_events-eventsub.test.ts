@@ -120,6 +120,7 @@ describe("channel events EventSub targets", () => {
         { channelId: "kanal-a", subscriptionType: "stream.online", variant: "", version: "1" },
         { channelId: "kanal-a", subscriptionType: "stream.offline", variant: "", version: "1" },
         { channelId: "kanal-a", subscriptionType: "channel.update", variant: "", version: "2" },
+        { channelId: "kanal-a", subscriptionType: "channel.chat.message", variant: "", version: "1" },
       ]);
     } finally {
       database.close();

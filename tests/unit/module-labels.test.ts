@@ -59,4 +59,20 @@ describe("Module labels", () => {
     expect(moduleDescription("raid", "en")).toContain("incoming raids");
     expect(moduleDescription("raid", "en")).toContain("manual shoutouts");
   });
+
+  it("explains that statistics stores only aggregate metrics in both languages", () => {
+    const module = MODULES.find((candidate) => candidate.id === "statistics");
+    expect(module?.mandatory).toBe(true);
+    expect(module?.navigationCategory).toBe("data");
+    expect(module?.needsActiveChatters).toBe(true);
+    expect(module?.eventSubTypes).toEqual(["channel.chat.message", "stream.online", "stream.offline"]);
+    expect(moduleName("statistics", "de")).toBe("Statistiken");
+    expect(moduleName("statistics", "en")).toBe("Statistics");
+    expect(moduleDescription("statistics", "de")).toContain("kurzzeitig pseudonyme Aktivitätsdaten");
+    expect(moduleDescription("statistics", "de")).toContain("dauerhaft gespeichert werden nur Fenstersummen");
+    expect(moduleDescription("statistics", "en")).toContain("Short-lived pseudonymous activity tracking");
+    expect(moduleDescription("statistics", "en")).toContain("only window totals are retained");
+    expect(module?.mandatoryReason?.de).toContain("immer aktiv");
+    expect(module?.mandatoryReason?.en).toContain("always active");
+  });
 });

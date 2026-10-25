@@ -215,6 +215,27 @@ zurück. Sie liefert im Modus „bei Bedarf“ eine leere Reihe; dort bleibt nur
 aktuelle Messung sichtbar. Deskstreams ohne verbundene Relay-Messung erzeugen
 weder Minutenzeilen noch Zusammenfassungen.
 
+Das verpflichtende `statistics`-Modul zählt während eines Livestreams Chat-
+Nachrichten und Emote-Fragmente pro Fünf-Minuten-Fenster im Channel Durable
+Object. Die Fenster sind an UTC-Vielfache von 300 s ausgerichtet
+(`window_start = floor(t / 300 s) * 300 s`), damit sich Zeitreihen
+verschiedener Module über denselben Schlüssel verbinden lassen; das erste
+Fenster nach `stream.online` und das letzte vor `stream.offline` sind
+Teilfenster, `window_seconds` hält die tatsächlich abgedeckten Sekunden. Ein
+keyed Modul-Alarm läuft an jeder Fenstergrenze und liest Zuschauerzahl über Helix
+Get Streams, Chatters über Get Chatters mit dem Bot-Token und aktive Chatter
+als Anzahl aus der flüchtigen DO-Verfolgung. `channel_statistics` erhält genau
+eine Aggregatzeile pro Kanal und Fenster; Upserts auf
+`(channel_id, window_start)` machen Wiederholungen idempotent. `stream.offline`
+schreibt das letzte Teilfenster vor dem Löschen der aktiven Chatter. Ein
+Offline/Online-Wechsel innerhalb eines Fensters führt zu einer einzigen Zeile:
+Zähler und abgedeckte Sekunden werden zusammengeführt, `active_chatters` wird
+dann `NULL`, weil sich eindeutige Chatter nicht über das Löschen der
+Verfolgung hinweg zusammenzählen lassen. Offline
+laufen keine Helix-Abfragen. Fehlende API-Werte bleiben `NULL`; D1 enthält
+weder Nutzerkennungen noch einzelne Nachrichten. Die Aggregate bleiben
+unbegrenzt erhalten (Entscheidung 0003).
+
 Migration `0016_text_library.sql` führte Textblöcke und zunächst eine
 Bibliothekszeitzone ein. `0017_text_library_variant_choices.sql` ergänzte den
 Zufallswahlindex je Variante. Migration `0018_template_value_providers.sql`

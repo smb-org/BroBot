@@ -274,8 +274,10 @@ const objectFor = (
     }
     if (/^\s*SELECT COUNT\(\*\) AS count FROM active_chatters\b/iu.test(query)) {
       const cutoff = bindings[0];
+      const end = bindings[1];
       const count = typeof cutoff === "string"
-        ? [...chatterRows.values()].filter((row) => row.last_seen_at >= cutoff).length
+        ? [...chatterRows.values()].filter((row) => row.last_seen_at >= cutoff &&
+          (typeof end !== "string" || row.last_seen_at < end)).length
         : chatterRows.size;
       return { toArray: () => [{ count }], one: () => ({ count }) };
     }
@@ -1395,6 +1397,68 @@ describe("ChannelObject realtime path", () => {
     expect(await object.getChatActivityCount()).toBe(3);
   });
 
+  it("aggregates live chat messages and emote occurrences per statistics window", async () => {
+    const object = objectFor([]);
+    const firstWindow = { windowStart: "2026-09-27T12:00:00.000Z", receivedAt: "2026-09-27T12:01:00.000Z", emotes: 2 };
+    const nextWindow = { windowStart: "2026-09-27T12:05:00.000Z", receivedAt: "2026-09-27T12:05:00.000Z", emotes: 0 };
+
+    await object.recordChatActivity("viewer-1", true, firstWindow);
+    await object.recordChatActivity("viewer-1", true, firstWindow);
+    await object.recordChatActivity("viewer-2", true, nextWindow);
+
+    await expect(object.getStatisticsChatWindow(firstWindow.windowStart)).resolves.toEqual({ messages: 2, emotes: 4 });
+    await expect(object.getStatisticsChatWindow(nextWindow.windowStart)).resolves.toEqual({ messages: 1, emotes: 0 });
+    expect(JSON.stringify(storageOf(object).values)).not.toContain("viewer-1");
+    expect(JSON.stringify(storageOf(object).values)).not.toContain("viewer-2");
+  });
+
+  it("keeps counting into the same statistics window after an offline/online flap", async () => {
+    const object = objectFor([]);
+    const window = { windowStart: "2026-09-27T12:00:00.000Z", receivedAt: "2026-09-27T12:01:00.000Z", emotes: 1 };
+
+    await object.recordChatActivity("viewer-1", false, window);
+    await object.recordChatActivity("viewer-2", false, window);
+    await object.clearStatisticsChatWindow(window.windowStart);
+    await object.recordChatActivity("viewer-3", false, window);
+
+    await expect(object.getStatisticsChatWindow(window.windowStart)).resolves.toEqual({ messages: 1, emotes: 1 });
+  });
+
+  it("flushes the partial statistics window once, with NULL for sources that were not read", async () => {
+    const binds: unknown[][] = [];
+    const statement = {
+      bind: vi.fn((...values: unknown[]) => {
+        binds.push(values);
+        return statement;
+      }),
+      run: vi.fn().mockResolvedValue({ success: true }),
+      first: vi.fn().mockResolvedValue(null),
+      all: vi.fn().mockResolvedValue({ results: [] }),
+    };
+    const database = { prepare: vi.fn(() => statement) } as unknown as D1Database;
+    const fetcher = vi.spyOn(globalThis, "fetch");
+    const object = objectFor([], database);
+    const window = { windowStart: "2026-09-27T12:00:00.000Z", receivedAt: "2026-09-27T12:01:00.000Z", emotes: 2 };
+    const invocation = {
+      kind: "offline-window",
+      streamId: "stream-1",
+      streamStartedAt: "2026-09-27T12:00:00.000Z",
+      windowStart: window.windowStart,
+      windowEnd: "2026-09-27T12:02:17.000Z",
+    };
+    await object.recordChatActivity("viewer-1", false, window);
+    await object.recordChatActivity("viewer-2", false, window);
+
+    await object.runModuleAlarm("statistics", "window", "offline:1", invocation);
+    // A retried or duplicated offline flush must not write or count the window again.
+    await object.runModuleAlarm("statistics", "window", "offline:1", invocation);
+
+    const inserts = binds.filter((values) => values[0] === "kanal-a" && values[2] === window.windowStart && values.length === 9);
+    expect(inserts).toEqual([["kanal-a", "stream-1", window.windowStart, 137, 2, 4, null, null, null]]);
+    await expect(object.getStatisticsChatWindow(window.windowStart)).resolves.toEqual({ messages: 0, emotes: 0 });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("tracks unique chatters in a rolling window without storing their ids", async () => {
     vi.useFakeTimers();
     const startedAt = "2026-09-27T12:00:00.000Z";
@@ -1426,6 +1490,30 @@ describe("ChannelObject realtime path", () => {
     expect(JSON.stringify(chatterRows)).not.toContain("viewer-1");
     expect(JSON.stringify(chatterRows)).not.toContain("viewer-2");
     expect(storage.list).not.toHaveBeenCalledWith(expect.objectContaining({ prefix: "chatter:" }));
+  });
+
+  it("counts distinct chatters in a fixed statistics window", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    vi.setSystemTime(Date.parse(startedAt) + 60_000);
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn().mockResolvedValue({ state: "online", source: "eventsub", changed_at: startedAt,
+        started_at: startedAt, stream_id: "stream-1", checked_at: null }),
+    };
+    const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
+
+    await object.recordChatActivity("viewer-1", true);
+    vi.setSystemTime(Date.parse(startedAt) + 4 * 60_000);
+    await object.recordChatActivity("viewer-1", true);
+    await object.recordChatActivity("viewer-2", true);
+    vi.setSystemTime(Date.parse(startedAt) + 5 * 60_000);
+    await object.recordChatActivity("viewer-3", true);
+
+    await expect(object.getActiveChatterCountBetween(
+      startedAt,
+      "2026-09-27T12:05:00.000Z",
+    )).resolves.toBe(2);
   });
 
   it("schedules the keyed sweep in the same transaction as its first chatter row", async () => {

@@ -678,6 +678,8 @@ export interface ModuleExecutionContext {
   getAlarmDeadline?: (alarmKey: string) => Promise<number | null>;
   /** Reads the identity and plan sequence for a module-owned alarm key, if scheduled. */
   getAlarmPlan?: (alarmKey: string) => Promise<ModuleAlarmPlan | null>;
+  /** Runs one of this module's registered alarm handlers synchronously from its event handler. */
+  runModuleAlarm?: (handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>;
 }
 
 export interface ModuleDryRunBallotSnapshot extends BallotSnapshot {
@@ -753,6 +755,18 @@ export interface ModuleAlarmContext {
   reconcileTimerSchedules?: (reason: ModuleScheduleInputChangeReason) => Promise<void>;
   /** Shared per-dispatch allowance for external provider requests. */
   externalFetchBudget?: ModuleExternalFetchBudget;
+  /** Bounded count reads and cleanup for the host's ephemeral active-chatter tracker. */
+  activeChatters?: {
+    countBetween: (windowStart: string, windowEnd: string) => Promise<number | null>;
+  };
+  /** Aggregate-only live chat counters held in the channel Durable Object. */
+  statisticsChat?: {
+    readWindow: (windowStart: string) => Promise<{ messages: number; emotes: number }>;
+    clearWindow: (windowStart: string) => Promise<void>;
+  };
+  /** Host-authenticated Helix counts; unavailable sources return null. */
+  fetchViewerCount?: () => Promise<number | null>;
+  fetchChattersTotal?: () => Promise<number | null>;
   /** Secret access bound to this alarm's channel and module. */
   secrets: ModuleSecretAccess;
   /** Ephemeral ballot access bound to this alarm's channel and module. */

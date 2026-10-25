@@ -90,6 +90,7 @@ import type {
   PointsKind,
   PointsMovement,
 } from "../../modules/contract";
+import type { StatisticsChatActivity } from "../../modules/statistics/domain";
 import { MODULES } from "../../modules/registry";
 import {
   ACTIVE_CHATTER_EXPIRY_HANDLER,
@@ -111,6 +112,7 @@ import type { AdPrewarningScheduler } from "../../modules/ads/adapters/prewarnin
 import { getAppAccessToken } from "../app-token";
 import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
+import { fetchLiveChattersTotal, fetchLiveViewerCount } from "../twitch/aggregate-counts";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 import {
@@ -324,6 +326,11 @@ const timerSkipReceiptsForSchedule = (
 };
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
+const STATISTICS_CHAT_WINDOW_KEY_PREFIX = "module:statistics:chat-window:";
+
+// Keyed by the epoch-aligned window only, so an offline/online flap inside one window keeps counting into it.
+const statisticsChatWindowKey = (windowStart: string): string =>
+  `${STATISTICS_CHAT_WINDOW_KEY_PREFIX}${String(Date.parse(windowStart))}`;
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
 const ACTIVE_CHATTER_EXPIRY_KEY = "host:active_chatters_expiry";
 const ACTIVE_CHATTER_RETENTION_MS = 60 * 60 * 1_000;
@@ -3171,6 +3178,15 @@ export class ChannelObject extends DurableObject<Env> {
       ...(alarmPlanSequence === undefined ? {} : { alarmPlanSequence }),
       ...(streamGeneration === undefined ? {} : { streamGeneration }),
       externalFetchBudget,
+      activeChatters: {
+        countBetween: (windowStart, windowEnd) => this.getActiveChatterCountBetween(windowStart, windowEnd),
+      },
+      statisticsChat: {
+        readWindow: (windowStart) => this.getStatisticsChatWindow(windowStart),
+        clearWindow: (windowStart) => this.clearStatisticsChatWindow(windowStart),
+      },
+      fetchViewerCount: () => fetchLiveViewerCount(this.env, channelId, externalFetchBudget),
+      fetchChattersTotal: () => fetchLiveChattersTotal(this.env, channelId, externalFetchBudget),
       ballots: this.ballotAccess(moduleId),
       points: this.pointAccess(moduleId),
       secrets: createModuleSecretAccess(this.env, channelId, moduleId),
@@ -3349,17 +3365,33 @@ export class ChannelObject extends DurableObject<Env> {
   public async recordChatActivity(
     chatterUserId: string | null = null,
     needsActiveChatters = false,
+    statistics?: StatisticsChatActivity,
   ): Promise<number> {
     await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
     this.reconcileLegacyActiveChatterStream();
-    const now = Date.now();
+    const statisticsReceivedAt = statistics === undefined ? Number.NaN : Date.parse(statistics.receivedAt);
+    const now = Number.isFinite(statisticsReceivedAt) ? statisticsReceivedAt : Date.now();
     const nowIso = new Date(now).toISOString();
     const userIdForTracking = needsActiveChatters && typeof chatterUserId === "string" && chatterUserId.length > 0
       ? chatterUserId
       : null;
+    const recordStatistics = (): void => {
+      if (statistics === undefined) return;
+      const windowStart = Date.parse(statistics.windowStart);
+      if (!Number.isFinite(windowStart) || !Number.isSafeInteger(statistics.emotes) || statistics.emotes < 0) return;
+      const key = statisticsChatWindowKey(statistics.windowStart);
+      const previous = this.ctx.storage.kv.get(key);
+      const current = isRecord(previous) ? previous : {};
+      const messages = typeof current.messages === "number" && Number.isSafeInteger(current.messages) ? current.messages : 0;
+      const emotes = typeof current.emotes === "number" && Number.isSafeInteger(current.emotes) ? current.emotes : 0;
+      this.ctx.storage.kv.put(key, { messages: messages + 1, emotes: emotes + statistics.emotes });
+    };
     if (userIdForTracking === null) {
-      return this.ctx.storage.transactionSync(() => this.incrementChatActivityCountSync());
+      return this.ctx.storage.transactionSync(() => {
+        recordStatistics();
+        return this.incrementChatActivityCountSync();
+      });
     }
 
     return await this.ctx.blockConcurrencyWhile(async () => {
@@ -3381,7 +3413,10 @@ export class ChannelObject extends DurableObject<Env> {
       try {
         await this.ensurePlatformActiveChatterAlarm(preflightDeadline);
       } catch (error: unknown) {
-        this.ctx.storage.transactionSync(() => this.incrementChatActivityCountSync());
+        this.ctx.storage.transactionSync(() => {
+          recordStatistics();
+          this.incrementChatActivityCountSync();
+        });
         throw error;
       }
       return this.ctx.storage.transactionSync(() => {
@@ -3402,9 +3437,24 @@ export class ChannelObject extends DurableObject<Env> {
         const nextSweep = this.activeChatterNextSweepSync(keyCreatedAt);
         if (nextSweep === null) this.clearActiveChatterExpiryEntrySync();
         else this.writeActiveChatterExpiryEntrySync(nextSweep);
+        recordStatistics();
         return this.incrementChatActivityCountSync();
       });
     });
+  }
+
+  public async getStatisticsChatWindow(
+    windowStart: string,
+  ): Promise<{ messages: number; emotes: number }> {
+    const value = await this.ctx.storage.get(statisticsChatWindowKey(windowStart));
+    if (!isRecord(value) || !Number.isSafeInteger(value.messages) || !Number.isSafeInteger(value.emotes)) {
+      return { messages: 0, emotes: 0 };
+    }
+    return { messages: value.messages as number, emotes: value.emotes as number };
+  }
+
+  public async clearStatisticsChatWindow(windowStart: string): Promise<void> {
+    await this.ctx.storage.delete(statisticsChatWindowKey(windowStart));
   }
 
   public async clearActiveChatters(): Promise<void> {
@@ -3428,6 +3478,25 @@ export class ChannelObject extends DurableObject<Env> {
     const result = this.ctx.storage.sql.exec<{ count: number }>(
       `SELECT COUNT(*) AS count FROM ${ACTIVE_CHATTER_TABLE} WHERE last_seen_at >= ?`,
       new Date(cutoff).toISOString(),
+    ).one();
+    return Promise.resolve(result.count);
+  }
+
+  public async getActiveChatterCountBetween(windowStart: string, windowEnd: string): Promise<number | null> {
+    await this.ensurePointRoundRecovery();
+    const start = Date.parse(windowStart);
+    const end = Date.parse(windowEnd);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+    const now = Date.now();
+    const key = this.activeChatterKeyRowSync();
+    if (key === null || now - key.createdAt >= ACTIVE_CHATTER_KEY_ROTATION_MS) return null;
+    const cutoff = Math.max(start, now - ACTIVE_CHATTER_RETENTION_MS);
+    if (end <= cutoff) return null;
+    this.ensureActiveChatterTable();
+    const result = this.ctx.storage.sql.exec<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM ${ACTIVE_CHATTER_TABLE} WHERE last_seen_at >= ? AND last_seen_at < ?`,
+      new Date(cutoff).toISOString(),
+      new Date(end).toISOString(),
     ).one();
     return Promise.resolve(result.count);
   }

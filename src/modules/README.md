@@ -552,6 +552,32 @@ sie aggregiert sind und keine Personendaten enthalten (Entscheidung 0003).
 Routenabfragen binden `channel_id`; `/history` liefert pro Messpunkt nur
 numerische Werte.
 
+### Kanalstatistiken (#557)
+
+Das verpflichtende `statistics`-Modul abonniert `channel.chat.message`,
+`stream.online` und `stream.offline` für jeden Kanal. Es zählt im Channel
+Durable Object Nachrichten und Emote-Fragmente, ohne je Nachricht eine
+D1-Zeile zu schreiben. Der keyed Modul-Alarm schließt Fünf-Minuten-Fenster ab,
+die an UTC-Vielfachen von 300 s ausgerichtet sind (`window_start =
+floor(t / 300 s) * 300 s`); das erste Fenster nach `stream.online` und das
+letzte vor `stream.offline` sind Teilfenster, `window_seconds` nennt die
+abgedeckten Sekunden. Ein Offline/Online-Wechsel im selben Fenster ergibt
+weiter genau eine Zeile (Zähler zusammengeführt, `active_chatters` dann
+`NULL`). Pro Fenster wird eine Zeile in `channel_statistics`
+geschrieben: `channel_id`, `stream_id`, `window_start`, `window_seconds`,
+`messages`, `emotes`, `viewer_count`, `chatters` und `active_chatters`. Der
+Primärschlüssel `(channel_id, window_start)` macht Alarmwiederholungen
+idempotent. Zuschauer kommen aus Helix Get Streams, `chatters` ist `total` aus
+Get Chatters mit Bot-Token und `moderator:read:chatters`, und
+`active_chatters` ist eine Anzahl aus der vorhandenen flüchtigen
+DO-Verfolgung. Nicht verfügbare Quellen bleiben `NULL`. Das Offline-Ereignis
+schreibt das letzte Teilfenster vor dem Löschen der DO-Chatterdaten; offline
+finden keine Helix-Abfragen statt. `channel_statistics` enthält nur Summen,
+keine Namen, Roh-IDs, Nutzerlisten oder Chatnachrichten. Für die Zählung
+aktiver Chatter fragt das Modul die bestehende kurzlebige pseudonyme
+DO-Verfolgung ab. Die Aggregattabelle wird unbegrenzt aufbewahrt und beim
+Löschen des Kanals kaskadiert entfernt (Entscheidung 0003, Abschnitt 6).
+
 ### Modulaktionen (`actions`)
 
 **Zweck:** Ein Modul deklariert jede direkt ausführbare Aktion. Das Dashboard

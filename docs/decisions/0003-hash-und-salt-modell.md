@@ -115,6 +115,7 @@ Für aktive Chatter (#292) gilt eine bewusst kürzere Regel: Der kanalgebundene 
 | Kanalweite Aktivitätszähler je Person | **180 Tage** rollierend | Wiederkehrende Zuschauer zu erkennen braucht Monate, nicht Jahre |
 | Modul-Ereignisse mit roher `actor_user_id` | **14 Tage** | Betriebliche Fehlersuche; die Ausnahme bleibt wegen der kurzen Frist begrenzt |
 | Audit-Einträge | **24 Monate** | Administrative Nachvollziehbarkeit; betrifft Bedienende, nicht Zuschauer |
+| Kanalstatistiken je Fünf-Minuten-Fenster (Nachrichten, Emotes, Viewer, Chatters, aktive Chatter) | unbegrenzt | Ausschließlich Summen ohne Namen, IDs oder Nutzerlisten |
 | Aggregate ohne Personenbezug | unbegrenzt | siehe Abschnitt 6 |
 
 Die Fristen werden durch einen Lauf durchgesetzt, nicht durch Vorsatz. Der stündliche Cron-Trigger aus #18 ist der naheliegende Ort.
