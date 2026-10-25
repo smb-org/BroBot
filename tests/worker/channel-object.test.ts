@@ -177,6 +177,16 @@ const objectFor = (
 ): ChannelObject => {
   let transactionQueue = Promise.resolve();
   const chatterRows = new Map<string, { hmac: string; first_seen_at: string; last_seen_at: string }>();
+  const statisticsChatWindows = new Map<number, {
+    active_messages: number;
+    active_emotes: number;
+    pending_messages: number;
+    pending_emotes: number;
+  }>();
+  const statisticsWindowChatters = new Map<number, Set<string>>();
+  const statisticsWindowChatterKeys = new Map<number, string>();
+  const eventSubMessageIds = new Map<string, number>();
+  let lastSqlChanges = 0;
   let chatterKey: { key_hex: string; created_at: string } | undefined;
   let failNextChatterDelete = false;
   const listValues = (options?: { prefix?: string; startAfter?: string; limit?: number }): Map<string, unknown> => {
@@ -200,7 +210,12 @@ const objectFor = (
     transactionSync: <T>(closure: () => T): T => {
       const valuesBefore = new Map(values);
       const rowsBefore = new Map(chatterRows);
+      const statisticsBefore = new Map([...statisticsChatWindows].map(([start, row]) => [start, { ...row }]));
+      const membershipBefore = new Map([...statisticsWindowChatters].map(([start, rows]) => [start, new Set(rows)]));
+      const windowKeysBefore = new Map(statisticsWindowChatterKeys);
+      const eventSubBefore = new Map(eventSubMessageIds);
       const keyBefore = chatterKey;
+      const changesBefore = lastSqlChanges;
       try {
         return closure();
       } catch (error: unknown) {
@@ -208,7 +223,16 @@ const objectFor = (
         for (const [key, value] of valuesBefore) values.set(key, value);
         chatterRows.clear();
         for (const [key, value] of rowsBefore) chatterRows.set(key, value);
+        statisticsChatWindows.clear();
+        for (const [start, row] of statisticsBefore) statisticsChatWindows.set(start, row);
+        statisticsWindowChatters.clear();
+        for (const [start, rows] of membershipBefore) statisticsWindowChatters.set(start, rows);
+        statisticsWindowChatterKeys.clear();
+        for (const [start, key] of windowKeysBefore) statisticsWindowChatterKeys.set(start, key);
+        eventSubMessageIds.clear();
+        for (const [messageId, receivedAt] of eventSubBefore) eventSubMessageIds.set(messageId, receivedAt);
         chatterKey = keyBefore;
+        lastSqlChanges = changesBefore;
         throw error;
       }
     },
@@ -227,6 +251,160 @@ const objectFor = (
     }
     if (/^\s*CREATE INDEX\b/iu.test(query)) {
       return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*INSERT OR IGNORE INTO statistics_chat_windows\b/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      if (!statisticsChatWindows.has(windowStart)) {
+        statisticsChatWindows.set(windowStart, {
+          active_messages: 0,
+          active_emotes: 0,
+          pending_messages: 0,
+          pending_emotes: 0,
+        });
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*INSERT INTO statistics_chat_windows\b/iu.test(query)) {
+      const [windowStart, emotes] = bindings as [number, number];
+      const previous = statisticsChatWindows.get(windowStart);
+      statisticsChatWindows.set(windowStart, {
+        active_messages: (previous?.active_messages ?? 0) + 1,
+        active_emotes: (previous?.active_emotes ?? 0) + emotes,
+        pending_messages: previous?.pending_messages ?? 0,
+        pending_emotes: previous?.pending_emotes ?? 0,
+      });
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*INSERT OR IGNORE INTO statistics_window_chatters\b/iu.test(query)) {
+      const [windowStart, hmac] = bindings as [number, string];
+      const members = statisticsWindowChatters.get(windowStart) ?? new Set<string>();
+      members.add(hmac);
+      statisticsWindowChatters.set(windowStart, members);
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT key_hex FROM statistics_window_chatter_keys\s+WHERE window_start = \?/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      const keyHex = statisticsWindowChatterKeys.get(windowStart);
+      return { toArray: () => keyHex === undefined ? [] : [{ key_hex: keyHex }], one: () => keyHex === undefined ? undefined : { key_hex: keyHex } };
+    }
+    if (/^\s*INSERT OR REPLACE INTO statistics_window_chatter_keys\b/iu.test(query)) {
+      const [windowStart, keyHex] = bindings as [number, string];
+      statisticsWindowChatterKeys.set(windowStart, keyHex);
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*UPDATE statistics_chat_windows\s+SET pending_messages = pending_messages \+ active_messages/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      const previous = statisticsChatWindows.get(windowStart);
+      if (previous !== undefined) {
+        statisticsChatWindows.set(windowStart, {
+          active_messages: 0,
+          active_emotes: 0,
+          pending_messages: previous.pending_messages + previous.active_messages,
+          pending_emotes: previous.pending_emotes + previous.active_emotes,
+        });
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT active_messages, active_emotes, pending_messages, pending_emotes\s+FROM statistics_chat_windows/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      const row = statisticsChatWindows.get(windowStart);
+      return { toArray: () => row === undefined ? [] : [{ ...row }], one: () => row };
+    }
+    if (/^\s*SELECT pending_messages, pending_emotes\s+FROM statistics_chat_windows/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      const row = statisticsChatWindows.get(windowStart);
+      const result = row === undefined ? undefined : {
+        pending_messages: row.pending_messages,
+        pending_emotes: row.pending_emotes,
+      };
+      return { toArray: () => result === undefined ? [] : [result], one: () => result };
+    }
+    if (/^\s*SELECT COUNT\(\*\) AS count FROM statistics_window_chatters/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      const count = statisticsWindowChatters.get(windowStart)?.size ?? 0;
+      return { toArray: () => [{ count }], one: () => ({ count }) };
+    }
+    if (/^\s*UPDATE statistics_chat_windows\s+SET pending_messages = 0/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      const previous = statisticsChatWindows.get(windowStart);
+      if (previous !== undefined) statisticsChatWindows.set(windowStart, { ...previous, pending_messages: 0, pending_emotes: 0 });
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT window_start FROM statistics_chat_windows\s+WHERE window_start < \? AND \(active_messages > 0 OR pending_messages > 0\)/iu.test(query)) {
+      const [cutoff, limit] = bindings as [number, number];
+      const rows = [...statisticsChatWindows.entries()]
+        .filter(([start, row]) => start < cutoff && (row.active_messages > 0 || row.pending_messages > 0))
+        .sort(([left], [right]) => left - right)
+        .slice(0, limit)
+        .map(([window_start]) => ({ window_start }));
+      return { toArray: () => rows, one: () => rows[0] };
+    }
+    if (/^\s*SELECT window_start FROM statistics_chat_windows\s+WHERE window_start < \? AND active_messages = 0 AND pending_messages = 0/iu.test(query)) {
+      const [cutoff, limit] = bindings as [number, number];
+      const rows = [...statisticsChatWindows.entries()]
+        .filter(([start, row]) => start < cutoff && row.active_messages === 0 && row.pending_messages === 0)
+        .sort(([left], [right]) => left - right)
+        .slice(0, limit)
+        .map(([window_start]) => ({ window_start }));
+      return { toArray: () => rows, one: () => rows[0] };
+    }
+    if (/^\s*DELETE FROM statistics_window_chatters\s+WHERE window_start = \?/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      statisticsWindowChatters.delete(windowStart);
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*DELETE FROM statistics_window_chatter_keys\s+WHERE window_start = \?/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      statisticsWindowChatterKeys.delete(windowStart);
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*DELETE FROM statistics_window_chatters\s+WHERE window_start < \?/iu.test(query)) {
+      const [windowEnd] = bindings as [number];
+      for (const windowStart of statisticsWindowChatters.keys()) {
+        if (windowStart < windowEnd) statisticsWindowChatters.delete(windowStart);
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*DELETE FROM statistics_window_chatter_keys\s+WHERE window_start < \?/iu.test(query)) {
+      const [windowEnd] = bindings as [number];
+      for (const windowStart of statisticsWindowChatterKeys.keys()) {
+        if (windowStart < windowEnd) statisticsWindowChatterKeys.delete(windowStart);
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*DELETE FROM statistics_chat_windows\s+WHERE window_start = \?/iu.test(query)) {
+      const [windowStart] = bindings as [number];
+      statisticsChatWindows.delete(windowStart);
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT key_hex FROM statistics_window_chatter_keys\b/iu.test(query)) {
+      return { toArray: () => [...statisticsWindowChatterKeys.values()].map((key_hex) => ({ key_hex })), one: () => undefined };
+    }
+    if (/^\s*DELETE FROM eventsub_message_ids\s+WHERE received_at <= \?/iu.test(query)) {
+      const [cutoff] = bindings as [number];
+      for (const [messageId, receivedAt] of eventSubMessageIds) {
+        if (receivedAt <= cutoff) eventSubMessageIds.delete(messageId);
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*INSERT OR IGNORE INTO eventsub_message_ids/iu.test(query)) {
+      const [messageId, receivedAt] = bindings as [string, number];
+      lastSqlChanges = eventSubMessageIds.has(messageId) ? 0 : 1;
+      if (lastSqlChanges > 0) eventSubMessageIds.set(messageId, receivedAt);
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT changes\(\) AS changes/iu.test(query)) {
+      return { toArray: () => [{ changes: lastSqlChanges }], one: () => ({ changes: lastSqlChanges }) };
+    }
+    if (/^\s*DELETE FROM eventsub_message_ids\s+WHERE message_id IN/iu.test(query)) {
+      const [limit] = bindings as [number];
+      const ids = [...eventSubMessageIds.entries()].sort(([leftId, leftAt], [rightId, rightAt]) =>
+        rightAt - leftAt || rightId.localeCompare(leftId));
+      for (const [messageId] of ids.slice(limit)) eventSubMessageIds.delete(messageId);
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT message_id, received_at FROM eventsub_message_ids/iu.test(query)) {
+      return { toArray: () => [...eventSubMessageIds.entries()].map(([message_id, received_at]) => ({ message_id, received_at })), one: () => undefined };
     }
     if (/^\s*DELETE FROM active_chatter_key\b/iu.test(query)) {
       chatterKey = undefined;
@@ -292,6 +470,12 @@ const objectFor = (
     }
     if (/^\s*SELECT hmac FROM active_chatters\b/iu.test(query)) {
       return { toArray: () => [...chatterRows.values()].map(({ hmac }) => ({ hmac })), one: () => undefined };
+    }
+    if (/^\s*SELECT hmac FROM statistics_window_chatters\b/iu.test(query)) {
+      return {
+        toArray: () => [...statisticsWindowChatters.values()].flatMap((members) => [...members].map((hmac) => ({ hmac }))),
+        one: () => undefined,
+      };
     }
     throw new Error(`Unexpected Durable Object SQL query: ${query}`);
   });
@@ -420,6 +604,14 @@ const objectFor = (
   (object as unknown as { timerOccurrenceQueues: Map<string, Promise<void>> }).timerOccurrenceQueues = new Map();
   return object;
 };
+
+const offlineStatisticsAlarmKey = (
+  streamId: string,
+  streamStartedAt: string,
+  firstWindowStart: string,
+  endedAt: string,
+  generation = 0,
+): string => `offline:${encodeURIComponent(streamId)}:${String(Date.parse(streamStartedAt))}:${String(Date.parse(firstWindowStart))}:${String(Date.parse(endedAt))}:${String(generation)}`;
 
 const databaseWithTermApprovals = (pollId: string, terms: readonly string[]): D1Database => {
   const approved = new Set(terms);
@@ -1408,8 +1600,15 @@ describe("ChannelObject realtime path", () => {
 
     await expect(object.getStatisticsChatWindow(firstWindow.windowStart)).resolves.toEqual({ messages: 2, emotes: 4 });
     await expect(object.getStatisticsChatWindow(nextWindow.windowStart)).resolves.toEqual({ messages: 1, emotes: 0 });
-    expect(JSON.stringify(storageOf(object).values)).not.toContain("viewer-1");
-    expect(JSON.stringify(storageOf(object).values)).not.toContain("viewer-2");
+    const storedValues = [...storageOf(object).values.entries()];
+    expect(JSON.stringify(storedValues)).not.toContain("viewer-1");
+    expect(JSON.stringify(storedValues)).not.toContain("viewer-2");
+    const storedChatterHashes = storageOf(object).sql.exec("SELECT hmac FROM active_chatters").toArray();
+    expect(JSON.stringify(storedChatterHashes)).not.toContain("viewer-1");
+    expect(JSON.stringify(storedChatterHashes)).not.toContain("viewer-2");
+    const storedWindowMembership = storageOf(object).sql.exec("SELECT hmac FROM statistics_window_chatters").toArray();
+    expect(JSON.stringify(storedWindowMembership)).not.toContain("viewer-1");
+    expect(JSON.stringify(storedWindowMembership)).not.toContain("viewer-2");
   });
 
   it("keeps counting into the same statistics window after an offline/online flap", async () => {
@@ -1436,22 +1635,24 @@ describe("ChannelObject realtime path", () => {
       all: vi.fn().mockResolvedValue({ results: [] }),
     };
     const database = { prepare: vi.fn(() => statement) } as unknown as D1Database;
+    // Retired-window pruning is relative to the wall clock, so pin it next to the test window.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse("2026-09-27T12:03:00.000Z"));
     const fetcher = vi.spyOn(globalThis, "fetch");
     const object = objectFor([], database);
     const window = { windowStart: "2026-09-27T12:00:00.000Z", receivedAt: "2026-09-27T12:01:00.000Z", emotes: 2 };
-    const invocation = {
-      kind: "offline-window",
-      streamId: "stream-1",
-      streamStartedAt: "2026-09-27T12:00:00.000Z",
-      windowStart: window.windowStart,
-      windowEnd: "2026-09-27T12:02:17.000Z",
-    };
+    const alarmKey = offlineStatisticsAlarmKey(
+      "stream-1",
+      "2026-09-27T12:00:00.000Z",
+      window.windowStart,
+      "2026-09-27T12:02:17.000Z",
+    );
     await object.recordChatActivity("viewer-1", false, window);
     await object.recordChatActivity("viewer-2", false, window);
 
-    await object.runModuleAlarm("statistics", "window", "offline:1", invocation);
+    await object.runModuleAlarm("statistics", "window", alarmKey);
     // A retried or duplicated offline flush must not write or count the window again.
-    await object.runModuleAlarm("statistics", "window", "offline:1", invocation);
+    await object.runModuleAlarm("statistics", "window", alarmKey);
 
     const inserts = binds.filter((values) => values[0] === "kanal-a" && values[2] === window.windowStart && values.length === 9);
     expect(inserts).toEqual([["kanal-a", "stream-1", window.windowStart, 137, 2, 4, null, null, null]]);
@@ -1514,6 +1715,199 @@ describe("ChannelObject realtime path", () => {
       startedAt,
       "2026-09-27T12:05:00.000Z",
     )).resolves.toBe(2);
+  });
+
+  it("keeps a chatter in the previous statistics window after they speak at its boundary", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-09-27T12:00:00.000Z";
+    const boundary = "2026-09-27T12:05:00.000Z";
+    vi.setSystemTime(Date.parse(boundary) - 1_000);
+    const binds: unknown[][] = [];
+    const statement = {
+      bind: vi.fn((...values: unknown[]) => { binds.push(values); return statement; }),
+      run: vi.fn().mockResolvedValue({ success: true }),
+      first: vi.fn().mockResolvedValue({ state: "online", source: "eventsub", changed_at: startedAt,
+        started_at: startedAt, stream_id: "stream-1", checked_at: null }),
+      all: vi.fn().mockResolvedValue({ results: [] }),
+    };
+    const database = { prepare: vi.fn(() => statement) } as unknown as D1Database;
+    const object = objectFor([], database);
+    const previousWindow = { windowStart: startedAt, receivedAt: "2026-09-27T12:04:59.000Z", emotes: 0 };
+    const nextWindow = { windowStart: boundary, receivedAt: boundary, emotes: 0 };
+
+    await object.recordChatActivity("viewer-1", true, previousWindow);
+    vi.setSystemTime(Date.parse(boundary));
+    await object.recordChatActivity("viewer-1", true, nextWindow);
+    await object.runModuleAlarm("statistics", "window", offlineStatisticsAlarmKey(
+      "stream-1",
+      startedAt,
+      startedAt,
+      boundary,
+    ));
+
+    const row = binds.find((values) => values[0] === "kanal-a" && values[2] === startedAt && values.length === 9);
+    expect(row?.[8]).toBe(1);
+  });
+
+  it("keeps per-window chatter identity stable across active-chatter key rotation", async () => {
+    vi.useFakeTimers();
+    const previousDay = Date.parse("2026-09-27T12:02:00.000Z");
+    vi.setSystemTime(previousDay);
+    const object = objectFor([]);
+    await object.recordChatActivity("viewer-1", true);
+
+    const windowStart = "2026-09-28T12:00:00.000Z";
+    vi.setSystemTime(Date.parse("2026-09-28T12:01:00.000Z"));
+    await object.recordChatActivity("viewer-1", true, {
+      windowStart,
+      receivedAt: "2026-09-28T12:01:00.000Z",
+      emotes: 0,
+    });
+    vi.setSystemTime(Date.parse("2026-09-28T12:03:00.000Z"));
+    await object.recordChatActivity("viewer-1", true, {
+      windowStart,
+      receivedAt: "2026-09-28T12:03:00.000Z",
+      emotes: 0,
+    });
+
+    await expect(object.beginStatisticsChatWindowFlush(windowStart)).resolves.toEqual({
+      messages: 2,
+      emotes: 0,
+      activeChatters: 1,
+      hasNew: true,
+    });
+  });
+
+  it("deletes per-window chatter hashes and keys at stream end", async () => {
+    const object = objectFor([]);
+    const windowStart = "2026-09-27T12:00:00.000Z";
+    await object.recordChatActivity("viewer-1", true, {
+      windowStart,
+      receivedAt: "2026-09-27T12:01:00.000Z",
+      emotes: 0,
+    });
+
+    await object.clearStatisticsWindowChattersThrough("2026-09-27T12:05:00.000Z");
+
+    expect(storageOf(object).sql.exec("SELECT hmac FROM statistics_window_chatters").toArray()).toEqual([]);
+    expect(storageOf(object).sql.exec("SELECT key_hex FROM statistics_window_chatter_keys").toArray()).toEqual([]);
+  });
+
+  it("claims EventSub chat message IDs once and expires them from bounded DO storage", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const object = objectFor([]);
+
+    await expect(object.claimEventSubMessage("chat-message-1")).resolves.toBe(true);
+    await expect(object.claimEventSubMessage("chat-message-1")).resolves.toBe(false);
+    vi.setSystemTime(now + 20 * 60 * 1_000 + 1);
+    await expect(object.claimEventSubMessage("chat-message-1")).resolves.toBe(true);
+
+    const ids = storageOf(object).sql.exec("SELECT message_id, received_at FROM eventsub_message_ids").toArray();
+    expect(ids).toEqual([{ message_id: "chat-message-1", received_at: now + 20 * 60 * 1_000 + 1 }]);
+  });
+
+  it("caps the retained EventSub chat message ID ring", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-09-27T12:00:00.000Z"));
+    const object = objectFor([]);
+
+    for (let index = 0; index < 4_097; index += 1) {
+      await object.claimEventSubMessage(`chat-message-${String(index)}`);
+    }
+
+    expect(storageOf(object).sql.exec("SELECT message_id, received_at FROM eventsub_message_ids").toArray()).toHaveLength(4_096);
+  });
+
+  it("preserves chat received while a statistics window is being committed", async () => {
+    const windowStart = "2026-09-27T12:00:00.000Z";
+    const binds: unknown[][] = [];
+    let recordedLateMessage = false;
+    const statement = {
+      bind: vi.fn((...values: unknown[]) => { binds.push(values); return statement; }),
+      run: vi.fn(async () => {
+        if (!recordedLateMessage && binds.at(-1)?.[2] === windowStart) {
+          recordedLateMessage = true;
+          await object.recordChatActivity(null, false, {
+            windowStart,
+            receivedAt: "2026-09-27T12:04:59.900Z",
+            emotes: 0,
+          });
+        }
+        return { success: true };
+      }),
+      first: vi.fn().mockResolvedValue({ state: "online", source: "eventsub", changed_at: windowStart,
+        started_at: windowStart, stream_id: "stream-1", checked_at: null }),
+      all: vi.fn().mockResolvedValue({ results: [] }),
+    };
+    const database = { prepare: vi.fn(() => statement) } as unknown as D1Database;
+    const object = objectFor([], database);
+    const window = { windowStart, receivedAt: "2026-09-27T12:01:00.000Z", emotes: 0 };
+    await object.recordChatActivity(null, false, window);
+
+    await object.runModuleAlarm("statistics", "window", offlineStatisticsAlarmKey(
+      "stream-1",
+      windowStart,
+      windowStart,
+      "2026-09-27T12:05:00.000Z",
+    ));
+
+    const committedRows = binds.filter((values) => values[0] === "kanal-a" && values[2] === windowStart && values.length === 9);
+    expect(committedRows.map((values) => values[4])).toEqual([1, 2]);
+    await expect(object.getStatisticsChatWindow(windowStart)).resolves.toEqual({ messages: 0, emotes: 0 });
+  });
+
+  it("serializes overlapping statistics window commits", async () => {
+    const windowStart = "2026-09-27T12:00:00.000Z";
+    const windowEnd = "2026-09-27T12:05:00.000Z";
+    let releaseFirstWrite!: () => void;
+    let notifyFirstWrite!: () => void;
+    const firstWriteStarted = new Promise<void>((resolve) => { notifyFirstWrite = resolve; });
+    const allowFirstWrite = new Promise<void>((resolve) => { releaseFirstWrite = resolve; });
+    let statisticsWrites = 0;
+    const prepare = vi.fn((sql: string) => {
+      const writesStatistics = sql.includes("INSERT INTO channel_statistics");
+      const statement = {
+        bind: vi.fn(() => statement),
+        run: vi.fn(async () => {
+          if (writesStatistics) {
+            statisticsWrites += 1;
+            if (statisticsWrites === 1) {
+              notifyFirstWrite();
+              await allowFirstWrite;
+            }
+          }
+          return { success: true };
+        }),
+        first: vi.fn().mockResolvedValue({ state: "offline", source: "eventsub", changed_at: windowEnd,
+          started_at: windowStart, stream_id: "stream-1", checked_at: null, transition_generation: 2 }),
+        all: vi.fn().mockResolvedValue({ results: [] }),
+      };
+      return statement;
+    });
+    const database = { prepare } as unknown as D1Database;
+    // Retired-window pruning is relative to the wall clock, so pin it next to the test window.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse("2026-09-27T12:06:00.000Z"));
+    const object = objectFor([], database);
+    await object.recordChatActivity(null, false, {
+      windowStart,
+      receivedAt: "2026-09-27T12:01:00.000Z",
+      emotes: 0,
+    });
+    const alarmKey = offlineStatisticsAlarmKey("stream-1", windowStart, windowStart, windowEnd, 2);
+
+    const first = object.runModuleAlarm("statistics", "window", alarmKey);
+    await firstWriteStarted;
+    const second = object.runModuleAlarm("statistics", "window", alarmKey);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(statisticsWrites).toBe(1);
+    releaseFirstWrite();
+    await Promise.all([first, second]);
+
+    expect(statisticsWrites).toBe(1);
   });
 
   it("schedules the keyed sweep in the same transaction as its first chatter row", async () => {
@@ -1766,6 +2160,19 @@ describe("ChannelObject realtime path", () => {
 
     expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
       [alarmKey]: { deadline: 40_000, ownerRevision: 1, streamGeneration: 9 },
+    });
+  });
+
+  it("keeps a newer statistics window alarm when an older offline transition clears", async () => {
+    const object = objectFor([]);
+    const alarmKey = "module:statistics:window";
+    const alarmTableKey = "channel:alarm_schedule";
+
+    await object.scheduleModuleAlarm("statistics", "window", "window", 30_000, undefined, 3);
+    await object.clearModuleAlarm("statistics", "window", undefined, 2);
+
+    expect(storageOf(object).values.get(alarmTableKey)).toMatchObject({
+      [alarmKey]: { deadline: 30_000, streamGeneration: 3 },
     });
   });
 

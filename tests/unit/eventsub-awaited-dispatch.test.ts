@@ -60,8 +60,21 @@ describe("EventSub awaited dispatch", () => {
     const executionContext = {
       waitUntil: (promise: Promise<unknown>): void => { waitUntil(promise); },
     } as unknown as ExecutionContext;
+    // Chat messages are claimed in the channel object, not in D1.
+    const claimed = new Set<string>();
+    const channel = {
+      idFromName: (channelId: string) => channelId,
+      get: () => ({
+        claimEventSubMessage: (messageId: string) => {
+          const isNew = !claimed.has(messageId);
+          claimed.add(messageId);
+          return Promise.resolve(isNew);
+        },
+      }),
+    } as unknown as Env["CHANNEL"];
     const environment = {
       DB: database as unknown as D1Database,
+      CHANNEL: channel,
       TWITCH_EVENTSUB_SECRET: secret,
     } as unknown as Env;
 
@@ -86,7 +99,8 @@ describe("EventSub awaited dispatch", () => {
     expect(acknowledgedBeforeDispatch).toBe(false);
     expect(response.status).toBe(204);
     expect(duplicate.status).toBe(204);
-    expect(recorded).toEqual({ message_id: "clip-confirmation-pending" });
+    expect(claimed).toEqual(new Set(["clip-confirmation-pending"]));
+    expect(recorded).toBeNull();
     expect(vi.mocked(dispatchEventSubNotification)).toHaveBeenCalledTimes(1);
     expect(waitUntil).not.toHaveBeenCalled();
     database.close();

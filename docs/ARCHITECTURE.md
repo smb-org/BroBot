@@ -26,6 +26,13 @@ Durable Object wird deterministisch aus dem `channelId`-Namen angesprochen und
 bleibt für die spätere Echtzeitstrecke zuständig. Der Worker bleibt das Gateway
 für HTTP und die Module.
 
+Wiederholte `channel.chat.message`-Notifications werden vor dem Dispatch mit
+einem begrenzten TTL-Satz aus Nachrichten-IDs im Channel Durable Object
+dedupliziert. Die IDs verfallen nach 20 Minuten; der Satz ist auf 4.096 Einträge
+begrenzt. Dadurch gilt die Einmalverarbeitung für alle Chatmodule, ohne für jede
+Nachricht einen D1-Beleg zu schreiben. Andere EventSub-Typen verwenden weiterhin
+die D1-Belege.
+
 ### Flüchtige Abstimmungen
 
 Der Channel Durable Object stellt Modulen einen gemeinsamen flüchtigen
@@ -224,16 +231,32 @@ Fenster nach `stream.online` und das letzte vor `stream.offline` sind
 Teilfenster, `window_seconds` hält die tatsächlich abgedeckten Sekunden. Ein
 keyed Modul-Alarm läuft an jeder Fenstergrenze und liest Zuschauerzahl über Helix
 Get Streams, Chatters über Get Chatters mit dem Bot-Token und aktive Chatter
-als Anzahl aus der flüchtigen DO-Verfolgung. `channel_statistics` erhält genau
+als Anzahl aus der pseudonymen DO-Mitgliedschaft des jeweiligen Fensters.
+`channel_statistics` erhält genau
 eine Aggregatzeile pro Kanal und Fenster; Upserts auf
-`(channel_id, window_start)` machen Wiederholungen idempotent. `stream.offline`
-schreibt das letzte Teilfenster vor dem Löschen der aktiven Chatter. Ein
-Offline/Online-Wechsel innerhalb eines Fensters führt zu einer einzigen Zeile:
-Zähler und abgedeckte Sekunden werden zusammengeführt, `active_chatters` wird
-dann `NULL`, weil sich eindeutige Chatter nicht über das Löschen der
-Verfolgung hinweg zusammenzählen lassen. Offline
-laufen keine Helix-Abfragen. Fehlende API-Werte bleiben `NULL`; D1 enthält
-weder Nutzerkennungen noch einzelne Nachrichten. Die Aggregate bleiben
+`(channel_id, window_start)` machen Wiederholungen idempotent. Zähler werden im
+DO synchron in einen dauerhaften Pending-Zähler übergeben, bevor der Alarm
+Helix oder D1 abwartet. Nachrichten mit älterem Empfangszeitpunkt können danach
+noch als Korrektur in ihr Fenster einfließen; ein späterer Flush addiert diese
+Delta idempotent. Alte Zählerfenster und Carry-Snapshots werden pro Flush mit
+einem begrenzten Scan bereinigt.
+
+Aktive Chatter werden anhand eines zufälligen HMAC-Schlüssels pro Fenster und
+Nutzer in DO-SQL gezählt. Das trennt die Fenstergrenze exakt: dieselbe Person
+kann in beiden Fenstern zählen, auch wenn der rollierende Chatter-Schlüssel
+wechselt. HMAC-Mitgliedschaften bleiben nur für das
+20-Minuten-Korrekturfenster im DO, damit verspätet verarbeitete Nachrichten
+keine doppelten oder fehlenden Chatter erzeugen; sie werden danach und bei
+Streamende gelöscht. Namen und Nutzerkennungen verlassen das DO nicht.
+
+Ein beim Start bereits laufender Stream erhält seinen Alarm auch über die
+Streamzustands-Wiederherstellung. Jeder Alarm ist an die
+Stream-Übergangsgeneration gebunden; ein alter Offline-Übergang kann so keinen
+Alarm des neueren Streams löschen. `stream.offline` plant den letzten Flush als
+dauerhafte Arbeit im gemeinsamen Alarmscheduler. D1-Fehler wiederholen diese
+Arbeit auch dann, wenn der Kanal offline bleibt. Offline laufen keine
+Helix-Abfragen. Fehlende API-Werte bleiben `NULL`; D1 enthält nur Aggregate,
+keine Nutzerkennungen oder einzelnen Nachrichten. Die Aggregate bleiben
 unbegrenzt erhalten (Entscheidung 0003).
 
 Migration `0016_text_library.sql` führte Textblöcke und zunächst eine

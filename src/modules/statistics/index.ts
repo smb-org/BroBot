@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { BotModule } from "../contract";
 import { statisticsModuleCatalog } from "./catalog";
-import { handleStatisticsWindowAlarm, processStatisticsEvent } from "./service";
+import { handleStatisticsWindowAlarm, processStatisticsEvent, reconcileStatisticsSchedule } from "./service";
 
 const settingsSchema = z.object({});
 
@@ -25,5 +25,6 @@ export const statisticsModule: BotModule<typeof settingsSchema> = {
     key: "window",
     retryDelaysMs: [5_000, 15_000, 60_000],
     handle: handleStatisticsWindowAlarm,
+    onScheduleInputsChanged: reconcileStatisticsSchedule,
   }],
 };

@@ -319,10 +319,19 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     }
   }
 
-  const isNew = await rememberEventSubMessage(context.env.DB, messageId, now);
-  if (!isNew) return response(null, 204);
-
   const target = notificationTarget(body);
+  if (target?.subscriptionType === "channel.chat.message") {
+    if (notifierChannelId === null || target.channelId !== notifierChannelId) {
+      return response("Invalid EventSub notification.", 400);
+    }
+    const channel = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(target.channelId));
+    const isNew = await channel.claimEventSubMessage(messageId, Date.parse(now));
+    if (!isNew) return response(null, 204);
+  } else {
+    const isNew = await rememberEventSubMessage(context.env.DB, messageId, now);
+    if (!isNew) return response(null, 204);
+  }
+
   if (target === null || notifierChannelId === null || target.channelId !== notifierChannelId) {
     return response("Invalid EventSub notification.", 400);
   }

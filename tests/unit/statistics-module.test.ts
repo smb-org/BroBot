@@ -4,13 +4,17 @@ import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "..
 import { statisticsModule } from "../../src/modules/statistics";
 import { processStatisticsEvent } from "../../src/modules/statistics/service";
 import { insertChannel } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
 
 const CHANNEL_ID = "statistics-channel";
 const STREAM_ID = "stream-1";
 const WINDOW_START = "2026-10-25T12:00:00.000Z";
 const WINDOW_END = "2026-10-25T12:05:00.000Z";
+const offlineAlarmKey = (streamId: string, streamStartedAt: string, endedAt: string, generation = 0): string => {
+  const startMs = Date.parse(streamStartedAt);
+  return `offline:${encodeURIComponent(streamId)}:${String(startMs)}:${String(Math.floor(startMs / 300_000) * 300_000)}:${String(Date.parse(endedAt))}:${String(generation)}`;
+};
 
 const createContext = (
   database: TestD1Database,
@@ -23,15 +27,29 @@ const createContext = (
   } = {},
 ): {
   context: ModuleAlarmContext;
-  calls: { clear: ReturnType<typeof vi.fn>; read: ReturnType<typeof vi.fn>; viewer: ReturnType<typeof vi.fn>; chatters: ReturnType<typeof vi.fn> };
+  calls: {
+    clear: ReturnType<typeof vi.fn>;
+    list: ReturnType<typeof vi.fn>;
+    read: ReturnType<typeof vi.fn>;
+    viewer: ReturnType<typeof vi.fn>;
+    chatters: ReturnType<typeof vi.fn>;
+  };
   pending: Map<string, unknown>;
 } => {
   const pending = new Map<string, unknown>();
   let failPendingDelete = options.failPendingDelete ?? false;
   let failSchedule = options.failSchedule ?? false;
+  const flushedWindows = new Set<string>();
   const calls = {
-    clear: vi.fn(() => Promise.resolve(undefined)),
-    read: vi.fn(() => Promise.resolve({ messages: 12, emotes: 5 })),
+    clear: vi.fn((windowStart: string) => { void windowStart; return Promise.resolve(undefined); }),
+    list: vi.fn((prefix: string, limit: number, startAfter?: string) => {
+      const keys = [...pending.keys()]
+        .filter((key) => key.startsWith(prefix) && (startAfter === undefined || key > startAfter))
+        .sort((left, right) => left.localeCompare(right))
+        .slice(0, limit);
+      return Promise.resolve(new Map(keys.map((key) => [key, pending.get(key)])));
+    }),
+    read: vi.fn((windowStart: string) => { void windowStart; return Promise.resolve({ messages: 12, emotes: 5 }); }),
     viewer: vi.fn(() => Promise.resolve(options.viewerCount === undefined ? 42 : options.viewerCount)),
     chatters: vi.fn(() => Promise.resolve(options.chatters === undefined ? 7 : options.chatters)),
   };
@@ -48,6 +66,7 @@ const createContext = (
         }
         return Promise.resolve(pending.delete(key));
       },
+      list: calls.list,
     },
     schedule: vi.fn(() => {
       if (failSchedule) {
@@ -58,7 +77,21 @@ const createContext = (
     }),
     clear: vi.fn(() => Promise.resolve(undefined)),
     activeChatters: { countBetween: vi.fn(() => Promise.resolve(3)) },
-    statisticsChat: { readWindow: calls.read, clearWindow: calls.clear },
+    statisticsChat: {
+      beginWindowFlush: vi.fn(async (windowStart: string) => {
+        const chat = await calls.read(windowStart);
+        return flushedWindows.has(windowStart)
+          ? { messages: 0, emotes: 0, activeChatters: 3, hasNew: false }
+          : { ...chat, activeChatters: 3, hasNew: chat.messages > 0 };
+      }),
+      finishWindowFlush: vi.fn(async (windowStart: string) => {
+        flushedWindows.add(windowStart);
+        await calls.clear(windowStart);
+      }),
+      listDirtyWindowsBefore: vi.fn(() => Promise.resolve([])),
+      pruneRetiredWindowsBefore: vi.fn(() => Promise.resolve()),
+      clearWindowChattersThrough: vi.fn(() => Promise.resolve()),
+    },
     fetchViewerCount: calls.viewer,
     fetchChattersTotal: calls.chatters,
     streamState: vi.fn(() => Promise.resolve(options.state ?? "online")),
@@ -102,6 +135,7 @@ describe("statistics window alarm", () => {
   afterEach(() => {
     database?.close();
     database = null;
+    vi.useRealTimers();
   });
 
   it("writes one aggregate row and schedules the next live window", async () => {
@@ -129,6 +163,99 @@ describe("statistics window alarm", () => {
     expect(context.schedule).toHaveBeenCalledWith("window", Date.parse(WINDOW_END) + 300_000, undefined, undefined);
   });
 
+  it("reconciles bounded dirty windows and prunes retired counters after each flush", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await insertLiveState(database);
+    const oldWindow = "2026-10-25T11:55:00.000Z";
+    const { context } = createContext(database);
+    const statisticsChat = context.statisticsChat;
+    if (statisticsChat === undefined) throw new Error("Statistics chat context is missing.");
+    vi.mocked(statisticsChat.listDirtyWindowsBefore).mockResolvedValueOnce([oldWindow]);
+
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
+
+    await expect(database.prepare(
+      "SELECT window_start, messages FROM channel_statistics WHERE channel_id = ? ORDER BY window_start",
+    ).bind(CHANNEL_ID).all()).resolves.toMatchObject({ results: [
+      { window_start: oldWindow, messages: 12 },
+      { window_start: WINDOW_START, messages: 12 },
+    ] });
+    expect(statisticsChat.listDirtyWindowsBefore).toHaveBeenCalledWith(WINDOW_START, 24);
+    expect(statisticsChat.pruneRetiredWindowsBefore).toHaveBeenCalledWith(
+      expect.any(String),
+      100,
+    );
+  });
+
+  it("prunes retired per-window carry snapshots with a bounded storage scan", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await insertLiveState(database);
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse(WINDOW_END) + 15 * 60_000);
+    const oldWindow = "2026-10-25T11:00:00.000Z";
+    const { context, pending, calls } = createContext(database);
+    pending.set(`last:${String(Date.parse(oldWindow))}`, {
+      streamId: STREAM_ID,
+      windowStart: oldWindow,
+      windowEnd: "2026-10-25T11:05:00.000Z",
+      windowSeconds: 300,
+      messages: 3,
+      emotes: 2,
+      viewerCount: null,
+      chatters: null,
+      activeChatters: 1,
+    });
+
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
+
+    expect(pending.has(`last:${String(Date.parse(oldWindow))}`)).toBe(false);
+    expect(pending.has(`last:${String(Date.parse(WINDOW_START))}`)).toBe(true);
+    expect(calls.list).toHaveBeenCalledWith("last:", 100, undefined);
+  });
+
+  it("reconciles one alarm for a channel that is already online", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await insertLiveState(database);
+    let deadline: number | null = null;
+    let generation: number | null = null;
+    const { context } = createContext(database);
+    context.getAlarmDeadline = vi.fn(() => Promise.resolve(deadline));
+    context.getAlarmPlan = vi.fn(() => Promise.resolve({
+      identity: null,
+      planSequence: null,
+      streamGeneration: generation,
+    }));
+    context.schedule = vi.fn((
+      _key: string,
+      scheduledDeadline: number,
+      _ownerRevision?: number,
+      scheduledGeneration?: number | null,
+    ): Promise<void> => {
+      deadline = scheduledDeadline;
+      generation = typeof scheduledGeneration === "number" ? scheduledGeneration : null;
+      return Promise.resolve();
+    });
+    const reconcile = windowAlarm().onScheduleInputsChanged;
+    if (reconcile === undefined) throw new Error("Statistics alarm reconciliation is not registered.");
+    const stream = await database.prepare(
+      "SELECT transition_generation FROM channel_stream_state WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).first<{ transition_generation: number }>();
+
+    await reconcile(context, "stream_state");
+    await reconcile(context, "stream_state");
+
+    expect(context.schedule).toHaveBeenCalledOnce();
+    expect(context.schedule).toHaveBeenCalledWith(
+      "window",
+      Date.parse(WINDOW_END),
+      undefined,
+      stream?.transition_generation,
+    );
+  });
+
   it("reuses the pending snapshot when a post-upsert cleanup fails", async () => {
     database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);
@@ -141,7 +268,7 @@ describe("statistics window alarm", () => {
     await expect(database.prepare(
       "SELECT COUNT(*) AS count FROM channel_statistics WHERE channel_id = ? AND window_start = ?",
     ).bind(CHANNEL_ID, WINDOW_START).first()).resolves.toEqual({ count: 1 });
-    expect(calls.read).toHaveBeenCalledTimes(1);
+    expect(calls.read).toHaveBeenCalledTimes(2);
     expect(calls.viewer).toHaveBeenCalledTimes(1);
     expect(calls.chatters).toHaveBeenCalledTimes(1);
   });
@@ -165,7 +292,7 @@ describe("statistics window alarm", () => {
       chatters: 7,
       active_chatters: 3,
     });
-    expect(calls.read).toHaveBeenCalledTimes(1);
+    expect(calls.read).toHaveBeenCalledTimes(2);
     expect(calls.viewer).toHaveBeenCalledTimes(1);
     expect(calls.chatters).toHaveBeenCalledTimes(1);
   });
@@ -181,7 +308,7 @@ describe("statistics window alarm", () => {
       .resolves.toEqual({ count: 0 });
     expect(calls.viewer).not.toHaveBeenCalled();
     expect(calls.chatters).not.toHaveBeenCalled();
-    expect(context.clear).toHaveBeenCalledWith("window");
+    expect(context.clear).toHaveBeenCalledWith("window", undefined, undefined);
   });
 
   it("writes final partial windows without external counts and keeps unavailable sources null", async () => {
@@ -190,13 +317,7 @@ describe("statistics window alarm", () => {
     const { context, calls } = createContext(database, { viewerCount: null, chatters: null });
     const endedAt = "2026-10-25T12:02:17.000Z";
 
-    await windowAlarm().handle(context, "offline-window", Date.parse(endedAt), undefined, {
-      kind: "offline-window",
-      streamId: STREAM_ID,
-      streamStartedAt: WINDOW_START,
-      windowStart: WINDOW_START,
-      windowEnd: endedAt,
-    });
+    await windowAlarm().handle(context, offlineAlarmKey(STREAM_ID, WINDOW_START, endedAt), Date.parse(endedAt));
 
     await expect(database.prepare(
       `SELECT window_seconds, messages, emotes, viewer_count, chatters, active_chatters
@@ -213,7 +334,7 @@ describe("statistics window alarm", () => {
     expect(calls.chatters).not.toHaveBeenCalled();
   });
 
-  it("flushes the final window from stream.offline before clearing chatter tracking", async () => {
+  it("durably schedules the final window before clearing only its stream alarm", async () => {
     database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);
     const alarm = createContext(database);
@@ -228,9 +349,11 @@ describe("statistics window alarm", () => {
       actor: null,
       chatStatus: null,
     };
+    const endedAt = event.eventSubTimestamp ?? event.receivedAt;
     const context = {
       DB: database as unknown as D1Database,
       streamStateTransitionAccepted: true,
+      streamStateTransitionGeneration: 2,
       streamSession: { streamId: STREAM_ID, startedAt: WINDOW_START },
       getAlarmDeadline: vi.fn(() => Promise.resolve(Date.parse(WINDOW_END))),
       scheduleAlarm: vi.fn(() => Promise.resolve(undefined)),
@@ -240,6 +363,21 @@ describe("statistics window alarm", () => {
     } as unknown as ModuleExecutionContext;
 
     await processStatisticsEvent(event, context);
+
+    expect(context.scheduleAlarm).toHaveBeenCalledOnce();
+    expect(context.scheduleAlarm).toHaveBeenCalledWith(
+      "window",
+      expect.stringMatching(/^offline:/u),
+      expect.any(Number),
+      undefined,
+      null,
+    );
+    expect(context.runModuleAlarm).not.toHaveBeenCalled();
+    expect(context.clearAlarm).toHaveBeenCalledWith("window", undefined, 2);
+
+    const alarmKey = vi.mocked(context.scheduleAlarm).mock.calls[0]?.[1];
+    if (alarmKey === undefined) throw new Error("Offline statistics alarm key was not scheduled.");
+    await windowAlarm().handle(alarm.context, alarmKey, Date.parse(endedAt));
 
     await expect(database.prepare(
       `SELECT window_seconds, messages, emotes, viewer_count, chatters, active_chatters
@@ -252,10 +390,65 @@ describe("statistics window alarm", () => {
       chatters: null,
       active_chatters: 3,
     });
-    expect(context.runModuleAlarm).toHaveBeenCalledTimes(1);
-    expect(context.clearAlarm).toHaveBeenCalledWith("window");
     expect(alarm.calls.viewer).not.toHaveBeenCalled();
     expect(alarm.calls.chatters).not.toHaveBeenCalled();
+  });
+
+  it("retries a durably scheduled offline flush after a transient D1 failure", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    let failFirstWrite = true;
+    const retryableDatabase = {
+      prepare: (sql: string) => {
+        const statement = database?.prepare(sql);
+        if (statement === undefined || !sql.includes("INSERT INTO channel_statistics")) return statement;
+        const wrapped = {
+          bind: (...values: Parameters<TestPreparedStatement["bind"]>) => {
+            statement.bind(...values);
+            return wrapped;
+          },
+          run: () => {
+            if (failFirstWrite) {
+              failFirstWrite = false;
+              return Promise.reject(new Error("Injected temporary D1 failure."));
+            }
+            return statement.run();
+          },
+        };
+        return wrapped;
+      },
+    } as unknown as D1Database;
+    const alarm = createContext(retryableDatabase as unknown as TestD1Database);
+    const event: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "stream.offline",
+      triggerId: "offline-event-retry",
+      payload: {},
+      settings: {},
+      receivedAt: "2026-10-25T12:02:17.000Z",
+      eventSubTimestamp: "2026-10-25T12:02:17.000Z",
+      actor: null,
+      chatStatus: null,
+    };
+    const execution = {
+      streamStateTransitionAccepted: true,
+      streamStateTransitionGeneration: 7,
+      streamSession: { streamId: STREAM_ID, startedAt: WINDOW_START },
+      getAlarmDeadline: vi.fn(() => Promise.resolve(null)),
+      scheduleAlarm: vi.fn(() => Promise.resolve()),
+      clearAlarm: vi.fn(() => Promise.resolve()),
+    } as unknown as ModuleExecutionContext;
+
+    await processStatisticsEvent(event, execution);
+    const alarmKey = vi.mocked(execution.scheduleAlarm).mock.calls[0]?.[1];
+    if (alarmKey === undefined) throw new Error("Offline statistics alarm was not scheduled.");
+    await expect(windowAlarm().handle(alarm.context, alarmKey, Date.parse(event.receivedAt)))
+      .rejects.toThrow("Injected temporary D1 failure.");
+    await windowAlarm().handle(alarm.context, alarmKey, Date.parse(event.receivedAt));
+
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM channel_statistics WHERE channel_id = ? AND window_start = ?",
+    ).bind(CHANNEL_ID, WINDOW_START).first()).resolves.toEqual({ count: 1 });
   });
 
   it("flushes every overdue window from stream start when the scheduled alarm is missing", async () => {
@@ -277,12 +470,16 @@ describe("statistics window alarm", () => {
       streamStateTransitionAccepted: true,
       streamSession: { streamId: STREAM_ID, startedAt: WINDOW_START },
       getAlarmDeadline: vi.fn(() => Promise.resolve(null)),
+      scheduleAlarm: vi.fn(() => Promise.resolve(undefined)),
       clearAlarm: vi.fn(() => Promise.resolve(undefined)),
-      runModuleAlarm: vi.fn(async (_handlerKey: string, alarmKey: string, invocation?: unknown) =>
-        await windowAlarm().handle(alarm.context, alarmKey, Date.parse(WINDOW_END), undefined, invocation)),
+      runModuleAlarm: vi.fn(),
     } as unknown as ModuleExecutionContext;
 
     await processStatisticsEvent(event, context);
+
+    const scheduledAlarmKey = vi.mocked(context.scheduleAlarm).mock.calls[0]?.[1];
+    if (scheduledAlarmKey === undefined) throw new Error("Offline statistics alarm was not scheduled.");
+    await windowAlarm().handle(alarm.context, scheduledAlarmKey, Date.parse("2026-10-25T12:07:00.000Z"));
 
     await expect(database.prepare(
       "SELECT window_start, window_seconds FROM channel_statistics WHERE channel_id = ? ORDER BY window_start",
@@ -290,7 +487,7 @@ describe("statistics window alarm", () => {
       { window_start: WINDOW_START, window_seconds: 300 },
       { window_start: "2026-10-25T12:05:00.000Z", window_seconds: 120 },
     ] });
-    expect(context.runModuleAlarm).toHaveBeenCalledTimes(2);
+    expect(context.runModuleAlarm).not.toHaveBeenCalled();
     expect(alarm.calls.viewer).not.toHaveBeenCalled();
     expect(alarm.calls.chatters).not.toHaveBeenCalled();
   });
@@ -318,13 +515,19 @@ describe("statistics window alarm", () => {
     const offlineAt = "2026-10-25T12:02:00.000Z";
     calls.read.mockResolvedValueOnce({ messages: 4, emotes: 1 }).mockResolvedValueOnce({ messages: 6, emotes: 2 });
 
-    await windowAlarm().handle(context, "offline-window", Date.parse(offlineAt), undefined, {
-      kind: "offline-window",
-      streamId: STREAM_ID,
-      streamStartedAt: WINDOW_START,
-      windowStart: WINDOW_START,
-      windowEnd: offlineAt,
-    });
+    const existingStatisticsChat = context.statisticsChat;
+    if (existingStatisticsChat === undefined) throw new Error("Statistics chat context is missing.");
+    context.statisticsChat = {
+      finishWindowFlush: existingStatisticsChat.finishWindowFlush,
+      listDirtyWindowsBefore: existingStatisticsChat.listDirtyWindowsBefore,
+      pruneRetiredWindowsBefore: existingStatisticsChat.pruneRetiredWindowsBefore,
+      clearWindowChattersThrough: existingStatisticsChat.clearWindowChattersThrough,
+      beginWindowFlush: vi.fn()
+        .mockResolvedValueOnce({ messages: 4, emotes: 1, activeChatters: 2, hasNew: true })
+        .mockResolvedValueOnce({ messages: 6, emotes: 2, activeChatters: 3, hasNew: true })
+        .mockResolvedValueOnce({ messages: 0, emotes: 0, activeChatters: 3, hasNew: false }),
+    };
+    await windowAlarm().handle(context, offlineAlarmKey(STREAM_ID, WINDOW_START, offlineAt), Date.parse(offlineAt));
     await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
     // A repeated delivery of the boundary alarm must not count the window again.
     await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
@@ -339,9 +542,9 @@ describe("statistics window alarm", () => {
       emotes: 3,
       viewer_count: 42,
       chatters: 7,
-      active_chatters: null,
+      active_chatters: 3,
     }] });
-    expect(calls.read).toHaveBeenCalledTimes(2);
+    expect(context.statisticsChat.beginWindowFlush).toHaveBeenCalledTimes(3);
   });
 
   it("flushes consecutive epoch-aligned windows as separate rows", async () => {

@@ -592,6 +592,8 @@ export interface ModuleAlarmIdentity {
 export interface ModuleAlarmPlan {
   identity: ModuleAlarmIdentity | null;
   planSequence: number | null;
+  /** Stream generation attached to this alarm, when it is stream-scoped. */
+  streamGeneration?: number | null;
 }
 
 /** Infrastructure the host gives a module for its own adapter. */
@@ -759,10 +761,18 @@ export interface ModuleAlarmContext {
   activeChatters?: {
     countBetween: (windowStart: string, windowEnd: string) => Promise<number | null>;
   };
-  /** Aggregate-only live chat counters held in the channel Durable Object. */
+  /** Aggregate-only window counters and short-lived pseudonymous membership held in the channel Durable Object. */
   statisticsChat?: {
-    readWindow: (windowStart: string) => Promise<{ messages: number; emotes: number }>;
-    clearWindow: (windowStart: string) => Promise<void>;
+    beginWindowFlush: (windowStart: string) => Promise<{
+      messages: number;
+      emotes: number;
+      activeChatters: number | null;
+      hasNew: boolean;
+    }>;
+    finishWindowFlush: (windowStart: string) => Promise<void>;
+    listDirtyWindowsBefore: (windowStart: string, limit: number) => Promise<readonly string[]>;
+    pruneRetiredWindowsBefore: (cutoff: string, limit: number) => Promise<void>;
+    clearWindowChattersThrough: (windowEnd: string) => Promise<void>;
   };
   /** Host-authenticated Helix counts; unavailable sources return null. */
   fetchViewerCount?: () => Promise<number | null>;
@@ -782,6 +792,7 @@ export interface ModuleAlarmContext {
     get(key: string): Promise<unknown>;
     put(key: string, value: unknown): Promise<void>;
     delete(key: string): Promise<boolean>;
+    list?(prefix: string, limit: number, startAfter?: string): Promise<ReadonlyMap<string, unknown>>;
   };
   /** Null streamGeneration marks a stream-independent timer alarm; undefined keeps legacy version guards. */
   schedule: (
