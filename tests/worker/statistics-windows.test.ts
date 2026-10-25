@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
 import { notifyModuleScheduleInputsChanged } from "../../src/worker/module-schedules";
@@ -22,6 +22,19 @@ const statisticsObject = (channelId: string) => {
 // The RPC type of an `unknown` result is not thenable for the linter, but the call is a promise.
 const runWindowAlarm = async (object: ReturnType<typeof statisticsObject>): Promise<void> => {
   await (object.runModuleAlarm("statistics", "window", "window") as unknown as Promise<unknown>);
+};
+
+// The platform fires the refresh alarm on its own as soon as it is queued, so runDurableObjectAlarm can
+// find nothing left to run while that invocation is still mid-flight. Wait until the host has retired
+// the schedule-input entry, which only happens after the module handlers finished.
+const settleScheduleRefresh = async (object: ReturnType<typeof statisticsObject>): Promise<void> => {
+  await vi.waitFor(async () => {
+    const pending = await runInDurableObject(object, async (_instance, state) => {
+      const table = await state.storage.get<Record<string, unknown>>("channel:alarm_schedule");
+      return Object.keys(table ?? {}).filter((key) => key.startsWith("host:schedule_inputs_changed"));
+    });
+    expect(pending).toEqual([]);
+  }, { timeout: 5_000, interval: 10 });
 };
 
 const pastWindowStart = (): number => Math.floor((Date.now() - 20 * 60_000) / WINDOW_MS) * WINDOW_MS;
@@ -116,6 +129,7 @@ describe("statistics windows in the channel object", () => {
     await expect(object.getModuleAlarmDeadline("statistics", "window")).resolves.toBeNull();
     await notifyModuleScheduleInputsChanged(worker.CHANNEL, channelId, "stream_state");
     await runDurableObjectAlarm(object);
+    await settleScheduleRefresh(object);
     const deadline = await object.getModuleAlarmDeadline("statistics", "window");
     expect(deadline).not.toBeNull();
     expect((deadline ?? 1) % WINDOW_MS).toBe(0);
@@ -123,6 +137,7 @@ describe("statistics windows in the channel object", () => {
     // A second refresh with the alarm already armed leaves the deadline untouched.
     await notifyModuleScheduleInputsChanged(worker.CHANNEL, channelId, "stream_state");
     await runDurableObjectAlarm(object);
+    await settleScheduleRefresh(object);
     await expect(object.getModuleAlarmDeadline("statistics", "window")).resolves.toBe(deadline);
   });
 });
