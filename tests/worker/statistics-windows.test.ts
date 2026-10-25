@@ -159,8 +159,8 @@ describe("statistics windows in the channel object", () => {
         `WITH RECURSIVE sequence(value) AS (
            VALUES (0) UNION ALL SELECT value + 1 FROM sequence WHERE value < 19999
          )
-         INSERT INTO statistics_word_seen (stream_id, word, first_batch)
-         SELECT ?, 'term' || printf('%05d', value), 1 FROM sequence`,
+         INSERT INTO statistics_word_seen (stream_id, word)
+         SELECT ?, 'term' || printf('%05d', value) FROM sequence`,
         streamId,
       );
       state.storage.sql.exec(

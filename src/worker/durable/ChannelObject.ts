@@ -1008,7 +1008,6 @@ export class ChannelObject extends DurableObject<Env> {
     const countColumns = new Set(this.ctx.storage.sql.exec<{ name: string }>(
       `PRAGMA table_info(${STATISTICS_WORD_COUNT_TABLE})`,
     ).toArray().map(({ name }) => name));
-    let migratedWordCounts = false;
     if (!countColumns.has("batch")) {
       this.ctx.storage.transactionSync(() => {
         this.ctx.storage.sql.exec(
@@ -1033,36 +1032,18 @@ export class ChannelObject extends DurableObject<Env> {
         );
         this.ctx.storage.sql.exec(`DROP TABLE ${STATISTICS_WORD_COUNT_TABLE}_legacy`);
       });
-      migratedWordCounts = true;
     } else if (!countColumns.has("last_increment_at")) {
       this.ctx.storage.sql.exec(
         `ALTER TABLE ${STATISTICS_WORD_COUNT_TABLE} ADD COLUMN last_increment_at INTEGER NOT NULL DEFAULT 0`,
       );
     }
-    const wordSeenTableIsNew = this.ctx.storage.sql.exec<{ name: string }>(
-      `PRAGMA table_info(${STATISTICS_WORD_SEEN_TABLE})`,
-    ).toArray().length === 0;
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ${STATISTICS_WORD_SEEN_TABLE} (
         stream_id TEXT NOT NULL,
         word TEXT NOT NULL,
-        first_batch INTEGER NOT NULL,
         PRIMARY KEY (stream_id, word)
       ) WITHOUT ROWID`,
     );
-    this.ctx.storage.sql.exec(
-      `INSERT OR IGNORE INTO ${STATISTICS_WORD_SEEN_TABLE} (stream_id, word, first_batch)
-       SELECT stream_id, word, MIN(batch) FROM ${STATISTICS_WORD_COUNT_TABLE} GROUP BY stream_id, word`,
-    );
-    if (migratedWordCounts || wordSeenTableIsNew) {
-      this.ctx.storage.sql.exec(
-        `UPDATE ${STATISTICS_WORD_STREAM_TABLE}
-            SET distinct_words = (
-              SELECT COUNT(*) FROM ${STATISTICS_WORD_SEEN_TABLE}
-               WHERE ${STATISTICS_WORD_SEEN_TABLE}.stream_id = ${STATISTICS_WORD_STREAM_TABLE}.stream_id
-            )`,
-      );
-    }
     this.ctx.storage.sql.exec(
       `CREATE INDEX IF NOT EXISTS statistics_word_counts_top_idx
        ON ${STATISTICS_WORD_COUNT_TABLE} (stream_id, batch, count DESC, word ASC)`,
@@ -3867,10 +3848,9 @@ export class ChannelObject extends DurableObject<Env> {
             word, count, lastSeenAt, lastIncrementAt,
           })));
           this.ctx.storage.sql.exec(
-            `INSERT OR IGNORE INTO ${STATISTICS_WORD_SEEN_TABLE} (stream_id, word, first_batch)
-             SELECT ?, json_extract(value, '$.word'), ? FROM json_each(?)`,
+            `INSERT OR IGNORE INTO ${STATISTICS_WORD_SEEN_TABLE} (stream_id, word)
+             SELECT ?, json_extract(value, '$.word') FROM json_each(?)`,
             streamId,
-            currentBatch,
             payload,
           );
           this.ctx.storage.sql.exec(
