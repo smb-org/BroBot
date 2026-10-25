@@ -597,15 +597,22 @@ Die lazy geladene Modulansicht zeigt Streams mit Kennzahlen und einem
 Fünf-Minuten-Verlauf. `GET /api/channels/:channelId/modules/statistics/streams`
 liefert höchstens 50 Einträge (Standard 20) mit undurchsichtigem Cursor. Die
 Liste gruppiert ausschließlich Fenster mit nicht-NULL `stream_id`; ein Stream
-ohne Timeline-Start bleibt sichtbar, solange Statistikfenster vorliegen. Start
-und Ende stammen zunächst aus dem ersten beziehungsweise letzten Fenster und
-werden durch Lifecycle-Zeitpunkte präzisiert, wenn sie vorhanden sind. Titel
-und Kategorien werden aus der letzten Metadatenbeobachtung vor dem Start und
-den Beobachtungen im Lifecycle-Intervall gebildet.
+ohne Timeline-Start bleibt sichtbar, solange Statistikfenster vorliegen. Der
+Zeitraum beginnt mit `window_start` des ersten Fensters und endet fünf Minuten
+nach `window_start` des letzten Fensters. Start und Ende haben daher
+Fünf-Minuten-Präzision. Timeline-Ereignisse gehören zum Stream, wenn
+`occurred_at` einschließlich des Endzeitpunkts im Fensterzeitraum liegt; der
+Vergleich berücksichtigt neun Nachkommastellen. Teilen zwei Streams denselben
+Fünf-Minuten-Bucket, kann ein Ereignis dieses Buckets bei beiden erscheinen.
+Titel und Kategorien verwenden die letzte Metadatenbeobachtung vor dem Start
+als Seed und danach die Beobachtungen im Fensterzeitraum.
 `GET /api/channels/:channelId/modules/statistics/streams/:streamId` liefert die
 vollständigen Fenster dieses Streams, passende Timeline-Ereignisse und
-BELABOX-Bitratefenster im Fenster-UTC-Zeitraum. Timeline-Ereignisse folgen dem
-Lifecycle-Intervall; fehlen Lifecycle-Fakten, gelten die Fenstergrenzen.
+BELABOX-Bitratefenster im Fenster-UTC-Zeitraum. Emote-Spitzen werden über
+`detail.windowStart` einem Streamfenster zugeordnet; ihr Ereigniszeitpunkt liegt
+am Fensterende. Drops entstehen aus einem Offline-Ereignis und einem folgenden
+Online-Ereignis innerhalb von zehn Minuten, sofern beide im Fensterzeitraum
+liegen.
 BELABOX-Stream-IDs werden dafür nicht mit Twitch-IDs verglichen. Antworten
 enthalten nur Aggregate und Stream-Metadaten.
 
@@ -614,9 +621,10 @@ Die Stream-Auswahl gruppiert alle `channel_statistics`-Fenster des Kanals nach
 diese Stream-Auswahl an. Diese Gruppierung scannt alle Statistikzeilen des
 Kanals, da kein vorhandener Index die Gruppierung und Reihenfolge abdeckt. Für
 die ausgewählten Streams werden danach alle Fenster gelesen, damit Seiten keine
-Teilaggregate liefern. Timeline-Abfragen nutzen vorhandene Kanal-/Zeitindizes;
-der Metadaten-Seed liest die letzte Beobachtung vor dem jeweils abgefragten
-Zeitbereich. Detailfenster lesen nur die Zeilen der angefragten Stream-ID.
+Teilaggregate liefern. Timeline-Abfragen nutzen vorhandene Kanal-/Zeitindizes
+und lesen nur den Fensterzeitraum. Zusätzlich liest die Metadatenabfrage die
+letzte Beobachtung vor dessen Beginn. Detailfenster lesen nur die Zeilen der
+angefragten Stream-ID.
 Das Seitenlimit begrenzt Antwort und Zahl ausgewählter Streams, nicht deren
 Dauer oder Zahl der Fünf-Minuten-Fenster. Die Ansicht formatiert Zeitpunkte in
 der Kanalzeitzone aus den Kanaleinstellungen.

@@ -326,22 +326,29 @@ Statistikfenster des Kanals nach Stream-ID und ordnet nach dem letzten
 `window_start`, bevor sie Cursor und Seitenlimit anwendet. Diese Auswahl
 scannt alle Statistikzeilen des Kanals; ein vorhandener Index deckt Gruppierung
 und Sortierung nicht ab. Danach liest die Liste sämtliche Fenster der
-ausgewählten IDs für vollständige Aggregate. Timeline-Fakten ergänzen Titel,
-Kategorie, Ereignisse und präzise Start-/Endzeiten. Metadaten beginnen mit der
-letzten Beobachtung vor dem Streamstart und folgen dann den Beobachtungen im
-Lifecycle-Intervall.
+ausgewählten IDs für vollständige Aggregate. Der Zeitraum eines Streams
+beginnt bei `window_start` des ersten Fensters und endet fünf Minuten nach dem
+`window_start` des letzten Fensters. Start, Ende und Ereigniszuordnung haben
+Fünf-Minuten-Präzision. Ein Timeline-Ereignis gehört zum Stream, wenn
+`occurred_at` innerhalb des inklusiven Bereichs `[start, end]` liegt; der
+Vergleich behält neun Nachkommastellen. Teilen zwei Streams denselben
+Fünf-Minuten-Bucket, können Ereignisse dieses Buckets beiden zugeordnet werden.
+Metadaten beginnen mit der letzten Beobachtung vor dem Streamstart als Seed und
+folgen dann den Beobachtungen im Fensterzeitraum.
 
 Das Detail liest alle Fenster der angefragten Stream-ID und benötigt keinen
-Timeline-Start. Timeline-Ereignisse werden, wenn Lifecycle-Fakten vorhanden
-sind, dem Intervall vom `stream_online`-Zeitpunkt bis zum nächsten Offline- oder
-Online-Ereignis zugeordnet; andernfalls gelten die Fenstergrenzen. Die
-Timeline-Abfragen nutzen den Kanal-/Zeitindex und normalisieren UTC-Grenzen auf
-neun Nachkommastellen wie gespeicherte `occurred_at`-Werte. Domain-Filter
-vergleichen Zeitpunkte mit Nanosekundenauflösung. BELABOX-Bitratefenster
-verwenden den Kanal-/Fensterindex und werden per Zeitbereich zugeordnet, da
-BELABOX- und Twitch-IDs verschieden sind. Antworten enthalten keine
-Nutzerkennungen oder Logins. Das Modul liest BELABOX-Daten direkt per SQL und
-importiert keinen anderen Modulcode.
+Timeline-Start. Die Listen- und Detailrouten lesen Timeline-Zeilen nur für den
+Fensterzeitraum sowie den bestehenden Metadaten-Seed davor. Emote-Spitzen
+werden über `detail.windowStart` dem passenden Streamfenster zugeordnet; ihr
+`occurred_at` liegt am Fensterende. Ein Drop ist ein Offline-Ereignis, auf das
+innerhalb von zehn Minuten ein Online-Ereignis folgt; beide Ereignisse müssen
+im Fensterzeitraum liegen. Die Timeline-Abfragen nutzen den Kanal-/Zeitindex
+und normalisieren UTC-Grenzen auf neun Nachkommastellen wie gespeicherte
+`occurred_at`-Werte. Domain-Filter vergleichen Zeitpunkte mit Nanosekunden-
+auflösung. BELABOX-Bitratefenster verwenden den Kanal-/Fensterindex und werden
+per Zeitbereich zugeordnet, da BELABOX- und Twitch-IDs verschieden sind.
+Antworten enthalten keine Nutzerkennungen oder Logins. Das Modul liest
+BELABOX-Daten direkt per SQL und importiert keinen anderen Modulcode.
 
 Lifecycle-Wiederholungen sind über Art, Ereigniszeit und — bei `stream.online`
 — Stream-ID idempotent. Metadatenbeobachtungen verwenden Art, Ereigniszeit und

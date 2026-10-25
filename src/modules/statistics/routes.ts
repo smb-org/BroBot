@@ -6,7 +6,6 @@ import type { StatisticsBitrateWindow, StatisticsStreamWindow, StatisticsTimelin
 import { decodeStreamCursor, deriveStreamEvents, encodeStreamCursor, groupStatisticsWindows, matchBitrateWindows, paginateStreamSummaries } from "./streams-domain";
 
 const WINDOW_MILLISECONDS = 5 * 60_000;
-const DROP_QUERY_PADDING_MILLISECONDS = 10 * 60_000;
 
 const listParamsSchema = z.object({ channelId: z.string().trim().min(1).max(128) });
 const listQuerySchema = z.object({
@@ -36,7 +35,6 @@ interface StreamWindowRow {
 
 interface TimelineRow {
   kind: StatisticsTimelineEvent["kind"];
-  stream_id: string | null;
   occurred_at: string;
   detail_json: string;
 }
@@ -69,7 +67,7 @@ const timelineEvent = (row: TimelineRow): StatisticsTimelineEvent => {
   } catch {
     // The table's JSON validity check makes this unreachable for stored rows.
   }
-  return { kind: row.kind, streamId: row.stream_id, occurredAt: row.occurred_at, detail };
+  return { kind: row.kind, occurredAt: row.occurred_at, detail };
 };
 
 const timelineTimestamp = (value: string): string => {
@@ -115,35 +113,26 @@ statisticsRoutes.get("/streams", async (context) => {
   if (selected.length === 0) return context.json({ streams: [], nextCursor: null });
 
   const streamIds = selected.map(({ stream_id }) => stream_id);
-  const lastTimelineAt = new Date(Math.max(...selected.map(({ last_window_start }) => Date.parse(last_window_start))) + WINDOW_MILLISECONDS + DROP_QUERY_PADDING_MILLISECONDS).toISOString();
+  const lastTimelineAt = new Date(Math.max(...selected.map(({ last_window_start }) => Date.parse(last_window_start))) + WINDOW_MILLISECONDS).toISOString();
   const placeholders = streamIds.map(() => "?").join(", ");
-  const [windowRows, onlineRows] = await Promise.all([
-    context.env.DB.prepare(
+  const windowRows = await context.env.DB.prepare(
       `SELECT window_start, stream_id, messages, emotes, viewer_count, chatters, active_chatters
          FROM channel_statistics
         WHERE channel_id = ? AND stream_id IN (${placeholders})
         ORDER BY window_start ASC`,
-    ).bind(channelId, ...streamIds).all<StreamWindowRow>(),
-    context.env.DB.prepare(
-      `SELECT occurred_at
-         FROM channel_timeline_events
-        WHERE channel_id = ? AND kind = 'stream_online' AND stream_id IN (${placeholders})
-        ORDER BY occurred_at ASC`,
-    ).bind(channelId, ...streamIds).all<{ occurred_at: string }>(),
-  ]);
+    ).bind(channelId, ...streamIds).all<StreamWindowRow>();
   const firstWindowAt = Math.min(...selected.map(({ first_window_start }) => Date.parse(first_window_start)));
-  const firstOnlineAt = onlineRows.results.reduce((earliest, row) => Math.min(earliest, Date.parse(row.occurred_at)), firstWindowAt);
-  const firstTimelineAt = new Date(Math.min(firstWindowAt, firstOnlineAt)).toISOString();
+  const firstTimelineAt = new Date(firstWindowAt).toISOString();
   const [timelineRows, previousMetadata] = await Promise.all([
     context.env.DB.prepare(
-      `SELECT kind, stream_id, occurred_at, detail_json
+      `SELECT kind, occurred_at, detail_json
          FROM channel_timeline_events
-        WHERE channel_id = ? AND occurred_at >= ? AND occurred_at < ?
+        WHERE channel_id = ? AND occurred_at >= ? AND occurred_at <= ?
           AND kind IN ('stream_online', 'stream_offline', 'channel_metadata', 'clip_created')
         ORDER BY occurred_at ASC`,
     ).bind(channelId, timelineTimestamp(firstTimelineAt), timelineTimestamp(lastTimelineAt)).all<TimelineRow>(),
     context.env.DB.prepare(
-      `SELECT kind, stream_id, occurred_at, detail_json
+      `SELECT kind, occurred_at, detail_json
          FROM channel_timeline_events
         WHERE channel_id = ? AND kind = 'channel_metadata' AND occurred_at < ?
         ORDER BY occurred_at DESC LIMIT 1`,
@@ -189,29 +178,21 @@ statisticsRoutes.get("/streams/:streamId", async (context) => {
   const startedAt = windows[0]?.windowStart ?? "";
   const lastWindowStart = windows.at(-1)?.windowStart ?? startedAt;
   const endedAt = new Date(Date.parse(lastWindowStart) + WINDOW_MILLISECONDS).toISOString();
-  const firstOnline = await context.env.DB.prepare(
-    `SELECT occurred_at
-       FROM channel_timeline_events
-      WHERE channel_id = ? AND kind = 'stream_online' AND stream_id = ?
-      ORDER BY occurred_at ASC LIMIT 1`,
-  ).bind(channelId, streamId).first<{ occurred_at: string }>();
-  const eventsStart = firstOnline?.occurred_at ?? startedAt;
-  const eventsEnd = new Date(Date.parse(endedAt) + DROP_QUERY_PADDING_MILLISECONDS).toISOString();
   const startMilliseconds = Date.parse(startedAt);
   const endMilliseconds = Date.parse(endedAt);
   const [timelineRows, previousMetadata, bitrateRows] = await Promise.all([
     context.env.DB.prepare(
-      `SELECT kind, stream_id, occurred_at, detail_json
+      `SELECT kind, occurred_at, detail_json
          FROM channel_timeline_events
-        WHERE channel_id = ? AND occurred_at >= ? AND occurred_at < ?
+        WHERE channel_id = ? AND occurred_at >= ? AND occurred_at <= ?
         ORDER BY occurred_at ASC`,
-    ).bind(channelId, timelineTimestamp(eventsStart), timelineTimestamp(eventsEnd)).all<TimelineRow>(),
+    ).bind(channelId, timelineTimestamp(startedAt), timelineTimestamp(endedAt)).all<TimelineRow>(),
     context.env.DB.prepare(
-      `SELECT kind, stream_id, occurred_at, detail_json
+      `SELECT kind, occurred_at, detail_json
          FROM channel_timeline_events
         WHERE channel_id = ? AND kind = 'channel_metadata' AND occurred_at < ?
         ORDER BY occurred_at DESC LIMIT 1`,
-    ).bind(channelId, timelineTimestamp(eventsStart)).all<TimelineRow>(),
+    ).bind(channelId, timelineTimestamp(startedAt)).all<TimelineRow>(),
     context.env.DB.prepare(
       `SELECT window_start, bitrate_avg, bitrate_min, bitrate_max, bitrate_p10
          FROM belabox_bitrate_windows
@@ -237,6 +218,6 @@ statisticsRoutes.get("/streams/:streamId", async (context) => {
     summary,
     windows,
     bitrateWindows: matchBitrateWindows(bitrateWindows, startedAt, endedAt),
-    events: deriveStreamEvents(timeline, startedAt, endedAt, streamId),
+    events: deriveStreamEvents(timeline, startedAt, endedAt, windows),
   });
 });

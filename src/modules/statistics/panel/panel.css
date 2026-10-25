@@ -38,12 +38,16 @@
   .statistics-streams__row:hover { background: var(--surface-hover); }
   .statistics-streams__row[aria-pressed="true"] { border-color: var(--brand); background: var(--tint-1); }
   .statistics-streams__row-date { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+  .statistics-streams__timestamp-placeholder { display: inline-block; height: 1em; border-radius: var(--r-control); background: var(--line-strong); vertical-align: middle; }
+  .statistics-streams__timestamp-placeholder--row { width: 20ch; }
+  .statistics-streams__timestamp-placeholder--date { width: 30ch; }
+  .statistics-streams__timestamp-placeholder--time { width: 8ch; }
   .statistics-streams__row-viewers { display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; color: var(--text); font: 13px var(--font-mono); }
   .statistics-streams__row-viewers svg { width: 14px; height: 14px; color: var(--text-3); }
   .statistics-streams__row-category { overflow: hidden; color: var(--text-3); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
   .statistics-streams__row-duration { color: var(--text-3); font-size: 12px; text-align: right; white-space: nowrap; }
 
-  .statistics-inspector { display: grid; width: 100%; min-width: 0; gap: var(--s4); padding: var(--s4); }
+  .statistics-inspector { position: relative; display: grid; width: 100%; min-width: 0; gap: var(--s4); padding: var(--s4); }
   .statistics-inspector > .inspector-section__heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; justify-content: initial; gap: var(--s2); margin-bottom: 0; }
   .statistics-inspector > .inspector-section__heading h3 { min-width: 0; font-size: 16px; line-height: 1.35; overflow-wrap: anywhere; }
   .statistics-inspector__meta { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); color: var(--text-3); font-size: 12px; }
@@ -51,6 +55,11 @@
   .statistics-inspector > .inspector-section__heading .inspector-close { grid-column: 2; grid-row: 1; }
   .statistics-inspector__chip { max-width: 100%; overflow: hidden; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
   .statistics-inspector__kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s2); }
+  /* Overlay slot: a failed refresh appears next to the close button without moving the content. */
+  .statistics-inspector__refresh-status { position: absolute; z-index: 2; top: 0; right: 52px; max-width: calc(100% - 64px); }
+  .statistics-inspector__refresh-status > div { display: flex; min-width: 0; flex-wrap: nowrap; align-items: center; gap: var(--s2); padding: 4px 4px 4px var(--s3); border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-raised); color: var(--color-error-text); font-size: 12px; box-shadow: var(--shadow-floating); }
+  .statistics-inspector__refresh-status > div > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .statistics-inspector__refresh-status .statistics-streams__older { min-height: 30px; }
   .statistics-inspector__kpi { display: grid; min-width: 0; min-height: 84px; align-content: center; gap: 4px; padding: var(--s3); border-radius: var(--r-control); background: var(--surface); }
   .statistics-inspector__kpi-label { color: var(--text-3); font-size: 12px; line-height: 1.3; }
   .statistics-inspector__kpi-value { overflow: hidden; color: var(--text); font-size: 22px; font-weight: 400; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
@@ -61,11 +70,11 @@
   .statistics-inspector__panel-heading h3, .statistics-chart__title h3 { margin: 0; color: var(--text); font-size: 15px; font-weight: 600; }
   .statistics-inspector__panel-heading span, .statistics-chart__title span { display: block; margin-top: 2px; color: var(--text-3); font-size: 12px; }
   .statistics-inspector__events { max-height: 440px; overflow-y: auto; padding: 0; margin: 0; border-top: 1px solid var(--line); list-style: none; scrollbar-gutter: stable; }
-  .statistics-inspector__event { display: grid; min-height: 44px; grid-template-columns: 12px 48px max-content minmax(0, 1fr) auto; align-items: center; gap: var(--s3); padding: 0 var(--s2); border-bottom: 1px solid var(--line); color: var(--text-2); font-size: 12px; transition: background-color 100ms ease; }
+  .statistics-inspector__event { display: grid; min-height: 44px; grid-template-columns: 12px 64px max-content minmax(0, 1fr) auto; align-items: center; gap: var(--s3); padding: 0 var(--s2); border-bottom: 1px solid var(--line); color: var(--text-2); font-size: 12px; transition: background-color 100ms ease; }
   .statistics-inspector__event[data-highlighted="true"] { background: var(--tint-1); color: var(--text); }
-  .statistics-inspector__event time { color: var(--text-2); font-size: 12px; }
+  .statistics-inspector__event time, .statistics-inspector__event-time { color: var(--text-2); font-size: 12px; white-space: nowrap; }
   .statistics-inspector__event strong { overflow: hidden; color: var(--text); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-  .statistics-inspector__event > span:nth-of-type(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .statistics-inspector__event-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .statistics-inspector__event-viewers { color: var(--text-3); font-size: 12px; text-align: right; white-space: nowrap; }
   .statistics-inspector__event-marker { display: inline-block; width: 10px; height: 10px; background: currentColor; }
   .statistics-inspector__event-marker--start, .statistics-inspector__event-marker--offline { width: 6px; height: 6px; margin-left: 2px; border-radius: 50%; color: var(--text-3); }
@@ -88,6 +97,7 @@
   .statistics-chart__tooltip { position: absolute; z-index: 2; top: 2px; max-width: min(280px, calc(100% - 12px)); display: grid; gap: 3px; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-raised); color: var(--text); box-shadow: var(--shadow-floating); font-size: 12px; pointer-events: none; transform: translateX(-50%); }
   .statistics-chart__tooltip strong { font-weight: 600; }
   .statistics-chart__tooltip span { overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
+  .statistics-chart__timestamp-placeholder { display: inline-block; width: 8ch; height: 1em; border-radius: var(--r-control); background: var(--line-strong); color: transparent; vertical-align: middle; }
   .statistics-chart__marker { cursor: pointer; outline: none; }
   .statistics-chart__marker:focus-visible circle:first-child { stroke: var(--focus); stroke-width: 2; }
   .statistics-chart__legend { display: flex; min-height: 24px; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s3); margin-top: var(--s2); color: var(--text-3); font-size: 12px; }
@@ -115,10 +125,10 @@
     .statistics-inspector { gap: var(--s3); padding: var(--s3); }
     .statistics-inspector__kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .statistics-inspector__card { padding: var(--s3); }
-    .statistics-inspector__event { grid-template-columns: 12px 44px minmax(0, 1fr) auto; gap: var(--s2); }
-    .statistics-inspector__event > span:nth-of-type(2) { grid-column: 3 / -1; grid-row: 2; }
+    .statistics-inspector__event { grid-template-columns: 12px 64px minmax(0, 1fr) auto; gap: var(--s2); }
+    .statistics-inspector__event-text { grid-column: 3 / -1; grid-row: 2; }
     .statistics-inspector__event strong { grid-column: 3; grid-row: 1; }
-    .statistics-inspector__event time { grid-row: 1 / span 2; }
+    .statistics-inspector__event time, .statistics-inspector__event-time { grid-row: 1 / span 2; }
     .statistics-inspector__event-marker { grid-row: 1 / span 2; }
     .statistics-inspector__event-viewers { grid-column: 4; grid-row: 1; }
     .statistics-chart__tooltip { left: 50% !important; }

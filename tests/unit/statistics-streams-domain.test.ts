@@ -66,10 +66,10 @@ describe("statistics stream derivation", () => {
       event("channel_metadata", "2026-10-25T12:01:00.000Z", { title: "Opening", category: { name: "Game A" } }),
       event("channel_metadata", "2026-10-25T12:02:00.000Z", { title: "Main show", category: { name: "Game B" } }),
       event("channel_metadata", "2026-10-25T12:03:00.000Z", { title: "Main show", category: { name: "Game A" } }),
-      event("channel_metadata", "2026-10-25T12:05:00.000Z", { title: "Outside range", category: { name: "Game C" } }),
+      event("channel_metadata", "2026-10-25T12:05:00.000Z", { title: "At stream end", category: { name: "Game C" } }),
     ]);
 
-    expect(summaries[0]).toMatchObject({ title: "Main show", categories: ["Game A", "Game B"] });
+    expect(summaries[0]).toMatchObject({ title: "At stream end", categories: ["Game A", "Game B", "Game C"] });
   });
 
   it("paginates summaries with an opaque cursor and keeps older rows on the next page", () => {
@@ -122,23 +122,72 @@ describe("statistics stream derivation", () => {
     expect(events.filter(({ type }) => type === "offline")).toHaveLength(2);
   });
 
-  it("keeps a stream running through a reconnect and ends one without offline notice at its last window", () => {
-    const online = (occurredAt: string, streamId: string): StatisticsTimelineEvent => ({ kind: "stream_online", streamId, occurredAt, detail: {} });
+  it("keeps a same-id reconnect in one window-bounded stream and derives its drop", () => {
+    const online = (occurredAt: string): StatisticsTimelineEvent => ({ kind: "stream_online", occurredAt, detail: {} });
     const timeline = [
-      online("2026-10-24T10:00:00.000Z", "stream-a"),
-      event("stream_offline", "2026-10-24T10:10:00.000Z"),
-      online("2026-10-24T10:12:00.000Z", "stream-a"),
-      online("2026-10-25T10:00:00.000Z", "stream-b"),
+      online("2026-10-24T10:00:00.000Z"),
+      event("stream_offline", "2026-10-24T10:06:00.000Z"),
+      online("2026-10-24T10:08:00.000Z"),
     ];
     const summaries = groupStatisticsWindows([
-      ...[0, 5, 10, 15, 20].map((minute) => window(`2026-10-24T10:${String(minute).padStart(2, "0")}:00.000Z`, "stream-a")),
-      window("2026-10-25T10:00:00.000Z", "stream-b"),
+      window("2026-10-24T10:00:00.000Z", "stream-a"),
+      window("2026-10-24T10:05:00.000Z", "stream-a"),
     ], timeline);
+    const events = deriveStreamEvents(timeline, "2026-10-24T10:00:00.000Z", "2026-10-24T10:10:00.000Z");
 
-    expect(summaries.find(({ streamId }) => streamId === "stream-a")).toMatchObject({
-      endedAt: "2026-10-24T10:25:00.000Z",
-      durationSeconds: 25 * 60,
-    });
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({ streamId: "stream-a", startedAt: "2026-10-24T10:00:00.000Z", endedAt: "2026-10-24T10:10:00.000Z" });
+    expect(events.filter(({ type }) => type === "drop")).toEqual([
+      expect.objectContaining({ at: "2026-10-24T10:06:00.000Z", recoveredAt: "2026-10-24T10:08:00.000Z", durationSeconds: 120 }),
+    ]);
+  });
+
+  it("ends a stream without an offline event at the end of its last window", () => {
+    const summaries = groupStatisticsWindows([
+      window("2026-10-24T10:00:00.000Z", "stream-a"),
+      window("2026-10-24T10:05:00.000Z", "stream-a"),
+    ], []);
+
+    expect(summaries[0]).toMatchObject({ endedAt: "2026-10-24T10:10:00.000Z", durationSeconds: 600 });
+  });
+
+  it("includes timeline events at the exact window end instant", () => {
+    const events = deriveStreamEvents([
+      event("clip_created", "2026-10-25T12:05:00.000000000Z", { clipId: "at-end" }),
+      event("clip_created", "2026-10-25T12:05:00.000000001Z", { clipId: "after-end" }),
+      event("stream_offline", "2026-10-25T12:05:00.000000000Z"),
+      event("stream_online", "2026-10-25T12:05:00.000000001Z"),
+    ], "2026-10-25T12:00:00.000Z", "2026-10-25T12:05:00.000Z");
+
+    expect(events.filter(({ type }) => type === "clip")).toEqual([
+      expect.objectContaining({ clipId: "at-end", at: "2026-10-25T12:05:00.000000000Z" }),
+    ]);
+    expect(events.filter(({ type }) => type === "drop")).toHaveLength(0);
+    expect(events.filter(({ type }) => type === "offline")).toHaveLength(1);
+  });
+
+  it("allows events in a shared five-minute bucket to appear on both streams", () => {
+    const summaries = groupStatisticsWindows([
+      window("2026-10-25T12:00:00.000Z", "stream-a"),
+      window("2026-10-25T12:00:00.000Z", "stream-b"),
+    ], [event("clip_created", "2026-10-25T12:02:00.000Z", { clipId: "shared-bucket" })]);
+
+    expect(summaries.map(({ streamId, clips }) => `${streamId}:${String(clips)}`).sort((left, right) => left.localeCompare(right)))
+      .toEqual(["stream-a:1", "stream-b:1"]);
+  });
+
+  it("associates emote spikes only with a matching stream window start", () => {
+    const streamWindows = [
+      window("2026-10-25T12:00:00.000Z", "stream-a"),
+      window("2026-10-25T12:10:00.000Z", "stream-a"),
+    ];
+    const events = deriveStreamEvents([
+      event("emote_spike", "2026-10-25T12:05:00.000Z", { windowStart: "2026-10-25T12:00:00.000Z", emotes: 30 }),
+      event("emote_spike", "2026-10-25T12:10:00.000Z", { windowStart: "2026-10-25T12:05:00.000Z", emotes: 50 }),
+      event("emote_spike", "2026-10-25T12:15:00.000Z", { windowStart: "2026-10-25T12:10:00.000Z", emotes: 60 }),
+    ], "2026-10-25T12:00:00.000Z", "2026-10-25T12:15:00.000Z", streamWindows);
+
+    expect(events.filter(({ type }) => type === "emoteSpike").map(({ emotes }) => emotes)).toEqual([30, 60]);
   });
 
   it("derives title and category transitions from consecutive observations", () => {

@@ -29,7 +29,8 @@ interface StatisticsHistoryChartProps {
   bitrateWindows: readonly StatisticsBitrateWindow[];
   events: readonly StatisticsStreamEvent[];
   language: "de" | "en";
-  timeZone: string;
+  timeZone: string | null;
+  timeZoneFallbackLabel: string | null;
   labels: StatisticsPanelTexts;
   highlightedEventId: string | null;
   onHighlightEvent: (eventId: string | null) => void;
@@ -102,7 +103,7 @@ const markerCandidates = (events: readonly StatisticsStreamEvent[], labels: Stat
   const candidates = events.flatMap((event) => {
     if (event.type !== "metadata" && event.type !== "clip" && event.type !== "ad" && event.type !== "drop" && event.type !== "emoteSpike") return [];
     const timestamp = Date.parse(event.at);
-    if (!Number.isFinite(timestamp) || timestamp < start || timestamp >= end) return [];
+    if (!Number.isFinite(timestamp) || timestamp < start || timestamp > end) return [];
     return [{ event: event as StatisticsStreamEvent & { type: MarkerType }, x: STATISTICS_CHART_PLOT.left + ((timestamp - start) / Math.max(1, end - start)) * plotWidth, color: markerColor(event.type), label: labelForEvent(event, labels), lane: 0 }];
   });
   const lastXByLane = [-Infinity, -Infinity];
@@ -115,7 +116,7 @@ const markerCandidates = (events: readonly StatisticsStreamEvent[], labels: Stat
   });
 };
 
-export function StatisticsHistoryChart({ summary, windows, bitrateWindows, events, language, timeZone, labels, highlightedEventId, onHighlightEvent }: StatisticsHistoryChartProps): ReactElement {
+export function StatisticsHistoryChart({ summary, windows, bitrateWindows, events, language, timeZone, timeZoneFallbackLabel, labels, highlightedEventId, onHighlightEvent }: StatisticsHistoryChartProps): ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(STATISTICS_CHART_PLOT.width);
   const [metric, setMetric] = useState<Metric>("viewer-chat");
@@ -167,9 +168,10 @@ export function StatisticsHistoryChart({ summary, windows, bitrateWindows, event
   const focusedPrimaryValue = focusedIndex < 0 ? null : primarySeries?.values[focusedIndex] ?? null;
   const focusedX = focusedIndex < 0 ? null : STATISTICS_CHART_PLOT.left + ((Date.parse(windows[focusedIndex]?.windowStart ?? summary.startedAt) - start) / Math.max(1, end - start)) * plotWidth;
   const focusedY = focusedPrimaryValue === null ? null : statisticsChartScaleY(focusedPrimaryValue, leftMaximum);
-  const averageLineValue = primarySeries === undefined
+  const primaryValues = primarySeries?.values.filter((value): value is number => value !== null) ?? [];
+  const averageLineValue = primaryValues.length === 0
     ? null
-    : primarySeries.values.filter((value): value is number => value !== null).reduce((sum, value, _index, values) => sum + value / values.length, 0);
+    : primaryValues.reduce((sum, value) => sum + value, 0) / primaryValues.length;
   const averageY = averageLineValue === null ? null : statisticsChartScaleY(averageLineValue, leftMaximum);
   const markers = markerData;
 
@@ -199,7 +201,11 @@ export function StatisticsHistoryChart({ summary, windows, bitrateWindows, event
         transform: focusedMarker.x / width < 0.2 ? "translateX(0)" : focusedMarker.x / width > 0.8 ? "translateX(-100%)" : "translateX(-50%)",
       }}>
         <strong>{labelForEvent(focusedMarker.event, labels)}</strong>
-        <span>{timeLabel(focusedMarker.event.at, language, timeZone)} · {eventDetail(focusedMarker.event, labels)}</span>
+        <span>
+          {timeZone === null ? <span className="statistics-chart__timestamp-placeholder" aria-hidden="true">00:00 AM</span> : <>
+            {timeLabel(focusedMarker.event.at, language, timeZone)}{timeZoneFallbackLabel === null ? "" : ` · ${timeZoneFallbackLabel}`} · {eventDetail(focusedMarker.event, labels)}
+          </>}
+        </span>
       </div>}
       <svg width="100%" height={CHART_HEIGHT} viewBox={`0 0 ${String(width)} ${String(CHART_HEIGHT)}`} role="group" aria-label={labels.history}>
         <text x={STATISTICS_CHART_PLOT.left} y="12" textAnchor="start" fill="var(--text-3)" fontSize="11">{primarySeries?.unit}</text>
@@ -232,13 +238,16 @@ export function StatisticsHistoryChart({ summary, windows, bitrateWindows, event
           const at = new Date(start + (end - start) * fraction).toISOString();
           return <g key={fraction}>
             <line x1={x} x2={x} y1={STATISTICS_CHART_PLOT.bottom} y2={STATISTICS_CHART_PLOT.bottom + 4} stroke="var(--text-3)" />
-            <text x={x} y={STATISTICS_CHART_PLOT.bottom + 17} textAnchor={fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"} fill="var(--text-3)" fontSize="11">{timeLabel(at, language, timeZone)}</text>
+            <text x={x} y={STATISTICS_CHART_PLOT.bottom + 17} textAnchor={fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"} fill="var(--text-3)" fontSize="11" visibility={timeZone === null ? "hidden" : undefined}>
+              {timeZone === null ? "00:00 AM" : timeLabel(at, language, timeZone)}
+              {timeZoneFallbackLabel === null || timeZone === null ? null : <title>{timeLabel(at, language, timeZone)} · {timeZoneFallbackLabel}</title>}
+            </text>
           </g>;
         })}
         {markers.map(({ event, x, lane, color, label }) => {
           const y = STATISTICS_CHART_PLOT.bottom + 35 + lane * 20;
           const active = event.id === highlightedEventId;
-          const accessibleLabel = `${label}: ${eventDetail(event, labels)} ${labels.at} ${timeLabel(event.at, language, timeZone)}`;
+          const accessibleLabel = `${label}: ${eventDetail(event, labels)}${timeZone === null ? "" : ` ${labels.at} ${timeLabel(event.at, language, timeZone)}${timeZoneFallbackLabel === null ? "" : ` · ${timeZoneFallbackLabel}`}`}`;
           return <g
             key={event.id}
             className="statistics-chart__marker"

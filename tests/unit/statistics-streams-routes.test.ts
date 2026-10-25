@@ -154,31 +154,42 @@ describe("statistics stream routes", () => {
     expect(second.nextCursor).toBeNull();
   });
 
-  it("assigns timeline events to lifecycle intervals when streams restart inside one window", async () => {
+  it("uses inclusive window bounds for events and keeps a same-id reconnect in one stream", async () => {
     const { database, fetch } = await setup();
-    await putWindow(database, "stream-before-restart", "2026-10-25T11:55:00.000Z");
-    await putWindow(database, "stream-after-restart", "2026-10-25T12:00:00.000Z");
-    await putTimeline(database, "online-before", "stream_online", "2026-10-25T11:00:00.000Z", {}, "stream-before-restart");
-    await putTimeline(database, "offline-before", "stream_offline", "2026-10-25T12:01:00.000Z");
-    await putTimeline(database, "online-after", "stream_online", "2026-10-25T12:02:00.000Z", {}, "stream-after-restart");
-    await putTimeline(database, "clip-after", "clip_created", "2026-10-25T12:03:00.000Z", { clipId: "clip-after" });
+    await putWindow(database, "reconnected-stream", "2026-10-25T12:00:00.000Z");
+    await putWindow(database, "reconnected-stream", "2026-10-25T12:05:00.000Z");
+    await putTimeline(database, "online", "stream_online", "2026-10-25T12:00:00.000Z", {}, "reconnected-stream");
+    await putTimeline(database, "offline", "stream_offline", "2026-10-25T12:01:00.000Z");
+    await putTimeline(database, "reconnect", "stream_online", "2026-10-25T12:02:00.000Z", {}, "reconnected-stream");
+    await putTimeline(database, "clip-before-end", "clip_created", "2026-10-25T12:09:59.999999999Z", { clipId: "clip-before-end" });
+    await putTimeline(database, "clip-at-end", "clip_created", "2026-10-25T12:10:00.000000000Z", { clipId: "clip-at-end" });
+    await putTimeline(database, "clip-after-end", "clip_created", "2026-10-25T12:10:00.000000001Z", { clipId: "clip-after-end" });
+    await putTimeline(database, "spike-last-window", "emote_spike", "2026-10-25T12:10:00.000000000Z", {
+      windowStart: "2026-10-25T12:05:00.000Z", emotes: 40,
+    });
+    await putTimeline(database, "spike-other-window", "emote_spike", "2026-10-25T12:08:00.000000000Z", {
+      windowStart: "2026-10-25T12:04:00.000Z", emotes: 99,
+    });
 
     const listResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams`);
     const list = await listResponse.json<{ streams: Array<{ streamId: string; startedAt: string; endedAt: string; clips: number }> }>();
-    const beforeResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams/stream-before-restart`);
-    const before = await beforeResponse.json<{ summary: { endedAt: string }; events: Array<{ type: string }> }>();
-    const afterResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams/stream-after-restart`);
-    const after = await afterResponse.json<{ summary: { startedAt: string }; events: Array<{ type: string }> }>();
+    const detailResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams/reconnected-stream`);
+    const detail = await detailResponse.json<{
+      summary: { startedAt: string; endedAt: string; clips: number };
+      events: Array<{ type: string; at: string; clipId?: string; emotes?: number; recoveredAt?: string }>;
+    }>();
 
-    expect(list.streams).toEqual(expect.arrayContaining([
-      expect.objectContaining({ streamId: "stream-before-restart", startedAt: "2026-10-25T11:00:00.000Z", endedAt: "2026-10-25T12:01:00.000Z", clips: 0 }),
-      expect.objectContaining({ streamId: "stream-after-restart", startedAt: "2026-10-25T12:02:00.000Z", clips: 1 }),
-    ]));
-    expect(beforeResponse.status).toBe(200);
-    expect(before.events.some(({ type }) => type === "clip")).toBe(false);
-    expect(afterResponse.status).toBe(200);
-    expect(after.events.some(({ type }) => type === "start")).toBe(true);
-    expect(after.events.some(({ type }) => type === "clip")).toBe(true);
+    expect(list.streams).toEqual([expect.objectContaining({
+      streamId: "reconnected-stream",
+      startedAt: "2026-10-25T12:00:00.000Z",
+      endedAt: "2026-10-25T12:10:00.000Z",
+      clips: 2,
+    })]);
+    expect(detailResponse.status).toBe(200);
+    expect(detail.summary).toMatchObject({ startedAt: "2026-10-25T12:00:00.000Z", endedAt: "2026-10-25T12:10:00.000Z", clips: 2 });
+    expect(detail.events).toContainEqual(expect.objectContaining({ type: "drop", at: "2026-10-25T12:01:00.000Z", recoveredAt: "2026-10-25T12:02:00.000Z" }));
+    expect(detail.events.filter(({ type }) => type === "clip").map(({ clipId }) => clipId)).toEqual(["clip-before-end", "clip-at-end"]);
+    expect(detail.events.filter(({ type }) => type === "emoteSpike").map(({ emotes }) => emotes)).toEqual([40]);
   });
 
   it("seeds list and detail metadata from the latest observation before the stream", async () => {

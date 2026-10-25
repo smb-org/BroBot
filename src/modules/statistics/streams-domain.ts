@@ -43,39 +43,7 @@ const compareInstants = (left: string, right: string): number => {
 };
 
 const eventInRange = (event: StatisticsTimelineEvent, start: string, end: string): boolean =>
-  compareInstants(event.occurredAt, start) >= 0 && compareInstants(event.occurredAt, end) < 0;
-
-interface StreamLifecycleRange {
-  startedAt: string;
-  endedAt: string;
-  endingKind: "stream_offline" | "stream_online" | null;
-}
-
-const streamLifecycleRange = (
-  timelineEvents: readonly StatisticsTimelineEvent[],
-  streamId: string | undefined,
-  windowStart: string,
-  windowEnd: string,
-): StreamLifecycleRange => {
-  if (streamId === undefined) return { startedAt: windowStart, endedAt: windowEnd, endingKind: null };
-  const ordered = [...timelineEvents].sort((left, right) => compareInstants(left.occurredAt, right.occurredAt));
-  const isOwnOnline = (event: StatisticsTimelineEvent): boolean => event.kind === "stream_online" && event.streamId === streamId;
-  const online = ordered.find(isOwnOnline);
-  if (online === undefined) return { startedAt: windowStart, endedAt: windowEnd, endingKind: null };
-  // Reconnects reuse the stream id, so the interval ends at the first lifecycle event after the last own start.
-  const lastOnlineIndex = ordered.findLastIndex(isOwnOnline);
-  const nextLifecycle = ordered.find((event, index) => index > lastOnlineIndex &&
-    (event.kind === "stream_offline" || event.kind === "stream_online"));
-  if (nextLifecycle === undefined) return { startedAt: online.occurredAt, endedAt: windowEnd, endingKind: null };
-  // The last window may close after the offline notice; events inside it still belong to the stream.
-  const endsWithOffline = nextLifecycle.kind === "stream_offline";
-  const endedAt = endsWithOffline && compareInstants(nextLifecycle.occurredAt, windowEnd) < 0 ? windowEnd : nextLifecycle.occurredAt;
-  return { startedAt: online.occurredAt, endedAt, endingKind: endsWithOffline ? "stream_offline" : "stream_online" };
-};
-
-const eventInLifecycleRange = (event: StatisticsTimelineEvent, range: StreamLifecycleRange): boolean =>
-  eventInRange(event, range.startedAt, range.endedAt) ||
-  (event.kind === "stream_offline" && range.endingKind === "stream_offline" && compareInstants(event.occurredAt, range.endedAt) === 0);
+  compareInstants(event.occurredAt, start) >= 0 && compareInstants(event.occurredAt, end) <= 0;
 
 const compareNewestFirst = (left: StatisticsStreamSummary, right: StatisticsStreamSummary): number =>
   compareInstants(right.cursorAt ?? right.endedAt, left.cursorAt ?? left.endedAt) || right.streamId.localeCompare(left.streamId);
@@ -120,9 +88,8 @@ export const groupStatisticsWindows = (
     const windowStart = ordered[0]?.windowStart ?? "";
     const lastWindowStart = ordered.at(-1)?.windowStart ?? windowStart;
     const windowEnd = new Date(Date.parse(lastWindowStart) + WINDOW_MILLISECONDS).toISOString();
-    const lifecycle = streamLifecycleRange(timelineEvents, streamId, windowStart, windowEnd);
-    const { startedAt, endedAt } = lifecycle;
-    const displayEnd = lifecycle.endingKind === "stream_online" ? windowEnd : endedAt;
+    const startedAt = windowStart;
+    const endedAt = windowEnd;
     const metadataEvents = timelineEvents
       .filter((event) => event.kind === "channel_metadata")
       .sort((left, right) => compareInstants(left.occurredAt, right.occurredAt));
@@ -141,9 +108,8 @@ export const groupStatisticsWindows = (
     return {
       streamId,
       startedAt,
-      // A stream without an offline notice runs to its last window, not to the next stream's start.
-      endedAt: displayEnd,
-      durationSeconds: Math.max(0, Math.round((Date.parse(displayEnd) - Date.parse(startedAt)) / 1_000)),
+      endedAt,
+      durationSeconds: Math.max(0, Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 1_000)),
       title: latestMetadata === undefined ? null : metadataValues(latestMetadata).title,
       categories,
       averageViewers: average(ordered.map((row) => row.viewerCount)),
@@ -151,7 +117,7 @@ export const groupStatisticsWindows = (
       peakAt: peak?.windowStart ?? null,
       messages: ordered.reduce((sum, row) => sum + row.messages, 0),
       averageActiveChatters: average(ordered.map((row) => row.activeChatters)),
-      clips: timelineEvents.filter((event) => event.kind === "clip_created" && eventInLifecycleRange(event, lifecycle)).length,
+      clips: timelineEvents.filter((event) => event.kind === "clip_created" && eventInRange(event, startedAt, endedAt)).length,
       cursorAt: lastWindowStart,
     };
   });
@@ -198,25 +164,31 @@ const dropPairs = (events: readonly StatisticsTimelineEvent[]): Map<number, numb
   return pairs;
 };
 
-/** Turns raw timeline facts into user-facing events; lifecycle drops use the documented ten-minute rule. */
+/** Turns timeline facts inside the window range into user-facing events. */
 export const deriveStreamEvents = (
   timelineEvents: readonly StatisticsTimelineEvent[],
   startedAt: string,
   endedAt: string,
-  streamId?: string,
+  windows: readonly StatisticsStreamWindow[] = [],
 ): StatisticsStreamEvent[] => {
   const ordered = [...timelineEvents].sort((left, right) => compareInstants(left.occurredAt, right.occurredAt));
-  const pairs = dropPairs(ordered);
+  const metadataSeed = ordered.findLast((event) => event.kind === "channel_metadata" && compareInstants(event.occurredAt, startedAt) < 0);
+  let metadataBefore = metadataSeed === undefined ? null : metadataValues(metadataSeed);
+  const windowStarts = new Set(windows.map(({ windowStart }) => Date.parse(windowStart)).filter(Number.isFinite));
+  const inRangeEvents = ordered.filter((event) => {
+    if (!eventInRange(event, startedAt, endedAt)) return false;
+    if (event.kind !== "emote_spike") return true;
+    const windowStart = event.detail.windowStart;
+    return typeof windowStart === "string" && windowStarts.has(Date.parse(windowStart));
+  });
+  const pairs = dropPairs(inRangeEvents);
   const pairedOnline = new Set(pairs.values());
   const result: StatisticsStreamEvent[] = [];
-  let metadataBefore: { title: string | null; category: string | null } | null = null;
-  const range = streamLifecycleRange(ordered, streamId, startedAt, endedAt);
 
-  ordered.forEach((event, index) => {
-    const inRange = eventInLifecycleRange(event, range);
+  inRangeEvents.forEach((event, index) => {
     if (event.kind === "channel_metadata") {
       const current = metadataValues(event);
-      if (inRange && metadataBefore !== null && (current.title !== metadataBefore.title || current.category !== metadataBefore.category)) {
+      if (metadataBefore !== null && (current.title !== metadataBefore.title || current.category !== metadataBefore.category)) {
         const transitionText = current.title ?? current.category;
         result.push({
           id: `metadata:${event.occurredAt}:${String(index)}`,
@@ -233,10 +205,9 @@ export const deriveStreamEvents = (
       return;
     }
     if (event.kind === "stream_offline") {
-      if (!inRange) return;
       const pairedOnlineIndex = pairs.get(index);
       if (pairedOnlineIndex !== undefined) {
-        const recoveredAt = ordered[pairedOnlineIndex]?.occurredAt;
+        const recoveredAt = inRangeEvents[pairedOnlineIndex]?.occurredAt;
         if (recoveredAt !== undefined) {
           result.push({
             id: `drop:${event.occurredAt}:${String(index)}`,
@@ -251,10 +222,8 @@ export const deriveStreamEvents = (
       result.push({ id: `offline:${event.occurredAt}:${String(index)}`, type: "offline", at: event.occurredAt });
       return;
     }
-    if (!inRange) return;
     if (event.kind === "stream_online") {
-      const isStreamStart = streamId !== undefined && event.streamId === streamId && compareInstants(event.occurredAt, range.startedAt) === 0;
-      if (!pairedOnline.has(index) || isStreamStart) result.push({ id: `start:${event.occurredAt}:${String(index)}`, type: "start", at: event.occurredAt });
+      if (!pairedOnline.has(index)) result.push({ id: `start:${event.occurredAt}:${String(index)}`, type: "start", at: event.occurredAt });
     } else if (event.kind === "clip_created") {
       const detail = record(event.detail) ?? {};
       const clipId = text(detail.clipId);

@@ -18,7 +18,6 @@ type StatisticsTimelineEventKind =
 
 export interface StatisticsTimelineEvent {
   kind: StatisticsTimelineEventKind;
-  streamId?: string | null;
   occurredAt: string;
   detail: Readonly<Record<string, unknown>>;
 }

@@ -49,6 +49,8 @@ test("shows seeded stream history, changes metrics, and links a chart marker to 
   await expect(bitrate).toHaveAttribute("aria-pressed", "true");
 
   const clipMarker = page.getByRole("button", { name: /clip: e2e highlight/iu });
+  // Keep the pointer off the event list so hover cannot take over the highlight while the page scrolls.
+  await page.mouse.move(0, 0);
   await clipMarker.focus();
   await expect(page.getByRole("tooltip")).toContainText("E2E highlight");
   await expect(page.getByRole("listitem", { name: /clip e2e highlight/iu })).toHaveAttribute("data-highlighted", "true");
