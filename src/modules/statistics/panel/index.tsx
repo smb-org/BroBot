@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { EmptyState, Icon, ListDetail, LoadState, SubInspector } from "../../../dashboard/ui";
 import { dashboardCommonTexts } from "../../../dashboard/locale";
 import { useModuleQuery } from "../../../dashboard/data/module-query";
+import { useChannelSettings } from "../../../dashboard/data/channel-settings";
+import { browserTimeZone } from "../../../dashboard/ui/format-relative-time";
 import type { ModulePanelProperties } from "../../contract";
 import type { StatisticsStreamDetailResponse, StatisticsStreamEvent, StatisticsStreamListResponse, StatisticsStreamSummary } from "../contracts";
 import { loadStatisticsStream, loadStatisticsStreams } from "./service";
@@ -15,18 +17,20 @@ const number = (value: number | null, language: "de" | "en", digits = 0): string
   ? "—"
   : new Intl.NumberFormat(language, { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(value);
 
-const dateParts = (value: string, language: "de" | "en"): { date: string; time: string } => {
+const dateParts = (value: string, language: "de" | "en", timeZone: string): { date: string; time: string } => {
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return { date: "—", time: "—" };
+  const locale = language === "de" ? "de-DE" : "en-US";
   return {
-    date: new Intl.DateTimeFormat(language, { weekday: "short", day: "2-digit", month: "2-digit" }).format(date),
-    time: new Intl.DateTimeFormat(language, { hour: "2-digit", minute: "2-digit" }).format(date),
+    date: new Intl.DateTimeFormat(locale, { weekday: "short", day: "2-digit", month: "2-digit", timeZone }).format(date),
+    time: new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone }).format(date),
   };
 };
 
-const fullDate = (value: string, language: "de" | "en"): string => {
+const fullDate = (value: string, language: "de" | "en", timeZone: string): string => {
   const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? "—" : new Intl.DateTimeFormat(language, { dateStyle: "full" }).format(date);
+  const locale = language === "de" ? "de-DE" : "en-US";
+  return Number.isNaN(date.valueOf()) ? "—" : new Intl.DateTimeFormat(locale, { dateStyle: "full", timeZone }).format(date);
 };
 
 const duration = (seconds: number, unit: string): string => {
@@ -68,14 +72,15 @@ const eventLabel = (event: StatisticsStreamEvent, labels: ReturnType<typeof stat
   return labels.emoteSpike;
 };
 
-const StreamRow = ({ summary, active, language, labels, onSelect }: {
+const StreamRow = ({ summary, active, language, timeZone, labels, onSelect }: {
   summary: StatisticsStreamSummary;
   active: boolean;
   language: "de" | "en";
+  timeZone: string;
   labels: ReturnType<typeof statisticsPanelTexts>;
   onSelect: () => void;
 }): ReactElement => {
-  const start = dateParts(summary.startedAt, language);
+  const start = dateParts(summary.startedAt, language, timeZone);
   const category = summary.categories[0] ?? labels.noCategory;
   const categorySuffix = summary.categories.length > 1 ? ` +${String(summary.categories.length - 1)}` : "";
   const accessibleName = `${summary.title ?? labels.noTitle}, ${start.date}, ${start.time}, ${duration(summary.durationSeconds, labels.durationUnit)}, ${category}${categorySuffix}, ${labels.averagePeakViewers} ${number(summary.averageViewers, language)}`;
@@ -89,16 +94,17 @@ const StreamRow = ({ summary, active, language, labels, onSelect }: {
   </li>;
 };
 
-const StreamInspector = ({ detail, language, labels, highlightedEventId, onHighlightEvent, onClose }: {
+const StreamInspector = ({ detail, language, timeZone, labels, highlightedEventId, onHighlightEvent, onClose }: {
   detail: StatisticsStreamDetailResponse;
   language: "de" | "en";
+  timeZone: string;
   labels: ReturnType<typeof statisticsPanelTexts>;
   highlightedEventId: string | null;
   onHighlightEvent: (eventId: string | null) => void;
   onClose: () => void;
 }): ReactElement => {
   const { summary } = detail;
-  const peakTime = summary.peakAt === null ? "—" : dateParts(summary.peakAt, language).time;
+  const peakTime = summary.peakAt === null ? "—" : dateParts(summary.peakAt, language, timeZone).time;
   const messagesPerMinute = summary.durationSeconds <= 0 ? null : summary.messages / (summary.durationSeconds / 60);
   const metrics = [
     { label: labels.duration, value: duration(summary.durationSeconds, labels.durationUnit), sub: "" },
@@ -111,8 +117,8 @@ const StreamInspector = ({ detail, language, labels, highlightedEventId, onHighl
 
   const headingMeta = <div className="statistics-inspector__meta">
     {summary.categories.map((category) => <span key={category} className="statistics-inspector__chip">{category}</span>)}
-    <span>{fullDate(summary.startedAt, language)}</span>
-    <span className="mono">{dateParts(summary.startedAt, language).time} – {dateParts(summary.endedAt, language).time}</span>
+    <span>{fullDate(summary.startedAt, language, timeZone)}</span>
+    <span className="mono">{dateParts(summary.startedAt, language, timeZone).time} – {dateParts(summary.endedAt, language, timeZone).time}</span>
   </div>;
 
   return <SubInspector
@@ -139,6 +145,7 @@ const StreamInspector = ({ detail, language, labels, highlightedEventId, onHighl
         bitrateWindows={detail.bitrateWindows}
         events={detail.events}
         language={language}
+        timeZone={timeZone}
         labels={labels}
         highlightedEventId={highlightedEventId}
         onHighlightEvent={onHighlightEvent}
@@ -162,7 +169,7 @@ const StreamInspector = ({ detail, language, labels, highlightedEventId, onHighl
           onMouseLeave={() => onHighlightEvent(null)}
         >
           <span className={`statistics-inspector__event-marker statistics-inspector__event-marker--${event.type}`} aria-hidden="true" />
-          <time className="mono" dateTime={event.at}>{dateParts(event.at, language).time}</time>
+          <time className="mono" dateTime={event.at}>{dateParts(event.at, language, timeZone).time}</time>
           <strong>{eventLabel(event, labels)}</strong>
           <span>{eventText(event, labels)}</span>
           <span className="statistics-inspector__event-viewers mono">{eventViewers(detail.windows, event.at, language, labels.viewer)}</span>
@@ -174,6 +181,8 @@ const StreamInspector = ({ detail, language, labels, highlightedEventId, onHighl
 
 export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePanelProperties): ReactElement {
   const labels = statisticsPanelTexts(language);
+  const settingsQuery = useChannelSettings(channelId);
+  const timeZone = settingsQuery.isError ? browserTimeZone() : settingsQuery.data?.timeZone ?? browserTimeZone();
   const [selectedStreamId, setSelectedStreamId] = useState<string | null>(null);
   const [selectionClosed, setSelectionClosed] = useState(false);
   const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 1280);
@@ -274,16 +283,21 @@ export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePan
   const list = <section className="statistics-streams__list" aria-label={labels.streams}>
     <header className="statistics-streams__list-header">
       <div><h2>{labels.streams}</h2><p>{labels.loadedCount(number(streams.length, language))}</p></div>
-      {nextCursor === null ? null : <button type="button" className="statistics-streams__older" disabled={olderLoading || listQuery.isFetching} onClick={() => { void loadOlder(); }}>
-        <Icon name="clock-hour-4" />{olderLoading ? labels.loading : labels.older}
-      </button>}
+      <div className="statistics-streams__list-status" aria-live="polite">
+        {nextCursor === null ? null : olderError ? <div className="statistics-streams__list-error" role="alert">
+          <span>{labels.loadError}</span>
+          <button type="button" className="statistics-streams__older" onClick={() => { void loadOlder(); }}>{labels.retry}</button>
+        </div> : <button type="button" className="statistics-streams__older" disabled={olderLoading || listQuery.isFetching} onClick={() => { void loadOlder(); }}>
+          <Icon name="clock-hour-4" />{olderLoading ? labels.loading : labels.older}
+        </button>}
+      </div>
     </header>
-    {olderError ? <div className="statistics-streams__list-error" role="alert">{labels.loadError} <button type="button" className="statistics-streams__older" onClick={() => { void loadOlder(); }}>{labels.retry}</button></div> : null}
     <ul className="statistics-streams__rows">
       {streams.map((stream) => <StreamRow
         key={stream.streamId}
         summary={stream}
         language={language}
+        timeZone={timeZone}
         labels={labels}
         active={stream.streamId === activeStreamId}
         onSelect={() => selectStream(stream.streamId)}
@@ -291,15 +305,7 @@ export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePan
     </ul>
   </section>;
 
-  const inspector = activeStreamId === null ? null : detailQuery.isLoading || detail === undefined ? <SubInspector
-    ariaLabel={labels.loadingDetail}
-    title={labels.loadingDetail}
-    className="statistics-inspector statistics-inspector--loading"
-    closeLabel={dashboardCommonTexts(language).close}
-    onClose={closeInspector}
-  >
-    <LoadState variant="panel-720" status="loading" loading={<span>{labels.loadingDetail}</span>} empty={null} error={null}>{null}</LoadState>
-  </SubInspector> : detailQuery.isError || detail === null ? <SubInspector
+  const inspector = activeStreamId === null ? null : detailQuery.isError || detail === null ? <SubInspector
     ariaLabel={labels.detailError}
     title={labels.detailError}
     className="statistics-inspector statistics-inspector--loading"
@@ -308,9 +314,18 @@ export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePan
   >
     <EmptyState title={labels.detailError} description={labels.emptyDescription} />
     <button type="button" className="statistics-streams__older" onClick={() => { void detailQuery.refetch(); }}>{labels.retry}</button>
+  </SubInspector> : detailQuery.isLoading || detail === undefined ? <SubInspector
+    ariaLabel={labels.loadingDetail}
+    title={labels.loadingDetail}
+    className="statistics-inspector statistics-inspector--loading"
+    closeLabel={dashboardCommonTexts(language).close}
+    onClose={closeInspector}
+  >
+    <LoadState variant="panel-720" status="loading" loading={<span>{labels.loadingDetail}</span>} empty={null} error={null}>{null}</LoadState>
   </SubInspector> : <StreamInspector
     detail={detail}
     language={language}
+    timeZone={timeZone}
     labels={labels}
     highlightedEventId={highlightedEventId}
     onHighlightEvent={setHighlightedEventId}

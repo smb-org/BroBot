@@ -319,22 +319,29 @@ Streamzustands-Updates laufen weiter.
 Die Streams-Ansicht liest diese Aggregate über
 `GET /api/channels/:channelId/modules/statistics/streams` und
 `GET /api/channels/:channelId/modules/statistics/streams/:streamId`; beide
-Routen hängen hinter der Kanalautorisierung. Die Liste gruppiert alle
-Timeline-Streamstarts dieses Kanals über den Kanal-/Ereignisart-/Zeitindex,
-beschränkt das Ergebnis auf die Seite plus einen Cursor-Eintrag und fragt
-Statistikfenster anschließend in einem begrenzten Zeitbereich für diese
-Stream-IDs ab. Das Detail nutzt den
-`channel_statistics`-Primärschlüssel `(channel_id, window_start)` für den
-Streamzeitraum, den Kanal-/Zeitindex der Timeline für Ereignisse und den
-Kanal-/Fensterindex von `belabox_bitrate_windows` für Bitrate. Die
-Fensterabfrage der Liste läuft vom ältesten ausgewählten Stream bis zur
-Cursorgrenze; der Indexweg kann Statistikzeilen in Lücken zwischen Streams
-einschließen. Die Lifecycle-Gruppierung liest alle entsprechenden
-Ereigniszeilen dieses Kanals. Detailabfragen wachsen mit dem Streamzeitraum.
-Die BELABOX-Reihe wird per Zeitbereich zugeordnet, da BELABOX- und Twitch-IDs
-verschiedene Werte haben. Antworten enthalten keine Nutzerkennungen oder
-Logins. Das Modul liest BELABOX-Daten direkt per SQL und importiert keinen
-anderen Modulcode.
+Routen hängen hinter der Kanalautorisierung. `channel_statistics` ist die
+Quelle für Streamauswahl und Kennzahlen: ein Stream existiert, wenn mindestens
+ein Fenster eine nicht-NULL `stream_id` trägt. Die Liste gruppiert alle
+Statistikfenster des Kanals nach Stream-ID und ordnet nach dem letzten
+`window_start`, bevor sie Cursor und Seitenlimit anwendet. Diese Auswahl
+scannt alle Statistikzeilen des Kanals; ein vorhandener Index deckt Gruppierung
+und Sortierung nicht ab. Danach liest die Liste sämtliche Fenster der
+ausgewählten IDs für vollständige Aggregate. Timeline-Fakten ergänzen Titel,
+Kategorie, Ereignisse und präzise Start-/Endzeiten. Metadaten beginnen mit der
+letzten Beobachtung vor dem Streamstart und folgen dann den Beobachtungen im
+Lifecycle-Intervall.
+
+Das Detail liest alle Fenster der angefragten Stream-ID und benötigt keinen
+Timeline-Start. Timeline-Ereignisse werden, wenn Lifecycle-Fakten vorhanden
+sind, dem Intervall vom `stream_online`-Zeitpunkt bis zum nächsten Offline- oder
+Online-Ereignis zugeordnet; andernfalls gelten die Fenstergrenzen. Die
+Timeline-Abfragen nutzen den Kanal-/Zeitindex und normalisieren UTC-Grenzen auf
+neun Nachkommastellen wie gespeicherte `occurred_at`-Werte. Domain-Filter
+vergleichen Zeitpunkte mit Nanosekundenauflösung. BELABOX-Bitratefenster
+verwenden den Kanal-/Fensterindex und werden per Zeitbereich zugeordnet, da
+BELABOX- und Twitch-IDs verschieden sind. Antworten enthalten keine
+Nutzerkennungen oder Logins. Das Modul liest BELABOX-Daten direkt per SQL und
+importiert keinen anderen Modulcode.
 
 Lifecycle-Wiederholungen sind über Art, Ereigniszeit und — bei `stream.online`
 — Stream-ID idempotent. Metadatenbeobachtungen verwenden Art, Ereigniszeit und

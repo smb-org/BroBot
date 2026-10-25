@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
+import type { ModuleTimelineEvent } from "../../src/modules/contract";
 import { statisticsRoutes } from "../../src/modules/statistics/routes";
+import { writeChannelTimelineEvent } from "../../src/worker/db/timeline-events";
 import { requireChannelAuthorization } from "../../src/worker/auth/guards";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
@@ -118,6 +120,108 @@ describe("statistics stream routes", () => {
     const second = await secondResponse.json<{ streams: Array<{ streamId: string; title: string | null }>; nextCursor: string | null }>();
     expect(second.streams).toEqual([expect.objectContaining({ streamId: "stream-old", title: "Yesterday" })]);
     expect(second.nextCursor).toBeNull();
+  });
+
+  it("lists and opens streams from statistics windows without a stream-online row", async () => {
+    const { database, fetch } = await setup();
+    await putWindow(database, "window-only", "2026-10-25T12:00:00.000Z", { messages: 35 });
+
+    const listResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams`);
+    const list = await listResponse.json<{ streams: Array<{ streamId: string; messages: number }> }>();
+    const detailResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams/window-only`);
+    const detail = await detailResponse.json<{ summary: { streamId: string; messages: number }; windows: unknown[] }>();
+
+    expect(listResponse.status).toBe(200);
+    expect(list.streams).toEqual([expect.objectContaining({ streamId: "window-only", messages: 35 })]);
+    expect(detailResponse.status).toBe(200);
+    expect(detail).toMatchObject({ summary: { streamId: "window-only", messages: 35 }, windows: [expect.any(Object)] });
+  });
+
+  it("reads every selected stream window while paging by its latest window", async () => {
+    const { database, fetch } = await setup();
+    await putWindow(database, "stream-a", "2026-10-25T12:00:00.000Z", { messages: 10 });
+    await putWindow(database, "stream-a", "2026-10-25T12:05:00.000Z", { messages: 20 });
+    await putWindow(database, "stream-b", "2026-10-25T12:10:00.000Z", { messages: 50 });
+
+    const firstResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams?limit=1`);
+    const first = await firstResponse.json<{ streams: Array<{ streamId: string; messages: number }>; nextCursor: string | null }>();
+    const secondResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams?limit=1&cursor=${encodeURIComponent(first.nextCursor ?? "")}`);
+    const second = await secondResponse.json<{ streams: Array<{ streamId: string; messages: number }>; nextCursor: string | null }>();
+
+    expect(first.streams).toEqual([expect.objectContaining({ streamId: "stream-b", messages: 50 })]);
+    expect(first.nextCursor).not.toBeNull();
+    expect(second.streams).toEqual([expect.objectContaining({ streamId: "stream-a", messages: 30 })]);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it("assigns timeline events to lifecycle intervals when streams restart inside one window", async () => {
+    const { database, fetch } = await setup();
+    await putWindow(database, "stream-before-restart", "2026-10-25T11:55:00.000Z");
+    await putWindow(database, "stream-after-restart", "2026-10-25T12:00:00.000Z");
+    await putTimeline(database, "online-before", "stream_online", "2026-10-25T11:00:00.000Z", {}, "stream-before-restart");
+    await putTimeline(database, "offline-before", "stream_offline", "2026-10-25T12:01:00.000Z");
+    await putTimeline(database, "online-after", "stream_online", "2026-10-25T12:02:00.000Z", {}, "stream-after-restart");
+    await putTimeline(database, "clip-after", "clip_created", "2026-10-25T12:03:00.000Z", { clipId: "clip-after" });
+
+    const listResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams`);
+    const list = await listResponse.json<{ streams: Array<{ streamId: string; startedAt: string; endedAt: string; clips: number }> }>();
+    const beforeResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams/stream-before-restart`);
+    const before = await beforeResponse.json<{ summary: { endedAt: string }; events: Array<{ type: string }> }>();
+    const afterResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams/stream-after-restart`);
+    const after = await afterResponse.json<{ summary: { startedAt: string }; events: Array<{ type: string }> }>();
+
+    expect(list.streams).toEqual(expect.arrayContaining([
+      expect.objectContaining({ streamId: "stream-before-restart", startedAt: "2026-10-25T11:00:00.000Z", endedAt: "2026-10-25T12:01:00.000Z", clips: 0 }),
+      expect.objectContaining({ streamId: "stream-after-restart", startedAt: "2026-10-25T12:02:00.000Z", clips: 1 }),
+    ]));
+    expect(beforeResponse.status).toBe(200);
+    expect(before.events.some(({ type }) => type === "clip")).toBe(false);
+    expect(afterResponse.status).toBe(200);
+    expect(after.events.some(({ type }) => type === "start")).toBe(true);
+    expect(after.events.some(({ type }) => type === "clip")).toBe(true);
+  });
+
+  it("seeds list and detail metadata from the latest observation before the stream", async () => {
+    const { database, fetch } = await setup();
+    await putWindow(database, "metadata-stream", "2026-10-25T12:00:00.000Z");
+    await putTimeline(database, "metadata-before", "channel_metadata", "2026-10-25T11:50:00.000Z", {
+      title: "Scheduled title", category: { id: "seed", name: "Seed game" },
+    });
+    await putTimeline(database, "metadata-online", "stream_online", "2026-10-25T12:00:00.000Z", {}, "metadata-stream");
+    await putTimeline(database, "metadata-live", "channel_metadata", "2026-10-25T12:02:00.000Z", {
+      title: "Live title", category: { id: "live", name: "Live game" },
+    });
+
+    const listResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams`);
+    const list = await listResponse.json<{ streams: Array<{ title: string | null; categories: string[] }> }>();
+    const detailResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams/metadata-stream`);
+    const detail = await detailResponse.json<{ summary: { title: string | null; categories: string[] } }>();
+
+    expect(list.streams[0]).toMatchObject({ title: "Live title", categories: ["Seed game", "Live game"] });
+    expect(detailResponse.status).toBe(200);
+    expect(detail.summary).toMatchObject({ title: "Live title", categories: ["Seed game", "Live game"] });
+  });
+
+  it("reads canonical nanosecond timeline timestamps at window boundaries", async () => {
+    const { database, fetch } = await setup();
+    await putWindow(database, "precise-stream", "2026-10-25T12:00:00.000Z");
+    const online: Extract<ModuleTimelineEvent, { kind: "stream_online" }> = {
+      kind: "stream_online",
+      identity: "precise-online",
+      occurredAt: "2026-10-25T12:00:00.000Z",
+      streamId: "precise-stream",
+      detail: { startedAt: "2026-10-25T12:00:00.000Z" },
+    };
+    await writeChannelTimelineEvent(database as unknown as D1Database, CHANNEL_ID, online);
+    const stored = await database.prepare(
+      "SELECT occurred_at FROM channel_timeline_events WHERE channel_id = ? AND kind = 'stream_online'",
+    ).bind(CHANNEL_ID).first<{ occurred_at: string }>();
+
+    const response = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/streams/precise-stream`);
+    const body = await response.json<{ events: Array<{ type: string }> }>();
+
+    expect(stored?.occurred_at).toBe("2026-10-25T12:00:00.000000000Z");
+    expect(body.events).toContainEqual(expect.objectContaining({ type: "start" }));
   });
 
   it("returns stream windows, time-matched BELABOX history, and derived timeline events", async () => {

@@ -89,6 +89,20 @@ describe("statistics stream derivation", () => {
     expect(second.nextCursor).toBeNull();
   });
 
+  it("pages equal window timestamps by stream id without skipping a tied row", () => {
+    const summaries = groupStatisticsWindows([
+      window("2026-10-25T12:00:00.000Z", "stream-a"),
+      window("2026-10-25T12:05:00.000Z", "stream-b"),
+    ], []).map((summary) => ({ ...summary, cursorAt: "2026-10-25T12:05:00.000Z" }));
+
+    const first = paginateStreamSummaries(summaries, null, 1);
+    const second = paginateStreamSummaries(summaries, first.nextCursor, 1);
+
+    expect(first.streams.map(({ streamId }) => streamId)).toEqual(["stream-b"]);
+    expect(second.streams.map(({ streamId }) => streamId)).toEqual(["stream-a"]);
+    expect(second.nextCursor).toBeNull();
+  });
+
   it("derives a drop only when an offline event is followed by an online event within ten minutes", () => {
     const events = deriveStreamEvents([
       event("stream_online", "2026-10-25T12:00:00.000Z"),
@@ -106,6 +120,25 @@ describe("statistics stream derivation", () => {
       durationSeconds: 480,
     });
     expect(events.filter(({ type }) => type === "offline")).toHaveLength(2);
+  });
+
+  it("keeps a stream running through a reconnect and ends one without offline notice at its last window", () => {
+    const online = (occurredAt: string, streamId: string): StatisticsTimelineEvent => ({ kind: "stream_online", streamId, occurredAt, detail: {} });
+    const timeline = [
+      online("2026-10-24T10:00:00.000Z", "stream-a"),
+      event("stream_offline", "2026-10-24T10:10:00.000Z"),
+      online("2026-10-24T10:12:00.000Z", "stream-a"),
+      online("2026-10-25T10:00:00.000Z", "stream-b"),
+    ];
+    const summaries = groupStatisticsWindows([
+      ...[0, 5, 10, 15, 20].map((minute) => window(`2026-10-24T10:${String(minute).padStart(2, "0")}:00.000Z`, "stream-a")),
+      window("2026-10-25T10:00:00.000Z", "stream-b"),
+    ], timeline);
+
+    expect(summaries.find(({ streamId }) => streamId === "stream-a")).toMatchObject({
+      endedAt: "2026-10-24T10:25:00.000Z",
+      durationSeconds: 25 * 60,
+    });
   });
 
   it("derives title and category transitions from consecutive observations", () => {

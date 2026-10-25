@@ -36,7 +36,7 @@ export interface StatisticsStreamSummary {
   messages: number;
   averageActiveChatters: number | null;
   clips: number;
-  /** Latest observed lifecycle start used only as the stable list-page cursor key. */
+  /** Latest statistics window used only as the stable list-page cursor key. */
   cursorAt?: string;
 }
 

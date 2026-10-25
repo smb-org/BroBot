@@ -596,27 +596,30 @@ Löschen des Kanals greift `ON DELETE CASCADE` (Entscheidung 0003, Abschnitt 6).
 Die lazy geladene Modulansicht zeigt Streams mit Kennzahlen und einem
 Fünf-Minuten-Verlauf. `GET /api/channels/:channelId/modules/statistics/streams`
 liefert höchstens 50 Einträge (Standard 20) mit undurchsichtigem Cursor. Die
-Liste gruppiert ausschließlich Fenster mit nicht-NULL `stream_id`; Start und
-Ende stammen aus dem ersten beziehungsweise letzten Fenster. Titel und
-Kategorien kommen aus den `channel_metadata`-Beobachtungen im Zeitbereich.
+Liste gruppiert ausschließlich Fenster mit nicht-NULL `stream_id`; ein Stream
+ohne Timeline-Start bleibt sichtbar, solange Statistikfenster vorliegen. Start
+und Ende stammen zunächst aus dem ersten beziehungsweise letzten Fenster und
+werden durch Lifecycle-Zeitpunkte präzisiert, wenn sie vorhanden sind. Titel
+und Kategorien werden aus der letzten Metadatenbeobachtung vor dem Start und
+den Beobachtungen im Lifecycle-Intervall gebildet.
 `GET /api/channels/:channelId/modules/statistics/streams/:streamId` liefert die
-Fenster, passende Timeline-Ereignisse und BELABOX-Bitratefenster im selben
-UTC-Zeitraum. BELABOX-Stream-IDs werden dafür nicht mit Twitch-IDs verglichen.
-Antworten enthalten nur Aggregate und Stream-Metadaten.
+vollständigen Fenster dieses Streams, passende Timeline-Ereignisse und
+BELABOX-Bitratefenster im Fenster-UTC-Zeitraum. Timeline-Ereignisse folgen dem
+Lifecycle-Intervall; fehlen Lifecycle-Fakten, gelten die Fenstergrenzen.
+BELABOX-Stream-IDs werden dafür nicht mit Twitch-IDs verglichen. Antworten
+enthalten nur Aggregate und Stream-Metadaten.
 
-Die Stream-Auswahl gruppiert die Streamstart-Ereignisse dieses Kanals über den
-vorhandenen Kanal-/Ereignisart-/Zeitindex der Timeline. Dafür werden die
-Lifecycle-Zeilen des Kanals gelesen; Cursor und `LIMIT` begrenzen das Ergebnis
-auf die angeforderte Seite plus einen Eintrag. Statistikfenster werden danach
-über den Primärschlüssel `(channel_id, window_start)` in einem Zeitbereich vom
-ältesten Stream der Seite bis zur aktuellen beziehungsweise vorherigen
-Cursorgrenze abgefragt und auf die ausgewählten `stream_id`-Werte gefiltert.
-Der Indexweg hängt von den Statistikzeilen dieses Kanals im Seitenzeitraum ab
-und kann Lücken zwischen ausgewählten Streams einschließen. Detailfenster,
-Timeline-Ereignisse und BELABOX-Daten sind auf den Stream-Zeitraum begrenzt;
-ihre Abfragen nutzen vorhandene Kanal-/Zeitindizes. Das Seitenlimit begrenzt
-die Antwort und Zahl der ausgewählten Streams, nicht deren Dauer oder Zahl
-der Fünf-Minuten-Fenster.
+Die Stream-Auswahl gruppiert alle `channel_statistics`-Fenster des Kanals nach
+`stream_id`, ordnet nach dem letzten `window_start` und wendet den Cursor auf
+diese Stream-Auswahl an. Diese Gruppierung scannt alle Statistikzeilen des
+Kanals, da kein vorhandener Index die Gruppierung und Reihenfolge abdeckt. Für
+die ausgewählten Streams werden danach alle Fenster gelesen, damit Seiten keine
+Teilaggregate liefern. Timeline-Abfragen nutzen vorhandene Kanal-/Zeitindizes;
+der Metadaten-Seed liest die letzte Beobachtung vor dem jeweils abgefragten
+Zeitbereich. Detailfenster lesen nur die Zeilen der angefragten Stream-ID.
+Das Seitenlimit begrenzt Antwort und Zahl ausgewählter Streams, nicht deren
+Dauer oder Zahl der Fünf-Minuten-Fenster. Die Ansicht formatiert Zeitpunkte in
+der Kanalzeitzone aus den Kanaleinstellungen.
 
 Für die Themen-Erkennung tokenisiert das DO ausschließlich Textfragmente und
 zählt Wörter je Stream. NFKC-Normalisierung, Kleinschreibung und das Entfernen

@@ -29,6 +29,7 @@ interface StatisticsHistoryChartProps {
   bitrateWindows: readonly StatisticsBitrateWindow[];
   events: readonly StatisticsStreamEvent[];
   language: "de" | "en";
+  timeZone: string;
   labels: StatisticsPanelTexts;
   highlightedEventId: string | null;
   onHighlightEvent: (eventId: string | null) => void;
@@ -80,9 +81,10 @@ const markerShape = (type: MarkerType, x: number, y: number): ReactElement => {
   return <path d={`M ${String(x)} ${String(y - 7)} l 2 5 5 -2 -3 4 4 3 -5 1 -1 5 -3 -4 -4 3 1 -5 -4 -3 5 -1 z`} />;
 };
 
-const timeLabel = (value: string, language: string): string => {
+const timeLabel = (value: string, language: string, timeZone: string): string => {
   const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? "—" : new Intl.DateTimeFormat(language, { hour: "2-digit", minute: "2-digit" }).format(date);
+  const locale = language === "de" ? "de-DE" : "en-US";
+  return Number.isNaN(date.valueOf()) ? "—" : new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone }).format(date);
 };
 
 const valueLabel = (value: number, language: string): string => new Intl.NumberFormat(language, { maximumFractionDigits: 0 }).format(value);
@@ -113,12 +115,15 @@ const markerCandidates = (events: readonly StatisticsStreamEvent[], labels: Stat
   });
 };
 
-export function StatisticsHistoryChart({ summary, windows, bitrateWindows, events, language, labels, highlightedEventId, onHighlightEvent }: StatisticsHistoryChartProps): ReactElement {
+export function StatisticsHistoryChart({ summary, windows, bitrateWindows, events, language, timeZone, labels, highlightedEventId, onHighlightEvent }: StatisticsHistoryChartProps): ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(STATISTICS_CHART_PLOT.width);
   const [metric, setMetric] = useState<Metric>("viewer-chat");
-  const start = Date.parse(summary.startedAt);
-  const end = Date.parse(summary.endedAt);
+  // The plot spans the five-minute windows so no point falls outside it.
+  const firstWindow = windows[0];
+  const lastWindow = windows.at(-1);
+  const start = Math.min(Date.parse(summary.startedAt), firstWindow === undefined ? Infinity : Date.parse(firstWindow.windowStart));
+  const end = Math.max(Date.parse(summary.endedAt), lastWindow === undefined ? 0 : Date.parse(lastWindow.windowStart) + 300_000);
   const hasBitrate = bitrateWindows.length > 0;
 
   useEffect(() => {
@@ -194,7 +199,7 @@ export function StatisticsHistoryChart({ summary, windows, bitrateWindows, event
         transform: focusedMarker.x / width < 0.2 ? "translateX(0)" : focusedMarker.x / width > 0.8 ? "translateX(-100%)" : "translateX(-50%)",
       }}>
         <strong>{labelForEvent(focusedMarker.event, labels)}</strong>
-        <span>{timeLabel(focusedMarker.event.at, language)} · {eventDetail(focusedMarker.event, labels)}</span>
+        <span>{timeLabel(focusedMarker.event.at, language, timeZone)} · {eventDetail(focusedMarker.event, labels)}</span>
       </div>}
       <svg width="100%" height={CHART_HEIGHT} viewBox={`0 0 ${String(width)} ${String(CHART_HEIGHT)}`} role="group" aria-label={labels.history}>
         <text x={STATISTICS_CHART_PLOT.left} y="12" textAnchor="start" fill="var(--text-3)" fontSize="11">{primarySeries?.unit}</text>
@@ -227,13 +232,13 @@ export function StatisticsHistoryChart({ summary, windows, bitrateWindows, event
           const at = new Date(start + (end - start) * fraction).toISOString();
           return <g key={fraction}>
             <line x1={x} x2={x} y1={STATISTICS_CHART_PLOT.bottom} y2={STATISTICS_CHART_PLOT.bottom + 4} stroke="var(--text-3)" />
-            <text x={x} y={STATISTICS_CHART_PLOT.bottom + 17} textAnchor={fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"} fill="var(--text-3)" fontSize="11">{timeLabel(at, language)}</text>
+            <text x={x} y={STATISTICS_CHART_PLOT.bottom + 17} textAnchor={fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"} fill="var(--text-3)" fontSize="11">{timeLabel(at, language, timeZone)}</text>
           </g>;
         })}
         {markers.map(({ event, x, lane, color, label }) => {
           const y = STATISTICS_CHART_PLOT.bottom + 35 + lane * 20;
           const active = event.id === highlightedEventId;
-          const accessibleLabel = `${label}: ${eventDetail(event, labels)} ${labels.at} ${timeLabel(event.at, language)}`;
+          const accessibleLabel = `${label}: ${eventDetail(event, labels)} ${labels.at} ${timeLabel(event.at, language, timeZone)}`;
           return <g
             key={event.id}
             className="statistics-chart__marker"

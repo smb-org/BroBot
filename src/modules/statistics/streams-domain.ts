@@ -27,11 +27,58 @@ const average = (values: readonly (number | null)[]): number | null => {
   return observed.length === 0 ? null : observed.reduce((sum, value) => sum + value, 0) / observed.length;
 };
 
+const instantNanoseconds = (value: string): bigint | null => {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/u.exec(value);
+  if (match === null) return null;
+  const milliseconds = Date.parse(`${match[1] ?? ""}${match[3] ?? ""}`);
+  if (!Number.isFinite(milliseconds)) return null;
+  return BigInt(milliseconds) * 1_000_000n + BigInt((match[2] ?? "").padEnd(9, "0"));
+};
+
+const compareInstants = (left: string, right: string): number => {
+  const leftInstant = instantNanoseconds(left);
+  const rightInstant = instantNanoseconds(right);
+  if (leftInstant !== null && rightInstant !== null) return leftInstant < rightInstant ? -1 : leftInstant > rightInstant ? 1 : 0;
+  return left.localeCompare(right);
+};
+
 const eventInRange = (event: StatisticsTimelineEvent, start: string, end: string): boolean =>
-  event.occurredAt >= start && event.occurredAt < end;
+  compareInstants(event.occurredAt, start) >= 0 && compareInstants(event.occurredAt, end) < 0;
+
+interface StreamLifecycleRange {
+  startedAt: string;
+  endedAt: string;
+  endingKind: "stream_offline" | "stream_online" | null;
+}
+
+const streamLifecycleRange = (
+  timelineEvents: readonly StatisticsTimelineEvent[],
+  streamId: string | undefined,
+  windowStart: string,
+  windowEnd: string,
+): StreamLifecycleRange => {
+  if (streamId === undefined) return { startedAt: windowStart, endedAt: windowEnd, endingKind: null };
+  const ordered = [...timelineEvents].sort((left, right) => compareInstants(left.occurredAt, right.occurredAt));
+  const isOwnOnline = (event: StatisticsTimelineEvent): boolean => event.kind === "stream_online" && event.streamId === streamId;
+  const online = ordered.find(isOwnOnline);
+  if (online === undefined) return { startedAt: windowStart, endedAt: windowEnd, endingKind: null };
+  // Reconnects reuse the stream id, so the interval ends at the first lifecycle event after the last own start.
+  const lastOnlineIndex = ordered.findLastIndex(isOwnOnline);
+  const nextLifecycle = ordered.find((event, index) => index > lastOnlineIndex &&
+    (event.kind === "stream_offline" || event.kind === "stream_online"));
+  if (nextLifecycle === undefined) return { startedAt: online.occurredAt, endedAt: windowEnd, endingKind: null };
+  // The last window may close after the offline notice; events inside it still belong to the stream.
+  const endsWithOffline = nextLifecycle.kind === "stream_offline";
+  const endedAt = endsWithOffline && compareInstants(nextLifecycle.occurredAt, windowEnd) < 0 ? windowEnd : nextLifecycle.occurredAt;
+  return { startedAt: online.occurredAt, endedAt, endingKind: endsWithOffline ? "stream_offline" : "stream_online" };
+};
+
+const eventInLifecycleRange = (event: StatisticsTimelineEvent, range: StreamLifecycleRange): boolean =>
+  eventInRange(event, range.startedAt, range.endedAt) ||
+  (event.kind === "stream_offline" && range.endingKind === "stream_offline" && compareInstants(event.occurredAt, range.endedAt) === 0);
 
 const compareNewestFirst = (left: StatisticsStreamSummary, right: StatisticsStreamSummary): number =>
-  (right.cursorAt ?? right.endedAt).localeCompare(left.cursorAt ?? left.endedAt) || right.streamId.localeCompare(left.streamId);
+  compareInstants(right.cursorAt ?? right.endedAt, left.cursorAt ?? left.endedAt) || right.streamId.localeCompare(left.streamId);
 
 interface StreamCursor {
   cursorAt: string;
@@ -70,17 +117,20 @@ export const groupStatisticsWindows = (
 
   const summaries = [...groups.entries()].map(([streamId, rows]): StatisticsStreamSummary => {
     const ordered = [...rows].sort((left, right) => left.windowStart.localeCompare(right.windowStart));
-    const startedAt = ordered[0]?.windowStart ?? "";
-    const lastWindowStart = ordered.at(-1)?.windowStart ?? startedAt;
-    const endedAt = new Date(Date.parse(lastWindowStart) + WINDOW_MILLISECONDS).toISOString();
-    const inRangeMetadata = timelineEvents
-      .filter((event) => event.kind === "channel_metadata" && eventInRange(event, startedAt, endedAt))
-      .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
-    const latestMetadata = inRangeMetadata.at(-1);
-    const cursorAt = timelineEvents
-      .filter((event) => event.kind === "stream_online" && event.streamId === streamId && eventInRange(event, startedAt, endedAt))
-      .at(-1)?.occurredAt;
-    const categories = [...new Set(inRangeMetadata.flatMap((event) => {
+    const windowStart = ordered[0]?.windowStart ?? "";
+    const lastWindowStart = ordered.at(-1)?.windowStart ?? windowStart;
+    const windowEnd = new Date(Date.parse(lastWindowStart) + WINDOW_MILLISECONDS).toISOString();
+    const lifecycle = streamLifecycleRange(timelineEvents, streamId, windowStart, windowEnd);
+    const { startedAt, endedAt } = lifecycle;
+    const displayEnd = lifecycle.endingKind === "stream_online" ? windowEnd : endedAt;
+    const metadataEvents = timelineEvents
+      .filter((event) => event.kind === "channel_metadata")
+      .sort((left, right) => compareInstants(left.occurredAt, right.occurredAt));
+    const metadataBefore = metadataEvents.filter((event) => compareInstants(event.occurredAt, startedAt) < 0).at(-1);
+    const inRangeMetadata = metadataEvents.filter((event) => eventInRange(event, startedAt, endedAt));
+    const observedMetadata = [...(metadataBefore === undefined ? [] : [metadataBefore]), ...inRangeMetadata];
+    const latestMetadata = observedMetadata.at(-1);
+    const categories = [...new Set(observedMetadata.flatMap((event) => {
       const category = metadataValues(event).category;
       return category === null ? [] : [category];
     }))];
@@ -91,8 +141,9 @@ export const groupStatisticsWindows = (
     return {
       streamId,
       startedAt,
-      endedAt,
-      durationSeconds: Math.max(0, Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 1_000)),
+      // A stream without an offline notice runs to its last window, not to the next stream's start.
+      endedAt: displayEnd,
+      durationSeconds: Math.max(0, Math.round((Date.parse(displayEnd) - Date.parse(startedAt)) / 1_000)),
       title: latestMetadata === undefined ? null : metadataValues(latestMetadata).title,
       categories,
       averageViewers: average(ordered.map((row) => row.viewerCount)),
@@ -100,8 +151,8 @@ export const groupStatisticsWindows = (
       peakAt: peak?.windowStart ?? null,
       messages: ordered.reduce((sum, row) => sum + row.messages, 0),
       averageActiveChatters: average(ordered.map((row) => row.activeChatters)),
-      clips: timelineEvents.filter((event) => event.kind === "clip_created" && eventInRange(event, startedAt, endedAt)).length,
-      ...(cursorAt === undefined ? {} : { cursorAt }),
+      clips: timelineEvents.filter((event) => event.kind === "clip_created" && eventInLifecycleRange(event, lifecycle)).length,
+      cursorAt: lastWindowStart,
     };
   });
 
@@ -118,7 +169,8 @@ export const paginateStreamSummaries = (
   const ordered = [...summaries].sort(compareNewestFirst).filter((summary) => {
     if (parsedCursor === null) return true;
     const cursorAt = summary.cursorAt ?? summary.endedAt;
-    return cursorAt < parsedCursor.cursorAt || (cursorAt === parsedCursor.cursorAt && summary.streamId < parsedCursor.streamId);
+    const comparison = compareInstants(cursorAt, parsedCursor.cursorAt);
+    return comparison < 0 || (comparison === 0 && summary.streamId < parsedCursor.streamId);
   });
   const streams = ordered.slice(0, limit);
   const hasMore = ordered.length > limit;
@@ -130,7 +182,7 @@ export const paginateStreamSummaries = (
 };
 
 const dropPairs = (events: readonly StatisticsTimelineEvent[]): Map<number, number> => {
-  const ordered = [...events].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  const ordered = [...events].sort((left, right) => compareInstants(left.occurredAt, right.occurredAt));
   const usedOnline = new Set<number>();
   const pairs = new Map<number, number>();
   ordered.forEach((event, offlineIndex) => {
@@ -151,15 +203,17 @@ export const deriveStreamEvents = (
   timelineEvents: readonly StatisticsTimelineEvent[],
   startedAt: string,
   endedAt: string,
+  streamId?: string,
 ): StatisticsStreamEvent[] => {
-  const ordered = [...timelineEvents].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  const ordered = [...timelineEvents].sort((left, right) => compareInstants(left.occurredAt, right.occurredAt));
   const pairs = dropPairs(ordered);
   const pairedOnline = new Set(pairs.values());
   const result: StatisticsStreamEvent[] = [];
   let metadataBefore: { title: string | null; category: string | null } | null = null;
+  const range = streamLifecycleRange(ordered, streamId, startedAt, endedAt);
 
   ordered.forEach((event, index) => {
-    const inRange = eventInRange(event, startedAt, endedAt);
+    const inRange = eventInLifecycleRange(event, range);
     if (event.kind === "channel_metadata") {
       const current = metadataValues(event);
       if (inRange && metadataBefore !== null && (current.title !== metadataBefore.title || current.category !== metadataBefore.category)) {
@@ -199,7 +253,8 @@ export const deriveStreamEvents = (
     }
     if (!inRange) return;
     if (event.kind === "stream_online") {
-      if (!pairedOnline.has(index)) result.push({ id: `start:${event.occurredAt}:${String(index)}`, type: "start", at: event.occurredAt });
+      const isStreamStart = streamId !== undefined && event.streamId === streamId && compareInstants(event.occurredAt, range.startedAt) === 0;
+      if (!pairedOnline.has(index) || isStreamStart) result.push({ id: `start:${event.occurredAt}:${String(index)}`, type: "start", at: event.occurredAt });
     } else if (event.kind === "clip_created") {
       const detail = record(event.detail) ?? {};
       const clipId = text(detail.clipId);
@@ -230,7 +285,7 @@ export const deriveStreamEvents = (
     }
   });
 
-  return result.sort((left, right) => left.at.localeCompare(right.at) || left.id.localeCompare(right.id));
+  return result.sort((left, right) => compareInstants(left.at, right.at) || left.id.localeCompare(right.id));
 };
 
 /** BELABOX stream ids are independent of Twitch ids, so only the UTC range is compared. */
