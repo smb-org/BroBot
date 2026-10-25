@@ -42,8 +42,8 @@ describe("stream clip lookup", () => {
     vi.useRealTimers();
   });
 
-  it("follows cursors for at most five pages and returns privacy-safe clip details", async () => {
-    for (let page = 0; page < 5; page += 1) {
+  it("follows at most two pages and returns privacy-safe clip details", async () => {
+    for (let page = 0; page < 2; page += 1) {
       helixRequest.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -61,8 +61,8 @@ describe("stream clip lookup", () => {
       "2026-10-25T12:05:00.000Z",
     );
 
-    expect(clips).toHaveLength(500);
-    expect(helixRequest).toHaveBeenCalledTimes(5);
+    expect(clips).toHaveLength(200);
+    expect(helixRequest).toHaveBeenCalledTimes(2);
     expect(helixRequest).toHaveBeenNthCalledWith(1, expect.objectContaining({
       url: "https://api.twitch.tv/helix/clips",
       clientId: "client-id",
@@ -109,5 +109,85 @@ describe("stream clip lookup", () => {
       "2026-10-25T12:05:00.000Z",
     )).resolves.toBeNull();
     expect(helixRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the fetched page when the next page is outside the external fetch budget", async () => {
+    helixRequest.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: { data: [rawClip(1)], pagination: { cursor: "next" } },
+    });
+    const budget = { claim: vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false) };
+
+    const clips = await fetchStreamClips(
+      environment,
+      "broadcaster-1",
+      "2026-10-25T08:00:00.000Z",
+      "2026-10-25T12:05:00.000Z",
+      budget,
+    );
+
+    expect(clips).toHaveLength(1);
+    expect(clips?.[0]?.clipId).toBe("clip-1");
+    expect(helixRequest).toHaveBeenCalledOnce();
+  });
+
+  it("fits two pages and the token request in the three-request budget", async () => {
+    readCachedAppAccessToken.mockResolvedValue(null);
+    helixRequest
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: { data: Array.from({ length: 100 }, (_, item) => rawClip(item)), pagination: { cursor: "next" } },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: { data: Array.from({ length: 100 }, (_, item) => rawClip(100 + item)), pagination: {} },
+      });
+    const budget = { claim: vi.fn(() => true) };
+
+    const clips = await fetchStreamClips(
+      environment,
+      "broadcaster-1",
+      "2026-10-25T08:00:00.000Z",
+      "2026-10-25T12:05:00.000Z",
+      budget,
+    );
+
+    expect(clips).toHaveLength(200);
+    expect(budget.claim).toHaveBeenCalledTimes(3);
+    expect(getAppAccessToken).toHaveBeenCalledOnce();
+  });
+
+  it("refreshes a cached app token once after a Helix 401", async () => {
+    helixRequest
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        reason: "http_401",
+        message: "Unauthorized",
+        body: {},
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: { data: [rawClip(7)], pagination: {} },
+      });
+    const budget = { claim: vi.fn(() => true) };
+    const fetcher = vi.fn<typeof fetch>();
+
+    const clips = await fetchStreamClips(
+      environment,
+      "broadcaster-1",
+      "2026-10-25T08:00:00.000Z",
+      "2026-10-25T12:05:00.000Z",
+      budget,
+      fetcher,
+    );
+
+    expect(clips?.map(({ clipId }) => clipId)).toEqual(["clip-7"]);
+    expect(getAppAccessToken).toHaveBeenCalledWith(environment, "2026-10-25T12:20:00.000Z", fetcher, true);
+    expect(budget.claim).toHaveBeenCalledTimes(3);
   });
 });

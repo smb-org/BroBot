@@ -145,7 +145,7 @@ import { createModuleSecretAccess } from "../module-secrets";
 import { sendChatMessage } from "../chat";
 import { sendModerationBan } from "../moderation";
 import { readChannelStreamState } from "../db/stream-state";
-import { writeChannelTimelineEvent } from "../db/timeline-events";
+import { writeChannelTimelineEvent, writeChannelTimelineEventOrThrow } from "../db/timeline-events";
 import { readChannelDefaultChatTarget } from "../db/channel-settings";
 import { moduleEnabledForChannel, readDispatchChannelState } from "../db/channel-controls";
 import { chatOutputSuppressionReason } from "../chat-output-gate";
@@ -995,10 +995,10 @@ export class ChannelObject extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS ${STATISTICS_CLIP_IMPORT_TABLE} (
         stream_id TEXT PRIMARY KEY,
+        started_at TEXT,
         ended_at INTEGER NOT NULL,
         ready_at INTEGER NOT NULL,
-        expires_at INTEGER NOT NULL,
-        completed INTEGER NOT NULL DEFAULT 0
+        expires_at INTEGER NOT NULL
       )`,
     );
     this.ctx.storage.sql.exec(
@@ -1899,6 +1899,21 @@ export class ChannelObject extends DurableObject<Env> {
   public async transitionTimerStream(stream: DurableTimerStream): Promise<void> {
     await this.ensurePointRoundRecovery();
     await this.ensureTimerSchedulesInitialized();
+    if (stream.endedSession !== undefined &&
+        !(stream.state === "online" && stream.streamId === stream.endedSession.streamId &&
+          sameStreamStartedAt(stream.startedAt, stream.endedSession.startedAt))) {
+      await this.markStatisticsClipImportPending(
+        stream.endedSession.streamId,
+        stream.endedSession.startedAt,
+        stream.endedSession.endedAt,
+      );
+      await this.scheduleModuleAlarm(
+        "statistics",
+        "window",
+        "window",
+        statisticsWindowStartMs(Date.now()) + STATISTICS_WINDOW_MILLISECONDS,
+      );
+    }
     const now = Date.now();
     const changedTimerIds: string[] = [];
     this.ctx.storage.transactionSync(() => {
@@ -1908,7 +1923,12 @@ export class ChannelObject extends DurableObject<Env> {
         stream.streamId !== state.stream.streamId || !sameStreamStartedAt(stream.startedAt, state.stream.startedAt);
       if (!streamChanged) return;
       this.timerScheduleInputGeneration += 1;
-      state.stream = stream;
+      state.stream = {
+        state: stream.state,
+        streamId: stream.streamId,
+        startedAt: stream.startedAt,
+        generation: stream.generation,
+      };
       if (stream.state === "online") state.activityCounts.live = 0;
       if (stream.state === "offline") state.activityCounts.offline = 0;
       const inputs: TimerScheduleInputs = { now, timeZone: "Europe/Berlin", eventTimes: [] };
@@ -3376,14 +3396,18 @@ export class ChannelObject extends DurableObject<Env> {
         deleteWordBucket: (bucket) => this.deleteStatisticsWordBucket(bucket),
         pruneExpiredWordStreams: (now) => this.pruneExpiredStatisticsWordStreams(now),
         hasWordStreams: () => this.hasStatisticsWordStreams(),
-        markClipImportPending: (streamId, endedAt) => this.markStatisticsClipImportPending(streamId, endedAt),
+        markClipImportPending: (streamId, startedAt, endedAt) =>
+          this.markStatisticsClipImportPending(streamId, startedAt, endedAt),
         listReadyClipImports: (now) => this.listReadyStatisticsClipImports(now),
         completeClipImport: (streamId) => this.completeStatisticsClipImport(streamId),
+        nextClipImportReadyAt: (now) => this.nextStatisticsClipImportReadyAt(now),
         pruneExpiredClipImports: (now) => this.pruneExpiredStatisticsClipImports(now),
         hasClipImports: () => this.hasStatisticsClipImports(),
       },
       recordTimelineEvent: (event: ModuleTimelineEvent) =>
         writeChannelTimelineEvent(this.env.DB, channelId, event),
+      recordTimelineEventStrict: (event: ModuleTimelineEvent) =>
+        writeChannelTimelineEventOrThrow(this.env.DB, channelId, event),
       fetchViewerCount: () => fetchLiveViewerCount(this.env, channelId, externalFetchBudget),
       fetchChattersTotal: () => fetchLiveChattersTotal(this.env, channelId, externalFetchBudget),
       fetchStreamClips: (startedAt, endedAt) => fetchTwitchStreamClips(
@@ -4020,14 +4044,20 @@ export class ChannelObject extends DurableObject<Env> {
     return Promise.resolve(present === 1);
   }
 
-  public markStatisticsClipImportPending(streamId: string, endedAt: string): Promise<void> {
+  public markStatisticsClipImportPending(
+    streamId: string,
+    startedAt: string | null,
+    endedAt: string,
+  ): Promise<void> {
     const endedAtMs = Date.parse(endedAt);
     if (streamId.length === 0 || !Number.isSafeInteger(endedAtMs)) return Promise.resolve();
     this.ensureStatisticsSchema();
     this.ctx.storage.sql.exec(
-      `INSERT OR IGNORE INTO ${STATISTICS_CLIP_IMPORT_TABLE} (stream_id, ended_at, ready_at, expires_at)
-       VALUES (?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO ${STATISTICS_CLIP_IMPORT_TABLE}
+         (stream_id, started_at, ended_at, ready_at, expires_at)
+       VALUES (?, ?, ?, ?, ?)`,
       streamId,
+      startedAt !== null && Number.isFinite(Date.parse(startedAt)) ? startedAt : null,
       endedAtMs,
       endedAtMs + STATISTICS_WORD_STREAM_IDLE_MILLISECONDS,
       endedAtMs + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS,
@@ -4038,14 +4068,15 @@ export class ChannelObject extends DurableObject<Env> {
   public listReadyStatisticsClipImports(now: number): Promise<readonly ModuleStatisticsClipImport[]> {
     if (!Number.isSafeInteger(now)) return Promise.resolve([]);
     this.ensureStatisticsSchema();
-    const rows = this.ctx.storage.sql.exec<{ stream_id: string; ended_at: number }>(
-      `SELECT stream_id, ended_at FROM ${STATISTICS_CLIP_IMPORT_TABLE}
-        WHERE completed = 0 AND ready_at <= ? AND expires_at > ? ORDER BY ended_at ASC`,
+    const rows = this.ctx.storage.sql.exec<{ stream_id: string; started_at: string | null; ended_at: number }>(
+      `SELECT stream_id, started_at, ended_at FROM ${STATISTICS_CLIP_IMPORT_TABLE}
+        WHERE ready_at <= ? AND expires_at > ? ORDER BY ended_at ASC`,
       now,
       now,
     ).toArray();
-    return Promise.resolve(rows.map(({ stream_id: streamId, ended_at: endedAt }) => ({
+    return Promise.resolve(rows.map(({ stream_id: streamId, started_at: startedAt, ended_at: endedAt }) => ({
       streamId,
+      startedAt,
       endedAt: new Date(endedAt).toISOString(),
     })));
   }
@@ -4053,10 +4084,20 @@ export class ChannelObject extends DurableObject<Env> {
   public completeStatisticsClipImport(streamId: string): Promise<void> {
     this.ensureStatisticsSchema();
     this.ctx.storage.sql.exec(
-      `UPDATE ${STATISTICS_CLIP_IMPORT_TABLE} SET completed = 1 WHERE stream_id = ?`,
+      `DELETE FROM ${STATISTICS_CLIP_IMPORT_TABLE} WHERE stream_id = ?`,
       streamId,
     );
     return Promise.resolve();
+  }
+
+  public nextStatisticsClipImportReadyAt(now: number): Promise<number | null> {
+    if (!Number.isSafeInteger(now)) return Promise.resolve(null);
+    this.ensureStatisticsSchema();
+    const readyAt = this.ctx.storage.sql.exec<{ ready_at: number | null }>(
+      `SELECT MIN(ready_at) AS ready_at FROM ${STATISTICS_CLIP_IMPORT_TABLE} WHERE expires_at > ?`,
+      now,
+    ).one().ready_at;
+    return Promise.resolve(Number.isSafeInteger(readyAt) ? readyAt : null);
   }
 
   public pruneExpiredStatisticsClipImports(now: number): Promise<void> {
@@ -4072,7 +4113,7 @@ export class ChannelObject extends DurableObject<Env> {
   public hasStatisticsClipImports(): Promise<boolean> {
     this.ensureStatisticsSchema();
     const present = this.ctx.storage.sql.exec<{ present: number }>(
-      `SELECT EXISTS (SELECT 1 FROM ${STATISTICS_CLIP_IMPORT_TABLE} WHERE completed = 0) AS present`,
+      `SELECT EXISTS (SELECT 1 FROM ${STATISTICS_CLIP_IMPORT_TABLE}) AS present`,
     ).one().present;
     return Promise.resolve(present === 1);
   }

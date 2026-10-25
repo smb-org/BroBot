@@ -3,7 +3,7 @@ import { getAppAccessToken, readCachedAppAccessToken } from "../app-token";
 import { helixRequest } from "./helix";
 
 const CLIPS_PER_PAGE = 100;
-const MAX_CLIP_PAGES = 5;
+const MAX_CLIP_PAGES = 2;
 
 const recordValue = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -32,7 +32,7 @@ const readClip = (value: unknown): ModuleStreamClip | null => {
   return result;
 };
 
-/** Reads at most 500 clips for a stream, returning only fields approved for its long-lived timeline. */
+/** Reads at most 200 clips for a stream, returning only fields approved for its long-lived timeline. */
 export const fetchStreamClips = async (
   environment: Env,
   broadcasterId: string,
@@ -52,12 +52,13 @@ export const fetchStreamClips = async (
     const clips: ModuleStreamClip[] = [];
     const seenCursors = new Set<string>();
     let cursor: string | undefined;
+    let refreshedAfterUnauthorized = false;
     for (let pageIndex = 0; pageIndex < MAX_CLIP_PAGES; pageIndex += 1) {
-      if (!mayFetch(externalFetchBudget)) return null;
-      const result = await helixRequest<{ data?: unknown; pagination?: unknown }>({
+      if (!mayFetch(externalFetchBudget)) return clips.length > 0 ? clips : null;
+      const request = (token: string) => helixRequest<{ data?: unknown; pagination?: unknown }>({
         url: "https://api.twitch.tv/helix/clips",
         clientId: environment.TWITCH_CLIENT_ID,
-        accessToken,
+        accessToken: token,
         fetcher,
         query: {
           broadcaster_id: broadcasterId,
@@ -67,6 +68,14 @@ export const fetchStreamClips = async (
           after: cursor,
         },
       });
+      let result = await request(accessToken);
+      if (result.status === 401 && !refreshedAfterUnauthorized) {
+        if (!mayFetch(externalFetchBudget)) return clips.length > 0 ? clips : null;
+        accessToken = await getAppAccessToken(environment, now, fetcher, true);
+        refreshedAfterUnauthorized = true;
+        if (!mayFetch(externalFetchBudget)) return clips.length > 0 ? clips : null;
+        result = await request(accessToken);
+      }
       if (!result.ok) return null;
       const body = recordValue(result.data);
       if (body === null || !Array.isArray(body.data)) return null;

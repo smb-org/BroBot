@@ -798,12 +798,18 @@ export const dispatchEventSubNotification = async (
     streamStateTransitionGeneration = stateWrite.transitionGeneration ?? undefined;
     if (stateWrite.result === "written" && stateWrite.transitionGeneration !== null) {
       const channelNamespace = environment.CHANNEL as NonNullable<typeof environment.CHANNEL>;
+      const endedAt = event.eventSubTimestamp ?? event.receivedAt;
+      const endedSession = streamBefore?.state === "online" && streamBefore.streamId !== null &&
+          (!isOnline || streamBefore.streamId !== streamId)
+        ? { streamId: streamBefore.streamId, startedAt: streamBefore.startedAt, endedAt }
+        : undefined;
       try {
         await channelNamespace.get(channelNamespace.idFromName(event.channelId)).transitionTimerStream({
           state: isOnline ? "online" : "offline",
           streamId,
           startedAt,
           generation: stateWrite.transitionGeneration,
+          ...(endedSession === undefined ? {} : { endedSession }),
         });
       } catch (error: unknown) {
         console.warn("Timer stream state could not be updated.", error);
@@ -1111,9 +1117,6 @@ export const dispatchEventSubNotification = async (
           markWordStreamEnded: (streamId: string, endedAt: string) =>
             channelNamespace.get(channelNamespace.idFromName(event.channelId))
               .markStatisticsWordStreamEnded(streamId, endedAt),
-          markClipImportPending: (streamId: string, endedAt: string) =>
-            channelNamespace.get(channelNamespace.idFromName(event.channelId))
-              .markStatisticsClipImportPending(streamId, endedAt),
         }
         : undefined;
       const moduleEvent: ModuleEvent = {

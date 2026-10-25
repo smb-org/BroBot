@@ -17,12 +17,17 @@ const keyRing = JSON.stringify({
   retired: [],
 });
 
-const environment = (database: TestD1Database, publish = vi.fn(), notifyScheduleInputsChanged = vi.fn()): Env => ({
+const environment = (
+  database: TestD1Database,
+  publish = vi.fn(),
+  notifyScheduleInputsChanged = vi.fn(),
+  transitionTimerStream = vi.fn(() => Promise.resolve()),
+): Env => ({
   DB: database as unknown as D1Database,
   TWITCH_CLIENT_ID: "client-id",
   TWITCH_CLIENT_SECRET: "client-secret",
   TOKEN_ENCRYPTION_KEYS: keyRing,
-  CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ publish, notifyScheduleInputsChanged }) },
+  CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ publish, notifyScheduleInputsChanged, transitionTimerStream }) },
 } as unknown as Env);
 
 const withAppToken = async (database: TestD1Database): Promise<void> => {
@@ -42,11 +47,12 @@ const insertStreamState = async (
   changedAt: string,
   source: "eventsub" | "helix",
   startedAt: string | null = null,
+  streamId: string | null = null,
 ): Promise<void> => {
   await database.prepare(
-    `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).bind(channelId, state, changedAt, source, startedAt).run();
+    `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, started_at, stream_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).bind(channelId, state, changedAt, source, startedAt, streamId).run();
 };
 
 const insertStreamEventSubCoverage = async (database: TestD1Database, channelId: string): Promise<void> => {
@@ -364,6 +370,32 @@ describe("lookupAndRefreshStreamState", () => {
       await expect(database.prepare(
         "SELECT state, transition_generation FROM channel_stream_state WHERE channel_id = 'kanal-a'",
       ).first()).resolves.toEqual({ state: "offline", transition_generation: 2 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("passes a missed stream end to the shared transition intake", async () => {
+    const database = new TestD1Database();
+    try {
+      const startedAt = "2026-09-23T09:00:00.000Z";
+      const streamId = "missed-offline-stream";
+      await insertChannel(database, "kanal-a");
+      await insertStreamState(database, "kanal-a", "online", STALE, "eventsub", startedAt, streamId);
+      await withAppToken(database);
+      const transitionTimerStream = vi.fn(() => Promise.resolve());
+
+      await lookupAndRefreshStreamState(
+        environment(database, vi.fn(), vi.fn(), transitionTimerStream),
+        "kanal-a",
+        NOW,
+        helixResponse(false),
+      );
+
+      expect(transitionTimerStream).toHaveBeenCalledWith(expect.objectContaining({
+        state: "offline",
+        endedSession: { streamId, startedAt, endedAt: NOW },
+      }));
     } finally {
       database.close();
     }

@@ -43,6 +43,20 @@ const insertTimelineRow = async (
   ).bind(channelId, eventKey, streamId, occurredAt, kind, JSON.stringify(detail)).run();
 };
 
+/** Writes an aggregate-only observation and lets D1 failures reach retryable callers. */
+export const writeChannelTimelineEventOrThrow = async (
+  database: D1Database,
+  channelId: string,
+  event: ModuleTimelineEvent,
+): Promise<void> => {
+  const occurredAt = canonicalTimestamp(event.occurredAt);
+  if (occurredAt === null) return;
+  const eventKey = await naturalEventKey(event, occurredAt);
+  if (eventKey === null) return;
+  const streamId = event.kind === "stream_online" ? event.streamId : null;
+  await insertTimelineRow(database, channelId, eventKey, streamId, occurredAt, event.kind, event.detail);
+};
+
 /** Writes an aggregate-only observation; timeline failures never affect event processing. */
 export const writeChannelTimelineEvent = async (
   database: D1Database,
@@ -50,12 +64,7 @@ export const writeChannelTimelineEvent = async (
   event: ModuleTimelineEvent,
 ): Promise<void> => {
   try {
-    const occurredAt = canonicalTimestamp(event.occurredAt);
-    if (occurredAt === null) return;
-    const eventKey = await naturalEventKey(event, occurredAt);
-    if (eventKey === null) return;
-    const streamId = event.kind === "stream_online" ? event.streamId : null;
-    await insertTimelineRow(database, channelId, eventKey, streamId, occurredAt, event.kind, event.detail);
+    await writeChannelTimelineEventOrThrow(database, channelId, event);
   } catch (error: unknown) {
     console.warn("Channel timeline event could not be recorded.", error);
   }

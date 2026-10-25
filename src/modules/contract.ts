@@ -621,8 +621,8 @@ export interface ModuleExecutionContext {
   streamStateTransitionAccepted?: boolean;
   /** Stream identity captured before an accepted offline transition changed channel state. */
   streamSession?: { streamId: string | null; startedAt: string | null };
-  /** Marks this stream's anonymous word counts and clip import as ended after an accepted offline transition. */
-  statisticsChat?: Pick<ModuleStatisticsChat, "markWordStreamEnded" | "markClipImportPending">;
+  /** Marks this stream's anonymous word counts as ended after an accepted offline transition. */
+  statisticsChat?: Pick<ModuleStatisticsChat, "markWordStreamEnded">;
   streamState: () => Promise<ModuleStreamState>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
@@ -763,6 +763,8 @@ export interface ModuleAlarmContext {
   statisticsChat?: ModuleStatisticsChat;
   /** Writes one privacy-safe host timeline observation with host-managed idempotency. */
   recordTimelineEvent?: (event: ModuleTimelineEvent) => Promise<void>;
+  /** Writes one privacy-safe host timeline observation and throws when D1 fails. */
+  recordTimelineEventStrict?: (event: ModuleTimelineEvent) => Promise<void>;
   /** Host-authenticated Helix counts; unavailable sources return null. */
   fetchViewerCount?: () => Promise<number | null>;
   fetchChattersTotal?: () => Promise<number | null>;
@@ -870,6 +872,7 @@ export interface ModuleStatisticsWordBucket {
 
 export interface ModuleStatisticsClipImport {
   streamId: string;
+  startedAt: string | null;
   endedAt: string;
 }
 
@@ -944,9 +947,10 @@ interface ModuleStatisticsChat {
   deleteWordBucket: (bucket: ModuleStatisticsWordBucket) => Promise<void>;
   pruneExpiredWordStreams: (now: number) => Promise<void>;
   hasWordStreams: () => Promise<boolean>;
-  markClipImportPending: (streamId: string, endedAt: string) => Promise<void>;
+  markClipImportPending: (streamId: string, startedAt: string | null, endedAt: string) => Promise<void>;
   listReadyClipImports: (now: number) => Promise<readonly ModuleStatisticsClipImport[]>;
   completeClipImport: (streamId: string) => Promise<void>;
+  nextClipImportReadyAt: (now: number) => Promise<number | null>;
   pruneExpiredClipImports: (now: number) => Promise<void>;
   hasClipImports: () => Promise<boolean>;
 }

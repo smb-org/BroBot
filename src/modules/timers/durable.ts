@@ -28,6 +28,7 @@ export interface DurableTimerStream {
   streamId: string | null;
   startedAt: string | null;
   generation: number;
+  endedSession?: { streamId: string; startedAt: string | null; endedAt: string };
 }
 
 export interface TimerOccurrence {
