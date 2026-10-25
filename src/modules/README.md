@@ -669,9 +669,12 @@ Die Worker-Host-Tabelle `channel_timeline_events` speichert rohe
 Stream-Lifecycle-Ereignisse (`stream.online` mit Stream-ID und `started_at`,
 `stream.offline`), jeweils eine aktuelle Metadatenbeobachtung aus
 `channel.update` (Titel und Kategorie, fehlende Kategorie als `NULL`),
-bestätigte Clips, autorisierte Werbepausen und Emote-Spitzen. Bot-Clips und
-nach Streamende importierte Clips verwenden die Clip-ID als natürlichen
-Schlüssel. Der Statistik-Alarm fragt Get Clips einmal 15 Minuten nach dem
+eingehende und ausgehende `channel.raid`-Ereignisse sowie bestätigte Clips,
+autorisierte Werbepausen und Emote-Spitzen. Raid-Einträge speichern die
+Zuschauerzahl und die öffentliche ID, den Login und den Anzeigenamen des
+Partnerkanals, aber keine Zuschauer-IDs; die EventSub-Nachrichten-ID ist ihr
+natürlicher Schlüssel. Bot-Clips und nach Streamende importierte Clips
+verwenden die Clip-ID als natürlichen Schlüssel. Der Statistik-Alarm fragt Get Clips einmal 15 Minuten nach dem
 Streamende ab, höchstens zwei Seiten beziehungsweise 200 Clips. Ein fehlgeschlagener
 Abruf bleibt bis zu 24 Stunden für spätere Alarme vorgemerkt. Die Timeline
 enthält bei Clips Clip-ID, Titel, Erstellungszeitpunkt, Aufruf-Snapshot und

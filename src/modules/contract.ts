@@ -900,6 +900,14 @@ export type ModuleTimelineEvent =
       detail: { title: string | null; category: { id: string; name: string | null } | null };
     })
   | (ModuleTimelineEventBase & {
+      kind: "raid_incoming";
+      detail: { viewers: number; partner: { id: string; login: string; displayName: string } };
+    })
+  | (ModuleTimelineEventBase & {
+      kind: "raid_outgoing";
+      detail: { viewers: number; partner: { id: string; login: string; displayName: string } };
+    })
+  | (ModuleTimelineEventBase & {
       kind: "clip_created";
       detail: {
         clipId: string;

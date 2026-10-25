@@ -204,6 +204,18 @@ describe("statistics stream derivation", () => {
     expect(events.filter(({ type }) => type === "emoteSpike").map(({ emotes }) => emotes)).toEqual([30, 60]);
   });
 
+  it("turns raid rows into directional events with the partner name and viewer count", () => {
+    const events = deriveStreamEvents([
+      event("raid_incoming", "2026-10-25T12:03:00.000Z", { viewers: 42, partner: { id: "p1", login: "partner_a", displayName: "Partner A" } }),
+      event("raid_outgoing", "2026-10-25T12:09:00.000Z", { viewers: 7, partner: { id: "p2", login: "partner_b", displayName: " " } }),
+    ], "2026-10-25T12:00:00.000Z", "2026-10-25T12:15:00.000Z");
+
+    expect(events).toEqual([
+      expect.objectContaining({ type: "raidIncoming", partnerName: "Partner A", raidViewers: 42 }),
+      expect.objectContaining({ type: "raidOutgoing", partnerName: "partner_b", raidViewers: 7 }),
+    ]);
+  });
+
   it("derives title and category transitions from consecutive observations", () => {
     const events = deriveStreamEvents([
       event("channel_metadata", "2026-10-25T12:00:00.000Z", { title: "Starting", category: { name: "Game A" } }),

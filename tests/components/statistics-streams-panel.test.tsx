@@ -32,6 +32,8 @@ const detail = (bitrateWindows: StatisticsStreamDetailResponse["bitrateWindows"]
   events: [
     { id: "clip-1", type: "clip", at: "2026-10-24T19:05:00.000Z", text: "First clip" },
     { id: "ad-1", type: "ad", at: "2026-10-24T19:10:00.000Z", durationSeconds: 90 },
+    { id: "raid-in", type: "raidIncoming", at: "2026-10-24T19:02:00.000Z", partnerName: "Partner A", raidViewers: 37 },
+    { id: "raid-out", type: "raidOutgoing", at: "2026-10-24T19:12:00.000Z", partnerName: "Partner B", raidViewers: 52 },
   ],
 });
 
@@ -103,6 +105,13 @@ describe("statistics streams page", () => {
     fireEvent.focus(clipMarker);
     expect((await screen.findByRole("tooltip")).textContent).toContain("First clip");
     expect(screen.getByRole("listitem", { name: /first clip/iu }).getAttribute("data-highlighted")).toBe("true");
+
+    expect(screen.getByRole("listitem", { name: /incoming raid raid from partner a with 37 viewers/iu })).toBeTruthy();
+    expect(screen.getByRole("listitem", { name: /outgoing raid raid to partner b with 52 viewers/iu })).toBeTruthy();
+    const legend = document.querySelector(".statistics-chart__legend-markers") as HTMLElement;
+    expect(within(legend).getByText("Incoming raid")).toBeTruthy();
+    expect(within(legend).getByText("Outgoing raid")).toBeTruthy();
+    expect(within(chart as HTMLElement).getByRole("button", { name: /incoming raid: raid from partner a/iu })).toBeTruthy();
 
     const bitrateButton = screen.getByRole("button", { name: "Bitrate" });
     expect((bitrateButton as HTMLButtonElement).disabled).toBe(true);

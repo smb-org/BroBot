@@ -27,9 +27,12 @@ describe("Schema baseline", () => {
 
   // Not every migration creates a table (0005 only backfills rows), so this
   // scans the whole history rather than assuming the latest file does it.
-  it("actually creates the table /healthz checks, somewhere in the migration history", () => {
-    const createsTable = files.some((file) =>
-      readFileSync(resolve(directory, file), "utf8").includes(`CREATE TABLE ${LATEST_SCHEMA_TABLE} `));
-    expect(createsTable).toBe(true);
+  it("actually creates or renames the table /healthz checks, somewhere in the migration history", () => {
+    const createsOrRenamesTable = files.some((file) => {
+      const source = readFileSync(resolve(directory, file), "utf8");
+      return source.includes(`CREATE TABLE ${LATEST_SCHEMA_TABLE} `) ||
+        new RegExp(`ALTER TABLE\\s+[A-Za-z_][A-Za-z0-9_]*\\s+RENAME TO\\s+${LATEST_SCHEMA_TABLE}\\b`, "iu").test(source);
+    });
+    expect(createsOrRenamesTable).toBe(true);
   });
 });

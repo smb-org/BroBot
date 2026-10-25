@@ -303,6 +303,130 @@ describe("channel timeline stream lifecycle", () => {
   });
 });
 
+describe("channel timeline raids", () => {
+  const occurredAt = "2026-10-25T12:03:04.123456789Z";
+  const raidEvent = (channelId: string, triggerId: string, fromId: string, toId: string) => ({
+    channelId,
+    subscriptionType: "channel.raid",
+    subscriptionVariant: channelId === toId ? "incoming" : "outgoing",
+    triggerId,
+    payload: {
+      from_broadcaster_user_id: fromId,
+      from_broadcaster_user_login: "source_login",
+      from_broadcaster_user_name: "Source Display",
+      to_broadcaster_user_id: toId,
+      to_broadcaster_user_login: "target_login",
+      to_broadcaster_user_name: "Target Display",
+      viewers: 42,
+    },
+    receivedAt: "2026-10-25T12:03:05.000Z",
+    eventSubTimestamp: occurredAt,
+  });
+
+  it.each([
+    {
+      kind: "raid_incoming",
+      channelId: "kanal-ziel",
+      triggerId: "raid-message-incoming",
+      fromId: "kanal-quelle",
+      toId: "kanal-ziel",
+      expected: { id: "kanal-quelle", login: "source_login", displayName: "Source Display" },
+    },
+    {
+      kind: "raid_outgoing",
+      channelId: "kanal-quelle",
+      triggerId: "raid-message-outgoing",
+      fromId: "kanal-quelle",
+      toId: "kanal-ziel",
+      expected: { id: "kanal-ziel", login: "target_login", displayName: "Target Display" },
+    },
+  ])("stores $kind with the partner and viewer count, once per EventSub message id", async ({
+    kind, channelId, triggerId, fromId, toId, expected,
+  }) => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, channelId);
+      const event = raidEvent(channelId, triggerId, fromId, toId);
+
+      await dispatchEventSubNotification(environment(database), event, vi.fn<typeof fetch>(), []);
+      await dispatchEventSubNotification(environment(database), event, vi.fn<typeof fetch>(), []);
+
+      const rows = await database.prepare(
+        `SELECT event_key, kind, stream_id, occurred_at, detail_json FROM channel_timeline_events
+          WHERE channel_id = ?`,
+      ).bind(channelId).all<{ event_key: string; kind: string; stream_id: string | null; occurred_at: string; detail_json: string }>();
+      expect(rows.results).toEqual([{
+        event_key: `${kind}:${triggerId}`,
+        kind,
+        stream_id: null,
+        occurred_at: occurredAt,
+        detail_json: JSON.stringify({ viewers: 42, partner: expected }),
+      }]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not record a raid when the event channel is neither broadcaster", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-unbeteiligt");
+
+      await dispatchEventSubNotification(
+        environment(database),
+        raidEvent("kanal-unbeteiligt", "raid-message-foreign", "kanal-quelle", "kanal-ziel"),
+        vi.fn<typeof fetch>(),
+        [],
+      );
+
+      await expect(database.prepare(
+        "SELECT COUNT(*) AS count FROM channel_timeline_events WHERE channel_id = ?",
+      ).bind("kanal-unbeteiligt").first()).resolves.toEqual({ count: 0 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("continues module dispatch when the raid timeline insert fails", async () => {
+    const database = new TestD1Database();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await insertChannel(database, "kanal-ziel");
+      await activate(database, "kanal-ziel", "raid-timeline-test");
+      const handler = vi.fn(() => ({ actions: [], diagnostics: [] }));
+      const module = fakeModule("raid-timeline-test", handler, ["channel.raid"]);
+      const failingDatabase = new Proxy(database as unknown as D1Database, {
+        get(_target, property) {
+          if (property === "prepare") {
+            return (sql: string) => {
+              if (sql.startsWith("INSERT INTO channel_timeline_events")) {
+                return {
+                  bind: () => ({ run: () => Promise.reject(new Error("timeline unavailable")) }),
+                } as unknown as D1PreparedStatement;
+              }
+              return database.prepare(sql);
+            };
+          }
+          return Reflect.get(database, property, database) as unknown;
+        },
+      });
+
+      await expect(dispatchEventSubNotification(
+        { ...environment(database), DB: failingDatabase },
+        raidEvent("kanal-ziel", "raid-message-write-fails", "kanal-quelle", "kanal-ziel"),
+        vi.fn<typeof fetch>(),
+        [module],
+      )).resolves.toBeUndefined();
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith("Channel timeline event could not be recorded.", expect.any(Error));
+    } finally {
+      warn.mockRestore();
+      database.close();
+    }
+  });
+});
+
 /** Registers every registry module as enabled; dispatch reads from the database. */
 const activate = async (database: TestD1Database, channelId: string, moduleId: string): Promise<void> => {
   await database.prepare(
