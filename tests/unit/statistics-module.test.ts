@@ -144,22 +144,35 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
     }),
     hasWordStreams: vi.fn(() => Promise.resolve(wordStreams.size > 0)),
     markClipImportPending: vi.fn((streamId: string, startedAt: string | null, endedAt: string) => {
-      if (!clipImports.has(streamId)) {
-        const endedAtMs = Date.parse(endedAt);
+      const endedAtMs = Date.parse(endedAt);
+      const pending = clipImports.get(streamId);
+      if (pending === undefined) {
         clipImports.set(streamId, {
           startedAt,
           endedAt,
           readyAt: endedAtMs + CLIP_IMPORT_DELAY_MS,
           expiresAt: endedAtMs + CLIP_IMPORT_RETENTION_MS,
         });
+      } else {
+        const existingStartedAt = pending.startedAt === null ? null : Date.parse(pending.startedAt);
+        const incomingStartedAt = startedAt === null ? null : Date.parse(startedAt);
+        if (existingStartedAt === null && incomingStartedAt !== null ||
+            existingStartedAt !== null && incomingStartedAt !== null && incomingStartedAt < existingStartedAt) {
+          pending.startedAt = startedAt;
+        }
+        if (endedAtMs > Date.parse(pending.endedAt)) {
+          pending.endedAt = endedAt;
+          pending.readyAt = endedAtMs + CLIP_IMPORT_DELAY_MS;
+          pending.expiresAt = endedAtMs + CLIP_IMPORT_RETENTION_MS;
+        }
       }
       return Promise.resolve();
     }),
     listReadyClipImports: vi.fn((now: number) => Promise.resolve([...clipImports]
       .filter(([, pending]) => pending.readyAt <= now && pending.expiresAt > now)
       .map(([streamId, pending]) => ({ streamId, startedAt: pending.startedAt, endedAt: pending.endedAt })))),
-    completeClipImport: vi.fn((streamId: string) => {
-      clipImports.delete(streamId);
+    completeClipImport: vi.fn((streamId: string, endedAt: string) => {
+      if (clipImports.get(streamId)?.endedAt === endedAt) clipImports.delete(streamId);
       return Promise.resolve();
     }),
     pruneExpiredClipImports: vi.fn((now: number) => {
@@ -1040,6 +1053,38 @@ describe("statistics window alarm", () => {
       "SELECT COUNT(*) AS count FROM channel_timeline_events WHERE channel_id = ? AND kind = 'clip_created'",
     ).bind(CHANNEL_ID).first<{ count: number }>();
     expect(repeated?.count).toBe(2);
+  });
+
+  it("imports a same-id reconnect through the final 10:12 offline cutoff", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    const startedAt = "2026-10-25T08:00:00.000Z";
+    const firstEnd = "2026-10-25T10:06:00.000Z";
+    const reconnectEnd = "2026-10-25T10:08:00.000Z";
+    const finalEnd = "2026-10-25T10:12:00.000Z";
+    await writeStreamState(database, "offline", finalEnd);
+    const chat = createStatisticsChat();
+    await chat.api.markClipImportPending(STREAM_ID, startedAt, firstEnd);
+    await chat.api.markClipImportPending(STREAM_ID, "2026-10-25T09:00:00.000Z", reconnectEnd);
+    await chat.api.markClipImportPending(STREAM_ID, "2026-10-25T09:30:00.000Z", finalEnd);
+    const { context, calls } = createContext(database, chat);
+    calls.fetchStreamClips.mockResolvedValue([{
+      clipId: "resumed-segment-clip",
+      title: "Resumed segment",
+      createdAt: "2026-10-25T10:11:00.000Z",
+      viewCount: 2,
+    }]);
+    vi.setSystemTime(Date.parse("2026-10-25T10:30:00.000Z"));
+
+    await windowAlarm().handle(context, "window", Date.parse("2026-10-25T10:30:00.000Z"));
+
+    expect(calls.fetchStreamClips).toHaveBeenCalledWith(startedAt, finalEnd);
+    expect(calls.timeline).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "clip_created",
+      identity: "resumed-segment-clip",
+    }));
+    expect(chat.calls.completeClipImport).toHaveBeenCalledWith(STREAM_ID, finalEnd);
+    expect(chat.clipImports.has(STREAM_ID)).toBe(false);
   });
 
   it("uses the stored session start when stream-online facts are missing", async () => {
