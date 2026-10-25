@@ -330,8 +330,12 @@ werden höchstens zwei Seiten beziehungsweise 200 Clips abgerufen, passend zum
 externen Anfragebudget eines Alarmlaufs inklusive Tokenabruf. Clips über diesem
 Limit oder Clips, die Twitch erst später verfügbar macht, können in der Timeline
 fehlen. Scheitert der `ChannelObject`-RPC `transitionTimerStream`, der
-`endedSession` überträgt, wird dieser Aufruf nicht wiederholt. Viewer-Clips
-dieses Streams werden dann nicht importiert; Bot-Clips sind davon nicht betroffen.
+`endedSession` überträgt, wird dieser Aufruf nicht wiederholt. Ebenso kann die
+Wiederherstellung nach einem Helix-Abgleich die Sitzung aus dem Zustand vor der
+Anfrage übernehmen; ersetzt ein gleichzeitiger EventSub-Schreibvorgang die
+Sitzung dazwischen, wird möglicherweise die ältere Sitzung eingereiht. Viewer-Clips
+eines Streams können also fehlen, wenn die Übergabe des Sitzungsendes verloren
+geht oder mit einem Schreibvorgang konkurriert; Bot-Clips sind davon nicht betroffen.
 
 Lifecycle-Wiederholungen sind über Art, Ereigniszeit und — bei `stream.online`
 — Stream-ID idempotent. Metadatenbeobachtungen verwenden Art, Ereigniszeit und

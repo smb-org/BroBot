@@ -1907,12 +1907,7 @@ export class ChannelObject extends DurableObject<Env> {
         stream.endedSession.startedAt,
         stream.endedSession.endedAt,
       );
-      await this.scheduleModuleAlarm(
-        "statistics",
-        "window",
-        "window",
-        statisticsWindowStartMs(Date.now()) + STATISTICS_WINDOW_MILLISECONDS,
-      );
+      await this.ensureStatisticsWindowAlarmScheduled(Date.now());
     }
     const now = Date.now();
     const changedTimerIds: string[] = [];

@@ -636,8 +636,12 @@ enthält bei Clips Clip-ID, Titel, Erstellungszeitpunkt, Aufruf-Snapshot und
 gegebenenfalls Dauer; Creator-, Broadcaster- und Spiel-IDs werden ausgelassen.
 Clips, die Twitch nach dem letzten Abruf verfügbar macht, können fehlen. Scheitert
 der `ChannelObject`-RPC `transitionTimerStream`, der `endedSession` überträgt,
-wird dieser Aufruf nicht wiederholt. Viewer-Clips dieses Streams werden dann
-nicht importiert; Bot-Clips sind davon nicht betroffen. Nur
+wird dieser Aufruf nicht wiederholt. Ebenso kann die Wiederherstellung nach
+einem Helix-Abgleich die Sitzung aus dem Zustand vor der Anfrage übernehmen;
+ersetzt ein gleichzeitiger EventSub-Schreibvorgang die Sitzung dazwischen, wird
+möglicherweise die ältere Sitzung eingereiht. Viewer-Clips eines Streams können
+also fehlen, wenn die Übergabe des Sitzungsendes verloren geht oder mit einem
+Schreibvorgang konkurriert; Bot-Clips sind davon nicht betroffen. Nur
 `stream.online` trägt eine Stream-ID; andere Ereignisse werden in der Analyse
 anhand ihrer Zeitpunkte Lifecycle-Zeilen zugeordnet.
 

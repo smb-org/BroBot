@@ -58,6 +58,7 @@ interface StatisticsClipImportObject {
 
 interface StatisticsStreamTransitionObject {
   getModuleAlarmDeadline(moduleId: string, alarmKey: string): Promise<number | null>;
+  scheduleModuleAlarm(moduleId: string, handlerKey: string, alarmKey: string, deadline: number): Promise<void>;
   transitionTimerStream(stream: {
     state: "offline";
     streamId: null;
@@ -663,5 +664,26 @@ describe("statistics windows in the channel object", () => {
     const scheduledAt = await object.getModuleAlarmDeadline("statistics", "window");
     expect(scheduledAt).not.toBeNull();
     expect((scheduledAt ?? 1) % WINDOW_MS).toBe(0);
+  });
+
+  it("keeps an existing statistics deadline when a clip import is enqueued", async () => {
+    const channelId = "statistics-clip-enqueue-keeps-deadline";
+    await insertPointChannel(channelId);
+    const object = statisticsObject(channelId) as unknown as StatisticsStreamTransitionObject;
+    // A real overdue alarm would fire at once and replace itself, so the stored deadline lies ahead;
+    // an overwrite to the next boundary is observable either way.
+    const overdue = Math.floor((Date.now() + 30 * 60_000) / WINDOW_MS) * WINDOW_MS;
+    await object.scheduleModuleAlarm("statistics", "window", "window", overdue);
+
+    await object.transitionTimerStream({
+      state: "offline",
+      streamId: null,
+      startedAt: null,
+      generation: 3,
+      endedSession: { streamId: "kept-deadline-stream", startedAt: iso(overdue - 60 * 60_000), endedAt: iso(overdue) },
+    });
+
+    expect(await object.hasStatisticsClipImports()).toBe(true);
+    expect(await object.getModuleAlarmDeadline("statistics", "window")).toBe(overdue);
   });
 });
