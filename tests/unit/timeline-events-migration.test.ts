@@ -7,7 +7,7 @@ const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
 const readMigration = (name: string): string => readFileSync(resolve(migrationsDirectory, name), "utf8");
 
 describe("timeline events migration", () => {
-  it("keeps one event per identity and deletes a channel's timeline with the channel", () => {
+  it("accepts raw metadata observations, keeps one natural event key and cascades channel deletion", () => {
     const database = new DatabaseSync(":memory:");
     try {
       database.exec("PRAGMA foreign_keys = ON");
@@ -30,7 +30,13 @@ describe("timeline events migration", () => {
       insert.run();
       insert.run();
 
-      expect(database.prepare("SELECT COUNT(*) AS count FROM channel_timeline_events").get()).toEqual({ count: 1 });
+      database.prepare(
+        `INSERT INTO channel_timeline_events
+          (channel_id, event_key, stream_id, occurred_at, kind, detail_json)
+         VALUES ('channel-a', 'channel_metadata:time:hash', NULL, '2026-10-25T12:00:00.000Z', 'channel_metadata', '{"title":"Title","category":null}')`,
+      ).run();
+
+      expect(database.prepare("SELECT COUNT(*) AS count FROM channel_timeline_events").get()).toEqual({ count: 2 });
       database.prepare("DELETE FROM channels WHERE channel_id = 'channel-a'").run();
       expect(database.prepare("SELECT COUNT(*) AS count FROM channel_timeline_events").get()).toEqual({ count: 0 });
     } finally {

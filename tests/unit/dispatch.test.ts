@@ -180,8 +180,8 @@ describe("channel timeline ad breaks", () => {
   });
 });
 
-describe("channel timeline metadata changes", () => {
-  it("stores title and category transitions with previous and new values once per update", async () => {
+describe("channel timeline metadata observations", () => {
+  it("stores each channel.update observation with a null category preserved", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -198,19 +198,17 @@ describe("channel timeline metadata changes", () => {
 
       await update("update-1", "2026-10-25T12:00:00.000Z", "Old title", "game-1", "Old category");
       await update("update-2", "2026-10-25T12:01:00.000Z", "New title", "game-2", "New category");
-      await update("update-2", "2026-10-25T12:01:00.000Z", "New title", "game-2", "New category");
+      await update("redelivery-with-new-message-id", "2026-10-25T12:01:00.000Z", "New title", "game-2", "New category");
       await update("update-3", "2026-10-25T12:02:00.000Z", "New title", "", "");
 
       const rows = await database.prepare(
-        `SELECT kind, detail_json FROM channel_timeline_events
-          WHERE channel_id = ? ORDER BY occurred_at, event_key`,
+        `SELECT kind, stream_id, occurred_at, detail_json FROM channel_timeline_events
+          WHERE channel_id = ? ORDER BY occurred_at`,
       ).bind("kanal-a").all<{ kind: string; detail_json: string }>();
       expect(rows.results).toEqual([
-        { kind: "category_change", detail_json: JSON.stringify({ oldCategory: null, newCategory: { id: "game-1", name: "Old category" } }) },
-        { kind: "title_change", detail_json: JSON.stringify({ oldTitle: null, newTitle: "Old title" }) },
-        { kind: "category_change", detail_json: JSON.stringify({ oldCategory: { id: "game-1", name: "Old category" }, newCategory: { id: "game-2", name: "New category" } }) },
-        { kind: "title_change", detail_json: JSON.stringify({ oldTitle: "Old title", newTitle: "New title" }) },
-        { kind: "category_change", detail_json: JSON.stringify({ oldCategory: { id: "game-2", name: "New category" }, newCategory: null }) },
+        { kind: "channel_metadata", stream_id: null, occurred_at: "2026-10-25T12:00:00.000Z", detail_json: JSON.stringify({ title: "Old title", category: { id: "game-1", name: "Old category" } }) },
+        { kind: "channel_metadata", stream_id: null, occurred_at: "2026-10-25T12:01:00.000Z", detail_json: JSON.stringify({ title: "New title", category: { id: "game-2", name: "New category" } }) },
+        { kind: "channel_metadata", stream_id: null, occurred_at: "2026-10-25T12:02:00.000Z", detail_json: JSON.stringify({ title: "New title", category: null }) },
       ]);
     } finally {
       database.close();
@@ -219,7 +217,7 @@ describe("channel timeline metadata changes", () => {
 });
 
 describe("channel timeline stream lifecycle", () => {
-  it("keeps online/offline entries and derives a same-broadcast drop idempotently", async () => {
+  it("stores raw lifecycle facts and deduplicates redeliveries with different message ids", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "kanal-a");
@@ -239,25 +237,67 @@ describe("channel timeline stream lifecycle", () => {
       await dispatch("online-1", "stream.online", "2026-10-25T12:00:00.000Z");
       await dispatch("offline-1", "stream.offline", "2026-10-25T12:05:00.000Z");
       await dispatch("online-2", "stream.online", "2026-10-25T12:09:00.000Z");
-      await dispatch("online-2", "stream.online", "2026-10-25T12:09:00.000Z");
+      await dispatch("another-message-for-same-fact", "stream.online", "2026-10-25T12:09:00.000Z");
 
       const rows = await database.prepare(
-        `SELECT kind, COUNT(*) AS count FROM channel_timeline_events
-          WHERE channel_id = ? GROUP BY kind ORDER BY kind`,
-      ).bind("kanal-a").all<{ kind: string; count: number }>();
+        `SELECT kind, stream_id, occurred_at, detail_json FROM channel_timeline_events
+          WHERE channel_id = ? ORDER BY occurred_at`,
+      ).bind("kanal-a").all<{ kind: string; stream_id: string | null; occurred_at: string; detail_json: string }>();
       expect(rows.results).toEqual([
-        { kind: "stream_drop", count: 1 },
-        { kind: "stream_offline", count: 1 },
-        { kind: "stream_online", count: 2 },
+        { kind: "stream_online", stream_id: "stream-1", occurred_at: "2026-10-25T12:00:00.000Z", detail_json: JSON.stringify({ startedAt: "2026-10-25T12:00:00.000Z" }) },
+        { kind: "stream_offline", stream_id: null, occurred_at: "2026-10-25T12:05:00.000Z", detail_json: "{}" },
+        { kind: "stream_online", stream_id: "stream-1", occurred_at: "2026-10-25T12:09:00.000Z", detail_json: JSON.stringify({ startedAt: "2026-10-25T12:00:00.000Z" }) },
       ]);
-      await expect(database.prepare(
-        `SELECT stream_id, detail_json FROM channel_timeline_events
-          WHERE channel_id = ? AND kind = 'stream_drop'`,
-      ).bind("kanal-a").first()).resolves.toEqual({
-        stream_id: "stream-1",
-        detail_json: JSON.stringify({ gapSeconds: 240 }),
-      });
     } finally {
+      database.close();
+    }
+  });
+
+  it("continues stream-state updates and module dispatch when the timeline insert fails", async () => {
+    const database = new TestD1Database();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await insertChannel(database, "kanal-a");
+      await activate(database, "kanal-a", "timeline-test");
+      const handler = vi.fn(() => ({ actions: [], diagnostics: [] }));
+      const module = fakeModule("timeline-test", handler, ["stream.online"]);
+      const failingDatabase = new Proxy(database as unknown as D1Database, {
+        get(_target, property) {
+          if (property === "prepare") {
+            return (sql: string) => {
+              if (sql.startsWith("INSERT INTO channel_timeline_events")) {
+                return {
+                  bind: () => ({ run: () => Promise.reject(new Error("timeline unavailable")) }),
+                } as unknown as D1PreparedStatement;
+              }
+              return database.prepare(sql);
+            };
+          }
+          return Reflect.get(database, property, database) as unknown;
+        },
+      });
+
+      await expect(dispatchEventSubNotification(
+        { ...environment(database), DB: failingDatabase },
+        {
+          channelId: "kanal-a",
+          subscriptionType: "stream.online",
+          triggerId: "timeline-write-fails",
+          payload: { id: "stream-1", started_at: NOW },
+          eventSubTimestamp: NOW,
+          receivedAt: NOW,
+        },
+        vi.fn<typeof fetch>(),
+        [module],
+      )).resolves.toBeUndefined();
+
+      await expect(database.prepare(
+        "SELECT state, stream_id, started_at FROM channel_stream_state WHERE channel_id = ?",
+      ).bind("kanal-a").first()).resolves.toEqual({ state: "online", stream_id: "stream-1", started_at: NOW });
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith("Channel timeline event could not be recorded.", expect.any(Error));
+    } finally {
+      warn.mockRestore();
       database.close();
     }
   });

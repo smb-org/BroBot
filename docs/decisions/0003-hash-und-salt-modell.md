@@ -117,7 +117,7 @@ Für aktive Chatter (#292) gilt eine bewusst kürzere Regel: Der kanalgebundene 
 | Modul-Ereignisse mit roher `actor_user_id` | **14 Tage** | Betriebliche Fehlersuche; die Ausnahme bleibt wegen der kurzen Frist begrenzt |
 | Audit-Einträge | **24 Monate** | Administrative Nachvollziehbarkeit; betrifft Bedienende, nicht Zuschauer |
 | Kanalstatistiken je Fünf-Minuten-Fenster (Nachrichten, Emotes, Viewer, Chatters, aktive Chatter) | unbegrenzt | Ausschließlich Summen ohne Namen, IDs oder Nutzerlisten |
-| Stream-Timeline-Ereignisse (Zeitpunkte, Titel/Kategorie, Clip-ID, Werbepause, Emote-Spitze) | unbegrenzt | Keine Nutzer- oder Creator-ID; Löschung mit dem Kanal |
+| Stream-Timeline-Ereignisse (Lifecycle-Zeitpunkte, Metadatenbeobachtungen, Clip-ID, Werbepause, Emote-Spitze) | unbegrenzt | Keine Nutzer- oder Creator-ID; Löschung mit dem Kanal |
 | Aggregate ohne Personenbezug | unbegrenzt | siehe Abschnitt 6 |
 
 Die Fristen werden durch einen Lauf durchgesetzt, nicht durch Vorsatz. Der stündliche Cron-Trigger aus #18 ist der naheliegende Ort.
@@ -131,13 +131,13 @@ Die Fristen werden durch einen Lauf durchgesetzt, nicht durch Vorsatz. Der stün
 Unbegrenzt bleiben dürfen ausschließlich Werte **ohne jeden Bezug zu einer einzelnen Person**:
 
 - Nachrichten pro Zeitfenster, Zuschauerzahl, Emote-Spitzen
-- Streamstart/-ende, Drops, Titel- und Kategorieübergänge, bestätigte Clip-IDs und Werbepausen. Clip-Creator-IDs werden nicht gespeichert.
+- Stream-Online-/Offline-Zeitpunkte, aktuelle Titel-/Kategoriebeobachtungen, bestätigte Clip-IDs und Werbepausen. Drops und Titel-/Kategorieübergänge werden erst bei einer Analyse aus den gespeicherten Ereigniszeitpunkten und geordneten Metadatenbeobachtungen abgeleitet; beim Schreiben entstehen keine Übergangszeilen. Clip-Creator-IDs werden nicht gespeichert.
 - Aktive Chatter in Kanalstatistiken sind eine ungefähre Aggregatanzahl aus dem bestehenden rollierenden Chatter-Tracking: unterschiedliche Chatter, die in den fünf Minuten vor der Fenstergrenze gesehen wurden. Dafür werden keine zusätzlichen Personen-Hashes je Statistikfenster gespeichert; Fenster ohne Stichprobe an ihrer Grenze erhalten `NULL`.
 - BELABOX-Bitrate-Min/Max, Mittelwert und P10, RTT-Mittelwert, Paketverlustdelta und Stichprobenzahl je Stream-Zeitfenster
 - Wortfrequenz-Baseline aus #12 — aggregiert über alle Nutzer, ohne Zuordnung
 - Ergebnisse abgeschlossener Votings und Quizrunden
 - Summen von Trinkgeldern je Stream
-- Zeitpunkte von Clips und Stream-Abbrüchen
+- Zeitpunkte von Clips und Stream-Offline-Ereignissen
 
 **Die Abgrenzung ist schärfer, als sie klingt.** Ein Zähler „unterschiedliche Chatter" ist ein Aggregat. Eine Liste „diese Hashes waren aktiv" ist es nicht, auch wenn sie nur aus Hashes besteht. Im Zweifel gilt eine Reihe, die je Person eine Zeile führt, als personenbezogen — unabhängig davon, wie die Spalte heißt.
 

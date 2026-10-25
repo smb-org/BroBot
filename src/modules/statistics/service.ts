@@ -92,7 +92,6 @@ const recordEmoteSpike = async (
     kind: "emote_spike",
     identity: window.windowStart,
     occurredAt: new Date(windowEnd).toISOString(),
-    streamId: window.streamId,
     detail: {
       windowStart: window.windowStart,
       emotes: window.emotes,

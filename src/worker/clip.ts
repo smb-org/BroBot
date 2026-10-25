@@ -287,16 +287,12 @@ export const postConfirmedClipLink = async (
       actorUserId: actorUserId ?? "system",
     },
   );
-  try {
-    await writeChannelTimelineEvent(environment.DB, channelId, {
-      kind: "clip_created",
-      identity: clip.clipId,
-      occurredAt: createdAt,
-      detail: { clipId: clip.clipId },
-    });
-  } catch (error: unknown) {
-    console.warn("Confirmed clip timeline event could not be recorded.", error);
-  }
+  await writeChannelTimelineEvent(environment.DB, channelId, {
+    kind: "clip_created",
+    identity: clip.clipId,
+    occurredAt: createdAt,
+    detail: { clipId: clip.clipId },
+  });
 
   const message = configuredClipLinkMessage(settings, {
     title: clip.title ?? clip.clipId,

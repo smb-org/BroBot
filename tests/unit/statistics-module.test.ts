@@ -310,7 +310,6 @@ describe("statistics window alarm", () => {
       kind: "emote_spike",
       identity: WINDOW_START,
       occurredAt: WINDOW_END,
-      streamId: STREAM_ID,
       detail: {
         windowStart: WINDOW_START,
         emotes: 15,

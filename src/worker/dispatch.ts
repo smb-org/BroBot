@@ -40,11 +40,7 @@ import { modulePoints } from "./module-points";
 import { createModuleSecretReadAccess } from "./module-secrets";
 import { recordChannelGameHistory } from "./db/game-search-cache";
 import { broadcasterHasScope } from "./broadcaster-scope";
-import {
-  readPreviousTimelineCategory,
-  readPreviousTimelineTitle,
-  writeChannelTimelineEvent,
-} from "./db/timeline-events";
+import { writeChannelTimelineEvent } from "./db/timeline-events";
 import { notifyModuleScheduleInputsChanged } from "./module-schedules";
 import { pointsCatalog } from "../modules/points/locale";
 import { appendPointWelcome, type PendingPointWelcome } from "./point-welcome";
@@ -703,7 +699,6 @@ export const dispatchEventSubNotification = async (
         kind: "stream_offline",
         identity: event.triggerId,
         occurredAt: event.eventSubTimestamp ?? event.receivedAt,
-        streamId: null,
         detail: {},
       });
     }
@@ -711,14 +706,19 @@ export const dispatchEventSubNotification = async (
   if (event.subscriptionType === "channel.ad_break.begin") {
     const startedAt = textValue(event.payload.started_at);
     const durationSeconds = event.payload.duration_seconds;
-    if (startedAt !== null && Number.isSafeInteger(durationSeconds) && (durationSeconds as number) >= 0 &&
-        await broadcasterHasScope(environment.DB, event.channelId, "channel:read:ads")) {
-      await writeChannelTimelineEvent(environment.DB, event.channelId, {
-        kind: "ad_break",
-        identity: event.triggerId,
-        occurredAt: startedAt,
-        detail: { durationSeconds: durationSeconds as number, startedAt },
-      });
+    if (startedAt !== null && Number.isSafeInteger(durationSeconds) && (durationSeconds as number) >= 0) {
+      try {
+        if (await broadcasterHasScope(environment.DB, event.channelId, "channel:read:ads")) {
+          await writeChannelTimelineEvent(environment.DB, event.channelId, {
+            kind: "ad_break",
+            identity: event.triggerId,
+            occurredAt: startedAt,
+            detail: { durationSeconds: durationSeconds as number, startedAt },
+          });
+        }
+      } catch (error: unknown) {
+        console.warn("Ad-break timeline eligibility could not be checked.", error);
+      }
     }
   }
   // `channel.update` already carries the new category, so the shared game-id
@@ -726,44 +726,16 @@ export const dispatchEventSubNotification = async (
   // instead of serving the old game until its TTL expires.
   if (event.subscriptionType === "channel.update") {
     const occurredAt = event.eventSubTimestamp ?? event.receivedAt;
-    const newTitle = typeof event.payload.title === "string" ? event.payload.title : null;
-    if (newTitle !== null) {
-      const oldTitle = await readPreviousTimelineTitle(environment.DB, event.channelId, occurredAt);
-      if (oldTitle !== newTitle) {
-        await writeChannelTimelineEvent(environment.DB, event.channelId, {
-          kind: "title_change",
-          identity: `${event.triggerId}:title`,
-          occurredAt,
-          detail: { oldTitle, newTitle },
-        });
-      }
-    }
+    const title = typeof event.payload.title === "string" ? event.payload.title : null;
     const categoryId = textValue(event.payload.category_id);
     const categoryName = textValue(event.payload.category_name);
-    const newCategory = categoryId === null && categoryName === null
-      ? null
-      : { id: categoryId, name: categoryName };
-    let oldCategory = await readPreviousTimelineCategory(environment.DB, event.channelId, occurredAt);
-    if (oldCategory === null) {
-      const occurredAtMs = Date.parse(occurredAt);
-      if (Number.isFinite(occurredAtMs)) {
-        const history = await environment.DB.prepare(
-          `SELECT game_id, game_name FROM channel_game_history
-            WHERE channel_id = ? AND last_seen_at_ms < ?
-            ORDER BY last_seen_at_ms DESC LIMIT 1`,
-        ).bind(event.channelId, occurredAtMs).first<{ game_id: string; game_name: string }>();
-        if (history !== null) oldCategory = { id: history.game_id, name: history.game_name };
-      }
-    }
-    if ((oldCategory !== null || newCategory !== null) &&
-        (oldCategory?.id !== newCategory?.id || oldCategory?.name !== newCategory?.name)) {
-      await writeChannelTimelineEvent(environment.DB, event.channelId, {
-        kind: "category_change",
-        identity: `${event.triggerId}:category`,
-        occurredAt,
-        detail: { oldCategory, newCategory },
-      });
-    }
+    const category = categoryId === null ? null : { id: categoryId, name: categoryName };
+    await writeChannelTimelineEvent(environment.DB, event.channelId, {
+      kind: "channel_metadata",
+      identity: event.triggerId,
+      occurredAt,
+      detail: { title, category },
+    });
     if (environment.CHANNEL !== undefined) {
       try {
         const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));

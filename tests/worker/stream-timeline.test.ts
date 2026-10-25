@@ -61,7 +61,7 @@ describe("stream timeline against D1 and the channel object", () => {
     stubs.clear();
   });
 
-  it("records one drop for online, offline, online within ten minutes, also after redelivery", async () => {
+  it("stores raw lifecycle rows and deduplicates a redelivery with a different message id", async () => {
     const channelId = "timeline-drop";
     await insertPointChannel(channelId);
     const now = Date.now();
@@ -70,12 +70,12 @@ describe("stream timeline against D1 and the channel object", () => {
     await deliver("stream.online", channelId, "drop-online-1", now - 8 * 60_000, streamEvent);
     await deliver("stream.offline", channelId, "drop-offline-1", now - 5 * 60_000, {});
     await deliver("stream.online", channelId, "drop-online-2", now - 1_000, streamEvent);
-    // The same EventSub message again, once through the router and once straight into the dispatcher.
-    await deliver("stream.online", channelId, "drop-online-2", now - 1_000, streamEvent);
+    // A different EventSub message can redeliver the same lifecycle fact.
+    await deliver("stream.online", channelId, "drop-online-redelivery", now - 1_000, streamEvent);
     await dispatchEventSubNotification(worker, {
       channelId,
       subscriptionType: "stream.online",
-      triggerId: "drop-online-2",
+      triggerId: "drop-online-redelivery",
       payload: { broadcaster_user_id: channelId, ...streamEvent },
       receivedAt: iso(now),
       eventSubTimestamp: iso(now - 1_000),
@@ -83,52 +83,106 @@ describe("stream timeline against D1 and the channel object", () => {
 
     expect(await timelineRows(channelId, "stream_online")).toHaveLength(2);
     expect(await timelineRows(channelId, "stream_offline")).toHaveLength(1);
-    const drops = await timelineRows(channelId, "stream_drop");
-    expect(drops).toHaveLength(1);
-    expect(drops[0]).toMatchObject({ stream_id: "stream-1" });
-    expect(JSON.parse(drops[0]?.detail_json ?? "{}")).toEqual({ gapSeconds: 299 });
+    const lifecycle = await worker.DB.prepare(
+      `SELECT kind, stream_id, occurred_at, detail_json FROM channel_timeline_events
+        WHERE channel_id = ? ORDER BY occurred_at`,
+    ).bind(channelId).all<{ kind: string; stream_id: string | null; occurred_at: string; detail_json: string }>();
+    expect(lifecycle.results).toEqual([
+      { kind: "stream_online", stream_id: "stream-1", occurred_at: iso(now - 8 * 60_000), detail_json: JSON.stringify({ startedAt: streamEvent.started_at }) },
+      { kind: "stream_offline", stream_id: null, occurred_at: iso(now - 5 * 60_000), detail_json: "{}" },
+      { kind: "stream_online", stream_id: "stream-1", occurred_at: iso(now - 1_000), detail_json: JSON.stringify({ startedAt: streamEvent.started_at }) },
+    ]);
   });
 
-  it("does not mark a gap longer than ten minutes as a drop", async () => {
-    const channelId = "timeline-no-drop";
+  it("stores lifecycle rows once when messages arrive out of order and keeps stream_id for online only", async () => {
+    const channelId = "timeline-out-of-order";
     await insertPointChannel(channelId);
-    const base = Date.now() - 9 * 60_000;
-    const dispatch = (type: string, triggerId: string, at: number) => dispatchEventSubNotification(worker, {
-      channelId,
-      subscriptionType: type,
-      triggerId,
-      payload: { id: "stream-9", started_at: iso(base) },
-      receivedAt: iso(at),
-      eventSubTimestamp: iso(at),
-    });
-    await dispatch("stream.online", "gap-online-1", base);
-    await dispatch("stream.offline", "gap-offline-1", base + 60_000);
-    await dispatch("stream.online", "gap-online-2", base + 60_000 + 11 * 60_000);
+    const now = Date.now();
+    const streamEvent = { id: "stream-7", started_at: iso(now - 20 * 60_000) };
 
-    expect(await timelineRows(channelId, "stream_drop")).toEqual([]);
+    // The offline message is delivered first, the older online message second, then both again.
+    await deliver("stream.offline", channelId, "ooo-offline", now - 2_000, {});
+    await deliver("stream.online", channelId, "ooo-online", now - 9 * 60_000, streamEvent);
+    await deliver("stream.offline", channelId, "ooo-offline-again", now - 2_000, {});
+    await deliver("stream.online", channelId, "ooo-online-again", now - 9 * 60_000, streamEvent);
+
+    const rows = (await worker.DB.prepare(
+      `SELECT kind, stream_id, occurred_at FROM channel_timeline_events
+        WHERE channel_id = ? ORDER BY occurred_at`,
+    ).bind(channelId).all<{ kind: string; stream_id: string | null; occurred_at: string }>()).results;
+    expect(rows).toEqual([
+      { kind: "stream_online", stream_id: "stream-7", occurred_at: iso(now - 9 * 60_000) },
+      { kind: "stream_offline", stream_id: null, occurred_at: iso(now - 2_000) },
+    ]);
   });
 
-  it("detects a title change once, with the previous title", async () => {
+  it("keeps stream_id null on late non-online events while a stream is current", async () => {
+    const channelId = "timeline-late-events";
+    await insertPointChannel(channelId);
+    await writeEventSubStreamState(worker.DB, channelId, "online", iso(Date.now()), iso(Date.now()), "current-stream");
+    const now = Date.now();
+
+    await deliver("channel.update", channelId, "late-update", now - 5_000, { title: "Late", category_id: "g1", category_name: "Game" });
+    await deliver("stream.offline", channelId, "late-offline", now - 4_000, {});
+
+    const rows = (await worker.DB.prepare(
+      "SELECT kind, stream_id FROM channel_timeline_events WHERE channel_id = ? ORDER BY occurred_at",
+    ).bind(channelId).all<{ kind: string; stream_id: string | null }>()).results;
+    expect(rows).toEqual([
+      { kind: "channel_metadata", stream_id: null },
+      { kind: "stream_offline", stream_id: null },
+    ]);
+  });
+
+  it("keeps processing the stream state when the timeline write fails", async () => {
+    const channelId = "timeline-write-failure";
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      `CREATE TRIGGER timeline_write_failure BEFORE INSERT ON channel_timeline_events
+         WHEN NEW.channel_id = 'timeline-write-failure'
+       BEGIN SELECT RAISE(ABORT, 'injected timeline failure'); END`,
+    ).run();
+    try {
+      await deliver("stream.online", channelId, "failure-online", Date.now() - 1_000, {
+        id: "stream-9",
+        started_at: iso(Date.now() - 60_000),
+      });
+    } finally {
+      await worker.DB.prepare("DROP TRIGGER timeline_write_failure").run();
+    }
+
+    expect(await timelineRows(channelId, "stream_online")).toEqual([]);
+    const state = await worker.DB.prepare(
+      "SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?",
+    ).bind(channelId).first<{ state: string; stream_id: string | null }>();
+    expect(state).toEqual({ state: "online", stream_id: "stream-9" });
+  });
+
+  it("stores current metadata observations, including an empty category", async () => {
     const channelId = "timeline-title";
     await insertPointChannel(channelId);
     const now = Date.now();
 
     await deliver("channel.update", channelId, "title-1", now - 120_000, { title: "First", category_id: "", category_name: "" });
-    await deliver("channel.update", channelId, "title-2", now - 60_000, { title: "Second", category_id: "", category_name: "" });
-    await deliver("channel.update", channelId, "title-2", now - 60_000, { title: "Second", category_id: "", category_name: "" });
-    // A different message that repeats the current title is not a change.
+    await deliver("channel.update", channelId, "title-2", now - 60_000, { title: "Second", category_id: "game-2", category_name: "Category" });
+    // A different message id carrying the same observation is a redelivery of the same fact.
+    await deliver("channel.update", channelId, "title-2-redelivery", now - 60_000, { title: "Second", category_id: "game-2", category_name: "Category" });
+    await deliver("channel.update", channelId, "title-3", now - 30_000, { title: "Second", category_id: "", category_name: "" });
     await deliver("channel.update", channelId, "title-3", now - 30_000, { title: "Second", category_id: "", category_name: "" });
 
-    const rows = await timelineRows(channelId, "title_change");
+    const rows = await timelineRows(channelId, "channel_metadata");
     expect(rows.map((row) => JSON.parse(row.detail_json) as unknown)).toEqual([
-      { oldTitle: null, newTitle: "First" },
-      { oldTitle: "First", newTitle: "Second" },
+      { title: "First", category: null },
+      { title: "Second", category: { id: "game-2", name: "Category" } },
+      { title: "Second", category: null },
     ]);
+    expect(rows.every((row) => row.stream_id === null)).toBe(true);
   });
 
-  it("writes one clip event with only the clip id, even when the confirmation is retried", async () => {
+  it("writes one unassociated clip event even when a stream is current and confirmation is retried", async () => {
     const channelId = "timeline-clip";
     await insertPointChannel(channelId);
+    await writeEventSubStreamState(worker.DB, channelId, "online", iso(Date.now()), iso(Date.now()), "current-stream");
     const confirmed = {
       created: true,
       reason: null,
@@ -146,6 +200,7 @@ describe("stream timeline against D1 and the channel object", () => {
 
     const rows = await timelineRows(channelId, "clip_created");
     expect(rows).toHaveLength(1);
+    expect(rows[0]?.stream_id).toBeNull();
     expect(rows[0]?.detail_json).toBe(JSON.stringify({ clipId: "clip-worker-1" }));
     expect(JSON.stringify(rows)).not.toContain("creator-user-7");
   });
@@ -177,6 +232,7 @@ describe("stream timeline against D1 and the channel object", () => {
     }
 
     const rows = await timelineRows(consented, "ad_break");
+    expect(rows[0]?.stream_id).toBeNull();
     expect(rows.map((row) => JSON.parse(row.detail_json) as unknown)).toEqual([
       { durationSeconds: 90, startedAt: iso(started) },
     ]);
@@ -215,6 +271,7 @@ describe("stream timeline against D1 and the channel object", () => {
 
     const rows = await timelineRows(channelId, "emote_spike");
     expect(rows).toHaveLength(1);
+    expect(rows[0]?.stream_id).toBeNull();
     expect(rows[0]?.occurred_at).toBe(iso(spikeStart + WINDOW_MS));
     expect(JSON.parse(rows[0]?.detail_json ?? "{}")).toMatchObject({
       windowStart: iso(spikeStart),

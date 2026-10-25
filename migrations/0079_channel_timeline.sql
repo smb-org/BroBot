@@ -4,8 +4,8 @@ CREATE TABLE channel_timeline_events (
   stream_id TEXT,
   occurred_at TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN (
-    'stream_online', 'stream_offline', 'stream_drop',
-    'title_change', 'category_change', 'clip_created', 'ad_break', 'emote_spike'
+    'stream_online', 'stream_offline', 'channel_metadata',
+    'clip_created', 'ad_break', 'emote_spike'
   )),
   detail_json TEXT NOT NULL CHECK (json_valid(detail_json)),
   PRIMARY KEY (channel_id, event_key)
