@@ -558,10 +558,10 @@ und Fenster bleiben unbegrenzt, weil sie aggregiert sind und keine
 Personendaten enthalten (Entscheidung 0003). Routenabfragen binden
 `channel_id`; `/history` liefert pro Messpunkt nur numerische Werte.
 
-### Kanalstatistiken (#557)
+### Kanalstatistiken (#557, #559)
 
 Das verpflichtende `statistics`-Modul abonniert `channel.chat.message`,
-und `stream.online` für jeden Kanal. Es zählt im Channel
+`stream.online` und `stream.offline` für jeden Kanal. Es zählt im Channel
 Durable Object Nachrichten und Emote-Fragmente, ohne je Nachricht eine
 D1-Zeile zu schreiben. Die Fenster beginnen an UTC-Vielfachen von 300 s
 (`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
@@ -590,6 +590,27 @@ ein Fenster ohne Abtastung an seiner Grenze hat `NULL`. Es gibt
 keine per-window Personen-Hashes oder neue personenbezogene Speicherung.
 `channel_statistics` enthält nur Summen und wird unbegrenzt aufbewahrt; beim
 Löschen des Kanals greift `ON DELETE CASCADE` (Entscheidung 0003, Abschnitt 6).
+
+Für die Themen-Erkennung tokenisiert das DO ausschließlich Textfragmente und
+zählt Wörter je Stream. NFKC-Normalisierung, Kleinschreibung und das Entfernen
+von Satzzeichen, Links, Mentions und Emote-Codes laufen vor einer gepflegten
+deutschen/englischen Stopwortliste; Emote-, Mention- und Cheermote-Fragmente
+werden übersprungen. Tokens mit weniger als drei Zeichen, Zahlen und Tokens
+mit Punkt oder Schrägstrich werden ausgelassen. Nachrichten, Nutzernamen und
+Mentions werden nicht gespeichert.
+
+Je Stream speichert das DO höchstens 20.000 verschiedene Wörter und erhöht bei
+erreichtem Limit nur bestehende Zähler. Beim bestätigten Streamende führt der
+Statistik-Alarm höchstens die 1.000 häufigsten Wörter in einem D1-Batch in die
+kanalweite Baseline zusammen. Der Alarm erkennt das Offline-Ende auch ohne
+`stream.offline` und führt fehlgeschlagene Batches idempotent erneut aus. DO-
+Wortzähler werden nach erfolgreichem Merge gelöscht; nach 24 Stunden löscht
+der nächste Statistik-Alarm sie (regulär innerhalb weiterer fünf Minuten).
+Die Frist beginnt mit dem Offline-Event; wenn es fehlt, beginnt sie bei der
+Offline-Erkennung durch den Alarm. Das Alter-Pruning läuft unabhängig vom
+D1-Erfolg. Die Baseline behält die 5.000 häufigsten Wörter je Kanal dauerhaft;
+ein dauerhafter Streammarker verhindert Doppelzählung nach einem unklaren
+Batch-Ausgang.
 
 ### Modulaktionen (`actions`)
 

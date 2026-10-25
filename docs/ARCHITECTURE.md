@@ -256,8 +256,9 @@ Chatter-Tracking: Anzahl unterschiedlicher Chatter, deren letzte Nachricht in
 den fünf Minuten vor der Fenstergrenze lag. Für Fenster ohne Stichprobe an der
 Grenze, etwa ein Fenster nach `stream.offline`, bleibt der Wert `NULL`. Es gibt
 keine zusätzliche HMAC-Mitgliedschaft je Statistikfenster. Der nächste Alarm
-schreibt noch geänderte Fenster. Der Alarm bleibt aktiv, solange der Stream online ist oder
-Fensterzustand im DO besteht. Fensterzustand wird nach einem letzten
+schreibt noch geänderte Fenster. Der Alarm bleibt aktiv, solange der Stream
+online ist, Fensterzustand im DO besteht oder Streamwörter auf Merge oder
+Alterslöschung warten. Fensterzustand wird nach einem letzten
 Schreibversuch gelöscht, sobald das Fensterende mehr als 60 Minuten zurückliegt.
 Ein D1-Ausfall länger als 60 Minuten kann deshalb noch nicht geschriebene
 Statistikzeilen verlieren; DO-Speicher und Wiederholungsdauer bleiben begrenzt.
@@ -268,6 +269,26 @@ den Alarm wieder her, falls keiner geplant ist. Der Alarm hängt nicht an einer
 Stream-Übergangsgeneration; dieselbe Fensterzeile nimmt Zähler nach einem
 Offline-/Online-Flap weiter auf. Zuschauer stammen aus Helix Get Streams,
 `chatters` aus Get Chatters mit Bot-Token und `moderator:read:chatters`.
+
+Für die Themen-Erkennung zählt dasselbe Modul Textfragmente im Channel DO zu
+einer Wortfrequenz je Stream. Es normalisiert Unicode mit NFKC, schreibt alles
+klein, entfernt Links, Mentions, Emote-Codes und Satzzeichen und ignoriert
+deutsche und englische Stopwörter, Zahlen sowie Tokens unter drei Zeichen.
+Emote-, Mention- und Cheermote-Fragmente werden vollständig übersprungen.
+Nachrichten und Nutzernamen werden nicht gespeichert. Das DO begrenzt jeden
+Stream auf 20.000 verschiedene Wörter; bei Erreichen der Grenze steigen nur
+bereits vorhandene Zähler weiter. Beim Streamende werden höchstens die 1.000
+häufigsten Wörter in einem D1-Batch zusammengeführt. Der kanalweite Bestand
+behält die 5.000 häufigsten Wörter. Der Streamzähler wird nach erfolgreichem
+Merge gelöscht; nach 24 Stunden löscht ihn der nächste Statistik-Alarm
+(regulär innerhalb weiterer fünf Minuten). Die Frist beginnt mit einem
+bestätigten `stream.offline`; fehlt das Event, beginnt sie bei der
+Offline-Erkennung durch den Alarm. Die Alterslöschung läuft auch bei
+D1-Fehlern. Ein keyed Statistik-Alarm führt Merge und Wiederholung aus. Die
+D1-Tabelle merkt sich zusammengeführte Stream-IDs dauerhaft, damit ein
+unklarer Batch-Ausgang bei Wiederholung keine Zähler verdoppelt. Dadurch kann
+ein längerer D1-Ausfall nach der 24-Stunden-Frist noch nicht zusammengeführte
+Streamwörter verlieren.
 Nicht verfügbare Stichproben bleiben `NULL`. D1 enthält nur Aggregate, keine
 Nutzerkennungen oder einzelnen Nachrichten. Die Aggregate bleiben unbegrenzt
 erhalten (Entscheidung 0003).

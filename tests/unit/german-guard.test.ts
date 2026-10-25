@@ -30,6 +30,7 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/blitz_round/panel/locale.ts": "Bilingual DE/EN blitz template editor catalogue; only its de values are German.",
   "src/modules/duel/locale.ts": "Bilingual DE/EN duel module catalogue; only its de values are German.",
   "src/modules/duel/panel/settings-editor-locale.ts": "Bilingual DE/EN duel settings editor catalogue; only its de values are German.",
+  "src/modules/statistics/stop-words.ts": "German and English stop-word list for the word-frequency baseline; its German half is German by design.",
   "src/modules/blitz_round/seed-words.ts": "Issue 503 explicitly requires German starter word data.",
   "src/dashboard/locale.ts": "Bilingual DE/EN dashboard text catalogue; only its `de` half is German.",
   "src/dashboard/channel-settings-locale.ts": "Bilingual DE/EN channel settings text catalogue; only its `de` half is German.",

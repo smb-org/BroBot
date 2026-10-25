@@ -82,6 +82,7 @@ import type {
   ModulePointRoundAnnouncement,
   ModulePointRoundResult,
   ModuleScheduleInputChangeReason,
+  ModuleStatisticsWordCount,
   ModuleStatisticsWindow,
   PointActiveRound,
   PointJoinResult,
@@ -91,7 +92,15 @@ import type {
   PointsKind,
   PointsMovement,
 } from "../../modules/contract";
-import { STATISTICS_WINDOW_MILLISECONDS, statisticsWindowStartMs, type StatisticsChatActivity } from "../../modules/statistics/domain";
+import {
+  admitStatisticsWordCounts,
+  STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS,
+  STATISTICS_WORD_STREAM_MERGE_LIMIT,
+  STATISTICS_WINDOW_MILLISECONDS,
+  statisticsWindowStartMs,
+  tokenizeStatisticsWords,
+  type StatisticsChatActivity,
+} from "../../modules/statistics/domain";
 import {
   EVENTSUB_REPLAY_WINDOW_MILLISECONDS,
   EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS,
@@ -332,6 +341,8 @@ const timerSkipReceiptsForSchedule = (
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
 const STATISTICS_CHAT_WINDOW_TABLE = "statistics_chat_windows";
+const STATISTICS_WORD_STREAM_TABLE = "statistics_word_streams";
+const STATISTICS_WORD_COUNT_TABLE = "statistics_word_counts";
 const STATISTICS_WINDOW_RETENTION_MS = 60 * 60 * 1_000;
 const EVENTSUB_MESSAGE_ID_TABLE = "eventsub_message_ids";
 const EVENTSUB_MESSAGE_ID_RETENTION_MS = EVENTSUB_REPLAY_WINDOW_MILLISECONDS + 2 * EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS;
@@ -944,6 +955,31 @@ export class ChannelObject extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       `CREATE INDEX IF NOT EXISTS statistics_chat_windows_flush_idx
        ON ${STATISTICS_CHAT_WINDOW_TABLE} (dirty, complete, window_start)`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${STATISTICS_WORD_STREAM_TABLE} (
+        stream_id TEXT PRIMARY KEY,
+        distinct_words INTEGER NOT NULL DEFAULT 0,
+        ended_at INTEGER,
+        expires_at INTEGER NOT NULL
+      )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE INDEX IF NOT EXISTS statistics_word_streams_expiry_idx
+       ON ${STATISTICS_WORD_STREAM_TABLE} (expires_at)`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${STATISTICS_WORD_COUNT_TABLE} (
+        stream_id TEXT NOT NULL,
+        word TEXT NOT NULL,
+        count INTEGER NOT NULL CHECK (count > 0),
+        last_seen_at TEXT NOT NULL,
+        PRIMARY KEY (stream_id, word)
+      ) WITHOUT ROWID`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE INDEX IF NOT EXISTS statistics_word_counts_top_idx
+       ON ${STATISTICS_WORD_COUNT_TABLE} (stream_id, count DESC, word ASC)`,
     );
     this.statisticsSchemaReady = true;
   }
@@ -3283,6 +3319,14 @@ export class ChannelObject extends DurableObject<Env> {
         markWindowClean: (windowStart, revision) => this.markStatisticsWindowClean(windowStart, revision),
         pruneExpiredWindows: (now) => this.pruneExpiredStatisticsWindows(now),
         hasWindows: () => this.hasStatisticsWindows(),
+        markWordStreamEnded: (streamId, endedAt) => this.markStatisticsWordStreamEnded(streamId, endedAt),
+        reconcileWordStreams: (streamIsOnline, streamId, observedAt) =>
+          this.reconcileStatisticsWordStreams(streamIsOnline, streamId, observedAt),
+        listEndedWordStreams: () => this.listEndedStatisticsWordStreams(),
+        readWordCounts: (streamId) => this.readStatisticsWordCounts(streamId),
+        deleteWordStream: (streamId) => this.deleteStatisticsWordStream(streamId),
+        pruneExpiredWordStreams: (now) => this.pruneExpiredStatisticsWordStreams(now),
+        hasWordStreams: () => this.hasStatisticsWordStreams(),
       },
       fetchViewerCount: () => fetchLiveViewerCount(this.env, channelId, externalFetchBudget),
       fetchChattersTotal: () => fetchLiveChattersTotal(this.env, channelId, externalFetchBudget),
@@ -3505,6 +3549,7 @@ export class ChannelObject extends DurableObject<Env> {
         statistics.streamId,
         statistics.emotes,
       );
+      this.recordStatisticsWordCountsSync(statistics.streamId, statistics.textFragments ?? [], statistics.receivedAt);
     };
     if (userIdForTracking === null) {
       const activityCount = this.ctx.storage.transactionSync(() => {
@@ -3574,6 +3619,97 @@ export class ChannelObject extends DurableObject<Env> {
       await this.ensureStatisticsWindowAlarmScheduled(now);
     }
     return activityCount;
+  }
+
+  private pruneExpiredStatisticsWordStreamsSync(now: number): void {
+    this.ctx.storage.sql.exec(
+      `DELETE FROM ${STATISTICS_WORD_COUNT_TABLE}
+        WHERE stream_id IN (
+          SELECT stream_id FROM ${STATISTICS_WORD_STREAM_TABLE} WHERE expires_at <= ?
+        )`,
+      now,
+    );
+    this.ctx.storage.sql.exec(
+      `DELETE FROM ${STATISTICS_WORD_STREAM_TABLE} WHERE expires_at <= ?`,
+      now,
+    );
+  }
+
+  private recordStatisticsWordCountsSync(
+    streamId: string | null,
+    textFragments: readonly string[],
+    receivedAt: string,
+  ): void {
+    if (streamId === null || streamId.length === 0 || textFragments.length === 0) return;
+    const counts = tokenizeStatisticsWords(textFragments);
+    if (counts.size === 0) return;
+
+    const now = Date.now();
+    const receivedAtMs = Date.parse(receivedAt);
+    const lastSeenAt = Number.isFinite(receivedAtMs) ? new Date(receivedAtMs).toISOString() : new Date(now).toISOString();
+    const expiresAt = now + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS;
+    this.pruneExpiredStatisticsWordStreamsSync(now);
+    let stream = this.ctx.storage.sql.exec<{ distinct_words: number; ended_at: number | null }>(
+      `SELECT distinct_words, ended_at FROM ${STATISTICS_WORD_STREAM_TABLE} WHERE stream_id = ?`,
+      streamId,
+    ).toArray()[0];
+    if (stream?.ended_at !== null && stream !== undefined) return;
+    if (stream === undefined) {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO ${STATISTICS_WORD_STREAM_TABLE} (stream_id, distinct_words, expires_at)
+         VALUES (?, 0, ?)`,
+        streamId,
+        expiresAt,
+      );
+      stream = { distinct_words: 0, ended_at: null };
+    }
+
+    const candidates = [...counts.entries()];
+    const existingWords = new Set<string>();
+    // Durable Object SQLite allows at most 100 bound parameters per statement (one is the stream id).
+    for (let offset = 0; offset < candidates.length; offset += 90) {
+      const chunk = candidates.slice(offset, offset + 90);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const rows = this.ctx.storage.sql.exec<{ word: string }>(
+        `SELECT word FROM ${STATISTICS_WORD_COUNT_TABLE}
+          WHERE stream_id = ? AND word IN (${placeholders})`,
+        streamId,
+        ...chunk.map(([word]) => word),
+      ).toArray();
+      for (const row of rows) existingWords.add(row.word);
+    }
+
+    const { accepted, addedDistinctWords } = admitStatisticsWordCounts(counts, existingWords, stream.distinct_words);
+    for (const [word, count] of accepted) {
+      if (existingWords.has(word)) {
+        this.ctx.storage.sql.exec(
+          `UPDATE ${STATISTICS_WORD_COUNT_TABLE}
+              SET count = count + ?, last_seen_at = MAX(last_seen_at, ?)
+            WHERE stream_id = ? AND word = ?`,
+          count,
+          lastSeenAt,
+          streamId,
+          word,
+        );
+      } else {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO ${STATISTICS_WORD_COUNT_TABLE} (stream_id, word, count, last_seen_at)
+           VALUES (?, ?, ?, ?)`,
+          streamId,
+          word,
+          count,
+          lastSeenAt,
+        );
+      }
+    }
+    this.ctx.storage.sql.exec(
+      `UPDATE ${STATISTICS_WORD_STREAM_TABLE}
+          SET distinct_words = distinct_words + ?, expires_at = MAX(expires_at, ?)
+        WHERE stream_id = ? AND ended_at IS NULL`,
+      addedDistinctWords,
+      expiresAt,
+      streamId,
+    );
   }
 
   public advanceStatisticsToBoundary(
@@ -3712,6 +3848,113 @@ export class ChannelObject extends DurableObject<Env> {
     this.ensureStatisticsSchema();
     const present = this.ctx.storage.sql.exec<{ present: number }>(
       `SELECT EXISTS (SELECT 1 FROM ${STATISTICS_CHAT_WINDOW_TABLE}) AS present`,
+    ).one().present;
+    return Promise.resolve(present === 1);
+  }
+
+  public markStatisticsWordStreamEnded(streamId: string, endedAt: string): Promise<void> {
+    const parsed = Date.parse(endedAt);
+    if (streamId.length === 0) return Promise.resolve();
+    const endedAtMs = Number.isFinite(parsed) ? parsed : Date.now();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.sql.exec(
+      `UPDATE ${STATISTICS_WORD_STREAM_TABLE}
+          SET ended_at = ?, expires_at = ?
+        WHERE stream_id = ? AND ended_at IS NULL`,
+      endedAtMs,
+      endedAtMs + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS,
+      streamId,
+    );
+    return Promise.resolve();
+  }
+
+  public reconcileStatisticsWordStreams(
+    streamIsOnline: boolean,
+    streamId: string | null,
+    observedAt: number,
+  ): Promise<void> {
+    if (!Number.isSafeInteger(observedAt)) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    const expiresAt = observedAt + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS;
+    if (streamIsOnline && streamId !== null) {
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_WORD_STREAM_TABLE}
+            SET ended_at = ?, expires_at = ?
+          WHERE stream_id <> ? AND ended_at IS NULL`,
+        observedAt,
+        expiresAt,
+        streamId,
+      );
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_WORD_STREAM_TABLE} SET expires_at = MAX(expires_at, ?)
+          WHERE stream_id = ? AND ended_at IS NULL`,
+        expiresAt,
+        streamId,
+      );
+    } else if (streamIsOnline) {
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_WORD_STREAM_TABLE} SET expires_at = MAX(expires_at, ?)
+          WHERE ended_at IS NULL`,
+        expiresAt,
+      );
+    } else {
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_WORD_STREAM_TABLE}
+            SET ended_at = ?, expires_at = ?
+          WHERE ended_at IS NULL`,
+        observedAt,
+        expiresAt,
+      );
+    }
+    return Promise.resolve();
+  }
+
+  public listEndedStatisticsWordStreams(): Promise<readonly string[]> {
+    this.ensureStatisticsSchema();
+    const rows = this.ctx.storage.sql.exec<{ stream_id: string }>(
+      `SELECT stream_id FROM ${STATISTICS_WORD_STREAM_TABLE}
+        WHERE ended_at IS NOT NULL ORDER BY ended_at ASC, stream_id ASC`,
+    ).toArray();
+    return Promise.resolve(rows.map(({ stream_id: streamId }) => streamId));
+  }
+
+  public readStatisticsWordCounts(streamId: string): Promise<readonly ModuleStatisticsWordCount[]> {
+    this.ensureStatisticsSchema();
+    const rows = this.ctx.storage.sql.exec<{
+      word: string;
+      count: number;
+      last_seen_at: string;
+    }>(
+      `SELECT word, count, last_seen_at FROM ${STATISTICS_WORD_COUNT_TABLE}
+        WHERE stream_id = ? ORDER BY count DESC, word ASC LIMIT ?`,
+      streamId,
+      STATISTICS_WORD_STREAM_MERGE_LIMIT,
+    ).toArray();
+    return Promise.resolve(rows.map(({ word, count, last_seen_at: lastSeenAt }) => ({ word, count, lastSeenAt })));
+  }
+
+  public deleteStatisticsWordStream(streamId: string): Promise<void> {
+    this.ensureStatisticsSchema();
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(`DELETE FROM ${STATISTICS_WORD_COUNT_TABLE} WHERE stream_id = ?`, streamId);
+      this.ctx.storage.sql.exec(`DELETE FROM ${STATISTICS_WORD_STREAM_TABLE} WHERE stream_id = ?`, streamId);
+    });
+    return Promise.resolve();
+  }
+
+  public pruneExpiredStatisticsWordStreams(now: number): Promise<void> {
+    if (!Number.isSafeInteger(now)) return Promise.resolve();
+    this.ensureStatisticsSchema();
+    this.ctx.storage.transactionSync(() => {
+      this.pruneExpiredStatisticsWordStreamsSync(now);
+    });
+    return Promise.resolve();
+  }
+
+  public hasStatisticsWordStreams(): Promise<boolean> {
+    this.ensureStatisticsSchema();
+    const present = this.ctx.storage.sql.exec<{ present: number }>(
+      `SELECT EXISTS (SELECT 1 FROM ${STATISTICS_WORD_STREAM_TABLE}) AS present`,
     ).one().present;
     return Promise.resolve(present === 1);
   }

@@ -117,6 +117,9 @@ Für aktive Chatter (#292) gilt eine bewusst kürzere Regel: Der kanalgebundene 
 | Modul-Ereignisse mit roher `actor_user_id` | **14 Tage** | Betriebliche Fehlersuche; die Ausnahme bleibt wegen der kurzen Frist begrenzt |
 | Audit-Einträge | **24 Monate** | Administrative Nachvollziehbarkeit; betrifft Bedienende, nicht Zuschauer |
 | Kanalstatistiken je Fünf-Minuten-Fenster (Nachrichten, Emotes, Viewer, Chatters, aktive Chatter) | unbegrenzt | Ausschließlich Summen ohne Namen, IDs oder Nutzerlisten |
+| DO-Wortzähler je Stream | nach erfolgreichem Merge; Löschung beim ersten Statistik-Alarm ab **24 Stunden nach bestätigtem Streamende** (regulär innerhalb weiterer fünf Minuten) | Kurzlebige Grundlage für die Wortfrequenz-Baseline; Alterslöschung läuft unabhängig von D1-Erfolg. Fehlt `stream.offline`, beginnt die Frist mit der Offline-Erkennung durch den Statistik-Alarm |
+| Kanalweite Wortfrequenz-Baseline | unbegrenzt; höchstens **5.000 Wörter je Kanal** | Aggregat ohne Namen, Nutzer-IDs oder Nachrichtentexte; je Stream werden höchstens die 1.000 häufigsten Wörter übernommen |
+| Marker zusammengeführter Stream-IDs | unbegrenzt | Eine kleine personenfreie Zeile je Stream verhindert Doppelzählung nach einem Retry mit unklarem D1-Ergebnis |
 | Aggregate ohne Personenbezug | unbegrenzt | siehe Abschnitt 6 |
 
 Die Fristen werden durch einen Lauf durchgesetzt, nicht durch Vorsatz. Der stündliche Cron-Trigger aus #18 ist der naheliegende Ort.
@@ -132,7 +135,7 @@ Unbegrenzt bleiben dürfen ausschließlich Werte **ohne jeden Bezug zu einer ein
 - Nachrichten pro Zeitfenster, Zuschauerzahl, Emote-Spitzen
 - Aktive Chatter in Kanalstatistiken sind eine ungefähre Aggregatanzahl aus dem bestehenden rollierenden Chatter-Tracking: unterschiedliche Chatter, die in den fünf Minuten vor der Fenstergrenze gesehen wurden. Dafür werden keine zusätzlichen Personen-Hashes je Statistikfenster gespeichert; Fenster ohne Stichprobe an ihrer Grenze erhalten `NULL`.
 - BELABOX-Bitrate-Min/Max, Mittelwert und P10, RTT-Mittelwert, Paketverlustdelta und Stichprobenzahl je Stream-Zeitfenster
-- Wortfrequenz-Baseline aus #12 — aggregiert über alle Nutzer, ohne Zuordnung
+- Wortfrequenz-Baseline aus #12 — aggregiert über alle Nutzer, ohne Zuordnung. Das DO zählt nur Textfragmente, hält höchstens 20.000 verschiedene Wörter je Stream und löscht die Zähler nach dem Merge oder nach der Frist aus Abschnitt 5. D1 übernimmt höchstens die 1.000 häufigsten Streamwörter; die kanalweite Baseline enthält höchstens 5.000 Wörter.
 - Ergebnisse abgeschlossener Votings und Quizrunden
 - Summen von Trinkgeldern je Stream
 - Zeitpunkte von Clips und Stream-Abbrüchen

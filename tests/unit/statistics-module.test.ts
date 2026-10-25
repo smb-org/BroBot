@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { statisticsModule } from "../../src/modules/statistics";
-import { processStatisticsEvent } from "../../src/modules/statistics/service";
+import { processStatisticsEvent, reconcileStatisticsSchedule } from "../../src/modules/statistics/service";
 import { insertChannel } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
@@ -30,6 +30,11 @@ interface WindowState {
 
 const createStatisticsChat = (initial: WindowState[] = []) => {
   const windows = new Map(initial.map((window) => [window.windowStart, { ...window }]));
+  const wordStreams = new Map<string, {
+    words: Array<{ word: string; count: number; lastSeenAt: string }>;
+    endedAt: string | null;
+    expiresAt: number;
+  }>();
   const calls = {
     advance: vi.fn((boundary: number, streamIsOnline: boolean, streamId: string | null) => {
       const windowStart = new Date(boundary - 300_000).toISOString();
@@ -77,6 +82,40 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       return Promise.resolve();
     }),
     hasWindows: vi.fn(() => Promise.resolve(windows.size > 0)),
+    markWordStreamEnded: vi.fn((streamId: string, endedAt: string) => {
+      const stream = wordStreams.get(streamId);
+      if (stream !== undefined && stream.endedAt === null) {
+        stream.endedAt = endedAt;
+        stream.expiresAt = Date.parse(endedAt) + 24 * 60 * 60_000;
+      }
+      return Promise.resolve();
+    }),
+    reconcileWordStreams: vi.fn((streamIsOnline: boolean, streamId: string | null, observedAt: number) => {
+      for (const [id, stream] of wordStreams) {
+        if (stream.endedAt !== null) continue;
+        if (!streamIsOnline || streamId !== null && id !== streamId) {
+          stream.endedAt = new Date(observedAt).toISOString();
+          stream.expiresAt = observedAt + 24 * 60 * 60_000;
+        } else {
+          stream.expiresAt = observedAt + 24 * 60 * 60_000;
+        }
+      }
+      return Promise.resolve();
+    }),
+    listEndedWordStreams: vi.fn(() => Promise.resolve([...wordStreams]
+      .filter(([, stream]) => stream.endedAt !== null).map(([streamId]) => streamId))),
+    readWordCounts: vi.fn((streamId: string) => Promise.resolve(wordStreams.get(streamId)?.words ?? [])),
+    deleteWordStream: vi.fn((streamId: string) => {
+      wordStreams.delete(streamId);
+      return Promise.resolve();
+    }),
+    pruneExpiredWordStreams: vi.fn((now: number) => {
+      for (const [streamId, stream] of wordStreams) {
+        if (stream.expiresAt <= now) wordStreams.delete(streamId);
+      }
+      return Promise.resolve();
+    }),
+    hasWordStreams: vi.fn(() => Promise.resolve(wordStreams.size > 0)),
   };
   return {
     windows,
@@ -89,7 +128,15 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       markWindowClean: calls.markClean,
       pruneExpiredWindows: calls.prune,
       hasWindows: calls.hasWindows,
+      markWordStreamEnded: calls.markWordStreamEnded,
+      reconcileWordStreams: calls.reconcileWordStreams,
+      listEndedWordStreams: calls.listEndedWordStreams,
+      readWordCounts: calls.readWordCounts,
+      deleteWordStream: calls.deleteWordStream,
+      pruneExpiredWordStreams: calls.pruneExpiredWordStreams,
+      hasWordStreams: calls.hasWordStreams,
     },
+    wordStreams,
     recordChat(windowStart: string, messages: number, emotes: number): void {
       const window = windows.get(windowStart);
       if (window === undefined) throw new Error("Test window is missing.");
@@ -369,6 +416,64 @@ describe("statistics window alarm", () => {
     expect(calls.schedule).toHaveBeenCalledWith("window", Date.parse(WINDOW_END) + 300_000);
   });
 
+  it("merges ended stream words in one D1 batch and deletes the DO stream after success", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await writeStreamState(database, "offline", WINDOW_END);
+    const chat = createStatisticsChat();
+    chat.wordStreams.set(STREAM_ID, {
+      words: [{ word: "hallo", count: 4, lastSeenAt: WINDOW_END }],
+      endedAt: WINDOW_END,
+      expiresAt: Date.parse(WINDOW_END) + 24 * 60 * 60_000,
+    });
+    const { context } = createContext(database, chat);
+    const batch = vi.fn((statements: TestPreparedStatement[]) => database?.batch(statements) ?? Promise.resolve([]));
+    context.DB = {
+      prepare: (sql: string) => database?.prepare(sql),
+      batch,
+    } as unknown as D1Database;
+
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
+
+    expect(batch).toHaveBeenCalledTimes(1);
+    await expect(database.prepare(
+      `SELECT total_count, streams_seen FROM channel_word_frequency_baseline
+        WHERE channel_id = ? AND word = ?`,
+    ).bind(CHANNEL_ID, "hallo").first()).resolves.toEqual({ total_count: 4, streams_seen: 1 });
+    expect(chat.calls.deleteWordStream).toHaveBeenCalledWith(STREAM_ID);
+    expect(chat.wordStreams.has(STREAM_ID)).toBe(false);
+  });
+
+  it("prunes expired word data after a failed D1 merge and keeps the existing alarm retrying meanwhile", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await writeStreamState(database, "offline", WINDOW_END);
+    const chat = createStatisticsChat();
+    chat.wordStreams.set(STREAM_ID, {
+      words: [{ word: "streamword", count: 2, lastSeenAt: WINDOW_END }],
+      endedAt: WINDOW_END,
+      expiresAt: Date.parse(WINDOW_END) + 10_000,
+    });
+    const { context, calls } = createContext(database, chat);
+    context.DB = {
+      prepare: (sql: string) => database?.prepare(sql),
+      batch: () => Promise.reject(new Error("Injected word baseline D1 failure.")),
+    } as unknown as D1Database;
+
+    await expect(windowAlarm().handle(context, "window", Date.parse(WINDOW_END)))
+      .rejects.toThrow("Injected word baseline D1 failure.");
+    expect(chat.calls.pruneExpiredWordStreams).toHaveBeenCalledWith(Date.parse(WINDOW_END) + 1_000);
+    expect(chat.wordStreams.has(STREAM_ID)).toBe(true);
+    expect(calls.schedule).toHaveBeenCalledWith("window", Date.parse(WINDOW_END) + 300_000);
+
+    vi.setSystemTime(Date.parse(WINDOW_END) + 10_001);
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END) + 10_001);
+
+    expect(chat.calls.pruneExpiredWordStreams).toHaveBeenLastCalledWith(Date.parse(WINDOW_END) + 10_001);
+    expect(chat.wordStreams.has(STREAM_ID)).toBe(false);
+    expect(chat.calls.deleteWordStream).not.toHaveBeenCalled();
+  });
+
   it("prunes an expired window after its final failed write attempt", async () => {
     database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);
@@ -478,5 +583,53 @@ describe("statistics window alarm", () => {
 
     expect(scheduleAlarm).toHaveBeenCalledWith("window", "window", Date.parse(WINDOW_END));
     expect(clearAlarm).not.toHaveBeenCalled();
+  });
+
+  it("marks only the accepted ending stream as ready for a baseline merge", async () => {
+    const markWordStreamEnded = vi.fn(() => Promise.resolve());
+    const scheduleAlarm = vi.fn(() => Promise.resolve());
+    const offline: ModuleEvent = {
+      channelId: CHANNEL_ID,
+      subscriptionType: "stream.offline",
+      triggerId: "offline",
+      payload: { id: STREAM_ID },
+      settings: {},
+      receivedAt: WINDOW_END,
+      eventSubTimestamp: WINDOW_END,
+      actor: null,
+      chatStatus: null,
+    };
+    const execution = {
+      statisticsChat: { markWordStreamEnded },
+      scheduleAlarm,
+      streamStateTransitionAccepted: true,
+      streamSession: { streamId: STREAM_ID, startedAt: WINDOW_START },
+    } as unknown as ModuleExecutionContext;
+
+    await processStatisticsEvent(offline, execution);
+
+    expect(markWordStreamEnded).toHaveBeenCalledWith(STREAM_ID, WINDOW_END);
+    expect(scheduleAlarm).toHaveBeenCalledWith("window", "window", Date.parse(WINDOW_END) + 300_000);
+    execution.streamStateTransitionAccepted = false;
+    await processStatisticsEvent(offline, execution);
+    expect(markWordStreamEnded).toHaveBeenCalledTimes(1);
+    expect(scheduleAlarm).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores the shared alarm while offline stream words still need merge or pruning", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await writeStreamState(database, "offline", WINDOW_END);
+    const chat = createStatisticsChat();
+    chat.wordStreams.set(STREAM_ID, {
+      words: [{ word: "pendingword", count: 1, lastSeenAt: WINDOW_END }],
+      endedAt: WINDOW_END,
+      expiresAt: Date.parse(WINDOW_END) + 24 * 60 * 60_000,
+    });
+    const { context, calls } = createContext(database, chat);
+
+    await reconcileStatisticsSchedule(context, "stream_state");
+
+    expect(calls.schedule).toHaveBeenCalledWith("window", Date.parse(WINDOW_END) + 300_000);
   });
 });
