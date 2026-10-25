@@ -8,6 +8,7 @@ import { readBotCredentials } from "./auth/bot-credentials";
 import type { EventCode } from "../contracts/values";
 import { moduleEnabledForChannel, readChannelControls } from "./db/channel-controls";
 import { chatOutputSuppressionReason, type ChatOutputSuppressionReason } from "./chat-output-gate";
+import { writeChannelTimelineEvent } from "./db/timeline-events";
 
 const CREATE_CLIP_URL = "https://api.twitch.tv/helix/clips";
 const CONFIRM_CLIP_URL = "https://api.twitch.tv/helix/clips";
@@ -286,6 +287,16 @@ export const postConfirmedClipLink = async (
       actorUserId: actorUserId ?? "system",
     },
   );
+  try {
+    await writeChannelTimelineEvent(environment.DB, channelId, {
+      kind: "clip_created",
+      identity: clip.clipId,
+      occurredAt: createdAt,
+      detail: { clipId: clip.clipId },
+    });
+  } catch (error: unknown) {
+    console.warn("Confirmed clip timeline event could not be recorded.", error);
+  }
 
   const message = configuredClipLinkMessage(settings, {
     title: clip.title ?? clip.clipId,

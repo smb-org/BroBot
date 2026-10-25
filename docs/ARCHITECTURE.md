@@ -272,6 +272,27 @@ Nicht verfügbare Stichproben bleiben `NULL`. D1 enthält nur Aggregate, keine
 Nutzerkennungen oder einzelnen Nachrichten. Die Aggregate bleiben unbegrenzt
 erhalten (Entscheidung 0003).
 
+`channel_timeline_events` ergänzt diese Fenster um Streamstart, Streamende,
+Titel- und Kategorieänderungen, bestätigte Clips, autorisierte Werbepausen und
+Emote-Spitzen. Die Tabelle hat pro Kanal einen natürlichen Ereignisschlüssel,
+ist unbegrenzt aufbewahrt und löscht mit `ON DELETE CASCADE`. EventSub-Wiederholungen
+verwenden denselben Schlüssel. Online- und Offline-Einträge bleiben erhalten;
+ein zusätzlicher `stream_drop` entsteht, wenn zwei Online-Ereignisse dieselbe
+Stream-ID tragen und dazwischen ein Offline-Ereignis mit höchstens zehn Minuten
+Abstand liegt. Die Paarbildung liest gespeicherte Zeitpunkte und funktioniert
+auch dann, wenn das Offline-Ereignis verspätet eintrifft.
+
+`channel.update` kommt über den verpflichtenden Statistics-EventSub-Zielpfad
+ohne zusätzlichen Broadcaster-Scope. Titel und Kategorie enthalten den zuletzt
+beobachteten alten sowie den neuen Wert; beim ersten beobachteten Update kann
+der alte Titel `NULL` sein. Clips werden erst nach bestätigter Verfügbarkeit mit
+Clip-ID erfasst. Werbepausen werden nur bei verbundener Broadcaster-Zustimmung
+für `channel:read:ads` abonniert. Emote-Spitzen entstehen beim Schreiben eines
+Fünf-Minuten-Fensters, wenn mindestens 10 Emotes gezählt wurden und der Wert
+mindestens dreimal so hoch ist wie der Median der bis zu zwölf vorherigen
+Fenster. Der Zeitstempel der Spitze ist das Ende ihres Fensters. Details
+enthalten keine Nutzer- oder Creator-IDs.
+
 `channel.chat.message`-IDs werden im Channel Durable Object nach Empfangszeit
 für die gesamte von EventSub akzeptierte Replaydauer aufbewahrt: bis zu elf
 Minuten einschließlich der beidseitigen 30-Sekunden-Uhrabweichung. IDs werden

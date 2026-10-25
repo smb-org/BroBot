@@ -759,6 +759,8 @@ export interface ModuleAlarmContext {
   externalFetchBudget?: ModuleExternalFetchBudget;
   /** Absolute window counters, online time, and boundary samples held in the channel Durable Object. */
   statisticsChat?: ModuleStatisticsChat;
+  /** Writes one privacy-safe host timeline event using its natural identity. */
+  recordTimelineEvent?: (event: ModuleTimelineEvent) => Promise<void>;
   /** Host-authenticated Helix counts; unavailable sources return null. */
   fetchViewerCount?: () => Promise<number | null>;
   fetchChattersTotal?: () => Promise<number | null>;
@@ -850,6 +852,37 @@ export interface ModuleStatisticsWindow {
   metricsSampled: boolean;
   revision: number;
 }
+
+interface ModuleTimelineEventBase {
+  identity: string;
+  occurredAt: string;
+  streamId?: string | null;
+}
+
+export type ModuleTimelineEvent =
+  | (ModuleTimelineEventBase & { kind: "stream_online"; detail: { startedAt: string | null } })
+  | (ModuleTimelineEventBase & { kind: "stream_offline"; detail: Record<string, never> })
+  | (ModuleTimelineEventBase & { kind: "title_change"; detail: { oldTitle: string | null; newTitle: string } })
+  | (ModuleTimelineEventBase & {
+      kind: "category_change";
+      detail: {
+        oldCategory: { id: string | null; name: string | null } | null;
+        newCategory: { id: string | null; name: string | null } | null;
+      };
+    })
+  | (ModuleTimelineEventBase & { kind: "clip_created"; detail: { clipId: string } })
+  | (ModuleTimelineEventBase & { kind: "ad_break"; detail: { durationSeconds: number; startedAt: string } })
+  | (ModuleTimelineEventBase & {
+      kind: "emote_spike";
+      detail: {
+        windowStart: string;
+        emotes: number;
+        medianEmotes: number;
+        baselineWindows: number;
+        minimumEmotes: number;
+        multiplier: number;
+      };
+    });
 
 interface ModuleStatisticsChat {
   advanceToBoundary: (boundary: number, streamIsOnline: boolean, streamId: string | null) => Promise<void>;

@@ -138,6 +138,131 @@ const eventLog = async (database: TestD1Database) => {
   return result.results;
 };
 
+describe("channel timeline ad breaks", () => {
+  it("records an ad break only for a connected broadcaster with the ads scope", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const adEvent = {
+        channelId: "kanal-a",
+        subscriptionType: "channel.ad_break.begin",
+        triggerId: "ad-event-1",
+        payload: { started_at: NOW, duration_seconds: 90, requester_user_login: "private-login" },
+        receivedAt: NOW,
+      };
+
+      await dispatchEventSubNotification(environment(database), adEvent, vi.fn<typeof fetch>(), []);
+      await expect(database.prepare(
+        "SELECT COUNT(*) AS count FROM channel_timeline_events WHERE kind = 'ad_break'",
+      ).first()).resolves.toEqual({ count: 0 });
+
+      await insertLoginIdentityAndSession(database, "kanal-a");
+      await dispatchEventSubNotification(environment(database), adEvent, vi.fn<typeof fetch>(), []);
+      await expect(database.prepare(
+        "SELECT COUNT(*) AS count FROM channel_timeline_events WHERE kind = 'ad_break'",
+      ).first()).resolves.toEqual({ count: 0 });
+
+      await database.prepare("UPDATE twitch_login_identity SET scopes_json = ? WHERE user_id = ?")
+        .bind(JSON.stringify(["channel:read:ads"]), "kanal-a").run();
+      await dispatchEventSubNotification(environment(database), adEvent, vi.fn<typeof fetch>(), []);
+      await dispatchEventSubNotification(environment(database), adEvent, vi.fn<typeof fetch>(), []);
+
+      const rows = await database.prepare(
+        "SELECT kind, detail_json FROM channel_timeline_events WHERE kind = 'ad_break'",
+      ).all<{ kind: string; detail_json: string }>();
+      expect(rows.results).toEqual([{
+        kind: "ad_break",
+        detail_json: JSON.stringify({ durationSeconds: 90, startedAt: NOW }),
+      }]);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("channel timeline metadata changes", () => {
+  it("stores title and category transitions with previous and new values once per update", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const { CHANNEL: channel, ...runtime } = environment(database);
+      void channel;
+      const update = (triggerId: string, receivedAt: string, title: string, categoryId: string, categoryName: string) =>
+        dispatchEventSubNotification(runtime, {
+          channelId: "kanal-a",
+          subscriptionType: "channel.update",
+          triggerId,
+          payload: { title, category_id: categoryId, category_name: categoryName },
+          receivedAt,
+        }, vi.fn<typeof fetch>(), []);
+
+      await update("update-1", "2026-10-25T12:00:00.000Z", "Old title", "game-1", "Old category");
+      await update("update-2", "2026-10-25T12:01:00.000Z", "New title", "game-2", "New category");
+      await update("update-2", "2026-10-25T12:01:00.000Z", "New title", "game-2", "New category");
+      await update("update-3", "2026-10-25T12:02:00.000Z", "New title", "", "");
+
+      const rows = await database.prepare(
+        `SELECT kind, detail_json FROM channel_timeline_events
+          WHERE channel_id = ? ORDER BY occurred_at, event_key`,
+      ).bind("kanal-a").all<{ kind: string; detail_json: string }>();
+      expect(rows.results).toEqual([
+        { kind: "category_change", detail_json: JSON.stringify({ oldCategory: null, newCategory: { id: "game-1", name: "Old category" } }) },
+        { kind: "title_change", detail_json: JSON.stringify({ oldTitle: null, newTitle: "Old title" }) },
+        { kind: "category_change", detail_json: JSON.stringify({ oldCategory: { id: "game-1", name: "Old category" }, newCategory: { id: "game-2", name: "New category" } }) },
+        { kind: "title_change", detail_json: JSON.stringify({ oldTitle: "Old title", newTitle: "New title" }) },
+        { kind: "category_change", detail_json: JSON.stringify({ oldCategory: { id: "game-2", name: "New category" }, newCategory: null }) },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("channel timeline stream lifecycle", () => {
+  it("keeps online/offline entries and derives a same-broadcast drop idempotently", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const runtime = environment(database);
+      const dispatch = (triggerId: string, subscriptionType: string, occurredAt: string) =>
+        dispatchEventSubNotification(runtime, {
+          channelId: "kanal-a",
+          subscriptionType,
+          triggerId,
+          eventSubTimestamp: occurredAt,
+          receivedAt: occurredAt,
+          payload: subscriptionType === "stream.offline"
+            ? { broadcaster_user_id: "kanal-a" }
+            : { id: "stream-1", started_at: "2026-10-25T12:00:00.000Z" },
+        }, vi.fn<typeof fetch>(), []);
+
+      await dispatch("online-1", "stream.online", "2026-10-25T12:00:00.000Z");
+      await dispatch("offline-1", "stream.offline", "2026-10-25T12:05:00.000Z");
+      await dispatch("online-2", "stream.online", "2026-10-25T12:09:00.000Z");
+      await dispatch("online-2", "stream.online", "2026-10-25T12:09:00.000Z");
+
+      const rows = await database.prepare(
+        `SELECT kind, COUNT(*) AS count FROM channel_timeline_events
+          WHERE channel_id = ? GROUP BY kind ORDER BY kind`,
+      ).bind("kanal-a").all<{ kind: string; count: number }>();
+      expect(rows.results).toEqual([
+        { kind: "stream_drop", count: 1 },
+        { kind: "stream_offline", count: 1 },
+        { kind: "stream_online", count: 2 },
+      ]);
+      await expect(database.prepare(
+        `SELECT stream_id, detail_json FROM channel_timeline_events
+          WHERE channel_id = ? AND kind = 'stream_drop'`,
+      ).bind("kanal-a").first()).resolves.toEqual({
+        stream_id: "stream-1",
+        detail_json: JSON.stringify({ gapSeconds: 240 }),
+      });
+    } finally {
+      database.close();
+    }
+  });
+});
+
 /** Registers every registry module as enabled; dispatch reads from the database. */
 const activate = async (database: TestD1Database, channelId: string, moduleId: string): Promise<void> => {
   await database.prepare(

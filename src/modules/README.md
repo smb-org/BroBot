@@ -558,10 +558,10 @@ und Fenster bleiben unbegrenzt, weil sie aggregiert sind und keine
 Personendaten enthalten (Entscheidung 0003). Routenabfragen binden
 `channel_id`; `/history` liefert pro Messpunkt nur numerische Werte.
 
-### Kanalstatistiken (#557)
+### Kanalstatistiken und Stream-Timeline (#557/#558)
 
 Das verpflichtende `statistics`-Modul abonniert `channel.chat.message`,
-und `stream.online` für jeden Kanal. Es zählt im Channel
+`stream.online` und `channel.update` für jeden Kanal. Es zählt im Channel
 Durable Object Nachrichten und Emote-Fragmente, ohne je Nachricht eine
 D1-Zeile zu schreiben. Die Fenster beginnen an UTC-Vielfachen von 300 s
 (`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
@@ -590,6 +590,18 @@ ein Fenster ohne Abtastung an seiner Grenze hat `NULL`. Es gibt
 keine per-window Personen-Hashes oder neue personenbezogene Speicherung.
 `channel_statistics` enthält nur Summen und wird unbegrenzt aufbewahrt; beim
 Löschen des Kanals greift `ON DELETE CASCADE` (Entscheidung 0003, Abschnitt 6).
+
+Die Worker-Host-Tabelle `channel_timeline_events` speichert zusätzlich
+Streamstart/-ende, Drops, Titel-/Kategorieänderungen, bestätigte Clip-IDs,
+Werbepausen und Emote-Spitzen. Ein Drop wird zusätzlich zu den Online-/Offline-
+Zeilen gespeichert, wenn dieselbe Stream-ID innerhalb von zehn Minuten
+wiederkommt. Emote-Spitzen verwenden mindestens 10 Emotes und mindestens das
+Dreifache des Medians der bis zu zwölf vorigen Fenster. Wiederholungen sind
+über natürliche Ereignisschlüssel idempotent. Werbepausen gibt es nur bei
+Broadcaster-Zustimmung für `channel:read:ads`; Creator- und Nutzer-IDs werden
+nicht gespeichert. Beide D1-Tabellen sind unbegrenzt und mit
+`ON DELETE CASCADE` kanalgebunden. Module greifen auf die Timeline nur über den
+Host-Kontrakt zu.
 
 ### Modulaktionen (`actions`)
 
