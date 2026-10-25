@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ChannelRole } from "../../src/contracts/values";
 import { dashboardNavigationGroups, DASHBOARD_NAVIGATION_CATEGORIES, MODULE_NAVIGATION_CATEGORY_GROUPS, visibleModuleNavigationIds } from "../../src/dashboard/nav-pages";
 import { dashboardTexts } from "../../src/dashboard/locale";
-import { dashboardModeForRoute, parseDashboardRoute, routeForDashboardMode, routeForSelectedChannel, type DashboardRoute } from "../../src/dashboard/router";
+import { dashboardModeForRoute, dashboardRoutePath, parseDashboardRoute, routeForDashboardMode, routeForSelectedChannel, type DashboardRoute } from "../../src/dashboard/router";
 import { moduleName } from "../../src/dashboard/module-labels";
 import { MODULES } from "../../src/modules/registry";
 
@@ -20,18 +20,42 @@ const navigationFor = (moduleStates: { id: string; enabled: boolean }[], role: C
   );
 
 describe("dashboard navigation", () => {
-  it("registers Streams as the first statistics page under data", () => {
+  it("registers Streams and Wörter as distinct statistics pages under data", () => {
     const groups = navigationFor(MODULES.map(({ id }) => ({ id, enabled: true })));
     const entries = groups.flatMap(({ entries: groupEntries }) => groupEntries).filter(({ moduleId }) => moduleId === "statistics");
 
-    expect(entries).toEqual([expect.objectContaining({
-      id: "module:statistics:streams",
-      moduleId: "statistics",
-      category: "data",
-      area: "setup",
-      label: "Streams",
-      route: { kind: "module", channelId: "channel-a", moduleId: "statistics" },
-    })]);
+    expect(entries).toEqual([
+      expect.objectContaining({
+        id: "module:statistics:streams",
+        moduleId: "statistics",
+        category: "data",
+        area: "setup",
+        label: "Streams",
+        route: { kind: "module", channelId: "channel-a", moduleId: "statistics" },
+      }),
+      expect.objectContaining({
+        id: "module:statistics:words",
+        moduleId: "statistics",
+        category: "data",
+        area: "setup",
+        label: "Words",
+        route: { kind: "module", channelId: "channel-a", moduleId: "statistics", pageId: "words" },
+      }),
+    ]);
+    expect(dashboardRoutePath(entries[1]?.route as DashboardRoute)).toBe("/channels/channel-a/modules/statistics?page=words");
+    expect(parseDashboardRoute("/channels/channel-a/modules/statistics", "?page=words")).toEqual({
+      kind: "module", channelId: "channel-a", moduleId: "statistics", pageId: "words",
+    });
+    // Unknown, malformed, default-page and single-page ids all resolve to the base route.
+    for (const [moduleId, page] of [
+      ["statistics", "Not%20valid"], ["statistics", "missing"], ["statistics", "streams"], ["currency", "missing"], ["currency", "words"],
+    ] as const) {
+      expect(parseDashboardRoute(`/channels/channel-a/modules/${moduleId}`, `?page=${page}`)).toEqual({
+        kind: "module", channelId: "channel-a", moduleId,
+      });
+    }
+    expect(dashboardRoutePath({ kind: "module", channelId: "channel-a", moduleId: "statistics", pageId: "streams" })).toBe("/channels/channel-a/modules/statistics");
+    expect(dashboardRoutePath({ kind: "module", channelId: "channel-a", moduleId: "currency", pageId: "words" })).toBe("/channels/channel-a/modules/currency");
   });
 
   it("maps every module navigation category to one of the six shell groups", () => {

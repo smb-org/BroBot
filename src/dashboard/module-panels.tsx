@@ -213,6 +213,7 @@ export const ModuleNavigation = ({ channelId, activeModules, onNavigate }: {
 interface ModulePanelMountProperties {
   channelId: string;
   activeModules: PanelActiveModule[];
+  pageId?: string;
   settingsSaveTarget?: HTMLElement | null;
   streamSessionIdentity?: string;
   suspendModuleId?: string;
@@ -1016,7 +1017,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   </>;
 };
 
-export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget = null, streamSessionIdentity, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, viewerIsBot = false, initialSelection, initialCommand, onInitialCommandConsumed, onOpenTestArea, chatVotingTab = "votes" }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, pageId, settingsSaveTarget = null, streamSessionIdentity, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, viewerIsBot = false, initialSelection, initialCommand, onInitialCommandConsumed, onOpenTestArea, chatVotingTab = "votes" }: ModulePanelMountProperties): ReactElement => {
   const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -1042,6 +1043,7 @@ export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget 
           canOperate={canOperate}
           botIsModerator={botIsModerator}
           viewerIsBot={viewerIsBot}
+          {...(pageId === undefined ? {} : { pageId })}
           suspendToParent={module.id === suspendModuleId}
           {...(initialSelection === undefined ? {} : { initialSelection })}
           {...(initialCommand === undefined ? {} : { initialCommand })}
@@ -1053,7 +1055,7 @@ export const ModulePanelMount = ({ channelId, activeModules, settingsSaveTarget 
   );
 };
 
-const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage, canOperate, botIsModerator, viewerIsBot, suspendToParent, settingsSaveTarget, initialSelection, initialCommand, onInitialCommandConsumed, onOpenTestArea, chatVotingTab }: {
+const MountedModuleView = ({ module, channelId, pageId, streamSessionIdentity, canManage, canOperate, botIsModerator, viewerIsBot, suspendToParent, settingsSaveTarget, initialSelection, initialCommand, onInitialCommandConsumed, onOpenTestArea, chatVotingTab }: {
   module: (typeof MODULES)[number];
   channelId: string;
   streamSessionIdentity?: string;
@@ -1068,6 +1070,7 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
   onInitialCommandConsumed?: () => void;
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
   chatVotingTab?: "votes" | "settings";
+  pageId?: string;
 }): ReactElement => {
   const language = dashboardLanguage();
   const description = moduleDescription(module.id, language);
@@ -1098,6 +1101,7 @@ const MountedModuleView = ({ module, channelId, streamSessionIdentity, canManage
       onRetry={retryModuleChunkLoad}
       properties={{
         channelId,
+        ...(pageId === undefined ? {} : { pageId }),
         ...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity }),
         language: dashboardLanguage(),
         resolveModuleName: moduleName,
@@ -1309,6 +1313,7 @@ const ModuleListLink = ({ channelId, onNavigate }: { channelId: string; onNaviga
 interface ModulePageProperties {
   channelId: string;
   moduleId: string;
+  pageId?: string;
   streamSessionIdentity?: string;
   ownRole: ChannelRole;
   modules: PanelModuleState[];
@@ -1330,12 +1335,13 @@ interface ModulePageProperties {
   suspendPanelUntilReady?: boolean;
 }
 
-export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModules, streamSessionIdentity, loading = false, error = null, busy = false, botIsModerator = null, viewerIsBot = false, onNavigate, onToggle, initialSelection, initialCommand, onInitialCommandConsumed, suspendPanelUntilReady = false }: ModulePageProperties): ReactElement => {
+export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, activeModules, streamSessionIdentity, loading = false, error = null, busy = false, botIsModerator = null, viewerIsBot = false, onNavigate, onToggle, initialSelection, initialCommand, onInitialCommandConsumed, suspendPanelUntilReady = false }: ModulePageProperties): ReactElement => {
   const texts = dashboardTexts();
   const labels = workspaceTexts();
   const details = moduleDetails(moduleId);
   const registered = MODULES.find((candidate) => candidate.id === moduleId);
-  const statisticsEntry = registered?.navigationEntries?.find((entry) => entry.id === "streams");
+  const statisticsEntry = registered?.navigationEntries?.find((entry) => entry.id === (pageId ?? "streams"))
+    ?? registered?.navigationEntries?.find((entry) => entry.id === "streams");
   const statisticsPageLabel = statisticsEntry?.label[dashboardLanguage()] ?? texts.events.info;
   const navigationPage = registered?.navigationEntries?.find((entry) => entry.showMainSwitch === false);
   const moduleState = modules.find((candidate) => candidate.id === moduleId);
@@ -1489,7 +1495,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             />
           </section> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} viewerIsBot={viewerIsBot} {...(initialSelection === undefined ? {} : { initialSelection })} {...(initialCommand === undefined ? {} : { initialCommand })} {...(onInitialCommandConsumed === undefined ? {} : { onInitialCommandConsumed })} onOpenTestArea={(targetModuleId, entryId) => onNavigate({ kind: "channel", channelId, section: "test-area", only: { moduleId: targetModuleId, entryId } })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
+              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} {...(pageId === undefined ? {} : { pageId })} settingsSaveTarget={settingsSaveTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} viewerIsBot={viewerIsBot} {...(initialSelection === undefined ? {} : { initialSelection })} {...(initialCommand === undefined ? {} : { initialCommand })} {...(onInitialCommandConsumed === undefined ? {} : { onInitialCommandConsumed })} onOpenTestArea={(targetModuleId, entryId) => onNavigate({ kind: "channel", channelId, section: "test-area", only: { moduleId: targetModuleId, entryId } })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
             </section>
           )
         ) : (

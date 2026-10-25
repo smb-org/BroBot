@@ -1609,6 +1609,8 @@ export interface ModuleEnableContext {
 /** Shared props for lazily loaded panel views. */
 export interface ModulePanelProperties {
   channelId: string;
+  /** Active module navigation page, when a module exposes more than one page. */
+  pageId?: string;
   /** The panel language resolved by the host; optional for legacy modules. */
   language?: ModuleLanguage;
   /** Resolves other registered module names for collection rows and history. */

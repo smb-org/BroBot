@@ -223,3 +223,25 @@ export const seedE2EStatisticsStreams = (channelId = e2eChannelId): void => {
     throw new Error(`Statistics streams e2e setup failed.\n${result.stdout}\n${result.stderr}`);
   }
 };
+
+export const seedE2EStatisticsWords = (channelId = e2eChannelId): void => {
+  seedE2EStatisticsStreams(channelId);
+  const observedAt = new Date().toISOString();
+  const sql = `
+    INSERT OR REPLACE INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+      VALUES
+      ('${channelId}', 'halloween', 20, '${observedAt}'),
+      ('${channelId}', 'hallway', 12, '${observedAt}'),
+      ('${channelId}', 'lol', 10, '${observedAt}');
+  `;
+  const result = spawnSync("./node_modules/.bin/wrangler", [
+    "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes",
+    "--persist-to", e2eWorkerPersist, "--command", sql,
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
+  });
+  if (result.status !== 0) {
+    throw new Error(`Statistics words e2e setup failed.\n${result.stdout}\n${result.stderr}`);
+  }
+};

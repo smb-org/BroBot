@@ -5,6 +5,7 @@ import { isAuditArea } from "./audit/areas";
 import type { PanelAuditFilters, PanelEventFilters, PanelEventOrigin } from "../panel-contract";
 import { runDashboardNavigationGuards } from "./ui/navigation-guard";
 import type { DryRunRequest } from "../contracts/dry-run";
+import { MODULES } from "../modules/registry";
 
 export type DashboardRoute =
   | { kind: "overview" }
@@ -21,7 +22,17 @@ export type DashboardRoute =
     auditFilters?: PanelAuditFilters;
     only?: DryRunRequest["only"];
   }
-  | { kind: "module"; channelId: string; moduleId: string };
+  | { kind: "module"; channelId: string; moduleId: string; pageId?: string };
+
+/**
+ * A module's extra pages are addressed by `?page=<id>`. Only registered entries after the first one
+ * count; unknown ids, the first (default) page and single-page modules resolve to the base route,
+ * so every URL that renders a page also marks that page's sidebar entry active.
+ */
+const registeredModulePageId = (moduleId: string, pageId: string | null): string | undefined => {
+  const entries = MODULES.find((module) => module.id === moduleId)?.navigationEntries ?? [];
+  return pageId !== null && entries.slice(1).some((entry) => entry.id === pageId) ? pageId : undefined;
+};
 
 export type DashboardMode = "live" | "setup";
 
@@ -154,7 +165,8 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     const channelId = decodeSegment(segments[1] ?? "");
     const moduleId = decodeSegment(segments[3] ?? "");
     if (channelId === null || moduleId === null) return { kind: "overview" };
-    return { kind: "module", channelId, moduleId };
+    const pageId = registeredModulePageId(moduleId, new URLSearchParams(search).get("page"));
+    return { kind: "module", channelId, moduleId, ...(pageId === undefined ? {} : { pageId }) };
   }
   if (segments.length === 4 && segments[0] === "channels" && segments[2] === "overlays") {
     const channelId = decodeSegment(segments[1] ?? "");
@@ -211,7 +223,11 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   if (route.kind === "overview") return "/";
   if (route.kind === "platform") return "/platform";
   const base = `/channels/${encodeURIComponent(route.channelId)}`;
-  if (route.kind === "module") return `${base}/modules/${encodeURIComponent(route.moduleId)}`;
+  if (route.kind === "module") {
+    const path = `${base}/modules/${encodeURIComponent(route.moduleId)}`;
+    const pageId = registeredModulePageId(route.moduleId, route.pageId ?? null);
+    return pageId === undefined ? path : `${path}?${new URLSearchParams({ page: pageId }).toString()}`;
+  }
   if (route.section === "overview") return base;
   const path = `${base}/${route.section}`;
   if (route.section === "overlays" && route.editorOverlayId !== undefined) {
@@ -254,7 +270,7 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
 /** Stable page identity for shell focus; excludes query state managed within a page. */
 export const dashboardRouteFocusKey = (route: DashboardRoute): string => {
   if (route.kind === "overview" || route.kind === "platform") return route.kind;
-  if (route.kind === "module") return `module:${route.channelId}:${route.moduleId}`;
+  if (route.kind === "module") return `module:${route.channelId}:${route.moduleId}${route.pageId === undefined ? "" : `:${route.pageId}`}`;
   const editor = route.section === "overlays" && route.editorOverlayId !== undefined
     ? `:editor:${route.editorOverlayId}`
     : "";
