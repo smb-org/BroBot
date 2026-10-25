@@ -31,7 +31,7 @@ interface WindowState {
 const createStatisticsChat = (initial: WindowState[] = []) => {
   const windows = new Map(initial.map((window) => [window.windowStart, { ...window }]));
   const wordStreams = new Map<string, {
-    words: Array<{ word: string; count: number; lastSeenAt: string; firstInStream?: boolean }>;
+    words: Array<{ word: string; count: number; lastSeenAt: string }>;
     endedAt: string | null;
     expiresAt: number;
     batch?: number;
@@ -117,7 +117,7 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       if (stream === undefined || streamState !== "offline" && bucket.streamId === streamId ||
           (stream.lastIncrementAt ?? Date.parse(WINDOW_END) - 15 * 60_000) > idleBefore) return Promise.resolve([]);
       if ((stream.batch ?? 1) === bucket.batch) stream.batch = bucket.batch + 1;
-      return Promise.resolve(stream.words.map((word) => ({ ...word, firstInStream: word.firstInStream ?? true })));
+      return Promise.resolve(stream.words.map((word) => ({ ...word })));
     }),
     deleteWordBucket: vi.fn((bucket: { streamId: string; batch: number }) => {
       const stream = wordStreams.get(bucket.streamId);
@@ -453,9 +453,9 @@ describe("statistics window alarm", () => {
 
     expect(batch).toHaveBeenCalledTimes(1);
     await expect(database.prepare(
-      `SELECT total_count, streams_seen FROM channel_word_frequency_baseline
+      `SELECT total_count FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word = ?`,
-    ).bind(CHANNEL_ID, "hallo").first()).resolves.toEqual({ total_count: 4, streams_seen: 1 });
+    ).bind(CHANNEL_ID, "hallo").first()).resolves.toEqual({ total_count: 4 });
     expect(chat.calls.deleteWordBucket).toHaveBeenCalledWith({ streamId: STREAM_ID, batch: 1 });
     expect(chat.wordStreams.get(STREAM_ID)?.words).toEqual([]);
   });
@@ -472,7 +472,6 @@ describe("statistics window alarm", () => {
       word: bucket.batch === 1 ? "firstword" : "laterword",
       count: 1,
       lastSeenAt: WINDOW_END,
-      firstInStream: bucket.batch === 1,
     }]));
     const { context } = createContext(database, chat);
     let attempts = 0;

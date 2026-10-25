@@ -611,14 +611,15 @@ als offline oder mit einer anderen Stream-ID meldet und seit mindestens
 erforderlich. Vor jedem D1-Aufruf rotiert das DO zur nächsten Bucket-Nummer;
 späte Zähler bleiben so für einen späteren Merge erhalten. Höchstens die 1.000
 häufigsten Wörter eines Buckets gelangen in die kanalweite Baseline. Marker je
-Stream und Batch machen Wiederholungen idempotent; `streams_seen` zählt jedes
-Wort je Stream nur einmal. Die Baseline behält dauerhaft die 5.000 häufigsten
+Stream und Batch machen Wiederholungen idempotent; je Wort speichert die
+Baseline nur Gesamtzahl und letzten Zeitpunkt. Ein noch gepufferter Zuwachs
+zählt für die 15-Minuten-Ruhe mit. Die Baseline behält dauerhaft die 5.000 häufigsten
 Wörter pro Kanal.
 
 Nach erfolgreichem Merge löscht das DO nur den jeweiligen Bucket. Nach
 24 Stunden ab bestätigtem Streamende oder Offline-Erkennung löscht der nächste
 Statistik-Alarm alle Streamdaten, unabhängig von D1-Erfolg. Ein Merge-Batch
-umfasst fünf D1-Anweisungen; pro geändertem Statistikfenster kommt ein
+umfasst vier D1-Anweisungen; pro geändertem Statistikfenster kommt ein
 absoluter Fenster-Upsert hinzu. Wortzählungen schreiben nicht pro Nachricht
 nach DO-SQLite.
 

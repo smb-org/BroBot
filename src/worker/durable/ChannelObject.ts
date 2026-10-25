@@ -503,7 +503,6 @@ type BufferedStatisticsWordCount = {
   count: number;
   lastSeenAt: string;
   lastIncrementAt: number;
-  firstBatch: number | null;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -774,6 +773,8 @@ export class ChannelObject extends DurableObject<Env> {
   private statisticsWordWordsByStream = new Map<string, Set<string>>();
   private statisticsWordNewDistinctByStream = new Map<string, number>();
   private statisticsWordStreamEndedAt = new Map<string, number>();
+  /** Latest increment per stream that is still buffered in memory, so idle checks see unflushed activity. */
+  private statisticsWordLastBufferedIncrementAt = new Map<string, number>();
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
   private timerScheduleInputGeneration = 0;
@@ -3741,6 +3742,7 @@ export class ChannelObject extends DurableObject<Env> {
     for (const streamId of expiredIds) {
       this.statisticsWordWordsByStream.delete(streamId);
       this.statisticsWordNewDistinctByStream.delete(streamId);
+      this.statisticsWordLastBufferedIncrementAt.delete(streamId);
       this.statisticsWordStreamEndedAt.delete(streamId);
     }
   }
@@ -3770,22 +3772,22 @@ export class ChannelObject extends DurableObject<Env> {
         stream === undefined && memoryEndedAt !== undefined &&
           memoryEndedAt + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS <= now) return;
     const bufferedWords = this.statisticsWordWordsByStream.get(streamId) ?? new Set<string>();
-    const candidates = [...counts.keys()].filter((word) => !bufferedWords.has(word));
-    const existingWords = new Set(bufferedWords);
-    const firstBatches = new Map<string, number>();
-    for (const word of bufferedWords) existingWords.add(word);
+    // Only this message's (at most 20) words are looked up; the stream-wide buffer is never copied.
+    const existingWords = new Set<string>();
+    const candidates: string[] = [];
+    for (const word of counts.keys()) {
+      if (bufferedWords.has(word)) existingWords.add(word);
+      else candidates.push(word);
+    }
     if (candidates.length > 0) {
       const placeholders = candidates.map(() => "?").join(", ");
-      const rows = this.ctx.storage.sql.exec<{ word: string; first_batch: number }>(
-        `SELECT word, first_batch FROM ${STATISTICS_WORD_SEEN_TABLE}
+      const rows = this.ctx.storage.sql.exec<{ word: string }>(
+        `SELECT word FROM ${STATISTICS_WORD_SEEN_TABLE}
           WHERE stream_id = ? AND word IN (${placeholders})`,
         streamId,
         ...candidates,
       ).toArray();
-      for (const row of rows) {
-        existingWords.add(row.word);
-        firstBatches.set(row.word, row.first_batch);
-      }
+      for (const row of rows) existingWords.add(row.word);
     }
 
     const bufferedDistinct = this.statisticsWordNewDistinctByStream.get(streamId) ?? 0;
@@ -3802,18 +3804,11 @@ export class ChannelObject extends DurableObject<Env> {
         buffered.lastSeenAt = buffered.lastSeenAt < lastSeenAt ? lastSeenAt : buffered.lastSeenAt;
         buffered.lastIncrementAt = now;
       } else {
-        const firstBatch = firstBatches.get(word) ?? null;
-        this.statisticsWordCounts.set(key, {
-          streamId,
-          word,
-          count,
-          lastSeenAt,
-          lastIncrementAt: now,
-          firstBatch,
-        });
+        this.statisticsWordCounts.set(key, { streamId, word, count, lastSeenAt, lastIncrementAt: now });
       }
       bufferedWords.add(word);
     }
+    if (accepted.size > 0) this.statisticsWordLastBufferedIncrementAt.set(streamId, now);
     if (bufferedWords.size > 0) this.statisticsWordWordsByStream.set(streamId, bufferedWords);
     if (addedDistinctWords > 0) {
       this.statisticsWordNewDistinctByStream.set(streamId, bufferedDistinct + addedDistinctWords);
@@ -3908,6 +3903,7 @@ export class ChannelObject extends DurableObject<Env> {
     this.statisticsWordCounts.clear();
     this.statisticsWordWordsByStream.clear();
     this.statisticsWordNewDistinctByStream.clear();
+    this.statisticsWordLastBufferedIncrementAt.clear();
     return Promise.resolve();
   }
 
@@ -4125,21 +4121,27 @@ export class ChannelObject extends DurableObject<Env> {
       return Promise.resolve([]);
     }
     this.ensureStatisticsSchema();
-    const activeFilter = streamState === "online" ? "AND counts.stream_id <> ?" : "";
-    const bindings = streamState === "online" ? [idleBefore, streamId, idleBefore] : [idleBefore, idleBefore];
+    // The idle test belongs in HAVING only: a WHERE on the row would hide a fresh word and let a busy bucket pass.
+    const activeFilter = streamState === "online" ? "WHERE counts.stream_id <> ?" : "";
+    const bindings = streamState === "online" ? [streamId, idleBefore] : [idleBefore];
     const rows = this.ctx.storage.sql.exec<{ stream_id: string; batch: number }>(
       `SELECT counts.stream_id, counts.batch
          FROM ${STATISTICS_WORD_COUNT_TABLE} AS counts
-        WHERE counts.last_increment_at <= ? ${activeFilter}
+        ${activeFilter}
         GROUP BY counts.stream_id, counts.batch
        HAVING MAX(counts.last_increment_at) <= ?
         ORDER BY counts.stream_id ASC, counts.batch ASC`,
       ...bindings,
     ).toArray();
-    return Promise.resolve(rows.map(({ stream_id: bucketStreamId, batch }) => ({
-      streamId: bucketStreamId,
-      batch,
-    })));
+    return Promise.resolve(rows
+      .filter(({ stream_id: bucketStreamId }) => !this.hasFreshBufferedStatisticsWords(bucketStreamId, idleBefore))
+      .map(({ stream_id: bucketStreamId, batch }) => ({ streamId: bucketStreamId, batch })));
+  }
+
+  /** True when a stream received a word increment newer than `idleBefore` that is not flushed yet. */
+  private hasFreshBufferedStatisticsWords(streamId: string, idleBefore: number): boolean {
+    const bufferedAt = this.statisticsWordLastBufferedIncrementAt.get(streamId);
+    return bufferedAt !== undefined && bufferedAt > idleBefore;
   }
 
   public prepareStatisticsWordBucketForMerge(
@@ -4151,6 +4153,8 @@ export class ChannelObject extends DurableObject<Env> {
     if (!Number.isSafeInteger(idleBefore) || streamState === "unknown" ||
         streamState === "online" && (streamId === null || bucket.streamId === streamId)) return Promise.resolve([]);
     this.ensureStatisticsSchema();
+    // Activity buffered after the alarm's flush is invisible to the persisted timestamps below.
+    if (this.hasFreshBufferedStatisticsWords(bucket.streamId, idleBefore)) return Promise.resolve([]);
     const rows = this.ctx.storage.transactionSync(() => {
       const lastIncrement = this.ctx.storage.sql.exec<{ last_increment_at: number | null }>(
         `SELECT MAX(last_increment_at) AS last_increment_at FROM ${STATISTICS_WORD_COUNT_TABLE}
@@ -4165,17 +4169,13 @@ export class ChannelObject extends DurableObject<Env> {
       ).toArray()[0]?.current_batch;
       if (currentBatch === undefined) return [];
       const wordRows = this.ctx.storage.sql.exec<{
-      word: string;
-      count: number;
-      last_seen_at: string;
-        first_batch: number | null;
-    }>(
-        `SELECT counts.word, counts.count, counts.last_seen_at, seen.first_batch
-           FROM ${STATISTICS_WORD_COUNT_TABLE} AS counts
-           LEFT JOIN ${STATISTICS_WORD_SEEN_TABLE} AS seen
-             ON seen.stream_id = counts.stream_id AND seen.word = counts.word
-          WHERE counts.stream_id = ? AND counts.batch = ?
-          ORDER BY counts.count DESC, counts.word ASC LIMIT 1000`,
+        word: string;
+        count: number;
+        last_seen_at: string;
+      }>(
+        `SELECT word, count, last_seen_at FROM ${STATISTICS_WORD_COUNT_TABLE}
+          WHERE stream_id = ? AND batch = ?
+          ORDER BY count DESC, word ASC LIMIT 1000`,
         bucket.streamId,
         bucket.batch,
       ).toArray();
@@ -4188,12 +4188,7 @@ export class ChannelObject extends DurableObject<Env> {
           bucket.batch,
         );
       }
-      return wordRows.map(({ word, count, last_seen_at: lastSeenAt, first_batch: firstBatch }) => ({
-        word,
-        count,
-        lastSeenAt,
-        firstInStream: firstBatch === bucket.batch,
-      }));
+      return wordRows.map(({ word, count, last_seen_at: lastSeenAt }) => ({ word, count, lastSeenAt }));
     });
     return Promise.resolve(rows);
   }

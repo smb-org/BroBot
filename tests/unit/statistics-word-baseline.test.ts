@@ -114,12 +114,11 @@ describe("statistics word baseline merge", () => {
     );
 
     await expect(database.prepare(
-      `SELECT total_count, streams_seen, last_seen_at
+      `SELECT total_count, last_seen_at
          FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word = ?`,
     ).bind("word-baseline-retry", "bonjour").first()).resolves.toEqual({
       total_count: 3,
-      streams_seen: 1,
       last_seen_at: "2026-10-25T12:00:00.000Z",
     });
   });
@@ -131,7 +130,6 @@ describe("statistics word baseline merge", () => {
       word: `word${String(index).padStart(4, "0")}`,
       count: index + 1,
       lastSeenAt: "2026-10-25T12:00:00.000Z",
-      firstInStream: true,
     }));
 
     await mergeStatisticsWordBatch(
@@ -162,8 +160,8 @@ describe("statistics word baseline merge", () => {
          VALUES (0) UNION ALL SELECT value + 1 FROM sequence WHERE value < 5_000
        )
        INSERT INTO channel_word_frequency_baseline
-         (channel_id, word, total_count, streams_seen, last_seen_at)
-       SELECT ?, 'word' || printf('%05d', value), value + 1, 1, '2026-10-25T12:00:00.000Z' FROM sequence`,
+         (channel_id, word, total_count, last_seen_at)
+       SELECT ?, 'word' || printf('%05d', value), value + 1, '2026-10-25T12:00:00.000Z' FROM sequence`,
     ).bind("word-baseline-channel-cap").run();
 
     await mergeStatisticsWordBatch(
@@ -186,26 +184,26 @@ describe("statistics word baseline merge", () => {
     ).bind("word-baseline-channel-cap", "freshword").first()).resolves.toEqual({ total_count: 10 });
   });
 
-  it("merges later batches once without counting a stream twice for the same word", async () => {
+  it("merges later batches once each and ignores a repeated batch", async () => {
     const database = new TestD1Database();
     await insertChannel(database, "word-baseline-late-batch");
     await mergeStatisticsWordBatch(database as unknown as D1Database, "word-baseline-late-batch", "stream-late", 1, [
-      { word: "bonjour", count: 2, lastSeenAt: "2026-10-25T12:00:00.000Z", firstInStream: true },
+      { word: "bonjour", count: 2, lastSeenAt: "2026-10-25T12:00:00.000Z" },
     ], "2026-10-25T12:05:00.000Z");
     await mergeStatisticsWordBatch(database as unknown as D1Database, "word-baseline-late-batch", "stream-late", 2, [
-      { word: "bonjour", count: 3, lastSeenAt: "2026-10-25T12:10:00.000Z", firstInStream: false },
-      { word: "lateword", count: 1, lastSeenAt: "2026-10-25T12:10:00.000Z", firstInStream: true },
+      { word: "bonjour", count: 3, lastSeenAt: "2026-10-25T12:10:00.000Z" },
+      { word: "lateword", count: 1, lastSeenAt: "2026-10-25T12:10:00.000Z" },
     ], "2026-10-25T12:15:00.000Z");
     await mergeStatisticsWordBatch(database as unknown as D1Database, "word-baseline-late-batch", "stream-late", 2, [
-      { word: "bonjour", count: 3, lastSeenAt: "2026-10-25T12:10:00.000Z", firstInStream: false },
-      { word: "lateword", count: 1, lastSeenAt: "2026-10-25T12:10:00.000Z", firstInStream: true },
+      { word: "bonjour", count: 3, lastSeenAt: "2026-10-25T12:10:00.000Z" },
+      { word: "lateword", count: 1, lastSeenAt: "2026-10-25T12:10:00.000Z" },
     ], "2026-10-25T12:16:00.000Z");
 
     await expect(database.prepare(
-      "SELECT word, total_count, streams_seen FROM channel_word_frequency_baseline WHERE channel_id = ? ORDER BY word",
+      "SELECT word, total_count FROM channel_word_frequency_baseline WHERE channel_id = ? ORDER BY word",
     ).bind("word-baseline-late-batch").all()).resolves.toMatchObject({ results: [
-      { word: "bonjour", total_count: 5, streams_seen: 1 },
-      { word: "lateword", total_count: 1, streams_seen: 1 },
+      { word: "bonjour", total_count: 5 },
+      { word: "lateword", total_count: 1 },
     ] });
     await expect(database.prepare(
       "SELECT COUNT(*) AS count FROM channel_word_frequency_streams WHERE channel_id = ?",

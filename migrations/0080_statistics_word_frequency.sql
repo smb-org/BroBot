@@ -2,7 +2,6 @@ CREATE TABLE channel_word_frequency_baseline (
   channel_id TEXT NOT NULL REFERENCES channels(channel_id) ON DELETE CASCADE,
   word TEXT NOT NULL,
   total_count INTEGER NOT NULL CHECK (total_count > 0),
-  streams_seen INTEGER NOT NULL CHECK (streams_seen > 0),
   last_seen_at TEXT NOT NULL,
   PRIMARY KEY (channel_id, word)
 ) WITHOUT ROWID;

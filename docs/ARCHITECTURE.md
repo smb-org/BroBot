@@ -287,18 +287,18 @@ ungeflushte Intervall verloren gehen. Persistiert sind höchstens 20.000
 verschiedene Wörter je Stream; bei Erreichen der Grenze steigen nur bekannte
 Wörter weiter. Der Alarm führt einen Stream-Bucket erst zusammen, wenn D1 den
 Kanal als offline oder mit einer anderen Stream-ID meldet und der Bucket seit
-mindestens 15 Minuten keinen Zuwachs hatte. Fensterzustand ist dafür nicht
-erforderlich. Jedes Zusammenführen rotiert atomar zur nächsten Bucket-Nummer;
+mindestens 15 Minuten keinen Zuwachs hatte; ein noch gepufferter Zuwachs zählt
+dabei mit. Fensterzustand ist dafür nicht erforderlich. Jedes Zusammenführen rotiert atomar zur nächsten Bucket-Nummer;
 späte Zähler landen dort und können später erneut zusammengeführt werden. Je
 Bucket gehen höchstens die 1.000 häufigsten Wörter in einem D1-Batch in die
 Baseline, die die 5.000 häufigsten Wörter pro Kanal behält. Marker je Stream
-und Bucket machen Wiederholungen idempotent; `streams_seen` zählt jedes Wort
-je Stream nur einmal.
+und Bucket machen Wiederholungen idempotent; je Wort speichert die Baseline nur
+Gesamtzahl und letzten Zeitpunkt.
 
 Ein erfolgreicher Merge löscht nur den jeweiligen DO-Bucket. Nach 24 Stunden
 ab bestätigtem `stream.offline` oder erkannter Offline-Zeit löscht der nächste
 Statistik-Alarm alle Streamdaten, auch wenn D1 weiter fehlschlägt. Ein
-Merge-Batch umfasst fünf D1-Anweisungen; zusätzlich schreibt der Alarm je
+Merge-Batch umfasst vier D1-Anweisungen; zusätzlich schreibt der Alarm je
 geändertem Statistikfenster einen absoluten Fenster-Upsert. Wortzählungen
 verursachen keine DO-SQL-Schreibvorgänge pro Nachricht.
 Nicht verfügbare Stichproben bleiben `NULL`. D1 enthält nur Aggregate, keine

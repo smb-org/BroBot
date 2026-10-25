@@ -118,7 +118,7 @@ Für aktive Chatter (#292) gilt eine bewusst kürzere Regel: Der kanalgebundene 
 | Audit-Einträge | **24 Monate** | Administrative Nachvollziehbarkeit; betrifft Bedienende, nicht Zuschauer |
 | Kanalstatistiken je Fünf-Minuten-Fenster (Nachrichten, Emotes, Viewer, Chatters, aktive Chatter) | unbegrenzt | Ausschließlich Summen ohne Namen, IDs oder Nutzerlisten |
 | DO-Wort-Buckets je Stream | Zähler eines erfolgreichen Batches sofort; übrige Streamdaten beim ersten Statistik-Alarm ab **24 Stunden nach bestätigtem Streamende** (regulär innerhalb weiterer fünf Minuten) | Kurzlebige Grundlage für die Wortfrequenz-Baseline; Alterslöschung läuft unabhängig von D1-Erfolg. Fehlt `stream.offline`, beginnt die Frist mit der Offline-Erkennung durch den Statistik-Alarm |
-| Kanalweite Wortfrequenz-Baseline | unbegrenzt; höchstens **5.000 Wörter je Kanal** | Aggregat ohne Namen, Nutzer-IDs oder Nachrichtentexte; je Stream werden höchstens die 1.000 häufigsten Wörter übernommen |
+| Kanalweite Wortfrequenz-Baseline | unbegrenzt; höchstens **5.000 Wörter je Kanal** | Aggregat ohne Namen, Nutzer-IDs oder Nachrichtentexte; je Batch (ein Stream kann mehrere Batches haben) werden höchstens die 1.000 häufigsten Wörter übernommen; je Wort nur Gesamtzahl und letzter Zeitpunkt |
 | Marker zusammengeführter Stream-Batches | unbegrenzt | Eine kleine personenfreie Zeile je Stream und Batch verhindert Doppelzählung nach einem Retry mit unklarem D1-Ergebnis |
 | Aggregate ohne Personenbezug | unbegrenzt | siehe Abschnitt 6 |
 
@@ -134,11 +134,11 @@ das ungeflushte Intervall verlieren. Das ist für diese näherungsweise Baseline
 akzeptiert und spart die DO-SQL-Schreibvorgänge pro Chatnachricht. Der Alarm
 führt einen inaktiven Bucket erst zusammen, wenn D1 offline
 oder eine andere Live-Stream-ID meldet und seit mindestens 15 Minuten kein
-Zuwachs erfolgte. Der Merge hängt nicht von vorhandenen Statistikfenstern ab.
+Zuwachs erfolgte; auch ein noch nicht geschriebener, gepufferter Zuwachs zählt
+als Aktivität. Der Merge hängt nicht von vorhandenen Statistikfenstern ab.
 Vor dem D1-Aufruf rotiert das DO zur nächsten Bucket-Nummer; ein später Zuwachs
-landet dadurch in einem neuen Batch. Je Batch schreibt D1 fünf Anweisungen,
+landet dadurch in einem neuen Batch. Je Batch schreibt D1 vier Anweisungen,
 während jedes geänderte Statistikfenster seinen eigenen absoluten Upsert erhält.
-`streams_seen` wird für jedes Wort höchstens einmal je Stream erhöht.
 
 **180 Tage ist eine Setzung, keine Ableitung.** Sie lässt sich verkürzen, ohne dass etwas kaputtgeht — verlängern dagegen nicht, weil die Daten dann schon weg sind. Im Zweifel also kürzer.
 

@@ -857,7 +857,6 @@ export interface ModuleStatisticsWordCount {
   word: string;
   count: number;
   lastSeenAt: string;
-  firstInStream: boolean;
 }
 
 export interface ModuleStatisticsWordBucket {

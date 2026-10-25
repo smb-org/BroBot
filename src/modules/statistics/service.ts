@@ -72,7 +72,7 @@ export const mergeStatisticsWordBatch = async (
   channelId: string,
   streamId: string,
   batch: number,
-  wordCounts: readonly { word: string; count: number; lastSeenAt: string; firstInStream?: boolean }[],
+  wordCounts: readonly { word: string; count: number; lastSeenAt: string }[],
   mergedAt: string,
 ): Promise<void> => {
   const topWords = [...wordCounts]
@@ -80,8 +80,6 @@ export const mergeStatisticsWordBatch = async (
     .slice(0, STATISTICS_WORD_STREAM_MERGE_LIMIT);
   if (topWords.length === 0) return;
 
-  const firstWords = topWords.filter(({ firstInStream }) => firstInStream !== false);
-  const laterWords = topWords.filter(({ firstInStream }) => firstInStream === false);
   await db.batch([
     db.prepare(
       `INSERT OR IGNORE INTO channel_word_frequency_streams (channel_id, stream_id, batch, merged_at)
@@ -89,23 +87,8 @@ export const mergeStatisticsWordBatch = async (
     ).bind(channelId, streamId, batch),
     db.prepare(
       `INSERT INTO channel_word_frequency_baseline
-         (channel_id, word, total_count, streams_seen, last_seen_at)
-       SELECT ?, json_extract(value, '$.word'), CAST(json_extract(value, '$.count') AS INTEGER), 1,
-              json_extract(value, '$.lastSeenAt')
-         FROM json_each(?)
-        WHERE EXISTS (
-          SELECT 1 FROM channel_word_frequency_streams
-           WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL
-        )
-       ON CONFLICT (channel_id, word) DO UPDATE SET
-         total_count = channel_word_frequency_baseline.total_count + excluded.total_count,
-         streams_seen = channel_word_frequency_baseline.streams_seen + 1,
-         last_seen_at = MAX(channel_word_frequency_baseline.last_seen_at, excluded.last_seen_at)`,
-    ).bind(channelId, JSON.stringify(firstWords), channelId, streamId, batch),
-    db.prepare(
-      `INSERT INTO channel_word_frequency_baseline
-         (channel_id, word, total_count, streams_seen, last_seen_at)
-       SELECT ?, json_extract(value, '$.word'), CAST(json_extract(value, '$.count') AS INTEGER), 1,
+         (channel_id, word, total_count, last_seen_at)
+       SELECT ?, json_extract(value, '$.word'), CAST(json_extract(value, '$.count') AS INTEGER),
               json_extract(value, '$.lastSeenAt')
          FROM json_each(?)
         WHERE EXISTS (
@@ -115,7 +98,7 @@ export const mergeStatisticsWordBatch = async (
        ON CONFLICT (channel_id, word) DO UPDATE SET
          total_count = channel_word_frequency_baseline.total_count + excluded.total_count,
          last_seen_at = MAX(channel_word_frequency_baseline.last_seen_at, excluded.last_seen_at)`,
-    ).bind(channelId, JSON.stringify(laterWords), channelId, streamId, batch),
+    ).bind(channelId, JSON.stringify(topWords), channelId, streamId, batch),
     db.prepare(
       `DELETE FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word NOT IN (

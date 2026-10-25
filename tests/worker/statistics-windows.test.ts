@@ -39,7 +39,7 @@ interface StatisticsWordObject {
     streamState: "online" | "offline" | "unknown",
     streamId: string | null,
     idleBefore: number,
-  ): Promise<Array<{ word: string; count: number; lastSeenAt: string; firstInStream: boolean }>>;
+  ): Promise<Array<{ word: string; count: number; lastSeenAt: string }>>;
   deleteStatisticsWordBucket(bucket: { streamId: string; batch: number }): Promise<void>;
   pruneExpiredStatisticsWordStreams(now: number): Promise<void>;
   hasStatisticsWordStreams(): Promise<boolean>;
@@ -257,6 +257,83 @@ describe("statistics windows in the channel object", () => {
     expect(words).toHaveLength(6);
   });
 
+  it("treats a word buffered after the alarm's flush as fresh activity before sealing a bucket", async () => {
+    const channelId = "statistics-word-buffered-idle";
+    await insertPointChannel(channelId);
+    const stub = statisticsObject(channelId);
+    const object = stub as unknown as StatisticsWordObject;
+    const streamId = "word-stream-buffered-idle";
+    const record = (text: string) => object.recordChatActivity(null, false, {
+      windowStart: iso(pastWindowStart()), receivedAt: iso(Date.now()), emotes: 0, streamId, textFragments: [text],
+    });
+    await writeEventSubStreamState(worker.DB, channelId, "offline", iso(Date.now()), null);
+    await record("oldword");
+    await runWindowAlarm(stub);
+    vi.advanceTimersByTime(16 * 60_000);
+    const idleBefore = () => Date.now() - 15 * 60_000;
+    // Control: the persisted bucket alone is idle and mergeable.
+    await expect(object.listMergeableStatisticsWordBuckets("offline", null, idleBefore()))
+      .resolves.toEqual([{ streamId, batch: 1 }]);
+
+    // This message arrives while the alarm's D1 work is pending: it is buffered, not yet persisted.
+    await record("freshword");
+
+    await expect(object.listMergeableStatisticsWordBuckets("offline", null, idleBefore())).resolves.toEqual([]);
+    await expect(object.prepareStatisticsWordBucketForMerge({ streamId, batch: 1 }, "offline", null, idleBefore()))
+      .resolves.toEqual([]);
+    // The batch was not sealed, so nothing rotated and the next flush stays in batch 1.
+    await runWindowAlarm(stub);
+    await expect(object.listMergeableStatisticsWordBuckets("offline", null, idleBefore())).resolves.toEqual([]);
+    await expect(runInDurableObject(stub, (_object, state) =>
+      state.storage.sql.exec<{ batch: number }>(
+        "SELECT DISTINCT batch FROM statistics_word_counts WHERE stream_id = ?", streamId,
+      ).toArray())).resolves.toEqual([{ batch: 1 }]);
+    vi.advanceTimersByTime(16 * 60_000);
+    await expect(object.listMergeableStatisticsWordBuckets("offline", null, idleBefore()))
+      .resolves.toEqual([{ streamId, batch: 1 }]);
+  });
+
+  it("looks up only the message's own words however large the stream buffer is", async () => {
+    const channelId = "statistics-word-message-lookup";
+    await insertPointChannel(channelId);
+    const stub = statisticsObject(channelId);
+    const object = stub as unknown as StatisticsWordObject;
+    const streamId = "word-stream-message-lookup";
+    const record = (text: string) => object.recordChatActivity(null, false, {
+      windowStart: iso(pastWindowStart()), receivedAt: iso(Date.now()), emotes: 0, streamId, textFragments: [text],
+    });
+    for (let offset = 0; offset < 2_000; offset += 20) {
+      await record(Array.from({ length: 20 }, (_unused, index) => `bulk${String(offset + index).padStart(5, "0")}`).join(" "));
+    }
+
+    const maxBindings = await runInDurableObject(stub, async (instance) => {
+      const sql = (instance as unknown as { ctx: { storage: { sql: { exec: (...args: unknown[]) => unknown } } } }).ctx.storage.sql;
+      const original = sql.exec.bind(sql);
+      let most = 0;
+      sql.exec = (...args: unknown[]) => {
+        if (/statistics_word/u.test(String(args[0]))) most = Math.max(most, args.length - 1);
+        return original(...args);
+      };
+      try {
+        await (instance as unknown as StatisticsWordObject).recordChatActivity(null, false, {
+          windowStart: iso(pastWindowStart()), receivedAt: iso(Date.now()), emotes: 0, streamId,
+          textFragments: ["bulk00000 bulk00001 brandnew"],
+        });
+      } finally {
+        sql.exec = original;
+      }
+      return most;
+    });
+    // Stream id plus the one word that is not already buffered; buffered words never reach SQL.
+    expect(maxBindings).toBeLessThanOrEqual(2);
+
+    await runWindowAlarm(stub);
+    const counts = await object.readStatisticsWordCounts(streamId);
+    expect(counts.slice(0, 3).map(({ word, count }) => [word, count])).toEqual([
+      ["bulk00000", 2], ["bulk00001", 2], ["brandnew", 1],
+    ]);
+  });
+
   it("never merges a different stream while its word bucket keeps receiving increments", async () => {
     const channelId = "statistics-word-stale-stream-read";
     await insertPointChannel(channelId);
@@ -301,9 +378,9 @@ describe("statistics windows in the channel object", () => {
     await runWindowAlarm(statisticsObject(channelId));
 
     await expect(worker.DB.prepare(
-      `SELECT total_count, streams_seen FROM channel_word_frequency_baseline
+      `SELECT total_count FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word = ?`,
-    ).bind(channelId, "bonjour").first()).resolves.toEqual({ total_count: 1, streams_seen: 1 });
+    ).bind(channelId, "bonjour").first()).resolves.toEqual({ total_count: 1 });
     await expect(object.readStatisticsWordCounts(streamId)).resolves.toEqual([]);
     await expect(object.hasStatisticsWordStreams()).resolves.toBe(true);
 
@@ -325,9 +402,9 @@ describe("statistics windows in the channel object", () => {
     await runWindowAlarm(statisticsObject(channelId));
     await runWindowAlarm(statisticsObject(channelId));
     await expect(worker.DB.prepare(
-      `SELECT total_count, streams_seen FROM channel_word_frequency_baseline
+      `SELECT total_count FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word = ?`,
-    ).bind(channelId, "bonjour").first()).resolves.toEqual({ total_count: 2, streams_seen: 1 });
+    ).bind(channelId, "bonjour").first()).resolves.toEqual({ total_count: 2 });
     await expect(worker.DB.prepare(
       "SELECT COUNT(*) AS count FROM channel_word_frequency_streams WHERE channel_id = ? AND stream_id = ?",
     ).bind(channelId, streamId).first()).resolves.toEqual({ count: 2 });
@@ -407,10 +484,10 @@ describe("statistics windows in the channel object", () => {
       `WITH RECURSIVE sequence(value) AS (
          VALUES (0) UNION ALL SELECT value + 1 FROM sequence WHERE value < 4999
        )
-       INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, streams_seen, last_seen_at)
-       SELECT ?, 'seed' || printf('%05d', value), value + 2, 1, '2026-10-25T12:00:00.000Z' FROM sequence`,
+       INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+       SELECT ?, 'seed' || printf('%05d', value), value + 2, '2026-10-25T12:00:00.000Z' FROM sequence`,
     ).bind(channelId).run();
-    const words = [{ word: "freshword", count: 3, lastSeenAt: "2026-10-25T12:05:00.000Z", firstInStream: true }];
+    const words = [{ word: "freshword", count: 3, lastSeenAt: "2026-10-25T12:05:00.000Z" }];
 
     await mergeStatisticsWordBatch(worker.DB, channelId, "d1-stream", 1, words, "2026-10-25T12:06:00.000Z");
     await mergeStatisticsWordBatch(worker.DB, channelId, "d1-stream", 1, words, "2026-10-25T12:07:00.000Z");
@@ -423,8 +500,8 @@ describe("statistics windows in the channel object", () => {
       "SELECT word FROM channel_word_frequency_baseline WHERE channel_id = ? AND word = 'seed00000'",
     ).bind(channelId).first()).resolves.toBeNull();
     await expect(worker.DB.prepare(
-      "SELECT total_count, streams_seen FROM channel_word_frequency_baseline WHERE channel_id = ? AND word = 'freshword'",
-    ).bind(channelId).first()).resolves.toEqual({ total_count: 3, streams_seen: 1 });
+      "SELECT total_count FROM channel_word_frequency_baseline WHERE channel_id = ? AND word = 'freshword'",
+    ).bind(channelId).first()).resolves.toEqual({ total_count: 3 });
   });
 
   it("reaches a failed word merge and lets the alarm prune the bucket at 24 hours", async () => {
