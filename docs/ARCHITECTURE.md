@@ -211,7 +211,7 @@ rollt die stündliche Modulwartung abgeschlossene Minuten in
 Epoch-Millisekunden, die durch 300.000 teilbar sind, und werden je Kanal,
 Stream und Fenster eindeutig gespeichert. Sie enthalten Bitrate-Min/Max,
 gewichteten Mittelwert, P10 aus den Minutenmittelwerten, RTT-Mittelwert,
-Paketverlustdelta und Stichprobenzahl. Pro Lauf werden höchstens 1.000 Fenster
+Paketverlustdelta und Stichprobenzahl. Pro Lauf werden höchstens 64 Fenster (Schreibbudget gegen das tägliche D1-Limit)
 verarbeitet; Minuten ohne abgeschlossenen Roll-up werden nicht gelöscht und
 bleiben für den nächsten Lauf vorgemerkt.
 

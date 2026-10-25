@@ -152,6 +152,41 @@ describe("BELABOX permanent bitrate history", () => {
     });
   });
 
+  it("does not publish roll-up bookkeeping as a Belabox live-data change", async () => {
+    await insertMinute("2026-10-05T12:00:00.000Z", "stream-a", 1, 100, 100, 100, 50, 1);
+    const revisionBeforeRollup = await belaboxLiveRevision();
+
+    await belaboxModule.scheduledMaintenance?.(database as unknown as D1Database, "2026-10-05T12:15:00.000Z");
+
+    await expect(belaboxLiveRevision()).resolves.toBe(revisionBeforeRollup);
+    await database.prepare(
+      `UPDATE belabox_minutes SET samples = samples + 1
+        WHERE channel_id = ? AND minute_at = ? AND stream_id = ?`,
+    ).bind(CHANNEL_ID, "2026-10-05T12:00:00.000Z", "stream-a").run();
+
+    await expect(belaboxLiveRevision()).resolves.toBe((revisionBeforeRollup ?? 0) + 1);
+  });
+
+  it("uses the pending-window index range without a temporary sort", async () => {
+    await insertMinute("2026-10-05T12:00:00.000Z", "stream-a", 1, 100, 100, 100, 50, 1);
+    let candidateSql: string | undefined;
+    const prepare = database.prepare.bind(database);
+    vi.spyOn(database, "prepare").mockImplementation((sql) => {
+      if (sql.includes("WITH candidate_windows")) candidateSql = sql;
+      return prepare(sql);
+    });
+
+    await belaboxModule.scheduledMaintenance?.(database as unknown as D1Database, "2026-10-05T12:15:00.000Z");
+
+    expect(candidateSql).toBeDefined();
+    const completedBeforeMs = Date.parse("2026-10-05T12:10:00.000Z");
+    const plan = await database.prepare(`EXPLAIN QUERY PLAN ${candidateSql ?? ""}`)
+      .bind(completedBeforeMs, 64).all<{ detail: string }>();
+    const details = plan.results.map(({ detail }) => detail).join(" | ");
+    expect(details).toContain("SEARCH belabox_minutes USING INDEX belabox_minutes_unrolled_window");
+    expect(details).not.toContain("USE TEMP B-TREE");
+  });
+
   it("rolls up expired rows before purging them", async () => {
     await insertMinute("2026-09-04T11:50:00.000Z", "old-stream", 1, 700, 700, 700, 20, 3);
     const executedBatchSql: string[] = [];
@@ -174,13 +209,13 @@ describe("BELABOX permanent bitrate history", () => {
     ).bind(CHANNEL_ID).first<{ count: number }>()).resolves.toEqual({ count: 1 });
   });
 
-  it("limits each maintenance run to 1,000 windows and resumes the backlog", async () => {
+  it("limits each maintenance run to 64 windows and resumes the backlog", async () => {
     const start = Date.parse("2026-09-01T00:00:00.000Z");
-    for (let index = 0; index < 1_001; index += 1) {
+    for (let index = 0; index < 65; index += 1) {
       const minuteAt = new Date(start + index * 300_000).toISOString();
       await insertMinute(minuteAt, "stream-a", 1, 1_000, 1_000, 1_000, 50, 1);
     }
-    const now = new Date(start + 1_002 * 300_000 + 300_000).toISOString();
+    const now = new Date(start + 66 * 300_000 + 300_000).toISOString();
     let largestBatch = 0;
     const batch = database.batch.bind(database);
     vi.spyOn(database, "batch").mockImplementation(async (statements) => {
@@ -196,7 +231,7 @@ describe("BELABOX permanent bitrate history", () => {
       "SELECT COUNT(*) AS count FROM belabox_minutes WHERE channel_id = ? AND rolled_up_at IS NULL",
     ).bind(CHANNEL_ID).first<{ count: number }>();
 
-    expect(firstRun?.count).toBe(1_000);
+    expect(firstRun?.count).toBe(64);
     expect(pendingAfterFirstRun?.count).toBe(1);
     expect(largestBatch).toBeLessThanOrEqual(100);
 
@@ -204,8 +239,16 @@ describe("BELABOX permanent bitrate history", () => {
     const secondRun = await database.prepare(
       `SELECT COUNT(*) AS count FROM belabox_bitrate_windows WHERE channel_id = ?`,
     ).bind(CHANNEL_ID).first<{ count: number }>();
-    expect(secondRun?.count).toBe(1_001);
+    expect(secondRun?.count).toBe(65);
   });
+
+  async function belaboxLiveRevision(): Promise<number | null> {
+    const result = await database.prepare(
+      `SELECT revision FROM panel_resource_revisions
+        WHERE channel_id = ? AND resource = 'module:belabox:live'`,
+    ).bind(CHANNEL_ID).first<{ revision: number }>();
+    return result?.revision ?? null;
+  }
 
   async function insertMinute(
     minuteAt: string,

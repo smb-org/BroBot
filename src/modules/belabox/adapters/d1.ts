@@ -722,7 +722,12 @@ export const belaboxStreamExists = async (
 ).bind(channelId, streamId).first<{ present: number }>()) !== null;
 
 const BELABOX_BITRATE_WINDOW_MS = 5 * 60_000;
-const BELABOX_BITRATE_ROLLUP_MAX_WINDOWS = 1_000;
+const BELABOX_BITRATE_ROLLUP_WRITE_BUDGET = 2_000;
+// An hourly run reserves about 48k of D1 Free's 100k daily row writes.
+// Each window costs ~16 writes for five minute-row updates, its upsert and triggers,
+// plus ~15 row deletes and delete-trigger writes when expired; indexes add load.
+// 2,000 / 31 caps a run at 64 windows.
+const BELABOX_BITRATE_ROLLUP_MAX_WINDOWS = Math.floor(BELABOX_BITRATE_ROLLUP_WRITE_BUDGET / 31);
 const BELABOX_BITRATE_ROLLUP_BATCH_STATEMENTS = 100;
 
 interface BelaboxMinuteRollupWindow {
@@ -736,19 +741,19 @@ const rollupBelaboxMinuteWindows = async (db: D1Database, now: string): Promise<
   if (!Number.isFinite(nowMs)) return;
   const completedBeforeMs = Math.floor((nowMs - BELABOX_BITRATE_WINDOW_MS) / BELABOX_BITRATE_WINDOW_MS) *
     BELABOX_BITRATE_WINDOW_MS;
-  const completedBefore = new Date(completedBeforeMs).toISOString();
   const windows = await db.prepare(
     `WITH candidate_windows AS (
-       SELECT channel_id, stream_id,
-              CAST(strftime('%s', minute_at) AS INTEGER) / 300 * 300000 AS window_start
+       SELECT CAST(strftime('%s', minute_at) AS INTEGER) / 300 * 300000 AS window_start,
+              channel_id, stream_id
          FROM belabox_minutes
-        WHERE rolled_up_at IS NULL AND minute_at < ?
-        GROUP BY channel_id, stream_id, window_start
+        WHERE rolled_up_at IS NULL
+          AND CAST(strftime('%s', minute_at) AS INTEGER) / 300 * 300000 < ?
+        GROUP BY window_start, channel_id, stream_id
         ORDER BY window_start, channel_id, stream_id
         LIMIT ?
      )
      SELECT channel_id, stream_id, window_start FROM candidate_windows`,
-  ).bind(completedBefore, BELABOX_BITRATE_ROLLUP_MAX_WINDOWS).all<BelaboxMinuteRollupWindow>();
+  ).bind(completedBeforeMs, BELABOX_BITRATE_ROLLUP_MAX_WINDOWS).all<BelaboxMinuteRollupWindow>();
   if (windows.results.length === 0) return;
 
   let batch: D1PreparedStatement[] = [];

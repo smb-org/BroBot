@@ -42,4 +42,44 @@ describe("BELABOX bitrate history on real D1 migrations", () => {
     ).bind(channelId).all();
     expect(minutes.results).toEqual([{ minute_at: "2026-10-05T11:50:00.000Z" }]);
   });
+
+  it("publishes a live revision for a real minute update but not for roll-up bookkeeping", async () => {
+    const channelId = `belabox-history-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await insertMinute(channelId, "2026-10-05T11:00:00.000Z", 1_000);
+    const liveRevision = async (): Promise<number | null> => (await database.prepare(
+      "SELECT revision FROM panel_resource_revisions WHERE channel_id = ? AND resource = 'module:belabox:live'",
+    ).bind(channelId).first<{ revision: number }>())?.revision ?? null;
+    const before = await liveRevision();
+    expect(before).not.toBeNull();
+
+    await belaboxModule.scheduledMaintenance?.(database, "2026-10-05T12:00:00.000Z");
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM belabox_minutes WHERE channel_id = ? AND rolled_up_at IS NOT NULL",
+    ).bind(channelId).first()).resolves.toEqual({ count: 1 });
+    expect(await liveRevision()).toBe(before);
+
+    await database.prepare(
+      "UPDATE belabox_minutes SET samples = samples + 1, bitrate_sum = bitrate_sum + 10 WHERE channel_id = ?",
+    ).bind(channelId).run();
+    expect(await liveRevision()).toBe((before ?? 0) + 1);
+  });
+
+  it("rolls up at most 64 windows per run and continues on the next run", async () => {
+    const channelId = `belabox-history-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const start = Date.parse("2026-10-01T00:00:00.000Z");
+    for (let index = 0; index < 70; index += 1) {
+      await insertMinute(channelId, new Date(start + index * 300_000).toISOString(), 1_000);
+    }
+    const now = new Date(start + 80 * 300_000).toISOString();
+    const windowCount = async (): Promise<unknown> => database.prepare(
+      "SELECT COUNT(*) AS count FROM belabox_bitrate_windows WHERE channel_id = ?",
+    ).bind(channelId).first();
+
+    await belaboxModule.scheduledMaintenance?.(database, now);
+    await expect(windowCount()).resolves.toEqual({ count: 64 });
+    await belaboxModule.scheduledMaintenance?.(database, now);
+    await expect(windowCount()).resolves.toEqual({ count: 70 });
+  });
 });
