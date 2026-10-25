@@ -11,7 +11,13 @@ import {
   type BelaboxSample,
 } from "./contracts";
 import { BELABOX_TEMPLATE_VARIABLES, belaboxCatalog } from "./contracts/catalog";
-import { belaboxStatusMatchesSession, belaboxStreamSessionKey, getBelaboxStatus, getBelaboxStreamSession, purgeExpiredBelaboxMinutes } from "./adapters/d1";
+import {
+  belaboxStatusMatchesSession,
+  belaboxStreamSessionKey,
+  getBelaboxStatus,
+  getBelaboxStreamSession,
+  maintainBelaboxHistory,
+} from "./adapters/d1";
 import {
   belaboxPresentationAlertStartedAt,
   resolvedBelaboxPhase,
@@ -221,7 +227,7 @@ export const belaboxModule: BotModule<typeof belaboxSettingsSchema> = {
     onScheduleInputsChanged: ensureBelaboxPollSchedule,
   }],
   routes: belaboxRoutes,
-  scheduledMaintenance: purgeExpiredBelaboxMinutes,
+  scheduledMaintenance: maintainBelaboxHistory,
   settingsEditorPlacement: "before-panel",
   panel: () => import("./panel/index"),
   settingsEditor: () => import("./panel/settings-editor"),

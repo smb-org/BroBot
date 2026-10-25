@@ -113,6 +113,7 @@ Für aktive Chatter (#292) gilt eine bewusst kürzere Regel: Der kanalgebundene 
 | Gleitendes Fenster der Themen-Erkennung | mit dem Fensterablauf, spätestens **am Streamende** | #12 sieht ohnehin Verfall am Streamende vor |
 | Aktive Chatter | **60 Minuten** nach letzter Aktivität plus Alarmverzögerung; Schlüsselrotation spätestens nach **24 Stunden** | Kurzlebige Grundlage für Fensterzählungen und Teilnahmeprüfungen |
 | Kanalweite Aktivitätszähler je Person | **180 Tage** rollierend | Wiederkehrende Zuschauer zu erkennen braucht Monate, nicht Jahre |
+| BELABOX-Bitratefenster je Kanal, Stream und 5-Minuten-Fenster | unbegrenzt | Aggregierte Encoder-Messwerte ohne Personenbezug |
 | Modul-Ereignisse mit roher `actor_user_id` | **14 Tage** | Betriebliche Fehlersuche; die Ausnahme bleibt wegen der kurzen Frist begrenzt |
 | Audit-Einträge | **24 Monate** | Administrative Nachvollziehbarkeit; betrifft Bedienende, nicht Zuschauer |
 | Kanalstatistiken je Fünf-Minuten-Fenster (Nachrichten, Emotes, Viewer, Chatters, aktive Chatter) | unbegrenzt | Ausschließlich Summen ohne Namen, IDs oder Nutzerlisten |
@@ -129,6 +130,7 @@ Die Fristen werden durch einen Lauf durchgesetzt, nicht durch Vorsatz. Der stün
 Unbegrenzt bleiben dürfen ausschließlich Werte **ohne jeden Bezug zu einer einzelnen Person**:
 
 - Nachrichten pro Zeitfenster, Zuschauerzahl, Emote-Spitzen
+- BELABOX-Bitrate-Min/Max, Mittelwert und P10, RTT-Mittelwert, Paketverlustdelta und Stichprobenzahl je Stream-Zeitfenster
 - Wortfrequenz-Baseline aus #12 — aggregiert über alle Nutzer, ohne Zuordnung
 - Ergebnisse abgeschlossener Votings und Quizrunden
 - Summen von Trinkgeldern je Stream
