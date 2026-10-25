@@ -692,7 +692,7 @@ describe("Dashboard skeleton", () => {
       payload: { entries: [{ eventId: newRaid.eventId, createdAt: newRaid.createdAt, moduleId: "channel_events", code: newRaid.code, actorUserId: null }] },
     }));
 
-    expect(await screen.findByText("Raid von freshraid mit 2 Zuschauern", {}, { timeout: 2_000 })).toBeInTheDocument();
+    expect(await screen.findByText("Raid von freshraid mit 2 Zuschauern")).toBeInTheDocument();
     expect(eventRequests).toBe(3);
   });
 
@@ -730,12 +730,12 @@ describe("Dashboard skeleton", () => {
     serverEntries = [neu, alt];
     socket.receive(JSON.stringify({ version: 1, id: "message-lower", createdAt: "2026-09-18T04:00:01.000Z", channelId: "kanal-a", type: "event_log.new", payload: { entries: [{ eventId: neu.eventId, createdAt: neu.createdAt, moduleId: neu.moduleId, code: neu.code, actorUserId: null }] } }));
 
-    expect(await screen.findByRole("button", { name: "1 neue Ereignisse" }, { timeout: 2_000 })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "1 neue Ereignisse" })).toBeInTheDocument();
     // Wait for the background response to land while the reader's visible rows stay frozen.
     await waitFor(() => {
       expect(eventRequests).toBe(3);
       expect(eventsQuery.state.data).not.toBe(previousEventData);
-    }, { timeout: 2_000 });
+    });
     expect(screen.queryByText("Raid von unbekannt mit 8 Zuschauern")).not.toBeInTheDocument();
     expect(document.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)")).toHaveLength(1);
 
@@ -1244,10 +1244,7 @@ describe("Dashboard skeleton", () => {
     // machine's speed and failed once in three runs for no reason.
     // `waitFor` polls until its own deadline and is therefore reliable, no
     // matter how fast or slow the debounce actually runs.
-    await waitFor(
-      () => { expect(eventRequests).toHaveLength(initialRequests + 1); },
-      { timeout: 2000 },
-    );
+    await waitFor(() => { expect(eventRequests).toHaveLength(initialRequests + 1); });
     expect(eventRequests.at(-1)?.searchParams.get("actor")).toBe("alice");
   });
 
@@ -2421,7 +2418,7 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => { expect(overviewRequestCount).toBe(2); });
     await waitFor(() => { expect(TestWebSocket.instances[0]?.readyState).toBe(1); });
     TestWebSocket.instances[0]?.close(1006, "socket interruption");
-    await waitFor(() => { expect(TestWebSocket.instances).toHaveLength(2); }, { timeout: 2_000 });
+    await waitFor(() => { expect(TestWebSocket.instances).toHaveLength(2); });
     TestWebSocket.instances[1]?.open();
     await waitFor(() => { expect(overviewRequestCount).toBe(3); });
 
@@ -2891,7 +2888,7 @@ describe("Dashboard skeleton", () => {
     navigateToPath("/channels/kanal-a/modules/text_commands");
     // The detail page mounts through a lazy panel import whose first transform alone can exceed the
     // 1 s default on a loaded runner; the assertion is about the mount, not about speed.
-    expect(await screen.findByRole("button", { name: "Befehl anlegen" }, { timeout: 5_000 })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
   });
 
   it("ignores a late overview response that predates a module toggle", async () => {
@@ -3088,9 +3085,9 @@ describe("Dashboard skeleton", () => {
     // boundary, so the wait is for a real dynamic import to resolve, not just
     // a state update -- under CI load that can outrun findBy's default
     // 1000 ms, so give it real headroom.
-    expect(await screen.findByRole("button", { name: "Clip erstellen" }, { timeout: 5000 })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Shoutout senden" }, { timeout: 5000 })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Werbung starten" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Clip erstellen" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Shoutout senden" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Werbung starten" })).toBeInTheDocument();
     expect(document.querySelector(".live-cockpit")).toBeVisible();
     // Warm runs take ~0.5 s, but on a cold CI transform cache the lazy
     // module imports above are slow; the test timeout must exceed the
@@ -3470,7 +3467,7 @@ describe("Dashboard skeleton", () => {
       expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname.endsWith("/overview"))).toHaveLength(1);
     });
     socket.close(1006, "socket interruption");
-    await waitFor(() => expect(TestWebSocket.instances).toHaveLength(2), { timeout: 2_000 });
+    await waitFor(() => expect(TestWebSocket.instances).toHaveLength(2));
     TestWebSocket.instances[1]?.open();
 
     await waitFor(() => {

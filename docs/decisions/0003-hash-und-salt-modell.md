@@ -138,8 +138,8 @@ oder eine andere Live-Stream-ID meldet und seit mindestens 15 Minuten kein
 Zuwachs erfolgte; auch ein noch nicht geschriebener, gepufferter Zuwachs zählt
 als Aktivität. Der Merge hängt nicht von vorhandenen Statistikfenstern ab.
 Vor dem D1-Aufruf rotiert das DO zur nächsten Bucket-Nummer; ein später Zuwachs
-landet dadurch in einem neuen Batch. Je Batch schreibt D1 vier Anweisungen,
-während jedes geänderte Statistikfenster seinen eigenen absoluten Upsert erhält.
+landet dadurch in einem neuen Batch. Je Batch führt D1 fünf Anweisungen aus (vier Schreibvorgänge und ein
+bestätigendes SELECT), während jedes geänderte Statistikfenster seinen eigenen absoluten Upsert erhält.
 
 **180 Tage ist eine Setzung, keine Ableitung.** Sie lässt sich verkürzen, ohne dass etwas kaputtgeht — verlängern dagegen nicht, weil die Daten dann schon weg sind. Im Zweifel also kürzer.
 

@@ -383,7 +383,7 @@ describe("Module panel loader", () => {
     />);
 
     expect(screen.getByText(/aggregierte Chat-, Viewer- und Chatter-Zahlen/u)).toBeDefined();
-    expect(screen.getByText(/Fenstersummen und eine kanalweite Liste der häufigsten Wörter/u)).toBeDefined();
+    expect(screen.getByText(/Fenstersummen, eine kanalweite Liste der häufigsten Wörter/u)).toBeDefined();
     expect(screen.queryByRole("switch")).toBeNull();
   });
 
