@@ -27,7 +27,7 @@ import { resolveMessageEnabledFlags } from "../contracts/resolve-message-enabled
 import type { MessageEnabledField } from "../contracts/resolve-message-enabled";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
-import { ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, Section, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorCatalog, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { Button, ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, Section, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorCatalog, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
 import { useDraft } from "./ui/useDraft";
 import { useChannelSettings } from "./data/channel-settings";
 import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
@@ -1335,6 +1335,8 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const labels = workspaceTexts();
   const details = moduleDetails(moduleId);
   const registered = MODULES.find((candidate) => candidate.id === moduleId);
+  const statisticsEntry = registered?.navigationEntries?.find((entry) => entry.id === "streams");
+  const statisticsPageLabel = statisticsEntry?.label[dashboardLanguage()] ?? texts.events.info;
   const navigationPage = registered?.navigationEntries?.find((entry) => entry.showMainSwitch === false);
   const moduleState = modules.find((candidate) => candidate.id === moduleId);
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
@@ -1355,6 +1357,7 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
   const effectiveEnabled = enabled && !permissionsMissing;
   const [settingsSaveTarget, setSettingsSaveTarget] = useState<HTMLDivElement | null>(null);
   const [chatVotingTab, setChatVotingTab] = useState<"votes" | "settings">("votes");
+  const [statisticsInfoOpen, setStatisticsInfoOpen] = useState(false);
   const viewLoading = loading || moduleState === undefined || ((registered?.panel !== undefined || registered?.settingsEditor !== undefined) && enabled && activeModule === undefined);
   const showActiveView = activeModule !== undefined && (enabled || moduleState === undefined);
 
@@ -1402,11 +1405,11 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
       <section className={`module-detail module-detail--${moduleId}`} aria-label={details.name}>
         <PageHeader
           kind="modules"
-          icon={navigationPage === undefined
+          icon={navigationPage === undefined || moduleId === "statistics"
             ? iconFor(moduleId, "module-heading-glyph")
             : <NavigationIcon kind={navigationPage.iconKind} className="module-heading-glyph module-glyph" />}
-          title={details.name}
-          subtitle={details.description}
+          title={moduleId === "statistics" && !statisticsInfoOpen ? statisticsPageLabel : details.name}
+          subtitle={moduleId === "statistics" && !statisticsInfoOpen ? statisticsEntry?.description?.[dashboardLanguage()] ?? details.description : details.description}
           saveTargetRef={setSettingsSaveTarget}
           {...(navigationPage?.showMainSwitch === false ? {} : {
             active: effectiveEnabled,
@@ -1422,7 +1425,15 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
             ...(headerLockHint === null || (dependencyLockReason === null && ((registered?.settingsEditor !== undefined && showActiveView && moduleId !== "chat_voting") || (registered?.panelManagesSettings && moduleState?.enabled !== false && moduleId !== "clips"))) ? {} : { lockHint: headerLockHint }),
             ...(reserveDependencyHint ? { reserveLockHint: true } : {}),
           })}
-          {...(moduleId === "chat_voting" ? {
+          {...(moduleId === "statistics" ? {
+            pageActions: <Button
+              variant="neutral"
+              icon="info"
+              ariaLabel={texts.module.infoTitle}
+              ariaExpanded={statisticsInfoOpen}
+              onClick={() => setStatisticsInfoOpen((open) => !open)}
+            >{statisticsInfoOpen ? statisticsPageLabel : texts.events.info}</Button>,
+          } : moduleId === "chat_voting" ? {
             pageActions: <>
               <Tabs className="chat-voting-page-tabs" value={chatVotingTab} keepMounted={false} onChange={(value) => {
                 if (value !== "votes" && value !== "settings") return;
@@ -1463,6 +1474,13 @@ export const ModulePage = ({ channelId, moduleId, ownRole, modules, activeModule
         </section>}
         {viewLoading ? <p className="muted">{texts.module.load}</p> : null}
         {stateMessage === null ? (
+          moduleId === "statistics" && statisticsInfoOpen && showActiveView ? <section className="module-detail__content" aria-label={texts.module.infoTitle}>
+            <ModuleInfoView
+              {...(mandatory ? { mandatoryReason } : {})}
+              templateVariableCatalog={registered?.templateVariableCatalog ?? []}
+              language={dashboardLanguage()}
+            />
+          </section> :
           registered?.panel === undefined && registered?.settingsEditor === undefined ? (showActiveView ? <section className="module-detail__content" aria-label={texts.module.infoTitle}>
             <ModuleInfoView
               {...(mandatory ? { mandatoryReason } : {})}

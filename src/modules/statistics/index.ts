@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { BotModule } from "../contract";
 import { statisticsModuleCatalog } from "./catalog";
+import { statisticsRoutes } from "./routes";
 import { handleStatisticsWindowAlarm, processStatisticsEvent, reconcileStatisticsSchedule } from "./service";
 
 const settingsSchema = z.object({});
@@ -16,8 +17,18 @@ export const statisticsModule: BotModule<typeof settingsSchema> = {
     en: statisticsModuleCatalog.en.mandatoryReason,
   },
   needsActiveChatters: true,
+  navigationEntries: [{
+    id: "streams",
+    label: { de: statisticsModuleCatalog.de.streamsLabel, en: statisticsModuleCatalog.en.streamsLabel },
+    description: { de: statisticsModuleCatalog.de.streamsDescription, en: statisticsModuleCatalog.en.streamsDescription },
+    showMainSwitch: false,
+    iconKind: "data",
+    keywords: ["stream", "streams", "verlauf", "history", "statistik", "statistics"],
+  }],
   settingsSchema,
   defaultSettings: {},
+  routes: statisticsRoutes,
+  panel: () => import("./panel").then((panel) => ({ default: panel.StatisticsStreamsPanel })),
   eventSubTypes: ["channel.chat.message", "stream.online", "stream.offline", "channel.update"],
   handleEvent: processStatisticsEvent,
   dryRunSilentReason: "activity_tracking",

@@ -1,0 +1,33 @@
+import { PanelApiError } from "../../../contracts/panel-error";
+import type { StatisticsStreamDetailResponse, StatisticsStreamListResponse } from "../contracts";
+
+const modulePath = (channelId: string): string =>
+  `/api/channels/${encodeURIComponent(channelId)}/modules/statistics/streams`;
+
+const readJson = async <Value,>(response: Response): Promise<Value> => {
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const code = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string" ? body.error : null;
+    throw new PanelApiError(response.status, code, body);
+  }
+  return body as Value;
+};
+
+export const loadStatisticsStreams = async (
+  channelId: string,
+  signal: AbortSignal,
+  cursor?: string,
+): Promise<StatisticsStreamListResponse> => {
+  const query = new URLSearchParams({ limit: "20" });
+  if (cursor !== undefined) query.set("cursor", cursor);
+  return readJson<StatisticsStreamListResponse>(await fetch(`${modulePath(channelId)}?${query.toString()}`, { signal }));
+};
+
+export const loadStatisticsStream = async (
+  channelId: string,
+  streamId: string,
+  signal: AbortSignal,
+): Promise<StatisticsStreamDetailResponse> => readJson<StatisticsStreamDetailResponse>(await fetch(
+  `${modulePath(channelId)}/${encodeURIComponent(streamId)}`,
+  { signal },
+));

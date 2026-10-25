@@ -566,9 +566,10 @@ Durable Object Nachrichten und Emote-Fragmente, ohne je Nachricht eine
 D1-Zeile zu schreiben. Die Fenster beginnen an UTC-Vielfachen von 300 s
 (`window_start = floor(t / 300 s) * 300 s`). Das DO hält je Fenster absolute
 Nachrichten- und Emote-Zähler. Jede Zeile beschreibt das vollständige
-UTC-Epoch-Fenster; Streamstart, Streamende und die Abdeckung angeschnittener
-Fenster kommen aus der Stream-Timeline (#558). Online-/Offline-Flaps im selben
-Fenster zählen in denselben Zustand.
+UTC-Epoch-Fenster; Streamstart und Streamende ergeben sich aus dem ersten und
+letzten Fenster mit der Stream-ID (Fünf-Minuten-Präzision), die Stream-Timeline
+(#558) liefert nur Ereignisse, Titel und Kategorie. Online-/Offline-Flaps im
+selben Fenster zählen in denselben Zustand.
 
 Ein einzelner keyed Alarm läuft alle fünf Minuten, solange der Stream online
 ist oder Fensterzustand im DO liegt. Er speichert absolute Werte für geänderte,
@@ -590,6 +591,46 @@ ein Fenster ohne Abtastung an seiner Grenze hat `NULL`. Es gibt
 keine per-window Personen-Hashes oder neue personenbezogene Speicherung.
 `channel_statistics` enthält nur Summen und wird unbegrenzt aufbewahrt; beim
 Löschen des Kanals greift `ON DELETE CASCADE` (Entscheidung 0003, Abschnitt 6).
+
+#### Streams-Seite (#574)
+
+Die lazy geladene Modulansicht zeigt Streams mit Kennzahlen und einem
+Fünf-Minuten-Verlauf. `GET /api/channels/:channelId/modules/statistics/streams`
+liefert höchstens 50 Einträge (Standard 20) mit undurchsichtigem Cursor. Das
+Panel hält die geladenen Seiten in einer Infinite Query; eine Aktualisierung
+baut die Kette ab Seite eins neu auf, sodass keine Streams zwischen den Seiten
+fehlen. Die Liste gruppiert ausschließlich Fenster mit nicht-NULL `stream_id`; ein Stream
+ohne Timeline-Start bleibt sichtbar, solange Statistikfenster vorliegen. Der
+Zeitraum beginnt mit `window_start` des ersten Fensters und endet fünf Minuten
+nach `window_start` des letzten Fensters. Start und Ende haben daher
+Fünf-Minuten-Präzision. Timeline-Ereignisse gehören zum Stream, wenn
+`occurred_at` einschließlich des Endzeitpunkts im Fensterzeitraum liegt; der
+Vergleich berücksichtigt neun Nachkommastellen. Teilen zwei Streams denselben
+Fünf-Minuten-Bucket, kann ein Ereignis dieses Buckets bei beiden erscheinen.
+Titel und Kategorien verwenden die letzte Metadatenbeobachtung vor dem Start
+als Seed und danach die Beobachtungen im Fensterzeitraum.
+`GET /api/channels/:channelId/modules/statistics/streams/:streamId` liefert die
+vollständigen Fenster dieses Streams, passende Timeline-Ereignisse und
+BELABOX-Bitratefenster im Fenster-UTC-Zeitraum. Emote-Spitzen werden über
+`detail.windowStart` einem Streamfenster zugeordnet; ihr Ereigniszeitpunkt liegt
+am Fensterende. Drops entstehen aus einem Offline-Ereignis und einem folgenden
+Online-Ereignis innerhalb von zehn Minuten, sofern beide im Fensterzeitraum
+liegen.
+BELABOX-Stream-IDs werden dafür nicht mit Twitch-IDs verglichen. Antworten
+enthalten nur Aggregate und Stream-Metadaten.
+
+Die Stream-Auswahl gruppiert alle `channel_statistics`-Fenster des Kanals nach
+`stream_id`, ordnet nach dem letzten `window_start` und wendet den Cursor auf
+diese Stream-Auswahl an. Diese Gruppierung scannt alle Statistikzeilen des
+Kanals, da kein vorhandener Index die Gruppierung und Reihenfolge abdeckt. Für
+die ausgewählten Streams werden danach alle Fenster gelesen, damit Seiten keine
+Teilaggregate liefern. Timeline-Abfragen nutzen vorhandene Kanal-/Zeitindizes
+und lesen nur den Fensterzeitraum. Zusätzlich liest die Metadatenabfrage die
+letzte Beobachtung vor dessen Beginn. Detailfenster lesen nur die Zeilen der
+angefragten Stream-ID.
+Das Seitenlimit begrenzt Antwort und Zahl ausgewählter Streams, nicht deren
+Dauer oder Zahl der Fünf-Minuten-Fenster. Die Ansicht formatiert Zeitpunkte in
+der Kanalzeitzone aus den Kanaleinstellungen.
 
 Für die Themen-Erkennung tokenisiert das DO ausschließlich Textfragmente und
 zählt Wörter je Stream. NFKC-Normalisierung, Kleinschreibung und das Entfernen
@@ -647,7 +688,7 @@ möglicherweise die ältere Sitzung eingereiht. Viewer-Clips eines Streams könn
 also fehlen, wenn die Übergabe des Sitzungsendes verloren geht oder mit einem
 Schreibvorgang konkurriert; Bot-Clips sind davon nicht betroffen. Nur
 `stream.online` trägt eine Stream-ID; andere Ereignisse werden in der Analyse
-anhand ihrer Zeitpunkte Lifecycle-Zeilen zugeordnet.
+anhand ihrer Zeitpunkte der Fensterspanne eines Streams zugeordnet.
 
 Drops und Titel-/Kategorieübergänge werden nicht beim Schreiben abgeleitet.
 Ein Drop ist ein Offline-Ereignis, auf das innerhalb von zehn Minuten ein
