@@ -48,7 +48,13 @@ test("opens the channel word list, hides fillers, and searches the seeded words"
   await fillerToggle.click();
   await expect(page.getByText("lol", { exact: true })).toBeVisible();
 
+  const searchResponse = page.waitForResponse((response) =>
+    new URL(response.url()).pathname.endsWith("/modules/statistics/words")
+    && new URL(response.url()).searchParams.get("search") === "hall");
   await page.getByRole("textbox", { name: "Search words" }).fill("hall");
+  expect((await searchResponse).status()).toBe(200);
+  await expect(page.getByText("1–2 of 2")).toBeVisible();
+  await expect(page.getByText("halloween", { exact: true })).toBeVisible();
   await expect(page.getByText("hallway", { exact: true })).toBeVisible();
   await expect(page.getByText("lol", { exact: true })).toHaveCount(0);
 });

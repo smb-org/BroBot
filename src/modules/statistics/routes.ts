@@ -262,20 +262,22 @@ statisticsRoutes.get("/words", async (context) => {
     channelId, search, search, query.data.hideFillers ? 1 : 0, JSON.stringify(STATISTICS_CHAT_FILLER_WORDS),
   ];
   const offset = (query.data.page - 1) * WORD_PAGE_SIZE;
-  const [countRow, totalRow, wordRows] = await Promise.all([
+  // One batch is one D1 transaction: count, totals and page share a snapshot, so a
+  // baseline merge in between cannot push a share above 100 %.
+  const [countResult, totalResult, wordRows] = await context.env.DB.batch([
     context.env.DB.prepare(
       `SELECT COUNT(*) AS total
          FROM channel_word_frequency_baseline
         WHERE channel_id = ?
           AND (? = '' OR instr(word, ?) > 0)
           AND (? = 0 OR word NOT IN (SELECT value FROM json_each(?)))`,
-    ).bind(...filters).first<WordFrequencyCountRow>(),
+    ).bind(...filters),
     context.env.DB.prepare(
       `SELECT COALESCE(SUM(total_count), 0) AS total_count,
               COALESCE(MAX(total_count), 0) AS max_count
          FROM channel_word_frequency_baseline
         WHERE channel_id = ?`,
-    ).bind(channelId).first<WordFrequencyTotalsRow>(),
+    ).bind(channelId),
     context.env.DB.prepare(
       `SELECT word, total_count, last_seen_at
          FROM channel_word_frequency_baseline
@@ -284,11 +286,11 @@ statisticsRoutes.get("/words", async (context) => {
           AND (? = 0 OR word NOT IN (SELECT value FROM json_each(?)))
         ORDER BY total_count DESC, word ASC
         LIMIT ? OFFSET ?`,
-    ).bind(...filters, WORD_PAGE_SIZE, offset).all<WordFrequencyRow>(),
-  ]);
-  const total = countRow?.total ?? 0;
-  const totalCount = totalRow?.total_count ?? 0;
-  const maxCount = totalRow?.max_count ?? 0;
+    ).bind(...filters, WORD_PAGE_SIZE, offset),
+  ]) as [D1Result<WordFrequencyCountRow>, D1Result<WordFrequencyTotalsRow>, D1Result<WordFrequencyRow>];
+  const total = countResult.results[0]?.total ?? 0;
+  const totalCount = totalResult.results[0]?.total_count ?? 0;
+  const maxCount = totalResult.results[0]?.max_count ?? 0;
   return context.json({
     words: wordRows.results.map((row, index) => ({
       rank: offset + index + 1,

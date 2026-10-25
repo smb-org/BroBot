@@ -46,9 +46,16 @@ describe("dashboard navigation", () => {
     expect(parseDashboardRoute("/channels/channel-a/modules/statistics", "?page=words")).toEqual({
       kind: "module", channelId: "channel-a", moduleId: "statistics", pageId: "words",
     });
-    expect(parseDashboardRoute("/channels/channel-a/modules/statistics", "?page=Not%20valid")).toEqual({
-      kind: "module", channelId: "channel-a", moduleId: "statistics",
-    });
+    // Unknown, malformed, default-page and single-page ids all resolve to the base route.
+    for (const [moduleId, page] of [
+      ["statistics", "Not%20valid"], ["statistics", "missing"], ["statistics", "streams"], ["currency", "missing"], ["currency", "words"],
+    ] as const) {
+      expect(parseDashboardRoute(`/channels/channel-a/modules/${moduleId}`, `?page=${page}`)).toEqual({
+        kind: "module", channelId: "channel-a", moduleId,
+      });
+    }
+    expect(dashboardRoutePath({ kind: "module", channelId: "channel-a", moduleId: "statistics", pageId: "streams" })).toBe("/channels/channel-a/modules/statistics");
+    expect(dashboardRoutePath({ kind: "module", channelId: "channel-a", moduleId: "currency", pageId: "words" })).toBe("/channels/channel-a/modules/currency");
   });
 
   it("maps every module navigation category to one of the six shell groups", () => {

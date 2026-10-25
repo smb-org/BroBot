@@ -5,6 +5,7 @@ import { isAuditArea } from "./audit/areas";
 import type { PanelAuditFilters, PanelEventFilters, PanelEventOrigin } from "../panel-contract";
 import { runDashboardNavigationGuards } from "./ui/navigation-guard";
 import type { DryRunRequest } from "../contracts/dry-run";
+import { MODULES } from "../modules/registry";
 
 export type DashboardRoute =
   | { kind: "overview" }
@@ -22,6 +23,16 @@ export type DashboardRoute =
     only?: DryRunRequest["only"];
   }
   | { kind: "module"; channelId: string; moduleId: string; pageId?: string };
+
+/**
+ * A module's extra pages are addressed by `?page=<id>`. Only registered entries after the first one
+ * count; unknown ids, the first (default) page and single-page modules resolve to the base route,
+ * so every URL that renders a page also marks that page's sidebar entry active.
+ */
+const registeredModulePageId = (moduleId: string, pageId: string | null): string | undefined => {
+  const entries = MODULES.find((module) => module.id === moduleId)?.navigationEntries ?? [];
+  return pageId !== null && entries.slice(1).some((entry) => entry.id === pageId) ? pageId : undefined;
+};
 
 export type DashboardMode = "live" | "setup";
 
@@ -154,13 +165,8 @@ export const parseDashboardRoute = (pathname: string, search = ""): DashboardRou
     const channelId = decodeSegment(segments[1] ?? "");
     const moduleId = decodeSegment(segments[3] ?? "");
     if (channelId === null || moduleId === null) return { kind: "overview" };
-    const pageId = new URLSearchParams(search).get("page");
-    return {
-      kind: "module",
-      channelId,
-      moduleId,
-      ...(pageId === null || !/^[a-z0-9_-]{1,64}$/u.test(pageId) ? {} : { pageId }),
-    };
+    const pageId = registeredModulePageId(moduleId, new URLSearchParams(search).get("page"));
+    return { kind: "module", channelId, moduleId, ...(pageId === undefined ? {} : { pageId }) };
   }
   if (segments.length === 4 && segments[0] === "channels" && segments[2] === "overlays") {
     const channelId = decodeSegment(segments[1] ?? "");
@@ -219,7 +225,8 @@ export const dashboardRoutePath = (route: DashboardRoute): string => {
   const base = `/channels/${encodeURIComponent(route.channelId)}`;
   if (route.kind === "module") {
     const path = `${base}/modules/${encodeURIComponent(route.moduleId)}`;
-    return route.pageId === undefined ? path : `${path}?${new URLSearchParams({ page: route.pageId }).toString()}`;
+    const pageId = registeredModulePageId(route.moduleId, route.pageId ?? null);
+    return pageId === undefined ? path : `${path}?${new URLSearchParams({ page: pageId }).toString()}`;
   }
   if (route.section === "overview") return base;
   const path = `${base}/${route.section}`;

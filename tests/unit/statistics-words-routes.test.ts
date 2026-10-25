@@ -19,7 +19,10 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-10-25T23:59:00.000Z"));
 });
 
-const setup = async (member = true): Promise<{ database: TestD1Database; fetch: (path: string) => Promise<Response> }> => {
+const setup = async (
+  member = true,
+  wrapDatabase: (inner: TestD1Database) => D1Database = (inner) => inner as unknown as D1Database,
+): Promise<{ database: TestD1Database; fetch: (path: string) => Promise<Response> }> => {
   const database = new TestD1Database();
   databases.push(database);
   await insertChannel(database, CHANNEL_ID);
@@ -30,7 +33,7 @@ const setup = async (member = true): Promise<{ database: TestD1Database; fetch: 
   app.use("/channels/:channelId/modules/statistics/*", requireChannelAuthorization());
   app.route("/channels/:channelId/modules/statistics", statisticsRoutes);
   const environment = {
-    DB: database as unknown as D1Database,
+    DB: wrapDatabase(database),
     SESSION_COOKIE_KEYS: cookieKeys,
     SESSION_ENCRYPTION_KEYS: encryptionKeys,
   } as Env;
@@ -136,6 +139,40 @@ describe("statistics words route", () => {
 
     expect(body.totalCount).toBe(15);
     expect(body.words[0]).toMatchObject({ word: "hello", share: 10 / 15 });
+  });
+
+  it("reads count, totals and page in one snapshot when a baseline merge lands between reads", async () => {
+    // Separate reads see the merge half-way; a batch is one transaction and never does.
+    let merged = false;
+    const { database, fetch } = await setup(true, (inner) => {
+      const merge = (): void => {
+        if (merged) return;
+        merged = true;
+        inner.sqlite.exec(
+          `INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+           VALUES ('${CHANNEL_ID}', 'merged', 1000, '2026-10-25T12:00:00.000Z')`,
+        );
+      };
+      return {
+        prepare: (sql: string) => {
+          const statement = inner.prepare(sql);
+          const wrapped = Object.create(statement) as typeof statement;
+          wrapped.bind = (...values) => { statement.bind(...values); return wrapped; };
+          const touchesBaseline = sql.includes("channel_word_frequency_baseline");
+          // The inner read executes synchronously; the merge lands before the next statement starts.
+          wrapped.first = <T>() => { const row = statement.first<T>(); if (touchesBaseline) merge(); return row; };
+          wrapped.all = (...hint) => { const rows = statement.all(...hint); if (touchesBaseline) merge(); return rows; };
+          return wrapped;
+        },
+        batch: (statements: unknown[]) => inner.batch(statements as never),
+      } as unknown as D1Database;
+    });
+    await putWord(database, "hello", 10);
+
+    const response = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words`);
+    const body = await response.json<{ words: Array<{ word: string; share: number }>; total: number; totalCount: number }>();
+
+    expect(body).toMatchObject({ total: 1, totalCount: 10, words: [{ word: "hello", share: 1 }] });
   });
 
   it("returns an empty page and zero totals for a channel without stored words", async () => {
