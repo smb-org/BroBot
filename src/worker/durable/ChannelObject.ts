@@ -3400,7 +3400,6 @@ export class ChannelObject extends DurableObject<Env> {
           this.markStatisticsClipImportPending(streamId, startedAt, endedAt),
         listReadyClipImports: (now) => this.listReadyStatisticsClipImports(now),
         completeClipImport: (streamId) => this.completeStatisticsClipImport(streamId),
-        nextClipImportReadyAt: (now) => this.nextStatisticsClipImportReadyAt(now),
         pruneExpiredClipImports: (now) => this.pruneExpiredStatisticsClipImports(now),
         hasClipImports: () => this.hasStatisticsClipImports(),
       },
@@ -4088,16 +4087,6 @@ export class ChannelObject extends DurableObject<Env> {
       streamId,
     );
     return Promise.resolve();
-  }
-
-  public nextStatisticsClipImportReadyAt(now: number): Promise<number | null> {
-    if (!Number.isSafeInteger(now)) return Promise.resolve(null);
-    this.ensureStatisticsSchema();
-    const readyAt = this.ctx.storage.sql.exec<{ ready_at: number | null }>(
-      `SELECT MIN(ready_at) AS ready_at FROM ${STATISTICS_CLIP_IMPORT_TABLE} WHERE expires_at > ?`,
-      now,
-    ).one().ready_at;
-    return Promise.resolve(Number.isSafeInteger(readyAt) ? readyAt : null);
   }
 
   public pruneExpiredStatisticsClipImports(now: number): Promise<void> {

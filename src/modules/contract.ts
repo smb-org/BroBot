@@ -950,7 +950,6 @@ interface ModuleStatisticsChat {
   markClipImportPending: (streamId: string, startedAt: string | null, endedAt: string) => Promise<void>;
   listReadyClipImports: (now: number) => Promise<readonly ModuleStatisticsClipImport[]>;
   completeClipImport: (streamId: string) => Promise<void>;
-  nextClipImportReadyAt: (now: number) => Promise<number | null>;
   pruneExpiredClipImports: (now: number) => Promise<void>;
   hasClipImports: () => Promise<boolean>;
 }

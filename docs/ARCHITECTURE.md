@@ -329,7 +329,9 @@ Streamende ab. Alle Weckzeiten bleiben auf UTC-Fünf-Minuten-Grenzen. Pro Stream
 werden höchstens zwei Seiten beziehungsweise 200 Clips abgerufen, passend zum
 externen Anfragebudget eines Alarmlaufs inklusive Tokenabruf. Clips über diesem
 Limit oder Clips, die Twitch erst später verfügbar macht, können in der Timeline
-fehlen.
+fehlen. Scheitert der `ChannelObject`-RPC `transitionTimerStream`, der
+`endedSession` überträgt, wird dieser Aufruf nicht wiederholt. Viewer-Clips
+dieses Streams werden dann nicht importiert; Bot-Clips sind davon nicht betroffen.
 
 Lifecycle-Wiederholungen sind über Art, Ereigniszeit und — bei `stream.online`
 — Stream-ID idempotent. Metadatenbeobachtungen verwenden Art, Ereigniszeit und

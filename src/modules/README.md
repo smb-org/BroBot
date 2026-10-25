@@ -630,11 +630,14 @@ Stream-Lifecycle-Ereignisse (`stream.online` mit Stream-ID und `started_at`,
 bestätigte Clips, autorisierte Werbepausen und Emote-Spitzen. Bot-Clips und
 nach Streamende importierte Clips verwenden die Clip-ID als natürlichen
 Schlüssel. Der Statistik-Alarm fragt Get Clips einmal 15 Minuten nach dem
-Streamende ab, höchstens fünf Seiten beziehungsweise 500 Clips. Ein fehlgeschlagener
+Streamende ab, höchstens zwei Seiten beziehungsweise 200 Clips. Ein fehlgeschlagener
 Abruf bleibt bis zu 24 Stunden für spätere Alarme vorgemerkt. Die Timeline
 enthält bei Clips Clip-ID, Titel, Erstellungszeitpunkt, Aufruf-Snapshot und
 gegebenenfalls Dauer; Creator-, Broadcaster- und Spiel-IDs werden ausgelassen.
-Clips, die Twitch nach dem letzten Abruf verfügbar macht, können fehlen. Nur
+Clips, die Twitch nach dem letzten Abruf verfügbar macht, können fehlen. Scheitert
+der `ChannelObject`-RPC `transitionTimerStream`, der `endedSession` überträgt,
+wird dieser Aufruf nicht wiederholt. Viewer-Clips dieses Streams werden dann
+nicht importiert; Bot-Clips sind davon nicht betroffen. Nur
 `stream.online` trägt eine Stream-ID; andere Ereignisse werden in der Analyse
 anhand ihrer Zeitpunkte Lifecycle-Zeilen zugeordnet.
 

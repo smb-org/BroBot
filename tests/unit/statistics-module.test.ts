@@ -162,12 +162,6 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       clipImports.delete(streamId);
       return Promise.resolve();
     }),
-    nextClipImportReadyAt: vi.fn(() => Promise.resolve(
-      [...clipImports.values()].reduce<number | null>(
-        (earliest, pending) => earliest === null ? pending.readyAt : Math.min(earliest, pending.readyAt),
-        null,
-      ),
-    )),
     pruneExpiredClipImports: vi.fn((now: number) => {
       for (const [streamId, pending] of clipImports) {
         if (pending.expiresAt <= now) clipImports.delete(streamId);
@@ -198,7 +192,6 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       markClipImportPending: calls.markClipImportPending,
       listReadyClipImports: calls.listReadyClipImports,
       completeClipImport: calls.completeClipImport,
-      nextClipImportReadyAt: calls.nextClipImportReadyAt,
       pruneExpiredClipImports: calls.pruneExpiredClipImports,
       hasClipImports: calls.hasClipImports,
     },
@@ -378,6 +371,7 @@ describe("statistics window alarm", () => {
     };
     await processStatisticsEvent(offline, {
       scheduleAlarm,
+      streamStateTransitionAccepted: true,
       streamSession: { streamId: STREAM_ID, startedAt: WINDOW_START },
     } as unknown as ModuleExecutionContext);
     expect(scheduleAlarm).toHaveBeenCalledWith("window", "window", Date.parse("2026-10-25T12:05:00.000Z"));
@@ -906,11 +900,15 @@ describe("statistics window alarm", () => {
     expect(clearAlarm).not.toHaveBeenCalled();
   });
 
-  it("keeps the offline statistics alarm on the next UTC boundary", async () => {
+  it("does not let a rejected stale offline event move an overdue alarm", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.parse("2026-10-25T12:06:17.000Z"));
     const markWordStreamEnded = vi.fn(() => Promise.resolve());
-    const scheduleAlarm = vi.fn(() => Promise.resolve());
+    let alarmDeadline: number | null = Date.parse("2026-10-25T12:12:00.000Z");
+    const scheduleAlarm = vi.fn((_handlerKey: string, _alarmKey: string, deadline: number) => {
+      alarmDeadline = deadline;
+      return Promise.resolve();
+    });
     const offline: ModuleEvent = {
       channelId: CHANNEL_ID,
       subscriptionType: "stream.offline",
@@ -933,11 +931,13 @@ describe("statistics window alarm", () => {
 
     expect(markWordStreamEnded).toHaveBeenCalledWith(STREAM_ID, WINDOW_END);
     expect(scheduleAlarm).toHaveBeenCalledWith("window", "window", Date.parse("2026-10-25T12:10:00.000Z"));
+    expect(alarmDeadline).toBe(Date.parse("2026-10-25T12:10:00.000Z"));
     execution.streamStateTransitionAccepted = false;
+    vi.setSystemTime(Date.parse("2026-10-25T12:11:17.000Z"));
     await processStatisticsEvent(offline, execution);
     expect(markWordStreamEnded).toHaveBeenCalledTimes(1);
-    expect(scheduleAlarm).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
+    expect(scheduleAlarm).toHaveBeenCalledOnce();
+    expect(alarmDeadline).toBe(Date.parse("2026-10-25T12:10:00.000Z"));
   });
 
   it("imports ready stream clips and deduplicates timeline writes by clip id", async () => {
@@ -1157,43 +1157,38 @@ describe("statistics window alarm", () => {
     expect(calls.schedule).not.toHaveBeenCalled();
   });
 
-  it("keeps a clip-only alarm on the first UTC boundary at or after readiness", async () => {
+  it("keeps the next boundary scheduled when a clip-only alarm is followed by a recovered stream", async () => {
     database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);
     await writeStreamState(database, "offline", WINDOW_END);
-    const readyAt = Date.parse("2026-10-25T12:20:00.000Z");
     const chat = createStatisticsChat();
     chat.clipImports.set(STREAM_ID, {
       startedAt: WINDOW_START,
       endedAt: WINDOW_END,
-      readyAt,
+      readyAt: Date.parse("2026-10-25T12:20:00.000Z"),
       expiresAt: Date.parse(WINDOW_END) + CLIP_IMPORT_RETENTION_MS,
     });
     const { context, calls } = createContext(database, chat);
-
-    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
-
-    expect(calls.schedule).toHaveBeenCalledWith("window", readyAt);
-    expect(readyAt % 300_000).toBe(0);
-  });
-
-  it("rounds an off-boundary readiness up to the next UTC boundary", async () => {
-    database = new TestD1Database();
-    await insertChannel(database, CHANNEL_ID);
-    await writeStreamState(database, "offline", WINDOW_END);
-    const readyAt = Date.parse("2026-10-25T12:17:30.000Z");
-    const chat = createStatisticsChat();
-    chat.clipImports.set(STREAM_ID, {
-      startedAt: WINDOW_START,
-      endedAt: WINDOW_END,
-      readyAt,
-      expiresAt: Date.parse(WINDOW_END) + CLIP_IMPORT_RETENTION_MS,
+    let alarmDeadline: number | null = null;
+    context.schedule = vi.fn((_key: string, deadline: number) => {
+      alarmDeadline = deadline;
+      return Promise.resolve();
     });
-    const { context, calls } = createContext(database, chat);
+    context.getAlarmDeadline = vi.fn(() => Promise.resolve(alarmDeadline));
+    const alarmAt = Date.parse("2026-10-25T12:10:00.000Z");
+    vi.setSystemTime(alarmAt);
 
-    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
+    await windowAlarm().handle(context, "window", alarmAt);
 
-    expect(calls.schedule).toHaveBeenCalledWith("window", Date.parse("2026-10-25T12:20:00.000Z"));
+    expect(alarmDeadline).toBe(Date.parse("2026-10-25T12:15:00.000Z"));
+    await writeStreamState(database, "online", "2026-10-25T12:12:00.000Z");
+    vi.setSystemTime(Date.parse("2026-10-25T12:12:00.000Z"));
+    await reconcileStatisticsSchedule(context, "stream_state");
+
+    expect(context.getAlarmDeadline).toHaveBeenCalledWith("window");
+    expect(alarmDeadline).toBe(Date.parse("2026-10-25T12:15:00.000Z"));
+    expect(context.schedule).toHaveBeenCalledOnce();
+    expect(calls.fetchStreamClips).not.toHaveBeenCalled();
   });
 
   it("restores the shared alarm while offline stream words still need merge or pruning", async () => {
