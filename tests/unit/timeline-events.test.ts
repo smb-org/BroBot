@@ -87,13 +87,13 @@ describe("channel timeline events", () => {
       {
         kind: "stream_offline",
         stream_id: null,
-        occurred_at: "2026-10-25T12:05:00.000Z",
+        occurred_at: "2026-10-25T12:05:00.000000000Z",
         detail_json: "{}",
       },
       {
         kind: "stream_online",
         stream_id: "stream-1",
-        occurred_at: "2026-10-25T12:00:00.000Z",
+        occurred_at: "2026-10-25T12:00:00.000000000Z",
         detail_json: JSON.stringify({ startedAt: "2026-10-25T11:55:00.000Z" }),
       },
     ]);
@@ -118,14 +118,14 @@ describe("channel timeline events", () => {
       {
         kind: "stream_online",
         stream_id: "stream-1",
-        occurred_at: "2026-10-25T12:00:00.000Z",
+        occurred_at: "2026-10-25T12:00:00.000000000Z",
         detail_json: JSON.stringify({ startedAt: "2026-10-25T11:55:00.000Z" }),
       },
-      { kind: "stream_offline", stream_id: null, occurred_at: "2026-10-25T12:05:00.000Z", detail_json: "{}" },
+      { kind: "stream_offline", stream_id: null, occurred_at: "2026-10-25T12:05:00.000000000Z", detail_json: "{}" },
       {
         kind: "stream_online",
         stream_id: "stream-1",
-        occurred_at: "2026-10-25T12:09:00.000Z",
+        occurred_at: "2026-10-25T12:09:00.000000000Z",
         detail_json: JSON.stringify({ startedAt: "2026-10-25T11:55:00.000Z" }),
       },
     ]);

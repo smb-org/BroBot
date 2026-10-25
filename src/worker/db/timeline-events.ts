@@ -1,8 +1,17 @@
 import type { ModuleTimelineEvent } from "../../modules/contract";
 
+const RFC3339 = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/u;
+
+/**
+ * UTC RFC 3339 with a fixed nine-digit fraction, so Twitch's nanosecond order survives and the
+ * stored text sorts and compares like the instant it names.
+ */
 const canonicalTimestamp = (value: string): string | null => {
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+  const match = RFC3339.exec(value);
+  if (match === null) return null;
+  const seconds = Date.parse(`${match[1] ?? ""}${match[3] ?? ""}`);
+  if (!Number.isFinite(seconds)) return null;
+  return `${new Date(seconds).toISOString().slice(0, 19)}.${(match[2] ?? "").padEnd(9, "0")}Z`;
 };
 
 const contentHash = async (detail: Readonly<Record<string, unknown>>): Promise<string> => {

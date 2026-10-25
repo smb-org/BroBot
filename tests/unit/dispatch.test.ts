@@ -206,9 +206,9 @@ describe("channel timeline metadata observations", () => {
           WHERE channel_id = ? ORDER BY occurred_at`,
       ).bind("kanal-a").all<{ kind: string; detail_json: string }>();
       expect(rows.results).toEqual([
-        { kind: "channel_metadata", stream_id: null, occurred_at: "2026-10-25T12:00:00.000Z", detail_json: JSON.stringify({ title: "Old title", category: { id: "game-1", name: "Old category" } }) },
-        { kind: "channel_metadata", stream_id: null, occurred_at: "2026-10-25T12:01:00.000Z", detail_json: JSON.stringify({ title: "New title", category: { id: "game-2", name: "New category" } }) },
-        { kind: "channel_metadata", stream_id: null, occurred_at: "2026-10-25T12:02:00.000Z", detail_json: JSON.stringify({ title: "New title", category: null }) },
+        { kind: "channel_metadata", stream_id: null, occurred_at: "2026-10-25T12:00:00.000000000Z", detail_json: JSON.stringify({ title: "Old title", category: { id: "game-1", name: "Old category" } }) },
+        { kind: "channel_metadata", stream_id: null, occurred_at: "2026-10-25T12:01:00.000000000Z", detail_json: JSON.stringify({ title: "New title", category: { id: "game-2", name: "New category" } }) },
+        { kind: "channel_metadata", stream_id: null, occurred_at: "2026-10-25T12:02:00.000000000Z", detail_json: JSON.stringify({ title: "New title", category: null }) },
       ]);
     } finally {
       database.close();
@@ -244,9 +244,9 @@ describe("channel timeline stream lifecycle", () => {
           WHERE channel_id = ? ORDER BY occurred_at`,
       ).bind("kanal-a").all<{ kind: string; stream_id: string | null; occurred_at: string; detail_json: string }>();
       expect(rows.results).toEqual([
-        { kind: "stream_online", stream_id: "stream-1", occurred_at: "2026-10-25T12:00:00.000Z", detail_json: JSON.stringify({ startedAt: "2026-10-25T12:00:00.000Z" }) },
-        { kind: "stream_offline", stream_id: null, occurred_at: "2026-10-25T12:05:00.000Z", detail_json: "{}" },
-        { kind: "stream_online", stream_id: "stream-1", occurred_at: "2026-10-25T12:09:00.000Z", detail_json: JSON.stringify({ startedAt: "2026-10-25T12:00:00.000Z" }) },
+        { kind: "stream_online", stream_id: "stream-1", occurred_at: "2026-10-25T12:00:00.000000000Z", detail_json: JSON.stringify({ startedAt: "2026-10-25T12:00:00.000Z" }) },
+        { kind: "stream_offline", stream_id: null, occurred_at: "2026-10-25T12:05:00.000000000Z", detail_json: "{}" },
+        { kind: "stream_online", stream_id: "stream-1", occurred_at: "2026-10-25T12:09:00.000000000Z", detail_json: JSON.stringify({ startedAt: "2026-10-25T12:00:00.000Z" }) },
       ]);
     } finally {
       database.close();

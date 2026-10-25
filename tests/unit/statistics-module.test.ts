@@ -321,6 +321,33 @@ describe("statistics window alarm", () => {
     });
   });
 
+  it("drops the spike but cleans the window and reschedules when the baseline read fails", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, CHANNEL_ID);
+    await writeStreamState(database, "online");
+    const chat = createStatisticsChat([windowState({ emotes: 15 })]);
+    const { context, calls } = createContext(database, chat);
+    const activeDatabase = database;
+    context.DB = {
+      prepare: (sql: string) => {
+        if (sql.includes("SELECT emotes FROM channel_statistics")) throw new Error("Injected baseline failure.");
+        return activeDatabase.prepare(sql);
+      },
+    } as unknown as D1Database;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
+
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+    expect(chat.windows.get(WINDOW_START)?.dirty).toBe(false);
+    expect(calls.schedule).toHaveBeenCalledWith("window", Date.parse(WINDOW_END) + 300_000);
+    expect(calls.timeline).not.toHaveBeenCalled();
+    await expect(database.prepare(
+      "SELECT emotes FROM channel_statistics WHERE channel_id = ? AND window_start = ?",
+    ).bind(CHANNEL_ID, WINDOW_START).first()).resolves.toEqual({ emotes: 15 });
+  });
+
   it("keeps the window dirty when a late increment lands during the D1 write", async () => {
     database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);

@@ -288,17 +288,26 @@ Lifecycle-Wiederholungen sind über Art, Ereigniszeit und — bei `stream.online
 einen Inhalts-Hash; EventSub-Nachrichten-IDs sind kein Ereignisschlüssel.
 Übergänge und Drops entstehen erst bei der Analyse. Ein Drop bedeutet ein
 Offline-Ereignis, auf das innerhalb von zehn Minuten ein Online-Ereignis folgt.
-Eine Analyse kann die Kandidaten beispielsweise so ermitteln:
+`occurred_at` ist UTC-RFC-3339 mit festen neun Nachkommastellen
+(`2026-10-25T12:05:00.123456789Z`); die Nanosekundenreihenfolge von Twitch
+bleibt erhalten und der Text ist unmittelbar sortier- und vergleichbar. Eine
+Analyse kann die Kandidaten beispielsweise so ermitteln, ohne die indizierten
+Spalten in Funktionen zu kapseln (beide Seiten nutzen
+`channel_timeline_events_channel_kind_occurred_idx`; die Untergrenze wird aus
+dem Online-Zeitpunkt berechnet, die Nachkommastellen bleiben erhalten):
 
 ```sql
-SELECT online.channel_id, offline.occurred_at AS offline_at, online.occurred_at AS online_at
+SELECT offline.occurred_at AS offline_at, online.occurred_at AS online_at
 FROM channel_timeline_events AS online
 JOIN channel_timeline_events AS offline
   ON offline.channel_id = online.channel_id
  AND offline.kind = 'stream_offline'
- AND julianday(online.occurred_at) >= julianday(offline.occurred_at)
- AND julianday(online.occurred_at) <= julianday(offline.occurred_at) + 10.0 / 1440
-WHERE online.kind = 'stream_online';
+ AND offline.occurred_at <= online.occurred_at
+ AND offline.occurred_at >= strftime('%Y-%m-%dT%H:%M:%S', substr(online.occurred_at, 1, 19), '-10 minutes')
+                            || substr(online.occurred_at, 20)
+WHERE online.channel_id = :channel_id
+  AND online.kind = 'stream_online'
+  AND online.occurred_at >= :from AND online.occurred_at < :to;
 ```
 
 Titel- und Kategorieänderungen leitet die Analyse aus zeitlich sortierten

@@ -14,6 +14,8 @@ const worker = env as unknown as Env;
 const encoder = new TextEncoder();
 const WINDOW_MS = 300_000;
 const iso = (time: number): string => new Date(time).toISOString();
+// Stored timeline timestamps keep a fixed nine-digit fraction.
+const ns = (time: number): string => iso(time).replace(/Z$/u, "000000Z");
 const stubs = new Set<DurableObjectStub>();
 
 const hex = (bytes: ArrayBuffer): string =>
@@ -88,9 +90,9 @@ describe("stream timeline against D1 and the channel object", () => {
         WHERE channel_id = ? ORDER BY occurred_at`,
     ).bind(channelId).all<{ kind: string; stream_id: string | null; occurred_at: string; detail_json: string }>();
     expect(lifecycle.results).toEqual([
-      { kind: "stream_online", stream_id: "stream-1", occurred_at: iso(now - 8 * 60_000), detail_json: JSON.stringify({ startedAt: streamEvent.started_at }) },
-      { kind: "stream_offline", stream_id: null, occurred_at: iso(now - 5 * 60_000), detail_json: "{}" },
-      { kind: "stream_online", stream_id: "stream-1", occurred_at: iso(now - 1_000), detail_json: JSON.stringify({ startedAt: streamEvent.started_at }) },
+      { kind: "stream_online", stream_id: "stream-1", occurred_at: ns(now - 8 * 60_000), detail_json: JSON.stringify({ startedAt: streamEvent.started_at }) },
+      { kind: "stream_offline", stream_id: null, occurred_at: ns(now - 5 * 60_000), detail_json: "{}" },
+      { kind: "stream_online", stream_id: "stream-1", occurred_at: ns(now - 1_000), detail_json: JSON.stringify({ startedAt: streamEvent.started_at }) },
     ]);
   });
 
@@ -111,9 +113,31 @@ describe("stream timeline against D1 and the channel object", () => {
         WHERE channel_id = ? ORDER BY occurred_at`,
     ).bind(channelId).all<{ kind: string; stream_id: string | null; occurred_at: string }>()).results;
     expect(rows).toEqual([
-      { kind: "stream_online", stream_id: "stream-7", occurred_at: iso(now - 9 * 60_000) },
-      { kind: "stream_offline", stream_id: null, occurred_at: iso(now - 2_000) },
+      { kind: "stream_online", stream_id: "stream-7", occurred_at: ns(now - 9 * 60_000) },
+      { kind: "stream_offline", stream_id: null, occurred_at: ns(now - 2_000) },
     ]);
+  });
+
+  it("keeps Twitch nanosecond order for metadata observations within one millisecond", async () => {
+    const channelId = "timeline-nanoseconds";
+    await insertPointChannel(channelId);
+    const second = iso(Date.now() - 2_000).slice(0, 19);
+    const dispatch = (triggerId: string, title: string, fraction: string) => dispatchEventSubNotification(worker, {
+      channelId,
+      subscriptionType: "channel.update",
+      triggerId,
+      payload: { title, category_id: "", category_name: "" },
+      receivedAt: iso(Date.now()),
+      eventSubTimestamp: `${second}.${fraction}Z`,
+    });
+
+    // Delivered in reverse: the later observation (.123900000) arrives first.
+    await dispatch("ns-later", "Later", "123900000");
+    await dispatch("ns-earlier", "Earlier", "123100000");
+
+    const rows = await timelineRows(channelId, "channel_metadata");
+    expect(rows.map((row) => row.occurred_at)).toEqual([`${second}.123100000Z`, `${second}.123900000Z`]);
+    expect(rows.map((row) => (JSON.parse(row.detail_json) as { title: string }).title)).toEqual(["Earlier", "Later"]);
   });
 
   it("keeps stream_id null on late non-online events while a stream is current", async () => {
@@ -272,7 +296,7 @@ describe("stream timeline against D1 and the channel object", () => {
     const rows = await timelineRows(channelId, "emote_spike");
     expect(rows).toHaveLength(1);
     expect(rows[0]?.stream_id).toBeNull();
-    expect(rows[0]?.occurred_at).toBe(iso(spikeStart + WINDOW_MS));
+    expect(rows[0]?.occurred_at).toBe(ns(spikeStart + WINDOW_MS));
     expect(JSON.parse(rows[0]?.detail_json ?? "{}")).toMatchObject({
       windowStart: iso(spikeStart),
       emotes: 12,

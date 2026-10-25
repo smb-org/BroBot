@@ -169,7 +169,12 @@ const flushCompletedWindows = async (
     if (window === null) continue;
     try {
       await writeAbsoluteWindow(context, window);
-      await recordEmoteSpike(context, window);
+      try {
+        await recordEmoteSpike(context, window);
+      } catch (error: unknown) {
+        // The window is already persisted; a lost spike must not keep it dirty or block the reschedule.
+        console.warn("Emote spike could not be evaluated.", error);
+      }
       await statisticsChat.markWindowClean(windowStart, window.revision);
     } catch (error: unknown) {
       writeFailure ??= error;
