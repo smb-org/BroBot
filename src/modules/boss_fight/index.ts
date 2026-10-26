@@ -2,7 +2,7 @@ import type { BotModule, ModuleAlarmContext, ModulePointRoundAnnouncement, Modul
 import { isMessageEnabled } from "../../contracts/message-enabled";
 import { BOSS_FIGHT_COMMAND, BOSS_FIGHT_MODULE_ID, bossFightDefaultsForLanguage, bossFightSettingsReadSchema, bossFightSettingsSchema } from "./contracts";
 import type { BossFightRoundData } from "./contracts";
-import { bossFightCatalog, formatBossOutcomeLine } from "./locale";
+import { bossFightCatalog, formatBossOutcomeLine, formatBossStartLine } from "./locale";
 import { bossFightRoutes } from "./routes";
 import { processBossFightMessage } from "./service";
 import { startBossFightNow, loadBossFightRound } from "./panel/service";
@@ -26,11 +26,13 @@ const formatAnnouncement = async (context: ModuleAlarmContext, round: ModulePoin
   if (data === null) return null;
   if (!isMessageEnabled(data, "startText", "startTextEnabled")) return { kind: "silent" as const };
   const rendered = await context.renderTemplate(round.text);
-  const copy = bossFightCatalog[data.language];
-  const suffix = `${copy.attackHint} (${String(data.durationSeconds)} ${copy.seconds})`;
-  const prefix = rendered.text.trim().replace(/\s+/gu, " ").slice(0, Math.max(1, 500 - suffix.length - 1));
   return {
-    text: `${prefix} ${suffix}`,
+    text: formatBossStartLine({
+      language: data.language,
+      summary: rendered.text,
+      durationSeconds: data.durationSeconds,
+      ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
+    }),
     ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
     ...(data.chatTarget === null ? {} : { target: data.chatTarget }),
   };
@@ -57,6 +59,7 @@ const formatResult = async (context: ModuleAlarmContext, round: ModulePointRound
       summary: rendered.text,
       topDamageDealers,
       otherCount: result.otherCount as number,
+      ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
     }),
     ...(rendered.attributions === undefined ? {} : { attributions: rendered.attributions }),
     ...(data.chatTarget === null ? {} : { target: data.chatTarget }),
@@ -68,6 +71,7 @@ const bossActionTexts = {
   error: { de: bossFightCatalog.de.actionError, en: bossFightCatalog.en.actionError },
   started: { de: bossFightCatalog.de.actionStarted, en: bossFightCatalog.en.actionStarted },
   roundRunning: { de: bossFightCatalog.de.roundRunning, en: bossFightCatalog.en.roundRunning },
+  streamOffline: { de: bossFightCatalog.de.streamOffline, en: bossFightCatalog.en.streamOffline },
 } as const;
 
 export const bossFightModule: BotModule<typeof bossFightSettingsSchema> = {
@@ -108,12 +112,12 @@ export const bossFightModule: BotModule<typeof bossFightSettingsSchema> = {
     id: "start-boss-fight",
     name: bossActionTexts.name,
     icon: "boss",
-    conditions: [{
+    conditions: ["streamLive", {
       check: async ({ channelId, signal }) => {
         const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules/${BOSS_FIGHT_MODULE_ID}/availability`, { signal });
         if (!response.ok) throw new Error("availability_unavailable");
         const reason = record(await response.json())?.reason;
-        return { reason: reason === "round_running" ? bossActionTexts.roundRunning : null };
+        return { reason: reason === "round_running" ? bossActionTexts.roundRunning : reason === "stream_offline" ? bossActionTexts.streamOffline : null };
       },
     }],
     requiredRole: "operator",

@@ -1,4 +1,5 @@
 import type { ModuleLanguage } from "../contract";
+import { reserveChatTextBeforeSuffix } from "../../contracts/chat-text";
 import type { BossPayout } from "./domain/boss";
 
 export const bossFightCatalog = {
@@ -12,6 +13,7 @@ export const bossFightCatalog = {
     actionError: "Der Bosskampf konnte nicht gestartet werden.",
     actionStarted: "Bosskampf gestartet.",
     roundRunning: "Ein Bosskampf läuft bereits.",
+    streamOffline: "Der Stream ist nicht live.",
     commandDescription: "Greift den laufenden Bosskampf an.",
     attackHint: "Schreib !attack, um den Boss anzugreifen.",
     attacker: () => "Angreifer",
@@ -53,6 +55,7 @@ export const bossFightCatalog = {
     actionError: "The boss fight could not be started.",
     actionStarted: "Boss fight started.",
     roundRunning: "A boss fight is already running.",
+    streamOffline: "The stream is not live.",
     commandDescription: "Attack the active boss fight.",
     attackHint: "Type !attack to hit the boss.",
     attacker: (count: number) => count === 1 ? "attacker" : "attackers",
@@ -91,12 +94,29 @@ export interface BossFightOutcomeLineInput {
   summary: string;
   topDamageDealers: readonly Pick<BossPayout, "login" | "damage" | "amount">[];
   otherCount: number;
+  attributions?: readonly string[];
 }
+
+const oneLine = (text: string): string => text.trim().replace(/\s+/gu, " ");
+
+// The mandatory part (command hint, top damage) is reserved first, so neither the custom text nor
+// the transport attributions appended by the host can cut it off.
+const withMandatorySuffix = (summary: string, suffix: string, attributions: readonly string[] | undefined): string =>
+  reserveChatTextBeforeSuffix(oneLine(summary), suffix, attributions)?.trim() ?? oneLine(suffix).slice(0, 500);
 
 export const formatBossOutcomeLine = (input: BossFightOutcomeLineInput): string => {
   const copy = bossFightCatalog[input.language];
   const names = input.topDamageDealers.slice(0, 3).map(copy.payout).join(", ");
   const ending = names.length === 0 ? copy.noDamage : copy.topDamage(names, Math.max(0, input.otherCount));
-  const summary = input.summary.trim().replace(/\s+/gu, " ").slice(0, 180);
-  return `${summary}${ending}`.slice(0, 500);
+  return withMandatorySuffix(input.summary, ending, input.attributions);
+};
+
+export const formatBossStartLine = (input: {
+  language: ModuleLanguage;
+  summary: string;
+  durationSeconds: number;
+  attributions?: readonly string[];
+}): string => {
+  const copy = bossFightCatalog[input.language];
+  return withMandatorySuffix(input.summary, ` ${copy.attackHint} (${String(input.durationSeconds)} ${copy.seconds})`, input.attributions);
 };

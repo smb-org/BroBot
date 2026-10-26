@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import type { BossFightSettings } from "../../src/modules/boss_fight/contracts";
-import { formatBossOutcomeLine } from "../../src/modules/boss_fight/locale";
+import { formatBossOutcomeLine, formatBossStartLine } from "../../src/modules/boss_fight/locale";
+import { truncateChatTextWithAttributions } from "../../src/worker/chat";
 import { bossFightDefaultsForLanguage } from "../../src/modules/boss_fight/contracts";
 import { bossAttackOperationId, processBossFightMessage } from "../../src/modules/boss_fight/service";
 
@@ -65,5 +66,32 @@ describe("boss fight chat output", () => {
     expect(line).not.toContain("\n");
     expect(line).not.toContain("amberleaf");
     expect(line.length).toBeLessThanOrEqual(500);
+  });
+
+  it("keeps the attack hint, duration and top damage intact when a long custom text meets attributions [protects=the mandatory part of each line is reserved before the custom text and the host attributions are added; fails_when=the attribution suffix cuts off !attack, the duration or the top damage; no_claim=attribution wording comes from the template sources]", () => {
+    const attributions = ["Weather data by Fictional Source", "Quotes by Another Fictional Source"];
+    const longText = "A very long boss story. ".repeat(40);
+    const start = truncateChatTextWithAttributions(
+      formatBossStartLine({ language: "en", summary: longText, durationSeconds: 90, attributions }),
+      attributions,
+    );
+    const result = truncateChatTextWithAttributions(
+      formatBossOutcomeLine({
+        language: "en",
+        summary: longText,
+        topDamageDealers: [{ login: "frostfern", damage: 120, amount: 400 }],
+        otherCount: 0,
+        attributions,
+      }),
+      attributions,
+    );
+
+    expect(start.truncated).toBe(false);
+    expect(start.text).toContain("Type !attack to hit the boss. (90 s)");
+    expect(start.text.endsWith(" · Quotes by Another Fictional Source")).toBe(true);
+    expect(start.text.length).toBeLessThanOrEqual(500);
+    expect(result.truncated).toBe(false);
+    expect(result.text).toContain("@frostfern 120 dmg · 400 pts.");
+    expect(result.text.length).toBeLessThanOrEqual(500);
   });
 });

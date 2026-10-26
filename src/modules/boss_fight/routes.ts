@@ -8,8 +8,13 @@ const record = (value: unknown): Record<string, unknown> | null =>
 
 export const bossFightRoutes = new Hono<ModuleRouteEnvironment>();
 
+const streamIsOnline = async (db: D1Database, channelId: string): Promise<boolean> =>
+  (await db.prepare("SELECT state FROM channel_stream_state WHERE channel_id = ?")
+    .bind(channelId).first<{ state: string }>())?.state === "online";
+
 bossFightRoutes.get("/availability", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
+  if (!await streamIsOnline(context.env.DB, channelId)) return context.json({ reason: "stream_offline" as const });
   const active = await context.get("points")(channelId).rounds.active();
   return context.json({ reason: active === null ? null : "round_running" as const });
 });
@@ -39,6 +44,7 @@ bossFightRoutes.post("/start", async (context) => {
   const channelId = context.req.param("channelId") ?? "";
   const settings = await loadEnabledBossFightSettings(context.env.DB, channelId);
   if (settings === null) return context.json({ error: "module_disabled" }, 409);
+  if (!await streamIsOnline(context.env.DB, channelId)) return context.json({ error: "stream_offline" }, 409);
   const points = context.get("points")(channelId);
   if (await points.rounds.active() !== null) return context.json({ error: "round_running" }, 409);
   const language = (await context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")

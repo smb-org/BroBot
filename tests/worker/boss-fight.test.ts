@@ -1,6 +1,7 @@
 import { evictDurableObject } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bossAttackOperationId } from "../../src/modules/boss_fight/service";
+import { attackPointRoundSync } from "../../src/worker/durable/points";
 import {
   clearPointObjectAlarms,
   forcePointAlarm,
@@ -113,7 +114,7 @@ describe("boss fight rounds in the channel Durable Object", () => {
     expect(await object.pointBalance("boss_fight", "viewer_two")).toBe(50);
     expect(ledger).toMatchObject({ sum: 0, negativeAccounts: ["__house"], resolveOperations: 1 });
     expect(ledger.attackColumns).not.toContain("account_id");
-    expect(ledger.attackRows.every((row) => !JSON.stringify(row).includes("viewer_one") && !JSON.stringify(row).includes("frostfern"))).toBe(true);
+    expect(ledger.attackRows).toEqual([]);
   });
 
   it("keeps an open round and its end alarm across Durable Object eviction, then pays nothing on timeout", async () => {
@@ -152,5 +153,78 @@ describe("boss fight rounds in the channel Durable Object", () => {
     }));
     expect(state).toEqual({ round: "cancelled", pointOperations: 0 });
     await expect(object.pointBalance("boss_fight", "viewer_one")).resolves.toBe(0);
+  });
+
+  it("stores only accepted hits and leaves no attack rows or cooldown keys after a spammed round is cancelled [protects=rejected attacks write nothing and a finished round drops its attack rows and cooldown keys; fails_when=spam grows a table or anything survives cancel or resolve; no_claim=reply behaviour is covered by the chat tests]", async () => {
+    const channelId = `boss-spam-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = bossObject(pointObject(channelId));
+    await openAnnouncedRound(object, "boss_fight", "boss-spam", bossRound("boss-spam"), Date.now() + 90_000);
+    await attack(object, "boss-spam", "viewer_one", "frostfern", "spam-hit");
+    for (let index = 0; index < 25; index += 1) await attack(object, "boss-spam", "viewer_one", "frostfern", `spam-${String(index)}`);
+    await attack(object, "unknown-round", "viewer_two", "moonmoss", "spam-unknown");
+
+    const attackState = (target: BossFightObject) => runPointObject(target, (_target, state) => ({
+      attacks: state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM game_round_attacks").one().count,
+      cooldowns: state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM game_cooldowns WHERE key LIKE 'boss_fight:%'").one().count,
+    }));
+    await expect(attackState(object)).resolves.toEqual({ attacks: 1, cooldowns: 1 });
+    const stored = await runPointObject(object, (_target, state) => JSON.stringify([
+      ...state.storage.sql.exec("SELECT * FROM game_round_attacks").toArray(),
+      ...state.storage.sql.exec("SELECT * FROM game_cooldowns WHERE key LIKE 'boss_fight:%'").toArray(),
+    ]));
+    expect(stored).not.toMatch(/viewer_one|frostfern/u);
+
+    await object.setGameModuleGate("boss_fight", true, 1, 1);
+    await expect(object.cancelOpenGameRounds("boss_fight", 1)).resolves.toBe(1);
+    await expect(attackState(object)).resolves.toEqual({ attacks: 0, cooldowns: 0 });
+  });
+
+  it("drops attack rows and cooldown keys when the round resolves [protects=resolution cleans the per-round attack state; fails_when=rows or cooldown keys survive settlement; no_claim=payout amounts are covered by the first test]", async () => {
+    const channelId = `boss-clean-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = bossObject(pointObject(channelId));
+    await openAnnouncedRound(object, "boss_fight", "boss-clean", bossRound("boss-clean"), Date.now() + 90_000);
+    await attack(object, "boss-clean", "viewer_one", "frostfern", "clean-hit");
+    vi.setSystemTime(Date.now() + 90_000);
+    await forcePointAlarm(object, "boss-clean");
+    await expect(runPointObject(object, (_target, state) => ({
+      attacks: state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM game_round_attacks").one().count,
+      cooldowns: state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM game_cooldowns WHERE key LIKE 'boss_fight:%'").one().count,
+    }))).resolves.toEqual({ attacks: 0, cooldowns: 0 });
+  });
+
+  it("does constant database work per hit however many attackers joined [protects=a hit reads the round aggregates instead of reloading all participants; fails_when=statements or rows read per hit grow with the attacker count; no_claim=the absolute numbers are a loose ceiling, not a benchmark]", async () => {
+    const channelId = `boss-bounded-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = bossObject(pointObject(channelId));
+    await openAnnouncedRound(object, "boss_fight", "boss-bounded", bossRound("boss-bounded"), Date.now() + 90_000);
+
+    const work = await runPointObject(object, (_target, state) => {
+      const measure = (index: number): { statements: number; rowsRead: number } => {
+        const cursors: SqlStorageCursor<Record<string, SqlStorageValue>>[] = [];
+        const counting = {
+          exec: (query: string, ...bindings: unknown[]) => {
+            const cursor = state.storage.sql.exec(query, ...bindings);
+            cursors.push(cursor);
+            return cursor;
+          },
+        } as unknown as DurableObjectStorage["sql"];
+        state.storage.transactionSync(() => attackPointRoundSync(
+          counting, "boss_fight", "boss-bounded", `op-${String(index)}`, `viewer_${String(index)}`, `login${String(index)}`,
+          30, Date.now(), `hash-${String(index)}`, `cooldown-${String(index)}`, Date.now(), new Date().toISOString(),
+        ));
+        return { statements: cursors.length, rowsRead: cursors.reduce((total, cursor) => total + cursor.rowsRead, 0) };
+      };
+      const results: { statements: number; rowsRead: number }[] = [];
+      for (let index = 0; index < 60; index += 1) results.push(measure(index));
+      return results;
+    });
+
+    const early = work[2];
+    const late = work[59];
+    expect(late?.statements).toBe(early?.statements);
+    expect(late?.rowsRead).toBeLessThanOrEqual((early?.rowsRead ?? 0) + 2);
+    expect(late?.rowsRead).toBeLessThan(40);
   });
 });

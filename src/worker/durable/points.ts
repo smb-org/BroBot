@@ -289,8 +289,6 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
     operation_id TEXT PRIMARY KEY,
     module_id TEXT NOT NULL,
     round_id TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('hit', 'cooldown', 'round_closed')),
-    damage INTEGER NOT NULL,
     result_json TEXT NOT NULL,
     payload_hash TEXT NOT NULL,
     created_at TEXT NOT NULL
@@ -1636,6 +1634,16 @@ export const answerPointRoundSync = (
   return { status, replayed: false, first, deadlineAt };
 };
 
+const attackCooldownPrefix = (roundId: string): string => `round:${roundId}:attack:`;
+
+/** Drops the stored attacks and per-viewer cooldown keys of a finished round. */
+const deleteRoundAttackStateSync = (sql: PointsSql, moduleId: string, roundId: string): void => {
+  sql.exec("DELETE FROM game_round_attacks WHERE module_id = ? AND round_id = ?", moduleId, roundId);
+  // Cooldown keys are `<module>:round:<id>:attack:<hash>`; the range ends at the prefix with ":" bumped to ";".
+  const prefix = `${moduleId}:${attackCooldownPrefix(roundId)}`;
+  sql.exec("DELETE FROM game_cooldowns WHERE key >= ? AND key < ?", prefix, `${prefix.slice(0, -1)};`);
+};
+
 export const attackPointRoundSync = (
   sql: PointsSql,
   moduleId: string,
@@ -1706,13 +1714,13 @@ export const attackPointRoundSync = (
     data !== null && data.defeated !== true && Number.isSafeInteger(data.baseHp) && (data.baseHp as number) > 0 &&
     Number.isSafeInteger(data.hpPerAttacker) && (data.hpPerAttacker as number) >= 0 &&
     Number.isSafeInteger(data.attackCooldownSeconds) && (data.attackCooldownSeconds as number) >= 1 && (data.attackCooldownSeconds as number) <= 3_600 &&
+    Number.isSafeInteger(data.attackerCount) && (data.attackerCount as number) >= 0 &&
+    Number.isSafeInteger(data.damageDealt) && (data.damageDealt as number) >= 0 &&
     Number.isSafeInteger(data.damageMinimum) && Number.isSafeInteger(data.damageMaximum) &&
     damage >= (data.damageMinimum as number) && damage <= (data.damageMaximum as number);
 
-  let status: PointRoundAttackResult["status"] = "round_closed";
-  let appliedDamage = 0;
-  if (attackAllowed && !claimPointCooldownSync(sql, moduleId, `round:${roundId}:attack:${cooldownKey}`, data.attackCooldownSeconds as number, nowMs)) {
-    status = "cooldown";
+  if (attackAllowed && !claimPointCooldownSync(sql, moduleId, `${attackCooldownPrefix(roundId)}${cooldownKey}`, data.attackCooldownSeconds as number, nowMs)) {
+    result = { ...result, status: "cooldown" };
   } else if (attackAllowed) {
     const participant = sql.exec<{ login: string; data_json: string }>(
       "SELECT login, data_json FROM game_round_participants WHERE round_id = ? AND account_id = ?",
@@ -1748,17 +1756,10 @@ export const attackPointRoundSync = (
         accountId,
       );
     }
-    const participants = participantsForRoundSync(sql, roundId);
-    const totalDamageBigInt = participants.reduce((total, value) => {
-      if (typeof value.data !== "object" || value.data === null || Array.isArray(value.data) ||
-          !Number.isSafeInteger((value.data as Record<string, unknown>).damage) || ((value.data as Record<string, unknown>).damage as number) < 0) {
-        throw new Error("invalid_round_attack");
-      }
-      return total + BigInt((value.data as { damage: number }).damage);
-    }, 0n);
-    if (totalDamageBigInt > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("invalid_round_attack");
-    const totalDamage = Number(totalDamageBigInt);
-    const attackers = participants.length;
+    // The round keeps the attacker count and damage total as aggregates, so a hit never reloads all participants.
+    const totalDamage = (data.damageDealt as number) + damage;
+    const attackers = (data.attackerCount as number) + (participant === undefined ? 1 : 0);
+    if (!Number.isSafeInteger(totalDamage)) throw new Error("invalid_round_attack");
     const health = bossHealth({
       baseHp: data.baseHp as number,
       hpPerAttacker: data.hpPerAttacker as number,
@@ -1775,23 +1776,20 @@ export const attackPointRoundSync = (
       defeated,
     };
     sql.exec("UPDATE game_rounds SET data_json = ? WHERE round_id = ? AND module_id = ? AND state = 'open'", jsonValue(nextData), roundId, moduleId);
-    status = "hit";
-    appliedDamage = damage;
-    result = { status, replayed: false, damage, defeated, currentHp, maxHp, attackers, damageDealt: totalDamage };
+    result = { status: "hit", replayed: false, damage, defeated, currentHp, maxHp, attackers, damageDealt: totalDamage };
+    // Only accepted hits are stored (for replay protection); rejected attacks leave nothing behind.
+    // The rows and the cooldown keys are removed when the round resolves or is cancelled.
+    sql.exec(
+      `INSERT INTO game_round_attacks (operation_id, module_id, round_id, result_json, payload_hash, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      operationId,
+      moduleId,
+      roundId,
+      jsonValue(result),
+      payloadHash,
+      now,
+    );
   }
-  result = { ...result, status, replayed: false, damage: appliedDamage };
-  sql.exec(
-    `INSERT INTO game_round_attacks (operation_id, module_id, round_id, status, damage, result_json, payload_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    operationId,
-    moduleId,
-    roundId,
-    result.status,
-    result.damage,
-    jsonValue(result),
-    payloadHash,
-    now,
-  );
   return result;
 };
 
@@ -1886,6 +1884,7 @@ export const resolvePointRoundSync = (
     moduleId,
   );
   sql.exec("DELETE FROM game_round_locks WHERE module_id = ? AND round_id = ?", moduleId, roundId);
+  deleteRoundAttackStateSync(sql, moduleId, roundId);
   return applied;
 };
 
@@ -1935,6 +1934,7 @@ export const cancelPointRoundsSync = (
     refundedStake ||= refunds.length > 0;
     sql.exec("UPDATE game_rounds SET state = 'cancelled' WHERE round_id = ? AND module_id = ?", roundId, moduleId);
     sql.exec("DELETE FROM game_round_locks WHERE module_id = ? AND round_id = ?", moduleId, roundId);
+    deleteRoundAttackStateSync(sql, moduleId, roundId);
     onRoundCancelled?.(roundId);
     cancelledCount += 1;
   }
