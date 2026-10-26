@@ -173,8 +173,10 @@ Tags der Sockets, die SQLite-Ablage und gesetzte Alarme.
 Deshalb ist die Regel: **Nichts, was nach dem Wecken noch stimmen muss, liegt
 in `this.*`.** Der Prinzipal liegt im Attachment. Für den Feed braucht das
 Objekt keine eigene Tabelle — die „begrenzte Warteschlange", die das Epic
-nennt, ist für den Feed das `event_log` in D1 mit seinen 500 Zeilen, und das
-Panel lädt nach einem Reconnect ohnehin die erste Seite neu. Erst Overlays mit
+nennt, ist für den Feed das `event_log` in D1 mit höchstens 10.000 Zeilen je
+Kanal und einer Aufbewahrung von 14 Tagen. Der tägliche Anzahl-Trim und die
+14-Tage-Löschung sind in `src/worker/event-log.ts` festgelegt. Das Panel lädt
+nach einem Reconnect ohnehin den verbindlichen Stand neu. Erst Overlays mit
 Wiederholung nicht angezeigter Ereignisse bekommen eine SQLite-Tabelle im
 Objekt; das kommt additiv mit #10.
 
@@ -509,3 +511,23 @@ und der beim Bootstrap gelieferten Serverzeit im Browser berechnet. Dafür
 werden keine periodischen Echtzeitnachrichten gesendet. Overlay- und
 Vorschaurendering wählen keine zufälligen Textalternativen aus und verändern
 keinen gespeicherten Auswahlstand.
+
+## Nachtrag #572: Begrenzung im Realtime-Client
+
+**Stand:** 26. Oktober 2026
+
+Overlay und Panel behalten höchstens die letzten 500 Nachrichten-IDs im
+Speicher, um doppelte Zustellungen nach einem Reconnect zu ignorieren. Ältere
+IDs werden beim Einfügen neuer IDs aus diesem Fenster entfernt.
+
+Overlays erhalten ausschließlich Live-Ereignisse: `ChannelObject.publish`
+sendet sofort an die offenen Sockets, es gibt keine Warteschlange und keine
+Wiederholung. Ein Alter-Filter über `createdAt` hätte daher nichts zu
+verwerfen; er würde nur bei einer vorgehenden Uhr des Stream-PCs alle Ereignisse
+unterdrücken und ist deshalb bewusst nicht vorhanden. Der Verbindungszustand
+des Overlay-Clients ist intern als `connecting`, `connected`, `reconnecting`
+oder `offline` beobachtbar.
+
+Ein Stream-Offset wird erst anhand der Ergebnisse von Spike #3 festgelegt und
+implementiert. Bis dahin persistiert oder übermittelt der Overlay-Client
+keinen Stream-Offset.

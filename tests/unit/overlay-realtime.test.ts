@@ -245,4 +245,75 @@ describe("overlay realtime client", () => {
     expect(overlayChanges).toMatchObject([{ type: "overlay.changed", payload: { overlayId: "overlay-a", revision: 3 } }]);
     stop();
   });
+
+  it("delivers each event id only once", () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const onMessage = vi.fn();
+    const stop = connectOverlayRealtime("z".repeat(43), undefined, { onMessage });
+    const socket = FakeWebSocket.instances[0];
+    const hello = JSON.stringify({
+      version: 1,
+      id: "hello-1",
+      createdAt: new Date().toISOString(),
+      channelId: "channel-a",
+      type: "system.hello",
+      payload: {},
+    });
+    const change = JSON.stringify({
+      version: 1,
+      id: "change-1",
+      createdAt: new Date().toISOString(),
+      channelId: "channel-a",
+      type: "variables.changed",
+      payload: { set: [{ name: "score", value: 8 }], removed: [] },
+    });
+    socket?.dispatch("message", { data: hello } as MessageEvent<string>);
+    socket?.dispatch("message", { data: change } as MessageEvent<string>);
+    socket?.dispatch("message", { data: change } as MessageEvent<string>);
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("evicts the oldest id after the bounded deduplication window fills", () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const onOverlayChanged = vi.fn();
+    const stop = connectOverlayRealtime("z".repeat(43), undefined, { onOverlayChanged });
+    const socket = FakeWebSocket.instances[0];
+    const now = new Date().toISOString();
+    socket?.dispatch("message", { data: JSON.stringify({
+      version: 1, id: "hello-1", createdAt: now, channelId: "channel-a", type: "system.hello", payload: {},
+    }) } as MessageEvent<string>);
+    const sendChange = (id: string): void => socket?.dispatch("message", { data: JSON.stringify({
+      version: 1,
+      id,
+      createdAt: now,
+      channelId: "channel-a",
+      type: "overlay.changed",
+      payload: { overlayId: "overlay-a", revision: 1 },
+    }) } as MessageEvent<string>);
+
+    for (let index = 0; index < 501; index += 1) sendChange(`message-${String(index)}`);
+    sendChange("message-0");
+
+    expect(onOverlayChanged).toHaveBeenCalledTimes(502);
+    stop();
+  });
+
+  it("reports connection state across initial connect, reconnect, and terminal close", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const states: string[] = [];
+    const stop = connectOverlayRealtime("z".repeat(43), undefined, {
+      onStateChange: (state) => states.push(state),
+    });
+    FakeWebSocket.instances[0]?.dispatch("open", new Event("open"));
+    FakeWebSocket.instances[0]?.dispatch("close", { code: 1006, reason: "network" } as CloseEvent);
+    await vi.advanceTimersByTimeAsync(250);
+    FakeWebSocket.instances[1]?.dispatch("open", new Event("open"));
+    FakeWebSocket.instances[1]?.dispatch("close", { code: 4003, reason: "revoked" } as CloseEvent);
+
+    expect(states).toEqual(["connecting", "connected", "reconnecting", "connected", "offline"]);
+    stop();
+  });
 });

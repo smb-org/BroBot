@@ -33,6 +33,7 @@ export const pointsDashboardTexts = {
       inCirculation: "im Umlauf",
       jackpot: "Jackpot",
       inRounds: "in laufenden Runden",
+      account: "Konto",
       accounts: "Konten",
       monthNet: (net: number, month: string, rank: number | null) => `${net > 0 ? "+" : net < 0 ? "−" : ""}${new Intl.NumberFormat("de-DE").format(Math.abs(net))} im ${month}${rank === null ? "" : ` · Platz ${String(rank)}`}`,
       noMonthGame: (month: string) => `Noch kein Spiel im ${month}`,
@@ -56,6 +57,7 @@ export const pointsDashboardTexts = {
       movement: "Bewegung",
       balanceAfter: "Stand",
       historyEmpty: "Noch kein Verlauf.",
+      historyEntry: "Eintrag",
       historyEntries: "Einträge",
       next: "Weiter",
       previous: "Zurück",
@@ -100,6 +102,7 @@ export const pointsDashboardTexts = {
       inCirculation: "in circulation",
       jackpot: "Jackpot",
       inRounds: "in open rounds",
+      account: "account",
       accounts: "accounts",
       monthNet: (net: number, month: string, rank: number | null) => `${net > 0 ? "+" : net < 0 ? "−" : ""}${new Intl.NumberFormat("en-US").format(Math.abs(net))} in ${month}${rank === null ? "" : ` · place ${String(rank)}`}`,
       noMonthGame: (month: string) => `No game in ${month} yet`,
@@ -123,6 +126,7 @@ export const pointsDashboardTexts = {
       movement: "Movement",
       balanceAfter: "Balance",
       historyEmpty: "No history yet.",
+      historyEntry: "entry",
       historyEntries: "entries",
       next: "Next",
       previous: "Previous",
@@ -3050,9 +3054,11 @@ const moderationFailureTexts: LocaleCatalog<Record<ModerationFailureReason, stri
     conflict: "gleichzeitige Moderationsänderung",
     invalid_request: "ungültige Moderationsanfrage",
     network_error: "Netzwerkfehler bei Twitch",
+    not_timed_out: "Für diesen Nutzer läuft kein Timeout",
     not_moderator: "Bot ist kein Moderator in diesem Kanal",
     protected_target: "geschütztes Ziel",
     rate_limited: "Twitch-Abklingzeit aktiv",
+    scope_missing: "Die erforderliche Twitch-Berechtigung zum Aufheben von Timeouts fehlt.",
     timeout: "Twitch-Anfrage hat zu lange gedauert",
     token_invalid: "Bot-Token ungültig",
     twitch_error: "Twitch hat die Moderationsanfrage abgelehnt",
@@ -3063,16 +3069,18 @@ const moderationFailureTexts: LocaleCatalog<Record<ModerationFailureReason, stri
     conflict: "Concurrent moderation change",
     invalid_request: "Invalid moderation request",
     network_error: "Network error from Twitch",
+    not_timed_out: "This user is not currently timed out",
     not_moderator: "The bot is not a moderator in this channel",
     protected_target: "Protected target",
     rate_limited: "Twitch cooldown is active",
+    scope_missing: "The required Twitch permission to lift timeouts is missing.",
     timeout: "The Twitch request timed out",
     token_invalid: "Bot token is invalid",
     twitch_error: "Twitch rejected the moderation request",
   },
 };
 
-const moderationFailureReasonText = (reason: unknown, language: DashboardLanguage): string | null =>
+export const moderationFailureReasonText = (reason: unknown, language: DashboardLanguage): string | null =>
   typeof reason === "string" && Object.hasOwn(moderationFailureTexts[language], reason)
     ? moderationFailureTexts[language][reason as ModerationFailureReason]
     : null;

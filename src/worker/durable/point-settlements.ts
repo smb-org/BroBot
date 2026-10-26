@@ -1,6 +1,8 @@
 import type { PointSettlement, PointSettlementInput } from "./points";
 import type { InstantPointSettlement } from "./points";
 import { settleSlot } from "../../modules/emote_slots/domain/settlement";
+import { resolveHeist } from "../../modules/heist/domain/settlement";
+import { calculateBossPayouts } from "../../modules/boss_fight/domain/boss";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -118,10 +120,80 @@ const duelSettlement: PointSettlement = ({ round, participants, pots, params }: 
   };
 };
 
+const heistSettlement: PointSettlement = ({ round, participants, pots, params }: PointSettlementInput) => {
+  if (!isRecord(params) || !Number.isSafeInteger(params.baseChance) || !Number.isSafeInteger(params.maxChance)) {
+    throw new Error("invalid_settlement_params");
+  }
+  const escrowId = `__escrow:${round.roundId}`;
+  const totalStake = participants.reduce((total, participant) => total + participant.stake, 0);
+  if (!Number.isSafeInteger(totalStake) || totalStake < 1 || pots[escrowId] !== totalStake) {
+    throw new Error("invalid_settlement_params");
+  }
+  const random = (): number => {
+    const value = new Uint32Array(1);
+    crypto.getRandomValues(value);
+    return (value[0] ?? 0) / 0x1_0000_0000;
+  };
+  const resolution = resolveHeist(
+    round.roundId,
+    participants.map(({ accountId, login, stake }) => ({ accountId, login, stake })),
+    { baseChance: params.baseChance as number, maxChance: params.maxChance as number },
+    random,
+  );
+  return { movements: resolution.movements, result: resolution.result };
+};
+
+const bossFightSettlement: PointSettlement = ({ round, participants, params }) => {
+  if (!isRecord(params) || Object.keys(params).length !== 0) throw new Error("invalid_settlement_params");
+  const data = isRecord(round.data) ? round.data : null;
+  if (data === null || typeof data.defeated !== "boolean" || !Number.isSafeInteger(data.lootPool) ||
+      (data.lootPool as number) < 1 || (data.lootPool as number) > 100_000 || !Number.isSafeInteger(data.damageDealt) ||
+      (data.damageDealt as number) < 0 || !Number.isSafeInteger(data.attackerCount) || (data.attackerCount as number) < 0) {
+    throw new Error("invalid_settlement_params");
+  }
+  const damage = participants.map(({ accountId, login, stake, data: participantData }) => {
+    if (stake !== 0 || !isRecord(participantData) || !Number.isSafeInteger(participantData.damage) ||
+        (participantData.damage as number) < 0) throw new Error("invalid_settlement_params");
+    return { accountId, login, damage: participantData.damage as number };
+  });
+  const calculated = calculateBossPayouts(data.lootPool as number, damage);
+  if (calculated.totalDamage !== data.damageDealt || damage.length !== data.attackerCount) throw new Error("invalid_settlement_params");
+  if (data.defeated && calculated.totalDamage === 0) throw new Error("invalid_settlement_params");
+
+  const ranked = calculated.payouts
+    .filter(({ damage: amount }) => amount > 0)
+    .sort((left, right) => right.damage - left.damage || left.accountId.localeCompare(right.accountId));
+  const topDamageDealers = ranked.slice(0, 3).map(({ accountId, login, damage: amount, amount: payout }) => ({
+    accountId,
+    login,
+    damage: amount,
+    amount: data.defeated ? payout : 0,
+  }));
+  const distributed = data.defeated ? calculated.distributed : 0;
+  const movements = distributed === 0 ? [] : [
+    { accountId: "__house", delta: -distributed },
+    ...calculated.payouts.filter(({ amount }) => amount > 0).map(({ accountId, login, amount }) => ({ accountId, delta: amount, login })),
+  ];
+  return {
+    movements,
+    result: {
+      defeated: data.defeated,
+      lootPool: data.lootPool,
+      distributed,
+      houseRemainder: data.defeated ? (data.lootPool as number) - distributed : data.lootPool,
+      totalDamage: calculated.totalDamage,
+      topDamageDealers,
+      otherCount: Math.max(0, ranked.length - topDamageDealers.length),
+    },
+  };
+};
+
 export const POINT_SETTLEMENTS: ReadonlyMap<string, PointSettlement> = new Map([
   ["test", testSettlement],
   ["blitz", blitzSettlement],
   ["duel", duelSettlement],
+  ["heist", heistSettlement],
+  ["boss_fight", bossFightSettlement],
 ]);
 
 export const INSTANT_SETTLEMENTS: ReadonlyMap<string, InstantPointSettlement> = new Map([

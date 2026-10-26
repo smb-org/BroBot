@@ -116,9 +116,10 @@
   .live-vote-tile__footer .ui-button, .live-votekick-tile .ui-button { min-height: 30px; }
   .live-votekick-tile__votes { margin: var(--s2) 0; }
   .live-votekick-tile__actions { display: flex; justify-content: flex-end; margin-top: auto; }
-  .live-cockpit-next-tile { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto minmax(0, 2fr); gap: var(--s2); }
+  /* The tile height is fixed (188px); of the ~90px left for both lists the timeouts get 3/5, enough for one full row above the scroll fade. */
+  .live-cockpit-next-tile { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 3fr) auto minmax(0, 2fr); gap: var(--s2); }
   .live-cockpit-next-list { display: grid; align-content: start; gap: var(--s2); min-height: 0; overflow: auto; }
-  .live-cockpit-next-list--recent { box-sizing: border-box; min-height: 0; max-height: 224px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-bottom: var(--s4); mask-image: linear-gradient(to bottom, var(--mask-opaque) calc(100% - 20px), transparent 100%); scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .live-cockpit-next-list--recent { box-sizing: border-box; min-height: 0; max-height: 224px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-bottom: var(--s4); mask-image: linear-gradient(to bottom, var(--mask-opaque) calc(100% - 16px), transparent 100%); scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
   .live-cockpit-next-tile > .live-cockpit-next-list:last-child { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
   .live-cockpit-next-list--recent::-webkit-scrollbar { width: 8px; }
   .live-cockpit-next-list--recent::-webkit-scrollbar-thumb { border-radius: 99px; background: var(--line-strong); }

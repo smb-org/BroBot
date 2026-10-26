@@ -1,4 +1,5 @@
 import { duelSettingsForLanguage } from "../../src/modules/duel/contracts";
+import { heistSettingsForLanguage } from "../../src/modules/heist/contracts";
 import { blitzTexts } from "../../src/modules/blitz_round/locale";
 import { readFileSync } from "node:fs";
 
@@ -377,6 +378,7 @@ const realtimeForms = {
 
 const expectedModuleSettings = {
   duel: duelSettingsForLanguage("de"),
+  heist: heistSettingsForLanguage("de"),
   blitz_round: {
     prize: 50, answerTimeSeconds: 60, autoStart: false, autoStartIntervalMinutes: 15, chatTarget: null,
     startText: blitzTexts("de").startTextDefault,
@@ -384,6 +386,15 @@ const expectedModuleSettings = {
     solvedText: blitzTexts("de").solvedTextDefault,
     solvedTextEnabled: true,
     timeoutText: blitzTexts("de").timeoutTextDefault,
+    timeoutTextEnabled: true,
+  },
+  boss_fight: {
+    durationSeconds: 90, attackCooldownSeconds: 10, damageMinimum: 20, damageMaximum: 40, lootPool: 1_000, chatTarget: null,
+    startText: "🐉 Ein Boss erscheint!",
+    startTextEnabled: true,
+    defeatedText: "🏆 Der Boss ist besiegt!",
+    defeatedTextEnabled: true,
+    timeoutText: "Der Boss hat überlebt. Niemand erhält Beute.",
     timeoutTextEnabled: true,
   },
   channel_events: {},
@@ -880,6 +891,7 @@ describe("serialized contract shapes", () => {
         "api_source",
         "belabox",
         "blitz_round",
+        "boss_fight",
         "channel_events",
         "chat_voting",
         "clips",
@@ -887,6 +899,7 @@ describe("serialized contract shapes", () => {
         "duel",
         "emote_slots",
         "faq",
+        "heist",
         "moon",
         "points",
         "raid",

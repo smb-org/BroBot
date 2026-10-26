@@ -67,6 +67,8 @@ export interface PointsWorkerObject {
     status: "joined" | "already_joined" | "round_closed";
     replayed?: boolean;
   }>;
+  gameRoundParticipants(moduleId: string, roundId: string, nameLimit: number): Promise<{ count: number; totalStake: number; logins: string[] }>;
+  scheduleModuleAlarm(moduleId: string, handlerKey: string, alarmKey: string, deadline: number): Promise<void>;
   resolveGameRound(moduleId: string, roundId: string, settlement: { kind: string; params: unknown }): Promise<{
     replayed: boolean;
     result: unknown;
@@ -181,7 +183,7 @@ export const deferPointAlarmWithin = async (state: DurableObjectState): Promise<
   await state.storage.setAlarm(Date.now() + 30 * 24 * 60 * 60_000);
 };
 
-const scheduleAlarmKeyWithin = async (
+export const scheduleAlarmKeyWithin = async (
   state: DurableObjectState,
   alarmKey: string,
 ): Promise<void> => {
