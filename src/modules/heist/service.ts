@@ -1,11 +1,11 @@
-import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext, ModulePointRoundResult, ModuleResult } from "../contract";
+import type { ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { isMessageEnabled } from "../../contracts/message-enabled";
 import { HEIST_COMMAND, HEIST_COOLDOWN_KEY, HEIST_MODULE_ID, type HeistRoundData, type HeistSettings } from "./contracts";
 import { parseHeistCommand } from "./domain/command";
 import { heistRoundIdForMessage } from "./domain/round-id";
 import { HEIST_CONFIRM_HANDLER, heistConfirmAlarmKey, heistConfirmLeadMs } from "./alarm";
 import { heistCatalog } from "./locale";
-import { heistRoundData, record } from "./round-data";
+import { record } from "./round-data";
 
 const emptyResult: ModuleResult = { actions: [], diagnostics: [] };
 
@@ -93,7 +93,8 @@ export const processHeistMessage = async (
     confirmTextEnabled: confirmEnabled,
     resultText: event.settings.resultText,
     resultTextEnabled: resultEnabled,
-    cooldownSeconds: event.settings.cooldownSeconds,
+    // The pause starts with the settlement itself, counted from the real end of the join window.
+    cooldownAfter: { key: HEIST_COOLDOWN_KEY, seconds: event.settings.cooldownSeconds },
     lockKeys: ["heist:active"],
     durationS: event.settings.joinWindowSeconds,
     announceText: startEnabled ? event.settings.startText : "",
@@ -108,7 +109,7 @@ export const processHeistMessage = async (
       userId,
       login,
       parsed.stake,
-      // Zero seconds only checks the pause; it starts when the round settles (see onPointRoundResolved).
+      // Zero seconds only checks the pause; the settlement starts it (see cooldownAfter above).
       { key: HEIST_COOLDOWN_KEY, seconds: 0 },
     );
   } catch (error) {
@@ -119,24 +120,16 @@ export const processHeistMessage = async (
     if (!IGNORED_CODES.has(code)) throw error;
     return emptyResult;
   }
-  // Failing here must surface: a redelivered start message replays the open and schedules again.
-  // The alarm corrects its time to the real middle once the start line has been delivered.
+  // The join line is cosmetic: if its alarm cannot be scheduled this round simply has none. Stakes and the
+  // result are unaffected, so the failure is only logged. The alarm corrects its time to the real middle
+  // once the start line has been delivered.
   if (confirmEnabled) {
-    await context.scheduleAlarm(HEIST_CONFIRM_HANDLER, heistConfirmAlarmKey(roundId),
-      Date.now() + heistConfirmLeadMs(event.settings.joinWindowSeconds));
+    try {
+      await context.scheduleAlarm(HEIST_CONFIRM_HANDLER, heistConfirmAlarmKey(roundId),
+        Date.now() + heistConfirmLeadMs(event.settings.joinWindowSeconds));
+    } catch {
+      return { actions: [], diagnostics: [{ code: "host.module.error", detail: { message: "heist_confirm_not_scheduled" } }] };
+    }
   }
   return emptyResult;
-};
-
-/**
- * Starts the pause between heists once a round has settled, so a delayed start line never eats into it.
- * A late replay of the notification only claims what is left of the pause.
- */
-export const startHeistCooldown = async (context: ModuleAlarmContext, round: ModulePointRoundResult): Promise<void> => {
-  const data = heistRoundData(round.data);
-  if (data?.cooldownSeconds === undefined) return;
-  const resolvedAt = Date.parse(round.resolvedAt);
-  const elapsedSeconds = Number.isFinite(resolvedAt) ? Math.max(0, Math.ceil((Date.now() - resolvedAt) / 1_000)) : 0;
-  const remainingSeconds = data.cooldownSeconds - elapsedSeconds;
-  if (remainingSeconds > 0) await context.points.claimCooldown(HEIST_COOLDOWN_KEY, remainingSeconds);
 };

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
+import type { ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { heistSettingsForLanguage } from "../../src/modules/heist/contracts";
-import { processHeistMessage, startHeistCooldown } from "../../src/modules/heist/service";
+import { processHeistMessage } from "../../src/modules/heist/service";
 
 const now = Date.UTC(2100, 0, 1);
 const settings = heistSettingsForLanguage("en");
@@ -64,40 +64,24 @@ describe("heist join and start errors", () => {
   });
 });
 
-describe("heist pause between rounds", () => {
-  const resolved = (cooldownSeconds: number | undefined, resolvedAgoMs: number) => ({
-    roundId: "heist-fictional",
-    data: {
-      language: "en", joinWindowSeconds: 60, startMessageId: "m", startText: "s", resultText: "r",
-      ...(cooldownSeconds === undefined ? {} : { cooldownSeconds }),
-    },
-    result: {},
-    resolvedAt: new Date(now - resolvedAgoMs).toISOString(),
-  });
-  const alarmContext = () => {
-    const claimCooldown = vi.fn(() => Promise.resolve(true));
-    return { claimCooldown, context: { points: { claimCooldown } } as unknown as ModuleAlarmContext };
-  };
+describe("heist round pause and join line scheduling", () => {
+  it("hands the pause to the settlement and only checks it when opening", async () => {
+    const openWithStake = vi.fn<ModuleExecutionContext["points"]["rounds"]["openWithStake"]>(() => Promise.resolve({ roundId: "heist-fictional", replayed: false }));
 
-  it("starts counting at settlement, not at the start message", async () => {
-    const { claimCooldown, context } = alarmContext();
+    await processHeistMessage(event("fictional-message-7", "!heist 20"), contextWith({ active: () => Promise.resolve(null), openWithStake }));
 
-    await startHeistCooldown(context, resolved(30, 0));
-
-    expect(claimCooldown).toHaveBeenCalledWith("between-rounds", 30);
+    expect(openWithStake.mock.calls[0]?.[1]).toMatchObject({ cooldownAfter: { key: "between-rounds", seconds: 30 } });
+    expect(openWithStake.mock.calls[0]?.[6]).toEqual({ key: "between-rounds", seconds: 0 });
   });
 
-  it("only claims what is left when the notification is replayed late", async () => {
-    const late = alarmContext();
-    const over = alarmContext();
-    const none = alarmContext();
+  it("opens the round without a join line when its alarm cannot be scheduled, and logs it", async () => {
+    const openWithStake = vi.fn<ModuleExecutionContext["points"]["rounds"]["openWithStake"]>(() => Promise.resolve({ roundId: "heist-fictional", replayed: false }));
+    const context = { ...contextWith({ active: () => Promise.resolve(null), openWithStake }), scheduleAlarm: () => Promise.reject(new Error("alarm_unavailable")) } as unknown as ModuleExecutionContext;
 
-    await startHeistCooldown(late.context, resolved(30, 12_000));
-    await startHeistCooldown(over.context, resolved(30, 45_000));
-    await startHeistCooldown(none.context, resolved(undefined, 0));
+    const result = await processHeistMessage(event("fictional-message-8", "!heist 20"), context);
 
-    expect(late.claimCooldown).toHaveBeenCalledWith("between-rounds", 18);
-    expect(over.claimCooldown).not.toHaveBeenCalled();
-    expect(none.claimCooldown).not.toHaveBeenCalled();
+    expect(openWithStake).toHaveBeenCalledOnce();
+    expect(result.actions).toEqual([]);
+    expect(result.diagnostics).toEqual([{ code: "host.module.error", detail: { message: "heist_confirm_not_scheduled" } }]);
   });
 });

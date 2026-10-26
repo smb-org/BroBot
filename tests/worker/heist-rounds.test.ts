@@ -5,6 +5,7 @@ import { heistSettingsForLanguage, type HeistSettings } from "../../src/modules/
 import { processHeistMessage } from "../../src/modules/heist/service";
 import { modulePoints } from "../../src/worker/module-points";
 import {
+  capturePointError,
   clearPointObjectAlarms,
   deferPointAlarmWithin,
   forcePointAlarm,
@@ -249,9 +250,13 @@ describe("heist batched join line alarm", () => {
     expect((await object.gameRoundParticipants(moduleId, "heist-later", 5)).count).toBe(2);
   });
 
-  it("starts the pause when the round settles, so a late start line does not eat into it", async () => {
+  it("keeps the pause through a lost post-settlement notification, counted from settlement rather than the start message", async () => {
     const { object, context, settings, roundId } = await startRound(`heist-pause-${crypto.randomUUID()}`, 20_000);
     vi.setSystemTime(Date.now() + 60_000);
+    // The notification after settlement is lost (as in a restart right after the commit); the pause must not depend on it.
+    await runPointObject(object, (target) => {
+      vi.spyOn(target as unknown as { notifyPointRoundResolved: () => Promise<void> }, "notifyPointRoundResolved").mockResolvedValue(undefined);
+    });
     await object.resolveGameRound(moduleId, roundId, { kind: "heist", params: { baseChance: 0, maxChance: 0 } });
 
     // Twenty seconds after settlement the 30 s pause still runs; counted from the start message it would be over.
@@ -264,6 +269,20 @@ describe("heist batched join line alarm", () => {
     const allowed = await processHeistMessage(eventFor(settings, "viewer_anna", "frostfern", "!heist 10", "fictional-next-2"), context);
     expect(allowed.actions).toEqual([]);
     expect(await object.activeGameRound(moduleId)).toMatchObject({ state: "announcing" });
+  });
+
+  it("rejects a round that asks for a malformed pause", async () => {
+    const channelId = `heist-bad-pause-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = heistObject(channelId);
+    await createViewer(object, "viewer_anna", "frostfern");
+
+    const error = await capturePointError(object, (target) => (target as HeistRoundObject).openGameRoundWithStake(moduleId, "heist-bad-pause", {
+      durationS: 60, announceText: "Heist open.", cooldownAfter: { key: "between-rounds", seconds: -1 },
+      settlement: { kind: "heist", params: { baseChance: 50, maxChance: 65 } },
+    }, "msg:fictional-bad-pause", "viewer_anna", "frostfern", 10));
+
+    expect(error).toBe("invalid_round_data");
   });
 
   it("answers a join without enough points with the intended reply", async () => {

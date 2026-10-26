@@ -168,7 +168,7 @@ describe("heist chat output", () => {
       startMessageId: "fictional-start-message",
       confirmText: settings.confirmText,
       confirmTextEnabled: true,
-      cooldownSeconds: 30,
+      cooldownAfter: { key: "between-rounds", seconds: 30 },
     });
   });
 });

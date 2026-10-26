@@ -12,8 +12,7 @@ export const heistRoundData = (value: unknown): HeistRoundData | null => {
     (data.startTextEnabled === undefined || typeof data.startTextEnabled === "boolean") &&
     (data.resultTextEnabled === undefined || typeof data.resultTextEnabled === "boolean") &&
     (data.confirmText === undefined || typeof data.confirmText === "string") &&
-    (data.confirmTextEnabled === undefined || typeof data.confirmTextEnabled === "boolean") &&
-    (data.cooldownSeconds === undefined || (Number.isSafeInteger(data.cooldownSeconds) && (data.cooldownSeconds as number) >= 0))
+    (data.confirmTextEnabled === undefined || typeof data.confirmTextEnabled === "boolean")
     ? data as unknown as HeistRoundData
     : null;
 };

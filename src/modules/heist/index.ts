@@ -5,7 +5,7 @@ import { HEIST_COMMAND, HEIST_MODULE_ID, heistSettingsForLanguage, heistSettings
 import { heistConfirmAlarm } from "./alarm";
 import { formatHeistNames, heistCatalog } from "./locale";
 import { heistRoundData, oneLine, record } from "./round-data";
-import { processHeistMessage, startHeistCooldown } from "./service";
+import { processHeistMessage } from "./service";
 
 const formatAnnouncement = async (context: ModuleAlarmContext, round: ModulePointRoundAnnouncement) => {
   const data = heistRoundData(round.data);
@@ -77,7 +77,6 @@ export const heistModule: BotModule<typeof heistSettingsSchema> = {
   pointRoundCancellationNotice: false,
   retryPointRoundRateLimitedResults: true,
   chatCommandNames: () => [HEIST_COMMAND],
-  onPointRoundResolved: startHeistCooldown,
   formatPointRoundAnnouncement: formatAnnouncement,
   formatPointRoundResult: formatResult,
   handleEvent: processHeistMessage,

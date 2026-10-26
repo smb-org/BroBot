@@ -98,6 +98,8 @@ interface PointRoundOpenData {
   silentAnnouncement?: boolean;
   settlement?: { kind: string; params: unknown };
   lockKeys?: string[];
+  /** A pause that starts in the same transaction as the settlement, under the module's cooldown `key`. */
+  cooldownAfter?: { key: string; seconds: number };
   [key: string]: unknown;
 }
 
@@ -1140,6 +1142,12 @@ const parseRoundOpenData = (value: unknown): {
       (rawSettlement as { kind: string }).kind.length === 0) {
     throw new Error("settlement_unknown");
   }
+  const after: unknown = data.cooldownAfter;
+  if (after !== undefined) {
+    const { key, seconds } = (typeof after === "object" && after !== null ? after : {}) as { key?: unknown; seconds?: unknown };
+    if (typeof key !== "string" || key.length === 0 || !Number.isSafeInteger(seconds) || (seconds as number) < 0 ||
+        (seconds as number) > 86_400) throw new Error("invalid_round_data");
+  }
   let lockKeys: string[] | undefined;
   if (data.lockKeys !== undefined) {
     if (!Array.isArray(data.lockKeys) || data.lockKeys.length === 0 || data.lockKeys.length > 4 ||
@@ -1735,6 +1743,16 @@ export const resolvePointRoundSync = (
     moduleId,
   );
   sql.exec("DELETE FROM game_round_locks WHERE module_id = ? AND round_id = ?", moduleId, roundId);
+  const cooldownAfter = (roundData as PointRoundOpenData).cooldownAfter;
+  if (cooldownAfter !== undefined) {
+    // Same transaction as the settlement, so no restart can leave a settled round without its pause.
+    sql.exec(
+      `INSERT INTO game_cooldowns (key, until_at) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET until_at = excluded.until_at`,
+      `${moduleId}:${cooldownAfter.key}`,
+      new Date(Date.parse(now) + cooldownAfter.seconds * 1_000).toISOString(),
+    );
+  }
   return applied;
 };
 

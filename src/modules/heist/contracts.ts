@@ -87,6 +87,4 @@ export interface HeistRoundData {
   confirmTextEnabled?: boolean;
   resultText: string;
   resultTextEnabled?: boolean;
-  /** Pause after settlement; absent in rounds opened before the pause moved to settlement. */
-  cooldownSeconds?: number;
 }

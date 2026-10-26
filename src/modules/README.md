@@ -1292,12 +1292,17 @@ Gewinner-/Verliererzusammenfassung. Die Beitrittsliste sendet ein Modulalarm
 Frist der Runde; sie entfällt, solange nur die startende Person dabei ist. Der
 Sendeclaim `round:<Runden-ID>:confirm` verhindert Doppelsendungen bei Retry und
 Neustart. Teilnehmerzahl, Namen und Gesamteinsatz liest der Alarm über
-`points.rounds.participants(roundId, nameLimit)`.
+`points.rounds.participants(roundId, nameLimit)`. Lässt sich der Alarm nicht
+planen, bleibt diese Runde ohne Beitrittsliste: Einsätze und Ergebnis sind
+unberührt, der Fehler landet nur als `host.module.error` im Ereignisprotokoll;
+es gibt bewusst keine Nachplanung.
 Einsätze werden unter `msg:<Nachrichten-ID>` gebucht, sodass eine erneut
 zugestellte Chatnachricht keine spätere Runde ein zweites Mal belastet. Die
-Abklingzeit prüft `!heist` beim Start nur (0 s) und beginnt erst beim
-Abschluss der Runde (`onPointRoundResolved`, gerechnet ab `resolvedAt`);
-eine verspätet zugestellte Startmeldung verkürzt sie also nicht. Jede
+Abklingzeit prüft `!heist` beim Start nur (0 s). Begonnen wird sie vom
+gemeinsamen Rundenkern in derselben Transaktion wie die Abrechnung
+(Rundendaten `cooldownAfter: { key, seconds }`, gerechnet ab dem Abschluss);
+ein Neustart zwischen Abrechnung und Benachrichtigung kann sie also nicht
+verlieren, und eine verspätet zugestellte Startmeldung verkürzt sie nicht. Jede
 Nachricht deklariert genau die Variablen, mit denen sie gerendert wird
 (Start: `heist.seconds`; Beitrittsliste: `heist.count`, `heist.names`,
 `heist.pot`; Ergebnis: `heist.winners`, `heist.losers`, `heist.chance`).
