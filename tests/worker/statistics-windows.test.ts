@@ -13,7 +13,10 @@ const worker = env as unknown as Env;
 const WINDOW_MS = 300_000;
 // The faked clock sits in the platform's near future, so an alarm armed for "the next boundary" or for the
 // current window is never already due and cannot fire between two steps of a test; only explicit runs flush.
-const TEST_NOW = (Math.floor(Date.now() / WINDOW_MS) + 1) * WINDOW_MS + 60_000;
+// It sits exactly on a window boundary: runModuleAlarm passes the clock as the alarm deadline, and the handler
+// only completes windows for a boundary-aligned deadline. Off a boundary an explicit run flushes nothing, and
+// the test would depend on the platform alarm for the already-past window winning the race against it.
+const TEST_NOW = (Math.floor(Date.now() / WINDOW_MS) + 1) * WINDOW_MS;
 const currentWindowStart = (): number => Math.floor(Date.now() / WINDOW_MS) * WINDOW_MS;
 const iso = (time: number): string => new Date(time).toISOString();
 const stubs = new Set<DurableObjectStub>();
