@@ -776,6 +776,13 @@ export interface ModuleAlarmContext {
   ballots: ModuleBallotAccess;
   /** Point ledger access bound to this alarm's channel and module. */
   points: ModulePointsAccess;
+  /** Adds the currently pending account welcome to a threaded game reply. */
+  decoratePointWelcome?: (
+    action: Extract<ModuleAction, { kind: "chat" }>,
+    accountId?: string,
+    claimId?: string,
+    attributions?: readonly string[],
+  ) => Extract<ModuleAction, { kind: "chat" }>;
   /** Channel locale and unbiased randomness for preparing the same module actions as event handlers. */
   channelLanguage: () => Promise<ModuleLanguage>;
   secureRandomInteger: (maximumExclusive: number) => number;
@@ -1188,6 +1195,10 @@ export interface ModulePointsAccess {
     welcomePending: boolean;
     startBonus: number | null;
   }>;
+  /** Stores the note payload while the account's pending bit remains the eligibility source. */
+  storePendingWelcome?: (welcome: { accountId: string; messageId: string; text: string }) => Promise<void>;
+  claimWelcome?: (accountId: string, claimId: string) => Promise<boolean>;
+  releaseWelcome?: (accountId: string, claimId: string) => Promise<void>;
   ackWelcome: (accountId: string) => Promise<void>;
   creditActivity: (
     accountId: string,

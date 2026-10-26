@@ -1,5 +1,5 @@
 import type { ModulePointsAccess, PointsKind, PointsMovement } from "../modules/contract";
-import { POINT_WELCOME_ROUND_DATA_KEY, type PointWelcomeNote } from "./point-welcome";
+import { POINT_WELCOME_ACCOUNT_ID_KEY, type PointWelcomeNote } from "./point-welcome";
 
 const unavailable = <T>(): Promise<T> => Promise.reject(new Error("Point storage is unavailable."));
 
@@ -52,7 +52,7 @@ export const modulePoints = (
   const withPointWelcome = (data: unknown, accountId: string): unknown => {
     const note = pointWelcomeFor(accountId);
     if (note === undefined || typeof data !== "object" || data === null || Array.isArray(data)) return data;
-    return { ...data, [POINT_WELCOME_ROUND_DATA_KEY]: note };
+    return { ...data, [POINT_WELCOME_ACCOUNT_ID_KEY]: accountId };
   };
   return {
     apply: (operationId, kind: PointsKind, movements: PointsMovement[], result, payloadIdentity) =>
@@ -60,6 +60,19 @@ export const modulePoints = (
     settle: (operationId, kind, actor, stake, params, options) =>
       object.settlePointOperation(moduleId, operationId, kind, actor, stake, params, options),
     touchAccount: (accountId, login, startBonus) => object.touchPointAccount(moduleId, accountId, login, startBonus),
+    storePendingWelcome: (welcome) => typeof object.storePendingPointWelcome === "function"
+      ? object.storePendingPointWelcome(moduleId, {
+        accountId: welcome.accountId,
+        messageId: welcome.messageId,
+        text: welcome.text,
+      })
+      : Promise.resolve(),
+    claimWelcome: (accountId, claimId) => typeof object.claimPointWelcome === "function"
+      ? object.claimPointWelcome(moduleId, accountId, claimId)
+      : Promise.resolve(true),
+    releaseWelcome: (accountId, claimId) => typeof object.releasePointWelcome === "function"
+      ? object.releasePointWelcome(moduleId, accountId, claimId)
+      : Promise.resolve(),
     ackWelcome: (accountId) => object.acknowledgePointWelcome(moduleId, accountId),
     creditActivity: (accountId, login, messageAt, live, rules) =>
       object.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
@@ -89,8 +102,7 @@ export const modulePoints = (
         object.attackGameRound(moduleId, roundId, operationId, accountId, login, damage, messageAt),
       resolve: (roundId, settlement) => object.resolveGameRound(moduleId, roundId, settlement),
       accept: (roundId, operationId, accountId, login, replyToMessageId) =>
-        object.acceptGameRound(moduleId, roundId, operationId, accountId, login, replyToMessageId,
-          pointWelcomeFor(accountId, replyToMessageId)),
+        object.acceptGameRound(moduleId, roundId, operationId, accountId, login, replyToMessageId),
       cancel: (roundId) => object.cancelGameRound(moduleId, roundId),
       cancelOpenRounds: (revision) => object.cancelOpenGameRounds(moduleId, revision),
       setGate: (closed, revision, lastDisabledRevision) => object.setGameModuleGate(moduleId, closed, revision, lastDisabledRevision),

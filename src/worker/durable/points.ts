@@ -7,7 +7,7 @@ import type {
   PointsMovement,
   PointsKind,
 } from "../../modules/contract";
-import { POINT_WELCOME_ROUND_DATA_KEY } from "../point-welcome";
+import { POINT_WELCOME_RESULT_ACCOUNT_ID_KEY } from "../point-welcome";
 import { bossHealth } from "../../modules/boss_fight/domain/boss";
 
 export const POINTS_ROUND_ALARM_HANDLER = "host:points_round";
@@ -227,6 +227,12 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
     balance INTEGER NOT NULL CHECK (account_id = '__house' OR balance >= 0),
     welcome_pending INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
+  )`);
+  sql.exec(`CREATE TABLE IF NOT EXISTS point_welcome_notes (
+    account_id TEXT PRIMARY KEY REFERENCES point_accounts(account_id) ON DELETE CASCADE,
+    message_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    claim_id TEXT
   )`);
   sql.exec(`CREATE TABLE IF NOT EXISTS point_ledger (
     operation_id TEXT NOT NULL REFERENCES point_operations(operation_id),
@@ -962,8 +968,85 @@ export const pointAccount = (
   return row === undefined ? null : { accountId: row.account_id, login: row.login ?? row.account_id, balance: row.balance };
 };
 
+export interface StoredPointWelcome {
+  accountId: string;
+  messageId: string;
+  text: string;
+}
+
+export const storePendingPointWelcomeSync = (sql: PointsSql, welcome: StoredPointWelcome): void => {
+  assertPointAccountId(welcome.accountId);
+  if (welcome.messageId.length === 0 || welcome.messageId.length > 256 || welcome.text.length === 0) return;
+  const account = sql.exec<{ welcome_pending: number }>(
+    "SELECT welcome_pending FROM point_accounts WHERE account_id = ? AND kind = 'viewer'",
+    welcome.accountId,
+  ).toArray()[0];
+  if (account?.welcome_pending !== 1) return;
+  sql.exec(
+    `INSERT INTO point_welcome_notes (account_id, message_id, text) VALUES (?, ?, ?)
+     ON CONFLICT(account_id) DO UPDATE SET message_id = excluded.message_id, text = excluded.text`,
+    welcome.accountId,
+    welcome.messageId,
+    welcome.text,
+  );
+};
+
+export const pendingPointWelcomeSync = (sql: PointsSql, accountId: string): StoredPointWelcome | null => {
+  assertPointAccountId(accountId);
+  const row = sql.exec<{ account_id: string; message_id: string; text: string }>(
+    `SELECT note.account_id, note.message_id, note.text
+       FROM point_accounts AS account
+       JOIN point_welcome_notes AS note ON note.account_id = account.account_id
+      WHERE account.account_id = ? AND account.kind = 'viewer' AND account.welcome_pending = 1`,
+    accountId,
+  ).toArray()[0];
+  return row === undefined ? null : { accountId: row.account_id, messageId: row.message_id, text: row.text };
+};
+
+export const claimPendingPointWelcomeSync = (
+  sql: PointsSql,
+  accountId: string,
+  claimId: string,
+): StoredPointWelcome | null => {
+  assertPointAccountId(accountId);
+  if (claimId.length === 0 || claimId.length > 512) return null;
+  sql.exec(
+    `UPDATE point_welcome_notes SET claim_id = ?
+      WHERE account_id = ? AND (claim_id IS NULL OR claim_id = ?)
+        AND EXISTS (
+          SELECT 1 FROM point_accounts AS account
+           WHERE account.account_id = point_welcome_notes.account_id AND account.welcome_pending = 1
+        )`,
+    claimId,
+    accountId,
+    claimId,
+  );
+  const row = sql.exec<{ account_id: string; message_id: string; text: string }>(
+    `SELECT account_id, message_id, text FROM point_welcome_notes
+      WHERE account_id = ? AND claim_id = ?`,
+    accountId,
+    claimId,
+  ).toArray()[0];
+  return row === undefined ? null : { accountId: row.account_id, messageId: row.message_id, text: row.text };
+};
+
+export const releasePointWelcomeClaimSync = (sql: PointsSql, accountId: string, claimId: string): void => {
+  assertPointAccountId(accountId);
+  sql.exec(
+    `UPDATE point_welcome_notes SET claim_id = NULL
+      WHERE account_id = ? AND claim_id = ?
+        AND EXISTS (
+          SELECT 1 FROM point_accounts AS account
+           WHERE account.account_id = point_welcome_notes.account_id AND account.welcome_pending = 1
+        )`,
+    accountId,
+    claimId,
+  );
+};
+
 export const acknowledgeWelcomeSync = (sql: PointsSql, accountId: string, now: string): void => {
-  sql.exec("UPDATE point_accounts SET welcome_pending = 0, updated_at = ? WHERE account_id = ?", now, accountId);
+  sql.exec("UPDATE point_accounts SET welcome_pending = 0, updated_at = ? WHERE account_id = ? AND welcome_pending = 1", now, accountId);
+  sql.exec("DELETE FROM point_welcome_notes WHERE account_id = ?", accountId);
 };
 
 export const pointAuditWrittenSync = (sql: PointsSql, moduleId: string, operationId: string): void => {
@@ -1516,7 +1599,6 @@ export const acceptPointRoundSync = (
   now: string,
   settlements: ReadonlyMap<string, PointSettlement>,
   acceptMessageId?: string,
-  pointWelcome?: { accountId: string; messageId: string; text: string },
 ): PointApplyInternalResult => {
   assertPointRoundId(roundId);
   assertPointAccountId(accountId);
@@ -1541,9 +1623,7 @@ export const acceptPointRoundSync = (
   if (acceptMessageId !== undefined) {
     if (acceptMessageId.length === 0 || acceptMessageId.length > 256) throw new Error("invalid_operation_id");
     data.acceptMessageId = acceptMessageId;
-    if (pointWelcome?.accountId === accountId && pointWelcome.messageId === acceptMessageId) {
-      data[POINT_WELCOME_ROUND_DATA_KEY] = pointWelcome;
-    }
+    data[POINT_WELCOME_RESULT_ACCOUNT_ID_KEY] = accountId;
     sql.exec("UPDATE game_rounds SET data_json = ? WHERE round_id = ? AND state = 'open'", JSON.stringify(data), roundId);
   }
   const participant = sql.exec<{ account_id: string }>(

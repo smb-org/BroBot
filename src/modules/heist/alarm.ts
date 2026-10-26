@@ -1,7 +1,7 @@
-import type { ModuleAlarmContext, ModuleAlarmDefinition } from "../contract";
+import type { ModuleAction, ModuleAlarmContext, ModuleAlarmDefinition, ModuleChatDelivery } from "../contract";
 import { isMessageEnabled } from "../../contracts/message-enabled";
 import { formatHeistNames } from "./locale";
-import { heistRoundData, oneLine } from "./round-data";
+import { heistRoundData, oneLine, record } from "./round-data";
 
 export const HEIST_CONFIRM_HANDLER = "confirm";
 const ALARM_KEY_PREFIX = "confirm:";
@@ -42,8 +42,22 @@ const handleConfirm = async (context: ModuleAlarmContext, alarmKey: string): Pro
     "heist.names": formatHeistNames(joined.logins, data.language, joined.count),
     "heist.pot": joined.totalStake,
   });
+  const replyToMessageId = data.startMessageId;
+  const baseAction: Extract<ModuleAction, { kind: "chat" }> = {
+    kind: "chat",
+    text: oneLine(rendered.text),
+    replyToMessageId,
+    automated: false,
+  };
+  const welcomeAccountId = record(round.data)?.welcomeAccountId;
+  const action = context.decoratePointWelcome?.(
+    baseAction,
+    typeof welcomeAccountId === "string" ? welcomeAccountId : undefined,
+    `round:${roundId}:confirm`,
+    rendered.attributions,
+  ) ?? baseAction;
   const result = await context.sendChat(
-    oneLine(rendered.text),
+    action.text,
     `round:${roundId}:confirm`,
     rendered.attributions,
     async () => {
@@ -51,8 +65,19 @@ const handleConfirm = async (context: ModuleAlarmContext, alarmKey: string): Pro
       return current?.roundId === roundId && current.state === "open" && Date.now() < deadlineAt;
     },
     undefined,
-    { replyToMessageId: data.startMessageId, automated: false },
+    {
+      ...(action.replyToMessageId === undefined ? {} : { replyToMessageId: action.replyToMessageId }),
+      automated: false,
+    },
   );
+  const delivery: ModuleChatDelivery = result.sent || result.delivery === "delivered" ? "sent"
+    : result.delivery === "ambiguous" ? "ambiguous"
+      : result.delivery === "not_attempted" ? "not_attempted" : "rejected";
+  try {
+    await action.onDelivery?.(delivery);
+  } catch (error) {
+    console.error("Heist confirmation welcome acknowledgement failed after a confirmed send.", error);
+  }
   // A retryable failure (for example rate limiting) throws so the host retries with its backoff.
   if (result.retryable) throw new Error("heist_confirm_retry");
 };

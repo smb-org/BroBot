@@ -375,7 +375,23 @@ const runActions = async (
     const isModerationFollowUp = moderationFollowUps.has(action);
     const commandResponseMessageId = commandResponseActions.has(action) ? handledMessageId : undefined;
     // Moderation follow-ups never carry or acknowledge the welcome, threaded or not.
-    if (!isModerationFollowUp) action = appendPointWelcome(action, module, pendingWelcome, attributions, commandResponseMessageId);
+    if (!isModerationFollowUp) {
+      const claimId = `dispatch:${triggerId ?? handledMessageId ?? "event"}:${module.id}:${String(index)}`;
+      const candidate = pendingWelcome === undefined ? undefined : {
+        ...pendingWelcome,
+        deliveryClaimId: claimId,
+      };
+      const decorated = appendPointWelcome(action, module, candidate, attributions, commandResponseMessageId);
+      if (decorated !== action && pendingWelcome?.access.claimWelcome !== undefined) {
+        let claimed = false;
+        try {
+          claimed = await pendingWelcome.access.claimWelcome(pendingWelcome.accountId, claimId);
+        } catch {
+          // If the account claim is unavailable, leave the welcome pending for a later reply.
+        }
+        if (claimed) action = decorated;
+      } else action = decorated;
+    }
     const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
       try {
@@ -1109,6 +1125,7 @@ export const dispatchEventSubNotification = async (
             access,
             used: false,
           };
+          await access.storePendingWelcome?.(pendingWelcome);
         }
       }
     } catch {

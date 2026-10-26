@@ -1,7 +1,8 @@
 import type { BotModule, ModuleAction, ModulePointsAccess } from "../modules/contract";
 import { reserveChatTextBeforeSuffix } from "./chat";
 
-export const POINT_WELCOME_ROUND_DATA_KEY = "__pointWelcome";
+export const POINT_WELCOME_ACCOUNT_ID_KEY = "welcomeAccountId";
+export const POINT_WELCOME_RESULT_ACCOUNT_ID_KEY = "welcomeResultAccountId";
 
 export interface PointWelcomeNote {
   accountId: string;
@@ -10,7 +11,8 @@ export interface PointWelcomeNote {
 }
 
 export interface PendingPointWelcome extends PointWelcomeNote {
-  access: Pick<ModulePointsAccess, "ackWelcome">;
+  access: Pick<ModulePointsAccess, "ackWelcome" | "claimWelcome" | "releaseWelcome">;
+  deliveryClaimId?: string;
   used: boolean;
 }
 
@@ -37,7 +39,12 @@ export const appendPointWelcome = (
     text,
     onDelivery: async (delivery) => {
       if (delivery === "sent") await pending.access.ackWelcome(pending.accountId);
-      else pending.used = false;
+      else if (delivery !== "ambiguous") {
+        if (pending.deliveryClaimId !== undefined) {
+          await pending.access.releaseWelcome?.(pending.accountId, pending.deliveryClaimId);
+        }
+        pending.used = false;
+      }
       await originalDelivery?.(delivery);
     },
   };
