@@ -45,6 +45,7 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/ads/panel/locale.ts": "Bilingual DE/EN ads panel text catalogue; only its `de` half is German.",
   "src/modules/ads/action-locale.ts": "Bilingual DE/EN ads immediate-action metadata; only its `de` half is German.",
   "src/modules/ads/panel/action-content-locale.ts": "Bilingual DE/EN ads action form text; only its `de` half is German.",
+  "src/modules/votekick/panel/immediate-action-locale.ts": "Bilingual DE/EN Votekick immediate-action text; only its `de` half is German.",
   "src/modules/ads/overlay/countdown-locale.ts": "Bilingual DE/EN countdown text catalogue; only its `de` half is German.",
   "src/modules/raid/panel/locale.ts": "Bilingual DE/EN raid panel text catalogue; only its `de` half is German.",
   "src/modules/raid/action-locale.ts": "Bilingual DE/EN raid immediate-action metadata; only its `de` half is German.",

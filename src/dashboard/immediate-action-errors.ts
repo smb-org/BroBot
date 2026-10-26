@@ -1,6 +1,6 @@
 import { COMMERCIAL_FAILURE_REASONS } from "../contracts/values";
 import { PanelApiError } from "../contracts/panel-error";
-import { apiErrorText, clipFailureReasonText, commercialFailureReasonText, dashboardTexts, shoutoutFailureReasonText, type DashboardLanguage } from "./locale";
+import { apiErrorText, clipFailureReasonText, commercialFailureReasonText, dashboardTexts, moderationFailureReasonText, shoutoutFailureReasonText, type DashboardLanguage } from "./locale";
 
 export interface ImmediateActionErrorFeedback {
   message: string;
@@ -49,6 +49,11 @@ export const immediateActionErrorFeedback = (
 
   if (moduleId === "raid" && error.code === "shoutout_send_failed") {
     const catalogReason = shoutoutFailureReasonText(reason, language);
+    if (catalogReason !== null) return { message: catalogReason, until: null };
+  }
+
+  if (moduleId === "votekick" && error.code === "votekick_timeout_lift_failed") {
+    const catalogReason = moderationFailureReasonText(reason, language);
     if (catalogReason !== null) return { message: catalogReason, until: null };
   }
 
