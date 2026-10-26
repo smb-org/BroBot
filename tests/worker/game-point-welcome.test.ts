@@ -76,6 +76,67 @@ const chatFetch = (messages: string[]): typeof fetch => vi.fn<typeof fetch>((inp
   return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
 });
 
+const prepareRealChat = (messages: string[]): typeof fetch => {
+  mocks.getBotIdentity.mockReset().mockResolvedValue({
+    id: 1,
+    userId: "fictional_brobot",
+    login: "brobot",
+    scopesJson: "[]",
+    accessTokenCiphertext: "unused",
+    refreshTokenCiphertext: "unused",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  mocks.getAppAccessToken.mockReset().mockResolvedValue("fictional-app-token");
+  mocks.getCachedBotUserId.mockReset().mockResolvedValue(null);
+  const fetcher = chatFetch(messages);
+  vi.stubGlobal("fetch", fetcher);
+  return fetcher;
+};
+
+const runHeistConfirmation = async (
+  object: PointsWorkerObject,
+  roundId: string,
+  skipDeliveryCallback = false,
+): Promise<void> => runPointObject(object, async (target, state) => {
+  state.storage.sql.exec("UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?", Date.now() + 20_000, roundId);
+  const runtime = target as unknown as {
+    moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext;
+  };
+  const context = runtime.moduleAlarmContext("heist", heistConfirmAlarm, {});
+  if (skipDeliveryCallback && context.decoratePointWelcome !== undefined) {
+    const decorate = context.decoratePointWelcome;
+    let skip = true;
+    context.decoratePointWelcome = (...args) => {
+      const action = decorate(...args);
+      if (!skip) return action;
+      skip = false;
+      const withoutDelivery = { ...action };
+      Reflect.deleteProperty(withoutDelivery, "onDelivery");
+      return withoutDelivery;
+    };
+  }
+  try {
+    await heistConfirmAlarm.handle(context, heistConfirmAlarmKey(roundId), Date.now());
+  } catch (error) {
+    // A real send reports retryable even when delivered, so the host retries; the test plays that retry itself.
+    if (!(error instanceof Error) || error.message !== "heist_confirm_retry") throw error;
+  }
+});
+
+const spyOnWelcomeAcknowledgement = async (
+  object: PointsWorkerObject,
+): Promise<MockInstance<PointsWorkerObject["acknowledgePointWelcome"]>> => {
+  let acknowledge: MockInstance<PointsWorkerObject["acknowledgePointWelcome"]> | undefined;
+  await runPointObject(object, (target) => {
+    const prototype = Object.getPrototypeOf(target) as typeof target;
+    acknowledge = vi.spyOn(prototype, "acknowledgePointWelcome");
+  });
+  if (acknowledge === undefined) throw new Error("acknowledge_spy_missing");
+  return acknowledge;
+};
+
 const dispatchGameMessage = async (
   channelId: string,
   moduleId: "duel" | "heist",
@@ -121,12 +182,18 @@ const prepareDelivery = async (
   sendChat: ReturnType<typeof vi.fn<ModuleAlarmContext["sendChat"]>>;
   acknowledge: MockInstance<PointsWorkerObject["acknowledgePointWelcome"]>;
 }> => {
-  const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({
-    sent: outcome === "delivered",
-    retryable: false,
-    reason: outcome === "delivered" ? null : "transport_failed",
-    delivery: outcome,
-  }));
+  const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>((...args) => {
+    const pointWelcome = args[5]?.pointWelcome;
+    return Promise.resolve({
+      sent: outcome === "delivered",
+      retryable: false,
+      reason: outcome === "delivered" ? null : "transport_failed",
+      delivery: outcome,
+      ...(outcome === "delivered" && pointWelcome !== undefined && args[0].includes(pointWelcome.text)
+        ? { postedWelcomeClaimId: pointWelcome.claimId }
+        : {}),
+    });
+  });
   let acknowledge: MockInstance<PointsWorkerObject["acknowledgePointWelcome"]> | undefined;
   await runPointObject(object, (target) => {
     const runtime = target as unknown as PointsWorkerObject & {
@@ -160,6 +227,7 @@ afterEach(async () => {
   try {
     await clearPointObjectAlarms();
   } finally {
+    vi.unstubAllGlobals();
     vi.useRealTimers();
     vi.restoreAllMocks();
   }
@@ -399,6 +467,73 @@ describe("delayed game welcome replies", () => {
     expect(sendChat).toHaveBeenCalledOnce();
     expect(sendChat.mock.calls[0]?.[0].split(welcome)).toHaveLength(2);
     expect(sendChat.mock.calls[0]?.[5]).toMatchObject({ replyToMessageId: "confirm-start-message" });
+    expect(acknowledge).toHaveBeenCalledOnce();
+    expect(await object.touchPointAccount("points", viewerId, viewerLogin, startBonus)).toMatchObject({ welcomePending: false });
+  });
+
+  it("keeps a welcome pending when a heist confirmation retry dedupes a send without it", async () => {
+    const channelId = `game-welcome-heist-confirm-retry-${crypto.randomUUID()}`;
+    const settings = { ...heistSettingsForLanguage("de"), startTextEnabled: false, resultTextEnabled: false };
+    const object = await dispatchGameCommand(channelId, "heist", "confirm-retry-start-message", settings);
+    const roundId = await openedRoundId(object, "heist");
+    await forcePointAlarm(object, roundId);
+    await dispatchGameMessage(channelId, "heist", "confirm-retry-join-message", "!heist 10", "viewer_joiner", "moonmoss");
+    const messages: string[] = [];
+    const fetcher = prepareRealChat(messages);
+    const acknowledge = await spyOnWelcomeAcknowledgement(object);
+    const heldClaimId = "dispatch:held:points:0";
+    expect(await object.claimPointWelcome("points", viewerId, heldClaimId)).toBe(true);
+
+    await runHeistConfirmation(object, roundId);
+    await runPointObject(object, (target) => {
+      const runtime = target as unknown as {
+        releasePointWelcome: (moduleId: string, accountId: string, claimId: string) => Promise<void>;
+      };
+      return runtime.releasePointWelcome("points", viewerId, heldClaimId);
+    });
+    await runHeistConfirmation(object, roundId);
+
+    const welcome = pointsCatalog.en.chat.startBonus(startBonus, "Points");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).not.toContain(welcome);
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(await object.touchPointAccount("points", viewerId, viewerLogin, startBonus)).toMatchObject({ welcomePending: true });
+
+    await dispatchGameMessage(channelId, "heist", "confirm-retry-next-reply", "!punkte", viewerId, viewerLogin, fetcher);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toContain(welcome);
+    expect(acknowledge).toHaveBeenCalledOnce();
+    expect(await object.touchPointAccount("points", viewerId, viewerLogin, startBonus)).toMatchObject({ welcomePending: false });
+  });
+
+  it("acknowledges a deduped heist confirmation when its earlier send carried the same welcome claim", async () => {
+    const channelId = `game-welcome-heist-confirm-retry-with-note-${crypto.randomUUID()}`;
+    const settings = { ...heistSettingsForLanguage("de"), startTextEnabled: false, resultTextEnabled: false };
+    const object = await dispatchGameCommand(channelId, "heist", "confirm-retry-note-start-message", settings);
+    const roundId = await openedRoundId(object, "heist");
+    await forcePointAlarm(object, roundId);
+    await dispatchGameMessage(channelId, "heist", "confirm-retry-note-join-message", "!heist 10", "viewer_joiner", "moonmoss");
+    const messages: string[] = [];
+    prepareRealChat(messages);
+    const acknowledge = await spyOnWelcomeAcknowledgement(object);
+
+    await runHeistConfirmation(object, roundId, true);
+
+    const confirmKey = `round:${roundId}:confirm`;
+    let receipt: unknown;
+    await runPointObject(object, (_target, state) => {
+      const receipts = state.storage.kv.get<Record<string, unknown>>("module_alarm:send_claims") ?? {};
+      receipt = receipts[confirmKey];
+    });
+    const welcome = pointsCatalog.en.chat.startBonus(startBonus, "Points");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain(welcome);
+    expect(receipt).toMatchObject({ status: "sent", welcomeClaimId: confirmKey });
+
+    await runHeistConfirmation(object, roundId);
+
+    expect(messages).toHaveLength(1);
     expect(acknowledge).toHaveBeenCalledOnce();
     expect(await object.touchPointAccount("points", viewerId, viewerLogin, startBonus)).toMatchObject({ welcomePending: false });
   });

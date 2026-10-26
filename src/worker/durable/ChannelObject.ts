@@ -260,6 +260,7 @@ import {
 import { INSTANT_SETTLEMENTS, POINT_SETTLEMENTS } from "./point-settlements";
 import {
   appendPointWelcome,
+  finalizePointWelcomeDelivery,
   POINT_WELCOME_ACCOUNT_ID_KEY,
   POINT_WELCOME_RESULT_ACCOUNT_ID_KEY,
   type PendingPointWelcome,
@@ -3568,8 +3569,14 @@ export class ChannelObject extends DurableObject<Env> {
             /^round:[^:]+:resolve$/u.test(idempotencyKey) ? POINTS_ANNOUNCE_AMBIGUOUS_MS : undefined,
             { automated: options?.automated !== false });
         };
-        const afterPost = async (delivery: "sent" | "rejected" | "ambiguous" | "not_attempted"): Promise<void> => {
-          if (delivery !== "not_attempted") await finishModuleAlarmSend(this.ctx.storage, idempotencyKey, delivery, Date.now());
+        const afterPost = async (
+          delivery: "sent" | "rejected" | "ambiguous" | "not_attempted",
+          _reason: string | null,
+          postedWelcomeClaimId?: string,
+        ): Promise<void> => {
+          if (delivery !== "not_attempted") {
+            await finishModuleAlarmSend(this.ctx.storage, idempotencyKey, delivery, Date.now(), postedWelcomeClaimId);
+          }
         };
         const result = await sendChatImpl(
           this.env,
@@ -3584,12 +3591,19 @@ export class ChannelObject extends DurableObject<Env> {
           target ?? await readChannelDefaultChatTarget(this.env.DB, channelId),
           options?.sourceBroadcasterUserId,
           (senderId, messageText) => this.recordBotChatMessage(senderId, messageText),
+          options?.pointWelcome,
         );
         let attemptedAt: number | undefined;
         let hasPersistedSendClaim = false;
         if (result.reason === "already_attempted") {
           const claim = await readModuleAlarmSendClaim(this.ctx.storage, idempotencyKey);
-          if (claim?.status === "sent") return { sent: true, reason: null, retryable: false, delivery: "delivered" };
+          if (claim?.status === "sent") return {
+            sent: true,
+            reason: null,
+            retryable: false,
+            delivery: "delivered",
+            ...(claim.welcomeClaimId === undefined ? {} : { postedWelcomeClaimId: claim.welcomeClaimId }),
+          };
           hasPersistedSendClaim = claim !== null;
           attemptedAt = claim?.at;
         }
@@ -3605,7 +3619,14 @@ export class ChannelObject extends DurableObject<Env> {
             : ambiguous ? "ambiguous"
               : result.delivery === "not_attempted" ? "not_attempted"
                 : "failed";
-        return { sent: result.sent, reason, retryable, delivery, ...(attemptedAt === undefined ? {} : { attemptedAt }) };
+        return {
+          sent: result.sent,
+          reason,
+          retryable,
+          delivery,
+          ...(result.postedWelcomeClaimId === undefined ? {} : { postedWelcomeClaimId: result.postedWelcomeClaimId }),
+          ...(attemptedAt === undefined ? {} : { attemptedAt }),
+        };
       },
       chatActivityCount: () => this.getChatActivityCount(),
       resolveEventTimes: (now) => resolveModuleEventTimes(this.env.DB, channelId, now),
@@ -5677,9 +5698,10 @@ export class ChannelObject extends DurableObject<Env> {
   private async reportPointRoundWelcomeDelivery(
     action: Extract<ModuleAction, { kind: "chat" }>,
     delivery: ModuleChatDelivery,
+    postedWelcomeClaimId?: string,
   ): Promise<void> {
     try {
-      await action.onDelivery?.(delivery);
+      await action.onDelivery?.(delivery, postedWelcomeClaimId);
     } catch (error) {
       console.error("Point welcome acknowledgement failed after a game message send.", error);
     }
@@ -5697,7 +5719,18 @@ export class ChannelObject extends DurableObject<Env> {
       ).toArray()[0];
       if (sendWelcome?.appended !== 1 || sendWelcome.claim_id === null) return;
       const accountId = this.pointRoundWelcomeAccountId(JSON.parse(round.data_json) as unknown, phase, round.module_id);
-      if (accountId !== null) await this.acknowledgePointWelcome("points", accountId, sendWelcome.claim_id);
+      if (accountId === null) return;
+      const receipt = await readModuleAlarmSendClaim(this.ctx.storage, `round:${roundId}:${phase}`);
+      if (receipt?.status !== "sent") return;
+      await finalizePointWelcomeDelivery({
+        accountId,
+        deliveryClaimId: sendWelcome.claim_id,
+        used: true,
+        access: {
+          ackWelcome: (pendingAccountId, claimId) => this.acknowledgePointWelcome("points", pendingAccountId, claimId),
+          releaseWelcome: (pendingAccountId, claimId) => this.releasePointWelcome("points", pendingAccountId, claimId),
+        },
+      }, "sent", receipt.welcomeClaimId);
     } catch (error) {
       console.error(`Confirmed point round ${roundId} send could not acknowledge its welcome.`, error);
     }
@@ -5882,9 +5915,10 @@ export class ChannelObject extends DurableObject<Env> {
         ...(action.replyToMessageId === undefined ? {} : { replyToMessageId: action.replyToMessageId }),
         ...(formatted?.sourceBroadcasterUserId === undefined ? {} : { sourceBroadcasterUserId: formatted.sourceBroadcasterUserId }),
         ...(action.automated === undefined ? {} : { automated: action.automated }),
+        ...(action.pointWelcome === undefined ? {} : { pointWelcome: action.pointWelcome }),
       },
     );
-    await this.reportPointRoundWelcomeDelivery(action, pointWelcomeDelivery(delivery));
+    await this.reportPointRoundWelcomeDelivery(action, pointWelcomeDelivery(delivery), delivery.postedWelcomeClaimId);
     const sendReturnedAt = Date.now();
     await this.recordPointRoundAnnouncement(
       roundId,
@@ -6045,9 +6079,10 @@ export class ChannelObject extends DurableObject<Env> {
           ...(action.replyToMessageId === undefined ? {} : { replyToMessageId: action.replyToMessageId }),
           ...(formatted.sourceBroadcasterUserId === undefined ? {} : { sourceBroadcasterUserId: formatted.sourceBroadcasterUserId }),
           ...(action.automated === undefined ? {} : { automated: action.automated }),
+          ...(action.pointWelcome === undefined ? {} : { pointWelcome: action.pointWelcome }),
         },
       );
-      await this.reportPointRoundWelcomeDelivery(action, pointWelcomeDelivery(delivery));
+      await this.reportPointRoundWelcomeDelivery(action, pointWelcomeDelivery(delivery), delivery.postedWelcomeClaimId);
     } catch (error) {
       const claim = await readModuleAlarmSendClaim(this.ctx.storage, `round:${roundId}:resolve`);
       if (claim === null) {

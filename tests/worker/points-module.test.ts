@@ -100,7 +100,7 @@ describe("points module worker events", () => {
     const welcomedReply = appendPointWelcome(reply, { id: moduleId }, pending);
     if (welcomedReply.kind !== "chat") throw new Error("The welcome note did not remain a chat reply.");
     expect(welcomedReply.text).toContain("Startguthaben 100 Punkte");
-    await welcomedReply.onDelivery?.("sent");
+    await welcomedReply.onDelivery?.("sent", claimId);
     await expect(object.touchPointAccount(moduleId, "viewer_demo", "nachtfalke", 100)).resolves.toEqual({ welcomePending: false, startBonus: 100 });
   });
 

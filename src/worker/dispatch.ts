@@ -392,10 +392,10 @@ const runActions = async (
         if (claimed) action = decorated;
       } else action = decorated;
     }
-    const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
+    const reportDelivery = async (delivery: ModuleChatDelivery, postedWelcomeClaimId?: string): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
       try {
-        await action.onDelivery(delivery);
+        await action.onDelivery(delivery, postedWelcomeClaimId);
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
       }
@@ -455,8 +455,10 @@ const runActions = async (
           undefined,
           await targetFor(action.target),
           sourceBroadcasterUserId,
+          undefined,
+          action.pointWelcome,
         );
-        await reportDelivery(result.delivery);
+        await reportDelivery(result.delivery, result.postedWelcomeClaimId);
         if (result.truncated) {
           diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
         }

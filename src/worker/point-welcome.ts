@@ -1,4 +1,4 @@
-import type { BotModule, ModuleAction, ModulePointsAccess } from "../modules/contract";
+import type { BotModule, ModuleAction, ModuleChatDelivery, ModulePointsAccess } from "../modules/contract";
 import { reserveChatTextBeforeSuffix } from "./chat";
 
 export const POINT_WELCOME_ACCOUNT_ID_KEY = "welcomeAccountId";
@@ -15,6 +15,24 @@ export interface PendingPointWelcome extends PointWelcomeNote {
   deliveryClaimId?: string;
   used: boolean;
 }
+
+type PointWelcomeDeliveryClaim = Pick<PendingPointWelcome, "accountId" | "access" | "deliveryClaimId" | "used">;
+
+/** Finalizes a welcome only when the posted receipt proves this exact claim carried the note. */
+export const finalizePointWelcomeDelivery = async (
+  pending: PointWelcomeDeliveryClaim,
+  delivery: ModuleChatDelivery,
+  postedWelcomeClaimId?: string,
+): Promise<void> => {
+  const claimId = pending.deliveryClaimId;
+  if (delivery === "sent" && claimId !== undefined && postedWelcomeClaimId === claimId) {
+    await pending.access.ackWelcome(pending.accountId, claimId);
+    return;
+  }
+  if (delivery === "ambiguous") return;
+  if (claimId !== undefined) await pending.access.releaseWelcome?.(pending.accountId, claimId);
+  pending.used = false;
+};
 
 /** Adds the first-contact note to the next points or game reply and acknowledges only a successful send. */
 export const appendPointWelcome = (
@@ -37,18 +55,12 @@ export const appendPointWelcome = (
   return {
     ...action,
     text,
-    onDelivery: async (delivery) => {
-      if (delivery === "sent") {
-        if (pending.deliveryClaimId === undefined) await pending.access.ackWelcome(pending.accountId);
-        else await pending.access.ackWelcome(pending.accountId, pending.deliveryClaimId);
-      }
-      else if (delivery !== "ambiguous") {
-        if (pending.deliveryClaimId !== undefined) {
-          await pending.access.releaseWelcome?.(pending.accountId, pending.deliveryClaimId);
-        }
-        pending.used = false;
-      }
-      await originalDelivery?.(delivery);
+    ...(pending.deliveryClaimId === undefined ? {} : {
+      pointWelcome: { claimId: pending.deliveryClaimId, text: pending.text },
+    }),
+    onDelivery: async (delivery, postedWelcomeClaimId) => {
+      await finalizePointWelcomeDelivery(pending, delivery, postedWelcomeClaimId);
+      await originalDelivery?.(delivery, postedWelcomeClaimId);
     },
   };
 };

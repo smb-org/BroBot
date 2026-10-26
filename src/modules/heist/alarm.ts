@@ -68,13 +68,14 @@ const handleConfirm = async (context: ModuleAlarmContext, alarmKey: string): Pro
     {
       ...(action.replyToMessageId === undefined ? {} : { replyToMessageId: action.replyToMessageId }),
       automated: false,
+      ...(action.pointWelcome === undefined ? {} : { pointWelcome: action.pointWelcome }),
     },
   );
   const delivery: ModuleChatDelivery = result.sent || result.delivery === "delivered" ? "sent"
     : result.delivery === "ambiguous" ? "ambiguous"
       : result.delivery === "not_attempted" ? "not_attempted" : "rejected";
   try {
-    await action.onDelivery?.(delivery);
+    await action.onDelivery?.(delivery, result.postedWelcomeClaimId);
   } catch (error) {
     console.error("Heist confirmation welcome acknowledgement failed after a confirmed send.", error);
   }

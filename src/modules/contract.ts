@@ -438,8 +438,10 @@ export type ModuleAction =
     replyToMessageId?: string;
     /** Chat outputs are automated by default; direct command responses set this false. */
     automated?: boolean;
+    /** Host delivery proof for a welcome note appended to this action. */
+    pointWelcome?: { claimId: string; text: string };
     /** Lets a module finalize a claim after the host knows the delivery outcome. */
-    onDelivery?: (delivery: ModuleChatDelivery) => Promise<void>;
+    onDelivery?: (delivery: ModuleChatDelivery, postedWelcomeClaimId?: string) => Promise<void>;
   }
   | { kind: "clip"; cooldownSeconds: number; postClipLinkInChat: boolean; chatLinkTemplate: string }
   | { kind: "announcement"; text: string; target?: ChatOutputTarget; automated?: boolean }
@@ -836,13 +838,19 @@ export interface ModuleAlarmContext {
     attributions?: readonly string[],
     stillValid?: () => Promise<boolean>,
     target?: ChatOutputTarget,
-    options?: { replyToMessageId?: string; sourceBroadcasterUserId?: string; automated?: boolean },
+    options?: {
+      replyToMessageId?: string;
+      sourceBroadcasterUserId?: string;
+      automated?: boolean;
+      pointWelcome?: { claimId: string; text: string };
+    },
   ) => Promise<{
     sent: boolean;
     reason: string | null;
     retryable: boolean;
     delivery: "delivered" | "rate_limited" | "ambiguous" | "not_attempted" | "failed";
     attemptedAt?: number;
+    postedWelcomeClaimId?: string;
   }>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
