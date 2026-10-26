@@ -1154,6 +1154,13 @@ export interface PointActiveRound {
   deadlineAt: number | null;
 }
 
+/** Funded participants of one round: total count and stake, plus the first logins in join order. */
+export interface PointRoundParticipants {
+  count: number;
+  totalStake: number;
+  logins: string[];
+}
+
 export interface PointRoundAttackResult {
   status: "hit" | "cooldown" | "round_closed";
   replayed: boolean;
@@ -1220,6 +1227,8 @@ export interface ModulePointsAccess {
     listOpen: () => Promise<PointActiveRound[]>;
     markAnnounced: (roundId: string, deadlineAt: number, alarmKey: string) => Promise<void>;
     join: (roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown) => Promise<PointJoinResult>;
+    /** Reads the round's participant count and total stake, with at most `nameLimit` logins. */
+    participants: (roundId: string, nameLimit: number) => Promise<PointRoundParticipants>;
     answer: (roundId: string, operationId: string, accountId: string, login: string, graceS: number, messageAt: number) => Promise<PointRoundAnswerResult>;
     attack: (roundId: string, operationId: string, accountId: string, login: string, damage: number, messageAt: number) => Promise<PointRoundAttackResult>;
     resolve: (roundId: string, settlement: { kind: string; params: unknown }) => Promise<PointsApplyResult>;
