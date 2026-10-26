@@ -20,6 +20,7 @@ import { formatRelativeTime } from "./ui/format-relative-time";
 import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon } from "./ui";
 import { LockedReason } from "./ui/LockedReason";
 import { AdsLiveTile, type AdsLiveSchedule } from "./AdsLiveTile";
+import { BossFightLiveTile } from "../modules/boss_fight/panel/live-tile";
 
 type EventFilter = "all" | "raids" | "community" | "chat";
 
@@ -77,6 +78,7 @@ export const LiveCockpitTiles = ({
     .slice(0, 12);
   const recentVotekicks = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "votekick_recent" }> => snapshot.kind === "votekick_recent");
   const duels = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "duel" }> => snapshot.kind === "duel");
+  const bossFights = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "boss_fight" }> => snapshot.kind === "boss_fight");
   const visibleDuels = duels.slice(0, 3);
   const running = snapshots.find((snapshot) => snapshot.kind === "vote" || snapshot.kind === "votekick");
   const [busy, setBusy] = useState(false);
@@ -255,7 +257,8 @@ export const LiveCockpitTiles = ({
           onConfirm={() => { void doCancelDuel(); }} onCancel={() => { if (!busy) setDuelCancelTarget(null); }}
           pending={busy} danger {...(duelCancelError === undefined ? {} : { error: duelCancelError })} />
       </>}
-      {running === undefined && duels.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noActionRunning}</p> : running === undefined ? null : running.kind === "vote"
+      {bossFights.map((round) => <BossFightLiveTile key={round.id} language={dashboardLanguage()} round={round} now={now} />)}
+      {running === undefined && duels.length === 0 && bossFights.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noActionRunning}</p> : running === undefined ? null : running.kind === "vote"
         ? <div className="live-vote-tile" data-testid="live-vote-tile">
           <header className="live-vote-tile__header">
             <div><span>{labels.voteType}</span><h3>{running.title?.trim() || labels.voteType}</h3></div>

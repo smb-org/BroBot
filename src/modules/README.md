@@ -965,6 +965,41 @@ daher dieselbe Validierung abbilden.
 
 Die folgenden Module zeigen die Fähigkeiten im Zusammenspiel; Details ihrer Fachlogik stehen hier, nicht im Contract.
 
+### Bosskampf (`boss_fight`)
+
+Der Bosskampf startet als Operator-Sofortaktion im Live-Cockpit und ist nur
+verfügbar, wenn der Stream live und das Modul eingeschaltet ist und keine
+Runde läuft; die Startroute prüft denselben Stream-Zustand erneut. `!attack` ist
+im konfigurierbaren Angriffsfenster (Standard: 90 Sekunden) kostenlos; pro
+Person gilt eine konfigurierbare Abklingzeit (Standard: 10 Sekunden). Jeder
+Angriff verursacht gleichverteilt zufälligen Schaden aus dem eingestellten
+inklusiven Bereich (Standard: 20–40).
+
+Die Lebenspunkte sind **300 Grundpunkte plus 80 je unterschiedlichem
+Angreifer**. Die Maximalpunkte werden bei jedem neuen Angreifer neu berechnet
+und dürfen nie unter dem bereits angerichteten Schaden liegen. Damit wächst
+das Ziel mit der Beteiligung, ohne bereits erzielten Schaden zurückzunehmen.
+Wenn der Boss vor Ablauf fällt, wird der konfigurierte Beutepool (Standard:
+1.000 Punkte) nach dem jeweiligen Schadensanteil aufgeteilt. Jeder Anteil wird
+abgerundet; der Rest verbleibt im Hauskonto. Bei Ablauf oder wenn das Modul
+während einer Runde deaktiviert wird, gibt es keine Auszahlung.
+
+Der Chat erhält höchstens eine Startzeile und eine Ergebniszeile; eine
+Halbzeitmeldung ist nicht vorgesehen. Einzelne Angriffe erzeugen keine
+Antworten. Gespeichert werden nur angenommene Treffer (gehashter
+Idempotenzschlüssel, damit eine erneut zugestellte Chatnachricht nicht doppelt
+zählt) und je Person ein gehashter Abkühlungsschlüssel; abgelehnte Angriffe
+(Abklingzeit, Runde geschlossen) hinterlassen nichts. Beides wird beim Auflösen
+oder Abbrechen der Runde gelöscht. Teilnehmer und Schaden verwenden die bereits
+vorhandene Spielrundentabelle mit deren Kontokennung und Login; es wird keine
+zusätzliche personenbezogene Angriffs-Historie angelegt. Die Runde führt
+Angreiferzahl und Gesamtschaden als Summen mit, sodass ein Treffer nur
+konstant viele Zeilen liest; alle Teilnehmer werden erst bei der Abrechnung
+geladen. Rundenende und Deaktivierung laufen über die gemeinsamen
+Punkte-Runden und deren Alarm- und Abbruchpfad. Die Start- und Ergebniszeile
+reservieren ihren Pflichtteil (Befehlshinweis mit Dauer, Top-Schaden) vor dem
+frei einstellbaren Text und den Quellenangaben.
+
 ### Astronomie-, Wetter- und Währungsquellen
 
 Die Sonnendatenquelle liegt eigenständig unter `src/modules/sun/`. Sie nutzt
