@@ -382,7 +382,8 @@ describe("points panel", () => {
     const detailHeader = view.container.querySelector(".points-detail__header");
     if (!(detailHeader instanceof HTMLElement)) throw new Error("The selected account detail header is missing.");
     expect(screen.getAllByRole("button", { name: "Settings" })).toHaveLength(1);
-    expect(within(detailHeader).queryByRole("button", { name: "More actions" })).toBeNull();
+    // Common labels follow the browser language, not the panel language, so match both locales.
+    expect(within(detailHeader).queryByRole("button", { name: /^(More actions|Weitere Aktionen)$/u })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const settingsPanel = screen.getByLabelText("Points settings");
