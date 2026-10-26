@@ -1,0 +1,6 @@
+@layer components.module {
+  .live-cockpit-boss-fight { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s1) var(--s3); min-width: 0; padding: var(--s2) 0; border-bottom: 1px solid var(--line); }
+  .live-cockpit-boss-fight__name { overflow: hidden; color: var(--text-2); font-size: var(--text-nav-label); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .live-cockpit-boss-fight__health { color: var(--text); font-family: var(--font-mono); font-size: var(--text-number); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .live-cockpit-boss-fight__meta { grid-column: 1 / -1; overflow: hidden; color: var(--text-3); font-size: var(--text-nav-label); text-overflow: ellipsis; white-space: nowrap; }
+}
