@@ -23,6 +23,7 @@ CREATE TRIGGER panel_rev_bot_identity_status_update AFTER UPDATE ON bot_identity
 WHEN OLD.id IS NOT NEW.id
   OR OLD.status IS NOT NEW.status
   OR OLD.reason IS NOT NEW.reason
+  OR OLD.updated_at IS NOT NEW.updated_at
 BEGIN
   INSERT INTO panel_resource_revisions SELECT channel.channel_id, dependency.resource, 1 FROM channels AS channel JOIN panel_resource_dependencies AS dependency ON dependency.source_table = 'bot_identity_status' WHERE dependency.resource NOT IN ('channels', 'module:*:settings') ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
   INSERT INTO panel_resource_revisions SELECT channel.channel_id, 'module:' || module.module_id || ':settings', 1 FROM channels AS channel JOIN channel_modules AS module ON module.channel_id = channel.channel_id WHERE EXISTS (SELECT 1 FROM panel_resource_dependencies WHERE source_table = 'bot_identity_status' AND resource = 'module:*:settings') ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
@@ -40,6 +41,7 @@ WHEN OLD.channel_id IS NOT NEW.channel_id
   OR OLD.reason IS NOT NEW.reason
   OR OLD.error_message IS NOT NEW.error_message
   OR OLD.error_status IS NOT NEW.error_status
+  OR OLD.updated_at IS NOT NEW.updated_at
 BEGIN
   INSERT INTO panel_resource_revisions SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'eventsub_subscriptions' AND resource <> 'channels' ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
   UPDATE panel_global_resource_revisions SET revision = revision + 1 WHERE resource = 'channels';

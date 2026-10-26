@@ -196,7 +196,7 @@ describe("D1 no-op writes and panel revisions", () => {
     expect(globalRevision(after, "channels")).toBe(globalRevision(before, "channels") + 1);
   });
 
-  it("does not revise panel resources for bookkeeping-only timestamp updates", async () => {
+  it("revises panel resources when heartbeat timestamps change", async () => {
     await insertChannel(database, "bookkeeping-only");
     await database.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('bookkeeping-only', 'chat', 1, '{}')",
@@ -210,10 +210,22 @@ describe("D1 no-op writes and panel revisions", () => {
     await database.prepare("DELETE FROM panel_resource_pending").run();
     const before = readPanelRevisionState(database);
 
+    // bot_identity.updated_at is not read by the panel: still no bump.
     await database.prepare("UPDATE bot_identity SET updated_at = '2026-09-19T00:00:00.000Z' WHERE id = 1").run();
-    await database.prepare("UPDATE bot_identity_status SET updated_at = '2026-09-19T00:00:00.000Z' WHERE id = 1").run();
-    await database.prepare("UPDATE eventsub_subscriptions SET updated_at = '2026-09-19T00:00:00.000Z' WHERE channel_id = 'bookkeeping-only'").run();
-
     expect(readPanelRevisionState(database)).toEqual(before);
+
+    await database.prepare("UPDATE bot_identity_status SET updated_at = '2026-09-19T00:00:00.000Z' WHERE id = 1").run();
+    const afterStatus = readPanelRevisionState(database);
+    expect(resourceRevision(afterStatus, "bookkeeping-only", "channel.overview")).toBe(
+      resourceRevision(before, "bookkeeping-only", "channel.overview") + 1,
+    );
+    expect(globalRevision(afterStatus, "channels")).toBe(globalRevision(before, "channels") + 1);
+
+    await database.prepare("UPDATE eventsub_subscriptions SET updated_at = '2026-09-19T00:00:00.000Z' WHERE channel_id = 'bookkeeping-only'").run();
+    const afterSubscription = readPanelRevisionState(database);
+    expect(resourceRevision(afterSubscription, "bookkeeping-only", "channel.overview")).toBe(
+      resourceRevision(afterStatus, "bookkeeping-only", "channel.overview") + 1,
+    );
+    expect(globalRevision(afterSubscription, "channels")).toBe(globalRevision(afterStatus, "channels") + 1);
   });
 });
