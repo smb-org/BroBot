@@ -12,7 +12,8 @@ import { liftVotekickTimeout, loadVotekickPanel } from "../../src/modules/voteki
 import type { Votekick } from "../../src/modules/votekick/contracts";
 import { votekickModule } from "../../src/modules/votekick";
 import { UiProvider } from "../../src/dashboard/ui";
-import { clickSelectOption } from "../query-test-utils";
+import { moduleQueryKey } from "../../src/dashboard/data";
+import { clickSelectOption, renderWithQuery } from "../query-test-utils";
 
 vi.mock("../../src/dashboard/api", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
@@ -97,6 +98,12 @@ beforeEach(() => {
   vi.mocked(liftVotekickTimeout).mockReset().mockResolvedValue(undefined);
 });
 
+const openViewerPicker = async (): Promise<void> => {
+  const picker = await screen.findByRole("combobox", { name: /Viewer|Nutzer/u });
+  await waitFor(() => expect(picker.hasAttribute("disabled") || picker.getAttribute("aria-disabled") === "true").toBe(false));
+  fireEvent.click(picker);
+};
+
 describe("cockpit action role mirror", () => {
   it("keeps rate-limit feedback concise in German and English", () => {
     expect(textCommandQuickActionTexts.testMessage.rateLimited("27")).toEqual({ de: "Erneut in 27 s", en: "Retry in 27 s" });
@@ -127,16 +134,39 @@ describe("cockpit action role mirror", () => {
     expect(votekickModule.actions?.find((action) => action.id === "lift-timeout")?.requiredRole).toBe("operator");
   });
 
+  it("drops a timeout lifted elsewhere from the open picker and clears its selection", async () => {
+    const secondVotekick: Votekick = { ...activeVotekick, id: "ballot-2", targetUserId: "viewer-2", targetLogin: "viewer_two" };
+    vi.mocked(loadVotekickPanel).mockResolvedValue({ running: null, votekicks: [activeVotekick, secondVotekick], now: new Date().toISOString() });
+    const { queryClient } = renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+      modules={[{ id: "votekick", enabled: true }]} /></UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Timeout aufheben|Lift timeout/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(action);
+    await openViewerPicker();
+    clickSelectOption(await screen.findByRole("option", { name: /viewer_one/u, hidden: true }));
+    const run = screen.getByRole<HTMLButtonElement>("button", { name: dashboardTexts().streamManager.actionRun });
+    await waitFor(() => expect(run.disabled).toBe(false));
+
+    // Another operator lifts viewer_one; the shared panel query is refreshed by a realtime revision.
+    vi.mocked(loadVotekickPanel).mockResolvedValue({ running: null, votekicks: [{ ...activeVotekick, liftedAt: new Date().toISOString() }, secondVotekick], now: new Date().toISOString() });
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: moduleQueryKey("channel-a", "votekick", "panel") }); });
+
+    await waitFor(() => expect(run.disabled).toBe(true));
+    await openViewerPicker();
+    expect(await screen.findByRole("option", { name: /viewer_two/u, hidden: true })).not.toBeNull();
+    expect(screen.queryByRole("option", { name: /viewer_one/u, hidden: true })).toBeNull();
+  });
+
   it("lifts the selected active Votekick timeout from the immediate action dialog", async () => {
-    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
       modules={[{ id: "votekick", enabled: true }]} /></UiProvider>);
 
     const action = await screen.findByRole("button", { name: /Timeout aufheben|Lift timeout/u });
     await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(action);
 
-    const viewerPicker = await screen.findByRole("combobox", { name: /Viewer|Nutzer/u });
-    fireEvent.click(viewerPicker);
+    await openViewerPicker();
     clickSelectOption(await screen.findByRole("option", { name: /viewer_one/u, hidden: true }));
     fireEvent.click(screen.getByRole("button", { name: dashboardTexts().streamManager.actionRun }));
 

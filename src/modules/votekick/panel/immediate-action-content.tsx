@@ -1,17 +1,11 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import type { ModuleImmediateActionContentProperties } from "../../contract";
+import { useModuleQuery } from "../../../dashboard/data";
 import { Select } from "../../../dashboard/ui";
 import { activeVotekickTimeouts } from "../domain/active-timeouts";
-import type { Votekick } from "../contracts";
 import { loadVotekickPanel } from "./service";
 import { votekickImmediateActionTexts } from "./immediate-action-locale";
-
-interface TimeoutListState {
-  channelId: string;
-  timeouts: readonly Votekick[] | null;
-  failed: boolean;
-}
 
 interface TimeoutSelectionState {
   channelId: string;
@@ -19,37 +13,31 @@ interface TimeoutSelectionState {
 }
 
 export default function VotekickTimeoutActionContent({ channelId, language, onReadinessChange }: ModuleImmediateActionContentProperties): ReactElement {
-  const [timeoutListState, setTimeoutListState] = useState<TimeoutListState>({ channelId, timeouts: null, failed: false });
+  // Shares the panel query with the lock card, so realtime panel revisions and the poll refresh this list.
+  const query = useModuleQuery(channelId, "votekick", "panel", (signal) => loadVotekickPanel(channelId, signal), { refetchInterval: 5_000 });
   const [selectionState, setSelectionState] = useState<TimeoutSelectionState>({ channelId, votekickId: null });
 
-  useEffect(() => {
-    const controller = new AbortController();
-    void loadVotekickPanel(channelId, controller.signal).then((state) => {
-      if (!controller.signal.aborted) {
-        setTimeoutListState({ channelId, timeouts: activeVotekickTimeouts(state.votekicks, state.now), failed: false });
-      }
-    }).catch(() => {
-      if (!controller.signal.aborted) setTimeoutListState({ channelId, timeouts: [], failed: true });
-    });
-    return () => { controller.abort(); };
-  }, [channelId]);
-
-  const timeouts = timeoutListState.channelId === channelId ? timeoutListState.timeouts : null;
+  const timeouts = useMemo(
+    () => query.data === undefined ? null : activeVotekickTimeouts(query.data.votekicks, query.data.now),
+    [query.data],
+  );
+  const failed = query.isError && timeouts === null;
   const availableTimeouts = timeouts ?? [];
+  // A selection that left the list (lifted elsewhere, expired) is dropped here.
   const selectedId = selectionState.channelId === channelId && availableTimeouts.some((timeout) => timeout.id === selectionState.votekickId)
     ? selectionState.votekickId
     : null;
-  const ready = timeouts !== null && !timeoutListState.failed && selectedId !== null;
+  const ready = timeouts !== null && selectedId !== null;
   const readinessReason = ready
     ? null
-    : timeouts === null
-      ? votekickImmediateActionTexts.loading[language]
-      : timeoutListState.failed
-        ? votekickImmediateActionTexts.loadFailed[language]
+    : failed
+      ? votekickImmediateActionTexts.loadFailed[language]
+      : timeouts === null
+        ? votekickImmediateActionTexts.loading[language]
         : availableTimeouts.length === 0
           ? votekickImmediateActionTexts.noActiveTimeouts[language]
           : votekickImmediateActionTexts.selectionRequired[language];
-  const fieldError = timeoutListState.failed
+  const fieldError = failed
     ? votekickImmediateActionTexts.loadFailed[language]
     : timeouts !== null && availableTimeouts.length === 0
       ? votekickImmediateActionTexts.noActiveTimeouts[language]
@@ -59,7 +47,7 @@ export default function VotekickTimeoutActionContent({ channelId, language, onRe
     onReadinessChange?.(ready, readinessReason);
   }, [onReadinessChange, readinessReason, ready]);
 
-  return <div className="live-action-content live-action-content--votekick-lift" aria-busy={timeouts === null}>
+  return <div className="live-action-content live-action-content--votekick-lift" aria-busy={timeouts === null && !failed}>
     <Select
       label={votekickImmediateActionTexts.timeoutLabel[language]}
       name="votekickId"
@@ -74,8 +62,8 @@ export default function VotekickTimeoutActionContent({ channelId, language, onRe
       hint={votekickImmediateActionTexts.chooseTimeoutHint[language]}
       dropdownBelowField
       {...(fieldError === undefined ? {} : { error: fieldError })}
-      disabled={timeouts === null || timeoutListState.failed || availableTimeouts.length === 0}
-      busy={timeouts === null}
+      disabled={timeouts === null || availableTimeouts.length === 0}
+      busy={timeouts === null && !failed}
       searchable
       required
     />

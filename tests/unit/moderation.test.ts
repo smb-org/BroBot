@@ -488,6 +488,41 @@ describe("moderation actions", () => {
     }
   });
 
+  it.each([
+    [401, "Invalid OAuth token", "token_invalid"],
+    [403, "The ID in broadcaster_id must match the user ID found in the request's OAuth token.", "not_moderator"],
+    [401, "Missing scope: moderation:read", "scope_missing"],
+    [403, "Missing required scope: moderation:read", "scope_missing"],
+  ] as const)("maps lookup status %s %j to %s without calling DELETE", async (status, message, reason) => {
+    const database = new TestD1Database();
+    try {
+      await seedChannel(database);
+      await seedBroadcasterIdentity(database);
+      const { environment } = environmentFor(database);
+      // A 401 makes the broadcaster-token helper refresh once and retry, so the refresh endpoint answers too.
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        return Promise.resolve(url.pathname === "/oauth2/token"
+          ? new Response(JSON.stringify({
+            access_token: "fictional-broadcaster-token-refreshed",
+            refresh_token: "fictional-broadcaster-refresh-refreshed",
+            expires_in: 7_200,
+            scope: ["moderation:read"],
+          }), { status: 200, headers: { "content-type": "application/json" } })
+          : responseFor(status, message));
+      });
+
+      await expect(liftModerationBan(environment, CHANNEL_ID, TARGET_USER_ID, {
+        reason: "Votekick (3:0) · ballot-1",
+        durationSeconds: 120,
+        startedAt: new Date(Date.now() - 5_000).toISOString(),
+      }, fetcher)).resolves.toMatchObject({ outcome: "rejected", reason });
+      expect(fetcher.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
   it.each([400, 404])("reports a Votekick timeout that Twitch says is not active on lookup status %s", async (status) => {
     const database = new TestD1Database();
     try {
