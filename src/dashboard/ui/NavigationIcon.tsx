@@ -1,5 +1,5 @@
 import {
-  BookOpenText, Braces, Clapperboard, Coins, CloudSun, Database, FlaskConical, Megaphone, MessageCircleQuestion,
+  Banknote, BookOpenText, Braces, Clapperboard, Coins, CloudSun, Crown, Database, FlaskConical, Megaphone, MessageCircleQuestion,
   MessageSquareText, Radio, RadioTower, ScrollText, Settings, Settings2, ShieldAlert, Signal, Sword, Timer, Zap,
   ToggleRight, UsersRound, Vote,
 } from "lucide-react";
@@ -31,6 +31,8 @@ const iconByKind: Readonly<Record<string, LucideIcon>> = {
   commands: MessageSquareText,
   blitz: Zap,
   duel: Sword,
+  heist: Banknote,
+  boss: Crown,
 };
 
 export function NavigationIcon({ kind, className = "navigation-icon" }: { kind: string; className?: string }): ReactElement {

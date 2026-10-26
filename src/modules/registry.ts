@@ -19,6 +19,8 @@ import { pointsModule } from "./points";
 import { emoteSlotsModule } from "./emote_slots";
 import { blitzRoundModule } from "./blitz_round";
 import { duelModule } from "./duel";
+import { bossFightModule } from "./boss_fight";
+import { heistModule } from "./heist";
 import { statisticsModule } from "./statistics";
 import type { ModuleOverlayElementDefinition } from "./contract";
 import type { TemplateVariable } from "../template";
@@ -26,7 +28,7 @@ import { TEMPLATE_BARE_VARIABLE_NAME_PATTERN, TEMPLATE_DOTTED_VARIABLE_NAME_PATT
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../template-variables";
 
 // This is the only place that knows all modules.
-export const MODULES: readonly BotModule[] = [textCommandModule, faqModule, chatVotingModule, textLibraryModule, timersModule, sunModule, moonModule, weatherModule, currencyModule, apiSourceModule, belaboxModule, channelEventsModule, adsModule, raidModule, clipsModule, votekickModule, pointsModule, emoteSlotsModule, blitzRoundModule, duelModule, statisticsModule];
+export const MODULES: readonly BotModule[] = [textCommandModule, faqModule, chatVotingModule, textLibraryModule, timersModule, sunModule, moonModule, weatherModule, currencyModule, apiSourceModule, belaboxModule, channelEventsModule, adsModule, raidModule, clipsModule, votekickModule, pointsModule, emoteSlotsModule, blitzRoundModule, duelModule, bossFightModule, heistModule, statisticsModule];
 
 const HOST_TEMPLATE_VARIABLE_NAMES = new Set(SYSTEM_TEMPLATE_VARIABLE_LIST.map((variable) => variable.name));
 const EXISTING_BARE_MODULE_VARIABLES: Readonly<Record<string, ReadonlySet<string>>> = {

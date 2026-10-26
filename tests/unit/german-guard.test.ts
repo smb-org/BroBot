@@ -26,10 +26,14 @@ import { describe, expect, it } from "vitest";
  * additions are reviewed by hand for that.
  */
 const ALLOWLIST: Record<string, string> = {
+  "src/modules/boss_fight/locale.ts": "Bilingual DE/EN boss-fight module catalogue; only its de values are German.",
+  "src/modules/boss_fight/panel/settings-editor-locale.ts": "Bilingual DE/EN boss-fight settings editor catalogue; only its de values are German.",
   "src/modules/blitz_round/locale.ts": "Bilingual DE/EN blitz module catalogue; only its de values are German.",
   "src/modules/blitz_round/panel/locale.ts": "Bilingual DE/EN blitz template editor catalogue; only its de values are German.",
   "src/modules/duel/locale.ts": "Bilingual DE/EN duel module catalogue; only its de values are German.",
   "src/modules/duel/panel/settings-editor-locale.ts": "Bilingual DE/EN duel settings editor catalogue; only its de values are German.",
+  "src/modules/heist/locale.ts": "Bilingual DE/EN heist module catalogue; only its de values are German.",
+  "src/modules/heist/panel/settings-editor-locale.ts": "Bilingual DE/EN heist settings editor catalogue; only its de values are German.",
   "src/modules/statistics/stop-words.ts": "German and English stop-word list for the word-frequency baseline; its German half is German by design.",
   "src/modules/blitz_round/seed-words.ts": "Issue 503 explicitly requires German starter word data.",
   "src/dashboard/locale.ts": "Bilingual DE/EN dashboard text catalogue; only its `de` half is German.",
