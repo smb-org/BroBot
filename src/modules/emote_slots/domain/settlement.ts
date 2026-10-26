@@ -15,6 +15,7 @@ const settlementParametersSchema = z.object({
     })).length(6),
   }),
   jackpotShareBp: z.number().int().min(0).max(2_000),
+  pairPayoutBp: z.number().int().min(10_000).max(30_000),
   maxStake: z.number().int().positive().max(100_000),
   seed: z.number().int().min(0).max(1_000_000),
 }).superRefine((params, context) => {
@@ -103,7 +104,7 @@ export const settleSlot = (input: SlotSettlementInput): SlotSettlementOutput => 
     payout = stake * BigInt(symbol.triple);
     triple = true;
   } else if (hasPair) {
-    payout = stake;
+    payout = (stake * BigInt(params.pairPayoutBp)) / 10_000n;
     pair = true;
   }
 

@@ -25,12 +25,14 @@ const nowMonth = (): string => new Date().toISOString().slice(0, 7);
 const paramsFor = (stake: number, symbols: [number, number, number], overrides: Partial<{
   seed: number;
   jackpotShareBp: number;
+  pairPayoutBp: number;
   maxStake: number;
 }> = {}) => ({
   stake,
   symbols,
   table: { symbols: slotSettlementTable(DEFAULT_EMOTE_SLOT_SETTINGS).symbols },
   jackpotShareBp: overrides.jackpotShareBp ?? 700,
+  pairPayoutBp: overrides.pairPayoutBp ?? DEFAULT_EMOTE_SLOT_SETTINGS.pairPayoutBp,
   maxStake: overrides.maxStake ?? 500,
   seed: overrides.seed ?? 500,
 });

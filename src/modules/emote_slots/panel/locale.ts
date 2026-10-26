@@ -98,6 +98,7 @@ const catalog = (language: DashboardLanguage): SettingsEditorCatalog => {
       maxStake: { label: copy.maxStake, hint: de ? "Obergrenze für einen Einsatz." : "Upper limit for one stake.", unit: copy.points, invalidError: copy.maxStakeError },
       jackpotSeed: { label: copy.seed, hint: de ? "Startet einen leeren Jackpot und füllt ihn nach einem Treffer." : "Funds an empty jackpot and reseeds after a hit.", unit: copy.points, invalidError: copy.seedError },
       jackpotShareBp: { label: copy.share, hint: de ? "Wird bei jedem Einsatz auf volle Punkte abgerundet." : "Rounded down to whole points on every stake.", invalidError: copy.shareError },
+      pairPayoutBp: { label: copy.pairPayout, hint: copy.pairPayoutHint, invalidError: copy.pairPayoutError },
       announceJackpot: { label: copy.announce, hint: copy.announceHint, description: copy.announceHint },
       cooldownSeconds: { label: copy.cooldown, hint: de ? "Pause zwischen gebuchten Drehungen derselben Person." : "Wait between booked spins from the same person.", unit: copy.seconds, zeroValueLabel: de ? "aus" : "off", invalidError: copy.cooldownError },
       chatTarget: { label: copy.targetLabel, hint: de ? "Dort erscheint die Antwort auf den Dreh." : "Where the spin reply is sent.", options: allChatOptions },

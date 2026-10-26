@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_EMOTE_SLOT_SETTINGS, emoteSlotSettingsSchema } from "../../src/modules/emote_slots/contracts";
+import { DEFAULT_EMOTE_SLOT_SETTINGS, emoteSlotSettingsReadSchema, emoteSlotSettingsSchema } from "../../src/modules/emote_slots/contracts";
 import { calculateSlotPayoutRate } from "../../src/modules/emote_slots/domain/payout-rate";
 import { formatSlotReply, parseSlotStake } from "../../src/modules/emote_slots/domain/chat";
 import { settleSlot } from "../../src/modules/emote_slots/domain/settlement";
 import { emoteSlotsCatalog } from "../../src/modules/emote_slots/locale";
+import { emoteSlotsModule } from "../../src/modules/emote_slots";
 
 const settlementInput = (overrides: Partial<{
   balance: number;
   jackpot: number;
   stake: number;
+  pairPayoutBp: number;
   symbols: [number, number, number];
   seed: number;
 }> = {}) => {
@@ -23,6 +25,7 @@ const settlementInput = (overrides: Partial<{
       stake,
       symbols: overrides.symbols ?? [0, 0, 4],
       table: { symbols: DEFAULT_EMOTE_SLOT_SETTINGS.symbols },
+      pairPayoutBp: overrides.pairPayoutBp ?? DEFAULT_EMOTE_SLOT_SETTINGS.pairPayoutBp,
       jackpotShareBp: 700,
       maxStake: 500,
       seed: overrides.seed ?? 500,
@@ -31,22 +34,32 @@ const settlementInput = (overrides: Partial<{
 };
 
 describe("emote slot settlement", () => {
-  it("returns the stake for a pair and adds the rounded share (protects=pair payout and 15-point share rounding; fails_when=a pair loses the stake or rounds 7% of 15 to zero; no_claim=concurrent ledger serialization)", () => {
-    const result = settleSlot(settlementInput({ stake: 15, symbols: [0, 0, 4] }));
+  it.each([[15, 22], [19, 28]])("pays the floored pair multiplier at stake %i (protects=pair payouts floor to whole points for small stakes; fails_when=a pair refunds the stake or rounds up; no_claim=concurrent ledger serialization)", (stake, payout) => {
+    const result = settleSlot(settlementInput({ stake, symbols: [0, 0, 4] }));
 
-    expect(result.result).toMatchObject({ pair: true, triple: false, net: 0, balanceAfter: 200, jackpotAfter: 1_001 });
-    expect(result.movements).toEqual([
-      { accountId: "viewer_demo", delta: 0, login: "nachtfalke" },
-      { accountId: "__jackpot:emote_slots", delta: 1 },
-      { accountId: "__house", delta: -1 },
-    ]);
+    expect(result.result).toMatchObject({ pair: true, triple: false, payout, net: payout - stake, balanceAfter: 200 + payout - stake, jackpotAfter: 1_001 });
+    expect(result.movements).toContainEqual({ accountId: "viewer_demo", delta: payout - stake, login: "nachtfalke" });
+    expect(result.movements).toContainEqual({ accountId: "__jackpot:emote_slots", delta: 1 });
+    expect(result.movements).toContainEqual({ accountId: "__house", delta: stake - 1 - payout });
+  });
+
+  it("pays a pair containing the jackpot symbol at the configured pair rate (protects=jackpot symbol pairs keep pair semantics; fails_when=a pair involving seven is treated as a jackpot or only refunds; no_claim=three sevens jackpot award)", () => {
+    const result = settleSlot(settlementInput({ stake: 15, symbols: [5, 5, 0] }));
+
+    expect(result.result).toMatchObject({ pair: true, triple: false, payout: 22, net: 7 });
+  });
+
+  it("keeps exact stake return when pair payout is one times (protects=legacy refund amount at 10,000 basis points; fails_when=the pair payout changes at 1×; no_claim=pair chat wording)", () => {
+    const result = settleSlot(settlementInput({ stake: 15, pairPayoutBp: 10_000, symbols: [0, 0, 4] }));
+
+    expect(result.result).toMatchObject({ pair: true, payout: 15, net: 0, balanceAfter: 200 });
   });
 
   it("pays stake times the configured non-jackpot triple (protects=the configured triple multiplier; fails_when=a triple pays only the stake or is reduced by the wager; no_claim=message formatting)", () => {
     const result = settleSlot(settlementInput({ symbols: [2, 2, 2] }));
 
-    expect(result.result).toMatchObject({ triple: true, pair: false, net: 550, balanceAfter: 750 });
-    expect(result.movements).toContainEqual({ accountId: "__house", delta: -553 });
+    expect(result.result).toMatchObject({ triple: true, pair: false, net: 200, balanceAfter: 400 });
+    expect(result.movements).toContainEqual({ accountId: "__house", delta: -203 });
   });
 
   it("charges the full stake for a loss (protects=loss net and player balance; fails_when=a losing spin leaves the balance unchanged; no_claim=chat delivery)", () => {
@@ -86,12 +99,81 @@ describe("emote slot settlement", () => {
 });
 
 describe("emote slot payout rate", () => {
-  it("pins the default fixed return and complete rational rate (protects=exact default fractions 107/128 and 4663/5120; fails_when=the formula or seed/share terms drift; no_claim=rounding in the displayed percentage)", () => {
+  it("includes the unrounded pair payout and jackpot terms as exact fractions (protects=pair, share, and seed calculations as an upper bound; fails_when=the pair payout or share is floored at minStake or the seed is dropped; no_claim=display rounding)", () => {
     const rate = calculateSlotPayoutRate(DEFAULT_EMOTE_SLOT_SETTINGS);
 
-    expect(rate.fixed).toEqual({ numerator: 107n, denominator: 128n });
-    expect(rate.total).toEqual({ numerator: 4_663n, denominator: 5_120n });
+    expect(rate.fixed).toEqual({ numerator: 3_473n, denominator: 4_096n });
+    expect(rate.total).toEqual({ numerator: 284_479n, denominator: 307_200n });
     expect(rate.allowed).toBe(true);
+  });
+
+  it("locks a 1.9999x pair payout at minStake 1 even though stake 1 would floor it to 1x (protects=the save lock cannot be bypassed through minStake rounding; fails_when=pair payout is floored at minStake before the rate; no_claim=other tables)", () => {
+    const settings = { ...DEFAULT_EMOTE_SLOT_SETTINGS, minStake: 1, defaultStake: 50, pairPayoutBp: 19_999, jackpotSeed: 0, jackpotShareBp: 0 };
+    const rate = calculateSlotPayoutRate(settings);
+
+    expect(rate.value).toBeGreaterThanOrEqual(1);
+    expect(rate.allowed).toBe(false);
+    expect(rate.status).toBe("locked");
+    expect(emoteSlotsModule.validateSettings?.(settings)).toBe("payout_rate_too_high");
+  });
+
+  it("never pays more than the computed rate at any enumerated stake (protects=the rate is an upper bound across stakes; fails_when=settlement rounding or the seed term exceeds the bound at stakes 15, 50, or 1000; no_claim=stakes outside the list)", () => {
+    const settings = DEFAULT_EMOTE_SLOT_SETTINGS;
+    const { total } = calculateSlotPayoutRate(settings);
+    const weights = settings.symbols.map(({ weight }) => BigInt(weight));
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0n);
+    const weightCubed = totalWeight ** 3n;
+    const jackpotWeight = weights[settings.symbols.findIndex(({ isJackpot }) => isJackpot)] ?? 0n;
+    const tripleOutcomes = settings.symbols.reduce((sum, symbol, index) => sum + (symbol.isJackpot ? 0n : (weights[index] ?? 0n) ** 3n * BigInt(symbol.triple)), 0n);
+    const pairOutcomes = weights.reduce((sum, weight) => sum + 3n * weight ** 2n * (totalWeight - weight), 0n);
+
+    for (const stakeNumber of [15, 50, 1_000]) {
+      const stake = BigInt(stakeNumber);
+      const pair = (stake * BigInt(settings.pairPayoutBp)) / 10_000n;
+      const share = (stake * BigInt(settings.jackpotShareBp)) / 10_000n;
+      // Expected payout per staked point = paid points / (stake * all outcomes), jackpot pays seed + share.
+      const paid = tripleOutcomes * stake + pairOutcomes * pair + jackpotWeight ** 3n * (BigInt(settings.jackpotSeed) + share);
+      expect(paid * total.denominator).toBeLessThanOrEqual(total.numerator * stake * weightCubed);
+    }
+  });
+
+  it("calculates pair payouts with integer fractions for a small table (protects=pair payout uses unrounded basis points in the rate; fails_when=the rate floors fractional points at minStake; no_claim=other stake sizes)", () => {
+    const table = {
+      ...DEFAULT_EMOTE_SLOT_SETTINGS,
+      minStake: 3,
+      jackpotSeed: 0,
+      jackpotShareBp: 0,
+      pairPayoutBp: 15_000,
+      symbols: DEFAULT_EMOTE_SLOT_SETTINGS.symbols.map((symbol) => ({ ...symbol, weight: 1, triple: 2 })),
+    };
+
+    expect(calculateSlotPayoutRate(table).fixed).toEqual({ numerator: 145n, denominator: 216n });
+    expect(calculateSlotPayoutRate(table).total).toEqual({ numerator: 145n, denominator: 216n });
+  });
+
+  it("keeps the default rate in the 85–95 percent target band (protects=the rebalance supports a 1.5× pair payout; fails_when=the published default table drifts outside target; no_claim=existing channel tables)", () => {
+    const rate = calculateSlotPayoutRate(DEFAULT_EMOTE_SLOT_SETTINGS);
+
+    expect(rate.status).toBe("target");
+    expect(rate.value).toBeGreaterThanOrEqual(0.85);
+    expect(rate.value).toBeLessThanOrEqual(0.95);
+  });
+
+  it("keeps the pre-change default table playable at the refund multiplier and locked at 1.5× (protects=saved tables balanced for refunds are read at 1× instead of jumping past 100 percent; fails_when=a legacy table without a stored pair payout reads at 1.5× or its 1× rate drifts; no_claim=other legacy tables)", () => {
+    const legacyTriples = [7, 7, 12, 20, 20, 2];
+    const legacy = {
+      ...DEFAULT_EMOTE_SLOT_SETTINGS,
+      symbols: DEFAULT_EMOTE_SLOT_SETTINGS.symbols.map((symbol, index) => ({ ...symbol, triple: legacyTriples[index] ?? 2 })),
+    };
+    Reflect.deleteProperty(legacy, "pairPayoutBp");
+    const read = emoteSlotSettingsReadSchema.parse(legacy);
+
+    expect(read.pairPayoutBp).toBe(10_000);
+    expect(calculateSlotPayoutRate(read).total).toEqual({ numerator: 70_201n, denominator: 76_800n });
+    expect(calculateSlotPayoutRate(read).status).toBe("target");
+    const atOneAndAHalf = calculateSlotPayoutRate({ ...read, pairPayoutBp: 15_000 });
+    expect(atOneAndAHalf.total).toEqual({ numerator: 175_727n, denominator: 153_600n });
+    expect(atOneAndAHalf.status).toBe("locked");
   });
 
   it("marks a rate at one hundred percent as locked (protects=the exact server/client save threshold; fails_when=a rate equal to one remains allowed; no_claim=the rendered lock reason)", () => {
@@ -101,6 +183,7 @@ describe("emote slot payout rate", () => {
     };
 
     expect(calculateSlotPayoutRate(settings).allowed).toBe(false);
+    expect(emoteSlotsModule.validateSettings?.(settings)).toBe("payout_rate_too_high");
   });
 });
 
@@ -136,6 +219,17 @@ describe("emote slot settings", () => {
     expect(emoteSlotSettingsSchema.safeParse({ ...DEFAULT_EMOTE_SLOT_SETTINGS, maxStake: 0 }).success).toBe(false);
     expect(emoteSlotSettingsSchema.safeParse({ ...DEFAULT_EMOTE_SLOT_SETTINGS, minStake: 60, defaultStake: 50 }).success).toBe(false);
   });
+
+  it("defaults a missing pair payout only when reading saved settings and enforces its write range (protects=old channels load at the refund multiplier and writes require an explicit valid basis-point setting; fails_when=legacy settings fail to load, load at 1.5×, or strict writes silently omit the setting; no_claim=server rate validation)", () => {
+    const oldSettings = { ...DEFAULT_EMOTE_SLOT_SETTINGS };
+    Reflect.deleteProperty(oldSettings, "pairPayoutBp");
+
+    expect(emoteSlotSettingsReadSchema.safeParse(oldSettings)).toMatchObject({ success: true, data: { pairPayoutBp: 10_000 } });
+    expect(emoteSlotSettingsSchema.safeParse(oldSettings).success).toBe(false);
+    expect(emoteSlotSettingsSchema.safeParse({ ...DEFAULT_EMOTE_SLOT_SETTINGS, pairPayoutBp: 9_999 }).success).toBe(false);
+    expect(emoteSlotSettingsSchema.safeParse({ ...DEFAULT_EMOTE_SLOT_SETTINGS, pairPayoutBp: 15_000.5 }).success).toBe(false);
+    expect(emoteSlotSettingsSchema.safeParse({ ...DEFAULT_EMOTE_SLOT_SETTINGS, pairPayoutBp: 30_001 }).success).toBe(false);
+  });
 });
 
 describe("emote slot chat domain", () => {
@@ -157,11 +251,15 @@ describe("emote slot chat domain", () => {
 
     const dePair = emoteSlotsCatalog.de.chat.pair
       .replace("{slot.symbols}", "🍒 | 🍒 | 💎")
-      .replace("{slot.net}", "±0")
-      .replace("{slot.balance}", "200")
+      .replace("{slot.net}", "+25")
+      .replace("{slot.balance}", "225")
       .replace("{slot.jackpot}", "1.003");
     expect(formatSlotReply(result.result, table, "de", "nachtfalke", "pair")).toBe(dePair);
     expect(formatSlotReply(result.result, table, "en", "nachtfalke", "pair"))
-      .toBe("🍒 | 🍒 | 💎  Stake back · ±0 · Balance 200 · Jackpot 1,003");
+      .toBe("🍒 | 🍒 | 💎  +25 · Balance 225 · Jackpot 1,003");
+    expect(formatSlotReply(result.result, table, "en", "nachtfalke", "pair", emoteSlotsCatalog.en.chat.pairRefund, 15_000))
+      .toBe("🍒 | 🍒 | 💎  +25 · Balance 225 · Jackpot 1,003");
+    expect(formatSlotReply(result.result, table, "en", "nachtfalke", "pair", undefined, 10_000))
+      .toBe("🍒 | 🍒 | 💎  Stake back · +25 · Balance 225 · Jackpot 1,003");
   });
 });

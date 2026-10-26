@@ -5,6 +5,13 @@ import { emoteSlotsCatalog } from "./locale";
 import { isMessageEnabled } from "../../contracts/message-enabled";
 
 export const EMOTE_SLOTS_MODULE_ID = "emote_slots";
+/** Pair payout of fresh channels and of "reset to defaults" (paired with the rebalanced default table). */
+export const DEFAULT_PAIR_PAYOUT_BP = 15_000;
+/**
+ * Pair payout of saved settings that predate the field: pairs refunded the stake, and those tables were balanced for it.
+ * Reading them at 1.5× would push many past 100 % (locked), so legacy settings keep 1×.
+ */
+export const REFUND_PAIR_PAYOUT_BP = 10_000;
 export type EmoteSlotTextKind = "win" | "loss" | "pair" | "jackpot";
 
 const emoteSlotSymbolSchema = z.object({
@@ -30,6 +37,7 @@ const emoteSlotSymbolSchema = z.object({
 });
 
 const textTemplateSchema = z.string().max(500);
+const pairPayoutBpSchema = z.number().int().min(10_000).max(30_000);
 
 const emoteSlotSettingsObjectSchema = z.object({
   symbols: z.array(emoteSlotSymbolSchema).length(6),
@@ -38,6 +46,7 @@ const emoteSlotSettingsObjectSchema = z.object({
   maxStake: z.number().int().min(1).max(100_000),
   jackpotSeed: z.number().int().min(0).max(1_000_000),
   jackpotShareBp: z.number().int().min(0).max(2_000),
+  pairPayoutBp: pairPayoutBpSchema,
   announceJackpot: z.boolean(),
   cooldownSeconds: z.number().int().min(0).max(3_600),
   chatTarget: z.enum(["all_chats", "source_only", "where_asked"]),
@@ -51,6 +60,9 @@ const emoteSlotSettingsObjectSchema = z.object({
     jackpot: textTemplateSchema,
     jackpotEnabled: z.boolean().optional(),
   }),
+});
+const emoteSlotSettingsReadObjectSchema = emoteSlotSettingsObjectSchema.extend({
+  pairPayoutBp: pairPayoutBpSchema.default(REFUND_PAIR_PAYOUT_BP),
 });
 
 const validateEmoteSlotSettings = (settings: z.output<typeof emoteSlotSettingsObjectSchema>, context: z.RefinementCtx, includeMessages: boolean): void => {
@@ -81,7 +93,7 @@ const validateEmoteSlotSettings = (settings: z.output<typeof emoteSlotSettingsOb
   }
 };
 
-export const emoteSlotSettingsReadSchema = emoteSlotSettingsObjectSchema.superRefine((settings, context) => {
+export const emoteSlotSettingsReadSchema = emoteSlotSettingsReadObjectSchema.superRefine((settings, context) => {
   validateEmoteSlotSettings(settings, context, false);
 });
 export const emoteSlotSettingsSchema = emoteSlotSettingsObjectSchema.superRefine((settings, context) => {
@@ -93,11 +105,11 @@ export type EmoteSlotSymbol = EmoteSlotSettings["symbols"][number];
 export const emoteSlotChatCopyForLanguage = (language: "de" | "en"): typeof emoteSlotsCatalog.de.chat => emoteSlotsCatalog[language].chat;
 
 const defaultSymbols = (): EmoteSlotSymbol[] => [
-  { id: "cherry", source: "emoji", code: "🍒", name: "Cherry", weight: 4, triple: 7, isJackpot: false },
-  { id: "lemon", source: "emoji", code: "🍋", name: "Lemon", weight: 4, triple: 7, isJackpot: false },
-  { id: "bell", source: "emoji", code: "🔔", name: "Bell", weight: 3, triple: 12, isJackpot: false },
-  { id: "star", source: "emoji", code: "⭐", name: "Star", weight: 2, triple: 20, isJackpot: false },
-  { id: "diamond", source: "emoji", code: "💎", name: "Diamond", weight: 2, triple: 20, isJackpot: false },
+  { id: "cherry", source: "emoji", code: "🍒", name: "Cherry", weight: 4, triple: 3, isJackpot: false },
+  { id: "lemon", source: "emoji", code: "🍋", name: "Lemon", weight: 4, triple: 3, isJackpot: false },
+  { id: "bell", source: "emoji", code: "🔔", name: "Bell", weight: 3, triple: 5, isJackpot: false },
+  { id: "star", source: "emoji", code: "⭐", name: "Star", weight: 2, triple: 8, isJackpot: false },
+  { id: "diamond", source: "emoji", code: "💎", name: "Diamond", weight: 2, triple: 8, isJackpot: false },
   { id: "seven", source: "emoji", code: "7️⃣", name: "Seven", weight: 1, triple: 2, isJackpot: true },
 ];
 
@@ -108,6 +120,7 @@ export const DEFAULT_EMOTE_SLOT_SETTINGS: EmoteSlotSettings = {
   maxStake: 500,
   jackpotSeed: 500,
   jackpotShareBp: 700,
+  pairPayoutBp: DEFAULT_PAIR_PAYOUT_BP,
   announceJackpot: true,
   cooldownSeconds: 30,
   chatTarget: "where_asked" satisfies ChatOutputTarget,
