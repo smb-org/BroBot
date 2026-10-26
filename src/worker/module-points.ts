@@ -32,6 +32,7 @@ export const modulePoints = (
         listOpen: () => unavailable(),
         markAnnounced: () => unavailable(),
         join: () => unavailable(),
+        participants: () => unavailable(),
         answer: () => unavailable(),
         resolve: () => unavailable(),
         accept: () => unavailable(),
@@ -70,6 +71,7 @@ export const modulePoints = (
       markAnnounced: (roundId, deadlineAt, alarmKey) => object.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
       join: (roundId, operationId, accountId, login, stake, data) =>
         object.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
+      participants: (roundId, nameLimit) => object.gameRoundParticipants(moduleId, roundId, nameLimit),
       answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
         object.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
       resolve: (roundId, settlement) => object.resolveGameRound(moduleId, roundId, settlement),

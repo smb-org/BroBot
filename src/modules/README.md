@@ -1283,10 +1283,25 @@ Der DO speichert Einsätze und Teilnehmende in den gemeinsamen Rundentabellen;
 der Alarm schließt das Fenster und löst jede Person unabhängig auf. Die Chance
 beginnt bei 50 %, steigt je weiterer Person um zwei Prozentpunkte und ist
 standardmäßig auf 65 % begrenzt. Gewinner erhalten ihren doppelten Einsatz,
-Verlierer verlieren ihren Einsatz an das Hauskonto. Start- und Ergebnistext
-sind lokalisierte Vorlagen; es gibt keine Join-Bestätigungen, damit pro Runde
-nur die Startmeldung und eine kompakte Gewinner-/Verliererzusammenfassung
-gesendet werden. Das Abschalten des Moduls erstattet alle noch offenen Einsätze
+Verlierer verlieren ihren Einsatz an das Hauskonto. Start-, Beitritts- und
+Ergebnistext sind lokalisierte Vorlagen mit je eigenem Schalter; es gibt keine
+Einzelbestätigungen. Pro Runde gehen höchstens drei Zeilen raus: die
+Startmeldung, eine gebündelte Beitrittsliste und eine kompakte
+Gewinner-/Verliererzusammenfassung. Die Beitrittsliste sendet ein Modulalarm
+(`confirm:<Runden-ID>`) zur Fensterhälfte, gerechnet ab der tatsächlichen
+Frist der Runde; sie entfällt, solange nur die startende Person dabei ist. Der
+Sendeclaim `round:<Runden-ID>:confirm` verhindert Doppelsendungen bei Retry und
+Neustart. Teilnehmerzahl, Namen und Gesamteinsatz liest der Alarm über
+`points.rounds.participants(roundId, nameLimit)`.
+Einsätze werden unter `msg:<Nachrichten-ID>` gebucht, sodass eine erneut
+zugestellte Chatnachricht keine spätere Runde ein zweites Mal belastet. Die
+Abklingzeit prüft `!heist` beim Start nur (0 s) und beginnt erst beim
+Abschluss der Runde (`onPointRoundResolved`, gerechnet ab `resolvedAt`);
+eine verspätet zugestellte Startmeldung verkürzt sie also nicht. Jede
+Nachricht deklariert genau die Variablen, mit denen sie gerendert wird
+(Start: `heist.seconds`; Beitrittsliste: `heist.count`, `heist.names`,
+`heist.pot`; Ergebnis: `heist.winners`, `heist.losers`, `heist.chance`).
+Das Abschalten des Moduls erstattet alle noch offenen Einsätze
 über den gemeinsamen Abbruchpfad. Einstellungen begrenzen Einsatz, Join-Zeit,
 Abklingzeit und optionale Chancenwerte. Der feste Befehl, Nachrichtenvariablen
 und Paneltexte sind zweisprachig in Modul- und Panelkatalogen hinterlegt.

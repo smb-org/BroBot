@@ -4,11 +4,18 @@ export interface HeistCatalog {
   title: string;
   description: string;
   startText: string;
+  confirmText: string;
   resultText: string;
   noParticipants: string;
   moreNames: (count: number) => string;
   joinWindowVariableLabel: string;
   joinWindowVariableDescription: string;
+  countVariableLabel: string;
+  countVariableDescription: string;
+  namesVariableLabel: string;
+  namesVariableDescription: string;
+  potVariableLabel: string;
+  potVariableDescription: string;
   chanceVariableLabel: string;
   chanceVariableDescription: string;
   winnersVariableLabel: string;
@@ -29,11 +36,18 @@ export const heistCatalog: Readonly<Record<ModuleLanguage, HeistCatalog>> = {
     title: "Überfall",
     description: "Gemeinsamer Punkteüberfall mit individueller Erfolgschance.",
     startText: "💰 Überfall offen für {heist.seconds} s: Mit !heist <Einsatz> mitmachen.",
+    confirmText: "{heist.count} dabei: {heist.names} · Pott {heist.pot}",
     resultText: "Überfall: Gewinner ×2: {heist.winners} · verloren: {heist.losers} · Chance {heist.chance}%.",
     noParticipants: "niemand",
     moreNames: (count) => `+${String(count)} weitere`,
     joinWindowVariableLabel: "Beitrittszeit",
     joinWindowVariableDescription: "Sekunden bis zum Ende des Beitrittsfensters.",
+    countVariableLabel: "Teilnehmerzahl",
+    countVariableDescription: "Anzahl der Personen, die bis zur Mitte des Beitrittsfensters dabei sind.",
+    namesVariableLabel: "Teilnehmende",
+    namesVariableDescription: "Bis zu fünf Namen in Beitrittsreihenfolge mit einem Hinweis auf weitere.",
+    potVariableLabel: "Pott",
+    potVariableDescription: "Summe aller bisherigen Einsätze.",
     chanceVariableLabel: "Erfolgschance",
     chanceVariableDescription: "Erfolgschance jeder Person in dieser Runde.",
     winnersVariableLabel: "Gewinner",
@@ -52,11 +66,18 @@ export const heistCatalog: Readonly<Record<ModuleLanguage, HeistCatalog>> = {
     title: "Heist",
     description: "A shared points heist with an individual chance to succeed.",
     startText: "💰 Heist open for {heist.seconds} s: join with !heist <stake>.",
+    confirmText: "{heist.count} in: {heist.names} · pot {heist.pot}",
     resultText: "Heist: winners ×2: {heist.winners} · lost: {heist.losers} · {heist.chance}% chance.",
     noParticipants: "nobody",
     moreNames: (count) => `+${String(count)} more`,
     joinWindowVariableLabel: "Join window",
     joinWindowVariableDescription: "Seconds until the join window closes.",
+    countVariableLabel: "Participants",
+    countVariableDescription: "Number of people in by the middle of the join window.",
+    namesVariableLabel: "Names",
+    namesVariableDescription: "Up to five names in join order followed by a count of the rest.",
+    potVariableLabel: "Pot",
+    potVariableDescription: "Sum of all stakes so far.",
     chanceVariableLabel: "Success chance",
     chanceVariableDescription: "Each participant's success chance for this round.",
     winnersVariableLabel: "Winners",
@@ -73,11 +94,12 @@ export const heistCatalog: Readonly<Record<ModuleLanguage, HeistCatalog>> = {
   },
 };
 
-export const formatHeistNames = (logins: readonly string[], language: ModuleLanguage): string => {
+/** `total` may exceed the list when only the first names were loaded. */
+export const formatHeistNames = (logins: readonly string[], language: ModuleLanguage, total = logins.length): string => {
   const copy = heistCatalog[language];
   if (logins.length === 0) return copy.noParticipants;
   const names = logins.slice(0, 5).map((login) => login.slice(0, 25));
-  const remaining = logins.length - names.length;
+  const remaining = total - names.length;
   if (remaining > 0) names.push(copy.moreNames(remaining));
   return names.join(", ");
 };

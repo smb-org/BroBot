@@ -1,32 +1,14 @@
 import type { BotModule, ModuleAlarmContext, ModulePointRoundAnnouncement, ModulePointRoundResult } from "../contract";
 import { isMessageEnabled } from "../../contracts/message-enabled";
 import { HEIST_TEMPLATE_FIELDS, HEIST_TEMPLATE_VARIABLES, heistTemplateVariableGroup } from "./contracts/template-variables";
-import { HEIST_COMMAND, HEIST_MODULE_ID, heistSettingsForLanguage, heistSettingsReadSchema, heistSettingsSchema, type HeistRoundData } from "./contracts";
+import { HEIST_COMMAND, HEIST_MODULE_ID, heistSettingsForLanguage, heistSettingsReadSchema, heistSettingsSchema } from "./contracts";
+import { heistConfirmAlarm } from "./alarm";
 import { formatHeistNames, heistCatalog } from "./locale";
-import { processHeistMessage } from "./service";
-
-const record = (value: unknown): Record<string, unknown> | null =>
-  typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
-
-const roundData = (value: unknown): HeistRoundData | null => {
-  const data = record(value);
-  return data !== null && (data.language === "de" || data.language === "en") &&
-    Number.isSafeInteger(data.joinWindowSeconds) && (data.joinWindowSeconds as number) > 0 &&
-    typeof data.startMessageId === "string" && typeof data.startText === "string" && typeof data.resultText === "string" &&
-    (data.startTextEnabled === undefined || typeof data.startTextEnabled === "boolean") &&
-    (data.resultTextEnabled === undefined || typeof data.resultTextEnabled === "boolean")
-    ? data as unknown as HeistRoundData
-    : null;
-};
-
-const oneLine = (value: string): string => {
-  const compact = value.replace(/[\r\n]+/gu, " ").trim();
-  const characters = Array.from(compact);
-  return characters.length > 500 ? `${characters.slice(0, 499).join("")}…` : compact;
-};
+import { heistRoundData, oneLine, record } from "./round-data";
+import { processHeistMessage, startHeistCooldown } from "./service";
 
 const formatAnnouncement = async (context: ModuleAlarmContext, round: ModulePointRoundAnnouncement) => {
-  const data = roundData(round.data);
+  const data = heistRoundData(round.data);
   if (data === null) return null;
   if (!isMessageEnabled(data, "startText", "startTextEnabled")) return { kind: "silent" as const };
   const rendered = await context.renderTemplate(round.text, { "heist.seconds": data.joinWindowSeconds });
@@ -39,7 +21,7 @@ const formatAnnouncement = async (context: ModuleAlarmContext, round: ModulePoin
 };
 
 const formatResult = async (context: ModuleAlarmContext, round: ModulePointRoundResult) => {
-  const data = roundData(round.data);
+  const data = heistRoundData(round.data);
   const result = record(round.result);
   if (data === null || result === null || !Number.isSafeInteger(result.chancePercent) || !Array.isArray(result.winners) ||
       !Array.isArray(result.losers) || !result.winners.every((value) => typeof record(value)?.login === "string") ||
@@ -89,11 +71,13 @@ export const heistModule: BotModule<typeof heistSettingsSchema> = {
   templateContext: "event",
   templateVariableCatalog: HEIST_TEMPLATE_VARIABLES,
   templateVariableGroup: heistTemplateVariableGroup,
+  alarms: [heistConfirmAlarm],
   eventSubTypes: ["channel.chat.message"],
   dryRunSilentReason: "round_answers",
   pointRoundCancellationNotice: false,
   retryPointRoundRateLimitedResults: true,
   chatCommandNames: () => [HEIST_COMMAND],
+  onPointRoundResolved: startHeistCooldown,
   formatPointRoundAnnouncement: formatAnnouncement,
   formatPointRoundResult: formatResult,
   handleEvent: processHeistMessage,

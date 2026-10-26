@@ -67,6 +67,7 @@ const catalog = (language: DashboardLanguage): SettingsEditorCatalog => {
       baseChance: { label: de ? "Grundchance" : "Base chance", hint: de ? "Erfolgschance mit einer teilnehmenden Person." : "Success chance with one participant.", unit: "%" },
       maxChance: { label: de ? "Maximale Chance" : "Chance cap", hint: de ? "Die Chance steigt um 2 Prozentpunkte pro weiterer Person bis zu diesem Wert." : "Chance rises by 2 percentage points per additional participant, up to this value.", unit: "%", invalidError: de ? "Muss mindestens der Grundchance entsprechen." : "Must be at least the base chance." },
       startText: { label: de ? "Startnachricht" : "Start message", hint: de ? "Wird als Antwort auf den Startbefehl gesendet." : "Sent as a reply to the command that starts the round.", requiredError: de ? "Text fehlt." : "Text is required." },
+      confirmText: { label: de ? "Beitrittsliste" : "Join list", hint: de ? "Eine Zeile in der Mitte des Beitrittsfensters mit allen, die dabei sind, und dem Pott. Entfällt, solange niemand außer der startenden Person dabei ist." : "One line in the middle of the join window listing who is in and the pot. Skipped while nobody but the starter has joined.", requiredError: de ? "Text fehlt." : "Text is required." },
       resultText: { label: de ? "Ergebnisnachricht" : "Result message", hint: de ? "Eine kompakte Zusammenfassung mit Gewinnern und Verlierern." : "One compact summary with winners and losers.", requiredError: de ? "Text fehlt." : "Text is required." },
     },
   };

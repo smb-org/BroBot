@@ -26,8 +26,11 @@ describe("heist settings", () => {
       baseChance: 50,
       maxChance: 65,
       startTextEnabled: true,
+      confirmTextEnabled: true,
       resultTextEnabled: true,
     });
+    expect(settings.confirmText).toBe("{heist.count} in: {heist.names} · pot {heist.pot}");
+    expect(heistSettingsForLanguage("de").confirmText).toBe("{heist.count} dabei: {heist.names} · Pott {heist.pot}");
     expect(heistSettingsSchema.safeParse(settings).success).toBe(true);
   });
 
@@ -36,11 +39,14 @@ describe("heist settings", () => {
     const legacy = { ...settings } as Record<string, unknown>;
     delete legacy.startTextEnabled;
     delete legacy.resultTextEnabled;
+    delete legacy.confirmText;
+    delete legacy.confirmTextEnabled;
     delete legacy.baseChance;
     delete legacy.maxChance;
 
     const parsed = heistSettingsReadSchema.parse(legacy);
-    expect(parsed).toMatchObject({ baseChance: 50, maxChance: 65 });
+    expect(parsed).toMatchObject({ baseChance: 50, maxChance: 65, confirmText: "" });
+    expect(parsed.confirmTextEnabled).toBeUndefined();
     expect(parsed.startTextEnabled).toBeUndefined();
     expect(parsed.resultTextEnabled).toBeUndefined();
   });
@@ -51,6 +57,8 @@ describe("heist settings", () => {
     expect(heistSettingsSchema.safeParse({ ...settings, minStake: 101, maxStake: 100 }).success).toBe(false);
     expect(heistSettingsSchema.safeParse({ ...settings, baseChance: 60, maxChance: 59 }).success).toBe(false);
     expect(heistSettingsSchema.safeParse({ ...settings, resultText: "", resultTextEnabled: true }).success).toBe(false);
+    expect(heistSettingsSchema.safeParse({ ...settings, confirmText: "", confirmTextEnabled: true }).success).toBe(false);
+    expect(heistSettingsSchema.safeParse({ ...settings, confirmText: "", confirmTextEnabled: false }).success).toBe(true);
   });
 });
 

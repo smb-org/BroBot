@@ -1,13 +1,12 @@
 import type { SettingsEditorDefinition, SettingsEditorSpec } from "../../../dashboard/ui";
 import type { HeistSettings } from "../contracts";
+import { HEIST_TEMPLATE_VARIABLES } from "../contracts/template-variables";
 import { heistSettingsEditorCatalog } from "./settings-editor-locale";
 
+// The preview fills in the same samples the template catalogue declares, so the two cannot drift apart.
 const templatePreview = (template: string, values: Readonly<Record<string, string>>): string =>
   Object.entries({
-    "heist.seconds": "60",
-    "heist.chance": "54",
-    "heist.winners": "frostfern, moonmoss",
-    "heist.losers": "starling",
+    ...Object.fromEntries(HEIST_TEMPLATE_VARIABLES.map(({ name, sample }) => [name, sample])),
     ...values,
   }).reduce((preview, [key, value]) => preview.replaceAll(`{${key}}`, value), template);
 
@@ -27,6 +26,7 @@ const spec: SettingsEditorSpec<HeistSettings> = {
     ] },
     { id: "messages", icon: "tabMessages", fields: [
       { kind: "message", key: "startText", enabledKey: "startTextEnabled", preview: (template, values) => templatePreview(template, values) },
+      { kind: "message", key: "confirmText", enabledKey: "confirmTextEnabled", preview: (template, values) => templatePreview(template, values) },
       { kind: "message", key: "resultText", enabledKey: "resultTextEnabled", preview: (template, values) => templatePreview(template, values) },
     ] },
   ],
@@ -42,6 +42,7 @@ const definition: SettingsEditorDefinition<HeistSettings> = {
   className: "heist-settings-editor",
   messageFields: [
     { messagePath: "startText", enabledPath: "startTextEnabled" },
+    { messagePath: "confirmText", enabledPath: "confirmTextEnabled" },
     { messagePath: "resultText", enabledPath: "resultTextEnabled" },
   ],
 };

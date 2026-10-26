@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { heistModule } from "../../src/modules/heist";
 import { heistSettingsForLanguage } from "../../src/modules/heist/contracts";
+import { HEIST_TEMPLATE_FIELDS } from "../../src/modules/heist/contracts/template-variables";
 import { processHeistMessage } from "../../src/modules/heist/service";
 
 const renderContext = {
@@ -80,7 +81,7 @@ describe("heist chat output", () => {
     expect(processed.actions).toEqual([]);
     expect(points.rounds.join).toHaveBeenCalledWith(
       "fictional_heist_round",
-      "round:fictional_heist_round:participant:viewer_anna",
+      "msg:fictional-join-message",
       "viewer_anna",
       "frostfern",
       75,
@@ -145,20 +146,75 @@ describe("heist chat output", () => {
       chatStatus: ["viewer"],
     };
 
-    const processed = await processHeistMessage(event, { points, channelLanguage: () => Promise.resolve("en") } as unknown as ModuleExecutionContext);
+    const scheduleAlarm = vi.fn(() => Promise.resolve());
+    const processed = await processHeistMessage(event, { points, scheduleAlarm, channelLanguage: () => Promise.resolve("en") } as unknown as ModuleExecutionContext);
     const [roundId, data, operationId, accountId, login, stake, cooldown] = openArgs;
 
     expect(processed.actions).toEqual([]);
+    // The midway line is planned for half of the 60 s window; the alarm corrects it to the real deadline.
+    expect(scheduleAlarm).toHaveBeenCalledWith("confirm", `confirm:${String(roundId)}`, expect.any(Number));
+    const [, , plannedAt] = scheduleAlarm.mock.calls[0] as unknown as [string, string, number];
+    expect(Math.abs(plannedAt - (Date.now() + 30_000))).toBeLessThan(5_000);
     expect(roundId).toMatch(/^heist-[a-f0-9]{40}$/u);
-    expect(operationId).toBe(`round:${String(roundId)}:participant:viewer_anna`);
+    expect(operationId).toBe("msg:fictional-start-message");
+    // The pause is only checked here; it starts when the round settles.
     expect([accountId, login, stake, cooldown]).toEqual([
-      "viewer_anna", "frostfern", 100, { key: "between-rounds", seconds: 90 },
+      "viewer_anna", "frostfern", 100, { key: "between-rounds", seconds: 0 },
     ]);
     expect(data).toMatchObject({
       durationS: 60,
       lockKeys: ["heist:active"],
       settlement: { kind: "heist", params: { baseChance: 50, maxChance: 65 } },
       startMessageId: "fictional-start-message",
+      confirmText: settings.confirmText,
+      confirmTextEnabled: true,
+      cooldownSeconds: 30,
     });
+  });
+});
+
+describe("heist template variables", () => {
+  it("declares for each message exactly the values it is rendered with, and previews use the same samples", async () => {
+    const settings = heistSettingsForLanguage("en");
+    const data = {
+      language: "en" as const,
+      joinWindowSeconds: 60,
+      startMessageId: "fictional-start-message",
+      startText: settings.startText,
+      startTextEnabled: true,
+      confirmText: settings.confirmText,
+      confirmTextEnabled: true,
+      resultText: settings.resultText,
+      resultTextEnabled: true,
+    };
+    const rendered: Record<string, string[]> = {};
+    const capture = (field: string) => ({
+      renderTemplate: (text: string, values: Record<string, string | number> = {}) => {
+        rendered[field] = Object.keys(values).sort((left, right) => left.localeCompare(right));
+        return Promise.resolve({ text });
+      },
+    }) as unknown as ModuleAlarmContext;
+
+    await heistModule.formatPointRoundAnnouncement?.(capture("startText"), { roundId: "fictional_heist_round", data, text: settings.startText });
+    await heistModule.formatPointRoundResult?.(capture("resultText"), {
+      roundId: "fictional_heist_round",
+      data,
+      result: { chancePercent: 50, participantCount: 1, winners: [], losers: [{ accountId: "viewer_anna", login: "frostfern", stake: 50 }] },
+      resolvedAt: "2100-01-01T00:00:00.000Z",
+    });
+    const alarmContext = {
+      ...capture("confirmText"),
+      points: { rounds: {
+        active: () => Promise.resolve({ roundId: "fictional_heist_round", state: "open", deadlineAt: Date.now() + 30_000, data }),
+        participants: () => Promise.resolve({ count: 2, totalStake: 100, logins: ["frostfern", "moonmoss"] }),
+      } },
+      sendChat: () => Promise.resolve({ sent: true, reason: null, retryable: false, delivery: "delivered" }),
+      schedule: () => Promise.resolve(),
+    } as unknown as ModuleAlarmContext;
+    await heistModule.alarms?.[0]?.handle(alarmContext, "confirm:fictional_heist_round", Date.now());
+
+    for (const [field, variables] of Object.entries(HEIST_TEMPLATE_FIELDS)) {
+      expect(rendered[field], field).toEqual(variables.map(({ name }) => name).sort((left, right) => left.localeCompare(right)));
+    }
   });
 });

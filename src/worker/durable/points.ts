@@ -1167,7 +1167,27 @@ export const pointRoundRow = (sql: PointsSql, roundId: string): RoundRow | null 
     roundId,
   ).toArray()[0] ?? null;
 
-export const pointRoundDeliveryGateIsCurrentSync = (sql: PointsSql, round: Pick<RoundRow, "module_id" | "gate_revision">): boolean => {
+export const pointRoundParticipantsSync = (
+  sql: PointsSql,
+  moduleId: string,
+  roundId: string,
+  nameLimit: number,
+): { count: number; totalStake: number; logins: string[] } => {
+  const round = pointRoundRow(sql, roundId);
+  if (round === null || round.module_id !== moduleId) return { count: 0, totalStake: 0, logins: [] };
+  const totals = sql.exec<{ count: number; total: number }>(
+    "SELECT COUNT(*) AS count, COALESCE(SUM(stake), 0) AS total FROM game_round_participants WHERE round_id = ?",
+    roundId,
+  ).one();
+  const logins = sql.exec<{ login: string }>(
+    "SELECT login FROM game_round_participants WHERE round_id = ? ORDER BY rowid LIMIT ?",
+    roundId,
+    Math.max(0, Math.min(Math.trunc(nameLimit), 50)),
+  ).toArray().map(({ login }) => login);
+  return { count: totals.count, totalStake: totals.total, logins };
+};
+
+export const pointRoundDeliveryGateIsCurrentSync =(sql: PointsSql, round: Pick<RoundRow, "module_id" | "gate_revision">): boolean => {
   const gate = sql.exec<{ closed: number; last_disabled_revision: number }>(
     "SELECT closed, last_disabled_revision FROM module_gates WHERE module_id = ?",
     round.module_id,
