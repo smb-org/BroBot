@@ -35,8 +35,10 @@ export interface SlotPayoutRate {
 }
 
 /**
- * Calculates expected payout using integer fractions, including rounded jackpot share and seed.
- * Pair payout is floored once at minStake, matching settlement; rates can vary slightly at other stakes.
+ * Calculates expected payout using integer fractions, including jackpot share and seed.
+ * The result is an upper bound across all permitted stakes (stake >= minStake): pair payout and
+ * jackpot share use unrounded basis points, the seed is divided by minStake (its largest
+ * per-point weight). Settlement rounding down can only pay less than this rate.
  */
 export const calculateSlotPayoutRate = (settings: Pick<EmoteSlotSettings,
   "symbols" | "minStake" | "jackpotSeed" | "jackpotShareBp" | "pairPayoutBp">): SlotPayoutRate => {
@@ -51,16 +53,14 @@ export const calculateSlotPayoutRate = (settings: Pick<EmoteSlotSettings,
     return sum + weight ** 3n * triple;
   }, 0n);
   const minimumStake = BigInt(settings.minStake);
-  const pairPayoutPoints = (minimumStake * BigInt(settings.pairPayoutBp)) / 10_000n;
   const pairOutcomes = weights.reduce((sum, weight) => sum + 3n * weight ** 2n * (totalWeight - weight), 0n);
-  const fixedNumerator = tripleNumerator * minimumStake + pairOutcomes * pairPayoutPoints;
-  const fixedDenominator = weightCubed * minimumStake;
-  const fixed = exactRate(fixedNumerator, fixedDenominator);
-  const sharePoints = (minimumStake * BigInt(settings.jackpotShareBp)) / 10_000n;
-  const seedPointsNumerator = BigInt(settings.jackpotSeed) * jackpotWeight ** 3n;
-  const totalNumerator = fixedNumerator + sharePoints * weightCubed + seedPointsNumerator;
-  const totalDenominator = fixedDenominator;
-  const total = exactRate(totalNumerator, totalDenominator);
+  // Common denominator: weightCubed * minStake * 10_000. Pair and share use unrounded basis points.
+  const denominator = weightCubed * minimumStake * 10_000n;
+  const fixedNumerator = tripleNumerator * minimumStake * 10_000n + pairOutcomes * minimumStake * BigInt(settings.pairPayoutBp);
+  const fixed = exactRate(fixedNumerator, denominator);
+  const shareNumerator = BigInt(settings.jackpotShareBp) * minimumStake * weightCubed;
+  const seedNumerator = BigInt(settings.jackpotSeed) * jackpotWeight ** 3n * 10_000n;
+  const total = exactRate(fixedNumerator + shareNumerator + seedNumerator, denominator);
   const one = { numerator: 1n, denominator: 1n };
   const eightyFivePercent = { numerator: 85n, denominator: 100n };
   const ninetyFivePercent = { numerator: 95n, denominator: 100n };

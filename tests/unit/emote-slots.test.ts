@@ -99,15 +99,45 @@ describe("emote slot settlement", () => {
 });
 
 describe("emote slot payout rate", () => {
-  it("includes the floored pair payout and jackpot terms as exact fractions (protects=pair, share, and seed calculations at minimum stake; fails_when=the pair payout is treated as a float or ignores point flooring; no_claim=display rounding)", () => {
+  it("includes the unrounded pair payout and jackpot terms as exact fractions (protects=pair, share, and seed calculations as an upper bound; fails_when=the pair payout or share is floored at minStake or the seed is dropped; no_claim=display rounding)", () => {
     const rate = calculateSlotPayoutRate(DEFAULT_EMOTE_SLOT_SETTINGS);
 
-    expect(rate.fixed).toEqual({ numerator: 17_051n, denominator: 20_480n });
-    expect(rate.total).toEqual({ numerator: 18_583n, denominator: 20_480n });
+    expect(rate.fixed).toEqual({ numerator: 3_473n, denominator: 4_096n });
+    expect(rate.total).toEqual({ numerator: 284_479n, denominator: 307_200n });
     expect(rate.allowed).toBe(true);
   });
 
-  it("calculates pair payouts with integer fractions for a small table (protects=pair payout floors at minStake before rate calculation; fails_when=the rate assumes fractional points; no_claim=other stake sizes)", () => {
+  it("locks a 1.9999x pair payout at minStake 1 even though stake 1 would floor it to 1x (protects=the save lock cannot be bypassed through minStake rounding; fails_when=pair payout is floored at minStake before the rate; no_claim=other tables)", () => {
+    const settings = { ...DEFAULT_EMOTE_SLOT_SETTINGS, minStake: 1, defaultStake: 50, pairPayoutBp: 19_999, jackpotSeed: 0, jackpotShareBp: 0 };
+    const rate = calculateSlotPayoutRate(settings);
+
+    expect(rate.value).toBeGreaterThanOrEqual(1);
+    expect(rate.allowed).toBe(false);
+    expect(rate.status).toBe("locked");
+    expect(emoteSlotsModule.validateSettings?.(settings)).toBe("payout_rate_too_high");
+  });
+
+  it("never pays more than the computed rate at any enumerated stake (protects=the rate is an upper bound across stakes; fails_when=settlement rounding or the seed term exceeds the bound at stakes 15, 50, or 1000; no_claim=stakes outside the list)", () => {
+    const settings = DEFAULT_EMOTE_SLOT_SETTINGS;
+    const { total } = calculateSlotPayoutRate(settings);
+    const weights = settings.symbols.map(({ weight }) => BigInt(weight));
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0n);
+    const weightCubed = totalWeight ** 3n;
+    const jackpotWeight = weights[settings.symbols.findIndex(({ isJackpot }) => isJackpot)] ?? 0n;
+    const tripleOutcomes = settings.symbols.reduce((sum, symbol, index) => sum + (symbol.isJackpot ? 0n : (weights[index] ?? 0n) ** 3n * BigInt(symbol.triple)), 0n);
+    const pairOutcomes = weights.reduce((sum, weight) => sum + 3n * weight ** 2n * (totalWeight - weight), 0n);
+
+    for (const stakeNumber of [15, 50, 1_000]) {
+      const stake = BigInt(stakeNumber);
+      const pair = (stake * BigInt(settings.pairPayoutBp)) / 10_000n;
+      const share = (stake * BigInt(settings.jackpotShareBp)) / 10_000n;
+      // Expected payout per staked point = paid points / (stake * all outcomes), jackpot pays seed + share.
+      const paid = tripleOutcomes * stake + pairOutcomes * pair + jackpotWeight ** 3n * (BigInt(settings.jackpotSeed) + share);
+      expect(paid * total.denominator).toBeLessThanOrEqual(total.numerator * stake * weightCubed);
+    }
+  });
+
+  it("calculates pair payouts with integer fractions for a small table (protects=pair payout uses unrounded basis points in the rate; fails_when=the rate floors fractional points at minStake; no_claim=other stake sizes)", () => {
     const table = {
       ...DEFAULT_EMOTE_SLOT_SETTINGS,
       minStake: 3,
@@ -117,8 +147,8 @@ describe("emote slot payout rate", () => {
       symbols: DEFAULT_EMOTE_SLOT_SETTINGS.symbols.map((symbol) => ({ ...symbol, weight: 1, triple: 2 })),
     };
 
-    expect(calculateSlotPayoutRate(table).fixed).toEqual({ numerator: 65n, denominator: 108n });
-    expect(calculateSlotPayoutRate(table).total).toEqual({ numerator: 65n, denominator: 108n });
+    expect(calculateSlotPayoutRate(table).fixed).toEqual({ numerator: 145n, denominator: 216n });
+    expect(calculateSlotPayoutRate(table).total).toEqual({ numerator: 145n, denominator: 216n });
   });
 
   it("keeps the default rate in the 85–95 percent target band (protects=the rebalance supports a 1.5× pair payout; fails_when=the published default table drifts outside target; no_claim=existing channel tables)", () => {
@@ -139,10 +169,10 @@ describe("emote slot payout rate", () => {
     const read = emoteSlotSettingsReadSchema.parse(legacy);
 
     expect(read.pairPayoutBp).toBe(10_000);
-    expect(calculateSlotPayoutRate(read).total).toEqual({ numerator: 4_663n, denominator: 5_120n });
+    expect(calculateSlotPayoutRate(read).total).toEqual({ numerator: 70_201n, denominator: 76_800n });
     expect(calculateSlotPayoutRate(read).status).toBe("target");
     const atOneAndAHalf = calculateSlotPayoutRate({ ...read, pairPayoutBp: 15_000 });
-    expect(atOneAndAHalf.total).toEqual({ numerator: 2_881n, denominator: 2_560n });
+    expect(atOneAndAHalf.total).toEqual({ numerator: 175_727n, denominator: 153_600n });
     expect(atOneAndAHalf.status).toBe("locked");
   });
 
