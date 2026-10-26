@@ -4,6 +4,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { PanelChannelControl, PanelChannelControls } from "../panel-contract";
 import type { RealtimeEnvelope, RealtimeEventLogHint, RealtimeMessage } from "../realtime-contract";
 import { REALTIME_PROTOCOL } from "../realtime-contract";
+import { RealtimeMessageIdCache } from "../realtime-message-ids";
 import {
   cancelDashboardRealtimeRetries,
   invalidateDashboardChannelQueries,
@@ -150,7 +151,7 @@ interface PanelSocketConnection {
   reconnectAttempt: number;
   disposed: boolean;
   references: number;
-  seenMessageIds: Set<string>;
+  seenMessageIds: RealtimeMessageIdCache;
 }
 
 const panelSocketConnections = new Map<string, PanelSocketConnection>();
@@ -241,7 +242,7 @@ const acquirePanelSocket = (channelId: string, queryClient: QueryClient): (() =>
       reconnectAttempt: 0,
       disposed: false,
       references: 0,
-      seenMessageIds: new Set(),
+      seenMessageIds: new RealtimeMessageIdCache(),
     };
     panelSocketConnections.set(channelId, connection);
     connectPanelSocket(channelId, connection);
