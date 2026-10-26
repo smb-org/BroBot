@@ -69,6 +69,46 @@ describe("statistics trends derivation", () => {
     ]);
   });
 
+  it("derives streams, heatmap and categories from the windows and metadata together", () => {
+    const trends = deriveStatisticsTrends([
+      window("2026-09-24T18:00:00.000Z", "previous-stream", { viewerCount: 70 }),
+      window("2026-10-20T18:00:00.000Z", "stream-a", { viewerCount: 100 }),
+      window("2026-10-20T18:05:00.000Z", "stream-a", { viewerCount: 200 }),
+      window("2026-10-22T19:00:00.000Z", "stream-b", { viewerCount: 50 }),
+    ], [
+      metadata("2026-09-20T09:00:00.000Z", "Game C"),
+      metadata("2026-10-20T17:00:00.000Z", "Game A"),
+      metadata("2026-10-22T19:02:00.000Z", "Game B"),
+    ], { weeks: 4, now: "2026-10-25T12:00:00.000Z", timeZone: "Europe/Berlin" });
+
+    expect(trends.kpis).toMatchObject({ streams: 2, streamHours: 0.25, averageViewers: 350 / 3 });
+    expect(trends.previousKpis).toMatchObject({ streams: 1, averageViewers: 70 });
+    expect(trends.heatmap).toEqual([
+      { weekday: 1, hour: 20, averageViewers: 150, streams: 1 },
+      { weekday: 3, hour: 21, averageViewers: 50, streams: 1 },
+    ]);
+    expect(trends.categories).toEqual([
+      expect.objectContaining({ name: "Game A", streams: 2, streamHours: 12 / 60 }),
+      expect.objectContaining({ name: "Game B", streams: 1, streamHours: 3 / 60 }),
+    ]);
+  });
+
+  it("stays fast on a year of streams with a long metadata history", () => {
+    const start = Date.parse("2025-11-01T18:00:00.000Z");
+    const windows = Array.from({ length: 300 }, (_, stream) => Array.from({ length: 40 }, (_unused, index) =>
+      window(new Date(start + stream * 30 * 3_600_000 + index * 300_000).toISOString(), `stream-${String(stream)}`)),
+    ).flat();
+    const timeline = Array.from({ length: 6_000 }, (_, index) =>
+      metadata(new Date(start - 86_400_000 + index * 3_600_000).toISOString(), `Game ${String(index % 20)}`));
+    const began = performance.now();
+
+    const trends = deriveStatisticsTrends(windows, timeline, { weeks: 52, now: "2026-10-31T12:00:00.000Z", timeZone: "Europe/Berlin" });
+
+    expect(trends.kpis.streams + trends.previousKpis.streams).toBeGreaterThan(200);
+    // Coarse guard against per-stream rescans of the whole timeline, not a benchmark.
+    expect(performance.now() - began).toBeLessThan(3_000);
+  });
+
   it("returns a fixed set of empty weekly buckets when the selected range has no windows", () => {
     const trends = deriveStatisticsTrends([], [], { weeks: 4, now: "2026-11-02T12:00:00.000Z", timeZone: "Europe/Berlin" });
 

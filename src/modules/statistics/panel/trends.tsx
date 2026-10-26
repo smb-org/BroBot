@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from "react";
 
 import { useModuleQuery } from "../../../dashboard/data/module-query";
 import { Icon } from "../../../dashboard/ui";
@@ -102,7 +102,8 @@ const WeekChart = ({ data, language, labels }: {
   language: "de" | "en";
   labels: ReturnType<typeof statisticsTrendsTexts>;
 }): ReactElement => {
-  const containerRef = useRef<HTMLDivElement>(null);
+  // A callback ref: the chart container comes and goes with the range, so the observer follows it.
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(TREND_PLOT.width);
   const hasStreams = data.kpis.streams > 0;
   const viewerMaximum = Math.max(50, Math.ceil(Math.max(0, ...data.weekly.map(({ averageViewers }) => averageViewers ?? 0)) / 50) * 50);
@@ -114,7 +115,6 @@ const WeekChart = ({ data, language, labels }: {
   const linePath = statisticsChartLinePath(linePoints, 0, data.weekly.length, hourMaximum, width, TREND_PLOT);
 
   useEffect(() => {
-    const container = containerRef.current;
     if (container === null) return;
     const observer = new ResizeObserver((entries) => {
       const nextWidth = entries[0]?.contentRect.width ?? container.getBoundingClientRect().width;
@@ -122,16 +122,20 @@ const WeekChart = ({ data, language, labels }: {
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, []);
+  }, [container]);
+  const viewerTicks = statisticsChartAxisTicks(viewerMaximum, 5);
+  // Round away float noise (15 * 0.2 is not exactly 3) and use one precision for the whole axis.
+  const hourTicks = viewerTicks.map(({ fraction }) => Math.round(hourMaximum * (1 - fraction) * 10) / 10);
+  const hourDigits = hourTicks.every((value) => Number.isInteger(value)) ? 0 : 1;
 
   return <section className="statistics-trends__panel statistics-trends__weekly" aria-labelledby="statistics-trends-weekly-title">
     <div className="statistics-trends__panel-heading">
       <h2 id="statistics-trends-weekly-title">{labels.weeklyTitle}</h2>
       <p>{labels.weeklyDescription}</p>
     </div>
-    {hasStreams ? <div className="statistics-trends__week-chart" ref={containerRef}>
+    {hasStreams ? <div className="statistics-trends__week-chart" ref={setContainer}>
       <svg width="100%" height={CHART_HEIGHT} viewBox={`0 0 ${String(width)} ${String(CHART_HEIGHT)}`} role="img" aria-label={labels.weeklyTitle}>
-        {statisticsChartAxisTicks(viewerMaximum, 5).map(({ fraction, value }) => {
+        {viewerTicks.map(({ fraction, value }, tickIndex) => {
           const y = TREND_PLOT.top + (TREND_PLOT.bottom - TREND_PLOT.top) * fraction;
           return <g key={fraction}>
             <line x1={TREND_PLOT.left} x2={width - TREND_PLOT.right} y1={y} y2={y}
@@ -140,7 +144,7 @@ const WeekChart = ({ data, language, labels }: {
               {numberText(value, language)}
             </text>
             <text x={width - TREND_PLOT.right + 8} y={y + 4} textAnchor="start" fill="var(--color-text-3)" fontSize="11">
-              {numberText(hourMaximum * (1 - fraction), language, hourMaximum * (1 - fraction) % 1 === 0 ? 0 : 1)}
+              {numberText(hourTicks[tickIndex] ?? 0, language, hourDigits)}
             </text>
           </g>;
         })}
@@ -204,6 +208,40 @@ const Heatmap = ({ data, language, labels }: {
   const levelFor = (value: number | null): number => value === null || !Number.isFinite(minimum) || !Number.isFinite(maximum)
     ? 0
     : maximum === minimum ? 3 : Math.min(5, Math.floor((value - minimum) / (maximum - minimum) * 5) + 1);
+  // Roving tabindex: one cell is in the tab order, the arrow keys move between cells.
+  const cellElements = useRef(new Map<string, HTMLElement>());
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [detailKey, setDetailKey] = useState<string | null>(null);
+  const firstKey = `0:${String(hours[0] ?? 0)}`;
+  const rovingKey = focusKey !== null && hours.includes(Number(focusKey.split(":")[1])) ? focusKey : firstKey;
+  const cellText = (weekday: number, hour: number): { name: string; detail: string } => {
+    const day = dayLabels[weekday] ?? "";
+    const cell = cellByCoordinate.get(`${String(weekday)}:${String(hour)}`);
+    if (cell === undefined) {
+      const name = labels.heatCellEmpty(day, hour);
+      return { name, detail: name };
+    }
+    const name = labels.heatCell(day, hour, numberText(cell.averageViewers, language));
+    return { name, detail: `${name} · ${String(cell.streams)} ${labels.streams}` };
+  };
+  const detailAt = detailKey === null ? null : detailKey.split(":").map(Number);
+  const detailText = detailAt === null ? "" : cellText(detailAt[0] ?? 0, detailAt[1] ?? 0).detail;
+  const moveFocus = (event: KeyboardEvent<HTMLElement>, weekday: number, hour: number): void => {
+    const steps: Readonly<Record<string, [number, number]>> = {
+      ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0],
+    };
+    const lastHour = hours.at(-1) ?? hour;
+    const first = hours[0] ?? hour;
+    const target = event.key === "Home" ? [weekday, first]
+      : event.key === "End" ? [weekday, lastHour]
+        : (() => {
+          const step = steps[event.key];
+          return step === undefined ? null : [Math.min(6, Math.max(0, weekday + step[0])), Math.min(lastHour, Math.max(first, hour + step[1]))];
+        })();
+    if (target === null || target[0] === undefined || target[1] === undefined) return;
+    event.preventDefault();
+    cellElements.current.get(`${String(target[0])}:${String(target[1])}`)?.focus();
+  };
 
   return <section className="statistics-trends__panel statistics-trends__heatmap" aria-labelledby="statistics-trends-heatmap-title">
     <div className="statistics-trends__panel-heading">
@@ -217,17 +255,24 @@ const Heatmap = ({ data, language, labels }: {
         {dayLabels.map((day, weekday) => <div className="statistics-trends__heat-row" role="row" key={day}>
           <span className="statistics-trends__heat-day" role="rowheader">{day}</span>
           {hours.map((hour) => {
-            const cell = cellByCoordinate.get(`${String(weekday)}:${String(hour)}`);
-            const label = cell === undefined
-              ? `${day}, ${String(hour).padStart(2, "0")}:00 · ${labels.noStream}`
-              : `${day}, ${String(hour).padStart(2, "0")}:00 · ${numberText(cell.averageViewers, language)} ${labels.viewers.toLowerCase()} · ${String(cell.streams)} ${labels.streams.toLowerCase()}`;
+            const key = `${String(weekday)}:${String(hour)}`;
+            const cell = cellByCoordinate.get(key);
             return <span
-              key={`${String(weekday)}:${String(hour)}`}
+              key={key}
+              ref={(element) => {
+                if (element === null) cellElements.current.delete(key);
+                else cellElements.current.set(key, element);
+              }}
               className={`statistics-trends__heat-cell${cell === undefined ? " is-empty" : ""}`}
               role="gridcell"
-              aria-label={label}
-              title={label}
+              tabIndex={key === rovingKey ? 0 : -1}
+              aria-label={cellText(weekday, hour).name}
               data-level={cell === undefined ? 0 : levelFor(cell.averageViewers)}
+              onFocus={() => { setFocusKey(key); setDetailKey(key); }}
+              onBlur={() => { setDetailKey(null); }}
+              onMouseEnter={() => { setDetailKey(key); }}
+              onMouseLeave={() => { setDetailKey(null); }}
+              onKeyDown={(event) => { moveFocus(event, weekday, hour); }}
             >{cell === undefined || hours.length > 15 ? null : numberText(cell.averageViewers, language)}</span>;
           })}
         </div>)}
@@ -240,6 +285,7 @@ const Heatmap = ({ data, language, labels }: {
         <span className="statistics-trends__scale-empty"><i />{labels.noStream}</span>
       </div>
       <p className="statistics-trends__scale-description">{labels.minViewers} · {labels.maxViewers}</p>
+      <p className="statistics-trends__heat-detail" aria-live="polite">{detailText}</p>
     </div> : <EmptyChart />}
   </section>;
 };
@@ -268,23 +314,17 @@ const sortedCategories = (categories: readonly StatisticsTrendCategory[], sort: 
     return comparison === 0 ? left.name.localeCompare(right.name) : direction === "ascending" ? comparison : -comparison;
   });
 
-const CategoryTable = ({ categories, hasStreams, language, labels }: {
+const CategoryTable = ({ categories, hasStreams, sort, direction, onSort, language, labels }: {
   categories: readonly StatisticsTrendCategory[];
   hasStreams: boolean;
+  sort: CategorySort;
+  direction: SortDirection;
+  onSort: (sort: CategorySort) => void;
   language: "de" | "en";
   labels: ReturnType<typeof statisticsTrendsTexts>;
 }): ReactElement => {
-  const [sort, setSort] = useState<CategorySort>("hours");
-  const [direction, setDirection] = useState<SortDirection>("descending");
   const rows = useMemo(() => sortedCategories(categories, sort, direction), [categories, direction, sort]);
   const maxHours = Math.max(0, ...categories.map(({ streamHours }) => streamHours));
-  const sortBy = (nextSort: CategorySort): void => {
-    if (nextSort === sort) setDirection((current) => current === "ascending" ? "descending" : "ascending");
-    else {
-      setSort(nextSort);
-      setDirection(nextSort === "name" ? "ascending" : "descending");
-    }
-  };
   const heading = labels.categoriesTitle(categories.length);
   const headers: readonly { id: CategorySort; label: string; mobile: string }[] = [
     { id: "name", label: labels.category, mobile: labels.categoryShort },
@@ -303,7 +343,7 @@ const CategoryTable = ({ categories, hasStreams, language, labels }: {
       <table aria-label={labels.categories}>
         <colgroup><col className="statistics-trends__column-name" /><col className="statistics-trends__column-streams" /><col className="statistics-trends__column-hours" /><col className="statistics-trends__column-viewers" /><col className="statistics-trends__column-messages" /></colgroup>
         <thead><tr>{headers.map((header) => <th key={header.id} scope="col" aria-sort={sort === header.id ? direction : "none"}>
-          <button type="button" aria-label={header.label} onClick={() => { sortBy(header.id); }}>
+          <button type="button" aria-label={header.label} onClick={() => { onSort(header.id); }}>
             <span className="statistics-trends__desktop-label">{header.label}</span>
             <span className="statistics-trends__mobile-label" aria-hidden="true">{header.mobile}</span>
             <span className="statistics-trends__sort-icon" aria-hidden="true">{sort === header.id
@@ -336,6 +376,8 @@ const LoadingShell = (): ReactElement => <div className="statistics-trends__load
 
 export const StatisticsTrendsPanel = ({ channelId, language = "de" }: ModulePanelProperties): ReactElement => {
   const [weeks, setWeeks] = useState<StatisticsTrendsWeeks>(12);
+  const [sort, setSort] = useState<CategorySort>("hours");
+  const [direction, setDirection] = useState<SortDirection>("descending");
   const labels = statisticsTrendsTexts(language);
   const query = useModuleQuery(
     channelId,
@@ -343,19 +385,35 @@ export const StatisticsTrendsPanel = ({ channelId, language = "de" }: ModulePane
     `trends:${String(weeks)}`,
     (signal) => loadStatisticsTrends(channelId, weeks, signal),
   );
-  const data = query.data;
-  const current: StatisticsTrendKpis = data?.kpis ?? { streams: 0, streamHours: 0, averageViewers: null, messagesPerMinute: null };
+  // Keep the last loaded range on screen while the next one loads; only the first load shows a skeleton.
+  const [shown, setShown] = useState<StatisticsTrendsResponse | undefined>(query.data);
+  if (query.data !== undefined && query.data !== shown) setShown(query.data);
+  const data = query.data ?? shown;
+  const pending = query.data === undefined && shown !== undefined && !query.isError;
+  const sortBy = (nextSort: CategorySort): void => {
+    if (nextSort === sort) setDirection((value) => value === "ascending" ? "descending" : "ascending");
+    else {
+      setSort(nextSort);
+      setDirection(nextSort === "name" ? "ascending" : "descending");
+    }
+  };
+  const current: StatisticsTrendKpis = data?.kpis ??{ streams: 0, streamHours: 0, averageViewers: null, messagesPerMinute: null };
   const previous: StatisticsTrendKpis = data?.previousKpis ?? { streams: 0, streamHours: 0, averageViewers: null, messagesPerMinute: null };
 
-  return <div className="statistics-trends" aria-busy={query.isLoading}>
+  return <div className="statistics-trends" aria-busy={query.isLoading} data-pending={pending ? "true" : "false"}>
     <header className="statistics-trends__toolbar">
       <p role={query.isError ? "alert" : undefined} className={query.isError ? "statistics-trends__error" : undefined}>{query.isError
         ? <>{labels.loadError} <button type="button" onClick={() => { void query.refetch(); }}>{labels.retry}</button></>
         : data === undefined ? <span className="statistics-trends__date-placeholder" aria-hidden="true" /> : dateRangeSummary(data, language)}</p>
-      <div className="statistics-trends__ranges" role="group" aria-label={labels.rangeSwitch}>
-        {RANGES.map((range) => <button type="button" key={range} aria-pressed={weeks === range} onClick={() => { setWeeks(range); }}>
-          {labels.weeks(range)}
-        </button>)}
+      <div className="statistics-trends__controls">
+        <span className="statistics-trends__pending" role="status" aria-label={pending ? labels.updating : undefined}>
+          {pending ? <Icon name="reload" size={16} /> : null}
+        </span>
+        <div className="statistics-trends__ranges" role="group" aria-label={labels.rangeSwitch}>
+          {RANGES.map((range) => <button type="button" key={range} aria-pressed={weeks === range} onClick={() => { setWeeks(range); }}>
+            {labels.weeks(range)}
+          </button>)}
+        </div>
       </div>
     </header>
     {data === undefined ? <LoadingShell /> : <>
@@ -370,7 +428,7 @@ export const StatisticsTrendsPanel = ({ channelId, language = "de" }: ModulePane
         <WeekChart data={data} language={language} labels={labels} />
         <Heatmap data={data} language={language} labels={labels} />
       </div>
-      <CategoryTable categories={data.categories} hasStreams={current.streams > 0} language={language} labels={labels} />
+      <CategoryTable categories={data.categories} hasStreams={current.streams > 0} sort={sort} direction={direction} onSort={sortBy} language={language} labels={labels} />
     </>}
   </div>;
 };

@@ -153,6 +153,12 @@
   .statistics-trends__toolbar { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--spacing-s3); }
   .statistics-trends__toolbar > p { margin: 0; color: var(--color-text-3); font-size: 12px; line-height: 1.4; }
   .statistics-trends__date-placeholder { display: inline-block; width: 34ch; max-width: 52vw; height: 14px; border-radius: var(--radius-control); background: var(--color-border-strong); vertical-align: middle; }
+  .statistics-trends__controls { display: flex; min-width: 0; align-items: center; gap: var(--spacing-s2); }
+  .statistics-trends__pending { display: inline-flex; width: 16px; height: 16px; flex: none; color: var(--color-text-3); }
+  .statistics-trends__pending svg { animation: statistics-trends-spin 1s linear infinite; }
+  .statistics-trends[data-pending="true"] .statistics-trends__kpis, .statistics-trends[data-pending="true"] .statistics-trends__charts, .statistics-trends[data-pending="true"] .statistics-trends__categories { opacity: 0.6; }
+  @keyframes statistics-trends-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .statistics-trends__pending svg { animation: none; } }
   .statistics-trends__ranges { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border: 1px solid var(--color-border); border-radius: var(--radius-control); }
   .statistics-trends__ranges button { min-height: 32px; padding: 0 var(--spacing-s3); border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--color-text-3); font: inherit; font-size: 12px; cursor: pointer; }
   .statistics-trends__ranges button[aria-pressed="true"] { border-color: var(--color-brand); background: var(--color-selection-surface); color: var(--color-text); }
@@ -208,6 +214,9 @@
   .statistics-trends__scale-empty { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
   .statistics-trends__scale-empty i { width: 14px; height: 10px; border: 1px dashed var(--color-border-strong); border-radius: 2px; }
   .statistics-trends__scale-description { margin: 4px 0 0; color: var(--color-text-4); font-size: 11px; }
+  .statistics-trends__heat-cell:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
+  /* Fixed line under the heatmap: hover and focus details never move the layout. */
+  .statistics-trends__heat-detail { min-height: 18px; margin: var(--spacing-s2) 0 0; color: var(--color-text-2); font-size: 12px; line-height: 1.5; }
   .statistics-trends__empty { display: grid; min-height: 240px; place-items: center; padding: var(--spacing-s4); border: 1px dashed var(--color-border-strong); border-radius: var(--radius-control); color: var(--color-text-3); font-size: 12px; text-align: center; }
   .statistics-trends__categories { min-height: 270px; }
   .statistics-trends__table-wrap { width: 100%; min-width: 0; overflow: hidden; }
@@ -247,7 +256,8 @@
     .statistics-trends { gap: var(--spacing-s3); }
     .statistics-trends__toolbar { align-items: flex-start; }
     .statistics-trends__toolbar > p { flex-basis: 100%; }
-    .statistics-trends__ranges { width: 100%; }
+    .statistics-trends__controls { width: 100%; }
+    .statistics-trends__ranges { flex: 1; }
     .statistics-trends__ranges button { flex: 1 1 auto; padding: 0 var(--spacing-s2); }
     .statistics-trends__kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--spacing-s2); }
     .statistics-trends__kpi { min-height: 98px; padding: var(--spacing-s3); }

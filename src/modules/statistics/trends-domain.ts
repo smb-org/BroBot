@@ -233,8 +233,10 @@ export const deriveStatisticsTrends = (
   const formatter = dateFormatter(input.timeZone);
   const currentWindows = periodWindows(windows, start, end);
   const previousWindows = periodWindows(windows, previousRangeStart, start);
-  const summaries = groupStatisticsWindows(currentWindows, timeline);
-  const previousSummaries = groupStatisticsWindows(previousWindows, timeline);
+  // Only stream counts, start times and viewer means are read from the groupings. The category split
+  // below walks the timeline once; passing it here would sort and scan it again for every stream.
+  const summaries = groupStatisticsWindows(currentWindows, []);
+  const previousSummaries = groupStatisticsWindows(previousWindows, []);
 
   return {
     weeks: input.weeks,

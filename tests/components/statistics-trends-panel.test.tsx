@@ -80,6 +80,60 @@ describe("statistics trends page", () => {
     document.querySelectorAll(".statistics-trends__delta").forEach((delta) => { expect(delta.textContent).toBe("–"); });
   });
 
+  it("makes dense heatmap cells keyboard reachable and describes the focused cell in a fixed line", async () => {
+    renderPanel({
+      ...trends(),
+      heatmap: [
+        { weekday: 2, hour: 6, averageViewers: 90, streams: 1 },
+        { weekday: 4, hour: 19, averageViewers: 262, streams: 3 },
+        { weekday: 6, hour: 22, averageViewers: 120, streams: 1 },
+      ],
+    });
+    const grid = await screen.findByRole("grid", { name: "Weekday × start hour" });
+    const cells = within(grid).getAllByRole("gridcell");
+
+    expect(cells.filter((cell) => cell.tabIndex === 0)).toHaveLength(1);
+    expect(cells.every((cell) => cell.textContent === "")).toBe(true);
+    const start = within(grid).getByRole("gridcell", { name: "Wed 06:00: avg 90 viewers" });
+    fireEvent.focus(start);
+    expect(document.querySelector(".statistics-trends__heat-detail")?.textContent).toBe("Wed 06:00: avg 90 viewers · 1 Streams");
+
+    fireEvent.keyDown(start, { key: "ArrowRight" });
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Wed 07:00: no stream");
+    fireEvent.keyDown(document.activeElement as Element, { key: "ArrowDown" });
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Thu 07:00: no stream");
+    expect(document.querySelector(".statistics-trends__heat-detail")?.textContent).toBe("Thu 07:00: no stream");
+    fireEvent.mouseEnter(within(grid).getByRole("gridcell", { name: "Fri 19:00: avg 262 viewers" }));
+    expect(document.querySelector(".statistics-trends__heat-detail")?.textContent).toBe("Fri 19:00: avg 262 viewers · 3 Streams");
+  });
+
+  it("keeps the loaded range and the chosen sort while another range loads", async () => {
+    const { fetchMock } = renderPanel();
+    const categoryTable = await screen.findByRole("table", { name: "Categories" });
+    fireEvent.click(within(categoryTable).getByRole("button", { name: "Category" }));
+    expect(within(categoryTable).getByRole("columnheader", { name: "Category" }).getAttribute("aria-sort")).toBe("ascending");
+
+    const body = { ...trends(), weeks: 4 };
+    let finish: (response: Response) => void = () => undefined;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    fireEvent.click(screen.getByRole("button", { name: "4 weeks" }));
+
+    expect(await screen.findByRole("status", { name: "Updating…" })).toBeTruthy();
+    expect(screen.getByRole("table", { name: "Categories" })).toBe(categoryTable);
+    finish(new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }));
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Updating…" })).toBeNull());
+    expect(within(screen.getByRole("table", { name: "Categories" })).getByRole("columnheader", { name: "Category" }).getAttribute("aria-sort")).toBe("ascending");
+  });
+
+  it("formats every tick of the hours axis with the same precision", async () => {
+    renderPanel();
+    const chart = await screen.findByRole("img", { name: "Weekly activity" });
+
+    const ticks = [...chart.querySelectorAll("text")].map((text) => text.textContent);
+    expect(ticks).toContain("3");
+    expect(ticks.some((tick) => /^\d+\.\d$/u.test(tick))).toBe(false);
+  });
+
   it("sorts category rows and exposes the current order with aria-sort", async () => {
     renderPanel();
     const categoryTable = await screen.findByRole("table", { name: "Categories" });

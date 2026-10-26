@@ -219,6 +219,10 @@ export interface StatisticsTrendsTexts {
   noCategories: string;
   loadError: string;
   retry: string;
+  updating: string;
+  /** Accessible name and detail text of a heatmap cell, e.g. "Mi 19 Uhr: Ø 262 Viewer". */
+  heatCell: (day: string, hour: number, viewers: string) => string;
+  heatCellEmpty: (day: string, hour: number) => string;
 }
 
 const trendsTexts: Readonly<Record<ModuleLanguage, StatisticsTrendsTexts>> = {
@@ -264,6 +268,9 @@ const trendsTexts: Readonly<Record<ModuleLanguage, StatisticsTrendsTexts>> = {
     noCategories: "Keine Kategorien in diesem Zeitraum erfasst.",
     loadError: "Die Trends konnten nicht geladen werden.",
     retry: "Erneut laden",
+    updating: "Aktualisiere …",
+    heatCell: (day, hour, viewers) => `${day} ${String(hour)} Uhr: Ø ${viewers} Viewer`,
+    heatCellEmpty: (day, hour) => `${day} ${String(hour)} Uhr: kein Stream`,
   },
   en: {
     rangeSwitch: "Date range",
@@ -307,6 +314,9 @@ const trendsTexts: Readonly<Record<ModuleLanguage, StatisticsTrendsTexts>> = {
     noCategories: "No categories recorded in this period.",
     loadError: "Could not load trends.",
     retry: "Reload",
+    updating: "Updating…",
+    heatCell: (day, hour, viewers) => `${day} ${String(hour).padStart(2, "0")}:00: avg ${viewers} viewers`,
+    heatCellEmpty: (day, hour) => `${day} ${String(hour).padStart(2, "0")}:00: no stream`,
   },
 };
 
