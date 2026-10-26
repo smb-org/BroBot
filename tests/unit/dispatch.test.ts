@@ -692,7 +692,7 @@ describe("dispatch and execution", () => {
       expect(String(gameBody?.message).split(startBonus)).toHaveLength(2);
       expect(gameBody).not.toHaveProperty("reply_parent_message_id");
       expect(object.acknowledgePointWelcome).toHaveBeenCalledOnce();
-      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1");
+      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1", "dispatch:unthreaded-game-welcome:chat_voting:0");
     } finally {
       database.close();
     }
@@ -732,7 +732,7 @@ describe("dispatch and execution", () => {
       const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
         acknowledgePointWelcome: ReturnType<typeof vi.fn>;
       };
-      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1");
+      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1", "dispatch:twitch-chat-message-486:points:0");
     } finally {
       database.close();
     }

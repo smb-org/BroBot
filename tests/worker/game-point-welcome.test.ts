@@ -84,6 +84,7 @@ const dispatchGameMessage = async (
   accountId = viewerId,
   login = viewerLogin,
   fetcher: typeof fetch = vi.fn<typeof fetch>(() => Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }))),
+  payloadMessageId = messageId,
 ): Promise<void> => {
   const { module } = gameFor(moduleId);
   await dispatchEventSubNotification(worker, {
@@ -95,7 +96,7 @@ const dispatchGameMessage = async (
       broadcaster_user_login: channelId,
       chatter_user_id: accountId,
       chatter_user_login: login,
-      message_id: messageId,
+      message_id: payloadMessageId,
       message: { text: command, fragments: [{ type: "text", text: command }] },
       badges: [],
     },
@@ -131,10 +132,13 @@ const prepareDelivery = async (
     const runtime = target as unknown as PointsWorkerObject & {
       moduleAlarmContext: (...args: unknown[]) => ModuleAlarmContext;
     };
-    const original = runtime.moduleAlarmContext.bind(runtime);
-    vi.spyOn(runtime, "moduleAlarmContext").mockImplementation((...args) => ({ ...original(...args), sendChat }));
+    const prototype = Object.getPrototypeOf(runtime) as typeof runtime;
+    const original = prototype.moduleAlarmContext;
+    vi.spyOn(prototype, "moduleAlarmContext").mockImplementation(function (this: typeof runtime, ...args) {
+      return { ...Reflect.apply(original, this, args), sendChat };
+    });
     // Spy on the prototype: Workers RPC only dispatches prototype methods, and the spy calls through.
-    acknowledge = vi.spyOn(Object.getPrototypeOf(runtime) as PointsWorkerObject, "acknowledgePointWelcome");
+    acknowledge = vi.spyOn(prototype, "acknowledgePointWelcome");
   });
   if (acknowledge === undefined) throw new Error("acknowledge_spy_missing");
   return { sendChat, acknowledge };
@@ -217,6 +221,103 @@ describe("delayed game welcome replies", () => {
     expect(sendChat).toHaveBeenCalledOnce();
     expect(sendChat.mock.calls[0]?.[0]).toContain(pointsCatalog.en.chat.startBonus(startBonus, "Points"));
     expect(acknowledge).not.toHaveBeenCalled();
+    expect(await object.touchPointAccount("points", viewerId, viewerLogin, startBonus)).toMatchObject({ welcomePending: true });
+  });
+
+  it("takes over an abandoned welcome claim on the next game reply", async () => {
+    const channelId = `game-welcome-expired-claim-${crypto.randomUUID()}`;
+    const object = await dispatchGameCommand(channelId, "duel", "welcome-expired-claim-message");
+    const roundId = await openedRoundId(object, "duel");
+    expect(await object.claimPointWelcome("points", viewerId, "dispatch:abandoned:points:0")).toBe(true);
+    await runPointObject(object, (_target, state) => {
+      state.storage.sql.exec(
+        "UPDATE point_welcome_notes SET claimed_at = ? WHERE account_id = ?",
+        Date.now() - 120_001,
+        viewerId,
+      );
+    });
+    const { sendChat, acknowledge } = await prepareDelivery(object, "delivered");
+
+    await forcePointAlarm(object, roundId);
+
+    const welcome = pointsCatalog.en.chat.startBonus(startBonus, "Points");
+    expect(sendChat.mock.calls[0]?.[0]).toContain(welcome);
+    expect(acknowledge).toHaveBeenCalledOnce();
+    expect(await object.touchPointAccount("points", viewerId, viewerLogin, startBonus)).toMatchObject({ welcomePending: false });
+  });
+
+  it("keeps the welcome pending when recovery confirms a game send that omitted it", async () => {
+    const channelId = `game-welcome-recovery-without-note-${crypto.randomUUID()}`;
+    const object = await dispatchGameCommand(channelId, "duel", "welcome-recovery-message");
+    const roundId = await openedRoundId(object, "duel");
+    mocks.getBotIdentity.mockResolvedValue({
+      id: 1,
+      userId: "fictional_brobot",
+      login: "brobot",
+      scopesJson: "[]",
+      accessTokenCiphertext: "unused",
+      refreshTokenCiphertext: "unused",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    mocks.getAppAccessToken.mockResolvedValue("fictional-app-token");
+    mocks.getCachedBotUserId.mockResolvedValue(null);
+    let releaseChatRequest!: (response: Response) => void;
+    let markChatRequestStarted!: () => void;
+    const chatRequestStarted = new Promise<void>((resolve) => { markChatRequestStarted = resolve; });
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.href;
+      if (url.includes("/helix/chat/messages")) {
+        markChatRequestStarted();
+        return new Promise<Response>((resolve) => { releaseChatRequest = resolve; });
+      }
+      return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    });
+    const dispatch = dispatchGameMessage(
+      channelId,
+      "duel",
+      "dispatch-held-message",
+      "!punkte",
+      viewerId,
+      viewerLogin,
+      fetcher,
+      "welcome-recovery-message",
+    );
+    await chatRequestStarted;
+    const { sendChat, acknowledge } = await prepareDelivery(object, "delivered");
+    let persistSendReceipt = (): void => undefined;
+    sendChat.mockImplementation(() => {
+      persistSendReceipt();
+      return Promise.resolve({
+        sent: true,
+        retryable: false,
+        reason: null,
+        delivery: "delivered",
+      });
+    });
+    await runPointObject(object, (target) => {
+      const prototype = Object.getPrototypeOf(target) as unknown as {
+        recordPointRoundAnnouncement: (...args: unknown[]) => Promise<void>;
+      };
+      vi.spyOn(prototype, "recordPointRoundAnnouncement").mockRejectedValueOnce(new Error("simulated_crash_after_send"));
+    });
+
+    await expect(forcePointAlarm(object, roundId, (_target, state) => {
+      persistSendReceipt = () => {
+        state.storage.kv.put("module_alarm:send_claims", {
+          [`round:${roundId}:announce`]: { status: "sent", at: Date.now() },
+        });
+      };
+    })).resolves.toBe(true);
+    await forcePointAlarm(object, roundId);
+
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(sendChat.mock.calls[0]?.[0]).not.toContain(pointsCatalog.en.chat.startBonus(startBonus, "Points"));
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(await object.touchPointAccount("points", viewerId, viewerLogin, startBonus)).toMatchObject({ welcomePending: true });
+    releaseChatRequest(new Response(JSON.stringify({ data: [{ is_sent: false }] }), { status: 500 }));
+    await dispatch;
     expect(await object.touchPointAccount("points", viewerId, viewerLogin, startBonus)).toMatchObject({ welcomePending: true });
   });
 

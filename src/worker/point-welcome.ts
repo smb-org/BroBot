@@ -38,7 +38,10 @@ export const appendPointWelcome = (
     ...action,
     text,
     onDelivery: async (delivery) => {
-      if (delivery === "sent") await pending.access.ackWelcome(pending.accountId);
+      if (delivery === "sent") {
+        if (pending.deliveryClaimId === undefined) await pending.access.ackWelcome(pending.accountId);
+        else await pending.access.ackWelcome(pending.accountId, pending.deliveryClaimId);
+      }
       else if (delivery !== "ambiguous") {
         if (pending.deliveryClaimId !== undefined) {
           await pending.access.releaseWelcome?.(pending.accountId, pending.deliveryClaimId);

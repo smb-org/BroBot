@@ -4721,7 +4721,7 @@ export class ChannelObject extends DurableObject<Env> {
       storePendingWelcome: (welcome) => this.storePendingPointWelcome(moduleId, welcome),
       claimWelcome: (accountId, claimId) => this.claimPointWelcome(moduleId, accountId, claimId),
       releaseWelcome: (accountId, claimId) => this.releasePointWelcome(moduleId, accountId, claimId),
-      ackWelcome: (accountId) => this.acknowledgePointWelcome(moduleId, accountId),
+      ackWelcome: (accountId, claimId) => this.acknowledgePointWelcome(moduleId, accountId, claimId),
       creditActivity: (accountId, login, messageAt, live, rules) =>
         this.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
       balance: (accountId) => this.pointBalance(moduleId, accountId),
@@ -4861,7 +4861,7 @@ export class ChannelObject extends DurableObject<Env> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     return this.ctx.storage.transactionSync(() =>
-      claimPendingPointWelcomeSync(this.ctx.storage.sql, accountId, claimId) !== null);
+      claimPendingPointWelcomeSync(this.ctx.storage.sql, accountId, claimId, Date.now()) !== null);
   }
 
   public async releasePointWelcome(_moduleId: string, accountId: string, claimId: string): Promise<void> {
@@ -4872,12 +4872,13 @@ export class ChannelObject extends DurableObject<Env> {
     });
   }
 
-  public async acknowledgePointWelcome(_moduleId: string, accountId: string): Promise<void> {
+  public async acknowledgePointWelcome(_moduleId: string, accountId: string, claimId?: string): Promise<void> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
+    if (claimId === undefined) return;
     assertPointAccountId(accountId);
     this.ctx.storage.transactionSync(() => {
-      acknowledgeWelcomeSync(this.ctx.storage.sql, accountId, new Date().toISOString());
+      acknowledgeWelcomeSync(this.ctx.storage.sql, accountId, claimId, new Date().toISOString());
     });
   }
 
@@ -5624,6 +5625,8 @@ export class ChannelObject extends DurableObject<Env> {
     claimId?: string,
     directAccountId?: string,
     attributions?: readonly string[],
+    roundId?: string,
+    claimedAt = Date.now(),
   ): Extract<ModuleAction, { kind: "chat" }> {
     if (module === undefined || !isRecord(data) || claimId === undefined) return action;
     const key = phase === "announce" ? POINT_WELCOME_ACCOUNT_ID_KEY : POINT_WELCOME_RESULT_ACCOUNT_ID_KEY;
@@ -5642,7 +5645,7 @@ export class ChannelObject extends DurableObject<Env> {
       messageId: action.replyToMessageId ?? stored.messageId,
       text: stored.text,
       access: {
-        ackWelcome: (pendingAccountId) => this.acknowledgePointWelcome("points", pendingAccountId),
+        ackWelcome: (pendingAccountId, pendingClaimId) => this.acknowledgePointWelcome("points", pendingAccountId, pendingClaimId),
         releaseWelcome: (pendingAccountId, pendingClaimId) => this.releasePointWelcome("points", pendingAccountId, pendingClaimId),
       },
       deliveryClaimId: claimId,
@@ -5650,8 +5653,20 @@ export class ChannelObject extends DurableObject<Env> {
     };
     const decorated = appendPointWelcome(action, module, pending, attributions) as Extract<ModuleAction, { kind: "chat" }>;
     if (decorated === action) return action;
-    const claimed = this.ctx.storage.transactionSync(() =>
-      claimPendingPointWelcomeSync(this.ctx.storage.sql, accountId, claimId));
+    const claimed = this.ctx.storage.transactionSync(() => {
+      const note = claimPendingPointWelcomeSync(this.ctx.storage.sql, accountId, claimId, claimedAt);
+      if (note === null) return null;
+      if (roundId !== undefined) {
+        const appendedColumn = phase === "announce" ? "announce_welcome_appended" : "resolve_welcome_appended";
+        const claimColumn = phase === "announce" ? "announce_welcome_claim_id" : "resolve_welcome_claim_id";
+        this.ctx.storage.sql.exec(
+          `UPDATE game_rounds SET ${appendedColumn} = 1, ${claimColumn} = ? WHERE round_id = ?`,
+          claimId,
+          roundId,
+        );
+      }
+      return note;
+    });
     if (claimed === null) {
       pending.used = false;
       return action;
@@ -5674,8 +5689,15 @@ export class ChannelObject extends DurableObject<Env> {
     try {
       const round = pointRoundRow(this.ctx.storage.sql, roundId);
       if (round === null) return;
+      const appendedColumn = phase === "announce" ? "announce_welcome_appended" : "resolve_welcome_appended";
+      const claimColumn = phase === "announce" ? "announce_welcome_claim_id" : "resolve_welcome_claim_id";
+      const sendWelcome = this.ctx.storage.sql.exec<{ appended: number; claim_id: string | null }>(
+        `SELECT ${appendedColumn} AS appended, ${claimColumn} AS claim_id FROM game_rounds WHERE round_id = ?`,
+        roundId,
+      ).toArray()[0];
+      if (sendWelcome?.appended !== 1 || sendWelcome.claim_id === null) return;
       const accountId = this.pointRoundWelcomeAccountId(JSON.parse(round.data_json) as unknown, phase, round.module_id);
-      if (accountId !== null) await this.acknowledgePointWelcome("points", accountId);
+      if (accountId !== null) await this.acknowledgePointWelcome("points", accountId, sendWelcome.claim_id);
     } catch (error) {
       console.error(`Confirmed point round ${roundId} send could not acknowledge its welcome.`, error);
     }
@@ -5727,7 +5749,7 @@ export class ChannelObject extends DurableObject<Env> {
     }
     if (round.state === "resolved") {
       if (round.resolve_delivery_state === "pending" || round.resolve_delivery_state === "sending") {
-        await this.deliverPointRoundResult(roundId);
+        await this.deliverPointRoundResult(roundId, now);
       } else this.ctx.storage.transactionSync(() => { this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId)); });
       return;
     }
@@ -5746,13 +5768,13 @@ export class ChannelObject extends DurableObject<Env> {
         const current = pointRoundRow(this.ctx.storage.sql, roundId);
         if (error instanceof Error && error.message === "operation_conflict" && current?.state === "resolved") {
           if (current.resolve_delivery_state === "pending" || current.resolve_delivery_state === "sending") {
-            await this.deliverPointRoundResult(roundId);
+            await this.deliverPointRoundResult(roundId, now);
           }
           return;
         }
         throw error;
       }
-      await this.deliverPointRoundResult(roundId);
+      await this.deliverPointRoundResult(roundId, now);
       return;
     }
     if (round.announce_state === "failed") {
@@ -5849,7 +5871,7 @@ export class ChannelObject extends DurableObject<Env> {
       ...(formatted?.target === undefined ? {} : { target: formatted.target }),
       ...(formatted?.replyToMessageId === undefined ? {} : { replyToMessageId: formatted.replyToMessageId }),
       ...(formatted?.automated === undefined ? {} : { automated: formatted.automated }),
-    }, module, roundData, "announce", `round:${roundId}:announce`, undefined, formatted?.attributions);
+    }, module, roundData, "announce", `round:${roundId}:announce`, undefined, formatted?.attributions, roundId, now);
     const delivery = await context.sendChat(
       action.text,
       `round:${roundId}:announce`,
@@ -5871,7 +5893,7 @@ export class ChannelObject extends DurableObject<Env> {
     );
   }
 
-  private async deliverPointRoundResult(roundId: string): Promise<void> {
+  private async deliverPointRoundResult(roundId: string, now: number): Promise<void> {
     const initialRound = pointRoundRow(this.ctx.storage.sql, roundId);
     if (initialRound?.state === "resolved") await this.notifyPointRoundResolved(roundId);
     const initialModule = MODULES.find((candidate) => candidate.id === initialRound?.module_id);
@@ -6011,7 +6033,8 @@ export class ChannelObject extends DurableObject<Env> {
         ...(formatted.target === undefined ? {} : { target: formatted.target }),
         ...(formatted.replyToMessageId === undefined ? {} : { replyToMessageId: formatted.replyToMessageId }),
         ...(formatted.automated === undefined ? {} : { automated: formatted.automated }),
-      }, module, JSON.parse(attempt.round.data_json) as unknown, "resolve", `round:${roundId}:resolve`, undefined, formatted.attributions);
+      }, module, JSON.parse(attempt.round.data_json) as unknown, "resolve", `round:${roundId}:resolve`, undefined,
+      formatted.attributions, roundId, now);
       delivery = await context.sendChat(
         action.text,
         `round:${roundId}:resolve`,

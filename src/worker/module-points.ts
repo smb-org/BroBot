@@ -73,7 +73,7 @@ export const modulePoints = (
     releaseWelcome: (accountId, claimId) => typeof object.releasePointWelcome === "function"
       ? object.releasePointWelcome(moduleId, accountId, claimId)
       : Promise.resolve(),
-    ackWelcome: (accountId) => object.acknowledgePointWelcome(moduleId, accountId),
+    ackWelcome: (accountId, claimId) => object.acknowledgePointWelcome(moduleId, accountId, claimId),
     creditActivity: (accountId, login, messageAt, live, rules) =>
       object.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
     balance: (accountId) => object.pointBalance(moduleId, accountId),

@@ -1199,7 +1199,7 @@ export interface ModulePointsAccess {
   storePendingWelcome?: (welcome: { accountId: string; messageId: string; text: string }) => Promise<void>;
   claimWelcome?: (accountId: string, claimId: string) => Promise<boolean>;
   releaseWelcome?: (accountId: string, claimId: string) => Promise<void>;
-  ackWelcome: (accountId: string) => Promise<void>;
+  ackWelcome: (accountId: string, claimId?: string) => Promise<void>;
   creditActivity: (
     accountId: string,
     login: string,

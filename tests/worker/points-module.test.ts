@@ -37,7 +37,7 @@ const contextFor = (object: PointsWorkerObject, live: "online" | "offline" = "on
     apply: (operationId, kind, movements, result) => object.applyPointOperation(moduleId, operationId, kind, movements, result),
     settle: (operationId, kind, actor, stake, params, options) => object.settlePointOperation(moduleId, operationId, kind, actor, stake, params, options),
     touchAccount: (accountId, login, startBonus) => object.touchPointAccount(moduleId, accountId, login, startBonus),
-    ackWelcome: (accountId) => object.acknowledgePointWelcome(moduleId, accountId),
+    ackWelcome: (accountId, claimId) => object.acknowledgePointWelcome(moduleId, accountId, claimId),
     creditActivity: (accountId, login, messageAt, isLive, rules) => object.creditPointActivity(moduleId, accountId, login, messageAt, isLive, rules),
     balance: (accountId) => object.pointBalance(moduleId, accountId),
     getAccount: (accountId) => object.pointAccount(moduleId, accountId),
@@ -82,11 +82,19 @@ describe("points module worker events", () => {
     expect(reply?.kind).toBe("chat");
     if (reply?.kind !== "chat") throw new Error("The points command did not produce a chat reply.");
     expect(reply.replyToMessageId).toBe("message-nachtfalke");
+    const claimId = "dispatch:points-module-first:points:0";
+    await object.storePendingPointWelcome(moduleId, {
+      accountId: "viewer_demo",
+      messageId: "message-nachtfalke",
+      text: "Startguthaben 100 Punkte",
+    });
+    expect(await object.claimPointWelcome(moduleId, "viewer_demo", claimId)).toBe(true);
     const pending = {
       accountId: "viewer_demo",
       messageId: "message-nachtfalke",
       text: "Startguthaben 100 Punkte",
-      access: { ackWelcome: (accountId: string) => object.acknowledgePointWelcome(moduleId, accountId) },
+      access: { ackWelcome: (accountId: string, currentClaimId?: string) => object.acknowledgePointWelcome(moduleId, accountId, currentClaimId) },
+      deliveryClaimId: claimId,
       used: false,
     };
     const welcomedReply = appendPointWelcome(reply, { id: moduleId }, pending);
