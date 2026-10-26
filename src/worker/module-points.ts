@@ -34,6 +34,7 @@ export const modulePoints = (
         join: () => unavailable(),
         participants: () => unavailable(),
         answer: () => unavailable(),
+        attack: () => unavailable(),
         resolve: () => unavailable(),
         accept: () => unavailable(),
         cancel: () => unavailable(),
@@ -74,6 +75,8 @@ export const modulePoints = (
       participants: (roundId, nameLimit) => object.gameRoundParticipants(moduleId, roundId, nameLimit),
       answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
         object.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
+      attack: (roundId, operationId, accountId, login, damage, messageAt) =>
+        object.attackGameRound(moduleId, roundId, operationId, accountId, login, damage, messageAt),
       resolve: (roundId, settlement) => object.resolveGameRound(moduleId, roundId, settlement),
       accept: (roundId, operationId, accountId, login, replyToMessageId) =>
         object.acceptGameRound(moduleId, roundId, operationId, accountId, login, replyToMessageId),

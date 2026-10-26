@@ -1161,6 +1161,17 @@ export interface PointRoundParticipants {
   logins: string[];
 }
 
+export interface PointRoundAttackResult {
+  status: "hit" | "cooldown" | "round_closed";
+  replayed: boolean;
+  damage: number;
+  defeated: boolean;
+  currentHp: number;
+  maxHp: number;
+  attackers: number;
+  damageDealt: number;
+}
+
 export interface ModulePointsAccess {
   /** Optional stable request identity for operations whose persisted result contains server-generated metadata. */
   apply: (operationId: string, kind: PointsKind, movements: PointsMovement[], result: unknown, payloadIdentity?: unknown) => Promise<PointsApplyResult>;
@@ -1219,6 +1230,7 @@ export interface ModulePointsAccess {
     /** Reads the round's participant count and total stake, with at most `nameLimit` logins. */
     participants: (roundId: string, nameLimit: number) => Promise<PointRoundParticipants>;
     answer: (roundId: string, operationId: string, accountId: string, login: string, graceS: number, messageAt: number) => Promise<PointRoundAnswerResult>;
+    attack: (roundId: string, operationId: string, accountId: string, login: string, damage: number, messageAt: number) => Promise<PointRoundAttackResult>;
     resolve: (roundId: string, settlement: { kind: string; params: unknown }) => Promise<PointsApplyResult>;
     accept: (roundId: string, operationId: string, accountId: string, login: string, replyToMessageId?: string) => Promise<PointsApplyResult>;
     cancel: (roundId: string) => Promise<number>;
@@ -1751,6 +1763,14 @@ export type ModuleLiveTileSnapshot =
     challenger: string;
     target: string | null;
     stake: number;
+    closesAt: string;
+  }
+  | {
+    kind: "boss_fight";
+    id: string;
+    currentHp: number;
+    maxHp: number;
+    attackers: number;
     closesAt: string;
   }
   | {

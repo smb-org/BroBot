@@ -2,10 +2,12 @@ import type {
   ModulePointsAccess,
   PointJoinResult,
   PointRoundAnswerResult,
+  PointRoundAttackResult,
   PointsApplyResult,
   PointsMovement,
   PointsKind,
 } from "../../modules/contract";
+import { bossHealth } from "../../modules/boss_fight/domain/boss";
 
 export const POINTS_ROUND_ALARM_HANDLER = "host:points_round";
 export const POINTS_ROUND_ALARM_PREFIX = "points:round:";
@@ -282,6 +284,14 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
     login TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('recorded', 'already_answered', 'round_closed')),
     first_answer INTEGER NOT NULL,
+    payload_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+  sql.exec(`CREATE TABLE IF NOT EXISTS game_round_attacks (
+    operation_id TEXT PRIMARY KEY,
+    module_id TEXT NOT NULL,
+    round_id TEXT NOT NULL,
+    result_json TEXT NOT NULL,
     payload_hash TEXT NOT NULL,
     created_at TEXT NOT NULL
   )`);
@@ -1652,6 +1662,165 @@ export const answerPointRoundSync = (
   return { status, replayed: false, first, deadlineAt };
 };
 
+const attackCooldownPrefix = (roundId: string): string => `round:${roundId}:attack:`;
+
+/** Drops the stored attacks and per-viewer cooldown keys of a finished round. */
+const deleteRoundAttackStateSync = (sql: PointsSql, moduleId: string, roundId: string): void => {
+  sql.exec("DELETE FROM game_round_attacks WHERE module_id = ? AND round_id = ?", moduleId, roundId);
+  // Cooldown keys are `<module>:round:<id>:attack:<hash>`; the range ends at the prefix with ":" bumped to ";".
+  const prefix = `${moduleId}:${attackCooldownPrefix(roundId)}`;
+  sql.exec("DELETE FROM game_cooldowns WHERE key >= ? AND key < ?", prefix, `${prefix.slice(0, -1)};`);
+};
+
+export const attackPointRoundSync = (
+  sql: PointsSql,
+  moduleId: string,
+  roundId: string,
+  operationId: string,
+  accountId: string,
+  login: string,
+  damage: number,
+  messageAt: number,
+  payloadHash: string,
+  cooldownKey: string,
+  nowMs: number,
+  now: string,
+): PointRoundAttackResult => {
+  assertPointRoundId(roundId);
+  assertPointAccountId(accountId);
+  if (operationId.length === 0 || operationId.length > 200) throw new Error("invalid_operation_id");
+  if (pointKindFor(accountId) !== "viewer" || !/^[A-Za-z0-9_]{1,25}$/u.test(login) ||
+      !Number.isSafeInteger(damage) || damage < 1 || !Number.isSafeInteger(messageAt) || messageAt < 0) {
+    throw new Error("invalid_round_attack");
+  }
+
+  const previous = sql.exec<{
+    module_id: string;
+    round_id: string;
+    result_json: string;
+    payload_hash: string;
+  }>("SELECT module_id, round_id, result_json, payload_hash FROM game_round_attacks WHERE operation_id = ?", operationId).toArray()[0];
+  if (previous !== undefined) {
+    if (previous.payload_hash !== payloadHash || previous.module_id !== moduleId || previous.round_id !== roundId) {
+      throw new Error("operation_conflict");
+    }
+    return { ...(JSON.parse(previous.result_json) as Omit<PointRoundAttackResult, "replayed">), replayed: true };
+  }
+
+  checkModuleGateSync(sql, moduleId);
+  const round = pointRoundRow(sql, roundId);
+  let result: PointRoundAttackResult = {
+    status: "round_closed",
+    replayed: false,
+    damage: 0,
+    defeated: false,
+    currentHp: 0,
+    maxHp: 0,
+    attackers: 0,
+    damageDealt: 0,
+  };
+  const parsedData: unknown = round === null ? null : JSON.parse(round.data_json);
+  const data = typeof parsedData === "object" && parsedData !== null ? parsedData as Record<string, unknown> : null;
+  if (data !== null && Number.isSafeInteger(data.attackerCount) && Number.isSafeInteger(data.damageDealt) &&
+      Number.isSafeInteger(data.currentHp) && Number.isSafeInteger(data.maxHp) && typeof data.defeated === "boolean") {
+    result = {
+      ...result,
+      defeated: data.defeated,
+      currentHp: data.currentHp as number,
+      maxHp: data.maxHp as number,
+      attackers: data.attackerCount as number,
+      damageDealt: data.damageDealt as number,
+    };
+  }
+  let announcementAt: number | null = null;
+  if (round !== null) {
+    if (round.announcement_at !== null) announcementAt = Date.parse(round.announcement_at);
+    else if (round.deadline_at !== null) announcementAt = round.deadline_at - round.duration_s * 1_000;
+  }
+  const attackAllowed = round !== null && round.module_id === moduleId && round.state === "open" && round.deadline_at !== null &&
+    round.deadline_at > nowMs && (announcementAt === null || Number.isFinite(announcementAt) && messageAt >= announcementAt) &&
+    data !== null && data.defeated !== true && Number.isSafeInteger(data.baseHp) && (data.baseHp as number) > 0 &&
+    Number.isSafeInteger(data.hpPerAttacker) && (data.hpPerAttacker as number) >= 0 &&
+    Number.isSafeInteger(data.attackCooldownSeconds) && (data.attackCooldownSeconds as number) >= 1 && (data.attackCooldownSeconds as number) <= 3_600 &&
+    Number.isSafeInteger(data.attackerCount) && (data.attackerCount as number) >= 0 &&
+    Number.isSafeInteger(data.damageDealt) && (data.damageDealt as number) >= 0 &&
+    Number.isSafeInteger(data.damageMinimum) && Number.isSafeInteger(data.damageMaximum) &&
+    damage >= (data.damageMinimum as number) && damage <= (data.damageMaximum as number);
+
+  if (attackAllowed && !claimPointCooldownSync(sql, moduleId, `${attackCooldownPrefix(roundId)}${cooldownKey}`, data.attackCooldownSeconds as number, nowMs)) {
+    result = { ...result, status: "cooldown" };
+  } else if (attackAllowed) {
+    const participant = sql.exec<{ login: string; data_json: string }>(
+      "SELECT login, data_json FROM game_round_participants WHERE round_id = ? AND account_id = ?",
+      roundId,
+      accountId,
+    ).toArray()[0];
+    let participantDamage = 0;
+    if (participant !== undefined) {
+      const participantData: unknown = JSON.parse(participant.data_json);
+      if (typeof participantData !== "object" || participantData === null || Array.isArray(participantData) ||
+          !Number.isSafeInteger((participantData as Record<string, unknown>).damage) || ((participantData as Record<string, unknown>).damage as number) < 0) {
+        throw new Error("invalid_round_attack");
+      }
+      participantDamage = (participantData as { damage: number }).damage;
+    }
+    const nextDamage = participantDamage + damage;
+    if (!Number.isSafeInteger(nextDamage)) throw new Error("invalid_round_attack");
+    if (participant === undefined) {
+      sql.exec(
+        `INSERT INTO game_round_participants (round_id, account_id, login, stake, data_json)
+         VALUES (?, ?, ?, 0, ?)`,
+        roundId,
+        accountId,
+        login,
+        jsonValue({ damage: nextDamage }),
+      );
+    } else {
+      sql.exec(
+        "UPDATE game_round_participants SET login = ?, data_json = ? WHERE round_id = ? AND account_id = ?",
+        login,
+        jsonValue({ damage: nextDamage }),
+        roundId,
+        accountId,
+      );
+    }
+    // The round keeps the attacker count and damage total as aggregates, so a hit never reloads all participants.
+    const totalDamage = (data.damageDealt as number) + damage;
+    const attackers = (data.attackerCount as number) + (participant === undefined ? 1 : 0);
+    if (!Number.isSafeInteger(totalDamage)) throw new Error("invalid_round_attack");
+    const health = bossHealth({
+      baseHp: data.baseHp as number,
+      hpPerAttacker: data.hpPerAttacker as number,
+      attackers,
+      damageDealt: totalDamage,
+    });
+    const { maxHp, defeated, currentHp } = health;
+    const nextData = {
+      ...data,
+      attackerCount: attackers,
+      damageDealt: totalDamage,
+      maxHp,
+      currentHp,
+      defeated,
+    };
+    sql.exec("UPDATE game_rounds SET data_json = ? WHERE round_id = ? AND module_id = ? AND state = 'open'", jsonValue(nextData), roundId, moduleId);
+    result = { status: "hit", replayed: false, damage, defeated, currentHp, maxHp, attackers, damageDealt: totalDamage };
+    // Only accepted hits are stored (for replay protection); rejected attacks leave nothing behind.
+    // The rows and the cooldown keys are removed when the round resolves or is cancelled.
+    sql.exec(
+      `INSERT INTO game_round_attacks (operation_id, module_id, round_id, result_json, payload_hash, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      operationId,
+      moduleId,
+      roundId,
+      jsonValue(result),
+      payloadHash,
+      now,
+    );
+  }
+  return result;
+};
+
 const potsForModuleSync = (sql: PointsSql, moduleId: string, roundId: string): Record<string, number> => {
   const rows = sql.exec<{ account_id: string; balance: number }>(
     `SELECT account_id, balance FROM point_accounts
@@ -1753,6 +1922,7 @@ export const resolvePointRoundSync = (
       new Date(Date.parse(now) + cooldownAfter.seconds * 1_000).toISOString(),
     );
   }
+  deleteRoundAttackStateSync(sql, moduleId, roundId);
   return applied;
 };
 
@@ -1802,6 +1972,7 @@ export const cancelPointRoundsSync = (
     refundedStake ||= refunds.length > 0;
     sql.exec("UPDATE game_rounds SET state = 'cancelled' WHERE round_id = ? AND module_id = ?", roundId, moduleId);
     sql.exec("DELETE FROM game_round_locks WHERE module_id = ? AND round_id = ?", moduleId, roundId);
+    deleteRoundAttackStateSync(sql, moduleId, roundId);
     onRoundCancelled?.(roundId);
     cancelledCount += 1;
   }

@@ -205,6 +205,7 @@ import {
   acknowledgeWelcomeSync,
   announceAttemptSync,
   answerPointRoundSync,
+  attackPointRoundSync,
   beginPointRoundResolutionDeliverySync,
   applyPointOperationSync,
   canonicalPointResult,
@@ -4714,6 +4715,8 @@ export class ChannelObject extends DurableObject<Env> {
         participants: (roundId, nameLimit) => this.gameRoundParticipants(moduleId, roundId, nameLimit),
         answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
           this.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
+        attack: (roundId, operationId, accountId, login, damage, messageAt) =>
+          this.attackGameRound(moduleId, roundId, operationId, accountId, login, damage, messageAt),
         resolve: (roundId, settlement) => this.resolveGameRound(moduleId, roundId, settlement),
         accept: (roundId, operationId, accountId, login, replyToMessageId) =>
           this.acceptGameRound(moduleId, roundId, operationId, accountId, login, replyToMessageId),
@@ -5116,6 +5119,38 @@ export class ChannelObject extends DurableObject<Env> {
     });
     if (answer.status === "recorded" && answer.first) await this.scheduleEarliestAlarm();
     return { status: answer.status, replayed: answer.replayed, first: answer.first };
+  }
+
+  public async attackGameRound(
+    moduleId: string,
+    roundId: string,
+    operationId: string,
+    accountId: string,
+    login: string,
+    damage: number,
+    messageAt: number,
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["rounds"]["attack"]>>> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointRoundId(roundId);
+    assertPointAccountId(accountId);
+    // The persisted first result owns its random damage roll, so a retried event stays idempotent.
+    const payloadHash = await pointPayloadHash({ moduleId, roundId, operationId, accountId, login, messageAt });
+    const cooldownKey = await pointPayloadHash({ purpose: "boss_fight_attack_cooldown", moduleId, roundId, accountId });
+    return this.ctx.storage.transactionSync(() => attackPointRoundSync(
+      this.ctx.storage.sql,
+      moduleId,
+      roundId,
+      operationId,
+      accountId,
+      login,
+      damage,
+      messageAt,
+      payloadHash,
+      cooldownKey,
+      Date.now(),
+      new Date().toISOString(),
+    ));
   }
 
   public async resolveGameRound(

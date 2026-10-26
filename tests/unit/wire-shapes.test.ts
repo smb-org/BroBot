@@ -388,6 +388,15 @@ const expectedModuleSettings = {
     timeoutText: blitzTexts("de").timeoutTextDefault,
     timeoutTextEnabled: true,
   },
+  boss_fight: {
+    durationSeconds: 90, attackCooldownSeconds: 10, damageMinimum: 20, damageMaximum: 40, lootPool: 1_000, chatTarget: null,
+    startText: "🐉 Ein Boss erscheint!",
+    startTextEnabled: true,
+    defeatedText: "🏆 Der Boss ist besiegt!",
+    defeatedTextEnabled: true,
+    timeoutText: "Der Boss hat überlebt. Niemand erhält Beute.",
+    timeoutTextEnabled: true,
+  },
   channel_events: {},
   emote_slots: {
     symbols: [
@@ -881,6 +890,7 @@ describe("serialized contract shapes", () => {
         "api_source",
         "belabox",
         "blitz_round",
+        "boss_fight",
         "channel_events",
         "chat_voting",
         "clips",
