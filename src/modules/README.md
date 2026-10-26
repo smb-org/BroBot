@@ -981,6 +981,33 @@ Dauer und Ablaufzeit; jeder Liftversuch erhält einen Audit-Eintrag.
 
 Die folgenden Module zeigen die Fähigkeiten im Zusammenspiel; Details ihrer Fachlogik stehen hier, nicht im Contract.
 
+### Emote-Slots: Auszahlungen und Wahrscheinlichkeiten
+
+Die Standardwalzen verwenden die Gewichte `4, 4, 3, 2, 2, 1`; die
+Nicht-Jackpot-Dreifachauszahlungen sind `3×, 3×, 5×, 8×, 8×`. Ein Paar zahlt
+standardmäßig `1,5×` des Einsatzes. Bei einem Mindesteinsatz von 15 Punkten
+wird das Paar auf 22 Punkte abgerundet. Für diese Tabelle sind die
+Wahrscheinlichkeiten: 49,80 % Verlust, 46,00 % Paar, 4,17 % regulärer
+Dreifachtreffer und 0,02 % Jackpot (drei Siebenen). Die Quote wird bei
+`minStake` berechnet und ist eine konservative Obergrenze über alle
+erlaubten Einsätze: Paarzahlung und Jackpotanteil gehen ungerundet ein, der
+Startwert wird anhand der Jackpotchance beim Mindesteinsatz eingerechnet.
+Die tatsächlichen Auszahlungen liegen bei jeder Einsatzhöhe höchstens leicht
+darunter. Mit 700 Basispunkten Jackpotanteil und dem 500-Punkte-Startwert
+beträgt die erwartete Gesamtauszahlung exakt `284.479/307.200`, also rund
+92,6 %.
+
+Gespeicherte Einstellungen ohne Paarfaktor stammen aus der Zeit, in der ein
+Paar den Einsatz zurückgab; ihre Tabellen sind darauf abgestimmt. Beim Lesen
+erhalten sie deshalb `1×` (`pairPayoutBp: 10000`), nicht `1,5×`: Die frühere
+Standardtabelle (`7×, 7×, 12×, 20×, 20×`) liegt bei `1×` exakt bei
+`70.201/76.800` (rund 91,4 %), bei `1,5×` aber bei `175.727/153.600` (rund 114,4 %)
+und wäre gesperrt. Nur frisch angelegte Einstellungen (erstes Aktivieren des Moduls)
+nutzen `1,5×` mit der neu abgestimmten Tabelle; Bestandskanäle stellen `1,5×`
+und die Tabelle im Panel selbst ein. „Gesperrt“ (Quote ab 100 %)
+verhindert nur das Speichern (Panel und PATCH-Route); beim Spielen wird die
+Quote nicht geprüft.
+
 ### Bosskampf (`boss_fight`)
 
 Der Bosskampf startet als Operator-Sofortaktion im Live-Cockpit und ist nur

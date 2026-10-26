@@ -43,6 +43,22 @@ const contextFor = (replayed: boolean, language: ModuleLanguage = "en", result: 
 } as unknown as ModuleExecutionContext);
 
 describe("slot spin overlay messages", () => {
+  it("passes the configured pair payout to settlement (protects=chat spins use the saved multiplier; fails_when=the settlement service silently falls back to another pair amount; no_claim=the ledger's arithmetic)", async () => {
+    const event = eventFor({ ...DEFAULT_EMOTE_SLOT_SETTINGS, pairPayoutBp: 22_500 });
+    const context = contextFor(false);
+
+    await processEmoteSlotMessage(event, context);
+
+    expect(context.points.settle).toHaveBeenCalledWith(
+      "msg:fictional-message-1",
+      "slot",
+      { accountId: "fictional-user-1", login: "nachtfalke" },
+      50,
+      expect.objectContaining({ pairPayoutBp: 22_500 }),
+      expect.any(Object),
+    );
+  });
+
   it("publishes the booked spin symbols and settled values (protects=an original settlement emits one overlay state matching its booked symbols, net, and jackpot; fails_when=the overlay omits a reel or reports values different from the settlement; no_claim=browser animation timing)", async () => {
     const result = await processEmoteSlotMessage(eventFor(), contextFor(false));
     const overlay = result.actions.find((action) => action.kind === "overlay");

@@ -3,7 +3,7 @@ import type { ReactElement } from "react";
 import type { SettingsEditorDefinition, SettingsEditorSpec, SettingsCustomFieldProps } from "../../../dashboard/ui";
 import type { EmoteSlotSettings } from "../contracts";
 import { emoteSlotSettingsEditorCatalog } from "./locale";
-import { SlotReelTable, SlotShareField, SlotTextsField } from "./slot-fields";
+import { SlotPairPayoutField, SlotReelTable, SlotShareField, SlotTextsField } from "./slot-fields";
 
 const custom = (render: (props: SettingsCustomFieldProps<EmoteSlotSettings>) => ReactElement | null) => ({
   kind: "custom" as const,
@@ -14,6 +14,7 @@ const spec: SettingsEditorSpec<EmoteSlotSettings> = {
   sections: [
     { id: "reels", icon: "tabSettings", fields: [
       { ...custom((props) => <SlotReelTable {...props} />), key: "symbols" },
+      { ...custom((props) => <SlotPairPayoutField {...props} />), key: "pairPayoutBp" },
     ] },
     { id: "stakes", icon: "tabSettings", fields: [
       { kind: "number", key: "minStake", min: 1, max: 10_000, step: 1 },
