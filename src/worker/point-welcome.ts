@@ -1,10 +1,15 @@
 import type { BotModule, ModuleAction, ModulePointsAccess } from "../modules/contract";
 import { reserveChatTextBeforeSuffix } from "./chat";
 
-export interface PendingPointWelcome {
+export const POINT_WELCOME_ROUND_DATA_KEY = "__pointWelcome";
+
+export interface PointWelcomeNote {
   accountId: string;
   messageId: string;
   text: string;
+}
+
+export interface PendingPointWelcome extends PointWelcomeNote {
   access: Pick<ModulePointsAccess, "ackWelcome">;
   used: boolean;
 }

@@ -75,7 +75,9 @@ import type {
   ModuleAlarmDefinition,
   ModuleAlarmIdentity,
   ModuleAlarmPlan,
+  ModuleAction,
   ModuleBallotAccess,
+  ModuleChatDelivery,
   ModuleDryRunBallotSnapshot,
   ModuleExternalFetchBudget,
   ModulePointsAccess,
@@ -252,6 +254,7 @@ import {
   touchPointAccountSync,
 } from "./points";
 import { INSTANT_SETTLEMENTS, POINT_SETTLEMENTS } from "./point-settlements";
+import { appendPointWelcome, POINT_WELCOME_ROUND_DATA_KEY, type PendingPointWelcome, type PointWelcomeNote } from "../point-welcome";
 
 type PointRoundChatResult = Awaited<ReturnType<ModuleAlarmContext["sendChat"]>>;
 type PointRoundDeliveryOutcome = "rate_limited" | "failed" | "delivered" | "ambiguous";
@@ -263,6 +266,13 @@ const pointRoundDeliveryOutcome = (delivery: PointRoundChatResult): PointRoundDe
     return "rate_limited";
   }
   return "failed";
+};
+
+const pointWelcomeDelivery = (delivery: PointRoundChatResult): ModuleChatDelivery => {
+  if (pointRoundDeliveryOutcome(delivery) === "delivered") return "sent";
+  if (delivery.delivery === "ambiguous") return "ambiguous";
+  if (delivery.delivery === "not_attempted") return "not_attempted";
+  return "rejected";
 };
 
 const SECURITY_ALARM_INTERVAL_MS = 15 * 60 * 1000;
@@ -4815,11 +4825,21 @@ export class ChannelObject extends DurableObject<Env> {
     ));
   }
 
-  public async acknowledgePointWelcome(_moduleId: string, accountId: string): Promise<void> {
+  public async acknowledgePointWelcome(_moduleId: string, accountId: string, roundId?: string): Promise<void> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
-    this.ctx.storage.transactionSync(() => { acknowledgeWelcomeSync(this.ctx.storage.sql, accountId, new Date().toISOString()); });
+    this.ctx.storage.transactionSync(() => {
+      acknowledgeWelcomeSync(this.ctx.storage.sql, accountId, new Date().toISOString());
+      if (roundId === undefined) return;
+      const round = pointRoundRow(this.ctx.storage.sql, roundId);
+      if (round === null) return;
+      const data: unknown = JSON.parse(round.data_json);
+      const pending = isRecord(data) ? data[POINT_WELCOME_ROUND_DATA_KEY] : undefined;
+      if (!isRecord(data) || !isRecord(pending) || pending.accountId !== accountId) return;
+      Reflect.deleteProperty(data, POINT_WELCOME_ROUND_DATA_KEY);
+      this.ctx.storage.sql.exec("UPDATE game_rounds SET data_json = ? WHERE round_id = ?", JSON.stringify(data), roundId);
+    });
   }
 
   public async creditPointActivity(
@@ -5213,6 +5233,7 @@ export class ChannelObject extends DurableObject<Env> {
     accountId: string,
     login: string,
     replyToMessageId?: string,
+    pointWelcome?: PointWelcomeNote,
   ): Promise<PointsApplyResult> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
@@ -5241,6 +5262,7 @@ export class ChannelObject extends DurableObject<Env> {
           new Date().toISOString(),
           POINT_SETTLEMENTS,
           replyToMessageId,
+          pointWelcome,
         );
         if (MODULES.find((module) => module.id === moduleId)?.formatPointRoundResult === undefined) {
           recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
@@ -5557,6 +5579,93 @@ export class ChannelObject extends DurableObject<Env> {
     else await this.scheduleEarliestAlarm();
   }
 
+  private appendPointRoundWelcome(
+    action: Extract<ModuleAction, { kind: "chat" }>,
+    module: BotModule | undefined,
+    roundId: string,
+    data: unknown,
+    attributions?: readonly string[],
+  ): Extract<ModuleAction, { kind: "chat" }> {
+    if (module === undefined || !isRecord(data)) return action;
+    const note = data[POINT_WELCOME_ROUND_DATA_KEY];
+    if (!isRecord(note) || typeof note.accountId !== "string" || typeof note.messageId !== "string" ||
+        typeof note.text !== "string") return action;
+    const pending: PendingPointWelcome = {
+      accountId: note.accountId,
+      messageId: note.messageId,
+      text: note.text,
+      access: { ackWelcome: (accountId) => this.acknowledgePointWelcome("points", accountId, roundId) },
+      used: false,
+    };
+    return appendPointWelcome(action, module, pending, attributions) as Extract<ModuleAction, { kind: "chat" }>;
+  }
+
+  private async reportPointRoundWelcomeDelivery(
+    action: Extract<ModuleAction, { kind: "chat" }>,
+    delivery: ModuleChatDelivery,
+  ): Promise<void> {
+    try {
+      await action.onDelivery?.(delivery);
+    } catch (error) {
+      console.error("Point welcome acknowledgement failed after a game message send.", error);
+    }
+  }
+
+  private async acknowledgeConfirmedPointRoundWelcome(roundId: string, phase: "announce" | "resolve"): Promise<void> {
+    try {
+      const round = pointRoundRow(this.ctx.storage.sql, roundId);
+      if (round === null) return;
+      const module = MODULES.find((candidate) => candidate.id === round.module_id);
+      if (module === undefined) return;
+      const registration = module.alarms?.[0] ?? POINTS_ANNOUNCEMENT_REGISTRATION;
+      const context = this.moduleAlarmContext(round.module_id, registration, createModuleExternalFetchBudget());
+      if (phase === "announce") {
+        const formatter = module.formatPointRoundAnnouncement;
+        if (formatter === undefined) return;
+        const formatted = await formatter(context, {
+          roundId,
+          data: JSON.parse(round.data_json) as unknown,
+          text: round.announce_text,
+        });
+        if (formatted === null || formatted.kind === "silent") return;
+        const action = this.appendPointRoundWelcome({
+          kind: "chat",
+          text: formatted.text,
+          ...(formatted.target === undefined ? {} : { target: formatted.target }),
+          ...(formatted.replyToMessageId === undefined ? {} : { replyToMessageId: formatted.replyToMessageId }),
+          ...(formatted.automated === undefined ? {} : { automated: formatted.automated }),
+        }, module, roundId, JSON.parse(round.data_json) as unknown, formatted.attributions);
+        await this.reportPointRoundWelcomeDelivery(action, "sent");
+        return;
+      }
+      const formatter = module.formatPointRoundResult;
+      if (formatter === undefined || round.state !== "resolved") return;
+      const operation = this.ctx.storage.sql.exec<{ result_json: string }>(
+        "SELECT result_json FROM point_operations WHERE operation_id = ? AND module_id = ?",
+        `round:${roundId}:resolve`,
+        round.module_id,
+      ).toArray()[0];
+      if (operation === undefined) return;
+      const formatted = await formatter(context, {
+        roundId,
+        data: JSON.parse(round.data_json) as unknown,
+        result: JSON.parse(operation.result_json) as unknown,
+        resolvedAt: round.resolved_at ?? new Date().toISOString(),
+      });
+      if (formatted === null) return;
+      const action = this.appendPointRoundWelcome({
+        kind: "chat",
+        text: formatted.text,
+        ...(formatted.target === undefined ? {} : { target: formatted.target }),
+        ...(formatted.replyToMessageId === undefined ? {} : { replyToMessageId: formatted.replyToMessageId }),
+        ...(formatted.automated === undefined ? {} : { automated: formatted.automated }),
+      }, module, roundId, JSON.parse(round.data_json) as unknown, formatted.attributions);
+      await this.reportPointRoundWelcomeDelivery(action, "sent");
+    } catch (error) {
+      console.error(`Confirmed point round ${roundId} send could not acknowledge its welcome.`, error);
+    }
+  }
+
   private async handlePointRoundAlarm(alarmKey: string, now: number): Promise<void> {
     await this.ensurePointsInitialized();
     for (const cancellation of pendingPointRoundCancellations(this.ctx.storage.sql)) {
@@ -5631,6 +5740,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (round.announce_state === "pending" && round.announce_attempts > 0 && round.last_attempt_at !== null) {
       const sendClaim = await readModuleAlarmSendClaim(this.ctx.storage, `round:${roundId}:announce`);
       if (sendClaim?.status === "sent") {
+        await this.acknowledgeConfirmedPointRoundWelcome(roundId, "announce");
         await this.recordPointRoundAnnouncement(roundId, "delivered", sendClaim.at);
         return;
       }
@@ -5707,18 +5817,26 @@ export class ChannelObject extends DurableObject<Env> {
       return current !== null && current.state === "announcing" && current.announce_state === "pending" &&
         current.announce_attempts === attemptNumber && current.last_attempt_at === attemptTimestamp;
     };
+    const action = this.appendPointRoundWelcome({
+      kind: "chat",
+      text: formatted?.text ?? attemptRound.announce_text,
+      ...(formatted?.target === undefined ? {} : { target: formatted.target }),
+      ...(formatted?.replyToMessageId === undefined ? {} : { replyToMessageId: formatted.replyToMessageId }),
+      ...(formatted?.automated === undefined ? {} : { automated: formatted.automated }),
+    }, module, roundId, roundData, formatted?.attributions);
     const delivery = await context.sendChat(
-      formatted?.text ?? attemptRound.announce_text,
+      action.text,
       `round:${roundId}:announce`,
       formatted?.attributions,
       stillValid,
-      formatted?.target,
+      action.target,
       {
-        ...(formatted?.replyToMessageId === undefined ? {} : { replyToMessageId: formatted.replyToMessageId }),
+        ...(action.replyToMessageId === undefined ? {} : { replyToMessageId: action.replyToMessageId }),
         ...(formatted?.sourceBroadcasterUserId === undefined ? {} : { sourceBroadcasterUserId: formatted.sourceBroadcasterUserId }),
-        ...(formatted?.automated === undefined ? {} : { automated: formatted.automated }),
+        ...(action.automated === undefined ? {} : { automated: action.automated }),
       },
     );
+    await this.reportPointRoundWelcomeDelivery(action, pointWelcomeDelivery(delivery));
     const sendReturnedAt = Date.now();
     await this.recordPointRoundAnnouncement(
       roundId,
@@ -5737,6 +5855,7 @@ export class ChannelObject extends DurableObject<Env> {
       const now = Date.now();
       if (claim !== null) {
         if (claim.status === "sent" || now - claim.at >= POINTS_ANNOUNCE_AMBIGUOUS_MS) {
+          if (claim.status === "sent") await this.acknowledgeConfirmedPointRoundWelcome(roundId, "resolve");
           this.ctx.storage.transactionSync(() => {
             recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
             this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
@@ -5860,18 +5979,26 @@ export class ChannelObject extends DurableObject<Env> {
     let delivery: Awaited<ReturnType<ModuleAlarmContext["sendChat"]>>;
     try {
       await this.scheduleEarliestAlarm();
+      const action = this.appendPointRoundWelcome({
+        kind: "chat",
+        text: formatted.text,
+        ...(formatted.target === undefined ? {} : { target: formatted.target }),
+        ...(formatted.replyToMessageId === undefined ? {} : { replyToMessageId: formatted.replyToMessageId }),
+        ...(formatted.automated === undefined ? {} : { automated: formatted.automated }),
+      }, module, roundId, JSON.parse(attempt.round.data_json) as unknown, formatted.attributions);
       delivery = await context.sendChat(
-        formatted.text,
+        action.text,
         `round:${roundId}:resolve`,
         formatted.attributions,
         () => Promise.resolve(rowIsCurrent()),
-        formatted.target,
+        action.target,
         {
-          ...(formatted.replyToMessageId === undefined ? {} : { replyToMessageId: formatted.replyToMessageId }),
+          ...(action.replyToMessageId === undefined ? {} : { replyToMessageId: action.replyToMessageId }),
           ...(formatted.sourceBroadcasterUserId === undefined ? {} : { sourceBroadcasterUserId: formatted.sourceBroadcasterUserId }),
-          ...(formatted.automated === undefined ? {} : { automated: formatted.automated }),
+          ...(action.automated === undefined ? {} : { automated: action.automated }),
         },
       );
+      await this.reportPointRoundWelcomeDelivery(action, pointWelcomeDelivery(delivery));
     } catch (error) {
       const claim = await readModuleAlarmSendClaim(this.ctx.storage, `round:${roundId}:resolve`);
       if (claim === null) {
@@ -5883,6 +6010,7 @@ export class ChannelObject extends DurableObject<Env> {
           else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
         });
       } else if (claim.status === "sent") {
+        await this.acknowledgeConfirmedPointRoundWelcome(roundId, "resolve");
         this.ctx.storage.transactionSync(() => {
           recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
           this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));

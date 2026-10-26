@@ -1123,7 +1123,14 @@ export const dispatchEventSubNotification = async (
 
     try {
       const activation = dispatchState.activations.find((candidate) => candidate.moduleId === module.id);
-      const points = modulePoints(environment.CHANNEL, event.channelId, module.id);
+      const points = modulePoints(
+        environment.CHANNEL,
+        event.channelId,
+        module.id,
+        module.requiresModules?.includes("points") === true && pendingWelcome !== undefined && !pendingWelcome.used
+          ? { accountId: pendingWelcome.accountId, messageId: pendingWelcome.messageId, text: pendingWelcome.text }
+          : undefined,
+      );
       if (module.requiresModules?.includes("points") === true && activation !== undefined) {
         await points.rounds.setGate(!activation.enabled, activation.revision, activation.lastDisabledRevision);
       }

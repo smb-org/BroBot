@@ -1,4 +1,5 @@
 import type { ModulePointsAccess, PointsKind, PointsMovement } from "../modules/contract";
+import { POINT_WELCOME_ROUND_DATA_KEY, type PointWelcomeNote } from "./point-welcome";
 
 const unavailable = <T>(): Promise<T> => Promise.reject(new Error("Point storage is unavailable."));
 
@@ -7,6 +8,7 @@ export const modulePoints = (
   namespace: Env["CHANNEL"] | undefined,
   channelId: string,
   moduleId: string,
+  pointWelcome?: PointWelcomeNote,
 ): ModulePointsAccess => {
   if (namespace === undefined) {
     return {
@@ -44,6 +46,14 @@ export const modulePoints = (
     };
   }
   const object = namespace.get(namespace.idFromName(channelId));
+  const pointWelcomeFor = (accountId: string, messageId?: string): PointWelcomeNote | undefined =>
+    pointWelcome !== undefined && pointWelcome.accountId === accountId &&
+      (messageId === undefined || pointWelcome.messageId === messageId) ? pointWelcome : undefined;
+  const withPointWelcome = (data: unknown, accountId: string): unknown => {
+    const note = pointWelcomeFor(accountId);
+    if (note === undefined || typeof data !== "object" || data === null || Array.isArray(data)) return data;
+    return { ...data, [POINT_WELCOME_ROUND_DATA_KEY]: note };
+  };
   return {
     apply: (operationId, kind: PointsKind, movements: PointsMovement[], result, payloadIdentity) =>
       object.applyPointOperation(moduleId, operationId, kind, movements, result, payloadIdentity),
@@ -66,7 +76,7 @@ export const modulePoints = (
     rounds: {
       open: (roundId, data) => object.openGameRound(moduleId, roundId, data),
       openWithStake: (roundId, data, operationId, accountId, login, stake, cooldown) =>
-        object.openGameRoundWithStake(moduleId, roundId, data, operationId, accountId, login, stake, cooldown),
+        object.openGameRoundWithStake(moduleId, roundId, withPointWelcome(data, accountId), operationId, accountId, login, stake, cooldown),
       active: () => object.activeGameRound(moduleId),
       listOpen: () => object.listOpenGameRounds(moduleId),
       markAnnounced: (roundId, deadlineAt, alarmKey) => object.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
@@ -79,7 +89,8 @@ export const modulePoints = (
         object.attackGameRound(moduleId, roundId, operationId, accountId, login, damage, messageAt),
       resolve: (roundId, settlement) => object.resolveGameRound(moduleId, roundId, settlement),
       accept: (roundId, operationId, accountId, login, replyToMessageId) =>
-        object.acceptGameRound(moduleId, roundId, operationId, accountId, login, replyToMessageId),
+        object.acceptGameRound(moduleId, roundId, operationId, accountId, login, replyToMessageId,
+          pointWelcomeFor(accountId, replyToMessageId)),
       cancel: (roundId) => object.cancelGameRound(moduleId, roundId),
       cancelOpenRounds: (revision) => object.cancelOpenGameRounds(moduleId, revision),
       setGate: (closed, revision, lastDisabledRevision) => object.setGameModuleGate(moduleId, closed, revision, lastDisabledRevision),

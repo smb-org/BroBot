@@ -7,6 +7,7 @@ import type {
   PointsMovement,
   PointsKind,
 } from "../../modules/contract";
+import { POINT_WELCOME_ROUND_DATA_KEY } from "../point-welcome";
 import { bossHealth } from "../../modules/boss_fight/domain/boss";
 
 export const POINTS_ROUND_ALARM_HANDLER = "host:points_round";
@@ -1515,6 +1516,7 @@ export const acceptPointRoundSync = (
   now: string,
   settlements: ReadonlyMap<string, PointSettlement>,
   acceptMessageId?: string,
+  pointWelcome?: { accountId: string; messageId: string; text: string },
 ): PointApplyInternalResult => {
   assertPointRoundId(roundId);
   assertPointAccountId(accountId);
@@ -1539,6 +1541,9 @@ export const acceptPointRoundSync = (
   if (acceptMessageId !== undefined) {
     if (acceptMessageId.length === 0 || acceptMessageId.length > 256) throw new Error("invalid_operation_id");
     data.acceptMessageId = acceptMessageId;
+    if (pointWelcome?.accountId === accountId && pointWelcome.messageId === acceptMessageId) {
+      data[POINT_WELCOME_ROUND_DATA_KEY] = pointWelcome;
+    }
     sql.exec("UPDATE game_rounds SET data_json = ? WHERE round_id = ? AND state = 'open'", JSON.stringify(data), roundId);
   }
   const participant = sql.exec<{ account_id: string }>(
