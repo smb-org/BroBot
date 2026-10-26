@@ -192,8 +192,9 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     ["activityAmount", labels.activityAmount, "number"],
     ["windowMinutes", labels.windowMinutes, "number"],
     ["dailyCap", labels.dailyCap, "number"],
-    ["safetyNetAmount", labels.safetyNetAmount, "number"],
   ];
+  const safetyNetOff = !settingsDraft.safetyNetEnabled;
+  const fixedThreshold = typeof settingsDraft.safetyNetThreshold === "number";
 
   const updateSettingsDraft = (settings: PointsSettings): void => {
     setSettingsSaved(false);
@@ -351,12 +352,19 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
         options={[{ value: "enabled", label: labels.safetyNetOn }, { value: "disabled", label: labels.safetyNetOff }]}
         onChange={(value) => { updateSettingsDraft({ ...settingsDraft, safetyNetEnabled: value === "enabled" }); }}
       />
+      <Field
+        label={labels.safetyNetAmount}
+        type="text"
+        value={String(settingsDraft.safetyNetAmount)}
+        disabled={!canManage || settingsPending || settingsRevision === null || safetyNetOff}
+        onChange={(value) => { updateSettingsDraft({ ...settingsDraft, safetyNetAmount: Number(value) }); }}
+      />
       <SegmentChoice
         label={labels.safetyNetThreshold}
-        hint={labels.safetyNetThresholdHint}
-        value={typeof settingsDraft.safetyNetThreshold === "number" ? "fixed" : "min_stake"}
+        hint={fixedThreshold ? labels.safetyNetThresholdFixedHint : labels.safetyNetThresholdHint}
+        value={fixedThreshold ? "fixed" : "min_stake"}
         wrap
-        disabled={!canManage || settingsPending || settingsRevision === null}
+        disabled={!canManage || settingsPending || settingsRevision === null || safetyNetOff}
         options={[{ value: "min_stake", label: labels.safetyNetMinimumStake }, { value: "fixed", label: labels.safetyNetFixedValue }]}
         onChange={(value) => {
           updateSettingsDraft({
@@ -372,7 +380,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
         hint={labels.safetyNetFixedThresholdHint}
         placeholder={labels.safetyNetFixedThresholdPlaceholder}
         value={typeof settingsDraft.safetyNetThreshold === "number" ? String(settingsDraft.safetyNetThreshold) : ""}
-        disabled={!canManage || settingsPending || settingsRevision === null || typeof settingsDraft.safetyNetThreshold !== "number"}
+        disabled={!canManage || settingsPending || settingsRevision === null || safetyNetOff || !fixedThreshold}
         onChange={(value) => { updateSettingsDraft({ ...settingsDraft, safetyNetThreshold: Number(value) }); }}
       />
     </div>

@@ -55,16 +55,43 @@ describe("points panel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
 
     const settingsPanel = screen.getByLabelText("Points settings");
-    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Off" }));
     fireEvent.click(within(settingsPanel).getByRole("button", { name: "Fixed value" }));
     fireEvent.change(within(settingsPanel).getByLabelText("Fixed threshold"), { target: { value: "25" } });
     fireEvent.change(within(settingsPanel).getByLabelText("Safety-net amount"), { target: { value: "80" } });
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Off" }));
     expect(mocks.savePointsSettings).not.toHaveBeenCalled();
 
     fireEvent.click(within(settingsPanel).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(mocks.savePointsSettings).toHaveBeenCalledOnce());
     expect(mocks.savePointsSettings).toHaveBeenCalledWith("kanal_demo", 1, nextSettings);
+  });
+
+  it("disables the safety-net amount and threshold while it is off and shows the hint of the selected mode (protects=the operator cannot edit safety-net values that have no effect and the threshold hint describes only the selected mode; fails_when=amount or threshold stay editable with the switch off or the min-stake hint shows for a fixed value; no_claim=the effect on payouts is covered in the points module tests)", async () => {
+    renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+
+    const settingsPanel = screen.getByLabelText("Points settings");
+    const amount = within(settingsPanel).getByLabelText("Safety-net amount");
+    const fixed = within(settingsPanel).getByLabelText("Fixed threshold");
+    await waitFor(() => expect(amount).toBeEnabled());
+    expect(within(settingsPanel).getByText("Uses the smallest minimum stake among enabled games.")).toBeInTheDocument();
+    expect(within(settingsPanel).queryByText("Uses the fixed value on the right.")).toBeNull();
+
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Fixed value" }));
+    expect(fixed).toBeEnabled();
+    expect(within(settingsPanel).getByText("Uses the fixed value on the right.")).toBeInTheDocument();
+    expect(within(settingsPanel).queryByText("Uses the smallest minimum stake among enabled games.")).toBeNull();
+
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Off" }));
+    expect(amount).toBeDisabled();
+    expect(fixed).toBeDisabled();
+    expect(within(settingsPanel).getByRole("button", { name: "Below minimum stake" })).toBeDisabled();
+    expect(within(settingsPanel).getByRole("button", { name: "Fixed value" })).toBeDisabled();
+
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "On" }));
+    expect(amount).toBeEnabled();
+    expect(fixed).toBeEnabled();
   });
 
   it("keeps a dirty settings draft and offers the server revision reload (protects=settings drafts stay based on their original revision after a refetch; fails_when=the server value replaces the draft or save remains available without a reload choice; no_claim=the server revision is advanced through the dashboard query cache)", async () => {
