@@ -296,8 +296,10 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     : selectedCorrection.status === labels.saved ? [] : [selectedCorrection.status];
   const detail = settingsOpen ? <section className="points-settings" aria-label={labels.settingsTitle}>
     <PageHeader
+      className="page-header--editor"
       title={labels.settingsTitle}
       kind="modules"
+      pageActions={<Button className="points-settings__back" variant="neutral" icon="collapse" onClick={closeDetail}>{labels.back}</Button>}
       save={{
         dirty: settingsDirty,
         persistent: true,
@@ -377,15 +379,6 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
           savedLabel={labels.saved}
           pendingLabel={labels.saving}
         />
-        <ActionMenu
-          label={commonLabels.moreActions}
-          items={[{ label: labels.settings, onSelect: () => {
-            resetDetailDraft();
-            setSettingsOpen(true);
-            selectedIdRef.current = null;
-            setSelectedAccount(null);
-          } }]}
-        />
       </div>
     </header>
     <section className="points-correction" aria-labelledby="points-correction-title">
@@ -394,12 +387,12 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
         <Field label={labels.amount} value={delta} onChange={(value) => {
           setDelta(value);
           updateCorrection(selected.accountId, { error: undefined, status: undefined });
-        }} disabled={!canManage || adjustPending || pendingAdjustment !== null} mono
+        }} disabled={!canManage || adjustPending || pendingAdjustment !== null} mono errorInDescription
           {...(newBalance < 0 ? { error: labels.negative } : balanceOverflow ? { error: labels.balanceOverflow } : {})} />
         <Field label={labels.reason} value={reason} onChange={(value) => {
           setReason(value);
           updateCorrection(selected.accountId, { error: undefined, status: undefined });
-        }} disabled={!canManage || adjustPending || pendingAdjustment !== null} required
+        }} disabled={!canManage || adjustPending || pendingAdjustment !== null} required errorInDescription
           {...(reason.trim().length > MAX_POINTS_ADJUSTMENT_REASON_LENGTH ? { error: labels.reasonTooLong } : {})} />
       </div>
       <p className={`points-correction__preview${newBalance < 0 || balanceOverflow ? " is-invalid" : ""}`} role="status">
@@ -408,7 +401,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     </section>
     <section className="points-history" aria-labelledby="points-history-title">
       <h3 id="points-history-title">{labels.history}</h3>
-      <ListPaginationFooter loadedCount={history.length} loadedLabel={labels.historyEntries}>
+      <ListPaginationFooter loadedCount={history.length} loadedLabel={history.length === 1 ? labels.historyEntry : labels.historyEntries}>
         <Button variant="neutral" size="compact" disabled={historyCursorStack.length === 0} onClick={() => {
           const stack = historyCursorStack.slice(0, -1);
           setHistoryCursorStack(stack);
@@ -454,6 +447,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     </section>
   </section>;
 
+  const accountNoun = (count: number): string => count === 1 ? labels.account : labels.accounts;
   const toolbar = <ListToolbar
     className="points-list-toolbar"
     language={locale}
@@ -474,12 +468,12 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
       count: accounts.length,
       loaded: accountsQuery.data !== undefined,
       copy: {
-        countSuffix: labels.accounts,
+        countSuffix: accountNoun,
         filteredInfix: commonLabels.of,
-        filteredSuffix: labels.accounts,
+        filteredSuffix: accountNoun,
         limitInfix: commonLabels.of,
-        limitSuffix: labels.accounts,
-        loadedSuffix: labels.accounts,
+        limitSuffix: accountNoun,
+        loadedSuffix: accountNoun,
       },
     }}
   />;
@@ -500,7 +494,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
           : labels.monthNet(account.monthNet, monthLabel(month, locale), null)}</span>
       </button></li>)}
     </ul>}
-    {hasAccountPages ? <ListPaginationFooter loadedCount={accounts.length} loadedLabel={labels.accounts}>
+    {hasAccountPages ? <ListPaginationFooter loadedCount={accounts.length} loadedLabel={accountNoun(accounts.length)}>
       <Button variant="neutral" size="compact" disabled={accountCursorStack.length === 0} onClick={() => {
         const stack = accountCursorStack.slice(0, -1);
         setAccountCursorStack(stack);
@@ -525,7 +519,7 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
       selectedIdRef.current = null;
       setSelectedAccount(null);
     }}>{labels.settings}</Button>
-    <Button variant="neutral" onClick={createTimer}><Icon name="clock-hour-4" size={16} />{labels.timer}</Button>
+    <ActionMenu size="md" label={commonLabels.moreActions} items={[{ label: labels.timer, onSelect: createTimer }]} />
   </div>;
 
   const commonPage = <CollectionPage
