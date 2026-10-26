@@ -91,6 +91,7 @@ import type {
   PointActiveRound,
   PointJoinResult,
   PointRoundAnswerResult,
+  PointRoundParticipants,
   PointSettlementCooldown,
   PointsApplyResult,
   PointsKind,
@@ -217,6 +218,7 @@ import {
   ensurePointsSchema,
   acceptPointRoundSync,
   joinPointRoundSync,
+  pointRoundParticipantsSync,
   listOpenPointRoundsSync,
   listPointAccounts,
   markPointRoundAnnouncedSync,
@@ -4710,6 +4712,7 @@ export class ChannelObject extends DurableObject<Env> {
         markAnnounced: (roundId, deadlineAt, alarmKey) => this.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
         join: (roundId, operationId, accountId, login, stake, data) =>
           this.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
+        participants: (roundId, nameLimit) => this.gameRoundParticipants(moduleId, roundId, nameLimit),
         answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
           this.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
         attack: (roundId, operationId, accountId, login, damage, messageAt) =>
@@ -5053,19 +5056,32 @@ export class ChannelObject extends DurableObject<Env> {
     assertPointRoundId(roundId);
     assertPointAccountId(accountId);
     const payloadHash = await pointPayloadHash({ moduleId, roundId, operationId, accountId, login, stake, data });
-    return this.ctx.storage.transactionSync(() => joinPointRoundSync(
-      this.ctx.storage.sql,
-      moduleId,
-      roundId,
-      operationId,
-      accountId,
-      login,
-      stake,
-      data,
-      payloadHash,
-      Date.now(),
-      new Date().toISOString(),
-    ));
+    try {
+      return this.ctx.storage.transactionSync(() => joinPointRoundSync(
+        this.ctx.storage.sql,
+        moduleId,
+        roundId,
+        operationId,
+        accountId,
+        login,
+        stake,
+        data,
+        payloadHash,
+        Date.now(),
+        new Date().toISOString(),
+      ));
+    } catch (error) {
+      // Same code the opening stake reports, so a module handles both alike.
+      if ((error instanceof Error ? error.message : String(error)) === "insufficient_balance") throw new Error("insufficient_points", { cause: error });
+      throw error;
+    }
+  }
+
+  public async gameRoundParticipants(moduleId: string, roundId: string, nameLimit: number): Promise<PointRoundParticipants> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointRoundId(roundId);
+    return pointRoundParticipantsSync(this.ctx.storage.sql, moduleId, roundId, nameLimit);
   }
 
   public async answerGameRound(

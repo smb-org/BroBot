@@ -1,7 +1,9 @@
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
+import { act, cleanup, render } from "@testing-library/react";
+import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { parseRealtimeMessage } from "../../src/dashboard/realtime";
+import { parseRealtimeMessage, useRealtimePanelMessages } from "../../src/dashboard/realtime";
 import { dashboardDataKeys, queryKeys } from "../../src/dashboard/data/keys";
 import {
   cancelDashboardRealtimeRetries,
@@ -28,10 +30,31 @@ const addQuery = (queryClient: QueryClient, key: readonly unknown[]): void => {
   queryClient.setQueryData(key, { ready: true });
 };
 
+class RealtimeFakeWebSocket {
+  public static instances: RealtimeFakeWebSocket[] = [];
+  private readonly listeners = new Map<string, Set<EventListener>>();
+
+  public constructor() {
+    RealtimeFakeWebSocket.instances.push(this);
+  }
+
+  public addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    const listeners = this.listeners.get(type) ?? new Set<EventListener>();
+    listeners.add(typeof listener === "function" ? listener : (event) => { listener.handleEvent(event); });
+    this.listeners.set(type, listeners);
+  }
+
+  public dispatch(type: string, event: Event): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
 afterEach(() => {
+  cleanup();
   setDashboardRealtimeStatus(channelId, "offline");
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  RealtimeFakeWebSocket.instances = [];
 });
 
 describe("dashboard realtime messages", () => {
@@ -217,6 +240,66 @@ describe("dashboard realtime messages", () => {
     setDashboardRealtimeStatus(channelId, "connected");
     expect(getDashboardRealtimeStatus(channelId)).toBe("connected");
     expect(getDashboardRealtimeStatus("channel-b")).toBe("offline");
+  });
+
+  it("evicts old panel message ids after 500 distinct messages", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-26T12:00:00.000Z"));
+    vi.stubGlobal("WebSocket", RealtimeFakeWebSocket);
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ revisions: {} }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+    vi.stubGlobal("fetch", fetcher);
+    const queryClient = new QueryClient();
+    const Harness = () => {
+      useRealtimePanelMessages(channelId, true);
+      return null;
+    };
+    const view = render(createElement(QueryClientProvider, { client: queryClient }, createElement(Harness)));
+    const socket = RealtimeFakeWebSocket.instances[0];
+    if (socket === undefined) throw new Error("The panel realtime socket was not created.");
+    const createdAt = new Date().toISOString();
+    const sendHint = (id: string): void => {
+      socket.dispatch("message", new MessageEvent("message", {
+        data: JSON.stringify({
+          version: 1,
+          id,
+          createdAt,
+          channelId,
+          type: "event_log.new",
+          payload: { entries: [{
+            eventId: `event-${id}`,
+            createdAt,
+            moduleId: "host",
+            code: "host.chat.sent",
+            actorUserId: null,
+          }] },
+        }),
+      }));
+    };
+
+    await act(async () => {
+      sendHint("message-0");
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      for (let index = 1; index <= 500; index += 1) sendHint(`message-${String(index)}`);
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      sendHint("message-0");
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+
+    view.unmount();
+    await vi.advanceTimersByTimeAsync(0);
+    queryClient.clear();
   });
 
   it("refreshes a second client from revisions and repairs a lost hint on focus", async () => {

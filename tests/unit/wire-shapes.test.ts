@@ -1,4 +1,5 @@
 import { duelSettingsForLanguage } from "../../src/modules/duel/contracts";
+import { heistSettingsForLanguage } from "../../src/modules/heist/contracts";
 import { blitzTexts } from "../../src/modules/blitz_round/locale";
 import { readFileSync } from "node:fs";
 
@@ -377,6 +378,7 @@ const realtimeForms = {
 
 const expectedModuleSettings = {
   duel: duelSettingsForLanguage("de"),
+  heist: heistSettingsForLanguage("de"),
   blitz_round: {
     prize: 50, answerTimeSeconds: 60, autoStart: false, autoStartIntervalMinutes: 15, chatTarget: null,
     startText: blitzTexts("de").startTextDefault,
@@ -896,6 +898,7 @@ describe("serialized contract shapes", () => {
         "duel",
         "emote_slots",
         "faq",
+        "heist",
         "moon",
         "points",
         "raid",
