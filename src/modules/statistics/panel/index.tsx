@@ -12,6 +12,7 @@ import type { StatisticsStreamDetailResponse, StatisticsStreamEvent, StatisticsS
 import { loadStatisticsStream, loadStatisticsStreams } from "./service";
 import { statisticsPanelTexts } from "./locale";
 import { StatisticsHistoryChart } from "./history-chart";
+import { StatisticsTrendsPanel } from "./trends";
 import { StatisticsWordsPanel } from "./words-panel";
 
 const number = (value: number | null, language: "de" | "en", digits = 0): string => value === null
@@ -53,7 +54,7 @@ const duration = (seconds: number, unit: string): string => {
   return `${String(hours)}:${String(minutes).padStart(2, "0")} ${unit}`;
 };
 
-const eventText = (event: StatisticsStreamEvent, labels: ReturnType<typeof statisticsPanelTexts>): string => {
+const eventText = (event: StatisticsStreamEvent, labels: ReturnType<typeof statisticsPanelTexts>, language: "de" | "en"): string => {
   if (event.type === "metadata") {
     const changes = [];
     if (event.oldCategory !== event.category) changes.push(`${labels.category}: ${event.oldCategory ?? "—"} → ${event.category ?? "—"}`);
@@ -61,12 +62,12 @@ const eventText = (event: StatisticsStreamEvent, labels: ReturnType<typeof stati
     return changes.join(" · ");
   }
   if (event.type === "clip") return event.text ?? event.clipId ?? labels.clip;
-  if (event.type === "ad") return `${number(event.durationSeconds ?? 0, "en")} s`;
-  if (event.type === "drop") return `${number(event.durationSeconds ?? 0, "en")} s`;
-  if (event.type === "emoteSpike") return labels.emotesInWindow(number(event.emotes ?? 0, "en"));
+  if (event.type === "ad") return `${number(event.durationSeconds ?? 0, language)} s`;
+  if (event.type === "drop") return `${number(event.durationSeconds ?? 0, language)} s`;
+  if (event.type === "emoteSpike") return labels.emotesInWindow(number(event.emotes ?? 0, language));
   if (event.type === "raidIncoming" || event.type === "raidOutgoing") {
     const describe = event.type === "raidIncoming" ? labels.raidFrom : labels.raidTo;
-    return describe(event.partnerName ?? "—", number(event.raidViewers ?? 0, "en"));
+    return describe(event.partnerName ?? "—", event.raidViewers ?? 0);
   }
   if (event.type === "offline") return labels.streamEnded;
   return labels.streamStarted;
@@ -201,7 +202,7 @@ const StreamInspector = ({ detail, language, timeZone, timeZoneFallbackLabel, la
         {detail.events.map((event) => <li
           key={event.id}
           className="statistics-inspector__event"
-          aria-label={`${eventLabel(event, labels)} ${eventText(event, labels)}`}
+          aria-label={`${eventLabel(event, labels)} ${eventText(event, labels, language)}`}
           data-highlighted={event.id === highlightedEventId ? "true" : "false"}
           onMouseEnter={() => onHighlightEvent(event.id)}
           onMouseLeave={() => onHighlightEvent(null)}
@@ -213,7 +214,7 @@ const StreamInspector = ({ detail, language, timeZone, timeZoneFallbackLabel, la
             title={timestampTitle(event.at, language, timeZone, timeZoneFallbackLabel)}
           >{dateParts(event.at, language, timeZone).time}</time>}
           <strong>{eventLabel(event, labels)}</strong>
-          <span className="statistics-inspector__event-text">{eventText(event, labels)}</span>
+          <span className="statistics-inspector__event-text">{eventText(event, labels, language)}</span>
           <span className="statistics-inspector__event-viewers mono">{eventViewers(detail.windows, event.at, language, labels.viewer)}</span>
         </li>)}
       </ul>}
@@ -365,8 +366,11 @@ export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePan
   return <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />;
 }
 
+const STATISTICS_PAGES: Readonly<Record<string, (properties: ModulePanelProperties) => ReactElement>> = {
+  trends: (properties) => <StatisticsTrendsPanel {...properties} />,
+  words: (properties) => <StatisticsWordsPanel {...properties} />,
+};
+
 export function StatisticsPanel(properties: ModulePanelProperties): ReactElement {
-  return properties.pageId === "words"
-    ? <StatisticsWordsPanel {...properties} />
-    : <StatisticsStreamsPanel {...properties} />;
+  return (STATISTICS_PAGES[properties.pageId ?? ""] ?? ((streams) => <StatisticsStreamsPanel {...streams} />))(properties);
 }

@@ -3,6 +3,7 @@ import { Hono } from "hono";
 
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
 import type { ModuleTimelineEvent } from "../../src/modules/contract";
+import type { StatisticsTrendsResponse } from "../../src/modules/statistics/contracts";
 import { statisticsRoutes } from "../../src/modules/statistics/routes";
 import { writeChannelTimelineEvent } from "../../src/worker/db/timeline-events";
 import { requireChannelAuthorization } from "../../src/worker/auth/guards";
@@ -97,6 +98,52 @@ describe("statistics stream routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: "channel_access_denied" });
+  });
+
+  it("denies a non-member before returning trends", async () => {
+    const { fetch } = await setup(false);
+    const response = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/trends?weeks=12`);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "channel_access_denied" });
+  });
+
+  it("rejects unsupported trends week ranges", async () => {
+    const { fetch } = await setup();
+    const response = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/trends?weeks=8`);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "statistics_trends_query_invalid" });
+  });
+
+  it("returns bounded current and previous aggregates with the channel time zone", async () => {
+    const { database, fetch } = await setup();
+    await database.prepare("UPDATE channels SET time_zone = 'Europe/Berlin' WHERE channel_id = ?").bind(CHANNEL_ID).run();
+    await putTimeline(database, "metadata-seed", "channel_metadata", "2026-08-01T12:00:00.000Z", {
+      title: "Seeded", category: { id: "game-a", name: "Game A" },
+    });
+    await putWindow(database, "previous-stream", "2026-09-20T18:00:00.000Z", { messages: 50, viewers: 20 });
+    await putWindow(database, "current-stream", "2026-10-20T18:00:00.000Z", { messages: 300, viewers: 60 });
+    await putWindow(database, "current-stream", "2026-10-20T18:05:00.000Z", { messages: 100, viewers: null });
+    await putTimeline(database, "metadata-change", "channel_metadata", "2026-10-20T18:03:00.000Z", {
+      title: "Second game", category: { id: "game-b", name: "Game B" },
+    });
+
+    const response = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/trends?weeks=4`);
+    const trends = await response.json<StatisticsTrendsResponse>();
+
+    expect(response.status).toBe(200);
+    expect(trends).toMatchObject({
+      weeks: 4,
+      timeZone: "Europe/Berlin",
+      kpis: { streams: 1, streamHours: 1 / 6, averageViewers: 60, messagesPerMinute: 40 },
+      previousKpis: { streams: 1, streamHours: 1 / 12, averageViewers: 20, messagesPerMinute: 10 },
+    });
+    expect(trends.weekly).toContainEqual(expect.objectContaining({ weekStart: "2026-10-19", averageViewers: 60 }));
+    expect(trends.categories).toEqual([
+      expect.objectContaining({ name: "Game A", streams: 1, streamHours: 3 / 60, averageViewers: 60, messagesPerMinute: 60 }),
+      expect.objectContaining({ name: "Game B", streams: 1, streamHours: 7 / 60, averageViewers: 60, messagesPerMinute: 220 / 7 }),
+    ]);
   });
 
   it("lists aggregated streams newest first and follows an opaque cursor", async () => {

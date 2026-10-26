@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 import { z } from "zod";
 
+import { DEFAULT_CHANNEL_TIME_ZONE, validChannelTimeZone } from "../contract";
 import type { ModuleRouteEnvironment } from "../contract";
-import type { StatisticsBitrateWindow, StatisticsStreamWindow, StatisticsTimelineEvent } from "./contracts";
+import type { StatisticsBitrateWindow, StatisticsStreamWindow, StatisticsTimelineEvent, StatisticsTrendsWeeks } from "./contracts";
 import { decodeStreamCursor, deriveStreamEvents, encodeStreamCursor, groupStatisticsWindows, matchBitrateWindows, paginateStreamSummaries } from "./streams-domain";
 import { STATISTICS_CHAT_FILLER_WORDS } from "./filler-words";
+import { deriveStatisticsTrends } from "./trends-domain";
 
 const WINDOW_MILLISECONDS = 5 * 60_000;
 const WORD_PAGE_SIZE = 100;
@@ -20,6 +22,8 @@ const streamParamsSchema = z.object({
   channelId: z.string().trim().min(1).max(128),
   streamId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/u),
 });
+const trendsQuerySchema = z.object({ weeks: z.enum(["4", "12", "52"]).default("12") })
+  .transform(({ weeks }): { weeks: StatisticsTrendsWeeks } => ({ weeks: Number(weeks) as StatisticsTrendsWeeks }));
 const wordsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(WORD_MAX_PAGE).default(1),
   search: z.string().trim().max(WORD_MAX_SEARCH_LENGTH).default(""),
@@ -244,6 +248,59 @@ statisticsRoutes.get("/streams/:streamId", async (context) => {
     bitrateWindows: matchBitrateWindows(bitrateWindows, startedAt, endedAt),
     events: deriveStreamEvents(timeline, startedAt, endedAt, windows),
   });
+});
+
+statisticsRoutes.get("/trends", async (context) => {
+  const params = listParamsSchema.safeParse({ channelId: context.req.param("channelId") });
+  const query = trendsQuerySchema.safeParse({
+    ...(context.req.query("weeks") === undefined ? {} : { weeks: context.req.query("weeks") }),
+  });
+  if (!params.success || !query.success) return context.json({ error: "statistics_trends_query_invalid" }, 400);
+
+  const { channelId } = params.data;
+  const endMilliseconds = Date.now();
+  const end = new Date(endMilliseconds).toISOString();
+  const periodMilliseconds = query.data.weeks * 7 * 24 * 60 * 60_000;
+  const scanStart = new Date(endMilliseconds - 2 * periodMilliseconds).toISOString();
+  const [channel, windowRows, metadataRows] = await Promise.all([
+    context.env.DB.prepare("SELECT time_zone FROM channels WHERE channel_id = ?").bind(channelId)
+      .first<{ time_zone: string }>(),
+    // A single bounded range scan serves both equal-length comparison periods.
+    context.env.DB.prepare(
+      `SELECT window_start, stream_id, messages, emotes, viewer_count, chatters, active_chatters
+         FROM channel_statistics
+        WHERE channel_id = ? AND stream_id IS NOT NULL AND window_start >= ? AND window_start < ?
+        ORDER BY window_start ASC`,
+    ).bind(channelId, scanStart, end).all<StreamWindowRow>(),
+    // Read in-range metadata plus only the latest earlier observation as the category seed.
+    context.env.DB.prepare(
+      `WITH metadata_in_range AS (
+         SELECT event_key, kind, occurred_at, detail_json
+           FROM channel_timeline_events
+          WHERE channel_id = ? AND kind = 'channel_metadata' AND occurred_at >= ? AND occurred_at < ?
+       ), metadata_seed AS (
+         SELECT event_key, kind, occurred_at, detail_json
+           FROM channel_timeline_events
+          WHERE channel_id = ? AND kind = 'channel_metadata' AND occurred_at < ?
+          ORDER BY occurred_at DESC, event_key DESC
+          LIMIT 1
+       )
+       SELECT event_key, kind, occurred_at, detail_json FROM metadata_in_range
+       UNION ALL
+       SELECT event_key, kind, occurred_at, detail_json FROM metadata_seed
+       ORDER BY occurred_at ASC, event_key ASC`,
+    ).bind(channelId, timelineTimestamp(scanStart), timelineTimestamp(end), channelId, timelineTimestamp(scanStart))
+      .all<TimelineRow>(),
+  ]);
+  const timeZone = channel !== null && validChannelTimeZone(channel.time_zone)
+    ? channel.time_zone
+    : DEFAULT_CHANNEL_TIME_ZONE;
+  const response = deriveStatisticsTrends(
+    windowRows.results.map(statisticsWindow),
+    metadataRows.results.map(timelineEvent),
+    { weeks: query.data.weeks, now: end, timeZone },
+  );
+  return context.json(response);
 });
 
 statisticsRoutes.get("/words", async (context) => {

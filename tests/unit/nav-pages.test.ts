@@ -20,7 +20,7 @@ const navigationFor = (moduleStates: { id: string; enabled: boolean }[], role: C
   );
 
 describe("dashboard navigation", () => {
-  it("registers Streams and Wörter as distinct statistics pages under data", () => {
+  it("registers Streams, Trends and Words as distinct statistics pages under data", () => {
     const groups = navigationFor(MODULES.map(({ id }) => ({ id, enabled: true })));
     const entries = groups.flatMap(({ entries: groupEntries }) => groupEntries).filter(({ moduleId }) => moduleId === "statistics");
 
@@ -34,6 +34,14 @@ describe("dashboard navigation", () => {
         route: { kind: "module", channelId: "channel-a", moduleId: "statistics" },
       }),
       expect.objectContaining({
+        id: "module:statistics:trends",
+        moduleId: "statistics",
+        category: "data",
+        area: "setup",
+        label: "Trends",
+        route: { kind: "module", channelId: "channel-a", moduleId: "statistics", pageId: "trends" },
+      }),
+      expect.objectContaining({
         id: "module:statistics:words",
         moduleId: "statistics",
         category: "data",
@@ -42,7 +50,8 @@ describe("dashboard navigation", () => {
         route: { kind: "module", channelId: "channel-a", moduleId: "statistics", pageId: "words" },
       }),
     ]);
-    expect(dashboardRoutePath(entries[1]?.route as DashboardRoute)).toBe("/channels/channel-a/modules/statistics?page=words");
+    expect(dashboardRoutePath(entries[1]?.route as DashboardRoute)).toBe("/channels/channel-a/modules/statistics?page=trends");
+    expect(dashboardRoutePath(entries[2]?.route as DashboardRoute)).toBe("/channels/channel-a/modules/statistics?page=words");
     expect(parseDashboardRoute("/channels/channel-a/modules/statistics", "?page=words")).toEqual({
       kind: "module", channelId: "channel-a", moduleId: "statistics", pageId: "words",
     });

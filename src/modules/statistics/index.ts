@@ -27,6 +27,14 @@ export const statisticsModule: BotModule<typeof settingsSchema> = {
       keywords: ["stream", "streams", "verlauf", "history", "statistik", "statistics"],
     },
     {
+      id: "trends",
+      label: { de: statisticsModuleCatalog.de.trendsLabel, en: statisticsModuleCatalog.en.trendsLabel },
+      description: { de: statisticsModuleCatalog.de.trendsDescription, en: statisticsModuleCatalog.en.trendsDescription },
+      showMainSwitch: false,
+      iconKind: "data",
+      keywords: ["trends", "wochenverlauf", "heatmap", "kategorien", "categories"],
+    },
+    {
       id: "words",
       label: { de: statisticsModuleCatalog.de.wordsLabel, en: statisticsModuleCatalog.en.wordsLabel },
       description: { de: statisticsModuleCatalog.de.wordsDescription, en: statisticsModuleCatalog.en.wordsDescription },

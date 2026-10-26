@@ -382,6 +382,26 @@ BELABOX-Daten direkt per SQL und importiert keinen anderen Modulcode. Die
 Streams-Ansicht zeigt den Titel eines importierten Clips; Bot-Clips ohne Titel
 fallen auf ihren bisherigen Text zurück.
 
+Die Trends-Seite liest über
+`GET /api/channels/:channelId/modules/statistics/trends?weeks=4|12|52` und
+bleibt hinter derselben Kanalautorisierung. Standardmäßig vergleicht sie die
+letzten zwölf Wochen mit den unmittelbar vorherigen zwölf Wochen. Eine einzige
+Zeitbereichsabfrage auf `channel_statistics(channel_id, window_start)` liest
+beide Perioden; bei vollständiger Belegung umfasst die größte Auswahl 104
+Wochen beziehungsweise rund 209.664 Fünf-Minuten-Zeilen. Eine einzelne
+Timeline-Abfrage liest `channel_metadata` im Bereich und den letzten früheren
+Eintrag als Seed über den vorhandenen Kanal-/Art-/Zeitindex. Eine kleine
+Kanaltabellenabfrage liefert `time_zone`.
+
+Wochenstarts und Streamstart-Zellen der Heatmap werden aus lokalen Kalender-
+Feldern in der Kanalzeitzone berechnet; ISO-Wochen beginnen am Montag und
+lokale DST-Wechsel ändern die Fensterdauer nicht. Viewer-Mittel ignorieren
+fehlende Stichproben. Kategorien folgen den `channel_metadata`-Zeitpunkten:
+Fensterstunden und Nachrichten werden proportional auf Kategorien innerhalb
+des Fensters verteilt, Viewer-Stichproben nach dieser Dauer gewichtet und ein
+Stream je gezeigter Kategorie einmal gezählt. Die Ansichten liefern nur
+Aggregate und Kategorienamen.
+
 Lifecycle-Wiederholungen sind über Art, Ereigniszeit und — bei `stream.online`
 — Stream-ID idempotent. Metadatenbeobachtungen verwenden Art, Ereigniszeit und
 einen Inhalts-Hash; EventSub-Nachrichten-IDs sind kein Ereignisschlüssel.

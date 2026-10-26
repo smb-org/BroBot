@@ -1,5 +1,10 @@
 import type { ModuleLanguage } from "../../contract";
 
+const germanViewers = (count: number): string =>
+  `${new Intl.NumberFormat("de-DE").format(count)} ${count === 1 ? "Zuschauer" : "Zuschauern"}`;
+const englishViewers = (count: number): string =>
+  `${new Intl.NumberFormat("en-US").format(count)} ${count === 1 ? "viewer" : "viewers"}`;
+
 export interface StatisticsPanelTexts {
   streams: string;
   older: string;
@@ -48,8 +53,9 @@ export interface StatisticsPanelTexts {
   emotesInWindow: (count: string) => string;
   raidIncoming: string;
   raidOutgoing: string;
-  raidFrom: (name: string, viewers: string) => string;
-  raidTo: (name: string, viewers: string) => string;
+  /** Raid sentences take the raw viewer count: the locale formats it and picks singular or plural. */
+  raidFrom: (name: string, viewers: number) => string;
+  raidTo: (name: string, viewers: number) => string;
   title: string;
   category: string;
   at: string;
@@ -105,8 +111,8 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsPanelTexts>> = {
     emotesInWindow: (count) => `${count} Emotes in 5 Minuten`,
     raidIncoming: "Eingehender Raid",
     raidOutgoing: "Ausgehender Raid",
-    raidFrom: (name, viewers) => `Raid von ${name} mit ${viewers} Zuschauern`,
-    raidTo: (name, viewers) => `Raid zu ${name} mit ${viewers} Zuschauern`,
+    raidFrom: (name, viewers) => `Raid von ${name} mit ${germanViewers(viewers)}`,
+    raidTo: (name, viewers) => `Raid zu ${name} mit ${germanViewers(viewers)}`,
     title: "Titel",
     category: "Kategorie",
     at: "um",
@@ -160,8 +166,8 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsPanelTexts>> = {
     emotesInWindow: (count) => `${count} emotes in 5 minutes`,
     raidIncoming: "Incoming raid",
     raidOutgoing: "Outgoing raid",
-    raidFrom: (name, viewers) => `Raid from ${name} with ${viewers} viewers`,
-    raidTo: (name, viewers) => `Raid to ${name} with ${viewers} viewers`,
+    raidFrom: (name, viewers) => `Raid from ${name} with ${englishViewers(viewers)}`,
+    raidTo: (name, viewers) => `Raid to ${name} with ${englishViewers(viewers)}`,
     title: "Title",
     category: "Category",
     at: "at",
@@ -170,3 +176,148 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsPanelTexts>> = {
 };
 
 export const statisticsPanelTexts = (language: ModuleLanguage): StatisticsPanelTexts => texts[language];
+
+export interface StatisticsTrendsTexts {
+  rangeSwitch: string;
+  weeks: (count: number) => string;
+  rangeSummary: (current: string, previous: string) => string;
+  kpis: string;
+  categories: string;
+  streams: string;
+  streamHours: string;
+  averageViewers: string;
+  messagesPerMinute: string;
+  previous: (value: string) => string;
+  noPrevious: string;
+  newPeriod: string;
+  weekPrefix: string;
+  weeklyTitle: string;
+  weeklyDescription: string;
+  viewers: string;
+  hours: string;
+  leftAxis: string;
+  rightAxis: string;
+  emptyWeek: string;
+  noStreamsInPeriod: string;
+  noStreamsDescription: string;
+  heatmapTitle: string;
+  heatmapDescription: string;
+  noStream: string;
+  minViewers: string;
+  maxViewers: string;
+  categoriesTitle: (count: number) => string;
+  category: string;
+  categoryShort: string;
+  categoryStreams: string;
+  categoryStreamsShort: string;
+  categoryHours: string;
+  categoryViewers: string;
+  categoryMessagesPerMinute: string;
+  categoryHoursShort: string;
+  categoryViewersShort: string;
+  categoryMessagesShort: string;
+  noCategories: string;
+  loadError: string;
+  retry: string;
+  updating: string;
+  /** Accessible name and detail text of a heatmap cell, e.g. "Mi 19 Uhr: Ø 262 Viewer". */
+  heatCell: (day: string, hour: number, viewers: string) => string;
+  heatCellEmpty: (day: string, hour: number) => string;
+}
+
+const trendsTexts: Readonly<Record<ModuleLanguage, StatisticsTrendsTexts>> = {
+  de: {
+    rangeSwitch: "Zeitraum",
+    weeks: (count) => `${String(count)} Wochen`,
+    rangeSummary: (current, previous) => `${current} · verglichen mit ${previous}`,
+    kpis: "Kennzahlen",
+    categories: "Kategorien",
+    streams: "Streams",
+    streamHours: "Streamstunden",
+    averageViewers: "Ø Viewer",
+    messagesPerMinute: "Nachrichten / Min",
+    previous: (value) => `vorher ${value}`,
+    noPrevious: "kein Vergleichswert",
+    newPeriod: "neu",
+    weekPrefix: "KW",
+    weeklyTitle: "Wochenverlauf",
+    weeklyDescription: "Ø Viewer je Woche und Streamstunden",
+    viewers: "Ø Viewer",
+    hours: "Streamstunden",
+    leftAxis: "linke Achse",
+    rightAxis: "rechte Achse",
+    emptyWeek: "Woche ohne Stream",
+    noStreamsInPeriod: "Keine Streams in diesem Zeitraum",
+    noStreamsDescription: "Hier erscheinen Wochenverlauf, Startzeiten und Kategorien, sobald Streams erfasst wurden.",
+    heatmapTitle: "Wochentag × Startstunde",
+    heatmapDescription: "Ø Viewer je Streamstart",
+    noStream: "Kein Stream",
+    minViewers: "Weniger Viewer",
+    maxViewers: "Mehr Viewer",
+    categoriesTitle: (count) => `${String(count)} Kategorien im Zeitraum`,
+    category: "Kategorie",
+    categoryShort: "Kat.",
+    categoryStreams: "Streams",
+    categoryStreamsShort: "St.",
+    categoryHours: "Stunden",
+    categoryViewers: "Ø Viewer",
+    categoryMessagesPerMinute: "Ø Nachrichten / Min",
+    categoryHoursShort: "Std.",
+    categoryViewersShort: "Ø View.",
+    categoryMessagesShort: "Ø N/Min",
+    noCategories: "Keine Kategorien in diesem Zeitraum erfasst.",
+    loadError: "Die Trends konnten nicht geladen werden.",
+    retry: "Erneut laden",
+    updating: "Aktualisiere …",
+    heatCell: (day, hour, viewers) => `${day} ${String(hour)} Uhr: Ø ${viewers} Viewer`,
+    heatCellEmpty: (day, hour) => `${day} ${String(hour)} Uhr: kein Stream`,
+  },
+  en: {
+    rangeSwitch: "Date range",
+    weeks: (count) => `${String(count)} weeks`,
+    rangeSummary: (current, previous) => `${current} · compared with ${previous}`,
+    kpis: "Key metrics",
+    categories: "Categories",
+    streams: "Streams",
+    streamHours: "Stream hours",
+    averageViewers: "Avg viewers",
+    messagesPerMinute: "Messages / min",
+    previous: (value) => `before ${value}`,
+    noPrevious: "no comparison value",
+    newPeriod: "new",
+    weekPrefix: "Week",
+    weeklyTitle: "Weekly activity",
+    weeklyDescription: "Avg viewers per week and stream hours",
+    viewers: "Avg viewers",
+    hours: "Stream hours",
+    leftAxis: "left axis",
+    rightAxis: "right axis",
+    emptyWeek: "Week without streams",
+    noStreamsInPeriod: "No streams in this period",
+    noStreamsDescription: "Weekly activity, start times, and categories will appear here once streams are recorded.",
+    heatmapTitle: "Weekday × start hour",
+    heatmapDescription: "Avg viewers by stream start",
+    noStream: "No stream",
+    minViewers: "Fewer viewers",
+    maxViewers: "More viewers",
+    categoriesTitle: (count) => `${String(count)} categories in this period`,
+    category: "Category",
+    categoryShort: "Cat.",
+    categoryStreams: "Streams",
+    categoryStreamsShort: "Str.",
+    categoryHours: "Hours",
+    categoryViewers: "Avg viewers",
+    categoryMessagesPerMinute: "Avg messages / min",
+    categoryHoursShort: "h",
+    categoryViewersShort: "Avg.",
+    categoryMessagesShort: "Msg/min",
+    noCategories: "No categories recorded in this period.",
+    loadError: "Could not load trends.",
+    retry: "Reload",
+    updating: "Updating…",
+    heatCell: (day, hour, viewers) => `${day} ${String(hour).padStart(2, "0")}:00: avg ${viewers} viewers`,
+    heatCellEmpty: (day, hour) => `${day} ${String(hour).padStart(2, "0")}:00: no stream`,
+  },
+};
+
+export const statisticsTrendsTexts = (language: ModuleLanguage): StatisticsTrendsTexts => trendsTexts[language];
