@@ -1,4 +1,4 @@
-import type { ModuleAction, ModulePointsAccess } from "../modules/contract";
+import type { BotModule, ModuleAction, ModulePointsAccess } from "../modules/contract";
 import { reserveChatTextBeforeSuffix } from "./chat";
 
 export interface PendingPointWelcome {
@@ -9,14 +9,17 @@ export interface PendingPointWelcome {
   used: boolean;
 }
 
-/** Adds the first-contact note to the next command reply and acknowledges only a successful send. */
+/** Adds the first-contact note to the next points or game reply and acknowledges only a successful send. */
 export const appendPointWelcome = (
   action: ModuleAction,
+  module: Pick<BotModule, "id" | "requiresModules">,
   pending: PendingPointWelcome | undefined,
   attributions: readonly string[] = [],
   commandResponseMessageId?: string,
 ): ModuleAction => {
   if (action.kind !== "chat" || pending === undefined || pending.used) return action;
+  // The note only makes sense next to points; replies of other modules leave the welcome pending.
+  if (module.id !== "points" && module.requiresModules?.includes("points") !== true) return action;
   const respondsToViewer = action.replyToMessageId === pending.messageId ||
     action.replyToMessageId === undefined && commandResponseMessageId === pending.messageId;
   if (!respondsToViewer) return action;

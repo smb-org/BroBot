@@ -375,7 +375,7 @@ const runActions = async (
     const isModerationFollowUp = moderationFollowUps.has(action);
     const commandResponseMessageId = commandResponseActions.has(action) ? handledMessageId : undefined;
     // Moderation follow-ups never carry or acknowledge the welcome, threaded or not.
-    if (!isModerationFollowUp) action = appendPointWelcome(action, pendingWelcome, attributions, commandResponseMessageId);
+    if (!isModerationFollowUp) action = appendPointWelcome(action, module, pendingWelcome, attributions, commandResponseMessageId);
     const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
       try {

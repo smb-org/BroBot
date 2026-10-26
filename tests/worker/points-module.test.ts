@@ -89,7 +89,7 @@ describe("points module worker events", () => {
       access: { ackWelcome: (accountId: string) => object.acknowledgePointWelcome(moduleId, accountId) },
       used: false,
     };
-    const welcomedReply = appendPointWelcome(reply, pending);
+    const welcomedReply = appendPointWelcome(reply, { id: moduleId }, pending);
     if (welcomedReply.kind !== "chat") throw new Error("The welcome note did not remain a chat reply.");
     expect(welcomedReply.text).toContain("Startguthaben 100 Punkte");
     await welcomedReply.onDelivery?.("sent");

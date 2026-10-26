@@ -6,6 +6,8 @@ import { localizedMonth, pointsBalanceReply, pointsTopReply, processPointsMessag
 import { truncateChatTextWithAttributions } from "../../src/worker/chat";
 import { appendPointWelcome, type PendingPointWelcome } from "../../src/worker/point-welcome";
 
+const pointsOwner = { id: "points" };
+
 const emptyDatabase = {
   prepare: () => ({ bind: () => ({ all: () => Promise.resolve({ results: [] }) }) }),
 } as unknown as D1Database;
@@ -124,15 +126,15 @@ describe("points module", () => {
     const unrelated: ModuleAction = { kind: "chat", text: "Other reply", replyToMessageId: "another_message" };
     const action: ModuleAction = { kind: "chat", text: "Command reply", replyToMessageId: "message_demo" };
 
-    expect(appendPointWelcome(unrelated, pending)).toBe(unrelated);
-    const first = appendPointWelcome(action, pending);
+    expect(appendPointWelcome(unrelated, pointsOwner, pending)).toBe(unrelated);
+    const first = appendPointWelcome(action, pointsOwner, pending);
     expect(first).toMatchObject({ kind: "chat", text: "Command reply · Startguthaben 100 Punkte" });
     if (first.kind !== "chat") throw new Error("The expected welcome action was not a chat reply.");
     await first.onDelivery?.("rejected");
     expect(pending.used).toBe(false);
     expect(ackWelcome).not.toHaveBeenCalled();
 
-    const retry = appendPointWelcome(action, pending);
+    const retry = appendPointWelcome(action, pointsOwner, pending);
     if (retry.kind !== "chat") throw new Error("The retry welcome action was not a chat reply.");
     await retry.onDelivery?.("sent");
     expect(ackWelcome).toHaveBeenCalledOnce();
@@ -155,7 +157,7 @@ describe("points module", () => {
       replyToMessageId: "message_demo",
     };
     const attributions = ["Source label"];
-    const decorated = appendPointWelcome(action, pending, attributions);
+    const decorated = appendPointWelcome(action, pointsOwner, pending, attributions);
     if (decorated.kind !== "chat") throw new Error("The expected welcome action was not a chat reply.");
     const transported = truncateChatTextWithAttributions(decorated.text, attributions);
 
@@ -175,7 +177,33 @@ describe("points module", () => {
       used: false,
     };
     const action: ModuleAction = { kind: "chat", text: "Command reply", replyToMessageId: "message_demo" };
-    expect(appendPointWelcome(action, pending, ["Source label"])).toBe(action);
+    expect(appendPointWelcome(action, pointsOwner, pending, ["Source label"])).toBe(action);
     expect(pending.used).toBe(false);
+  });
+
+  it("carries the welcome note only on points and game replies and keeps it pending after any other reply (protects=!befehle, text command and FAQ replies never show the start bonus; fails_when=a module without a points dependency gets the note or consumes the pending welcome; no_claim=chat delivery is not simulated)", async () => {
+    const ackWelcome = vi.fn(() => Promise.resolve());
+    const pending: PendingPointWelcome = {
+      accountId: "viewer_demo",
+      messageId: "message_demo",
+      text: "Startguthaben 100 Punkte",
+      access: { ackWelcome },
+      used: false,
+    };
+    const reply: ModuleAction = { kind: "chat", text: "Befehle: !befehle, !hallo, !up", replyToMessageId: "message_demo" };
+
+    for (const id of ["commands", "text_commands", "faq"]) {
+      expect(appendPointWelcome(reply, { id }, pending)).toBe(reply);
+      expect(pending.used).toBe(false);
+    }
+
+    const game = appendPointWelcome(reply, { id: "slot", requiresModules: ["points"] }, pending);
+    expect(game).toMatchObject({ kind: "chat", text: "Befehle: !befehle, !hallo, !up · Startguthaben 100 Punkte" });
+    expect(pending.used).toBe(true);
+    // Once claimed, a second points reply must not repeat the note.
+    expect(appendPointWelcome(reply, pointsOwner, pending)).toBe(reply);
+    if (game.kind !== "chat") throw new Error("The expected game reply was not a chat reply.");
+    await game.onDelivery?.("sent");
+    expect(ackWelcome).toHaveBeenCalledOnce();
   });
 });
