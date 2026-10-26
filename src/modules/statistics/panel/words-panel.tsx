@@ -46,12 +46,14 @@ export function StatisticsWordsPanel({ channelId, language = "de" }: ModulePanel
   const [page, setPage] = useState(1);
 
   useEffect(() => {
+    // An unchanged search must not reset the page: on mount the first run would otherwise jump back to page 1.
+    if (searchDraft === search) return undefined;
     const timer = window.setTimeout(() => {
       setSearch(searchDraft);
       setPage(1);
     }, SEARCH_DEBOUNCE_MILLISECONDS);
     return () => window.clearTimeout(timer);
-  }, [searchDraft]);
+  }, [searchDraft, search]);
 
   const queryPart = `words:${JSON.stringify([page, search, hideFillers])}`;
   const query = useModuleQuery<StatisticsWordsResponse>(
