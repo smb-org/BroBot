@@ -965,6 +965,33 @@ daher dieselbe Validierung abbilden.
 
 Die folgenden Module zeigen die Fähigkeiten im Zusammenspiel; Details ihrer Fachlogik stehen hier, nicht im Contract.
 
+### Bosskampf (`boss_fight`)
+
+Der Bosskampf startet als Operator-Sofortaktion im Live-Cockpit (wie Blitz-Runde
+und Duell: nur bei eingeschaltetem Modul und ohne laufende Runde). `!attack` ist
+im konfigurierbaren Angriffsfenster (Standard: 90 Sekunden) kostenlos; pro
+Person gilt eine konfigurierbare Abklingzeit (Standard: 10 Sekunden). Jeder
+Angriff verursacht gleichverteilt zufälligen Schaden aus dem eingestellten
+inklusiven Bereich (Standard: 20–40).
+
+Die Lebenspunkte sind **300 Grundpunkte plus 80 je unterschiedlichem
+Angreifer**. Die Maximalpunkte werden bei jedem neuen Angreifer neu berechnet
+und dürfen nie unter dem bereits angerichteten Schaden liegen. Damit wächst
+das Ziel mit der Beteiligung, ohne bereits erzielten Schaden zurückzunehmen.
+Wenn der Boss vor Ablauf fällt, wird der konfigurierte Beutepool (Standard:
+1.000 Punkte) nach dem jeweiligen Schadensanteil aufgeteilt. Jeder Anteil wird
+abgerundet; der Rest verbleibt im Hauskonto. Bei Ablauf oder wenn das Modul
+während einer Runde deaktiviert wird, gibt es keine Auszahlung.
+
+Der Chat erhält höchstens eine Startzeile und eine Ergebniszeile; eine
+Halbzeitmeldung ist nicht vorgesehen. Einzelne Angriffe erzeugen keine
+Antworten. Dauerhafte Angriffsoperationen speichern nur gehashte
+Idempotenz-/Abkühlungsschlüssel. Teilnehmer und Schaden verwenden die bereits
+vorhandene Spielrundentabelle mit deren Kontokennung und Login; es wird keine
+zusätzliche personenbezogene Angriffs-Historie angelegt. Rundenende und
+Deaktivierung laufen über die gemeinsamen Punkte-Runden und deren Alarm- und
+Abbruchpfad.
+
 ### Astronomie-, Wetter- und Währungsquellen
 
 Die Sonnendatenquelle liegt eigenständig unter `src/modules/sun/`. Sie nutzt
