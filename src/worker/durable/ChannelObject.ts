@@ -98,6 +98,7 @@ import type {
   PointsApplyResult,
   PointsKind,
   PointsMovement,
+  StoredPointWelcome,
 } from "../../modules/contract";
 import {
   admitStatisticsWordCounts,
@@ -221,6 +222,7 @@ import {
   claimPointCooldownSync,
   completePointRoundCancellationNoticeSync,
   creditPointActivitySync,
+  creditPointSafetyNetSync,
   ensurePointsSchema,
   acceptPointRoundSync,
   joinPointRoundSync,
@@ -231,6 +233,7 @@ import {
   openPointRoundSync,
   openPointRoundWithStakeSync,
   pendingPointAudits,
+  pointActivityDayKey,
   pointAccount,
   pointAuditWrittenSync,
   pointBalance,
@@ -4739,12 +4742,15 @@ export class ChannelObject extends DurableObject<Env> {
       settle: (operationId, kind, actor, stake, params, options) =>
         this.settlePointOperation(moduleId, operationId, kind, actor, stake, params, options),
       touchAccount: (accountId, login, startBonus) => this.touchPointAccount(moduleId, accountId, login, startBonus),
+      getPendingWelcome: (accountId) => this.getPendingPointWelcome(moduleId, accountId),
       storePendingWelcome: (welcome) => this.storePendingPointWelcome(moduleId, welcome),
       claimWelcome: (accountId, claimId) => this.claimPointWelcome(moduleId, accountId, claimId),
       releaseWelcome: (accountId, claimId) => this.releasePointWelcome(moduleId, accountId, claimId),
       ackWelcome: (accountId, claimId) => this.acknowledgePointWelcome(moduleId, accountId, claimId),
       creditActivity: (accountId, login, messageAt, live, rules) =>
         this.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
+      creditSafetyNet: (accountId, login, messageAt, live, rules, welcome) =>
+        this.creditPointSafetyNet(moduleId, accountId, login, messageAt, live, rules, welcome),
       balance: (accountId) => this.pointBalance(moduleId, accountId),
       getAccount: (accountId) => this.pointAccount(moduleId, accountId),
       listAccounts: (query) => this.listPointAccounts(moduleId, query),
@@ -4869,13 +4875,19 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async storePendingPointWelcome(
     _moduleId: string,
-    welcome: { accountId: string; messageId: string; text: string },
+    welcome: StoredPointWelcome,
   ): Promise<void> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     this.ctx.storage.transactionSync(() => {
       storePendingPointWelcomeSync(this.ctx.storage.sql, welcome);
     });
+  }
+
+  public async getPendingPointWelcome(_moduleId: string, accountId: string): Promise<StoredPointWelcome | null> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    return pendingPointWelcomeSync(this.ctx.storage.sql, accountId);
   }
 
   public async claimPointWelcome(_moduleId: string, accountId: string, claimId: string): Promise<boolean> {
@@ -4926,6 +4938,34 @@ export class ChannelObject extends DurableObject<Env> {
       live,
       rules,
       () => payloadHash,
+      new Date().toISOString(),
+    ));
+  }
+
+  public async creditPointSafetyNet(
+    moduleId: string,
+    accountId: string,
+    login: string,
+    messageAt: number,
+    live: boolean,
+    rules: { amount: number; threshold: number },
+    welcome: { messageId: string; text: string },
+  ): Promise<{ credited: number }> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointAccountId(accountId);
+    const operationId = `safety-net:${accountId}:${pointActivityDayKey(messageAt)}`;
+    const payloadHash = await pointPayloadHash({ moduleId, operationId, kind: "safety_net", accountId, rules });
+    return this.ctx.storage.transactionSync(() => creditPointSafetyNetSync(
+      this.ctx.storage.sql,
+      moduleId,
+      accountId,
+      login,
+      messageAt,
+      live,
+      rules,
+      payloadHash,
+      welcome,
       new Date().toISOString(),
     ));
   }
@@ -5665,6 +5705,7 @@ export class ChannelObject extends DurableObject<Env> {
       accountId,
       messageId: action.replyToMessageId ?? stored.messageId,
       text: stored.text,
+      kind: stored.kind,
       access: {
         ackWelcome: (pendingAccountId, pendingClaimId) => this.acknowledgePointWelcome("points", pendingAccountId, pendingClaimId),
         releaseWelcome: (pendingAccountId, pendingClaimId) => this.releasePointWelcome("points", pendingAccountId, pendingClaimId),

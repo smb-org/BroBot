@@ -6,6 +6,7 @@ import type {
   PointsApplyResult,
   PointsMovement,
   PointsKind,
+  PointWelcomeKind,
 } from "../../modules/contract";
 import { POINT_WELCOME_RESULT_ACCOUNT_ID_KEY } from "../point-welcome";
 import { bossHealth } from "../../modules/boss_fight/domain/boss";
@@ -153,7 +154,7 @@ export const assertPointAccountId = (accountId: string): void => {
   if (!POINT_ACCOUNT_ID_PATTERN.test(accountId)) throw new Error("invalid_account_id");
 };
 
-const allowedKinds = new Set<PointsKind>(["bonus", "activity", "stake", "game", "resolve", "refund", "admin"]);
+const allowedKinds = new Set<PointsKind>(["bonus", "activity", "safety_net", "stake", "game", "resolve", "refund", "admin"]);
 const systemAccount = (accountId: string): boolean => accountId.startsWith("__");
 const pointKindFor = (accountId: string): "viewer" | "house" | "pot" => {
   if (accountId === "__house") return "house";
@@ -233,6 +234,7 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
     account_id TEXT PRIMARY KEY REFERENCES point_accounts(account_id) ON DELETE CASCADE,
     message_id TEXT NOT NULL,
     text TEXT NOT NULL,
+    note_kind TEXT NOT NULL DEFAULT 'start_bonus',
     claim_id TEXT,
     claimed_at INTEGER
   )`);
@@ -335,6 +337,9 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
   )`);
   const gameRoundColumns = sql.exec<{ name: string }>("PRAGMA table_info(game_rounds)").toArray();
   const pointWelcomeColumns = sql.exec<{ name: string }>("PRAGMA table_info(point_welcome_notes)").toArray();
+  if (!pointWelcomeColumns.some(({ name }) => name === "note_kind")) {
+    sql.exec("ALTER TABLE point_welcome_notes ADD COLUMN note_kind TEXT NOT NULL DEFAULT 'start_bonus'");
+  }
   if (!pointWelcomeColumns.some(({ name }) => name === "claimed_at")) {
     sql.exec("ALTER TABLE point_welcome_notes ADD COLUMN claimed_at INTEGER");
   }
@@ -740,7 +745,7 @@ export const creditPointActivitySync = (
       !Number.isSafeInteger(rules.dailyCap) || rules.dailyCap < 0 || pointKindFor(accountId) !== "viewer") {
     throw new Error("invalid_activity_rules");
   }
-  const day = new Date(messageAt).toISOString().slice(0, 10);
+  const day = pointActivityDayKey(messageAt);
   const windowMs = rules.windowMinutes * 60_000;
   const windowStart = Math.floor(messageAt / windowMs) * windowMs;
   const window = String(windowStart);
@@ -776,6 +781,58 @@ export const creditPointActivitySync = (
     window,
   );
   return { credited };
+};
+
+export const pointActivityDayKey = (messageAt: number): string => new Date(messageAt).toISOString().slice(0, 10);
+
+export const creditPointSafetyNetSync = (
+  sql: PointsSql,
+  moduleId: string,
+  accountId: string,
+  login: string,
+  messageAt: number,
+  live: boolean,
+  rules: { amount: number; threshold: number },
+  payloadHash: string,
+  welcome: { messageId: string; text: string },
+  now: string,
+): { credited: number } => {
+  if (!Number.isFinite(messageAt) || !Number.isSafeInteger(rules.amount) || rules.amount < 1 ||
+      !Number.isSafeInteger(rules.threshold) || rules.threshold < 1 || pointKindFor(accountId) !== "viewer" ||
+      login.length === 0 || welcome.messageId.length === 0 || welcome.messageId.length > 256 || welcome.text.length === 0) {
+    throw new Error("invalid_safety_net_rules");
+  }
+  if (!live) return { credited: 0 };
+
+  const operationId = `safety-net:${accountId}:${pointActivityDayKey(messageAt)}`;
+  const previousOperation = operationSync(sql, operationId);
+  if (previousOperation !== null) {
+    if (previousOperation.module_id !== moduleId || previousOperation.kind !== "safety_net") throw new Error("operation_conflict");
+    return { credited: 0 };
+  }
+
+  const account = sql.exec<{ balance: number; welcome_pending: number }>(
+    "SELECT balance, welcome_pending FROM point_accounts WHERE account_id = ? AND kind = 'viewer'",
+    accountId,
+  ).toArray()[0];
+  if (account === undefined || account.balance >= rules.threshold) return { credited: 0 };
+  if (account.welcome_pending === 1) {
+    const pendingKind = sql.exec<{ note_kind: string }>(
+      "SELECT note_kind FROM point_welcome_notes WHERE account_id = ?",
+      accountId,
+    ).toArray()[0]?.note_kind;
+    // First-contact notes take precedence, including the brief gap between booking the bonus and storing its text.
+    if (pendingKind !== "safety_net") return { credited: 0 };
+  }
+
+  applyPointOperationSync(sql, moduleId, operationId, "safety_net", [
+    { accountId, delta: rules.amount, login },
+    { accountId: "__house", delta: -rules.amount },
+  ], { amount: rules.amount, threshold: rules.threshold, messageAt: new Date(messageAt).toISOString() }, payloadHash, now);
+  sql.exec("UPDATE point_accounts SET welcome_pending = 1, login = ?, updated_at = ? WHERE account_id = ?", login, now, accountId);
+  storePendingPointWelcomeSync(sql, { accountId, messageId: welcome.messageId, text: welcome.text, kind: "safety_net" });
+  invariantSync(sql);
+  return { credited: rules.amount };
 };
 
 const decodeCursor = (cursor: string | undefined): PointsCursor | HistoryCursor | null => {
@@ -994,35 +1051,44 @@ export interface StoredPointWelcome {
   accountId: string;
   messageId: string;
   text: string;
+  kind: PointWelcomeKind;
 }
 
 export const storePendingPointWelcomeSync = (sql: PointsSql, welcome: StoredPointWelcome): void => {
   assertPointAccountId(welcome.accountId);
-  if (welcome.messageId.length === 0 || welcome.messageId.length > 256 || welcome.text.length === 0) return;
+  const kind: unknown = welcome.kind;
+  if ((kind !== "start_bonus" && kind !== "safety_net") ||
+      welcome.messageId.length === 0 || welcome.messageId.length > 256 || welcome.text.length === 0) return;
   const account = sql.exec<{ welcome_pending: number }>(
     "SELECT welcome_pending FROM point_accounts WHERE account_id = ? AND kind = 'viewer'",
     welcome.accountId,
   ).toArray()[0];
   if (account?.welcome_pending !== 1) return;
   sql.exec(
-    `INSERT INTO point_welcome_notes (account_id, message_id, text) VALUES (?, ?, ?)
-     ON CONFLICT(account_id) DO UPDATE SET message_id = excluded.message_id, text = excluded.text`,
+    `INSERT INTO point_welcome_notes (account_id, message_id, text, note_kind) VALUES (?, ?, ?, ?)
+     ON CONFLICT(account_id) DO UPDATE SET message_id = excluded.message_id, text = excluded.text, note_kind = excluded.note_kind`,
     welcome.accountId,
     welcome.messageId,
     welcome.text,
+    welcome.kind,
   );
 };
 
 export const pendingPointWelcomeSync = (sql: PointsSql, accountId: string): StoredPointWelcome | null => {
   assertPointAccountId(accountId);
-  const row = sql.exec<{ account_id: string; message_id: string; text: string }>(
-    `SELECT note.account_id, note.message_id, note.text
+  const row = sql.exec<{ account_id: string; message_id: string; text: string; note_kind: string }>(
+    `SELECT note.account_id, note.message_id, note.text, note.note_kind
        FROM point_accounts AS account
        JOIN point_welcome_notes AS note ON note.account_id = account.account_id
       WHERE account.account_id = ? AND account.kind = 'viewer' AND account.welcome_pending = 1`,
     accountId,
   ).toArray()[0];
-  return row === undefined ? null : { accountId: row.account_id, messageId: row.message_id, text: row.text };
+  return row === undefined ? null : {
+    accountId: row.account_id,
+    messageId: row.message_id,
+    text: row.text,
+    kind: row.note_kind === "safety_net" ? "safety_net" : "start_bonus",
+  };
 };
 
 export const claimPendingPointWelcomeSync = (
@@ -1048,13 +1114,18 @@ export const claimPendingPointWelcomeSync = (
     claimId,
     now - POINT_WELCOME_CLAIM_LEASE_MS,
   );
-  const row = sql.exec<{ account_id: string; message_id: string; text: string }>(
-    `SELECT account_id, message_id, text FROM point_welcome_notes
+  const row = sql.exec<{ account_id: string; message_id: string; text: string; note_kind: string }>(
+    `SELECT account_id, message_id, text, note_kind FROM point_welcome_notes
       WHERE account_id = ? AND claim_id = ?`,
     accountId,
     claimId,
   ).toArray()[0];
-  return row === undefined ? null : { accountId: row.account_id, messageId: row.message_id, text: row.text };
+  return row === undefined ? null : {
+    accountId: row.account_id,
+    messageId: row.message_id,
+    text: row.text,
+    kind: row.note_kind === "safety_net" ? "safety_net" : "start_bonus",
+  };
 };
 
 export const releasePointWelcomeClaimSync = (sql: PointsSql, accountId: string, claimId: string): void => {

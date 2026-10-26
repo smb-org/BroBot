@@ -30,6 +30,7 @@ const historySource = (row: PointsHistoryRow, language: "de" | "en", resolveModu
   const copy = pointsDashboardTexts[language].source;
   if (row.kind === "activity") return copy.activity;
   if (row.kind === "bonus") return copy.start;
+  if (row.kind === "safety_net") return copy.safetyNet;
   if (row.kind === "admin") {
     const detail = asRecord(row.detail);
     const reason = typeof detail?.reason === "string" ? detail.reason : "";
@@ -191,7 +192,17 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     ["activityAmount", labels.activityAmount, "number"],
     ["windowMinutes", labels.windowMinutes, "number"],
     ["dailyCap", labels.dailyCap, "number"],
+    ["safetyNetAmount", labels.safetyNetAmount, "number"],
   ];
+
+  const updateSettingsDraft = (settings: PointsSettings): void => {
+    setSettingsSaved(false);
+    setSettingsEdit({
+      revision: settingsDirty ? settingsEdit.revision : settingsRevision ?? 0,
+      base: settingsDirty ? settingsEdit.base : settingsDraft,
+      settings,
+    });
+  };
 
   const saveSettings = useCallback(async (): Promise<void> => {
     if (!canManage || settingsRevision === null || settingsPending || !settingsDirty || settingsConflict || !settingsValid) return;
@@ -329,14 +340,41 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
         value={String(settingsDraft[key])}
         disabled={!canManage || settingsPending || settingsRevision === null}
         onChange={(value) => {
-          setSettingsSaved(false);
-          setSettingsEdit({
-            revision: settingsDirty ? settingsEdit.revision : settingsRevision ?? 0,
-            base: settingsDirty ? settingsEdit.base : settingsDraft,
-            settings: { ...settingsDraft, [key]: type === "number" ? Number(value) : value },
-          });
+          updateSettingsDraft({ ...settingsDraft, [key]: type === "number" ? Number(value) : value });
         }}
       />)}
+      <SegmentChoice
+        label={labels.safetyNetEnabled}
+        value={settingsDraft.safetyNetEnabled ? "enabled" : "disabled"}
+        wrap
+        disabled={!canManage || settingsPending || settingsRevision === null}
+        options={[{ value: "enabled", label: labels.safetyNetOn }, { value: "disabled", label: labels.safetyNetOff }]}
+        onChange={(value) => { updateSettingsDraft({ ...settingsDraft, safetyNetEnabled: value === "enabled" }); }}
+      />
+      <SegmentChoice
+        label={labels.safetyNetThreshold}
+        hint={labels.safetyNetThresholdHint}
+        value={typeof settingsDraft.safetyNetThreshold === "number" ? "fixed" : "min_stake"}
+        wrap
+        disabled={!canManage || settingsPending || settingsRevision === null}
+        options={[{ value: "min_stake", label: labels.safetyNetMinimumStake }, { value: "fixed", label: labels.safetyNetFixedValue }]}
+        onChange={(value) => {
+          updateSettingsDraft({
+            ...settingsDraft,
+            safetyNetThreshold: value === "min_stake"
+              ? "min_stake"
+              : typeof settingsDraft.safetyNetThreshold === "number" ? settingsDraft.safetyNetThreshold : DEFAULT_POINTS_SETTINGS.safetyNetAmount,
+          });
+        }}
+      />
+      <Field
+        label={labels.safetyNetFixedThreshold}
+        hint={labels.safetyNetFixedThresholdHint}
+        placeholder={labels.safetyNetFixedThresholdPlaceholder}
+        value={typeof settingsDraft.safetyNetThreshold === "number" ? String(settingsDraft.safetyNetThreshold) : ""}
+        disabled={!canManage || settingsPending || settingsRevision === null || typeof settingsDraft.safetyNetThreshold !== "number"}
+        onChange={(value) => { updateSettingsDraft({ ...settingsDraft, safetyNetThreshold: Number(value) }); }}
+      />
     </div>
     {!canManage ? <p className="points-settings__hint">{labels.managementLocked}</p> : null}
   </section> : selected === null ? <div className="points-detail-empty">

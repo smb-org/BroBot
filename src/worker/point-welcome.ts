@@ -1,4 +1,4 @@
-import type { BotModule, ModuleAction, ModuleChatDelivery, ModulePointsAccess } from "../modules/contract";
+import type { BotModule, ModuleAction, ModuleChatDelivery, ModulePointsAccess, PointWelcomeKind } from "../modules/contract";
 import { reserveChatTextBeforeSuffix } from "./chat";
 
 export const POINT_WELCOME_ACCOUNT_ID_KEY = "welcomeAccountId";
@@ -8,6 +8,7 @@ export interface PointWelcomeNote {
   accountId: string;
   messageId: string;
   text: string;
+  kind: PointWelcomeKind;
 }
 
 export interface PendingPointWelcome extends PointWelcomeNote {

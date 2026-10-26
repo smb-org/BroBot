@@ -43,6 +43,7 @@ import { broadcasterHasScope } from "./broadcaster-scope";
 import { writeChannelTimelineEvent } from "./db/timeline-events";
 import { notifyModuleScheduleInputsChanged } from "./module-schedules";
 import { pointsCatalog } from "../modules/points/locale";
+import { pointsSettingsReadSchema } from "../modules/points/contracts";
 import { appendPointWelcome, type PendingPointWelcome } from "./point-welcome";
 
 export interface DispatchEnvironment {
@@ -238,6 +239,32 @@ const channelTimeZoneFor = async (db: D1Database, channelId: string): Promise<st
 
 const recordValue = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const enabledPointsGameMinimumStake = async (
+  db: D1Database,
+  channelId: string,
+  registry: readonly BotModule[],
+): Promise<number | null> => {
+  const rows = await db.prepare(
+    "SELECT module_id, settings FROM channel_modules WHERE channel_id = ? AND enabled = 1",
+  ).bind(channelId).all<{ module_id: string; settings: string }>();
+  const modules = new Map(registry.map((module) => [module.id, module]));
+  let minimum: number | null = null;
+  for (const row of rows.results) {
+    const module = modules.get(row.module_id);
+    if (module?.requiresModules?.includes("points") !== true) continue;
+    try {
+      const settings = (module.settingsReadSchema ?? module.settingsSchema).parse(JSON.parse(row.settings));
+      const minStake = recordValue(settings) ? settings.minStake : undefined;
+      if (typeof minStake === "number" && Number.isSafeInteger(minStake) && minStake > 0) {
+        minimum = minimum === null ? minStake : Math.min(minimum, minStake);
+      }
+    } catch {
+      // An invalid game setting cannot define a safe threshold.
+    }
+  }
+  return minimum;
+};
 
 export const chatStatusFor = (
   subscriptionType: string,
@@ -1115,19 +1142,56 @@ export const dispatchEventSubNotification = async (
     try {
       const botUserId = await getCachedBotUserId(environment.DB);
       if (chatterUserId !== botUserId) {
-        const settings = (pointsMatch.module.settingsReadSchema ?? pointsMatch.module.settingsSchema).parse(JSON.parse(pointsMatch.settings)) as { startBonus: number; currencyName: string };
+        const settings = pointsSettingsReadSchema.parse(JSON.parse(pointsMatch.settings));
         const access = modulePoints(environment.CHANNEL, event.channelId, "points");
+        const previousAccount = await access.getAccount(chatterUserId);
         const touched = await access.touchAccount(chatterUserId, chatterLogin, settings.startBonus);
-        if (touched.welcomePending && touched.startBonus !== null) {
-          const language = await channelLanguage();
-          pendingWelcome = {
+        const language = await channelLanguage();
+        let storedWelcome = await access.getPendingWelcome?.(chatterUserId) ?? null;
+        if (touched.welcomePending && storedWelcome === null && touched.startBonus !== null) {
+          storedWelcome = {
             accountId: chatterUserId,
             messageId,
             text: pointsCatalog[language].chat.startBonus(touched.startBonus, settings.currencyName),
-            access,
-            used: false,
+            kind: "start_bonus",
           };
-          await access.storePendingWelcome?.(pendingWelcome);
+          await access.storePendingWelcome?.(storedWelcome);
+        } else if (touched.welcomePending && storedWelcome !== null) {
+          storedWelcome = { ...storedWelcome, messageId };
+          await access.storePendingWelcome?.(storedWelcome);
+        }
+        const startBonusPending = touched.welcomePending && (storedWelcome === null || storedWelcome.kind === "start_bonus");
+        if (touched.welcomePending && storedWelcome !== null) {
+          pendingWelcome = { ...storedWelcome, access, used: false };
+        }
+
+        if (previousAccount !== null && !startBonusPending && settings.safetyNetEnabled) {
+          const threshold = settings.safetyNetThreshold === "min_stake"
+            ? await enabledPointsGameMinimumStake(environment.DB, event.channelId, registry)
+            : settings.safetyNetThreshold;
+          if (threshold !== null && access.creditSafetyNet !== undefined) {
+            const parsedTimestamp = Date.parse(event.eventSubTimestamp ?? event.receivedAt);
+            const messageAt = Number.isFinite(parsedTimestamp) ? parsedTimestamp : Date.now();
+            const safetyNetText = pointsCatalog[language].chat.safetyNet(settings.safetyNetAmount, settings.currencyName);
+            const credited = await access.creditSafetyNet(
+              chatterUserId,
+              chatterLogin,
+              messageAt,
+              await streamState() === "online",
+              { amount: settings.safetyNetAmount, threshold },
+              { messageId, text: safetyNetText },
+            );
+            if (credited.credited > 0) {
+              pendingWelcome = {
+                accountId: chatterUserId,
+                messageId,
+                text: safetyNetText,
+                kind: "safety_net",
+                access,
+                used: false,
+              };
+            }
+          }
         }
       }
     } catch {
@@ -1147,7 +1211,7 @@ export const dispatchEventSubNotification = async (
         event.channelId,
         module.id,
         module.requiresModules?.includes("points") === true && pendingWelcome !== undefined && !pendingWelcome.used
-          ? { accountId: pendingWelcome.accountId, messageId: pendingWelcome.messageId, text: pendingWelcome.text }
+          ? { accountId: pendingWelcome.accountId, messageId: pendingWelcome.messageId, text: pendingWelcome.text, kind: pendingWelcome.kind }
           : undefined,
       );
       if (module.requiresModules?.includes("points") === true && activation !== undefined) {

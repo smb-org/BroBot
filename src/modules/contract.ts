@@ -1135,7 +1135,16 @@ export interface ModuleBallotAccess {
   acknowledgeClosed?: (ballotId: string) => Promise<void>;
 }
 
-export type PointsKind = "bonus" | "activity" | "stake" | "game" | "resolve" | "refund" | "admin";
+export type PointsKind = "bonus" | "activity" | "safety_net" | "stake" | "game" | "resolve" | "refund" | "admin";
+
+export type PointWelcomeKind = "start_bonus" | "safety_net";
+
+export interface StoredPointWelcome {
+  accountId: string;
+  messageId: string;
+  text: string;
+  kind: PointWelcomeKind;
+}
 
 export type PointsMovement =
   | { accountId: string; delta: number; login?: string }
@@ -1203,8 +1212,9 @@ export interface ModulePointsAccess {
     welcomePending: boolean;
     startBonus: number | null;
   }>;
+  getPendingWelcome?: (accountId: string) => Promise<StoredPointWelcome | null>;
   /** Stores the note payload while the account's pending bit remains the eligibility source. */
-  storePendingWelcome?: (welcome: { accountId: string; messageId: string; text: string }) => Promise<void>;
+  storePendingWelcome?: (welcome: StoredPointWelcome) => Promise<void>;
   claimWelcome?: (accountId: string, claimId: string) => Promise<boolean>;
   releaseWelcome?: (accountId: string, claimId: string) => Promise<void>;
   ackWelcome: (accountId: string, claimId?: string) => Promise<void>;
@@ -1214,6 +1224,14 @@ export interface ModulePointsAccess {
     messageAt: number,
     live: boolean,
     rules: { amount: number; windowMinutes: number; dailyCap: number },
+  ) => Promise<{ credited: number }>;
+  creditSafetyNet?: (
+    accountId: string,
+    login: string,
+    messageAt: number,
+    live: boolean,
+    rules: { amount: number; threshold: number },
+    welcome: Omit<StoredPointWelcome, "accountId" | "kind">,
   ) => Promise<{ credited: number }>;
   balance: (accountId: string) => Promise<number>;
   getAccount: (accountId: string) => Promise<{ accountId: string; login: string; balance: number } | null>;

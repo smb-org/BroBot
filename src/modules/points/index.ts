@@ -1,5 +1,5 @@
 import type { BotModule } from "../contract";
-import { DEFAULT_POINTS_SETTINGS, POINTS_MODULE_ID, pointsDefaultSettingsForLanguage, pointsSettingsSchema } from "./contracts";
+import { DEFAULT_POINTS_SETTINGS, POINTS_MODULE_ID, pointsDefaultSettingsForLanguage, pointsSettingsReadSchema, pointsSettingsSchema } from "./contracts";
 import { pointsCatalog } from "./locale";
 import { pointsRoutes } from "./routes";
 import { processPointsMessage } from "./service";
@@ -28,6 +28,7 @@ export const pointsModule: BotModule<typeof pointsSettingsSchema> = {
   ],
   defaultEnabled: false,
   settingsSchema: pointsSettingsSchema,
+  settingsReadSchema: pointsSettingsReadSchema,
   defaultSettings: DEFAULT_POINTS_SETTINGS,
   defaultSettingsForLanguage: pointsDefaultSettingsForLanguage,
   panel: () => import("./panel"),

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ModuleAction, ModuleExecutionContext, ModuleEvent } from "../../src/modules/contract";
-import { DEFAULT_POINTS_SETTINGS, pointsDefaultSettingsForLanguage, pointsSettingsSchema, type PointsSettings } from "../../src/modules/points/contracts";
+import { DEFAULT_POINTS_SETTINGS, pointsDefaultSettingsForLanguage, pointsSettingsReadSchema, pointsSettingsSchema, type PointsSettings } from "../../src/modules/points/contracts";
 import { localizedMonth, pointsBalanceReply, pointsTopReply, processPointsMessage } from "../../src/modules/points/service";
 import { truncateChatTextWithAttributions } from "../../src/worker/chat";
 import { appendPointWelcome, type PendingPointWelcome } from "../../src/worker/point-welcome";
@@ -33,7 +33,7 @@ const makeContext = (overrides: Record<string, unknown> = {}) => {
   const calls: { activity: unknown[][]; touched: number } = { activity: [], touched: 0 };
   const points = {
     apply: vi.fn(),
-    touchAccount: vi.fn(() => { calls.touched += 1; return Promise.resolve({ welcomePending: false, startBonus: null }); }),
+    touchAccount: vi.fn(() => { calls.touched += 1; return Promise.resolve({ welcomePending: false, startBonus: null as number | null }); }),
     ackWelcome: vi.fn(() => Promise.resolve()),
     creditActivity: vi.fn((...args: unknown[]) => { calls.activity.push(args); return Promise.resolve({ credited: 5 }); }),
     balance: vi.fn(() => Promise.resolve(240)),
@@ -69,6 +69,23 @@ describe("points module", () => {
     expect(pointsSettingsSchema.safeParse({ ...DEFAULT_POINTS_SETTINGS, windowMinutes: 0 }).success).toBe(false);
   });
 
+  it("fills safety-net defaults when reading legacy saved settings (protects=channels saved before #595 remain usable with the default safety net; fails_when=legacy points settings are rejected or receive a disabled or malformed safety net; no_claim=the read schema is exercised directly)", () => {
+    const legacySettings = {
+      currencyName: "Points",
+      startBonus: 100,
+      activityAmount: 5,
+      windowMinutes: 10,
+      dailyCap: 150,
+    };
+
+    expect(pointsSettingsReadSchema.parse(legacySettings)).toEqual({
+      ...legacySettings,
+      safetyNetEnabled: true,
+      safetyNetAmount: 50,
+      safetyNetThreshold: "min_stake",
+    });
+  });
+
   it("formats balance replies from current balance, monthly game net, and rank (protects=the balance command uses current account balance and monthly game placement; fails_when=the response reports an incorrect balance or rank; no_claim=DO ranking persistence is covered by worker ledger tests)", () => {
     expect(pointsBalanceReply({ balance: 240, currency: "Punkte", monthNet: 40, rank: 4, language: "de" }))
       .toBe("240 Punkte · diesen Monat +40 · Platz 4");
@@ -101,6 +118,23 @@ describe("points module", () => {
     expect(points.rankOf).toHaveBeenCalledWith("viewer_demo", currentMonth);
   });
 
+  it("keeps the start-bonus hint visible while a safety-net note is pending (protects=a generic pending point note does not hide the !spiele start-bonus hint; fails_when=the panel suppresses that hint for a safety-net claim; no_claim=the account note kind is supplied by the points access contract)", async () => {
+    const { context, points } = makeContext();
+    points.touchAccount.mockResolvedValue({ welcomePending: true, startBonus: 100 });
+    Object.assign(points, {
+      getPendingWelcome: vi.fn(() => Promise.resolve({
+        accountId: "viewer_demo",
+        messageId: "message_previous",
+        text: "Safety net: +50 Points.",
+        kind: "safety_net" as const,
+      })),
+    });
+
+    const result = await processPointsMessage(messageEvent("!spiele"), context);
+
+    expect(result.actions[0]).toMatchObject({ text: "Noch sind keine Spiele aktiv. · Startguthaben 100 Punkte · !punkte" });
+  });
+
   it("credits activity with the message timestamp, live state, and configured window rules (protects=the module passes event-time and UTC activity settings to the ledger; fails_when=an offline or differently-windowed event is credited incorrectly; no_claim=ledger atomicity is covered by worker tests)", async () => {
     const { context, calls } = makeContext();
     await processPointsMessage(messageEvent("hello"), context);
@@ -120,6 +154,7 @@ describe("points module", () => {
       accountId: "viewer_demo",
       messageId: "message_demo",
       text: "Startguthaben 100 Punkte",
+      kind: "start_bonus" as const,
       access: { ackWelcome },
       deliveryClaimId: "claim_demo",
       used: false,
@@ -148,6 +183,7 @@ describe("points module", () => {
       accountId: "viewer_demo",
       messageId: "message_demo",
       text: "Initial balance 100 points",
+      kind: "start_bonus",
       access: { ackWelcome },
       deliveryClaimId: "claim_demo",
       used: false,
@@ -175,6 +211,7 @@ describe("points module", () => {
       accountId: "viewer_demo",
       messageId: "message_demo",
       text: "x".repeat(500),
+      kind: "start_bonus",
       access: { ackWelcome: vi.fn(() => Promise.resolve()) },
       used: false,
     };
@@ -189,6 +226,7 @@ describe("points module", () => {
       accountId: "viewer_demo",
       messageId: "message_demo",
       text: "Startguthaben 100 Punkte",
+      kind: "start_bonus",
       access: { ackWelcome },
       deliveryClaimId: "claim_demo",
       used: false,

@@ -87,12 +87,14 @@ describe("points module worker events", () => {
       accountId: "viewer_demo",
       messageId: "message-nachtfalke",
       text: "Startguthaben 100 Punkte",
+      kind: "start_bonus",
     });
     expect(await object.claimPointWelcome(moduleId, "viewer_demo", claimId)).toBe(true);
     const pending = {
       accountId: "viewer_demo",
       messageId: "message-nachtfalke",
       text: "Startguthaben 100 Punkte",
+      kind: "start_bonus" as const,
       access: { ackWelcome: (accountId: string, currentClaimId?: string) => object.acknowledgePointWelcome(moduleId, accountId, currentClaimId) },
       deliveryClaimId: claimId,
       used: false,

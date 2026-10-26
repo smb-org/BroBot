@@ -68,6 +68,7 @@ const environment = (database: TestD1Database, publish = vi.fn()) => {
     transitionTimerStream: vi.fn().mockResolvedValue(undefined),
     touchPointAccount: vi.fn((_moduleId: string, _accountId: string, _login: string, startBonus: number) =>
       Promise.resolve({ welcomePending: true, startBonus })),
+    pointAccount: vi.fn().mockResolvedValue(null),
     acknowledgePointWelcome: vi.fn().mockResolvedValue(undefined),
     creditPointActivity: vi.fn().mockResolvedValue({ credited: 5 }),
     scheduleModuleAlarm: vi.fn().mockResolvedValue(undefined),

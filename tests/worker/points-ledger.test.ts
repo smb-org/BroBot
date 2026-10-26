@@ -390,6 +390,7 @@ describe("points ledger in the worker Durable Object", () => {
       accountId: "viewer-a",
       messageId: "message-first-contact",
       text: "Start bonus 75 points",
+      kind: "start_bonus",
     });
     expect(await object.claimPointWelcome(pointTestModule, "viewer-a", "dispatch:first-contact:points:0")).toBe(true);
     await object.acknowledgePointWelcome(pointTestModule, "viewer-a", "dispatch:first-contact:points:0");

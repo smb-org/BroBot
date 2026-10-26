@@ -26,6 +26,9 @@ const settings = {
   activityAmount: 5,
   windowMinutes: 10,
   dailyCap: 150,
+  safetyNetEnabled: true,
+  safetyNetAmount: 50,
+  safetyNetThreshold: "min_stake" as const,
 };
 
 afterEach(() => {
@@ -45,6 +48,25 @@ beforeEach(() => {
 });
 
 describe("points panel", () => {
+  it("saves the safety-net mode, amount, and fixed threshold together (protects=the explicit settings save sends all safety-net values in the points settings payload; fails_when=the UI omits a value or saves before the operator clicks Save; no_claim=the service response is a settings mock)", async () => {
+    const nextSettings = { ...settings, safetyNetEnabled: false, safetyNetAmount: 80, safetyNetThreshold: 25 };
+    mocks.savePointsSettings.mockResolvedValue({ settings: nextSettings, revision: 2 });
+    renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+
+    const settingsPanel = screen.getByLabelText("Points settings");
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Off" }));
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Fixed value" }));
+    fireEvent.change(within(settingsPanel).getByLabelText("Fixed threshold"), { target: { value: "25" } });
+    fireEvent.change(within(settingsPanel).getByLabelText("Safety-net amount"), { target: { value: "80" } });
+    expect(mocks.savePointsSettings).not.toHaveBeenCalled();
+
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.savePointsSettings).toHaveBeenCalledOnce());
+    expect(mocks.savePointsSettings).toHaveBeenCalledWith("kanal_demo", 1, nextSettings);
+  });
+
   it("keeps a dirty settings draft and offers the server revision reload (protects=settings drafts stay based on their original revision after a refetch; fails_when=the server value replaces the draft or save remains available without a reload choice; no_claim=the server revision is advanced through the dashboard query cache)", async () => {
     const view = renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));

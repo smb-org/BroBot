@@ -95,7 +95,11 @@ export const processPointsMessage = async (
   } else if (command === "!spiele") {
     const games = await enabledGames(event.channelId, context, language);
     const catalog = pointsCatalog[language].chat;
-    reply = `${catalog.games(games)}${welcome.welcomePending ? "" : ` · ${catalog.startBonus(event.settings.startBonus, event.settings.currencyName)}`} · !punkte`;
+    const pendingNote = await context.points.getPendingWelcome?.(accountId);
+    const startBonusPending = pendingNote === undefined
+      ? welcome.welcomePending
+      : pendingNote?.kind === "start_bonus" || pendingNote === null && welcome.welcomePending;
+    reply = `${catalog.games(games)}${startBonusPending ? "" : ` · ${catalog.startBonus(event.settings.startBonus, event.settings.currencyName)}`} · !punkte`;
   }
 
   const messageId = textValue(event.payload.message_id);

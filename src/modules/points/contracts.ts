@@ -7,15 +7,29 @@ const POINT_VIEWER_ACCOUNT_ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/u;
 export const isPointViewerAccountId = (accountId: string): boolean =>
   POINT_VIEWER_ACCOUNT_ID_PATTERN.test(accountId) && !accountId.startsWith("__");
 
+const safetyNetThresholdSchema = z.union([
+  z.literal("min_stake"),
+  z.number().int().min(1).max(1_000_000),
+]);
+
 export const pointsSettingsSchema = z.object({
   currencyName: z.string().trim().min(1).max(24),
   startBonus: z.number().int().min(0).max(1_000_000),
   activityAmount: z.number().int().min(0).max(1_000_000),
   windowMinutes: z.number().int().min(1).max(1_440),
   dailyCap: z.number().int().min(0).max(10_000_000),
+  safetyNetEnabled: z.boolean(),
+  safetyNetAmount: z.number().int().min(1).max(1_000_000),
+  safetyNetThreshold: safetyNetThresholdSchema,
 });
 
 export type PointsSettings = z.output<typeof pointsSettingsSchema>;
+
+export const pointsSettingsReadSchema = pointsSettingsSchema.extend({
+  safetyNetEnabled: z.boolean().default(true),
+  safetyNetAmount: z.number().int().min(1).max(1_000_000).default(50),
+  safetyNetThreshold: safetyNetThresholdSchema.default("min_stake"),
+});
 
 export const DEFAULT_POINTS_SETTINGS: PointsSettings = {
   currencyName: "Punkte",
@@ -23,6 +37,9 @@ export const DEFAULT_POINTS_SETTINGS: PointsSettings = {
   activityAmount: 5,
   windowMinutes: 10,
   dailyCap: 150,
+  safetyNetEnabled: true,
+  safetyNetAmount: 50,
+  safetyNetThreshold: "min_stake",
 };
 
 export const pointsDefaultSettingsForLanguage = (language: "de" | "en"): PointsSettings => ({

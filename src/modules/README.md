@@ -981,6 +981,21 @@ Dauer und Ablaufzeit; jeder Liftversuch erhält einen Audit-Eintrag.
 
 Die folgenden Module zeigen die Fähigkeiten im Zusammenspiel; Details ihrer Fachlogik stehen hier, nicht im Contract.
 
+### Punkte: Aktivität und täglicher Notgroschen
+
+Das Punkte-Modul vergibt Aktivitätspunkte ausschließlich während eines Live-Streams.
+Der Notgroschen folgt derselben Live-Regel und wird bei einer Chatnachricht eines
+bestehenden Kontos geprüft. Standardmäßig greift er unterhalb des kleinsten
+Mindesteinsatzes eines aktivierten Punktespiels; ohne aktiviertes Spiel mit
+Mindesteinsatz gibt es in diesem Modus keine Gutschrift. Alternativ lässt sich eine
+feste positive Schwelle setzen. Pro Konto und UTC-Kalendertag wird höchstens eine
+Gutschrift aus dem Hauskonto gebucht. Sie zählt nicht zum Aktivitäts-Tageslimit.
+
+Der Hinweis bleibt beim Konto vorgemerkt und erscheint einmal in der nächsten
+Punkte- oder Spielantwort an diese Person. Wie beim Startbonus bestätigt der Host
+den Hinweis erst nach einem nachgewiesenen Versand; ein fehlgeschlagener Versand
+lässt ihn vorgemerkt.
+
 ### Emote-Slots: Auszahlungen und Wahrscheinlichkeiten
 
 Die Standardwalzen verwenden die Gewichte `4, 4, 3, 2, 2, 1`; die

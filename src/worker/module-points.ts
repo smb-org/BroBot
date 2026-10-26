@@ -15,8 +15,10 @@ export const modulePoints = (
       apply: () => unavailable(),
       settle: () => unavailable(),
       touchAccount: () => unavailable(),
+      getPendingWelcome: () => unavailable(),
       ackWelcome: () => unavailable(),
       creditActivity: () => unavailable(),
+      creditSafetyNet: () => unavailable(),
       balance: () => unavailable(),
       getAccount: () => unavailable(),
       listAccounts: () => unavailable(),
@@ -60,11 +62,15 @@ export const modulePoints = (
     settle: (operationId, kind, actor, stake, params, options) =>
       object.settlePointOperation(moduleId, operationId, kind, actor, stake, params, options),
     touchAccount: (accountId, login, startBonus) => object.touchPointAccount(moduleId, accountId, login, startBonus),
+    getPendingWelcome: (accountId) => typeof object.getPendingPointWelcome === "function"
+      ? object.getPendingPointWelcome(moduleId, accountId)
+      : Promise.resolve(null),
     storePendingWelcome: (welcome) => typeof object.storePendingPointWelcome === "function"
       ? object.storePendingPointWelcome(moduleId, {
         accountId: welcome.accountId,
         messageId: welcome.messageId,
         text: welcome.text,
+        kind: welcome.kind,
       })
       : Promise.resolve(),
     claimWelcome: (accountId, claimId) => typeof object.claimPointWelcome === "function"
@@ -76,6 +82,10 @@ export const modulePoints = (
     ackWelcome: (accountId, claimId) => object.acknowledgePointWelcome(moduleId, accountId, claimId),
     creditActivity: (accountId, login, messageAt, live, rules) =>
       object.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
+    creditSafetyNet: (accountId, login, messageAt, live, rules, welcome) =>
+      typeof object.creditPointSafetyNet === "function"
+        ? object.creditPointSafetyNet(moduleId, accountId, login, messageAt, live, rules, welcome)
+        : Promise.resolve({ credited: 0 }),
     balance: (accountId) => object.pointBalance(moduleId, accountId),
     getAccount: (accountId) => object.pointAccount(moduleId, accountId),
     listAccounts: (query) => object.listPointAccounts(moduleId, query),
