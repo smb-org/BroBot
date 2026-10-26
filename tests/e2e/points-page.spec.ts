@@ -164,6 +164,10 @@ test("keeps the account layout inside the viewport at desktop widths (protects=t
     const status = header.getByRole("status");
     await expect(status).toBeVisible();
     await expect(status).toHaveText("Ungespeichert");
+    const actionsBox = await page.locator(".points-page-actions").boundingBox();
+    expect((actionsBox?.y ?? 0) + (actionsBox?.height ?? 0), `page actions end above the inspector header at ${String(viewport.width)}px`).toBeLessThanOrEqual(headerBox?.y ?? 0);
+    await expect(page.getByRole("button", { name: "Einstellungen" })).toHaveCount(1);
+    await expect(header.getByRole("button", { name: "Weitere Aktionen" })).toHaveCount(0);
 
     const leftBorderWidth = await row.evaluate((element) => Number.parseFloat(getComputedStyle(element).borderLeftWidth));
     expect(leftBorderWidth).toBeLessThanOrEqual(1);
@@ -212,6 +216,8 @@ test("lists accounts, selects one, corrects its balance, and shows the history r
   await expect(page.locator(".points-detail__balance")).toContainText("1.015");
   await expect(page.getByText("Korrektur · Kanalwette · von kanal_demo", { exact: true })).toHaveCount(1);
   await expect(page.locator(".points-history__table")).toContainText("+15");
+  await expect(page.locator(".points-history .list-pagination-footer__count")).toHaveText("1 Eintrag");
+  await expect(page.locator(".list-toolbar__usage")).toHaveText("1 Konto");
 });
 
 test("shows the empty account state with the chat prompt and timer action (protects=empty collection directs the streamer to the chat game and timer setup; fails_when=it shows a selection hint or omits the timer action; no_claim=module APIs are mocked)", async ({ page }) => {
@@ -221,8 +227,10 @@ test("shows the empty account state with the chat prompt and timer action (prote
 
   await expect(page.getByText("Noch keine Konten. Punkte entstehen, sobald jemand im Chat schreibt.")).toBeVisible();
   await expect(page.getByText("Sag deinem Chat Bescheid: !spiele")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Als Timer anlegen" })).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "Als Timer anlegen" })).toHaveCount(1);
   await expect(page.locator(".points-detail-empty").getByRole("button", { name: "Als Timer anlegen" })).toBeVisible();
+  await page.locator(".points-page-actions").getByRole("button", { name: "Weitere Aktionen" }).click();
+  await expect(page.getByRole("menuitem", { name: "Als Timer anlegen" })).toBeVisible();
   await expect(page.locator(".collection-page__list-content .list-pagination-footer")).toHaveCount(0);
 });
 
@@ -354,6 +362,7 @@ test("loads points settings, discards an edit, and saves explicitly (protects=se
   const controls = await installPointsPage(page, []);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
+  await expect(page.getByRole("button", { name: "Einstellungen" })).toHaveCount(1);
   await page.getByRole("button", { name: "Einstellungen" }).click();
 
   const settings = page.locator(".points-settings");
@@ -375,6 +384,29 @@ test("loads points settings, discards an edit, and saves explicitly (protects=se
     settings: { currencyName: "Sterne", startBonus: 100 },
   });
   await expect(currencyName).toHaveValue("Sterne");
+
+  await settings.getByRole("button", { name: "Zur Liste" }).click();
+  await expect(settings).toHaveCount(0);
+  await expect(page.getByText("Noch keine Konten. Punkte entstehen, sobald jemand im Chat schreibt.")).toBeVisible();
+});
+
+test("keeps the correction save button quiet until there is something to save (protects=Speichern is visibly inactive for an empty correction and becomes primary without moving; fails_when=the empty form shows a gold button or the button jumps when the form turns dirty; no_claim=module APIs are mocked)", async ({ page }) => {
+  await installPointsPage(page, [{ accountId: "viewer_demo", login: "pixelpilz", balance: 1_000, monthNet: 340 }]);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
+  await page.locator(".points-account-list").getByRole("button").filter({ hasText: "pixelpilz" }).click();
+  const save = page.locator(".points-detail__header").getByRole("button", { name: "Speichern" });
+  await expect(save).toBeDisabled();
+  await expect(save).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  const quietBox = await save.boundingBox();
+  const fieldsBox = await page.locator(".points-correction__fields").boundingBox();
+
+  await page.getByLabel("Betrag ±").fill("15");
+  await page.getByLabel("Grund").fill("Kanalwette");
+  await expect(save).toBeEnabled();
+  await expect(save).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  expect(await save.boundingBox()).toEqual(quietBox);
+  expect(await page.locator(".points-correction__fields").boundingBox()).toEqual(fieldsBox);
 });
 
 test("prepares the games timer text and creates it only after an explicit save (protects=timer setup starts with the games prompt and creates only after save; fails_when=opening the action creates a timer or the saved text differs; no_claim=timer and preview APIs are mocked)", async ({ page }) => {
@@ -409,7 +441,8 @@ test("prepares the games timer text and creates it only after an explicit save (
   });
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/channels/${CHANNEL_ID}/modules/points`);
-  await page.locator(".points-page-actions").getByRole("button", { name: "Als Timer anlegen" }).click();
+  await page.locator(".points-page-actions").getByRole("button", { name: "Weitere Aktionen" }).click();
+  await page.getByRole("menuitem", { name: "Als Timer anlegen" }).click();
   await expect(page).toHaveURL(`/channels/${CHANNEL_ID}/modules/timers`);
 
   const editor = page.locator(".timer-editor");

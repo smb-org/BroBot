@@ -374,4 +374,33 @@ describe("points panel", () => {
     expect(preview).not.toHaveTextContent("safe range");
     releaseRefresh();
   });
+
+  it("offers one settings entry and a way back to the accounts overview (protects=Settings exists once on the page, never in the inspector, and the open settings view has its own back action; fails_when=Settings is duplicated, the inspector regains an overflow menu, or the settings view has no way back; no_claim=service calls are mocks and the single-column back button is not rendered by this test)", async () => {
+    const view = renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    const row = (await screen.findByText("pixelpilz", { exact: true })).closest("button") as HTMLButtonElement;
+    fireEvent.click(row);
+    const detailHeader = view.container.querySelector(".points-detail__header");
+    if (!(detailHeader instanceof HTMLElement)) throw new Error("The selected account detail header is missing.");
+    expect(screen.getAllByRole("button", { name: "Settings" })).toHaveLength(1);
+    // Common labels follow the browser language, not the panel language, so match both locales.
+    expect(within(detailHeader).queryByRole("button", { name: /^(More actions|Weitere Aktionen)$/u })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const settingsPanel = screen.getByLabelText("Points settings");
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Back to list" }));
+
+    expect(screen.queryByLabelText("Points settings")).toBeNull();
+    expect(screen.getByText("Choose a person from the list", { exact: true })).toBeVisible();
+  });
+
+  it("uses the singular for one account and one history entry (protects=counts of one read Konto/Eintrag style singular; fails_when=the list or history footer says 1 accounts or 1 entries; no_claim=plural wording for larger counts is covered by the existing list tests)", async () => {
+    mocks.loadPointsHistory.mockResolvedValue({ rows: [
+      { operationId: "admin:one", kind: "admin", moduleId: "points", delta: 5, balanceAfter: 100, at: "2026-10-19T12:00:00.000Z", detail: { reason: "gift", actorLogin: "kanal_demo" } },
+    ] });
+    const view = renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    const row = (await screen.findByText("pixelpilz", { exact: true })).closest("button") as HTMLButtonElement;
+    await waitFor(() => expect(view.container.querySelector(".list-toolbar__usage")).toHaveTextContent(/^1 account$/u));
+    fireEvent.click(row);
+    await waitFor(() => expect(view.container.querySelector(".points-history .list-pagination-footer__count")).toHaveTextContent(/^1 entry$/u));
+  });
 });
