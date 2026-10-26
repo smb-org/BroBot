@@ -1,5 +1,5 @@
 import type { ModuleLanguage } from "../../contract";
-import { emoteSlotChatCopyForLanguage, type EmoteSlotSettings, type EmoteSlotSymbol, type EmoteSlotTextKind } from "../contracts";
+import { DEFAULT_PAIR_PAYOUT_BP, REFUND_PAIR_PAYOUT_BP, emoteSlotChatCopyForLanguage, type EmoteSlotSettings, type EmoteSlotSymbol, type EmoteSlotTextKind } from "../contracts";
 import type { SlotSettlementResult } from "./settlement";
 
 export type SlotStakeParseResult =
@@ -49,9 +49,14 @@ export const formatSlotReply = (
   login: string,
   kind: EmoteSlotTextKind,
   template = emoteSlotChatCopyForLanguage(language)[kind],
+  pairPayoutBp = DEFAULT_PAIR_PAYOUT_BP,
 ): string => {
   const values = templateValues(result, symbols, language, login);
-  return template.replace(/\{(user|slot\.(?:symbols|net|balance|jackpot|payout|stake))\}/gu, (token, name: string) =>
+  const copy = emoteSlotChatCopyForLanguage(language);
+  const resolvedTemplate = kind === "pair" && (template === copy.pair || template === copy.pairRefund)
+    ? pairPayoutBp === REFUND_PAIR_PAYOUT_BP ? copy.pairRefund : copy.pair
+    : template;
+  return resolvedTemplate.replace(/\{(user|slot\.(?:symbols|net|balance|jackpot|payout|stake))\}/gu, (token, name: string) =>
     values[name] ?? token);
 };
 

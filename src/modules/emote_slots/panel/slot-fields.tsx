@@ -338,6 +338,54 @@ const percentToBasisPoints = (percent: number): number => {
   return Math.abs(scaled - rounded) < 1e-6 ? rounded : scaled;
 };
 
+const multiplierToBasisPoints = (multiplier: number): number => {
+  const scaled = multiplier * 10_000;
+  const rounded = Math.round(scaled);
+  return Math.abs(scaled - rounded) < 1e-6 ? rounded : scaled;
+};
+
+export function SlotPairPayoutField({
+  settings,
+  onChange,
+  disabled,
+  readOnly,
+  label,
+  context,
+  error,
+}: {
+  settings: EmoteSlotSettings;
+  onChange: (value: unknown) => void;
+  disabled: boolean;
+  readOnly: boolean;
+  label: string;
+  context?: unknown;
+  error?: string;
+}): ReactElement {
+  const fieldContext = context as SlotFieldContext | undefined;
+  const language = fieldContext?.language ?? "de";
+  const copy = copyFor(language);
+  const value = typeof settings.pairPayoutBp === "number" ? settings.pairPayoutBp / 10_000 : "";
+  const rate = calculateSlotPayoutRateForDraft(settings, emoteSlotSettingsReadSchema);
+  const fieldError = rate?.status === "locked" && fieldContext?.lastTouchedField === "pairPayoutBp"
+    ? copy.quoteFieldError
+    : error;
+  return <UnitInput
+    id="slot-pair-payout"
+    label={label}
+    ariaLabel={label}
+    value={value}
+    onChange={(next) => { onChange(next === "" ? "" : multiplierToBasisPoints(next)); }}
+    min={1}
+    max={3}
+    step={0.0001}
+    clampOnBlur={false}
+    unit="×"
+    hint={copy.pairPayoutHint}
+    {...(fieldError === undefined ? {} : { error: fieldError })}
+    disabled={disabled || readOnly}
+  />;
+}
+
 export function SlotShareField({
   settings,
   onChange,

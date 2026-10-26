@@ -7,7 +7,7 @@ import { emoteSlotDefaultSettingsForLanguage, emoteSlotSettingsReadSchema, emote
 import { calculateSlotPayoutRateForDraft } from "../../src/modules/emote_slots/domain/payout-rate";
 import { emoteSlotsCatalog } from "../../src/modules/emote_slots/locale";
 import { emoteSlotSettingsEditorCatalog } from "../../src/modules/emote_slots/panel/locale";
-import { SlotReelTable, SlotShareField, SlotTextsField } from "../../src/modules/emote_slots/panel/slot-fields";
+import { SlotPairPayoutField, SlotReelTable, SlotShareField, SlotTextsField } from "../../src/modules/emote_slots/panel/slot-fields";
 import type { EmoteSlotSettings } from "../../src/modules/emote_slots/contracts";
 
 afterEach(() => {
@@ -35,6 +35,28 @@ const renderReelTable = (settings: EmoteSlotSettings) => render(<UiProvider>
 </UiProvider>);
 
 describe("emote slot settings controls", () => {
+  it("edits the pair multiplier in basis points and shows its locked-rate validation (protects=pair payouts are precise, bounded, and rate-aware; fails_when=the field sends a display multiplier instead of basis points or hides the locked state; no_claim=page-level save lifecycle)", () => {
+    const base = emoteSlotDefaultSettingsForLanguage("de");
+    const onChange = vi.fn();
+    const copy = emoteSlotsCatalog.de.panel;
+    const { rerender } = render(<UiProvider><SlotPairPayoutField settings={base} onChange={onChange} disabled={false} readOnly={false}
+      label={copy.pairPayout} context={{ channelId: "slot_component_demo", language: "de", lastTouchedField: "pairPayoutBp" }} /></UiProvider>);
+    const input = screen.getByRole("spinbutton", { name: copy.pairPayout });
+
+    expect(input).toHaveValue(1.5);
+    expect(input).toHaveAttribute("min", "1");
+    expect(input).toHaveAttribute("max", "3");
+    expect(input.parentElement).toHaveTextContent("×");
+    fireEvent.change(input, { target: { value: "2.25" } });
+    expect(onChange).toHaveBeenLastCalledWith(22_500);
+
+    const locked = { ...base, pairPayoutBp: 30_000 };
+    rerender(<UiProvider><SlotPairPayoutField settings={locked} onChange={() => undefined} disabled={false} readOnly={false}
+      label={copy.pairPayout} context={{ channelId: "slot_component_demo", language: "de", lastTouchedField: "pairPayoutBp" }} /></UiProvider>);
+    expect(screen.getByRole("spinbutton", { name: copy.pairPayout })).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(copy.quoteFieldError)).toBeInTheDocument();
+  });
+
   it.each([
     ["8.03", 803], ["1.1", 110], ["7", 700],
   ])("converts a %s percent jackpot share to whole basis points (protects=decimal percentages become integers the schema accepts; fails_when=floating-point residue such as 802.9999999999999 reaches the draft; no_claim=locale-specific decimal input handling of the browser)", (typed, expected) => {

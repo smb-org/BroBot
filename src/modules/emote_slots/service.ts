@@ -83,6 +83,7 @@ export const processEmoteSlotMessage = async (
         symbols,
         table: slotSettlementTable(event.settings),
         jackpotShareBp: event.settings.jackpotShareBp,
+        pairPayoutBp: event.settings.pairPayoutBp,
         maxStake: event.settings.maxStake,
         seed: event.settings.jackpotSeed,
       },
@@ -108,7 +109,7 @@ export const processEmoteSlotMessage = async (
   const isJackpot = result.symbols.every((index) => index === jackpotRow);
   const textKind = isJackpot ? "jackpot" : result.pair ? "pair" : result.net > 0 ? "win" : "loss";
   const reply = formatSlotReply(result, event.settings.symbols, language, login, textKind,
-    event.settings.texts[textKind]);
+    event.settings.texts[textKind], event.settings.pairPayoutBp);
   const action = isMessageEnabled(event.settings.texts, textKind, `${textKind}Enabled`)
     ? isJackpot && event.settings.announceJackpot
       ? { kind: "announcement" as const, text: reply, target: event.settings.chatTarget, automated: false }
