@@ -386,7 +386,13 @@ describe("points ledger in the worker Durable Object", () => {
     await expect(object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke_neu", 75)).resolves.toEqual({ welcomePending: true, startBonus: 75 });
     await expect(object.pointHistory(pointTestModule, "viewer-a")).resolves.toMatchObject({ rows: [{ operationId: "bonus:viewer-a" }] });
 
-    await object.acknowledgePointWelcome(pointTestModule, "viewer-a");
+    await object.storePendingPointWelcome(pointTestModule, {
+      accountId: "viewer-a",
+      messageId: "message-first-contact",
+      text: "Start bonus 75 points",
+    });
+    expect(await object.claimPointWelcome(pointTestModule, "viewer-a", "dispatch:first-contact:points:0")).toBe(true);
+    await object.acknowledgePointWelcome(pointTestModule, "viewer-a", "dispatch:first-contact:points:0");
 
     await expect(object.touchPointAccount(pointTestModule, "viewer-a", "nachtfalke_neu", 75)).resolves.toEqual({ welcomePending: false, startBonus: 75 });
     await expect(object.pointBalance(pointTestModule, "viewer-a")).resolves.toBe(75);
