@@ -1274,6 +1274,23 @@ mit Moderator, Ballot-ID, Dauer und Ablaufzeit. Twitch bietet für das Löschen
 keine bedingte Sperr-ID; eine Änderung direkt zwischen Prüfung und Löschung
 kann daher nicht atomar ausgeschlossen werden.
 
+### Spiele: Überfall (#570)
+
+`src/modules/heist/` nutzt den gemeinsamen Punkte-Rundenkern und benötigt das
+Punktemodul. `!heist <Einsatz>` eröffnet pro Kanal einen Überfall oder lässt eine
+Person während des Join-Fensters einmal mit ihrem eigenen Einsatz beitreten.
+Der DO speichert Einsätze und Teilnehmende in den gemeinsamen Rundentabellen;
+der Alarm schließt das Fenster und löst jede Person unabhängig auf. Die Chance
+beginnt bei 50 %, steigt je weiterer Person um zwei Prozentpunkte und ist
+standardmäßig auf 65 % begrenzt. Gewinner erhalten ihren doppelten Einsatz,
+Verlierer verlieren ihren Einsatz an das Hauskonto. Start- und Ergebnistext
+sind lokalisierte Vorlagen; es gibt keine Join-Bestätigungen, damit pro Runde
+nur die Startmeldung und eine kompakte Gewinner-/Verliererzusammenfassung
+gesendet werden. Das Abschalten des Moduls erstattet alle noch offenen Einsätze
+über den gemeinsamen Abbruchpfad. Einstellungen begrenzen Einsatz, Join-Zeit,
+Abklingzeit und optionale Chancenwerte. Der feste Befehl, Nachrichtenvariablen
+und Paneltexte sind zweisprachig in Modul- und Panelkatalogen hinterlegt.
+
 ## Checkliste für ein neues Modul
 
 - [ ] **Contract:** `id`, `navigationCategory`, `settingsSchema`, `defaultSettings`; nur benötigte optionale Felder (`eventSubTypes`, `routes`, `panel` oder `settingsEditor` lazy, `defaultEnabled` bewusst gewählt). Bei Secrets, Ballots oder aktiven Chattern die jeweilige Deklaration und den Zugriff nur über den Kontext nutzen.

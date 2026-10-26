@@ -1,6 +1,7 @@
 import type { PointSettlement, PointSettlementInput } from "./points";
 import type { InstantPointSettlement } from "./points";
 import { settleSlot } from "../../modules/emote_slots/domain/settlement";
+import { resolveHeist } from "../../modules/heist/domain/settlement";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -118,10 +119,34 @@ const duelSettlement: PointSettlement = ({ round, participants, pots, params }: 
   };
 };
 
+const heistSettlement: PointSettlement = ({ round, participants, pots, params }: PointSettlementInput) => {
+  if (!isRecord(params) || !Number.isSafeInteger(params.baseChance) || !Number.isSafeInteger(params.maxChance)) {
+    throw new Error("invalid_settlement_params");
+  }
+  const escrowId = `__escrow:${round.roundId}`;
+  const totalStake = participants.reduce((total, participant) => total + participant.stake, 0);
+  if (!Number.isSafeInteger(totalStake) || totalStake < 1 || pots[escrowId] !== totalStake) {
+    throw new Error("invalid_settlement_params");
+  }
+  const random = (): number => {
+    const value = new Uint32Array(1);
+    crypto.getRandomValues(value);
+    return (value[0] ?? 0) / 0x1_0000_0000;
+  };
+  const resolution = resolveHeist(
+    round.roundId,
+    participants.map(({ accountId, login, stake }) => ({ accountId, login, stake })),
+    { baseChance: params.baseChance as number, maxChance: params.maxChance as number },
+    random,
+  );
+  return { movements: resolution.movements, result: resolution.result };
+};
+
 export const POINT_SETTLEMENTS: ReadonlyMap<string, PointSettlement> = new Map([
   ["test", testSettlement],
   ["blitz", blitzSettlement],
   ["duel", duelSettlement],
+  ["heist", heistSettlement],
 ]);
 
 export const INSTANT_SETTLEMENTS: ReadonlyMap<string, InstantPointSettlement> = new Map([
