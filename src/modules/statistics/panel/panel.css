@@ -164,6 +164,7 @@
   .statistics-trends__ranges button[aria-pressed="true"] { border-color: var(--color-brand); background: var(--color-selection-surface); color: var(--color-text); }
   .statistics-trends__ranges button:focus-visible, .statistics-trends__table-wrap button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
   .statistics-trends__toolbar > .statistics-trends__error { color: var(--color-error-text); }
+  .statistics-trends__error > span { color: var(--color-text-3); }
   .statistics-trends__error button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
   .statistics-trends__error button { padding: 0; border: 0; background: transparent; color: var(--color-brand-text); font: inherit; text-decoration: underline; cursor: pointer; }
   .statistics-trends__kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--spacing-s4); min-width: 0; }

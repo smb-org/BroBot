@@ -212,8 +212,18 @@ const Heatmap = ({ data, language, labels }: {
   const cellElements = useRef(new Map<string, HTMLElement>());
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [detailKey, setDetailKey] = useState<string | null>(null);
-  const firstKey = `0:${String(hours[0] ?? 0)}`;
-  const rovingKey = focusKey !== null && hours.includes(Number(focusKey.split(":")[1])) ? focusKey : firstKey;
+  const firstCell = data.heatmap[0];
+  // Tab stop: the last focused cell while it exists, else the first cell with data, else the first cell.
+  const defaultKey = firstCell === undefined ? `0:${String(hours[0] ?? 0)}` : `${String(firstCell.weekday)}:${String(firstCell.hour)}`;
+  const rovingKey = focusKey !== null && hours.includes(Number(focusKey.split(":")[1])) ? focusKey : defaultKey;
+  // Set when the focused cell is torn down; the effect below then moves focus to the new tab stop.
+  const focusLost = useRef(false);
+  useEffect(() => {
+    if (!focusLost.current) return;
+    focusLost.current = false;
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    cellElements.current.get(rovingKey)?.focus();
+  });
   const cellText = (weekday: number, hour: number): { name: string; detail: string } => {
     const day = dayLabels[weekday] ?? "";
     const cell = cellByCoordinate.get(`${String(weekday)}:${String(hour)}`);
@@ -224,7 +234,8 @@ const Heatmap = ({ data, language, labels }: {
     const name = labels.heatCell(day, hour, numberText(cell.averageViewers, language));
     return { name, detail: `${name} · ${String(cell.streams)} ${labels.streams}` };
   };
-  const detailAt = detailKey === null ? null : detailKey.split(":").map(Number);
+  // A detail line for a cell that no longer exists in the current grid is dropped.
+  const detailAt = detailKey === null || !hours.includes(Number(detailKey.split(":")[1])) ? null : detailKey.split(":").map(Number);
   const detailText = detailAt === null ? "" : cellText(detailAt[0] ?? 0, detailAt[1] ?? 0).detail;
   const moveFocus = (event: KeyboardEvent<HTMLElement>, weekday: number, hour: number): void => {
     const steps: Readonly<Record<string, [number, number]>> = {
@@ -259,9 +270,14 @@ const Heatmap = ({ data, language, labels }: {
             const cell = cellByCoordinate.get(key);
             return <span
               key={key}
+              data-cell={key}
               ref={(element) => {
-                if (element === null) cellElements.current.delete(key);
-                else cellElements.current.set(key, element);
+                if (element === null) return undefined;
+                cellElements.current.set(key, element);
+                return () => {
+                  if (cellElements.current.get(key) === element) cellElements.current.delete(key);
+                  if (document.activeElement === element) focusLost.current = true;
+                };
               }}
               className={`statistics-trends__heat-cell${cell === undefined ? " is-empty" : ""}`}
               role="gridcell"
@@ -271,7 +287,11 @@ const Heatmap = ({ data, language, labels }: {
               onFocus={() => { setFocusKey(key); setDetailKey(key); }}
               onBlur={() => { setDetailKey(null); }}
               onMouseEnter={() => { setDetailKey(key); }}
-              onMouseLeave={() => { setDetailKey(null); }}
+              onMouseLeave={() => {
+                // Fall back to the focused cell's details when a cell still has focus.
+                const focused = document.activeElement;
+                setDetailKey(focused instanceof HTMLElement && focused.dataset.cell !== undefined ? focused.dataset.cell : null);
+              }}
               onKeyDown={(event) => { moveFocus(event, weekday, hour); }}
             >{cell === undefined || hours.length > 15 ? null : numberText(cell.averageViewers, language)}</span>;
           })}
@@ -397,13 +417,13 @@ export const StatisticsTrendsPanel = ({ channelId, language = "de" }: ModulePane
       setDirection(nextSort === "name" ? "ascending" : "descending");
     }
   };
-  const current: StatisticsTrendKpis = data?.kpis ??{ streams: 0, streamHours: 0, averageViewers: null, messagesPerMinute: null };
+  const current: StatisticsTrendKpis = data?.kpis ?? { streams: 0, streamHours: 0, averageViewers: null, messagesPerMinute: null };
   const previous: StatisticsTrendKpis = data?.previousKpis ?? { streams: 0, streamHours: 0, averageViewers: null, messagesPerMinute: null };
 
   return <div className="statistics-trends" aria-busy={query.isLoading} data-pending={pending ? "true" : "false"}>
     <header className="statistics-trends__toolbar">
       <p role={query.isError ? "alert" : undefined} className={query.isError ? "statistics-trends__error" : undefined}>{query.isError
-        ? <>{labels.loadError} <button type="button" onClick={() => { void query.refetch(); }}>{labels.retry}</button></>
+        ? <>{data === undefined ? null : <span>{dateRangeSummary(data, language)} · </span>}{labels.loadError} <button type="button" onClick={() => { void query.refetch(); }}>{labels.retry}</button></>
         : data === undefined ? <span className="statistics-trends__date-placeholder" aria-hidden="true" /> : dateRangeSummary(data, language)}</p>
       <div className="statistics-trends__controls">
         <span className="statistics-trends__pending" role="status" aria-label={pending ? labels.updating : undefined}>

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { StatisticsTrendsPanel } from "../../src/modules/statistics/panel/trends";
@@ -105,6 +105,48 @@ describe("statistics trends page", () => {
     expect(document.querySelector(".statistics-trends__heat-detail")?.textContent).toBe("Thu 07:00: no stream");
     fireEvent.mouseEnter(within(grid).getByRole("gridcell", { name: "Fri 19:00: avg 262 viewers" }));
     expect(document.querySelector(".statistics-trends__heat-detail")?.textContent).toBe("Fri 19:00: avg 262 viewers · 3 Streams");
+  });
+
+  it("moves focus to the new tab stop when new data removes the focused heatmap hour", async () => {
+    const morning = { ...trends(), heatmap: [{ weekday: 2, hour: 6, averageViewers: 90, streams: 1 }, { weekday: 4, hour: 19, averageViewers: 262, streams: 3 }] };
+    const evening = { ...trends(), weeks: 4, heatmap: [{ weekday: 4, hour: 19, averageViewers: 262, streams: 3 }, { weekday: 5, hour: 21, averageViewers: 120, streams: 1 }] };
+    const { fetchMock } = renderPanel(morning);
+    const grid = await screen.findByRole("grid", { name: "Weekday × start hour" });
+    act(() => { within(grid).getByRole("gridcell", { name: "Wed 06:00: avg 90 viewers" }).focus(); });
+    expect(document.querySelector(".statistics-trends__heat-detail")?.textContent).toBe("Wed 06:00: avg 90 viewers · 1 Streams");
+
+    fetchMock.mockImplementationOnce(() => Promise.resolve(new Response(JSON.stringify(evening), { status: 200, headers: { "Content-Type": "application/json" } })));
+    fireEvent.click(screen.getByRole("button", { name: "4 weeks" }));
+
+    await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Fri 19:00: avg 262 viewers"));
+    expect(document.querySelector(".statistics-trends__heat-detail")?.textContent).toBe("Fri 19:00: avg 262 viewers · 3 Streams");
+    expect(within(screen.getByRole("grid", { name: "Weekday × start hour" })).getAllByRole("gridcell").filter((cell) => cell.tabIndex === 0)).toHaveLength(1);
+  });
+
+  it("falls back to the focused cell's details when the pointer leaves another cell", async () => {
+    renderPanel({ ...trends(), heatmap: [{ weekday: 2, hour: 6, averageViewers: 90, streams: 1 }, { weekday: 4, hour: 19, averageViewers: 262, streams: 3 }] });
+    const grid = await screen.findByRole("grid", { name: "Weekday × start hour" });
+    act(() => { within(grid).getByRole("gridcell", { name: "Wed 06:00: avg 90 viewers" }).focus(); });
+    const other = within(grid).getByRole("gridcell", { name: "Fri 19:00: avg 262 viewers" });
+
+    fireEvent.mouseEnter(other);
+    expect(document.querySelector(".statistics-trends__heat-detail")?.textContent).toBe("Fri 19:00: avg 262 viewers · 3 Streams");
+    fireEvent.mouseLeave(other);
+    expect(document.querySelector(".statistics-trends__heat-detail")?.textContent).toBe("Wed 06:00: avg 90 viewers · 1 Streams");
+  });
+
+  it("keeps naming the displayed range next to a failed range load", async () => {
+    const { fetchMock } = renderPanel();
+    await screen.findByRole("button", { name: "12 weeks" });
+    await screen.findByText(/Week 42–43/u);
+
+    fetchMock.mockImplementationOnce(() => Promise.resolve(new Response(JSON.stringify({ error: "failed" }), { status: 500, headers: { "Content-Type": "application/json" } })));
+    fireEvent.click(screen.getByRole("button", { name: "4 weeks" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Week 42–43");
+    expect(alert.textContent).toContain("Could not load trends.");
+    expect(within(alert).getByRole("button", { name: "Reload" })).toBeTruthy();
   });
 
   it("keeps the loaded range and the chosen sort while another range loads", async () => {
