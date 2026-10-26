@@ -71,6 +71,14 @@ const failureReasonFrom400Message = (message: string | null): ModerationFailureR
   return "invalid_request";
 };
 
+const isNotActiveTimeoutMessage = (message: string | null): boolean => {
+  const normalized = message?.toLocaleLowerCase("en-US") ?? "";
+  if (normalized.includes("may not be banned")) return false;
+  return normalized.includes("user is not banned") || normalized.includes("user is not timed out") ||
+    normalized.includes("user is not currently banned") || normalized.includes("user is not currently timed out") ||
+    normalized.includes("target is not banned") || normalized.includes("target is not timed out");
+};
+
 const failureReasonFromStatus = (status: number): ModerationFailureReason => {
   if (status === 400) return "invalid_request";
   if (status === 401) return "token_invalid";
@@ -193,6 +201,13 @@ async function executeModeration(
   if (result.reason === "timeout" || result.reason === "network_error") {
     return failure(result.reason, detail, "ambiguous");
   }
+  if (method === "DELETE" && (result.status === 401 || result.status === 403) &&
+      (result.message?.toLocaleLowerCase("en-US") ?? "").includes("scope")) {
+    return failure("scope_missing", detail);
+  }
+  if (method === "DELETE" && (result.status === 400 || result.status === 404) && isNotActiveTimeoutMessage(result.message)) {
+    return failure("not_timed_out", detail);
+  }
   if (result.status === 429) {
     if (environment.CHANNEL !== undefined) {
       try {
@@ -223,7 +238,7 @@ const isCurrentExpectedTimeout = async (
   userId: string,
   expected: ModerationTimeoutExpectation,
   fetcher: typeof fetch,
-): Promise<boolean | "absent" | null> => {
+): Promise<boolean | "absent" | "not_timed_out" | "scope_missing" | null> => {
   if (!Number.isSafeInteger(expected.durationSeconds) || expected.durationSeconds < 1 || expected.durationSeconds > MODERATION_TIMEOUT_MAX_SECONDS) return null;
   const expectedStart = Date.parse(expected.startedAt);
   if (!Number.isFinite(expectedStart)) return null;
@@ -242,6 +257,14 @@ const isCurrentExpectedTimeout = async (
     }),
     { fetcher },
   );
+  if (lookup.kind === "scope_missing") return "scope_missing";
+  if (lookup.kind === "http_error") {
+    if (lookup.result.status === 401 || lookup.result.status === 403) return "scope_missing";
+    if ((lookup.result.status === 400 || lookup.result.status === 404) && isNotActiveTimeoutMessage(lookup.result.message)) {
+      return "not_timed_out";
+    }
+    return null;
+  }
   if (lookup.kind !== "ok" || !isTwitchModerationBanRows(lookup.value.data)) return null;
   const current = lookup.value.data.find((row) => row.user_id === userId);
   if (current === undefined) return "absent";
@@ -267,7 +290,11 @@ export const liftModerationBan = (
     ? executeModeration(environment, channelId, { userId, durationSeconds: null, reason: "" }, "DELETE", fetcher)
     : matches === "absent"
       ? Promise.resolve({ outcome: "applied", reason: null, detail: { target: userId, alreadyAbsent: true } })
-      : Promise.resolve(failure(matches === null ? "twitch_error" : "conflict", { target: userId })));
+      : matches === "not_timed_out"
+        ? Promise.resolve(failure("not_timed_out", { target: userId }))
+        : matches === "scope_missing"
+          ? Promise.resolve(failure("scope_missing", { target: userId }))
+          : Promise.resolve(failure(matches === null ? "twitch_error" : "conflict", { target: userId })));
 
 /** Checks one user against Twitch's channel moderator list; null means lookup failure. */
 export const isTwitchChannelModerator = async (

@@ -961,6 +961,22 @@ für die Feldliste in der Speicherleiste, die Tab-Fehlerpunkte und den Fokus auf
 das erste fehlerhafte Feld. Die Liste und `SettingsEditor.fieldErrors` müssen
 daher dieselbe Validierung abbilden.
 
+### Sofortaktionen (`actions`)
+
+Ein Modul kann einzelne Live-Cockpit-Aktionen deklarieren. Der Host prüft die
+Modulbedingungen und `requiredRole`, zeigt gesperrte Aktionen mit einem Grund
+am Knopf und lädt optionale Dialog- oder Popover-Inhalte erst beim Öffnen.
+`execute` erhält die Formulardaten; Ausführungsfehler werden über
+`errorMessage` und die modulbezogene Fehlerzuordnung lokalisiert. Für dynamische
+Voraussetzungen wie eine verfügbare Timeoutliste verwendet ein Modul eine
+`ModuleImmediateActionCondition`.
+
+Votekick bietet „Timeout aufheben“ ab Operator-Rolle an, wenn mindestens ein
+aktiver Votekick-Timeout existiert. Die Auswahl stammt aus der bestehenden
+Votekickliste und wird über dieselbe geschützte Lift-Route wie im Cockpit
+ausgeführt. Der Host vergleicht vor dem Helix-DELETE Moderator, Ballot-ID,
+Dauer und Ablaufzeit; jeder Liftversuch erhält einen Audit-Eintrag.
+
 ## Referenzmodule
 
 Die folgenden Module zeigen die Fähigkeiten im Zusammenspiel; Details ihrer Fachlogik stehen hier, nicht im Contract.
@@ -1269,7 +1285,8 @@ zufälliger Dauer bis 3.600 Sekunden. Ein registrierter Modul-Alarm beendet
 abgelaufene Abstimmungen; die generische stündliche Modulwartung löscht rohe
 Ziel-ID, Ziel-Login und Starter-ID nach 14 Tagen. Das Panel kann laufende
 Ballots abbrechen und nur einen noch aktiven, passenden Votekick-Timeout
-aufheben. Vor dem Aufheben vergleicht der Host den aktuellen Twitch-Eintrag
+aufheben. Die Sofortaktion „Timeout aufheben“ nutzt dieselbe Liste, Route und
+Audit-Spur. Vor dem Aufheben vergleicht der Host den aktuellen Twitch-Eintrag
 mit Moderator, Ballot-ID, Dauer und Ablaufzeit. Twitch bietet für das Löschen
 keine bedingte Sperr-ID; eine Änderung direkt zwischen Prüfung und Löschung
 kann daher nicht atomar ausgeschlossen werden.

@@ -488,6 +488,75 @@ describe("moderation actions", () => {
     }
   });
 
+  it.each([400, 404])("reports a Votekick timeout that Twitch says is not active on lookup status %s", async (status) => {
+    const database = new TestD1Database();
+    try {
+      await seedChannel(database);
+      await seedBroadcasterIdentity(database);
+      const { environment } = environmentFor(database);
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(responseFor(status, "The user is not banned"));
+
+      await expect(liftModerationBan(environment, CHANNEL_ID, TARGET_USER_ID, {
+        reason: "Votekick (3:0) · ballot-1",
+        durationSeconds: 120,
+        startedAt: new Date(Date.now() - 5_000).toISOString(),
+      }, fetcher)).resolves.toMatchObject({ outcome: "rejected", reason: "not_timed_out" });
+      expect(fetcher).toHaveBeenCalledOnce();
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each([400, 404])("reports a timeout that expires between lookup and DELETE on status %s", async (status) => {
+    const database = new TestD1Database();
+    try {
+      await seedChannel(database);
+      await seedBroadcasterIdentity(database);
+      const { environment } = environmentFor(database);
+      const startedAt = new Date(Date.now() - 5_000).toISOString();
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{
+          user_id: TARGET_USER_ID,
+          moderator_id: BOT_USER_ID,
+          reason: "Votekick (3:0) · ballot-1",
+          created_at: startedAt,
+          expires_at: new Date(Date.parse(startedAt) + 120_000).toISOString(),
+        }] }), { status: 200, headers: { "content-type": "application/json" } }))
+        .mockResolvedValueOnce(responseFor(status, "The user is not banned"));
+
+      await expect(liftModerationBan(environment, CHANNEL_ID, TARGET_USER_ID, {
+        reason: "Votekick (3:0) · ballot-1", durationSeconds: 120, startedAt,
+      }, fetcher)).resolves.toMatchObject({ outcome: "rejected", reason: "not_timed_out" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each([401, 403])("maps a Helix permission rejection on DELETE status %s to the missing-scope reason", async (status) => {
+    const database = new TestD1Database();
+    try {
+      await seedChannel(database);
+      await seedBroadcasterIdentity(database);
+      const { environment } = environmentFor(database);
+      const startedAt = new Date(Date.now() - 5_000).toISOString();
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{
+          user_id: TARGET_USER_ID,
+          moderator_id: BOT_USER_ID,
+          reason: "Votekick (3:0) · ballot-1",
+          created_at: startedAt,
+          expires_at: new Date(Date.parse(startedAt) + 120_000).toISOString(),
+        }] }), { status: 200, headers: { "content-type": "application/json" } }))
+        .mockResolvedValueOnce(responseFor(status, "Missing required scope: moderator:manage:banned_users"));
+
+      await expect(liftModerationBan(environment, CHANNEL_ID, TARGET_USER_ID, {
+        reason: "Votekick (3:0) · ballot-1", durationSeconds: 120, startedAt,
+      }, fetcher)).resolves.toMatchObject({ outcome: "rejected", reason: "scope_missing" });
+    } finally {
+      database.close();
+    }
+  });
+
   it.each([
     ["natural expiry", "expired"],
     ["replacement by a different moderator", "different_moderator"],

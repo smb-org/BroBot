@@ -1,18 +1,46 @@
-import type { BotModule, JsonObject, ModuleLiveTileSnapshot, ModuleTemplateUsageSource } from "../contract";
+import type { BotModule, JsonObject, ModuleImmediateActionCondition, ModuleLiveTileSnapshot, ModuleTemplateUsageSource } from "../contract";
 import { settingsVariableReferences } from "../contract";
 import { VOTEKICK_TEMPLATE_FIELDS } from "./contracts/template-variable-catalog";
 import { votekickCatalog } from "./contracts/catalog";
 import { VOTEKICK_CHAT_COMMANDS } from "./contracts/chat-commands";
-import { DEFAULT_VOTEKICK_SETTINGS, VOTEKICK_HISTORY_DAYS, VOTEKICK_LIFT_CLAIM_LEASE_MS, VOTEKICK_MODULE_ID, votekickDefaultSettingsForLanguage, votekickSettingsReadSchema, votekickSettingsSchema } from "./contracts";
+import { DEFAULT_VOTEKICK_SETTINGS, VOTEKICK_HISTORY_DAYS, VOTEKICK_MODULE_ID, votekickDefaultSettingsForLanguage, votekickSettingsReadSchema, votekickSettingsSchema } from "./contracts";
 import { createVotekickRepository, purgeExpiredVotekickUserIds } from "./adapters/d1";
 import { processVotekickMessage, closeExpiredVotekick, votekickOverlayPayload } from "./service";
 import { dryRunVotekickMessage } from "./dry-run";
 import { votekickRoutes } from "./routes";
 import { votekickOverlayElements } from "./overlay/element";
 import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
+import { activeVotekickTimeouts } from "./domain/active-timeouts";
+import { votekickImmediateActionTexts } from "./panel/immediate-action-locale";
 
 const votekickIcon = { paths: ["M12 3v18", "M3 12h18", "m5 5 14 14", "M19 5 5 19"] } as const;
 const templateFields = ["startText", "passText", "failText", "expiredText", "protectedText", "busyText"] as const;
+
+const activeTimeoutExists: ModuleImmediateActionCondition = {
+  check: async ({ channelId, signal }) => {
+    const state = await (await import("./panel/service")).loadVotekickPanel(channelId, signal);
+    const timeouts = activeVotekickTimeouts(state.votekicks, state.now);
+    return { reason: timeouts.length === 0 ? votekickImmediateActionTexts.noActiveTimeouts : null };
+  },
+};
+
+const liftTimeoutAction: NonNullable<BotModule["actions"]>[number] = {
+  id: "lift-timeout",
+  name: votekickImmediateActionTexts.name,
+  icon: "timer",
+  conditions: ["moduleEnabled", activeTimeoutExists],
+  requiredRole: "operator",
+  content: { presentation: "dialog", requiresReadiness: true, load: () => import("./panel/immediate-action-content") },
+  errorMessage: votekickImmediateActionTexts.error,
+  execute: async ({ channelId, formData }) => {
+    const votekickId = formData.get("votekickId");
+    if (typeof votekickId !== "string" || votekickId.length === 0) {
+      return { tone: "error", message: votekickImmediateActionTexts.selectionRequired };
+    }
+    await (await import("./panel/service")).liftVotekickTimeout(channelId, votekickId);
+    return { tone: "success", message: votekickImmediateActionTexts.success };
+  },
+};
 
 const templateUsageSources = async (db: D1Database, channelId: string): Promise<readonly ModuleTemplateUsageSource[]> => {
   const row = await db.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?")
@@ -76,12 +104,11 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   settingsEditor: () => import("./panel/settings-editor"),
   panel: () => import("./panel/lock-card"),
   settingsEditorRelatedParts: ["panel"],
+  actions: [liftTimeoutAction],
   liveTile: {
     load: async (channelId, signal) => {
       const state = await (await import("./panel/service")).loadVotekickPanel(channelId, signal);
       const running = state.running;
-      const serverNow = Date.parse(state.now);
-      const staleClaimBefore = serverNow - VOTEKICK_LIFT_CLAIM_LEASE_MS;
       return [
         ...(running === null ? [] : [{
         kind: "votekick",
@@ -92,23 +119,7 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
         noVotes: running.noVotes,
         threshold: running.threshold,
         } satisfies ModuleLiveTileSnapshot]),
-        ...state.votekicks.filter((item) => {
-          const timeoutExpiresAt = item.endedAt === null || item.durationSeconds === null
-            ? Number.NaN
-            : Date.parse(item.endedAt) + item.durationSeconds * 1_000;
-          const liftClaimedAt = item.liftClaimedAt === null ? Number.NaN : Date.parse(item.liftClaimedAt);
-          const staleClaim = Number.isFinite(liftClaimedAt) && liftClaimedAt <= staleClaimBefore;
-          return item.status === "passed"
-          && item.liftedAt === null
-          && item.targetUserId !== null
-          && item.durationSeconds !== null
-          && item.durationSeconds > 0
-          && item.endedAt !== null
-          && Number.isFinite(Date.parse(item.endedAt))
-          && Number.isFinite(serverNow)
-          && Number.isFinite(timeoutExpiresAt)
-          && (staleClaim || (item.liftClaimedAt === null && timeoutExpiresAt > serverNow));
-        }).map((item) => ({
+        ...activeVotekickTimeouts(state.votekicks, state.now).map((item) => ({
           kind: "votekick_recent" as const,
           id: item.id,
           target: item.targetLogin ?? item.targetUserId ?? "—",

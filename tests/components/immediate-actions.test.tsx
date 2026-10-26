@@ -8,6 +8,9 @@ import { loadTextCommandData } from "../../src/modules/text_commands/panel/servi
 import { textCommandQuickActionTexts } from "../../src/modules/text_commands/panel/quick-action-locale";
 import { loadUpcomingTimers, skipNextTimerOccurrence } from "../../src/modules/timers/panel/service";
 import type { Timer } from "../../src/modules/timers/contracts";
+import { liftVotekickTimeout, loadVotekickPanel } from "../../src/modules/votekick/panel/service";
+import type { Votekick } from "../../src/modules/votekick/contracts";
+import { votekickModule } from "../../src/modules/votekick";
 import { UiProvider } from "../../src/dashboard/ui";
 import { clickSelectOption } from "../query-test-utils";
 
@@ -32,6 +35,12 @@ vi.mock("../../src/modules/timers/panel/service", async (importOriginal) => ({
   skipNextTimerOccurrence: vi.fn(),
 }));
 
+vi.mock("../../src/modules/votekick/panel/service", async (importOriginal) => ({
+  ...await importOriginal<Record<string, unknown>>(),
+  liftVotekickTimeout: vi.fn(),
+  loadVotekickPanel: vi.fn(),
+}));
+
 const setChannelVariables = (variables: readonly PanelChannelVariable[]): void => {
   vi.mocked(fetchChannelVariables).mockResolvedValue({ count: variables.length, maximum: 50, variables });
   vi.mocked(loadTextCommandData).mockResolvedValue({ commands: [], variables: [...variables] });
@@ -52,6 +61,24 @@ const plannedTimer: Timer = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
+const activeVotekick: Votekick = {
+  id: "ballot-1",
+  targetUserId: "viewer-1",
+  targetLogin: "viewer_one",
+  initiatorUserId: "starter-1",
+  status: "passed",
+  threshold: 3,
+  yesVotes: 3,
+  noVotes: 0,
+  ballotRevision: 2,
+  durationSeconds: 90,
+  startedAt: "2026-10-26T12:00:00.000Z",
+  endsAt: "2026-10-26T12:01:00.000Z",
+  endedAt: new Date(Date.now() - 15_000).toISOString(),
+  liftedAt: null,
+  liftClaimedAt: null,
+};
+
 afterEach(() => {
   cleanup();
   localStorage.clear();
@@ -66,6 +93,8 @@ beforeEach(() => {
   vi.mocked(loadUpcomingTimers).mockClear();
   vi.mocked(loadUpcomingTimers).mockResolvedValue([plannedTimer]);
   vi.mocked(skipNextTimerOccurrence).mockReset();
+  vi.mocked(loadVotekickPanel).mockReset().mockResolvedValue({ running: null, votekicks: [activeVotekick], now: new Date().toISOString() });
+  vi.mocked(liftVotekickTimeout).mockReset().mockResolvedValue(undefined);
 });
 
 describe("cockpit action role mirror", () => {
@@ -92,6 +121,26 @@ describe("cockpit action role mirror", () => {
     expect((clipAction as HTMLButtonElement).disabled).toBe(false);
     expect(clipAction.hasAttribute("aria-haspopup")).toBe(false);
     expect(screen.getByText(/Nur Verwalter und Broadcaster dürfen diese Aktion ausführen\.|Only managers and broadcasters may run this action\./u)).not.toBeNull();
+  });
+
+  it("requires the existing operator role for timeout lifting", () => {
+    expect(votekickModule.actions?.find((action) => action.id === "lift-timeout")?.requiredRole).toBe("operator");
+  });
+
+  it("lifts the selected active Votekick timeout from the immediate action dialog", async () => {
+    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+      modules={[{ id: "votekick", enabled: true }]} /></UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Timeout aufheben|Lift timeout/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(action);
+
+    const viewerPicker = await screen.findByRole("combobox", { name: /Viewer|Nutzer/u });
+    fireEvent.click(viewerPicker);
+    clickSelectOption(await screen.findByRole("option", { name: /viewer_one/u, hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: dashboardTexts().streamManager.actionRun }));
+
+    await waitFor(() => expect(liftVotekickTimeout).toHaveBeenCalledWith("channel-a", "ballot-1"));
   });
 
   it("increments the selected variable through the existing value route and shows its new value", async () => {

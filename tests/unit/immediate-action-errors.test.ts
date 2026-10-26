@@ -13,4 +13,14 @@ describe("immediate action error feedback", () => {
 
     expect(immediateActionErrorFeedback(error, "raid", "Shoutout fehlgeschlagen", "de").message).toBe(expected);
   });
+
+  it.each([
+    ["scope_missing", "Die erforderliche Twitch-Berechtigung zum Aufheben von Timeouts fehlt."],
+    ["not_timed_out", "Für diesen Nutzer läuft kein Timeout"],
+    ["twitch_error", "Twitch hat die Moderationsanfrage abgelehnt"],
+  ])("maps Votekick lift failure %s to its localized moderation message", (reason, expected) => {
+    const error = new PanelApiError(502, "votekick_timeout_lift_failed", { reason });
+
+    expect(immediateActionErrorFeedback(error, "votekick", "Timeout konnte nicht aufgehoben werden", "de").message).toBe(expected);
+  });
 });

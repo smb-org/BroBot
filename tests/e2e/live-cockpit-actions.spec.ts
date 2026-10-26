@@ -4,7 +4,32 @@ test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
 test("vote action keeps its draft while templates load and guards every close path", async ({ page }) => {
   const channelId = "kanal-live-actions";
-  const modules = [{ id: "chat_voting", enabled: true, settings: "{}" }];
+  const modules = [
+    { id: "chat_voting", enabled: true, settings: "{}" },
+    { id: "votekick", enabled: true, settings: "{}" },
+  ];
+  const timeoutEndedAt = new Date(Date.now() - 15_000).toISOString();
+  const timeoutState = {
+    running: null,
+    votekicks: [{
+      id: "ballot-active-timeout",
+      targetUserId: "viewer-active-timeout",
+      targetLogin: "viewer_active",
+      initiatorUserId: "starter-active-timeout",
+      status: "passed",
+      threshold: 3,
+      yesVotes: 3,
+      noVotes: 0,
+      ballotRevision: 2,
+      durationSeconds: 600,
+      startedAt: timeoutEndedAt,
+      endsAt: timeoutEndedAt,
+      endedAt: timeoutEndedAt,
+      liftedAt: null,
+      liftClaimedAt: null,
+    }],
+    now: new Date().toISOString(),
+  };
   const channel = {
     channelId,
     login: "demo-kanal",
@@ -41,7 +66,10 @@ test("vote action keeps its draft while templates load and guards every close pa
       return;
     }
     if (pathname === `/api/channels/${channelId}/overview`) {
-      await route.fulfill(json({ ...channel, viewerCount: 42, activeModules: [{ moduleId: "chat_voting", settings: "{}" }] }));
+      await route.fulfill(json({ ...channel, viewerCount: 42, activeModules: [
+        { moduleId: "chat_voting", settings: "{}" },
+        { moduleId: "votekick", settings: "{}" },
+      ] }));
       return;
     }
     if (pathname === `/api/channels/${channelId}/modules`) {
@@ -81,10 +109,15 @@ test("vote action keeps its draft while templates load and guards every close pa
       }));
       return;
     }
+    if (pathname === `/api/channels/${channelId}/modules/votekick/votekicks`) {
+      await route.fulfill(json(timeoutState));
+      return;
+    }
     await route.fulfill(json({}));
   });
 
   await page.goto(`/channels/${channelId}`);
+  await expect(page.locator(".live-cockpit-actions__grid").getByRole("button", { name: "Timeout aufheben" })).toBeEnabled();
   await page.getByRole("button", { name: "Abstimmung starten" }).click();
   const dialog = page.getByRole("dialog", { name: "Abstimmung starten" });
   const question = dialog.getByRole("textbox", { name: "Frage" });
