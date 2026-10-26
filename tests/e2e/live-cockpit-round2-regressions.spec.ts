@@ -189,10 +189,74 @@ test("five active Votekick timeouts remain reachable with a visible scroll edge"
   });
   expect(finalItem.itemName).toMatch(/Lift timeout|Timeout aufheben/u);
   expect(finalItem.buttonBottom).toBeLessThanOrEqual(finalItem.listBottom + 0.5);
-  expect(finalItem.listBottom - (finalItem.itemBottom ?? finalItem.listBottom)).toBeGreaterThanOrEqual(16);
-  expect(finalItem.nextHeadingTop - (finalItem.itemBottom ?? finalItem.nextHeadingTop)).toBeGreaterThanOrEqual(24);
+  // The 3fr list height is fractional, so the 16px end clearance can read a fraction below 16 after the last scroll step.
+  expect(finalItem.listBottom - (finalItem.itemBottom ?? finalItem.listBottom)).toBeGreaterThanOrEqual(15.5);
+  expect(finalItem.nextHeadingTop - (finalItem.itemBottom ?? finalItem.nextHeadingTop)).toBeGreaterThanOrEqual(23.5);
   expect(finalItem.nextHeadingTop).toBeCloseTo(initialGeometry.nextHeadingTop ?? 0, 0);
 });
+
+for (const [width, height] of [[1920, 1080], [1280, 800]] as const) {
+  for (const count of [2, 5]) {
+    test(`${String(count)} active Votekick timeouts stay inside their tile at ${String(width)}px (protects=the tile keeps its height, the first timeout row is fully visible and nothing overlaps the next-up heading; fails_when=the timeout list is squeezed below one row, its button crosses the next heading, or the tile grows with the count; no_claim=timeout data is mocked)`, async ({ page }) => {
+      const channelId = `round2-votekick-tile-${String(width)}-${String(count)}`;
+      const now = new Date().toISOString();
+      const endedAt = new Date(Date.now() - 16_000).toISOString();
+      await installLiveCockpitMocks(page, { channelId, role: "manager", modules: [{ id: "votekick", enabled: true, settings: "{}" }] });
+      await page.route(`**/api/channels/${channelId}/modules/votekick/votekicks`, (route) => route.fulfill(json({
+        running: null,
+        now,
+        votekicks: Array.from({ length: count }, (_, index) => ({
+          id: `passed-${String(index + 1)}`,
+          targetUserId: `viewer-${String(index + 1)}`,
+          targetLogin: `viewer_${String(index + 1)}`,
+          initiatorUserId: "manager-1",
+          status: "passed",
+          threshold: 5,
+          yesVotes: 7,
+          noVotes: 1,
+          ballotRevision: 1,
+          durationSeconds: 3600,
+          startedAt: endedAt,
+          endsAt: endedAt,
+          endedAt,
+          liftedAt: null,
+          liftClaimedAt: null,
+        })),
+      })));
+      await page.setViewportSize({ width, height });
+      await page.goto(`/channels/${channelId}`);
+
+      const list = page.locator(".live-cockpit-next-list--recent");
+      await expect(list.locator(".live-cockpit-next-item")).toHaveCount(count);
+      const geometry = await list.evaluate((element) => {
+        const tile = element.closest(".live-cockpit-next-tile");
+        const nextHeading = tile?.querySelector(":scope > h2:last-of-type");
+        const first = element.querySelector(".live-cockpit-next-item");
+        const button = first?.querySelector("button");
+        if (tile === null || !(nextHeading instanceof HTMLElement) || first === null || !(button instanceof HTMLElement)) {
+          throw new Error("The tile, next-up heading or first timeout is missing.");
+        }
+        const listBox = element.getBoundingClientRect();
+        return {
+          tileHeight: tile.getBoundingClientRect().height,
+          listBottom: listBox.bottom,
+          nextHeadingTop: nextHeading.getBoundingClientRect().top,
+          firstItemBottom: first.getBoundingClientRect().bottom,
+          firstButtonTop: button.getBoundingClientRect().top,
+          firstButtonBottom: button.getBoundingClientRect().bottom,
+          listTop: listBox.top,
+          overflows: element.scrollHeight > element.clientHeight,
+        };
+      });
+      expect(geometry.tileHeight).toBeCloseTo(188, 0);
+      expect(geometry.listBottom).toBeLessThanOrEqual(geometry.nextHeadingTop);
+      expect(geometry.firstButtonTop).toBeGreaterThanOrEqual(geometry.listTop);
+      expect(geometry.firstItemBottom).toBeLessThanOrEqual(geometry.listBottom);
+      expect(geometry.firstButtonBottom).toBeLessThanOrEqual(geometry.listBottom - 8);
+      expect(geometry.overflows).toBe(true);
+    });
+  }
+}
 
 test("two managers can save title and category without restoring the stale field", async ({ page }) => {
   const channelId = "round2-two-managers";
