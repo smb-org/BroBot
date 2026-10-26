@@ -91,6 +91,7 @@ import type {
   PointActiveRound,
   PointJoinResult,
   PointRoundAnswerResult,
+  PointRoundParticipants,
   PointSettlementCooldown,
   PointsApplyResult,
   PointsKind,
@@ -204,6 +205,7 @@ import {
   acknowledgeWelcomeSync,
   announceAttemptSync,
   answerPointRoundSync,
+  attackPointRoundSync,
   beginPointRoundResolutionDeliverySync,
   applyPointOperationSync,
   canonicalPointResult,
@@ -216,6 +218,7 @@ import {
   ensurePointsSchema,
   acceptPointRoundSync,
   joinPointRoundSync,
+  pointRoundParticipantsSync,
   listOpenPointRoundsSync,
   listPointAccounts,
   markPointRoundAnnouncedSync,
@@ -4709,8 +4712,11 @@ export class ChannelObject extends DurableObject<Env> {
         markAnnounced: (roundId, deadlineAt, alarmKey) => this.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
         join: (roundId, operationId, accountId, login, stake, data) =>
           this.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
+        participants: (roundId, nameLimit) => this.gameRoundParticipants(moduleId, roundId, nameLimit),
         answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
           this.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
+        attack: (roundId, operationId, accountId, login, damage, messageAt) =>
+          this.attackGameRound(moduleId, roundId, operationId, accountId, login, damage, messageAt),
         resolve: (roundId, settlement) => this.resolveGameRound(moduleId, roundId, settlement),
         accept: (roundId, operationId, accountId, login, replyToMessageId) =>
           this.acceptGameRound(moduleId, roundId, operationId, accountId, login, replyToMessageId),
@@ -5050,19 +5056,32 @@ export class ChannelObject extends DurableObject<Env> {
     assertPointRoundId(roundId);
     assertPointAccountId(accountId);
     const payloadHash = await pointPayloadHash({ moduleId, roundId, operationId, accountId, login, stake, data });
-    return this.ctx.storage.transactionSync(() => joinPointRoundSync(
-      this.ctx.storage.sql,
-      moduleId,
-      roundId,
-      operationId,
-      accountId,
-      login,
-      stake,
-      data,
-      payloadHash,
-      Date.now(),
-      new Date().toISOString(),
-    ));
+    try {
+      return this.ctx.storage.transactionSync(() => joinPointRoundSync(
+        this.ctx.storage.sql,
+        moduleId,
+        roundId,
+        operationId,
+        accountId,
+        login,
+        stake,
+        data,
+        payloadHash,
+        Date.now(),
+        new Date().toISOString(),
+      ));
+    } catch (error) {
+      // Same code the opening stake reports, so a module handles both alike.
+      if ((error instanceof Error ? error.message : String(error)) === "insufficient_balance") throw new Error("insufficient_points", { cause: error });
+      throw error;
+    }
+  }
+
+  public async gameRoundParticipants(moduleId: string, roundId: string, nameLimit: number): Promise<PointRoundParticipants> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointRoundId(roundId);
+    return pointRoundParticipantsSync(this.ctx.storage.sql, moduleId, roundId, nameLimit);
   }
 
   public async answerGameRound(
@@ -5100,6 +5119,38 @@ export class ChannelObject extends DurableObject<Env> {
     });
     if (answer.status === "recorded" && answer.first) await this.scheduleEarliestAlarm();
     return { status: answer.status, replayed: answer.replayed, first: answer.first };
+  }
+
+  public async attackGameRound(
+    moduleId: string,
+    roundId: string,
+    operationId: string,
+    accountId: string,
+    login: string,
+    damage: number,
+    messageAt: number,
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["rounds"]["attack"]>>> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointRoundId(roundId);
+    assertPointAccountId(accountId);
+    // The persisted first result owns its random damage roll, so a retried event stays idempotent.
+    const payloadHash = await pointPayloadHash({ moduleId, roundId, operationId, accountId, login, messageAt });
+    const cooldownKey = await pointPayloadHash({ purpose: "boss_fight_attack_cooldown", moduleId, roundId, accountId });
+    return this.ctx.storage.transactionSync(() => attackPointRoundSync(
+      this.ctx.storage.sql,
+      moduleId,
+      roundId,
+      operationId,
+      accountId,
+      login,
+      damage,
+      messageAt,
+      payloadHash,
+      cooldownKey,
+      Date.now(),
+      new Date().toISOString(),
+    ));
   }
 
   public async resolveGameRound(

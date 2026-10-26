@@ -437,6 +437,10 @@ Timeouts und Banns benötigen den vorhandenen Bot-Scope
 Moderator sein. Ein Helix-429 setzt eine 60-sekündige Abklingzeit nur für
 diesen Kanal im Channel Durable Object. Moderationsereignisse enthalten die
 Ziel-ID im Ereignisprotokoll und werden mit dessen 14-Tage-Frist gelöscht.
+Die geschützte Votekick-Timeout-Aufhebung prüft den aktuellen Twitch-Eintrag
+vor dem Löschen zusätzlich mit dem verbundenen Kanal-Konto und benötigt dafür
+`moderation:read` auf diesem Konto. Das DELETE selbst verwendet weiterhin das
+Bot-Konto mit `moderator:manage:banned_users`.
 
 Der Scheduled-Handler läuft in jeder Umgebung stündlich. Er validiert den
 Bot-Token über Twitch, erneuert Token mit weniger als einer Stunde Restlaufzeit

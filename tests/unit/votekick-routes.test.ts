@@ -173,6 +173,25 @@ describe("Votekick routes", () => {
     expect(row).toEqual({ status: "cancelled" });
   });
 
+  it("rejects timeout lifts from a user without an operator role before calling Twitch", async () => {
+    const database = await databaseFor();
+    await insertLoginIdentityAndSession(database, "viewer-a");
+    await insertPassed(database, "ballot-unauthorized-lift");
+    const twitchFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", twitchFetch);
+
+    const response = await panelRouter.fetch(
+      await requestFor("viewer-a", "/api/channels/channel-a/modules/votekick/votekicks/ballot-unauthorized-lift/lift", "POST"),
+      environmentFor(database),
+    );
+
+    expect(response.status).toBe(403);
+    expect(twitchFetch).not.toHaveBeenCalled();
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM audit_log WHERE channel_id = 'channel-a' AND action = 'votekick.timeout_lift_attempted'",
+    ).first()).resolves.toEqual({ count: 0 });
+  });
+
   it("requires the Votekick module to remain enabled when cancelling", async () => {
     const database = await databaseFor();
     await insertLoginIdentityAndSession(database, "operator-a");
@@ -259,6 +278,12 @@ describe("Votekick routes", () => {
       "SELECT revision FROM panel_resource_revisions WHERE channel_id = 'channel-a' AND resource = 'module:votekick:panel'",
     ).first<{ revision: number }>();
     expect(revision?.revision).toBeGreaterThan(0);
+    const liftAudit = await database.prepare(
+      "SELECT action, module_id, before_json, after_json FROM audit_log WHERE channel_id = 'channel-a' AND action = 'votekick.timeout_lift_attempted'",
+    ).all<{ action: string; module_id: string; before_json: string; after_json: string }>();
+    expect(liftAudit.results).toHaveLength(1);
+    expect(liftAudit.results[0]).toMatchObject({ action: "votekick.timeout_lift_attempted", module_id: "votekick" });
+    expect(JSON.parse(liftAudit.results[0]?.after_json ?? "{}")).toMatchObject({ outcome: "applied", reason: null });
   });
 
   it("reconciles an ambiguous timeout lift after the timeout expires", async () => {

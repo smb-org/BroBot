@@ -961,9 +961,60 @@ für die Feldliste in der Speicherleiste, die Tab-Fehlerpunkte und den Fokus auf
 das erste fehlerhafte Feld. Die Liste und `SettingsEditor.fieldErrors` müssen
 daher dieselbe Validierung abbilden.
 
+### Sofortaktionen (`actions`)
+
+Ein Modul kann einzelne Live-Cockpit-Aktionen deklarieren. Der Host prüft die
+Modulbedingungen und `requiredRole`, zeigt gesperrte Aktionen mit einem Grund
+am Knopf und lädt optionale Dialog- oder Popover-Inhalte erst beim Öffnen.
+`execute` erhält die Formulardaten; Ausführungsfehler werden über
+`errorMessage` und die modulbezogene Fehlerzuordnung lokalisiert. Für dynamische
+Voraussetzungen wie eine verfügbare Timeoutliste verwendet ein Modul eine
+`ModuleImmediateActionCondition`.
+
+Votekick bietet „Timeout aufheben“ ab Operator-Rolle an, wenn mindestens ein
+aktiver Votekick-Timeout existiert. Die Auswahl stammt aus der bestehenden
+Votekickliste und wird über dieselbe geschützte Lift-Route wie im Cockpit
+ausgeführt. Der Host vergleicht vor dem Helix-DELETE Moderator, Ballot-ID,
+Dauer und Ablaufzeit; jeder Liftversuch erhält einen Audit-Eintrag.
+
 ## Referenzmodule
 
 Die folgenden Module zeigen die Fähigkeiten im Zusammenspiel; Details ihrer Fachlogik stehen hier, nicht im Contract.
+
+### Bosskampf (`boss_fight`)
+
+Der Bosskampf startet als Operator-Sofortaktion im Live-Cockpit und ist nur
+verfügbar, wenn der Stream live und das Modul eingeschaltet ist und keine
+Runde läuft; die Startroute prüft denselben Stream-Zustand erneut. `!attack` ist
+im konfigurierbaren Angriffsfenster (Standard: 90 Sekunden) kostenlos; pro
+Person gilt eine konfigurierbare Abklingzeit (Standard: 10 Sekunden). Jeder
+Angriff verursacht gleichverteilt zufälligen Schaden aus dem eingestellten
+inklusiven Bereich (Standard: 20–40).
+
+Die Lebenspunkte sind **300 Grundpunkte plus 80 je unterschiedlichem
+Angreifer**. Die Maximalpunkte werden bei jedem neuen Angreifer neu berechnet
+und dürfen nie unter dem bereits angerichteten Schaden liegen. Damit wächst
+das Ziel mit der Beteiligung, ohne bereits erzielten Schaden zurückzunehmen.
+Wenn der Boss vor Ablauf fällt, wird der konfigurierte Beutepool (Standard:
+1.000 Punkte) nach dem jeweiligen Schadensanteil aufgeteilt. Jeder Anteil wird
+abgerundet; der Rest verbleibt im Hauskonto. Bei Ablauf oder wenn das Modul
+während einer Runde deaktiviert wird, gibt es keine Auszahlung.
+
+Der Chat erhält höchstens eine Startzeile und eine Ergebniszeile; eine
+Halbzeitmeldung ist nicht vorgesehen. Einzelne Angriffe erzeugen keine
+Antworten. Gespeichert werden nur angenommene Treffer (gehashter
+Idempotenzschlüssel, damit eine erneut zugestellte Chatnachricht nicht doppelt
+zählt) und je Person ein gehashter Abkühlungsschlüssel; abgelehnte Angriffe
+(Abklingzeit, Runde geschlossen) hinterlassen nichts. Beides wird beim Auflösen
+oder Abbrechen der Runde gelöscht. Teilnehmer und Schaden verwenden die bereits
+vorhandene Spielrundentabelle mit deren Kontokennung und Login; es wird keine
+zusätzliche personenbezogene Angriffs-Historie angelegt. Die Runde führt
+Angreiferzahl und Gesamtschaden als Summen mit, sodass ein Treffer nur
+konstant viele Zeilen liest; alle Teilnehmer werden erst bei der Abrechnung
+geladen. Rundenende und Deaktivierung laufen über die gemeinsamen
+Punkte-Runden und deren Alarm- und Abbruchpfad. Die Start- und Ergebniszeile
+reservieren ihren Pflichtteil (Befehlshinweis mit Dauer, Top-Schaden) vor dem
+frei einstellbaren Text und den Quellenangaben.
 
 ### Astronomie-, Wetter- und Währungsquellen
 
@@ -1269,10 +1320,48 @@ zufälliger Dauer bis 3.600 Sekunden. Ein registrierter Modul-Alarm beendet
 abgelaufene Abstimmungen; die generische stündliche Modulwartung löscht rohe
 Ziel-ID, Ziel-Login und Starter-ID nach 14 Tagen. Das Panel kann laufende
 Ballots abbrechen und nur einen noch aktiven, passenden Votekick-Timeout
-aufheben. Vor dem Aufheben vergleicht der Host den aktuellen Twitch-Eintrag
+aufheben. Die Sofortaktion „Timeout aufheben“ nutzt dieselbe Liste, Route und
+Audit-Spur. Vor dem Aufheben vergleicht der Host den aktuellen Twitch-Eintrag
 mit Moderator, Ballot-ID, Dauer und Ablaufzeit. Twitch bietet für das Löschen
 keine bedingte Sperr-ID; eine Änderung direkt zwischen Prüfung und Löschung
 kann daher nicht atomar ausgeschlossen werden.
+
+### Spiele: Überfall (#570)
+
+`src/modules/heist/` nutzt den gemeinsamen Punkte-Rundenkern und benötigt das
+Punktemodul. `!heist <Einsatz>` eröffnet pro Kanal einen Überfall oder lässt eine
+Person während des Join-Fensters einmal mit ihrem eigenen Einsatz beitreten.
+Der DO speichert Einsätze und Teilnehmende in den gemeinsamen Rundentabellen;
+der Alarm schließt das Fenster und löst jede Person unabhängig auf. Die Chance
+beginnt bei 50 %, steigt je weiterer Person um zwei Prozentpunkte und ist
+standardmäßig auf 65 % begrenzt. Gewinner erhalten ihren doppelten Einsatz,
+Verlierer verlieren ihren Einsatz an das Hauskonto. Start-, Beitritts- und
+Ergebnistext sind lokalisierte Vorlagen mit je eigenem Schalter; es gibt keine
+Einzelbestätigungen. Pro Runde gehen höchstens drei Zeilen raus: die
+Startmeldung, eine gebündelte Beitrittsliste und eine kompakte
+Gewinner-/Verliererzusammenfassung. Die Beitrittsliste sendet ein Modulalarm
+(`confirm:<Runden-ID>`) zur Fensterhälfte, gerechnet ab der tatsächlichen
+Frist der Runde; sie entfällt, solange nur die startende Person dabei ist. Der
+Sendeclaim `round:<Runden-ID>:confirm` verhindert Doppelsendungen bei Retry und
+Neustart. Teilnehmerzahl, Namen und Gesamteinsatz liest der Alarm über
+`points.rounds.participants(roundId, nameLimit)`. Lässt sich der Alarm nicht
+planen, bleibt diese Runde ohne Beitrittsliste: Einsätze und Ergebnis sind
+unberührt, der Fehler landet nur als `host.module.error` im Ereignisprotokoll;
+es gibt bewusst keine Nachplanung.
+Einsätze werden unter `msg:<Nachrichten-ID>` gebucht, sodass eine erneut
+zugestellte Chatnachricht keine spätere Runde ein zweites Mal belastet. Die
+Abklingzeit prüft `!heist` beim Start nur (0 s). Begonnen wird sie vom
+gemeinsamen Rundenkern in derselben Transaktion wie die Abrechnung
+(Rundendaten `cooldownAfter: { key, seconds }`, gerechnet ab dem Abschluss);
+ein Neustart zwischen Abrechnung und Benachrichtigung kann sie also nicht
+verlieren, und eine verspätet zugestellte Startmeldung verkürzt sie nicht. Jede
+Nachricht deklariert genau die Variablen, mit denen sie gerendert wird
+(Start: `heist.seconds`; Beitrittsliste: `heist.count`, `heist.names`,
+`heist.pot`; Ergebnis: `heist.winners`, `heist.losers`, `heist.chance`).
+Das Abschalten des Moduls erstattet alle noch offenen Einsätze
+über den gemeinsamen Abbruchpfad. Einstellungen begrenzen Einsatz, Join-Zeit,
+Abklingzeit und optionale Chancenwerte. Der feste Befehl, Nachrichtenvariablen
+und Paneltexte sind zweisprachig in Modul- und Panelkatalogen hinterlegt.
 
 ## Checkliste für ein neues Modul
 
