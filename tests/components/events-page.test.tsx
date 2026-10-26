@@ -1194,8 +1194,10 @@ describe("EventsPage failure cause icon", () => {
     }));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
 
-    const refreshRows = view.container.querySelector(".event-feed [aria-busy]");
-    const refreshBusyState = refreshRows?.getAttribute("aria-busy");
+    // The fetch starts before React renders the busy state (query notifications are deferred), so wait for it.
+    await waitFor(() => {
+      expect(view.container.querySelector(".event-feed [aria-busy]")).toHaveAttribute("aria-busy", "true");
+    });
     fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
     const paginationStarted = releaseNextPage !== undefined;
     releaseRefresh?.(new Response(JSON.stringify({ entries: [liveEntry, firstEntry], nextCursor: "cursor-1" }), {
@@ -1210,7 +1212,6 @@ describe("EventsPage failure cause icon", () => {
     }
 
     await waitFor(() => expect(screen.getByText("Raid von freshraid mit 2 Zuschauern")).toBeVisible());
-    expect(refreshBusyState).toBe("true");
     view.unmount();
   });
 

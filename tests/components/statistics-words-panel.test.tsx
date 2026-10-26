@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { StatisticsWordsPanel } from "../../src/modules/statistics/panel/words-panel";
@@ -105,10 +105,20 @@ describe("statistics words page", () => {
       count: 200 - index,
       lastSeenAt: "2026-10-25T12:00:00.000Z",
     }));
-    renderPanel(manyWords);
-    await screen.findByText("word-000");
+    // The search debounce is armed on mount. Fire it right after the click, the worst case for a slow runner,
+    // so a debounce that resets the page would be caught every time and not only when the machine is slow.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderPanel(manyWords);
+      await screen.findByText("word-000");
+      const next = screen.getByRole("button", { name: "Next page" });
+      await waitFor(() => expect(next.hasAttribute("disabled")).toBe(false));
 
-    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+      fireEvent.click(next);
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    } finally {
+      vi.useRealTimers();
+    }
 
     expect(await screen.findByText("word-100")).toBeTruthy();
     expect(screen.getByText("101–101 of 101")).toBeTruthy();
