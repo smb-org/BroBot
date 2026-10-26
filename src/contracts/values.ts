@@ -143,9 +143,11 @@ export type ModerationFailureReason =
   | "conflict"
   | "invalid_request"
   | "network_error"
+  | "not_timed_out"
   | "not_moderator"
   | "protected_target"
   | "rate_limited"
+  | "scope_missing"
   | "timeout"
   | "token_invalid"
   | "twitch_error";

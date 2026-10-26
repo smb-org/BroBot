@@ -6,6 +6,7 @@ import {
 import type { RealtimeEnvelope } from "../realtime-contract";
 import type { ModuleOverlayRealtimeEnvelope } from "../realtime-contract";
 import { isModuleOverlayRealtimeMessageType } from "../realtime-contract";
+import { RealtimeMessageIdCache } from "../realtime-message-ids";
 
 const SOCKET_EXPIRED_CODE = 4001;
 const SOCKET_REVOKED_CODE = 4003;
@@ -15,7 +16,10 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
 const ABNORMAL_CLOSE_REVALIDATION_THRESHOLD = 3;
 const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 
+type OverlayRealtimeState = "connecting" | "connected" | "reconnecting" | "offline";
+
 export interface OverlayRealtimeCallbacks {
+  onStateChange?: (state: OverlayRealtimeState) => void;
   onOpen?: (reconnected: boolean) => void;
   onMessage?: (message: RealtimeEnvelope<"variables.changed">) => void;
   onOverlayChanged?: (message: RealtimeEnvelope<"overlay.changed">) => void;
@@ -63,6 +67,20 @@ export const connectOverlayRealtime = (
   let hasConnected = false;
   let consecutiveAbnormalCloses = 0;
   let authorizationCheck: Promise<boolean> | null = null;
+  let state: OverlayRealtimeState = "offline";
+  const seenMessageIds = new RealtimeMessageIdCache();
+
+  const setState = (next: OverlayRealtimeState): void => {
+    if (state === next) return;
+    state = next;
+    callbacks.onStateChange?.(next);
+  };
+
+  const acceptEvent = (id: string): boolean => {
+    if (seenMessageIds.has(id)) return false;
+    seenMessageIds.add(id);
+    return true;
+  };
 
   const stopReconnectTimer = (): void => {
     if (reconnectTimer === null) return;
@@ -72,6 +90,7 @@ export const connectOverlayRealtime = (
 
   const scheduleReconnect = (): void => {
     if (disposed || fatalProtocolError || reconnectTimer !== null) return;
+    setState("reconnecting");
     const delay = reconnectDelay(reconnectAttempt);
     reconnectAttempt += 1;
     reconnectTimer = window.setTimeout(() => {
@@ -97,6 +116,7 @@ export const connectOverlayRealtime = (
     if (disposed || fatalProtocolError) return;
     fatalProtocolError = true;
     stopReconnectTimer();
+    setState("offline");
     onTerminalClose?.();
   };
 
@@ -111,6 +131,7 @@ export const connectOverlayRealtime = (
   const failProtocol = (activeSocket: WebSocket): void => {
     fatalProtocolError = true;
     stopReconnectTimer();
+    setState("offline");
     try {
       activeSocket.close(1002, "Realtime protocol error");
     } catch {
@@ -120,6 +141,7 @@ export const connectOverlayRealtime = (
 
   async function connect(revalidate = false): Promise<void> {
     if (!canConnect()) return;
+    setState(hasConnected || reconnectAttempt > 0 ? "reconnecting" : "connecting");
     if (revalidate && !await revalidateAuthorization()) return;
     if (!canConnect()) return;
     const WebSocketConstructor = window.WebSocket;
@@ -150,6 +172,7 @@ export const connectOverlayRealtime = (
       hasConnected = true;
       reconnectAttempt = 0;
       consecutiveAbnormalCloses = 0;
+      setState("connected");
       callbacks.onOpen?.(reconnected);
     });
 
@@ -161,7 +184,8 @@ export const connectOverlayRealtime = (
       } catch {
         return;
       }
-      if (!isRecord(parsed) || parsed.version !== 1 || typeof parsed.channelId !== "string") return;
+      if (!isRecord(parsed) || parsed.version !== 1 || typeof parsed.channelId !== "string" ||
+          typeof parsed.id !== "string" || parsed.id.length === 0) return;
       if (channelId !== null && parsed.channelId !== channelId) {
         failProtocol(activeSocket);
         return;
@@ -169,14 +193,18 @@ export const connectOverlayRealtime = (
       if (parsed.type === "system.hello" && isRecord(parsed.payload) &&
           Object.keys(parsed.payload).length === 0) {
         channelId ??= parsed.channelId;
+        seenMessageIds.add(parsed.id);
         return;
       }
       if (channelId === null) return;
-      if (parsed.type === "variables.changed" && isVariablesChangedPayload(parsed.payload)) {
+      if (parsed.type === "variables.changed" && isVariablesChangedPayload(parsed.payload) &&
+          acceptEvent(parsed.id)) {
         callbacks.onMessage?.(parsed as RealtimeEnvelope<"variables.changed">);
-      } else if (parsed.type === "overlay.changed" && isOverlayChangedPayload(parsed.payload)) {
+      } else if (parsed.type === "overlay.changed" && isOverlayChangedPayload(parsed.payload) &&
+          acceptEvent(parsed.id)) {
         callbacks.onOverlayChanged?.(parsed as RealtimeEnvelope<"overlay.changed">);
-      } else if (typeof parsed.type === "string" && isModuleOverlayRealtimeMessageType(parsed.type) && isRecord(parsed.payload)) {
+      } else if (typeof parsed.type === "string" && isModuleOverlayRealtimeMessageType(parsed.type) &&
+          isRecord(parsed.payload) && acceptEvent(parsed.id)) {
         callbacks.onModuleMessage?.(parsed as ModuleOverlayRealtimeEnvelope<`modul.${string}.${string}`>);
       }
     });
@@ -187,12 +215,14 @@ export const connectOverlayRealtime = (
       if (event.code === OVERLAY_ACCESS_BOUND_CLOSE_CODE) {
         fatalProtocolError = true;
         stopReconnectTimer();
+        setState("offline");
         callbacks.onTokenBound?.();
         return;
       }
       if (event.code === SOCKET_EXPIRED_CODE || event.code === SOCKET_REVOKED_CODE ||
           event.code === SOCKET_POLICY_VIOLATION_CODE) {
         if (event.code === SOCKET_POLICY_VIOLATION_CODE) fatalProtocolError = true;
+        setState("offline");
         onTerminalClose?.();
         return;
       }
@@ -212,6 +242,7 @@ export const connectOverlayRealtime = (
   return () => {
     disposed = true;
     stopReconnectTimer();
+    setState("offline");
     const activeSocket = socket;
     socket = null;
     try {
