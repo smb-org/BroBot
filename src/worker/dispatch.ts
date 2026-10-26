@@ -375,11 +375,27 @@ const runActions = async (
     const isModerationFollowUp = moderationFollowUps.has(action);
     const commandResponseMessageId = commandResponseActions.has(action) ? handledMessageId : undefined;
     // Moderation follow-ups never carry or acknowledge the welcome, threaded or not.
-    if (!isModerationFollowUp) action = appendPointWelcome(action, pendingWelcome, attributions, commandResponseMessageId);
-    const reportDelivery = async (delivery: ModuleChatDelivery): Promise<void> => {
+    if (!isModerationFollowUp) {
+      const claimId = `dispatch:${triggerId ?? handledMessageId ?? "event"}:${module.id}:${String(index)}`;
+      const candidate = pendingWelcome === undefined ? undefined : {
+        ...pendingWelcome,
+        deliveryClaimId: claimId,
+      };
+      const decorated = appendPointWelcome(action, module, candidate, attributions, commandResponseMessageId);
+      if (decorated !== action && pendingWelcome?.access.claimWelcome !== undefined) {
+        let claimed = false;
+        try {
+          claimed = await pendingWelcome.access.claimWelcome(pendingWelcome.accountId, claimId);
+        } catch {
+          // If the account claim is unavailable, leave the welcome pending for a later reply.
+        }
+        if (claimed) action = decorated;
+      } else action = decorated;
+    }
+    const reportDelivery = async (delivery: ModuleChatDelivery, postedWelcomeClaimId?: string): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
       try {
-        await action.onDelivery(delivery);
+        await action.onDelivery(delivery, postedWelcomeClaimId);
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
       }
@@ -439,8 +455,10 @@ const runActions = async (
           undefined,
           await targetFor(action.target),
           sourceBroadcasterUserId,
+          undefined,
+          action.pointWelcome,
         );
-        await reportDelivery(result.delivery);
+        await reportDelivery(result.delivery, result.postedWelcomeClaimId);
         if (result.truncated) {
           diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
         }
@@ -1109,6 +1127,7 @@ export const dispatchEventSubNotification = async (
             access,
             used: false,
           };
+          await access.storePendingWelcome?.(pendingWelcome);
         }
       }
     } catch {
@@ -1123,7 +1142,14 @@ export const dispatchEventSubNotification = async (
 
     try {
       const activation = dispatchState.activations.find((candidate) => candidate.moduleId === module.id);
-      const points = modulePoints(environment.CHANNEL, event.channelId, module.id);
+      const points = modulePoints(
+        environment.CHANNEL,
+        event.channelId,
+        module.id,
+        module.requiresModules?.includes("points") === true && pendingWelcome !== undefined && !pendingWelcome.used
+          ? { accountId: pendingWelcome.accountId, messageId: pendingWelcome.messageId, text: pendingWelcome.text }
+          : undefined,
+      );
       if (module.requiresModules?.includes("points") === true && activation !== undefined) {
         await points.rounds.setGate(!activation.enabled, activation.revision, activation.lastDisabledRevision);
       }

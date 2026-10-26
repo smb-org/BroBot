@@ -7,6 +7,7 @@ import type {
   PointsMovement,
   PointsKind,
 } from "../../modules/contract";
+import { POINT_WELCOME_RESULT_ACCOUNT_ID_KEY } from "../point-welcome";
 import { bossHealth } from "../../modules/boss_fight/domain/boss";
 
 export const POINTS_ROUND_ALARM_HANDLER = "host:points_round";
@@ -16,6 +17,7 @@ export const POINTS_CANCELLATION_NOTICE_ALARM_PREFIX = "points:cancellation_noti
 export const POINTS_ANNOUNCE_RETRY_MS = 5_000;
 export const POINTS_ANNOUNCE_MAX_ATTEMPTS = 6;
 export const POINTS_ANNOUNCE_AMBIGUOUS_MS = 30_000;
+const POINT_WELCOME_CLAIM_LEASE_MS = 2 * 60_000;
 
 type PointRoundDeliveryStatus = "rate_limited" | "failed" | "delivered" | "ambiguous";
 type PointRoundDeliveryDisposition = "retry" | "park" | "complete";
@@ -227,6 +229,13 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
     welcome_pending INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
   )`);
+  sql.exec(`CREATE TABLE IF NOT EXISTS point_welcome_notes (
+    account_id TEXT PRIMARY KEY REFERENCES point_accounts(account_id) ON DELETE CASCADE,
+    message_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    claim_id TEXT,
+    claimed_at INTEGER
+  )`);
   sql.exec(`CREATE TABLE IF NOT EXISTS point_ledger (
     operation_id TEXT NOT NULL REFERENCES point_operations(operation_id),
     account_id TEXT NOT NULL,
@@ -260,6 +269,10 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
     resolve_delivery_state TEXT NOT NULL DEFAULT 'delivered',
     resolve_delivery_attempts INTEGER NOT NULL DEFAULT 0,
     resolve_delivery_last_attempt_at INTEGER,
+    announce_welcome_appended INTEGER NOT NULL DEFAULT 0,
+    announce_welcome_claim_id TEXT,
+    resolve_welcome_appended INTEGER NOT NULL DEFAULT 0,
+    resolve_welcome_claim_id TEXT,
     resolved_at TEXT
   )`);
   sql.exec(`CREATE TABLE IF NOT EXISTS game_round_participants (
@@ -321,6 +334,10 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
     PRIMARY KEY (module_id, revision)
   )`);
   const gameRoundColumns = sql.exec<{ name: string }>("PRAGMA table_info(game_rounds)").toArray();
+  const pointWelcomeColumns = sql.exec<{ name: string }>("PRAGMA table_info(point_welcome_notes)").toArray();
+  if (!pointWelcomeColumns.some(({ name }) => name === "claimed_at")) {
+    sql.exec("ALTER TABLE point_welcome_notes ADD COLUMN claimed_at INTEGER");
+  }
   if (!gameRoundColumns.some(({ name }) => name === "prepare_state")) {
     sql.exec("ALTER TABLE game_rounds ADD COLUMN prepare_state TEXT NOT NULL DEFAULT 'delivered'");
   }
@@ -338,6 +355,18 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
   }
   if (!gameRoundColumns.some(({ name }) => name === "resolved_at")) {
     sql.exec("ALTER TABLE game_rounds ADD COLUMN resolved_at TEXT");
+  }
+  if (!gameRoundColumns.some(({ name }) => name === "announce_welcome_appended")) {
+    sql.exec("ALTER TABLE game_rounds ADD COLUMN announce_welcome_appended INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!gameRoundColumns.some(({ name }) => name === "announce_welcome_claim_id")) {
+    sql.exec("ALTER TABLE game_rounds ADD COLUMN announce_welcome_claim_id TEXT");
+  }
+  if (!gameRoundColumns.some(({ name }) => name === "resolve_welcome_appended")) {
+    sql.exec("ALTER TABLE game_rounds ADD COLUMN resolve_welcome_appended INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!gameRoundColumns.some(({ name }) => name === "resolve_welcome_claim_id")) {
+    sql.exec("ALTER TABLE game_rounds ADD COLUMN resolve_welcome_claim_id TEXT");
   }
   const moduleGateColumns = sql.exec<{ name: string }>("PRAGMA table_info(module_gates)").toArray();
   if (!moduleGateColumns.some(({ name }) => name === "last_disabled_revision")) {
@@ -961,8 +990,104 @@ export const pointAccount = (
   return row === undefined ? null : { accountId: row.account_id, login: row.login ?? row.account_id, balance: row.balance };
 };
 
-export const acknowledgeWelcomeSync = (sql: PointsSql, accountId: string, now: string): void => {
-  sql.exec("UPDATE point_accounts SET welcome_pending = 0, updated_at = ? WHERE account_id = ?", now, accountId);
+export interface StoredPointWelcome {
+  accountId: string;
+  messageId: string;
+  text: string;
+}
+
+export const storePendingPointWelcomeSync = (sql: PointsSql, welcome: StoredPointWelcome): void => {
+  assertPointAccountId(welcome.accountId);
+  if (welcome.messageId.length === 0 || welcome.messageId.length > 256 || welcome.text.length === 0) return;
+  const account = sql.exec<{ welcome_pending: number }>(
+    "SELECT welcome_pending FROM point_accounts WHERE account_id = ? AND kind = 'viewer'",
+    welcome.accountId,
+  ).toArray()[0];
+  if (account?.welcome_pending !== 1) return;
+  sql.exec(
+    `INSERT INTO point_welcome_notes (account_id, message_id, text) VALUES (?, ?, ?)
+     ON CONFLICT(account_id) DO UPDATE SET message_id = excluded.message_id, text = excluded.text`,
+    welcome.accountId,
+    welcome.messageId,
+    welcome.text,
+  );
+};
+
+export const pendingPointWelcomeSync = (sql: PointsSql, accountId: string): StoredPointWelcome | null => {
+  assertPointAccountId(accountId);
+  const row = sql.exec<{ account_id: string; message_id: string; text: string }>(
+    `SELECT note.account_id, note.message_id, note.text
+       FROM point_accounts AS account
+       JOIN point_welcome_notes AS note ON note.account_id = account.account_id
+      WHERE account.account_id = ? AND account.kind = 'viewer' AND account.welcome_pending = 1`,
+    accountId,
+  ).toArray()[0];
+  return row === undefined ? null : { accountId: row.account_id, messageId: row.message_id, text: row.text };
+};
+
+export const claimPendingPointWelcomeSync = (
+  sql: PointsSql,
+  accountId: string,
+  claimId: string,
+  now: number,
+): StoredPointWelcome | null => {
+  assertPointAccountId(accountId);
+  if (claimId.length === 0 || claimId.length > 512) return null;
+  sql.exec(
+    `UPDATE point_welcome_notes SET claim_id = ?, claimed_at = ?
+      WHERE account_id = ? AND (
+        claim_id IS NULL OR claim_id = ? OR claimed_at IS NULL OR claimed_at <= ?
+      )
+        AND EXISTS (
+          SELECT 1 FROM point_accounts AS account
+           WHERE account.account_id = point_welcome_notes.account_id AND account.welcome_pending = 1
+        )`,
+    claimId,
+    now,
+    accountId,
+    claimId,
+    now - POINT_WELCOME_CLAIM_LEASE_MS,
+  );
+  const row = sql.exec<{ account_id: string; message_id: string; text: string }>(
+    `SELECT account_id, message_id, text FROM point_welcome_notes
+      WHERE account_id = ? AND claim_id = ?`,
+    accountId,
+    claimId,
+  ).toArray()[0];
+  return row === undefined ? null : { accountId: row.account_id, messageId: row.message_id, text: row.text };
+};
+
+export const releasePointWelcomeClaimSync = (sql: PointsSql, accountId: string, claimId: string): void => {
+  assertPointAccountId(accountId);
+  sql.exec(
+    `UPDATE point_welcome_notes SET claim_id = NULL, claimed_at = NULL
+      WHERE account_id = ? AND claim_id = ?
+        AND EXISTS (
+          SELECT 1 FROM point_accounts AS account
+           WHERE account.account_id = point_welcome_notes.account_id AND account.welcome_pending = 1
+        )`,
+    accountId,
+    claimId,
+  );
+};
+
+export const acknowledgeWelcomeSync = (
+  sql: PointsSql,
+  accountId: string,
+  claimId: string,
+  now: string,
+): void => {
+  assertPointAccountId(accountId);
+  sql.exec(
+    `UPDATE point_accounts SET welcome_pending = 0, updated_at = ?
+      WHERE account_id = ? AND welcome_pending = 1
+        AND EXISTS (SELECT 1 FROM point_welcome_notes WHERE account_id = ? AND claim_id = ?)`,
+    now,
+    accountId,
+    accountId,
+    claimId,
+  );
+  sql.exec("DELETE FROM point_welcome_notes WHERE account_id = ? AND claim_id = ?", accountId, claimId);
 };
 
 export const pointAuditWrittenSync = (sql: PointsSql, moduleId: string, operationId: string): void => {
@@ -1539,6 +1664,7 @@ export const acceptPointRoundSync = (
   if (acceptMessageId !== undefined) {
     if (acceptMessageId.length === 0 || acceptMessageId.length > 256) throw new Error("invalid_operation_id");
     data.acceptMessageId = acceptMessageId;
+    data[POINT_WELCOME_RESULT_ACCOUNT_ID_KEY] = accountId;
     sql.exec("UPDATE game_rounds SET data_json = ? WHERE round_id = ? AND state = 'open'", JSON.stringify(data), roundId);
   }
   const participant = sql.exec<{ account_id: string }>(
@@ -2013,7 +2139,8 @@ export const announceAttemptSync = (sql: PointsSql, roundId: string, now: number
   if (round.announce_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS) return { round, attempt: null, outcome: "ignored" };
   const attempt = round.announce_attempts + 1;
   sql.exec(
-    `UPDATE game_rounds SET announce_state = 'pending', announce_attempts = ?, last_attempt_at = ?
+    `UPDATE game_rounds SET announce_state = 'pending', announce_attempts = ?, last_attempt_at = ?,
+            announce_welcome_appended = 0, announce_welcome_claim_id = NULL
       WHERE round_id = ? AND state = 'announcing'`,
     attempt,
     now,
@@ -2077,7 +2204,9 @@ export const beginPointRoundResolutionDeliverySync = (sql: PointsSql, roundId: s
     `UPDATE game_rounds
         SET resolve_delivery_state = 'sending',
             resolve_delivery_attempts = resolve_delivery_attempts + 1,
-            resolve_delivery_last_attempt_at = ?
+            resolve_delivery_last_attempt_at = ?,
+            resolve_welcome_appended = 0,
+            resolve_welcome_claim_id = NULL
       WHERE round_id = ? AND state = 'resolved' AND resolve_delivery_state = 'pending'`,
     now,
     roundId,

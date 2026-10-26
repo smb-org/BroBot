@@ -438,8 +438,10 @@ export type ModuleAction =
     replyToMessageId?: string;
     /** Chat outputs are automated by default; direct command responses set this false. */
     automated?: boolean;
+    /** Host delivery proof for a welcome note appended to this action. */
+    pointWelcome?: { claimId: string; text: string };
     /** Lets a module finalize a claim after the host knows the delivery outcome. */
-    onDelivery?: (delivery: ModuleChatDelivery) => Promise<void>;
+    onDelivery?: (delivery: ModuleChatDelivery, postedWelcomeClaimId?: string) => Promise<void>;
   }
   | { kind: "clip"; cooldownSeconds: number; postClipLinkInChat: boolean; chatLinkTemplate: string }
   | { kind: "announcement"; text: string; target?: ChatOutputTarget; automated?: boolean }
@@ -776,6 +778,13 @@ export interface ModuleAlarmContext {
   ballots: ModuleBallotAccess;
   /** Point ledger access bound to this alarm's channel and module. */
   points: ModulePointsAccess;
+  /** Adds the currently pending account welcome to a threaded game reply. */
+  decoratePointWelcome?: (
+    action: Extract<ModuleAction, { kind: "chat" }>,
+    accountId?: string,
+    claimId?: string,
+    attributions?: readonly string[],
+  ) => Extract<ModuleAction, { kind: "chat" }>;
   /** Channel locale and unbiased randomness for preparing the same module actions as event handlers. */
   channelLanguage: () => Promise<ModuleLanguage>;
   secureRandomInteger: (maximumExclusive: number) => number;
@@ -829,13 +838,19 @@ export interface ModuleAlarmContext {
     attributions?: readonly string[],
     stillValid?: () => Promise<boolean>,
     target?: ChatOutputTarget,
-    options?: { replyToMessageId?: string; sourceBroadcasterUserId?: string; automated?: boolean },
+    options?: {
+      replyToMessageId?: string;
+      sourceBroadcasterUserId?: string;
+      automated?: boolean;
+      pointWelcome?: { claimId: string; text: string };
+    },
   ) => Promise<{
     sent: boolean;
     reason: string | null;
     retryable: boolean;
     delivery: "delivered" | "rate_limited" | "ambiguous" | "not_attempted" | "failed";
     attemptedAt?: number;
+    postedWelcomeClaimId?: string;
   }>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
@@ -1188,7 +1203,11 @@ export interface ModulePointsAccess {
     welcomePending: boolean;
     startBonus: number | null;
   }>;
-  ackWelcome: (accountId: string) => Promise<void>;
+  /** Stores the note payload while the account's pending bit remains the eligibility source. */
+  storePendingWelcome?: (welcome: { accountId: string; messageId: string; text: string }) => Promise<void>;
+  claimWelcome?: (accountId: string, claimId: string) => Promise<boolean>;
+  releaseWelcome?: (accountId: string, claimId: string) => Promise<void>;
+  ackWelcome: (accountId: string, claimId?: string) => Promise<void>;
   creditActivity: (
     accountId: string,
     login: string,

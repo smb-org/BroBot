@@ -4,7 +4,7 @@ const MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY = "module_alarm:send_claims";
 const MODULE_ALARM_SEND_CLAIM_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 
 export type ModuleAlarmDelivery = "sent" | "rejected" | "ambiguous";
-export type ModuleAlarmSendClaim = { status: "sending" | "sent"; at: number };
+export type ModuleAlarmSendClaim = { status: "sending" | "sent"; at: number; welcomeClaimId?: string };
 
 interface ClaimTransaction {
   get(key: string): Promise<unknown>;
@@ -51,13 +51,18 @@ export const finishModuleAlarmSend = async (
   occurrenceKey: string,
   delivery: ModuleAlarmDelivery,
   now: number,
+  welcomeClaimId?: string,
 ): Promise<void> => storage.transaction(async (transaction) => {
   const stored = await transaction.get(MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY);
   const claims = isRecord(stored) ? stored : {};
   const current = claims[occurrenceKey];
   if (!isRecord(current) || current.status !== "sending") return;
   if (delivery === "rejected") Reflect.deleteProperty(claims, occurrenceKey);
-  else if (delivery === "sent") claims[occurrenceKey] = { status: "sent", at: now } satisfies ModuleAlarmSendClaim;
+  else if (delivery === "sent") claims[occurrenceKey] = {
+    status: "sent",
+    at: now,
+    ...(welcomeClaimId === undefined ? {} : { welcomeClaimId }),
+  } satisfies ModuleAlarmSendClaim;
   await transaction.put(MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY, claims);
 });
 
@@ -69,5 +74,9 @@ export const readModuleAlarmSendClaim = async (
   if (!isRecord(stored)) return null;
   const claim = stored[occurrenceKey];
   if (!isRecord(claim) || (claim.status !== "sending" && claim.status !== "sent") || typeof claim.at !== "number") return null;
-  return { status: claim.status, at: claim.at };
+  return {
+    status: claim.status,
+    at: claim.at,
+    ...(typeof claim.welcomeClaimId === "string" ? { welcomeClaimId: claim.welcomeClaimId } : {}),
+  };
 };

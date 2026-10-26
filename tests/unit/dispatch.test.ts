@@ -624,7 +624,7 @@ describe("module selection", () => {
 });
 
 describe("dispatch and execution", () => {
-  it("appends a pending welcome to the real unthreaded !vote response (protects=the next command response produced for the viewer's chat message carries the welcome and acknowledges it after delivery even without Twitch threading; fails_when=the dispatcher requires replyToMessageId and sends the vote response without the welcome or acknowledgement; no_claim=chat delivery uses the test HTTP transport)", async () => {
+  it("keeps the welcome off an unrelated !vote response and appends it to an unthreaded game-module response (protects=only points and points-dependent modules carry the welcome, which stays pending until then and is acknowledged after delivery even without Twitch threading; fails_when=a module without requiresModules points gets the note or acknowledgement, or the dispatcher requires replyToMessageId; no_claim=chat delivery uses the test HTTP transport and the vote handler stands in for a game module)", async () => {
     const database = new TestD1Database();
     try {
       await withBot(database);
@@ -654,16 +654,45 @@ describe("dispatch and execution", () => {
         eventSubTimestamp: NOW,
       }, fetcher, [pointsModule, chatVotingModule]);
 
+      const startBonus = pointsCatalog.de.chat.startBonus(100, DEFAULT_POINTS_SETTINGS.currencyName);
       const chatBody = fetcher.mock.calls.map((_call, index) => bodyOf(fetcher, index))
         .find((body) => typeof body.message === "string");
       expect(String(chatBody?.message)).toContain("!vote");
-      expect(String(chatBody?.message)).toContain(pointsCatalog.de.chat.startBonus(100, DEFAULT_POINTS_SETTINGS.currencyName));
-      expect(chatBody).not.toHaveProperty("reply_parent_message_id");
+      expect(String(chatBody?.message)).not.toContain(startBonus);
       const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
         acknowledgePointWelcome: ReturnType<typeof vi.fn>;
+        setGameModuleGate: ReturnType<typeof vi.fn>;
       };
+      expect(object.acknowledgePointWelcome).not.toHaveBeenCalled();
+
+      object.setGameModuleGate = vi.fn().mockResolvedValue(undefined);
+      const gameVoting: typeof chatVotingModule = { ...chatVotingModule, requiresModules: ["points"] };
+      const gameFetcher = sent();
+      await dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "unthreaded-game-welcome",
+        payload: {
+          broadcaster_user_id: "kanal-a",
+          broadcaster_user_login: "kanal_demo",
+          chatter_user_id: "viewer-1",
+          chatter_user_login: "nachtfalke",
+          message_id: "game-message-589",
+          badges: [{ set_id: "moderator", id: "1", info: "" }],
+          message: { text: "!vote help", fragments: [{ type: "text", text: "!vote help" }] },
+        },
+        receivedAt: NOW,
+        eventSubTimestamp: NOW,
+      }, gameFetcher, [pointsModule, gameVoting]);
+
+      const gameBody = gameFetcher.mock.calls.map((_call, index) => bodyOf(gameFetcher, index))
+        .find((body) => typeof body.message === "string");
+      expect(String(gameBody?.message)).toContain("!vote");
+      expect(String(gameBody?.message)).toContain(startBonus);
+      expect(String(gameBody?.message).split(startBonus)).toHaveLength(2);
+      expect(gameBody).not.toHaveProperty("reply_parent_message_id");
       expect(object.acknowledgePointWelcome).toHaveBeenCalledOnce();
-      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1");
+      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1", "dispatch:unthreaded-game-welcome:chat_voting:0");
     } finally {
       database.close();
     }
@@ -703,7 +732,7 @@ describe("dispatch and execution", () => {
       const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
         acknowledgePointWelcome: ReturnType<typeof vi.fn>;
       };
-      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1");
+      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1", "dispatch:twitch-chat-message-486:points:0");
     } finally {
       database.close();
     }

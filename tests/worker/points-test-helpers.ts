@@ -32,7 +32,9 @@ export interface PointsWorkerObject {
     welcomePending: boolean;
     startBonus: number | null;
   }>;
-  acknowledgePointWelcome(moduleId: string, accountId: string): Promise<void>;
+  storePendingPointWelcome(moduleId: string, welcome: { accountId: string; messageId: string; text: string }): Promise<void>;
+  claimPointWelcome(moduleId: string, accountId: string, claimId: string): Promise<boolean>;
+  acknowledgePointWelcome(moduleId: string, accountId: string, claimId?: string): Promise<void>;
   pointBalance(moduleId: string, accountId: string): Promise<number>;
   pointAccount(moduleId: string, accountId: string): Promise<{ accountId: string; login: string; balance: number } | null>;
   creditPointActivity(moduleId: string, accountId: string, login: string, messageAt: number, live: boolean,
