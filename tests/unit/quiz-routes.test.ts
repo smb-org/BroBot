@@ -118,6 +118,38 @@ describe("quiz set HTTP routes", () => {
     await expect(nextSave.json()).resolves.toMatchObject({ error: "quiz_set_conflict" });
   });
 
+  it("reads set metadata and questions in one batch so a save cannot interleave", async () => {
+    const env = await setup();
+    const created = await panelRouter.fetch(await request("fictional_editor", "POST", "", { name: "Space" }), env);
+    const { set } = await created.json<{ set: { id: string } }>();
+    await panelRouter.fetch(await request("fictional_editor", "PUT", `/${set.id}`, {
+      name: "Space", revision: 1, questions: [validQuestion],
+    }), env);
+    let batches = 0;
+    const singleReads: string[] = [];
+    const spyingDatabase = {
+      prepare: (sql: string) => {
+        const statement = database.prepare(sql);
+        if (!sql.includes("FROM quiz_sets WHERE channel_id = ? AND set_id = ?") && !sql.includes("FROM quiz_questions WHERE set_id = ?")) return statement;
+        const spied = {
+          bind: (...values: Parameters<TestPreparedStatement["bind"]>) => { statement.bind(...values); return spied; },
+          runSync: () => statement.runSync(),
+          first: () => { singleReads.push(sql); return statement.first(); },
+          all: () => { singleReads.push(sql); return statement.all(); },
+        };
+        return spied;
+      },
+      batch: (statements: TestPreparedStatement[]) => { batches += 1; return database.batch(statements); },
+    } as unknown as D1Database;
+
+    const detail = await panelRouter.fetch(await request("fictional_editor", "GET", `/${set.id}`), { ...env, DB: spyingDatabase });
+
+    expect(detail.status).toBe(200);
+    await expect(detail.json()).resolves.toMatchObject({ set: { revision: 2, questions: [{ text: validQuestion.text }] } });
+    expect(batches).toBe(1);
+    expect(singleReads).toEqual([]);
+  });
+
   it("rejects invalid option lengths without changing the set", async () => {
     const env = await setup();
     const created = await panelRouter.fetch(await request("fictional_editor", "POST", "", { name: "Space" }), env);

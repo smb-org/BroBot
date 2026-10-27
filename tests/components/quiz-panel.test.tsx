@@ -28,6 +28,7 @@ const installFetch = (options: {
   includeOtherSet?: boolean;
   holdCreate?: boolean;
   holdFailedSave?: boolean;
+  holdSave?: boolean;
   holdCollectionRefresh?: boolean;
   holdReopenSet?: boolean;
   holdUpdatedRead?: boolean;
@@ -52,6 +53,8 @@ const installFetch = (options: {
   const heldConflictReload = deferred<Response>();
   const updatedReadStarted = deferred<undefined>();
   const heldUpdatedRead = deferred<Response>();
+  const saveStarted = deferred<undefined>();
+  const heldSave = deferred<undefined>();
   const failedSaveStarted = deferred<undefined>();
   const heldFailedSave = deferred<Response>();
   const collectionRefreshStarted = deferred<undefined>();
@@ -124,6 +127,18 @@ const installFetch = (options: {
         failedSaveStarted.resolve(undefined);
         return heldFailedSave.promise;
       }
+      if (options.holdSave) {
+        const body = requestBody(init);
+        saveStarted.resolve(undefined);
+        return heldSave.promise.then(() => {
+          const current = savedSets.get(detailSetId);
+          if (current === undefined) return Response.json({ error: "quiz_set_not_found" }, { status: 404 });
+          writes.push(body);
+          const savedSet = { ...current, name: String(body.name), questions: body.questions as QuizSet["questions"], revision: current.revision + 1 };
+          savedSets.set(detailSetId, savedSet);
+          return Response.json({ set: savedSet });
+        });
+      }
       if (options.conflictThenFailReload) {
         conflicted = true;
         return response({ error: "quiz_set_conflict" }, 409);
@@ -166,6 +181,8 @@ const installFetch = (options: {
     releaseConflictReload: () => heldConflictReload.resolve(Response.json({ set: savedSets.get(set.id) })),
     updatedReadStarted: updatedReadStarted.promise,
     releaseUpdatedRead: () => heldUpdatedRead.resolve(Response.json({ set: savedSets.get(set.id) })),
+    saveStarted: saveStarted.promise,
+    releaseSave: () => heldSave.resolve(undefined),
     failedSaveStarted: failedSaveStarted.promise,
     releaseFailedSave: () => heldFailedSave.resolve(Response.json({ error: "unavailable" }, { status: 503 })),
     collectionRefreshStarted: collectionRefreshStarted.promise,
@@ -396,6 +413,23 @@ describe("quiz set editor", () => {
     fireEvent.change(screen.getByLabelText("Set name"), { target: { value: "Later draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Newer space");
+  });
+
+  it("asks before switching when an edit is reverted while a save is pending", async () => {
+    const fetch = installFetch({ existing: true, includeOtherSet: true, holdSave: true });
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    fireEvent.change(await screen.findByLabelText("Set name"), { target: { value: "Saved space" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await fetch.saveStarted;
+    fireEvent.change(screen.getByLabelText("Set name"), { target: { value: "Space" } });
+    fireEvent.click(screen.getByRole("button", { name: /Ocean/u }));
+
+    expect(await screen.findByRole("dialog", { name: "Unsaved changes" })).toBeTruthy();
+    expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Space");
+    act(() => fetch.releaseSave());
+    await waitFor(() => expect(fetch.writes).toHaveLength(1));
   });
 
   it("switches after saving a padded name that the server normalizes", async () => {

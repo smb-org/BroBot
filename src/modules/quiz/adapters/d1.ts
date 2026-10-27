@@ -73,13 +73,17 @@ export const createQuizSetRepository = (db: D1Database): QuizSetRepository => ({
   },
 
   async get(channelId, setId) {
-    const row = await db.prepare(
-      "SELECT set_id, name, revision, created_at, updated_at FROM quiz_sets WHERE channel_id = ? AND set_id = ?",
-    ).bind(channelId, setId).first<QuizSetRow>();
-    if (row === null) return null;
-    const questionRows = await db.prepare(
-      "SELECT position, text, options_json, correct_index, enabled FROM quiz_questions WHERE set_id = ? ORDER BY position",
-    ).bind(setId).all<QuizQuestionRow>();
+    // One batch reads metadata and questions from the same revision; separate reads could interleave with a save.
+    const [setResult, questionRows] = await db.batch([
+      db.prepare(
+        "SELECT set_id, name, revision, created_at, updated_at FROM quiz_sets WHERE channel_id = ? AND set_id = ?",
+      ).bind(channelId, setId),
+      db.prepare(
+        "SELECT position, text, options_json, correct_index, enabled FROM quiz_questions WHERE set_id = ? ORDER BY position",
+      ).bind(setId),
+    ]) as [D1Result<QuizSetRow>, D1Result<QuizQuestionRow>];
+    const row = setResult.results[0];
+    if (row === undefined) return null;
     return {
       id: row.set_id,
       name: row.name,

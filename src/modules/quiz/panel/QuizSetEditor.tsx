@@ -66,6 +66,7 @@ export default function QuizSetEditor({ channelId, language, canManage, deleting
   const [session] = useState(() => Symbol());
   const mounted = useRef(false);
   const saveInFlight = useRef<Promise<string | null> | null>(null);
+  const [pendingSaveDraft, setPendingSaveDraft] = useState("");
   const [baselineRevision, setBaselineRevision] = useState(setRevision);
   const [saving, setSaving] = useState(false);
   const [reloading, setReloading] = useState(false);
@@ -114,6 +115,7 @@ export default function QuizSetEditor({ channelId, language, canManage, deleting
 
     const revision = baselineRevision;
     const submittedDraft = JSON.stringify(draftRef.current);
+    setPendingSaveDraft(submittedDraft);
     setSaving(true);
     setSaveError(undefined);
     setConflicted(false);
@@ -194,8 +196,13 @@ export default function QuizSetEditor({ channelId, language, canManage, deleting
     }
   }, [acceptDraft, channelId, queryClient, setId]);
 
-  const guard = useDraftGuard(draftDirty, saveDraft, discardDraft);
-  const isDirty = useCallback(() => dirtyRef.current, []);
+  // A pending save lands its submitted draft, so a draft that differs from it (e.g. a revert) is unsaved too.
+  const differsFromPendingSave = saving && JSON.stringify(draftValue) !== pendingSaveDraft;
+  const guard = useDraftGuard(draftDirty || differsFromPendingSave, saveDraft, discardDraft);
+  const isDirty = useCallback(
+    () => dirtyRef.current || (saving && JSON.stringify(draftRef.current) !== pendingSaveDraft),
+    [saving, pendingSaveDraft],
+  );
   const control = useMemo<QuizEditorControl>(() => ({
     session,
     guardSwitch: guard.guardSwitch,
