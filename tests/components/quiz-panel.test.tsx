@@ -27,6 +27,9 @@ const installFetch = (options: {
   existing?: boolean;
   includeOtherSet?: boolean;
   holdCreate?: boolean;
+  holdFailedSave?: boolean;
+  holdCollectionRefresh?: boolean;
+  holdReopenSet?: boolean;
   holdUpdatedRead?: boolean;
   holdConflictReload?: boolean;
   conflictThenFailReload?: boolean;
@@ -39,25 +42,41 @@ const installFetch = (options: {
   let conflicted = false;
   let conflictReads = 0;
   let failedReads = 0;
+  let updateReadHeld = false;
+  let collectionReads = 0;
+  const detailReads = new Map<string, number>();
   const createStarted = deferred<undefined>();
   const heldCreate = deferred<Response>();
   const conflictReloadStarted = deferred<undefined>();
   const heldConflictReload = deferred<Response>();
   const updatedReadStarted = deferred<undefined>();
   const heldUpdatedRead = deferred<Response>();
+  const failedSaveStarted = deferred<undefined>();
+  const heldFailedSave = deferred<Response>();
+  const collectionRefreshStarted = deferred<undefined>();
+  const heldCollectionRefresh = deferred<Response>();
+  const reopenReadStarted = deferred<undefined>();
+  const heldReopenRead = deferred<Response>();
+  const collectionResponseBody = () => {
+    const sets = [...savedSets.values()];
+    return {
+      sets: sets.map(({ id, name, revision, questions, createdAt, updatedAt }) => ({
+        id, name, revision, questionCount: questions.length, createdAt, updatedAt,
+      })),
+      total: sets.length,
+      page: 1,
+    };
+  };
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(input, window.location.href);
     const method = init?.method ?? "GET";
     if (url.pathname === "/api/csrf") return response({ token: "fictional-token" });
     if (url.pathname.endsWith("/modules/quiz/sets") && method === "GET") {
-      const sets = [...savedSets.values()];
-      return response({
-        sets: sets.map(({ id, name, revision, questions, createdAt, updatedAt }) => ({
-          id, name, revision, questionCount: questions.length, createdAt, updatedAt,
-        })),
-        total: sets.length,
-        page: 1,
-      });
+      if (options.holdCollectionRefresh && collectionReads++ > 0) {
+        collectionRefreshStarted.resolve(undefined);
+        return heldCollectionRefresh.promise;
+      }
+      return response(collectionResponseBody());
     }
     if (url.pathname.endsWith("/modules/quiz/sets") && method === "POST") {
       const body = requestBody(init);
@@ -74,6 +93,12 @@ const installFetch = (options: {
     }
     const detailSetId = url.pathname.split("/").at(-1) ?? "";
     if (url.pathname.includes("/modules/quiz/sets/") && method === "GET") {
+      const reads = (detailReads.get(detailSetId) ?? 0) + 1;
+      detailReads.set(detailSetId, reads);
+      if (options.holdReopenSet && detailSetId === set.id && reads > 1) {
+        reopenReadStarted.resolve(undefined);
+        return heldReopenRead.promise;
+      }
       if (conflicted && detailSetId === set.id) {
         if (options.conflictThenFailReload) {
           failedReads += 1;
@@ -86,13 +111,18 @@ const installFetch = (options: {
       }
       const savedSet = savedSets.get(detailSetId);
       if (savedSet === undefined) return response({ error: "quiz_set_not_found" }, 404);
-      if (options.holdUpdatedRead && detailSetId === set.id && savedSet.revision > set.revision) {
+      if (options.holdUpdatedRead && !updateReadHeld && detailSetId === set.id && savedSet.revision > set.revision) {
+        updateReadHeld = true;
         updatedReadStarted.resolve(undefined);
         return heldUpdatedRead.promise;
       }
       return response({ set: savedSet });
     }
     if (url.pathname.includes("/modules/quiz/sets/") && method === "PUT") {
+      if (options.holdFailedSave) {
+        failedSaveStarted.resolve(undefined);
+        return heldFailedSave.promise;
+      }
       if (options.conflictThenFailReload) {
         conflicted = true;
         return response({ error: "quiz_set_conflict" }, 409);
@@ -104,9 +134,10 @@ const installFetch = (options: {
         return response({ error: "quiz_set_conflict" }, 409);
       }
       const body = requestBody(init);
-      writes.push(body);
       const current = savedSets.get(detailSetId);
       if (current === undefined) return response({ error: "quiz_set_not_found" }, 404);
+      writes.push(body);
+      if (body.revision !== current.revision) return response({ error: "quiz_set_conflict" }, 409);
       const savedSet = {
         ...current,
         name: typeof body.name === "string" ? body.name : current.name,
@@ -115,6 +146,13 @@ const installFetch = (options: {
       };
       savedSets.set(detailSetId, savedSet);
       return response({ set: savedSet });
+    }
+    if (url.pathname.includes("/modules/quiz/sets/") && method === "DELETE") {
+      const current = savedSets.get(detailSetId);
+      if (current === undefined) return response({ error: "quiz_set_not_found" }, 404);
+      if (Number(url.searchParams.get("revision")) !== current.revision) return response({ error: "quiz_set_conflict" }, 409);
+      savedSets.delete(detailSetId);
+      return response({ removed: true });
     }
     return response({ error: "route_missing" }, 404);
   }));
@@ -127,6 +165,13 @@ const installFetch = (options: {
     releaseConflictReload: () => heldConflictReload.resolve(Response.json({ set: savedSets.get(set.id) })),
     updatedReadStarted: updatedReadStarted.promise,
     releaseUpdatedRead: () => heldUpdatedRead.resolve(Response.json({ set: savedSets.get(set.id) })),
+    failedSaveStarted: failedSaveStarted.promise,
+    releaseFailedSave: () => heldFailedSave.resolve(Response.json({ error: "unavailable" }, { status: 503 })),
+    collectionRefreshStarted: collectionRefreshStarted.promise,
+    releaseCollectionRefresh: () => heldCollectionRefresh.resolve(Response.json(collectionResponseBody())),
+    reopenReadStarted: reopenReadStarted.promise,
+    releaseReopenRead: () => heldReopenRead.resolve(Response.json({ set: savedSets.get(set.id) })),
+    advanceSet: (updated: QuizSet) => { savedSets.set(updated.id, updated); },
   };
 };
 
@@ -150,6 +195,24 @@ describe("quiz set editor", () => {
     await screen.findByLabelText("Set name");
     expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Edited space");
     expect(document.querySelector(".quiz-set-row[aria-pressed='true']")?.textContent).toContain("Space");
+  });
+
+  it("does not let a delayed create replace another set's draft", async () => {
+    const fetch = installFetch({ existing: true, includeOtherSet: true, holdCreate: true });
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    await screen.findByLabelText("Set name");
+    fireEvent.click(screen.getByRole("button", { name: "New set" }));
+    await fetch.createStarted;
+
+    fireEvent.click(screen.getByRole("button", { name: /Ocean/u }));
+    fireEvent.change(await screen.findByLabelText("Set name"), { target: { value: "Edited ocean" } });
+    act(() => fetch.releaseCreate());
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Creating set …" })).toBeNull());
+    expect(await screen.findByLabelText("Set name")).toHaveProperty("value", "Edited ocean");
+    expect(document.querySelector(".quiz-set-row[aria-pressed='true']")?.textContent).toContain("Ocean");
   });
 
   it("opens a normally created set in the editor", async () => {
@@ -201,6 +264,26 @@ describe("quiz set editor", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Remote space"));
     expect(screen.queryByRole("button", { name: "Reload" })).toBeNull();
+  });
+
+  it("keeps edits made while a conflict reload is pending", async () => {
+    const fetch = installFetch({ existing: true, holdConflictReload: true });
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    fireEvent.change(await screen.findByLabelText("Set name"), { target: { value: "Draft space" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
+    await fetch.conflictReloadStarted;
+    fireEvent.change(screen.getByLabelText("Set name"), { target: { value: "Newer draft" } });
+
+    await act(async () => {
+      fetch.releaseConflictReload();
+      await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    });
+
+    expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Newer draft");
+    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
   });
 
   it("adds, removes, reorders questions and selects the correct option", async () => {
@@ -302,6 +385,94 @@ describe("quiz set editor", () => {
     fetch.releaseUpdatedRead();
     await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", false));
     expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Newer space");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetch.writes).toHaveLength(2));
+    expect(fetch.writes.map((write) => (write as { revision: number }).revision)).toEqual([1, 2]);
+    await waitFor(() => expect(queryClient.getQueryData<QuizSet>(moduleQueryKey("fictional_channel", "quiz", `set:${set.id}`))?.revision).toBe(3));
+    expect(screen.queryByRole("button", { name: "Reload" })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Set name"), { target: { value: "Later draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Newer space");
+  });
+
+  it("keeps the draft and blocks Save and switch when a stale save fails", async () => {
+    const fetch = installFetch({ existing: true, includeOtherSet: true, holdFailedSave: true });
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    fireEvent.change(await screen.findByLabelText("Set name"), { target: { value: "Saving space" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await fetch.failedSaveStarted;
+    fireEvent.change(screen.getByLabelText("Set name"), { target: { value: "Newer space" } });
+    fireEvent.click(screen.getByRole("button", { name: /Ocean/u }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save and switch" }));
+    act(() => fetch.releaseFailedSave());
+
+    await waitFor(() => expect(within(dialog).getByText("The set could not be saved.")).toBeTruthy());
+    expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Newer space");
+    expect(document.querySelector(".quiz-set-row[aria-pressed='true']")?.textContent).toContain("Space");
+  });
+
+  it("blocks Save and switch when edits arrive during the post-save collection refresh", async () => {
+    const fetch = installFetch({ existing: true, includeOtherSet: true, holdCollectionRefresh: true });
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    fireEvent.change(await screen.findByLabelText("Set name"), { target: { value: "Saved space" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await fetch.collectionRefreshStarted;
+    fireEvent.change(screen.getByLabelText("Set name"), { target: { value: "Newer space" } });
+    fireEvent.click(screen.getByRole("button", { name: /Ocean/u }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save and switch" }));
+    act(() => fetch.releaseCollectionRefresh());
+
+    await waitFor(() => expect(within(dialog).getByText("The draft changed while saving. Save again to include the latest edits.")).toBeTruthy());
+    expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Newer space");
+    expect(document.querySelector(".quiz-set-row[aria-pressed='true']")?.textContent).not.toContain("Ocean");
+  });
+
+  it("reopens cached set details by set id after selecting another set", async () => {
+    const fetch = installFetch({ existing: true, includeOtherSet: true, holdReopenSet: true });
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>, undefined, { gcTime: 600_000, staleTime: 0 });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    expect(await screen.findByLabelText("Set name")).toHaveProperty("value", "Space");
+    fireEvent.click(screen.getByRole("button", { name: /Ocean/u }));
+    expect(await screen.findByLabelText("Set name")).toHaveProperty("value", "Ocean");
+    fireEvent.click(screen.getByRole("button", { name: /Space/u }));
+    await fetch.reopenReadStarted;
+
+    expect(await screen.findByLabelText("Set name")).toHaveProperty("value", "Space");
+    await act(async () => {
+      fetch.releaseReopenRead();
+      await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    });
+    expect(await screen.findByLabelText("Set name")).toHaveProperty("value", "Space");
+  });
+
+  it("deletes with the editor baseline revision after a refresh while the draft is dirty", async () => {
+    const fetch = installFetch({ existing: true });
+    const { queryClient } = renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    fireEvent.change(await screen.findByLabelText("Set name"), { target: { value: "Draft space" } });
+    const remoteSet = { ...set, name: "Remote space", revision: 2 };
+    fetch.advanceSet(remoteSet);
+    queryClient.setQueryData(moduleQueryKey("fictional_channel", "quiz", `set:${set.id}`), remoteSet);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete set" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete this quiz set?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete set" }));
+
+    await waitFor(() => expect(within(dialog).getByText("The set could not be deleted.")).toBeTruthy());
+    expect(document.querySelector(".quiz-set-row[aria-pressed='true']")?.textContent).toContain("Space");
+    expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Draft space");
   });
 
   it("asks before dashboard navigation leaves an unsaved draft", async () => {
@@ -330,8 +501,7 @@ describe("quiz set editor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
 
     await waitFor(() => expect(fetch.failedReads()).toBeGreaterThan(0));
-    const failedBeforeSettle = fetch.failedReads();
-    await waitFor(() => expect(fetch.failedReads()).toBe(failedBeforeSettle));
+    await screen.findByRole("button", { name: "Reload" });
     expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Edited space");
     expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
     expect(screen.getAllByText(/The set changed while you were editing it\./u).length).toBeGreaterThan(0);
