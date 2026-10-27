@@ -91,7 +91,8 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
       const stillOnSource = selectedSetIdRef.current === sourceSetId && (
         sourceEditor === null
           ? activeEditorRef.current === null
-          : activeEditorRef.current?.session === sourceEditor.session && !sourceEditor.isDirty()
+          // Ask the live control: the captured one may have closed over stale state.
+          : activeEditorRef.current?.session === sourceEditor.session && !activeEditorRef.current.isDirty()
       );
       if (stillOnSource) {
         queryClient.setQueryData(moduleQueryKey(channelId, "quiz", `set:${created.id}`), created);

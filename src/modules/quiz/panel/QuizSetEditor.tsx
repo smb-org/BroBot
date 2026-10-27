@@ -63,6 +63,8 @@ export default function QuizSetEditor({ channelId, language, canManage, deleting
   const draftRef = useRef(draftValue);
   const baselineDraftRef = useRef(initialDraft);
   const dirtyRef = useRef(draftDirty);
+  // Submitted draft of the save in flight (null when idle); read by isDirty so it is never stale.
+  const pendingSaveRef = useRef<string | null>(null);
   const [session] = useState(() => Symbol());
   const mounted = useRef(false);
   const saveInFlight = useRef<Promise<string | null> | null>(null);
@@ -115,6 +117,7 @@ export default function QuizSetEditor({ channelId, language, canManage, deleting
 
     const revision = baselineRevision;
     const submittedDraft = JSON.stringify(draftRef.current);
+    pendingSaveRef.current = submittedDraft;
     setPendingSaveDraft(submittedDraft);
     setSaving(true);
     setSaveError(undefined);
@@ -164,6 +167,7 @@ export default function QuizSetEditor({ channelId, language, canManage, deleting
         }
         return message;
       } finally {
+        pendingSaveRef.current = null;
         if (mounted.current) setSaving(false);
       }
     })();
@@ -200,8 +204,8 @@ export default function QuizSetEditor({ channelId, language, canManage, deleting
   const differsFromPendingSave = saving && JSON.stringify(draftValue) !== pendingSaveDraft;
   const guard = useDraftGuard(draftDirty || differsFromPendingSave, saveDraft, discardDraft);
   const isDirty = useCallback(
-    () => dirtyRef.current || (saving && JSON.stringify(draftRef.current) !== pendingSaveDraft),
-    [saving, pendingSaveDraft],
+    () => dirtyRef.current || (pendingSaveRef.current !== null && JSON.stringify(draftRef.current) !== pendingSaveRef.current),
+    [],
   );
   const control = useMemo<QuizEditorControl>(() => ({
     session,

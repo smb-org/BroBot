@@ -432,6 +432,31 @@ describe("quiz set editor", () => {
     await waitFor(() => expect(fetch.writes).toHaveLength(1));
   });
 
+  it("does not switch to a delayed new set when an edit was reverted during a pending save", async () => {
+    const fetch = installFetch({ existing: true, holdCreate: true, holdSave: true });
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    await screen.findByLabelText("Set name");
+    fireEvent.click(screen.getByRole("button", { name: "New set" }));
+    await fetch.createStarted;
+    fireEvent.change(screen.getByLabelText("Set name"), { target: { value: "Saved space" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await fetch.saveStarted;
+    fireEvent.change(screen.getByLabelText("Set name"), { target: { value: "Space" } });
+
+    await act(async () => {
+      fetch.releaseCreate();
+      await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    });
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Creating set …" })).toBeNull());
+    expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Space");
+    expect(document.querySelector(".quiz-set-row[aria-pressed='true']")?.textContent).toContain("Space");
+    act(() => fetch.releaseSave());
+    await waitFor(() => expect(fetch.writes).toHaveLength(1));
+  });
+
   it("switches after saving a padded name that the server normalizes", async () => {
     const fetch = installFetch({ existing: true, includeOtherSet: true, normalizeNameOnSave: true });
     renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
