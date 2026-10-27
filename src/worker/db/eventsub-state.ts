@@ -217,7 +217,13 @@ export const upsertEventSubSubscription = async (
        reason = excluded.reason,
        error_message = excluded.error_message,
        error_status = excluded.error_status,
-       updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at
+     WHERE eventsub_subscriptions.subscription_id IS NOT excluded.subscription_id
+        OR eventsub_subscriptions.secret_id IS NOT excluded.secret_id
+        OR eventsub_subscriptions.status IS NOT excluded.status
+        OR eventsub_subscriptions.reason IS NOT excluded.reason
+        OR eventsub_subscriptions.error_message IS NOT excluded.error_message
+        OR eventsub_subscriptions.error_status IS NOT excluded.error_status`,
   ).bind(
     subscription.channelId,
     subscription.subscriptionType,
