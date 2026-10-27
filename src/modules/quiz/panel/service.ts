@@ -1,5 +1,11 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { QuizSet, QuizSetInput, QuizSetPage } from "../contracts";
+import { quizSettingsSchema, type QuizSet, type QuizSetInput, type QuizSetPage, type QuizSettings } from "../contracts";
+
+export interface QuizCockpitSet {
+  id: string;
+  name: string;
+  enabledQuestionCount: number;
+}
 
 const basePath = (channelId: string): string => `/api/channels/${encodeURIComponent(channelId)}/modules/quiz`;
 
@@ -46,3 +52,49 @@ export const deleteQuizSet = async (channelId: string, setId: string, revision: 
 };
 
 export const quizErrorCode = (error: unknown): string | null => error instanceof PanelApiError ? error.code : null;
+
+export interface QuizSettingsState {
+  settings: QuizSettings;
+  revision: number;
+}
+
+export const loadQuizSettings = async (channelId: string, signal?: AbortSignal): Promise<QuizSettingsState> => {
+  const loaded = await readJson<{ settings: unknown; revision: number }>(await fetch(
+    `${basePath(channelId)}/settings`, signal === undefined ? {} : { signal },
+  ));
+  // Stored settings may predate newer fields; read them with the same defaults as the worker.
+  return { settings: quizSettingsSchema.parse(loaded.settings), revision: loaded.revision };
+};
+
+export const saveQuizSettings = async (channelId: string, revision: number, settings: QuizSettings): Promise<QuizSettingsState> => {
+  const token = await csrf();
+  const saved = await readJson<{ settings: unknown; revision: number }>(await fetch(`${basePath(channelId)}/settings`, {
+    method: "PATCH",
+    headers: { "X-CSRF-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ revision, settings }),
+  }));
+  return { settings: quizSettingsSchema.parse(saved.settings), revision: saved.revision };
+};
+
+export const loadQuizCockpitSets = async (channelId: string, signal?: AbortSignal): Promise<QuizCockpitSet[]> =>
+  (await readJson<{ sets: QuizCockpitSet[] }>(await fetch(
+    `${basePath(channelId)}/session/sets`, signal === undefined ? {} : { signal },
+  ))).sets;
+
+export const startQuizSession = async (channelId: string, setId: string, questionCount: number | null): Promise<void> => {
+  const token = await csrf();
+  await readJson<{ sessionId: string }>(await fetch(`${basePath(channelId)}/session/start`, {
+    method: "POST",
+    headers: { "X-CSRF-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ setId, questionCount }),
+  }));
+};
+
+export const controlQuizSession = async (channelId: string, action: "next" | "pause" | "resume" | "end"): Promise<void> => {
+  const token = await csrf();
+  await readJson<{ ok: true }>(await fetch(`${basePath(channelId)}/session/action`, {
+    method: "POST",
+    headers: { "X-CSRF-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  }));
+};

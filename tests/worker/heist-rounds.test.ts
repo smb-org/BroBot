@@ -25,7 +25,7 @@ interface HeistRoundObject extends PointsWorkerObject {
   activeGameRound(moduleId: string): Promise<{ roundId: string; state: "announcing" | "open"; data: unknown; deadlineAt: number | null } | null>;
 }
 
-const heistObject = (channelId: string): HeistRoundObject => pointObject(channelId) as unknown as HeistRoundObject;
+const heistObject = (channelId: string): HeistRoundObject => pointObject(channelId);
 
 const openRound = async (object: HeistRoundObject, roundId: string): Promise<void> => {
   const data = {
@@ -277,7 +277,7 @@ describe("heist batched join line alarm", () => {
     const object = heistObject(channelId);
     await createViewer(object, "viewer_anna", "frostfern");
 
-    const error = await capturePointError(object, (target) => (target as HeistRoundObject).openGameRoundWithStake(moduleId, "heist-bad-pause", {
+    const error = await capturePointError(object, (target) => target.openGameRoundWithStake(moduleId, "heist-bad-pause", {
       durationS: 60, announceText: "Heist open.", cooldownAfter: { key: "between-rounds", seconds: -1 },
       settlement: { kind: "heist", params: { baseChance: 50, maxChance: 65 } },
     }, "msg:fictional-bad-pause", "viewer_anna", "frostfern", 10));

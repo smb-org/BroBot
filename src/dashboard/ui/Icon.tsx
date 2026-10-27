@@ -1,6 +1,6 @@
 import {
   AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpDown, ArrowUpRight, BellRing, Bookmark, Braces, Check, ChevronLeft, ChevronRight, Clock, Cloud, CloudFog, CloudLightning, CloudMoon, CloudRain, CloudSnow, CloudSun, Copy, Crown, Diamond, ExternalLink, Eye, Film, GripVertical, Image, Info, KeyRound, Layers,
-  ListChecks, Lock, MapPin, Megaphone, MessageSquareText, Minus, MoreVertical, Pause, Pencil, Play, Plus, Radio, RadioTower, RefreshCw, Search, Settings,
+  ListChecks, Lock, MapPin, Megaphone, MessageSquareText, Minus, MoreVertical, Pause, Pencil, Play, Plus, Radio, RadioTower, RefreshCw, Search, Settings, SkipForward,
   SlidersHorizontal, Square, Star, Sun, Moon, Timer, Wind, Sword, Trash2, Type, User, UserMinus, UserPlus, Users, Video, Volume2, VolumeX, Vote, X, Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -8,6 +8,7 @@ import type { ReactElement } from "react";
 
 const glyphs = {
   ad: Megaphone, shoutout: User, clip: Film, vote: Vote, boss: Crown, blitz: Zap, duel: Sword, quiz: ListChecks,
+  "skip-forward": SkipForward, "player-pause": Pause, "player-play": Play,
   counter: Plus, "test-message": MessageSquareText, marker: Bookmark,
   timer: Timer,
   cloud: Cloud, "cloud-fog": CloudFog, "cloud-lightning": CloudLightning, "cloud-moon": CloudMoon,
@@ -24,7 +25,7 @@ const glyphs = {
   styleFont: Type, styleOutline: Square, styleShadow: Layers, styleBackground: Image,
   tabMessages: MessageSquareText, tabPrewarning: BellRing,
   broadcast: RadioTower, "broadcast-off": Radio, "volume-3": Volume2,
-  "volume-off": VolumeX, "player-pause": Pause, "player-play": Play,
+  "volume-off": VolumeX, square: Square,
   "clock-hour-4": Clock,
   "chevron-left": ChevronLeft,
   "chevron-right": ChevronRight,

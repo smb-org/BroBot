@@ -21,6 +21,7 @@ import { Button, ChipGroup, ConfirmDialog, DataTable, Field, FilterBar, Icon } f
 import { LockedReason } from "./ui/LockedReason";
 import { AdsLiveTile, type AdsLiveSchedule } from "./AdsLiveTile";
 import { BossFightLiveTile } from "../modules/boss_fight/panel/live-tile";
+import { QuizLiveTile } from "../modules/quiz/panel/live-tile";
 
 type EventFilter = "all" | "raids" | "community" | "chat";
 
@@ -79,6 +80,7 @@ export const LiveCockpitTiles = ({
   const recentVotekicks = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "votekick_recent" }> => snapshot.kind === "votekick_recent");
   const duels = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "duel" }> => snapshot.kind === "duel");
   const bossFights = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "boss_fight" }> => snapshot.kind === "boss_fight");
+  const quizzes = snapshots.filter((snapshot): snapshot is Extract<ModuleLiveTileSnapshot, { kind: "quiz" }> => snapshot.kind === "quiz");
   const visibleDuels = duels.slice(0, 3);
   const running = snapshots.find((snapshot) => snapshot.kind === "vote" || snapshot.kind === "votekick");
   const [busy, setBusy] = useState(false);
@@ -258,7 +260,8 @@ export const LiveCockpitTiles = ({
           pending={busy} danger {...(duelCancelError === undefined ? {} : { error: duelCancelError })} />
       </>}
       {bossFights.map((round) => <BossFightLiveTile key={round.id} language={dashboardLanguage()} round={round} now={now} />)}
-      {running === undefined && duels.length === 0 && bossFights.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noActionRunning}</p> : running === undefined ? null : running.kind === "vote"
+      {quizzes.map((session) => <QuizLiveTile key={session.sessionId} channelId={channelId} language={dashboardLanguage()} session={session} now={now} canManage={roleCanManage} onRefresh={onRefresh} onMessage={onMessage} />)}
+      {running === undefined && duels.length === 0 && bossFights.length === 0 && quizzes.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noActionRunning}</p> : running === undefined ? null : running.kind === "vote"
         ? <div className="live-vote-tile" data-testid="live-vote-tile">
           <header className="live-vote-tile__header">
             <div><span>{labels.voteType}</span><h3>{running.title?.trim() || labels.voteType}</h3></div>

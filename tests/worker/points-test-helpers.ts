@@ -85,6 +85,10 @@ export interface PointsWorkerObject {
     replayed?: boolean;
   }>;
   gameRoundParticipants(moduleId: string, roundId: string, nameLimit: number): Promise<{ count: number; totalStake: number; logins: string[] }>;
+  gameRoundParticipantData(moduleId: string, roundId: string): Promise<Array<{ accountId: string; login: string; stake: number; data: unknown }>>;
+  answerGameRoundChoice(moduleId: string, roundId: string, operationId: string, accountId: string, login: string,
+    questionIndex: number, choice: number, messageAt: number): Promise<{ status: "recorded" | "round_closed"; replayed: boolean }>;
+  activeGameRound(moduleId: string): Promise<{ roundId: string; state: "announcing" | "open"; data: unknown; deadlineAt: number | null } | null>;
   scheduleModuleAlarm(moduleId: string, handlerKey: string, alarmKey: string, deadline: number): Promise<void>;
   resolveGameRound(moduleId: string, roundId: string, settlement: { kind: string; params: unknown }): Promise<{
     replayed: boolean;

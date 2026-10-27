@@ -15,6 +15,9 @@ export interface QuizPanelTexts {
   noSets: string;
   noSetsDescription: string;
   selectSet: string;
+  settings: string;
+  settingsLoadError: string;
+  retry: string;
   setName: string;
   setNamePlaceholder: string;
   addQuestion: string;
@@ -104,6 +107,9 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     noSets: "Noch keine Fragensets",
     noSetsDescription: "Lege ein Set an und füge deine ersten Fragen hinzu.",
     selectSet: "Wähle ein Fragenset aus.",
+    settings: "Einstellungen",
+    settingsLoadError: "Die Quiz-Einstellungen konnten nicht geladen werden.",
+    retry: "Erneut versuchen",
     setName: "Set-Name",
     setNamePlaceholder: "Zum Beispiel: Allgemeinwissen",
     addQuestion: "Frage hinzufügen",
@@ -172,6 +178,9 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     noSets: "No question sets yet",
     noSetsDescription: "Create a set and add your first questions.",
     selectSet: "Choose a question set.",
+    settings: "Settings",
+    settingsLoadError: "The quiz settings could not be loaded.",
+    retry: "Try again",
     setName: "Set name",
     setNamePlaceholder: "For example: General knowledge",
     addQuestion: "Add question",
@@ -229,3 +238,78 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
 };
 
 export const quizPanelTexts = (language: DashboardLanguage): QuizPanelTexts => texts[language];
+
+export const quizCatalog = {
+  de: {
+    startLine: (setName: string, count: number) => `Quiz „${setName}“ startet · ${String(count)} ${count === 1 ? "Frage" : "Fragen"}.`,
+    questionLine: (position: number, total: number, question: string, options: readonly string[]) =>
+      `Frage ${String(position)}/${String(total)}: ${question} · ${options.map((option, index) => `${String(index + 1)}: ${option}`).join(" · ")}`,
+    resultLine: (ranking: readonly { login: string; correct: number; rank: number; payout: number }[], distributed: number) => ranking.length === 0
+      ? `Quiz beendet · keine Antworten · ${String(distributed)} Punkte ausgezahlt.`
+      : `Quiz beendet · ${ranking.map((entry) => `${String(entry.rank)}. ${entry.login} (${String(entry.correct)} richtig, +${String(entry.payout)})`).join(" · ")} · ${String(distributed)} Punkte ausgezahlt.`,
+    startAction: "Quiz starten",
+    nextAction: "Weiter",
+    pauseAction: "Pause",
+    resumeAction: "Fortsetzen",
+    endAction: "Beenden",
+    actionError: "Die Quizaktion ist fehlgeschlagen.",
+    started: "Quiz gestartet.",
+    advanced: "Quizphase beendet.",
+    paused: "Quiz pausiert.",
+    resumed: "Quiz fortgesetzt.",
+    ended: "Quiz beendet.",
+    roundRunning: "Ein Quiz läuft bereits.",
+    noQuestionSets: "Kein Fragenset mit aktiven Fragen vorhanden.",
+    streamOffline: "Der Stream muss live sein.",
+    chooseSet: "Fragenset",
+    chooseSetPlaceholder: "Set auswählen",
+    questionsLabel: "Fragen",
+    allQuestions: "Alle aktiven Fragen",
+    loadError: "Fragensets konnten nicht geladen werden.",
+    enabledQuestionCount: (count: number) => `${String(count)} ${count === 1 ? "aktive Frage" : "aktive Fragen"}`,
+    firstQuestions: (count: number) => `Erste ${String(count)}`,
+    sessionTitle: "Quiz",
+    phase: { announce: "Frage wird angekündigt", open: "Antworten offen", reveal: "Lösung", results: "Ergebnis" },
+    questionProgress: (current: number, total: number) => `Frage ${String(current)} von ${String(total)}`,
+    controlError: "Quizaktion fehlgeschlagen. Bitte erneut versuchen.",
+    pausedLabel: "Pausiert",
+    timeLeft: (time: string) => `Noch ${time}`,
+  },
+  en: {
+    startLine: (setName: string, count: number) => `Quiz “${setName}” starts · ${String(count)} ${count === 1 ? "question" : "questions"}.`,
+    questionLine: (position: number, total: number, question: string, options: readonly string[]) =>
+      `Question ${String(position)}/${String(total)}: ${question} · ${options.map((option, index) => `${String(index + 1)}: ${option}`).join(" · ")}`,
+    resultLine: (ranking: readonly { login: string; correct: number; rank: number; payout: number }[], distributed: number) => ranking.length === 0
+      ? `Quiz ended · no answers · ${String(distributed)} points paid.`
+      : `Quiz ended · ${ranking.map((entry) => `${String(entry.rank)}. ${entry.login} (${String(entry.correct)} correct, +${String(entry.payout)})`).join(" · ")} · ${String(distributed)} points paid.`,
+    startAction: "Start quiz",
+    nextAction: "Next",
+    pauseAction: "Pause",
+    resumeAction: "Resume",
+    endAction: "End",
+    actionError: "The quiz action failed.",
+    started: "Quiz started.",
+    advanced: "Quiz phase ended.",
+    paused: "Quiz paused.",
+    resumed: "Quiz resumed.",
+    ended: "Quiz ended.",
+    roundRunning: "A quiz is already running.",
+    noQuestionSets: "No question set with enabled questions is available.",
+    streamOffline: "The stream must be live.",
+    chooseSet: "Question set",
+    chooseSetPlaceholder: "Choose a set",
+    questionsLabel: "Questions",
+    allQuestions: "All enabled questions",
+    loadError: "Question sets could not be loaded.",
+    enabledQuestionCount: (count: number) => `${String(count)} ${count === 1 ? "enabled question" : "enabled questions"}`,
+    firstQuestions: (count: number) => `First ${String(count)}`,
+    sessionTitle: "Quiz",
+    phase: { announce: "Announcing question", open: "Answers open", reveal: "Answer reveal", results: "Results" },
+    questionProgress: (current: number, total: number) => `Question ${String(current)} of ${String(total)}`,
+    controlError: "Quiz action failed. Try again.",
+    pausedLabel: "Paused",
+    timeLeft: (time: string) => `${time} left`,
+  },
+} as const;
+
+export const quizCockpitTexts = (language: DashboardLanguage) => quizCatalog[language];

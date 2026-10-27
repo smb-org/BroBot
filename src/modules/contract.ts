@@ -1034,6 +1034,12 @@ export interface ModulePointRoundResult {
   resolvedAt: string;
 }
 
+export interface ModulePointRoundDeadline {
+  roundId: string;
+  data: unknown;
+  deadlineAt: number;
+}
+
 export interface ModulePointRoundAnnouncement {
   roundId: string;
   data: unknown;
@@ -1191,6 +1197,18 @@ export interface PointRoundParticipants {
   logins: string[];
 }
 
+interface PointRoundParticipantRecord {
+  accountId: string;
+  login: string;
+  stake: number;
+  data: unknown;
+}
+
+export interface PointRoundChoiceResult {
+  status: "recorded" | "round_closed";
+  replayed: boolean;
+}
+
 export interface PointRoundAttackResult {
   status: "hit" | "cooldown" | "round_closed";
   replayed: boolean;
@@ -1292,6 +1310,20 @@ export interface ModulePointsAccess {
     join: (roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown) => Promise<PointJoinResult>;
     /** Reads the round's participant count and total stake, with at most `nameLimit` logins. */
     participants: (roundId: string, nameLimit: number) => Promise<PointRoundParticipants>;
+    /** Reads participant data inside the channel Durable Object for round reveal and settlement work. */
+    participantRecords: (roundId: string) => Promise<PointRoundParticipantRecord[]>;
+    /** Replaces one participant's response for the active quiz question, keyed by the chat message operation id. */
+    answerChoice: (
+      roundId: string,
+      operationId: string,
+      accountId: string,
+      login: string,
+      questionIndex: number,
+      choice: number,
+      messageAt: number,
+    ) => Promise<PointRoundChoiceResult>;
+    /** Persists module round state and resets its shared deadline/alarm; a null deadline pauses the round. */
+    update: (roundId: string, data: unknown, deadlineAt: number | null) => Promise<void>;
     answer: (roundId: string, operationId: string, accountId: string, login: string, graceS: number, messageAt: number) => Promise<PointRoundAnswerResult>;
     attack: (roundId: string, operationId: string, accountId: string, login: string, damage: number, messageAt: number) => Promise<PointRoundAttackResult>;
     resolve: (roundId: string, settlement: { kind: string; params: unknown }) => Promise<PointsApplyResult>;
@@ -1726,7 +1758,7 @@ export interface ModulePanelProperties {
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
 
-type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "duel" | "counter" | "test-message" | "marker" | "timer";
+type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "duel" | "quiz" | "skip-forward" | "player-pause" | "player-play" | "square" | "counter" | "test-message" | "marker" | "timer";
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
@@ -1835,6 +1867,16 @@ export type ModuleLiveTileSnapshot =
     maxHp: number;
     attackers: number;
     closesAt: string;
+  }
+  | {
+    kind: "quiz";
+    sessionId: string;
+    setName: string;
+    phase: "announce" | "open" | "reveal" | "results";
+    questionIndex: number;
+    questionCount: number;
+    paused: boolean;
+    phaseEndsAt: string | null;
   }
   | {
     kind: "upcoming";
@@ -2167,6 +2209,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   routes?: Hono<ModuleRouteEnvironment>;
   /** Overlay presentation declarations, with view and editor chunks loaded on demand. */
   overlayElements?: readonly ModuleOverlayElementDefinition[];
+  /** Realtime element kinds a later overlay slice will implement without registering an element UI yet. */
+  overlayRealtimeElementKinds?: readonly string[];
   /** Durable alarm handlers registered through the shared host contract. */
   alarms?: readonly ModuleAlarmDefinition[];
   /** Serializes this module's alarm and point-round lifecycle mutations per channel. */
@@ -2175,6 +2219,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   onPointRoundOpened?: (context: ModuleAlarmContext, round: ModulePointRoundAnnouncement) => Promise<void>;
   /** Receives an internal, replayable notification immediately after round resolution and during watchdog recovery. */
   onPointRoundResolved?: (context: ModuleAlarmContext, round: ModulePointRoundResult) => Promise<void>;
+  /** Handles a shared round deadline when a module owns multiple phases inside one points round. */
+  onPointRoundDeadline?: (context: ModuleAlarmContext, round: ModulePointRoundDeadline) => Promise<void>;
   /** Whether cancelling funded rounds queues the shared refund notice. Defaults to true. */
   pointRoundCancellationNotice?: boolean;
   /** Formats the persisted result of a resolved points round for retryable chat delivery. */

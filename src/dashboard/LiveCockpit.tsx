@@ -289,6 +289,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
           ? nextBelaboxObservationAt()
           : Date.now()}
         onActionResult={(moduleId: string, result: ModuleImmediateActionResult, observedAt: number) => {
+          if (moduleId === "quiz") refreshLiveData();
           if (moduleId === "belabox" && result.belaboxSample !== undefined) {
             recordBelaboxObservation(overview.channelId, (previous) => successfulManualBelaboxObservation(
               observedAt,

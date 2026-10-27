@@ -3,6 +3,7 @@ import type { InstantPointSettlement } from "./points";
 import { settleSlot } from "../../modules/emote_slots/domain/settlement";
 import { resolveHeist } from "../../modules/heist/domain/settlement";
 import { calculateBossPayouts } from "../../modules/boss_fight/domain/boss";
+import { scoreQuizSession } from "../../modules/quiz/domain/session";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -188,12 +189,62 @@ const bossFightSettlement: PointSettlement = ({ round, participants, params }) =
   };
 };
 
+const quizSettlement: PointSettlement = ({ round, participants, params }) => {
+  if (!isRecord(params) || Object.keys(params).length !== 0) throw new Error("invalid_settlement_params");
+  const data = isRecord(round.data) ? round.data : null;
+  if (data === null || !Array.isArray(data.questions) || !Number.isSafeInteger(data.pot) ||
+      (data.pot as number) < 0 || data.questions.length === 0) throw new Error("invalid_settlement_params");
+  const questions = data.questions.map((value) => {
+    if (!isRecord(value) || typeof value.text !== "string" || !Array.isArray(value.options) ||
+        !value.options.every((option) => typeof option === "string") || typeof value.correctIndex !== "number" ||
+        !Number.isSafeInteger(value.correctIndex)) {
+      throw new Error("invalid_settlement_params");
+    }
+    return { text: value.text, options: value.options, correctIndex: value.correctIndex };
+  });
+  const scoringParticipants = participants.map(({ accountId, login, stake, data: participantData }) => {
+    if (stake !== 0 || !isRecord(participantData) || !Array.isArray(participantData.answers) ||
+        !participantData.answers.every((answer) => answer === null || Number.isSafeInteger(answer))) {
+      throw new Error("invalid_settlement_params");
+    }
+    return { accountId, login, answers: participantData.answers as (number | null)[] };
+  });
+  const score = scoreQuizSession(questions, scoringParticipants, data.pot as number);
+  const movements = score.distributed === 0 ? [] : [
+    { accountId: "__house", delta: -score.distributed },
+    ...score.ranking.filter(({ payout }) => payout > 0).map(({ accountId, login, payout }) => ({
+      accountId, login, delta: payout,
+    })),
+  ];
+  const result = {
+    sessionId: typeof data.sessionId === "string" ? data.sessionId : round.roundId,
+    setId: typeof data.setId === "string" ? data.setId : "",
+    setName: typeof data.setName === "string" ? data.setName : "",
+    questions: questions.map((question, index) => ({
+      text: question.text,
+      correctCounts: score.correctCounts[index] ?? 0,
+      answerDistribution: score.answerDistribution[index] ?? [],
+    })),
+    participants: score.participants,
+    totalAnswers: score.totalAnswers,
+    totalCorrect: score.totalCorrect,
+    correctRate: score.correctRate,
+    distributed: score.distributed,
+    houseRemainder: score.houseRemainder,
+    ranking: score.ranking.slice(0, 10).map(({ login, correct, rank, payout }) => ({
+      login, correct, rank, payout,
+    })),
+  };
+  return { movements, result, clearParticipantData: true };
+};
+
 export const POINT_SETTLEMENTS: ReadonlyMap<string, PointSettlement> = new Map([
   ["test", testSettlement],
   ["blitz", blitzSettlement],
   ["duel", duelSettlement],
   ["heist", heistSettlement],
   ["boss_fight", bossFightSettlement],
+  ["quiz", quizSettlement],
 ]);
 
 export const INSTANT_SETTLEMENTS: ReadonlyMap<string, InstantPointSettlement> = new Map([

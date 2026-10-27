@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 
-import { canManage, type AuditAction } from "../../contracts/values";
+import { canManage, hasRequiredChannelRole, type AuditAction } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import {
   QUIZ_MODULE_ID,
@@ -10,6 +10,8 @@ import {
 } from "./contracts";
 import { createQuizSetRepository } from "./adapters/d1";
 import { validateQuizSet } from "./domain/sets";
+import { loadEnabledQuizSettings, openQuizSession, quizRoundData } from "./service";
+import { quizPhasePayload, quizSessionControlAlarm } from "./lifecycle";
 
 type QuizRouteContext = Context<ModuleRouteEnvironment>;
 const body = async (request: Request): Promise<unknown> => request.json().catch(() => null);
@@ -22,6 +24,150 @@ const nowIso = (): string => new Date().toISOString();
 const auditSnapshot = (set: QuizSet) => ({ setId: set.id, name: set.name, revision: set.revision, questionCount: set.questions.length });
 
 export const quizRoutes = new Hono<ModuleRouteEnvironment>();
+
+const streamIsOnline = async (db: D1Database, channelId: string): Promise<boolean> =>
+  (await db.prepare("SELECT state FROM channel_stream_state WHERE channel_id = ?")
+    .bind(channelId).first<{ state: string }>())?.state === "online";
+
+const hasEnabledQuestions = async (db: D1Database, channelId: string): Promise<boolean> =>
+  (await db.prepare(
+    `SELECT EXISTS(
+       SELECT 1 FROM quiz_questions AS question
+       JOIN quiz_sets AS quiz_set ON quiz_set.set_id = question.set_id
+       WHERE quiz_set.channel_id = ? AND question.enabled = 1
+     ) AS present`,
+  ).bind(channelId).first<{ present: number }>())?.present === 1;
+
+quizRoutes.get("/session/sets", async (context) => {
+  const rows = await context.env.DB.prepare(
+    `SELECT quiz_set.set_id AS id, quiz_set.name, COUNT(question.position) AS enabledQuestionCount
+       FROM quiz_sets AS quiz_set
+       JOIN quiz_questions AS question ON question.set_id = quiz_set.set_id AND question.enabled = 1
+      WHERE quiz_set.channel_id = ?
+      GROUP BY quiz_set.set_id, quiz_set.name
+      ORDER BY quiz_set.name COLLATE NOCASE, quiz_set.set_id`,
+  ).bind(channelIdFrom(context)).all<{ id: string; name: string; enabledQuestionCount: number }>();
+  return context.json({ sets: rows.results });
+});
+
+quizRoutes.get("/session/availability", async (context) => {
+  const channelId = channelIdFrom(context);
+  const [settings, active, live, hasQuestions] = await Promise.all([
+    loadEnabledQuizSettings(context.env.DB, channelId),
+    context.get("points")(channelId).rounds.active(),
+    streamIsOnline(context.env.DB, channelId),
+    hasEnabledQuestions(context.env.DB, channelId),
+  ]);
+  const data = quizRoundData(active?.data);
+  const reason = settings === null ? "module_disabled"
+    : !live ? "stream_offline"
+      : active !== null ? "round_running"
+        : !hasQuestions ? "question_pool_empty" : null;
+  return context.json({
+    reason,
+    running: active !== null,
+    paused: data?.paused ?? false,
+    phase: data?.phase ?? null,
+    sessionId: active?.roundId ?? null,
+    questionIndex: data?.questionIndex ?? null,
+    questionCount: data?.questions.length ?? null,
+  });
+});
+
+quizRoutes.get("/session/state", async (context) => {
+  const active = await context.get("points")(channelIdFrom(context)).rounds.active();
+  const data = quizRoundData(active?.data);
+  if (active === null || data === null) return context.json({ session: null });
+  return context.json({
+    session: {
+      sessionId: data.sessionId,
+      setName: data.setName,
+      phase: data.phase,
+      questionIndex: data.questionIndex,
+      questionCount: data.questions.length,
+      paused: data.paused,
+      phaseEndsAt: data.phaseEndsAt === null ? null : new Date(data.phaseEndsAt).toISOString(),
+      remainingMs: data.paused ? data.remainingMs : null,
+    },
+  });
+});
+
+quizRoutes.post("/session/start", async (context) => {
+  if (!hasRequiredChannelRole(context.get("channelRole"), "operator")) {
+    return context.json({ error: "quiz_operation_denied" }, 403);
+  }
+  const channelId = channelIdFrom(context);
+  if (!await streamIsOnline(context.env.DB, channelId)) return context.json({ error: "stream_offline" }, 409);
+  const settings = await loadEnabledQuizSettings(context.env.DB, channelId);
+  if (settings === null) return context.json({ error: "module_disabled" }, 409);
+  const points = context.get("points")(channelId);
+  if (await points.rounds.active() !== null) return context.json({ error: "round_running" }, 409);
+  const requestBody = await body(context.req.raw);
+  if (!isRecord(requestBody) || typeof requestBody.setId !== "string" || requestBody.setId.length === 0) {
+    return context.json({ error: "quiz_set_required" }, 400);
+  }
+  const set = await repository(context).get(channelId, requestBody.setId);
+  if (set === null) return context.json({ error: "quiz_set_not_found" }, 404);
+  const questionCount = requestBody.questionCount === undefined || requestBody.questionCount === null
+    ? null : requestBody.questionCount;
+  if (questionCount !== null && (!Number.isSafeInteger(questionCount) || (questionCount as number) < 1)) {
+    return context.json({ error: "question_count_invalid" }, 400);
+  }
+  const language = (await context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
+    .bind(channelId).first<{ language: "de" | "en" }>())?.language ?? "de";
+  try {
+    const opened = await openQuizSession({
+      set,
+      questionCount: questionCount as number | null,
+      settings,
+      language,
+      points,
+    });
+    await context.get("publishModuleOverlayMessage")(
+      channelId,
+      QUIZ_MODULE_ID,
+      "phase",
+      "quiz.session",
+      quizPhasePayload(opened.data),
+    );
+    return context.json({ sessionId: opened.sessionId }, 201);
+  } catch (failure: unknown) {
+    const reason = failure instanceof Error ? failure.message : "quiz_start_failed";
+    if (reason === "round_active" || reason === "module_closed") return context.json({ error: "round_running" }, 409);
+    if (reason === "question_pool_empty" || reason === "question_count_invalid") return context.json({ error: reason }, 400);
+    return context.json({ error: "quiz_start_failed" }, 500);
+  }
+});
+
+quizRoutes.post("/session/action", async (context) => {
+  if (!hasRequiredChannelRole(context.get("channelRole"), "operator")) {
+    return context.json({ error: "quiz_operation_denied" }, 403);
+  }
+  const channelId = channelIdFrom(context);
+  if (await loadEnabledQuizSettings(context.env.DB, channelId) === null) return context.json({ error: "module_disabled" }, 409);
+  const requestBody = await body(context.req.raw);
+  const action = isRecord(requestBody) ? requestBody.action : null;
+  if (action !== "next" && action !== "pause" && action !== "resume" && action !== "end") {
+    return context.json({ error: "invalid_quiz_action" }, 400);
+  }
+  const active = await context.get("points")(channelId).rounds.active();
+  if (active === null || active.state !== "open" || quizRoundData(active.data) === null) {
+    return context.json({ error: "round_not_running" }, 409);
+  }
+  try {
+    await context.get("runModuleAlarm")(
+      channelId,
+      QUIZ_MODULE_ID,
+      quizSessionControlAlarm.key,
+      active.roundId,
+      { action },
+    );
+    return context.json({ ok: true });
+  } catch (failure: unknown) {
+    const reason = failure instanceof Error ? failure.message : "quiz_action_failed";
+    return context.json({ error: reason === "round_not_running" ? reason : "quiz_action_failed" }, 409);
+  }
+});
 
 quizRoutes.get("/sets", async (context) => {
   const rawPage = Number(context.req.query("page") ?? "1");

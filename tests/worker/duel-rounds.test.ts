@@ -10,7 +10,7 @@ interface DuelRoundObject extends PointsWorkerObject {
   answerGameRound?: never;
 }
 
-const duelObject = (channelId: string): DuelRoundObject => pointObject(channelId) as unknown as DuelRoundObject;
+const duelObject = (channelId: string): DuelRoundObject => pointObject(channelId);
 
 const duelRoundData = (overrides: Record<string, unknown> = {}): Record<string, unknown> => {
   const challengerId = typeof overrides.challengerId === "string" ? overrides.challengerId : "viewer_anna";
