@@ -103,6 +103,128 @@ afterEach(async () => {
 });
 
 describe("quiz answers in the shared point round", () => {
+  it("rearms the persisted quiz deadline after the first open-phase publication fails", async () => {
+    const channelId = `quiz-open-publish-retry-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const openedAt = Date.now();
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'points', 1, '{}', 1), (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId, channelId).run();
+    const overlayId = `overlay-${roundId}`;
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz overlay', ?, ?)",
+    ).bind(overlayId, channelId, new Date(openedAt).toISOString(), new Date(openedAt).toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${roundId}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    let failOpenPhase = true;
+    vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
+      const publishesOpenPhase = JSON.stringify(messages).includes('"phase":"open"');
+      if (publishesOpenPhase && failOpenPhase) {
+        failOpenPhase = false;
+        return Promise.reject(new Error("open phase publish failed"));
+      }
+      return Promise.resolve();
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await runPointObject(object, async (target, state) => {
+      await target.openGameRound("quiz", roundId, { ...session(roundId), phase: "announce", phaseEndsAt: null });
+      await deferPointAlarmWithin(state);
+    });
+    await forcePointAlarm(object, roundId);
+
+    const opened = await object.activeGameRound("quiz");
+    expect(failOpenPhase).toBe(false);
+    expect(opened).toMatchObject({ data: { phase: "open" } });
+    if (opened?.deadlineAt === null || opened?.deadlineAt === undefined) throw new Error("Quiz question deadline was not persisted.");
+
+    vi.setSystemTime(openedAt + 5_000);
+    await forcePointAlarm(object, roundId);
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { phase: "open" }, deadlineAt: opened.deadlineAt });
+
+    vi.setSystemTime(opened.deadlineAt);
+    await forcePointAlarm(object, roundId);
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { phase: "reveal" } });
+  });
+
+  it("keeps a muted quiz start pending until its start line and first question are delivered", async () => {
+    const channelId = `quiz-muted-start-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'points', 1, '{}', 1), (?, 'quiz', 1, ?, 1)",
+    ).bind(channelId, channelId, JSON.stringify({ pot: 10, answerSeconds: 30, revealSeconds: 8, chatQuestions: true })).run();
+    await worker.DB.prepare("UPDATE channels SET language = 'en' WHERE channel_id = ?").bind(channelId).run();
+    await worker.DB.prepare(
+      "INSERT INTO channel_controls (channel_id, muted, updated_at) VALUES (?, 1, ?)",
+    ).bind(channelId, new Date().toISOString()).run();
+    const object = pointObject(channelId);
+    const deliveredLines: string[] = [];
+    const mutedLines: string[] = [];
+    hostChatMock.send.mockImplementation(async (...args) => {
+      const validateOutput = args[5];
+      const claimBeforePost = args[6];
+      const afterPost = args[8];
+      if (validateOutput === undefined || claimBeforePost === undefined || afterPost === undefined) {
+        throw new Error("Quiz announcement omitted its delivery guards.");
+      }
+      if (!await validateOutput()) {
+        mutedLines.push(args[2]);
+        return { sent: false, truncated: false, delivery: "not_attempted", reason: "channel_muted", detail: {} };
+      }
+      const claim = await claimBeforePost();
+      if (claim === "rate_limited") {
+        return { sent: false, truncated: false, delivery: "not_attempted", reason: "rate_limited", retryable: true, detail: {} };
+      }
+      if (!claim) {
+        return { sent: false, truncated: false, delivery: "not_attempted", reason: "already_attempted", detail: {} };
+      }
+      deliveredLines.push(args[2]);
+      await afterPost("sent", null);
+      return { sent: true, truncated: false, delivery: "sent", reason: null, detail: {} };
+    });
+
+    await runPointObject(object, async (target, state) => {
+      await target.openGameRound("quiz", roundId, {
+        ...session(roundId),
+        chatQuestions: true,
+        announceText: "Quiz Example starts now.",
+        silentAnnouncement: false,
+        phase: "announce",
+      });
+      await deferPointAlarmWithin(state);
+    });
+    await forcePointAlarm(object, roundId);
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ state: "announcing" });
+    expect(mutedLines).toHaveLength(1);
+    expect(mutedLines[0]).toContain("starts");
+
+    for (let retry = 0; retry < 7; retry += 1) {
+      vi.setSystemTime(Date.now() + 5_000);
+      await forcePointAlarm(object, roundId);
+      await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ state: "announcing" });
+    }
+    expect(mutedLines).toHaveLength(8);
+
+    await worker.DB.prepare("UPDATE channel_controls SET muted = 0, updated_at = ? WHERE channel_id = ?")
+      .bind(new Date().toISOString(), channelId).run();
+    vi.setSystemTime(Date.now() + 5_000);
+    await forcePointAlarm(object, roundId);
+    expect(deliveredLines).toHaveLength(1);
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ state: "open", data: { phase: "announce", questionIndex: 0 } });
+
+    vi.setSystemTime(Date.now() + 5_000);
+    await forcePointAlarm(object, roundId);
+
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ state: "open", data: { phase: "open", questionIndex: 0 } });
+    expect(deliveredLines).toHaveLength(2);
+    expect(deliveredLines[0]).toContain("Example");
+    expect(deliveredLines[1]).toContain("Capital?");
+  });
+
   it("overwrites a viewer's answer on each accepted message and deletes data after settlement", async () => {
     const channelId = `quiz-answer-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;

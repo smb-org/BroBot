@@ -2233,6 +2233,10 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   onPointRoundResolved?: (context: ModuleAlarmContext, round: ModulePointRoundResult) => Promise<void>;
   /** Handles a shared round deadline when a module owns multiple phases inside one points round. */
   onPointRoundDeadline?: (context: ModuleAlarmContext, round: ModulePointRoundDeadline) => Promise<void>;
+  /** Preserves a module-owned deadline when its post-announcement lifecycle hook fails. */
+  preservePointRoundDeadlineOnAnnouncementFailure?: boolean;
+  /** Retries channel-control-suppressed start announcements without consuming the attempt limit. */
+  retrySuppressedPointRoundAnnouncements?: boolean;
   /** Whether cancelling funded rounds queues the shared refund notice. Defaults to true. */
   pointRoundCancellationNotice?: boolean;
   /** Formats the persisted result of a resolved points round for retryable chat delivery. */

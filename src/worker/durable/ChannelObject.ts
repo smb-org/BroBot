@@ -279,10 +279,11 @@ import {
 type PointRoundChatResult = Awaited<ReturnType<ModuleAlarmContext["sendChat"]>>;
 type PointRoundDeliveryOutcome = "rate_limited" | "failed" | "delivered" | "ambiguous";
 
-const pointRoundDeliveryOutcome = (delivery: PointRoundChatResult): PointRoundDeliveryOutcome => {
+const pointRoundDeliveryOutcome = (delivery: PointRoundChatResult, retrySuppressed = false): PointRoundDeliveryOutcome => {
   if (delivery.sent || delivery.delivery === "delivered") return "delivered";
   if (delivery.delivery === "ambiguous") return "ambiguous";
-  if (delivery.delivery === "rate_limited" || (delivery.delivery === "not_attempted" && delivery.retryable)) {
+  if (delivery.delivery === "rate_limited" ||
+      (delivery.delivery === "not_attempted" && (delivery.retryable || retrySuppressed))) {
     return "rate_limited";
   }
   return "failed";
@@ -5848,8 +5849,19 @@ export class ChannelObject extends DurableObject<Env> {
     roundId: string,
     state: "rate_limited" | "failed" | "delivered" | "ambiguous",
     deliveredAt: number,
+    retrySuppressed = false,
   ): Promise<void> {
     const recorded = this.ctx.storage.transactionSync(() => {
+      if (retrySuppressed && state === "rate_limited") {
+        const current = pointRoundRow(this.ctx.storage.sql, roundId);
+        if (current !== null && MODULES.find((module) => module.id === current.module_id)?.retrySuppressedPointRoundAnnouncements === true) {
+          this.ctx.storage.sql.exec(
+            "UPDATE game_rounds SET announce_attempts = ? WHERE round_id = ? AND state = 'announcing'",
+            Math.max(0, current.announce_attempts - 1),
+            roundId,
+          );
+        }
+      }
       const outcome = recordPointAnnouncementSync(
         this.ctx.storage.sql,
         roundId,
@@ -5873,8 +5885,15 @@ export class ChannelObject extends DurableObject<Env> {
       try {
         await this.notifyPointRoundAnnounced(roundId);
       } catch (error) {
+        const module = MODULES.find((candidate) => candidate.id === recorded.moduleId);
         this.ctx.storage.transactionSync(() => {
-          this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+          const current = pointRoundRow(this.ctx.storage.sql, roundId);
+          const retryAt = Date.now() + POINTS_ANNOUNCE_RETRY_MS;
+          const deadlineAt = module?.preservePointRoundDeadlineOnAnnouncementFailure === true && current?.module_id === recorded.moduleId
+            ? current.deadline_at
+            : null;
+          this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId),
+            deadlineAt === null ? retryAt : Math.min(retryAt, deadlineAt));
         });
         await this.scheduleEarliestAlarm();
         throw error;
@@ -6050,7 +6069,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (currentRound.deadline_at === null && module?.onPointRoundDeadline === undefined) return;
       const deadlineAt = currentRound.deadline_at ?? now;
       if (deadlineAt > now) {
-        if (preparedOnOpen) {
+        if (preparedOnOpen || module?.preservePointRoundDeadlineOnAnnouncementFailure === true) {
           this.ctx.storage.transactionSync(() => { this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), deadlineAt); });
           await this.scheduleEarliestAlarm();
         }
@@ -6215,6 +6234,9 @@ export class ChannelObject extends DurableObject<Env> {
         ...(action.pointWelcome === undefined ? {} : { pointWelcome: action.pointWelcome }),
       },
     );
+    const retrySuppressed = module?.retrySuppressedPointRoundAnnouncements === true &&
+      delivery.delivery === "not_attempted" && !delivery.retryable &&
+      (delivery.reason === "channel_paused" || delivery.reason === "channel_muted");
     await this.reportPointRoundWelcomeDelivery(
       action,
       pointWelcomeDelivery(delivery),
@@ -6224,8 +6246,9 @@ export class ChannelObject extends DurableObject<Env> {
     const sendReturnedAt = Date.now();
     await this.recordPointRoundAnnouncement(
       roundId,
-      pointRoundDeliveryOutcome(delivery),
+      pointRoundDeliveryOutcome(delivery, retrySuppressed),
       delivery.delivery === "ambiguous" ? delivery.attemptedAt ?? attemptAt : sendReturnedAt,
+      retrySuppressed,
     );
   }
 

@@ -44,6 +44,8 @@ export const quizModule: BotModule<typeof quizSettingsSchema> = {
   alarms: [{ ...quizSessionControlAlarm, onScheduleInputsChanged: onQuizScheduleInputsChanged }],
   serializeLifecycleMutations: true,
   serializePointRoundDeadline: true,
+  preservePointRoundDeadlineOnAnnouncementFailure: true,
+  retrySuppressedPointRoundAnnouncements: true,
   pointRoundCancellationNotice: false,
   overlayRealtimeElementKinds: ["quiz.session"],
   formatPointRoundAnnouncement: formatQuizPointRoundAnnouncement,
