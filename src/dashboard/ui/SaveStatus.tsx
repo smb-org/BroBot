@@ -22,7 +22,7 @@ export interface SaveStatusProps {
   mobileFixed?: boolean;
   warnings?: readonly string[];
   warningStatusLabel?: (warnings: readonly string[], saved: boolean) => ReactNode;
-  conflict?: { message: string; reloadLabel: string; onReload: () => void };
+  conflict?: { message: string; reloadLabel: string; onReload: () => void; reloadPending?: boolean };
   discardOnConflict?: boolean;
   footer?: ReactNode;
   destructive?: ReactNode;
@@ -132,7 +132,7 @@ export function SaveStatus({
                 <span aria-hidden={pending}>{saveLabel}</span>
                 <span aria-hidden={!pending}>{pendingLabel}</span>
               </span>
-            </Button> : <Button className="ui-save-bar__reload" variant="neutral" icon="reload" onClick={conflict.onReload} disabled={pending}>{conflict.reloadLabel}</Button> : null}
+            </Button> : <Button className="ui-save-bar__reload" variant="neutral" icon="reload" onClick={conflict.onReload} disabled={pending || conflict.reloadPending === true}>{conflict.reloadLabel}</Button> : null}
           </div>
         </div>
       ) : null}

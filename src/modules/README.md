@@ -1405,6 +1405,21 @@ Das Abschalten des Moduls erstattet alle noch offenen Einsätze
 Abklingzeit und optionale Chancenwerte. Der feste Befehl, Nachrichtenvariablen
 und Paneltexte sind zweisprachig in Modul- und Panelkatalogen hinterlegt.
 
+### Quiz (`quiz`)
+
+Quiz verwaltet kanalbezogene Fragensets in `quiz_sets` und ihre geordneten Fragen
+in `quiz_questions`. Es benötigt das Punkte-Modul, enthält aber in diesem Slice
+weder Chatbefehle noch Sitzungs- oder Spielablauf. Beim ersten Aktivieren erhält
+ein leerer Kanal ein fünf Fragen kleines Beispielset in seiner Kanalsprache;
+beim erneuten Aktivieren bleiben vorhandene Sets erhalten.
+
+Das Panel erlaubt höchstens 50 Sets je Kanal und 100 Fragen je Set. Fragetexte
+sind auf 200 Zeichen, Antwortoptionen auf 80 Zeichen begrenzt; jede Frage hat
+zwei bis vier Optionen und genau einen markierten Lösungseintrag. Änderungen
+werden als Entwurf gesammelt und explizit gespeichert. Set- und Fragenmutationen
+verwenden die FAQ-Autorisierung und den Audit-Batch; die Revisionstrigger der
+beiden Tabellen aktualisieren `module:quiz:data`.
+
 ## Checkliste für ein neues Modul
 
 - [ ] **Contract:** `id`, `navigationCategory`, `settingsSchema`, `defaultSettings`; nur benötigte optionale Felder (`eventSubTypes`, `routes`, `panel` oder `settingsEditor` lazy, `defaultEnabled` bewusst gewählt). Bei Secrets, Ballots oder aktiven Chattern die jeweilige Deklaration und den Zugriff nur über den Kontext nutzen.

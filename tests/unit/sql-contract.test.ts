@@ -231,6 +231,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["blockGuard.sql", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["textBlockGuard?.sql ?? \"\"", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["commandCollisionGuard?.sql ?? \"\"", moduleCommandCollisionWriteGuard("channel-id", ["!duel"], MODULES).sql],
+  ["saveSucceeded", "1 = 1"],
   ["stateGuard?.sql ?? \"\"", `AND EXISTS (
         SELECT 1 FROM channel_modules AS required_module
          WHERE required_module.channel_id = ? AND required_module.module_id = ? AND required_module.enabled = 1
@@ -357,10 +358,10 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(70);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(57);
-      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(135);
-      expect(objects).toHaveLength(262);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(72);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(58);
+      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(143);
+      expect(objects).toHaveLength(273);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

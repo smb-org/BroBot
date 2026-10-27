@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 export interface UseDraftResult<T> {
   value: T;
@@ -8,6 +8,8 @@ export interface UseDraftResult<T> {
   reset: () => void;
   /** Accepts a successful server value as the new clean baseline. */
   accept: (value: T) => void;
+  /** Advances the committed value without replacing edits made after a save started. */
+  advanceBaseline: (value: T) => void;
 }
 
 /**
@@ -23,7 +25,8 @@ export const useDraft = <T,>(initial: T, initiallyDirty = false): UseDraftResult
   const [value, setValue] = useState(initial);
   const [forcedDirty, setForcedDirty] = useState(initiallyDirty);
   const dirty = forcedDirty || JSON.stringify(value) !== JSON.stringify(baseline);
-  const reset = (): void => { setValue(baseline); setForcedDirty(false); };
-  const accept = (next: T): void => { setBaseline(next); setValue(next); setForcedDirty(false); };
-  return { value, setValue, dirty, reset, accept };
+  const reset = useCallback((): void => { setValue(baseline); setForcedDirty(false); }, [baseline]);
+  const accept = useCallback((next: T): void => { setBaseline(next); setValue(next); setForcedDirty(false); }, []);
+  const advanceBaseline = useCallback((next: T): void => { setBaseline(next); setForcedDirty(false); }, []);
+  return { value, setValue, dirty, reset, accept, advanceBaseline };
 };

@@ -21,6 +21,7 @@ const iconNames: Readonly<Record<IconName, true>> = {
   boss: true,
   blitz: true,
   duel: true,
+  quiz: true,
   counter: true,
   "test-message": true,
   marker: true,
