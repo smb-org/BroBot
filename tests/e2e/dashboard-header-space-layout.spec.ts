@@ -62,19 +62,27 @@ for (const locale of ["de-DE", "en-US"] as const) {
         await page.goto(`/channels/${channelId}/overview`);
         await expect(page.locator(".dashboard-header__stream")).toHaveAttribute("data-state", "live");
 
-        const mode = page.locator(".dashboard-header__mode");
         const targetMode = page.getByRole("button", { name: expectedMode === "live" ? /^Live$/ : /^(Einrichten|Setup)$/ });
         await targetMode.click();
         await expect(targetMode).toHaveAttribute("aria-pressed", "true");
 
-        const controls = page.locator(
+        const controlsSelector =
           ".dashboard-shell__burger, .dashboard-header__mode button, .dashboard-header__start a, .dashboard-header__start button, .dashboard-header__start [role='combobox'], " +
-          ".dashboard-header__end a, .dashboard-header__end button, .dashboard-header__end [role='combobox']",
-        );
+          ".dashboard-header__end a, .dashboard-header__end button, .dashboard-header__end [role='combobox']";
 
         for (const width of widths) {
           await page.setViewportSize({ width, height: 900 });
-          const layout = await page.evaluate(() => {
+          // Wait for the browser to apply the new viewport and lay out each header cell before measuring it.
+          await page.waitForFunction((expectedWidth) => {
+            if (window.innerWidth !== expectedWidth) return false;
+            return [".dashboard-header", ".dashboard-header__start", ".dashboard-header__mode", ".dashboard-header__end"]
+              .every((selector) => {
+                const box = document.querySelector<HTMLElement>(selector)?.getBoundingClientRect();
+                return box !== undefined && box.width > 0 && box.height > 0;
+              });
+          }, width);
+
+          const geometry = await page.evaluate((selector) => {
             const header = document.querySelector<HTMLElement>(".dashboard-header");
             const headerBox = header?.getBoundingClientRect();
             if (headerBox === undefined) return null;
@@ -102,32 +110,41 @@ for (const locale of ["de-DE", "en-US"] as const) {
             }
             const value = document.querySelector<HTMLElement>(".dashboard-header__channel-select .ui-select__value");
             const valueBox = value?.getBoundingClientRect();
-            if (value === null || valueBox === undefined || getComputedStyle(value).display === "none") {
-              return { violations, visibleChannelName: null, eightCh: null };
+            const valueIsVisible = value !== null && valueBox !== undefined && getComputedStyle(value).display !== "none";
+            let visibleChannelName: number | null = null;
+            let eightCh: number | null = null;
+            if (valueIsVisible) {
+              visibleChannelName = valueBox.width;
+              const context = document.createElement("canvas").getContext("2d");
+              if (context === null) eightCh = Number.POSITIVE_INFINITY;
+              else {
+                context.font = getComputedStyle(value).font;
+                eightCh = context.measureText("0").width * 8;
+              }
             }
-            const canvas = document.createElement("canvas");
-            const context = canvas.getContext("2d");
-            if (context === null) return { violations, visibleChannelName: valueBox.width, eightCh: Number.POSITIVE_INFINITY };
-            context.font = getComputedStyle(value).font;
-            return { violations, visibleChannelName: valueBox.width, eightCh: context.measureText("0").width * 8 };
-          });
+            const modeWidth = document.querySelector<HTMLElement>(".dashboard-header__mode")?.getBoundingClientRect().width ?? null;
+            const controlHits = [...document.querySelectorAll<HTMLElement>(selector)].flatMap((element) => {
+              const style = getComputedStyle(element);
+              const box = element.getBoundingClientRect();
+              if (style.display === "none" || style.visibility === "hidden" || box.width === 0 || box.height === 0) return [];
+              const target = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+              return [{
+                label: element.getAttribute("aria-label") || element.className || element.tagName,
+                hit: target !== null && (target === element || element.contains(target)),
+              }];
+            });
+            return { violations, visibleChannelName, eightCh, modeWidth, controlHits };
+          }, controlsSelector);
 
-          expect(layout, `layout data at ${String(width)}px`).not.toBeNull();
-          expect(layout?.violations, `topbar items fit their cells at ${String(width)}px`).toEqual([]);
-          if (width > 768 && layout?.visibleChannelName !== null) {
-            expect(layout?.visibleChannelName ?? 0, `channel name has eight visible ch at ${String(width)}px`).toBeGreaterThanOrEqual(layout?.eightCh ?? Number.POSITIVE_INFINITY);
+          expect(geometry, `layout data at ${String(width)}px`).not.toBeNull();
+          expect(geometry?.violations, `topbar items fit their cells at ${String(width)}px`).toEqual([]);
+          if (width > 768 && geometry?.visibleChannelName !== null) {
+            expect(geometry?.visibleChannelName ?? 0, `channel name has eight visible ch at ${String(width)}px`).toBeGreaterThanOrEqual(geometry?.eightCh ?? Number.POSITIVE_INFINITY);
           }
 
-          const modeBox = await mode.boundingBox();
-          expect(modeBox, `mode switch exists at ${String(width)}px`).not.toBeNull();
-          for (const control of await controls.all()) {
-            if (!(await control.isVisible())) continue;
-            const hit = await control.evaluate((element) => {
-              const box = element.getBoundingClientRect();
-              const target = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-              return target !== null && (target === element || element.contains(target));
-            });
-            expect(hit, `control center is hit-testable at ${String(width)}px`).toBe(true);
+          expect(geometry?.modeWidth ?? 0, `mode switch exists at ${String(width)}px`).toBeGreaterThan(0);
+          for (const control of geometry?.controlHits ?? []) {
+            expect(control.hit, `${control.label} center is hit-testable at ${String(width)}px`).toBe(true);
           }
         }
       });
