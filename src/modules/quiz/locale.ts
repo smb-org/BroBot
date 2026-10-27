@@ -8,6 +8,7 @@ export interface QuizPanelTexts {
   searchPlaceholder: string;
   clearSearch: string;
   newSet: string;
+  creatingSet: string;
   page: (current: number, total: number) => string;
   previousPage: string;
   nextPage: string;
@@ -35,9 +36,11 @@ export interface QuizPanelTexts {
   discard: string;
   saved: string;
   saving: string;
+  draftChangedWhileSaving: string;
   saveError: string;
   conflict: string;
   reload: string;
+  reloading: string;
   validationError: (code: QuizSetValidationCode) => string;
   maximumSets: string;
   createError: string;
@@ -45,6 +48,7 @@ export interface QuizPanelTexts {
   deleteTitle: string;
   deleteDescription: string;
   deleteError: string;
+  deleting: string;
   confirm: string;
   cancel: string;
   unsavedTitle: string;
@@ -93,6 +97,7 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     searchPlaceholder: "Nach Namen suchen",
     clearSearch: "Suche löschen",
     newSet: "Neues Set",
+    creatingSet: "Set wird erstellt …",
     page: (current, total) => `Seite ${String(current)} von ${String(total)}`,
     previousPage: "Vorherige Seite",
     nextPage: "Nächste Seite",
@@ -120,9 +125,11 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     discard: "Verwerfen",
     saved: "Gespeichert",
     saving: "Speichert …",
+    draftChangedWhileSaving: "Der Entwurf hat sich während des Speicherns geändert. Speichere erneut.",
     saveError: "Das Set konnte nicht gespeichert werden.",
     conflict: "Das Set wurde zwischenzeitlich geändert.",
     reload: "Neu laden",
+    reloading: "Wird neu geladen …",
     validationError: (code) => ({
       invalid_set: "Prüfe die Eingaben und versuche es erneut.",
       set_name_required: "Gib einen Namen für das Set ein.",
@@ -141,6 +148,7 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     deleteTitle: "Dieses Quiz-Set löschen?",
     deleteDescription: "Das Set und alle zugehörigen Fragen werden gelöscht.",
     deleteError: "Das Set konnte nicht gelöscht werden.",
+    deleting: "Wird gelöscht …",
     confirm: "Set löschen",
     cancel: "Abbrechen",
     unsavedTitle: "Änderungen noch nicht gespeichert",
@@ -157,6 +165,7 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     searchPlaceholder: "Search by name",
     clearSearch: "Clear search",
     newSet: "New set",
+    creatingSet: "Creating set …",
     page: (current, total) => `Page ${String(current)} of ${String(total)}`,
     previousPage: "Previous page",
     nextPage: "Next page",
@@ -184,9 +193,11 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     discard: "Discard",
     saved: "Saved",
     saving: "Saving …",
+    draftChangedWhileSaving: "The draft changed while saving. Save again to include the latest edits.",
     saveError: "The set could not be saved.",
     conflict: "The set changed while you were editing it.",
     reload: "Reload",
+    reloading: "Reloading …",
     validationError: (code) => ({
       invalid_set: "Check the fields and try again.",
       set_name_required: "Enter a name for this set.",
@@ -205,6 +216,7 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     deleteTitle: "Delete this quiz set?",
     deleteDescription: "The set and all its questions will be deleted.",
     deleteError: "The set could not be deleted.",
+    deleting: "Deleting …",
     confirm: "Delete set",
     cancel: "Cancel",
     unsavedTitle: "Unsaved changes",

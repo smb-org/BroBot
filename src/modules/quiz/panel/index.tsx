@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardLanguage } from "../../../dashboard/locale";
@@ -38,9 +38,17 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
+  const selectedSetIdRef = useRef<string | null>(null);
+  const draftGenerationRef = useRef(0);
+  const selectedGenerationRef = useRef<{ id: string | null; generation: number }>({ id: null, generation: 0 });
+  const detailSnapshotsRef = useRef(new WeakMap<QuizSet, { id: string; generation: number }>());
+  const savePromisesRef = useRef(new Map<string, Promise<string | null>>());
   const [baseline, setBaseline] = useState<QuizSet | null>(null);
   const [draft, setDraft] = useState<QuizSetInput | null>(null);
-  const [pending, setPending] = useState(false);
+  const [savingSetIds, setSavingSetIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [creating, setCreating] = useState(false);
+  const [reloadingSetIds, setReloadingSetIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [deleting, setDeleting] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>();
   const [validationCode, setValidationCode] = useState<Parameters<typeof labels.validationError>[0] | null>(null);
@@ -52,30 +60,46 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
     (signal) => loadQuizSets(channelId, page, search, signal));
   const detailPart = selectedSetId === null ? "set:none" : `set:${selectedSetId}`;
   const detailQuery = useModuleQuery(channelId, "quiz", detailPart,
-    (signal) => selectedSetId === null ? Promise.reject(new Error("quiz_set_not_selected")) : loadQuizSet(channelId, selectedSetId, signal),
+    (signal) => {
+      if (selectedSetId === null) return Promise.reject(new Error("quiz_set_not_selected"));
+      const id = selectedSetId;
+      const generation = draftGenerationRef.current;
+      return loadQuizSet(channelId, id, signal).then((loaded) => {
+        detailSnapshotsRef.current.set(loaded, { id, generation });
+        return loaded;
+      });
+    },
     { enabled: selectedSetId !== null });
   const data = collectionQuery.data;
   const isManager = canManage !== false;
+  const saving = selectedSetId !== null && savingSetIds.has(selectedSetId);
+  const reloading = selectedSetId !== null && reloadingSetIds.has(selectedSetId);
   const dirty = baseline !== null && draft !== null && JSON.stringify(draft) !== JSON.stringify(draftFromSet(baseline));
   const validated = draft === null ? null : validateQuizSet(draft);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- A server snapshot initializes the selected editor draft and clean external revisions. */
   useEffect(() => {
     const loaded = detailQuery.data;
     if (loaded === undefined || loaded.id !== selectedSetId) return;
     const selectedChanged = baseline?.id !== loaded.id;
     const baselineRevision = baseline?.revision;
     const cleanRevisionChanged = !dirty && baselineRevision !== undefined && loaded.revision > baselineRevision;
-    if (!selectedChanged && !cleanRevisionChanged) return;
+    if (selectedSetIdRef.current !== loaded.id) return;
+    const selection = selectedGenerationRef.current;
+    const request = detailSnapshotsRef.current.get(loaded);
+    const currentRequest = request?.id === loaded.id && request.generation === draftGenerationRef.current;
+    const currentSelection = selectedChanged && selection.id === loaded.id && selection.generation === draftGenerationRef.current && currentRequest;
+    const currentCleanRefresh = !selectedChanged && cleanRevisionChanged && currentRequest;
+    if (!currentSelection && !currentCleanRefresh) return;
+    draftGenerationRef.current += 1;
     setBaseline(loaded);
     setDraft(draftFromSet(loaded));
     setValidationCode(null);
     setSaveError(undefined);
     setConflicted(false);
   }, [baseline?.id, baseline?.revision, detailQuery.data, dirty, selectedSetId]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   const markDirty = (next: QuizSetInput): void => {
+    draftGenerationRef.current += 1;
     setDraft(next);
     setSaved(false);
     setSaveError(undefined);
@@ -83,50 +107,73 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
   };
 
   const discardDraft = (): void => {
+    draftGenerationRef.current += 1;
     if (baseline !== null) setDraft(draftFromSet(baseline));
     setValidationCode(null);
     setSaveError(undefined);
     setSaved(false);
   };
 
-  const saveDraft = async (): Promise<string | null> => {
-    if (baseline === null || draft === null) return null;
+  const saveDraft = (): Promise<string | null> => {
+    if (baseline === null || draft === null) return Promise.resolve(null);
+    if (selectedSetIdRef.current !== baseline.id) return Promise.resolve(null);
+    const existingSave = savePromisesRef.current.get(baseline.id);
+    if (existingSave !== undefined) return existingSave;
     const check = validateQuizSet(draft);
     if (!check.ok) {
       setValidationCode(check.code);
-      return labels.validationError(check.code);
+      return Promise.resolve(labels.validationError(check.code));
     }
-    setPending(true);
+    const selectedId = baseline.id;
+    const generation = draftGenerationRef.current;
+    setSavingSetIds((current) => new Set(current).add(selectedId));
     setSaveError(undefined);
-    try {
-      const savedSet = await runModuleQueryWrite(
-        queryClient,
-        channelId,
-        "quiz",
-        `set:${baseline.id}`,
-        (baselineRevision) => saveQuizSet(channelId, baseline.id, baselineRevision ?? baseline.revision, check.value),
-        { baselineRevision: baseline.revision, updateCache: (_current, saved) => saved },
-      );
-      setBaseline(savedSet);
-      setDraft(draftFromSet(savedSet));
-      setSaved(true);
-      setValidationCode(null);
-      setConflicted(false);
-      await queryClient.invalidateQueries({
-        predicate: (query) => isQuizQuery(channelId, query) && typeof query.queryKey[4] === "string" && query.queryKey[4].startsWith("sets:"),
-      });
-      return null;
-    } catch (error: unknown) {
-      const code = quizErrorCode(error);
-      if (code === "quiz_set_conflict" || code === "quiz_set_deleted") setConflicted(true);
-      const message = code === "quiz_set_conflict" || code === "quiz_set_deleted"
-        ? labels.conflict
-        : code === "quiz_set_not_found" ? labels.conflict : labels.saveError;
-      setSaveError(message);
-      return message;
-    } finally {
-      setPending(false);
-    }
+    let operation: Promise<string | null> = Promise.resolve(null);
+    operation = (async (): Promise<string | null> => {
+      let obsoleteDraftMessage: string | undefined;
+      try {
+        const savedSet = await runModuleQueryWrite(
+          queryClient,
+          channelId,
+          "quiz",
+          `set:${baseline.id}`,
+          (baselineRevision) => saveQuizSet(channelId, baseline.id, baselineRevision ?? baseline.revision, check.value),
+          { baselineRevision: baseline.revision, updateCache: (_current, saved) => saved },
+        );
+        if (selectedSetIdRef.current === selectedId && draftGenerationRef.current === generation) {
+          draftGenerationRef.current += 1;
+          setBaseline(savedSet);
+          setDraft(draftFromSet(savedSet));
+          setSaved(true);
+          setValidationCode(null);
+          setConflicted(false);
+        } else if (selectedSetIdRef.current === selectedId) {
+          obsoleteDraftMessage = labels.draftChangedWhileSaving;
+        }
+        await queryClient.invalidateQueries({
+          predicate: (query) => isQuizQuery(channelId, query) && typeof query.queryKey[4] === "string" && query.queryKey[4].startsWith("sets:"),
+        });
+        return obsoleteDraftMessage ?? null;
+      } catch (error: unknown) {
+        if (selectedSetIdRef.current !== selectedId || draftGenerationRef.current !== generation) return null;
+        const code = quizErrorCode(error);
+        if (code === "quiz_set_conflict" || code === "quiz_set_deleted") setConflicted(true);
+        const message = code === "quiz_set_conflict" || code === "quiz_set_deleted"
+          ? labels.conflict
+          : code === "quiz_set_not_found" ? labels.conflict : labels.saveError;
+        setSaveError(message);
+        return message;
+      } finally {
+        if (savePromisesRef.current.get(selectedId) === operation) savePromisesRef.current.delete(selectedId);
+        setSavingSetIds((current) => {
+          const next = new Set(current);
+          next.delete(selectedId);
+          return next;
+        });
+      }
+    })();
+    savePromisesRef.current.set(selectedId, operation);
+    return operation;
   };
 
   const guard = useDraftGuard(dirty, saveDraft, discardDraft);
@@ -135,60 +182,108 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
 
   const createSet = async (): Promise<void> => {
     if (!isManager) return;
+    const selectedId = selectedSetIdRef.current;
+    const generation = draftGenerationRef.current;
+    setCreating(true);
     try {
       const created = await createQuizSet(channelId, labels.newSet);
-      setBaseline(created);
-      setDraft(draftFromSet(created));
-      setSelectedSetId(created.id);
-      setSaved(false);
-      setSaveError(undefined);
+      if (selectedSetIdRef.current === selectedId && draftGenerationRef.current === generation) {
+        setBaseline(created);
+        setDraft(draftFromSet(created));
+        selectSet(created.id);
+        setSaved(false);
+        setSaveError(undefined);
+        setConflicted(false);
+        setValidationCode(null);
+      }
       await queryClient.invalidateQueries({ predicate: (query) => isQuizQuery(channelId, query) });
     } catch (error: unknown) {
+      if (selectedSetIdRef.current !== selectedId || draftGenerationRef.current !== generation) return;
       const code = quizErrorCode(error);
       setSaveError(code === "quiz_set_limit_reached" ? labels.maximumSets : labels.createError);
+    } finally {
+      setCreating(false);
     }
   };
+
+  function selectSet(setId: string | null): void {
+    if (selectedSetIdRef.current === setId) return;
+    selectedSetIdRef.current = setId;
+    draftGenerationRef.current += 1;
+    selectedGenerationRef.current = { id: setId, generation: draftGenerationRef.current };
+    setSelectedSetId(setId);
+  }
 
   const chooseSet = (setId: string): void => {
     if (setId === selectedSetId) return;
     requestSwitch(() => {
-      setSelectedSetId(setId);
+      selectSet(setId);
       setSaved(false);
       setSaveError(undefined);
+      setConflicted(false);
+      setValidationCode(null);
     });
   };
 
   const removeSet = async (): Promise<void> => {
-    if (baseline === null) return;
-    setPending(true);
+    if (baseline === null || selectedSetIdRef.current !== baseline.id) return;
+    const selectedId = baseline.id;
+    const generation = draftGenerationRef.current;
+    setDeleting(true);
     setDeleteError(undefined);
     try {
       await deleteQuizSet(channelId, baseline.id, baseline.revision);
-      setDeleteOpen(false);
-      setSelectedSetId(null);
-      setBaseline(null);
-      setDraft(null);
+      if (selectedSetIdRef.current === selectedId && draftGenerationRef.current === generation) {
+        setDeleteOpen(false);
+        selectSet(null);
+        setBaseline(null);
+        setDraft(null);
+        setConflicted(false);
+        setSaveError(undefined);
+      }
       await queryClient.invalidateQueries({ predicate: (query) => isQuizQuery(channelId, query) });
     } catch {
-      setDeleteError(labels.deleteError);
+      if (selectedSetIdRef.current === selectedId && draftGenerationRef.current === generation) setDeleteError(labels.deleteError);
     } finally {
-      setPending(false);
+      setDeleting(false);
     }
   };
 
   const reloadConflict = async (): Promise<void> => {
-    if (selectedSetId === null) return;
+    const selectedId = selectedSetIdRef.current;
+    if (selectedId === null) return;
+    const generation = draftGenerationRef.current;
+    setReloadingSetIds((current) => new Set(current).add(selectedId));
     let reloaded: QuizSet;
     try {
-      reloaded = await refetchModuleQueryData<QuizSet>(queryClient, channelId, "quiz", `set:${selectedSetId}`);
+      reloaded = await refetchModuleQueryData<QuizSet>(queryClient, channelId, "quiz", `set:${selectedId}`);
     } catch {
+      setReloadingSetIds((current) => {
+        const next = new Set(current);
+        next.delete(selectedId);
+        return next;
+      });
       return; // Keep the draft and the conflict state when the reload fails.
     }
+    if (selectedSetIdRef.current !== selectedId || draftGenerationRef.current !== generation) {
+      setReloadingSetIds((current) => {
+        const next = new Set(current);
+        next.delete(selectedId);
+        return next;
+      });
+      return;
+    }
+    draftGenerationRef.current += 1;
     setBaseline(reloaded);
     setDraft(draftFromSet(reloaded));
     setConflicted(false);
     setSaveError(undefined);
     setValidationCode(null);
+    setReloadingSetIds((current) => {
+      const next = new Set(current);
+      next.delete(selectedId);
+      return next;
+    });
   };
 
   const updateQuestion = (index: number, change: (question: QuizSetInput["questions"][number]) => QuizSetInput["questions"][number]): void => {
@@ -216,7 +311,7 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
         value={draft.name}
         onChange={(name) => { markDirty({ ...draft, name }); }}
         placeholder={labels.setNamePlaceholder}
-        disabled={!isManager || pending}
+        disabled={!isManager}
         errorInDescription
         {...(validationCode === "set_name_required" ? { error: labels.validationError(validationCode) } : {})}
       />
@@ -226,7 +321,7 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
           icon="add"
           variant="secondary"
           onClick={() => markDirty({ ...draft, questions: [...draft.questions, { text: "", options: ["", ""], correctIndex: 0, enabled: true }] })}
-          disabled={!isManager || pending || draft.questions.length >= QUIZ_QUESTION_MAXIMUM_COUNT}
+          disabled={!isManager || draft.questions.length >= QUIZ_QUESTION_MAXIMUM_COUNT}
         >{labels.addQuestion}</Button>
       </div>
       <div className="quiz-question-list">
@@ -235,9 +330,9 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
             <div className="quiz-question__heading">
               <h3>{labels.question(questionIndex + 1)}</h3>
               <div className="quiz-question__actions">
-                <Button variant="subtle" icon="sortAscending" iconOnly ariaLabel={labels.moveUp(questionIndex + 1)} disabled={!isManager || pending || questionIndex === 0} onClick={() => reorderQuestion(questionIndex, -1)} />
-                <Button variant="subtle" icon="sortDescending" iconOnly ariaLabel={labels.moveDown(questionIndex + 1)} disabled={!isManager || pending || questionIndex === draft.questions.length - 1} onClick={() => reorderQuestion(questionIndex, 1)} />
-                <Button variant="subtle" icon="remove" iconOnly ariaLabel={labels.removeQuestion(questionIndex + 1)} disabled={!isManager || pending} onClick={() => {
+                <Button variant="subtle" icon="sortAscending" iconOnly ariaLabel={labels.moveUp(questionIndex + 1)} disabled={!isManager || questionIndex === 0} onClick={() => reorderQuestion(questionIndex, -1)} />
+                <Button variant="subtle" icon="sortDescending" iconOnly ariaLabel={labels.moveDown(questionIndex + 1)} disabled={!isManager || questionIndex === draft.questions.length - 1} onClick={() => reorderQuestion(questionIndex, 1)} />
+                <Button variant="subtle" icon="remove" iconOnly ariaLabel={labels.removeQuestion(questionIndex + 1)} disabled={!isManager} onClick={() => {
                   markDirty({ ...draft, questions: draft.questions.filter((_, index) => index !== questionIndex) });
                 }} />
               </div>
@@ -250,7 +345,7 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
               maxLength={QUIZ_QUESTION_TEXT_MAXIMUM_LENGTH}
               countLength={characterCount}
               countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
-              disabled={!isManager || pending}
+              disabled={!isManager}
               errorInDescription
               {...(validationCode === "question_text_required" && question.text.trim().length === 0 ? { error: labels.validationError(validationCode) } : {})}
             />
@@ -266,7 +361,7 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
                       checked={question.correctIndex === optionIndex}
                       onChange={() => updateQuestion(questionIndex, (current) => ({ ...current, correctIndex: optionIndex }))}
                       ariaLabel={labels.correctAnswer(optionIndex + 1, questionIndex + 1)}
-                      disabled={!isManager || pending}
+                      disabled={!isManager}
                     />
                     <Field
                       label={labels.option(optionIndex + 1)}
@@ -278,7 +373,7 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
                       maxLength={QUIZ_OPTION_MAXIMUM_LENGTH}
                       countLength={characterCount}
                       countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
-                      disabled={!isManager || pending}
+                      disabled={!isManager}
                       className="quiz-option-chip__field"
                       errorInDescription
                       {...(validationCode === "option_invalid" && option.trim().length === 0 ? { error: labels.optionRequired } : {})}
@@ -288,7 +383,7 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
                       icon="remove"
                       iconOnly
                       ariaLabel={labels.removeOption(optionIndex + 1)}
-                      disabled={!isManager || pending}
+                      disabled={!isManager}
                       onClick={() => updateQuestion(questionIndex, (current) => ({
                         ...current,
                         options: current.options.filter((_, index) => index !== optionIndex),
@@ -304,14 +399,14 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
                 variant="subtle"
                 icon="add"
                 onClick={() => updateQuestion(questionIndex, (current) => ({ ...current, options: [...current.options, ""] }))}
-                disabled={!isManager || pending}
+                disabled={!isManager}
               >{labels.addOption}</Button> : null}
             </fieldset>
             <SwitchRow
               label={labels.enabled}
               checked={question.enabled}
               onChange={(enabled) => updateQuestion(questionIndex, (current) => ({ ...current, enabled }))}
-              disabled={!isManager || pending}
+              disabled={!isManager}
             />
           </section>
         ))}
@@ -324,12 +419,12 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
     <SaveStatus
       persistent
       dirty={dirty}
-      pending={pending}
+      pending={saving}
       saved={saved}
       {...(saveError === undefined ? {} : { error: saveError })}
       invalid={validated !== null && !validated.ok}
       {...(validationCode === null ? {} : { invalidMessage: labels.validationError(validationCode) })}
-      {...(conflicted ? { conflict: { message: labels.conflict, reloadLabel: labels.reload, onReload: () => { void reloadConflict(); } } } : {})}
+      {...(conflicted ? { conflict: { message: labels.conflict, reloadLabel: reloading ? labels.reloading : labels.reload, reloadPending: reloading, onReload: () => { void reloadConflict(); } } } : {})}
       onSave={() => { void saveDraft(); }}
       onInvalidSave={() => {
         if (validated !== null && !validated.ok) setValidationCode(validated.code);
@@ -339,8 +434,8 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
       discardLabel={labels.discard}
       savedLabel={labels.saved}
       pendingLabel={labels.saving}
-      saveDisabled={!isManager || baseline === null || pending}
-      discardDisabled={!isManager || pending}
+      saveDisabled={!isManager || baseline === null}
+      discardDisabled={!isManager}
     />
   );
 
@@ -359,10 +454,10 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
         <Button
           variant="primary"
           icon="add"
-          disabled={!isManager || pending || createReason !== undefined}
+          disabled={!isManager || creating || createReason !== undefined}
           {...(createReason === undefined ? {} : { describedBy: "quiz-create-reason" })}
           onClick={() => requestSwitch(() => { void createSet(); })}
-        >{labels.newSet}</Button>
+        >{creating ? labels.creatingSet : labels.newSet}</Button>
       </div>
       <div className="quiz-collection-pagination" aria-label={labels.page(page, totalPages)}>
         <Button variant="subtle" icon="chevron-left" iconOnly ariaLabel={labels.previousPage} disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} />
@@ -378,7 +473,6 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
       className={`quiz-set-row${selectedSetId === set.id ? " is-selected" : ""}`}
       type="button"
       aria-pressed={selectedSetId === set.id}
-      disabled={pending}
       key={set.id}
       onClick={() => chooseSet(set.id)}
     >
@@ -389,10 +483,10 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
 
   const selectedLoaded = detailQuery.data?.id === selectedSetId;
   const empty = data !== undefined && data.total === 0;
-  const detail = selectedLoaded && questionEditor !== null ? (
+  const detail = selectedLoaded && baseline?.id === selectedSetId && questionEditor !== null ? (
     <section className="module-stack quiz-detail" aria-label={labels.title}>
       <div className="quiz-detail__toolbar">
-        {baseline !== null && isManager ? <Button variant="subtle" icon="remove" disabled={pending} onClick={() => { setDeleteError(undefined); setDeleteOpen(true); }}>{labels.delete}</Button> : null}
+        {isManager ? <Button variant="subtle" icon="remove" disabled={deleting} onClick={() => { setDeleteError(undefined); setDeleteOpen(true); }}>{deleting ? labels.deleting : labels.delete}</Button> : null}
       </div>
       {questionEditor}
     </section>
@@ -419,7 +513,7 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
       empty={collectionQuery.isError ? labels.saveError : labels.noSets}
       detail={detail}
       detailOpen={selectedSetId !== null}
-      onCloseDetail={() => guard.guardSwitch(() => { setSelectedSetId(null); })}
+      onCloseDetail={() => guard.guardSwitch(() => { selectSet(null); })}
       closeDetailDisabled={guard.confirmOpen}
       backLabel={labels.selectSet}
     />
@@ -439,12 +533,12 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
       opened={deleteOpen}
       title={labels.deleteTitle}
       description={labels.deleteDescription}
-      confirmLabel={labels.confirm}
+      confirmLabel={deleting ? labels.deleting : labels.confirm}
       cancelLabel={labels.cancel}
       danger
       onConfirm={() => { void removeSet(); }}
       onCancel={() => { setDeleteOpen(false); }}
-      pending={pending}
+      pending={deleting}
       {...(deleteError === undefined ? {} : { error: deleteError })}
     />
   </section>;
