@@ -3622,7 +3622,7 @@ export class ChannelObject extends DurableObject<Env> {
           attemptedAt = claim?.at;
         }
         const reason = suppression.reason ?? result.reason;
-        const retryable = suppression.reason === null && result.reason !== "stale_before_send" &&
+        const retryable = !result.sent && suppression.reason === null && result.reason !== "stale_before_send" &&
           result.reason !== "already_attempted" && result.delivery !== "ambiguous";
         const ambiguous = result.reason === "already_attempted"
           ? hasPersistedSendClaim
