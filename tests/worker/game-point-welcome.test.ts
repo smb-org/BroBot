@@ -15,8 +15,10 @@ import {
   forcePointAlarm,
   insertPointChannel,
   pointObject,
+  runPointAlarm,
   runMigrations,
   runPointObject,
+  scheduleAlarmKeyWithin,
   type PointsWorkerObject,
 } from "./points-test-helpers";
 
@@ -117,12 +119,7 @@ const runHeistConfirmation = async (
       return withoutDelivery;
     };
   }
-  try {
-    await heistConfirmAlarm.handle(context, heistConfirmAlarmKey(roundId), Date.now());
-  } catch (error) {
-    // A real send reports retryable even when delivered, so the host retries; the test plays that retry itself.
-    if (!(error instanceof Error) || error.message !== "heist_confirm_retry") throw error;
-  }
+  await heistConfirmAlarm.handle(context, heistConfirmAlarmKey(roundId), Date.now());
 });
 
 const spyOnWelcomeAcknowledgement = async (
@@ -470,6 +467,31 @@ describe("delayed game welcome replies", () => {
     expect(sendChat.mock.calls[0]?.[5]).toMatchObject({ replyToMessageId: "confirm-start-message" });
     expect(acknowledge).toHaveBeenCalledOnce();
     expect(await object.touchPointAccount("points", viewerId, viewerLogin, startBonus)).toMatchObject({ welcomePending: false });
+  });
+
+  it("does not schedule a retry after a heist confirmation is delivered", async () => {
+    const channelId = `game-welcome-heist-confirm-no-retry-${crypto.randomUUID()}`;
+    const settings = { ...heistSettingsForLanguage("de"), startTextEnabled: false, resultTextEnabled: false };
+    const object = await dispatchGameCommand(channelId, "heist", "confirm-no-retry-start-message", settings);
+    const roundId = await openedRoundId(object, "heist");
+    await forcePointAlarm(object, roundId);
+    await dispatchGameMessage(channelId, "heist", "confirm-no-retry-join-message", "!heist 10", "viewer_joiner", "moonmoss");
+    const messages: string[] = [];
+    prepareRealChat(messages);
+    const alarmKey = `module:heist:confirm:${roundId}`;
+    await runPointObject(object, async (_target, state) => {
+      state.storage.sql.exec("UPDATE game_rounds SET deadline_at = ? WHERE round_id = ?", Date.now() + 20_000, roundId);
+      await scheduleAlarmKeyWithin(state, alarmKey);
+    });
+
+    await runPointAlarm(object);
+
+    let confirmationAlarm: unknown;
+    await runPointObject(object, (_target, state) => {
+      confirmationAlarm = state.storage.kv.get<Record<string, unknown>>("channel:alarm_schedule")?.[alarmKey];
+    });
+    expect(messages).toHaveLength(1);
+    expect(confirmationAlarm).toBeUndefined();
   });
 
   it("keeps a welcome pending when a heist confirmation retry dedupes a send without it", async () => {
