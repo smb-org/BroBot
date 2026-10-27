@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardLanguage } from "../../../dashboard/locale";
 import {
-  Button, CollectionPage, ConfirmDialog, EmptyState, Field, Icon, ListToolbar, NativeRadio,
+  Button, CollectionPage, ConfirmDialog, EmptyState, Field, Icon, NativeRadio,
   PageHeader, SaveStatus, SwitchRow, useDraftGuard,
 } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
@@ -212,10 +212,9 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
         onChange={(name) => { markDirty({ ...draft, name }); }}
         placeholder={labels.setNamePlaceholder}
         disabled={!isManager || pending}
+        errorInDescription
+        {...(validationCode === "set_name_required" ? { error: labels.validationError(validationCode) } : {})}
       />
-      <div className="quiz-editor-validation" role={validationCode === null ? undefined : "alert"} aria-live="polite">
-        {validationCode === null ? null : labels.validationError(validationCode)}
-      </div>
       <div className="quiz-question-toolbar">
         <h2>{labels.questionCount(draft.questions.length)}</h2>
         <Button
@@ -247,12 +246,15 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
               countLength={characterCount}
               countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
               disabled={!isManager || pending}
+              errorInDescription
+              {...(validationCode === "question_text_required" && question.text.trim().length === 0 ? { error: labels.validationError(validationCode) } : {})}
             />
             <fieldset className="quiz-options">
               <legend>{labels.options}</legend>
+              <p className="quiz-options__hint">{labels.correctAnswerHint}</p>
               <div className="quiz-options__list">
                 {question.options.map((option, optionIndex) => (
-                  <div className="quiz-option-chip" key={optionIndex}>
+                  <div className={`quiz-option-chip${question.correctIndex === optionIndex ? " is-correct" : ""}`} key={optionIndex}>
                     <NativeRadio
                       name={`quiz-correct-${String(questionIndex)}`}
                       value={String(optionIndex)}
@@ -273,6 +275,8 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
                       countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
                       disabled={!isManager || pending}
                       className="quiz-option-chip__field"
+                      errorInDescription
+                      {...(validationCode === "option_invalid" && option.trim().length === 0 ? { error: labels.optionRequired } : {})}
                     />
                     {question.options.length > 2 ? <Button
                       variant="subtle"
@@ -335,27 +339,31 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
     />
   );
 
+  const createReason = search.trim().length === 0 && (data?.total ?? 0) >= QUIZ_SET_MAXIMUM_COUNT ? labels.maximumSets : undefined;
   const listToolbar = (
     <div className="quiz-collection-toolbar">
-      <ListToolbar
-        language={activeLanguage}
-        searchLabel={labels.search}
-        searchLabelVisible
-        searchPlaceholder={labels.searchPlaceholder}
-        searchClearLabel={labels.clearSearch}
-        searchValue={search}
-        onSearchChange={(value) => { setSearch(value); setPage(1); }}
-        create={{
-          label: labels.newSet,
-          onClick: () => requestSwitch(() => { void createSet(); }),
-          disabled: !isManager || pending || (search.trim().length === 0 && (data?.total ?? 0) >= QUIZ_SET_MAXIMUM_COUNT),
-          ...(search.trim().length === 0 && (data?.total ?? 0) >= QUIZ_SET_MAXIMUM_COUNT ? { reason: labels.maximumSets } : {}),
-        }}
-      />
+      <div className="quiz-collection-toolbar__top">
+        <Field
+          variant="search"
+          label={labels.search}
+          clearLabel={labels.clearSearch}
+          value={search}
+          onChange={(value) => { setSearch(value); setPage(1); }}
+          placeholder={labels.searchPlaceholder}
+        />
+        <Button
+          variant="primary"
+          icon="add"
+          disabled={!isManager || pending || createReason !== undefined}
+          {...(createReason === undefined ? {} : { describedBy: "quiz-create-reason" })}
+          onClick={() => requestSwitch(() => { void createSet(); })}
+        >{labels.newSet}</Button>
+      </div>
       <div className="quiz-collection-pagination" aria-label={labels.page(page, totalPages)}>
         <Button variant="subtle" icon="chevron-left" iconOnly ariaLabel={labels.previousPage} disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} />
         <span>{labels.page(page, totalPages)}</span>
         <Button variant="subtle" icon="chevron-right" iconOnly ariaLabel={labels.nextPage} disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} />
+        {createReason === undefined ? null : <span id="quiz-create-reason" className="quiz-collection-pagination__note" role="note" title={createReason}>{createReason}</span>}
       </div>
     </div>
   );

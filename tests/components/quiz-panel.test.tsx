@@ -117,6 +117,39 @@ describe("quiz set editor", () => {
     expect(writes[0]).toMatchObject({ name: "My set", revision: 1, questions: [{ text: "What is frozen water?", options: ["Ice", "Steam"], correctIndex: 0 }] });
   });
 
+  it("shows an empty option error at the option and keeps the summary in the save bar", async () => {
+    const { writes } = installFetch();
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "New set" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add question" }));
+    fireEvent.change(screen.getByLabelText("Question text"), { target: { value: "What is frozen water?" } });
+    fireEvent.change(screen.getByLabelText("Option 1"), { target: { value: "Ice" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const optionError = await screen.findByText("Must not be empty.");
+    expect(screen.getByLabelText("Option 2")).toHaveProperty("ariaInvalid", "true");
+    expect(screen.getByLabelText("Option 1").getAttribute("aria-invalid")).toBeNull();
+    expect(screen.getByLabelText("Set name").getAttribute("aria-invalid")).toBeNull();
+    expect(optionError.closest(".quiz-option-chip")).toBe(screen.getByLabelText("Option 2").closest(".quiz-option-chip"));
+    expect(screen.getAllByText(/Answer options cannot be empty\./u)).toHaveLength(1);
+    expect(writes).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("Option 2"), { target: { value: "Steam" } });
+    expect(screen.queryByText("Must not be empty.")).toBeNull();
+  });
+
+  it("shows a missing set name under the set name only", async () => {
+    installFetch();
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "New set" }));
+    fireEvent.change(await screen.findByLabelText("Set name"), { target: { value: "  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Set name").getAttribute("aria-invalid")).toBe("true"));
+  });
+
   it("publishes the saved revision before a delayed refresh and locks edits while saving", async () => {
     const fetch = installFetch({ existing: true, holdUpdatedRead: true });
     const { queryClient } = renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);

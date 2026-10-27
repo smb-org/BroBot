@@ -23,6 +23,8 @@ export interface QuizPanelTexts {
   options: string;
   option: (position: number) => string;
   correctAnswer: (option: number, question: number) => string;
+  correctAnswerHint: string;
+  optionRequired: string;
   addOption: string;
   removeOption: (position: number) => string;
   removeQuestion: (position: number) => string;
@@ -88,7 +90,7 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     title: "Fragensets",
     subtitle: "Erstelle Quizfragen für deinen Kanal.",
     search: "Sets suchen",
-    searchPlaceholder: "Nach Set-Namen suchen",
+    searchPlaceholder: "Nach Namen suchen",
     clearSearch: "Suche löschen",
     newSet: "Neues Set",
     page: (current, total) => `Seite ${String(current)} von ${String(total)}`,
@@ -106,6 +108,8 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     options: "Antwortoptionen",
     option: (position) => `Option ${String(position)}`,
     correctAnswer: (option, question) => `Richtige Antwort Option ${String(option)} für Frage ${String(question)}`,
+    correctAnswerHint: "Richtige Antwort per Auswahlkreis markieren.",
+    optionRequired: "Darf nicht leer sein.",
     addOption: "Option hinzufügen",
     removeOption: (position) => `Option ${String(position)} entfernen`,
     removeQuestion: (position) => `Frage ${String(position)} entfernen`,
@@ -150,7 +154,7 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     title: "Question sets",
     subtitle: "Create quiz questions for your channel.",
     search: "Search sets",
-    searchPlaceholder: "Search set names",
+    searchPlaceholder: "Search by name",
     clearSearch: "Clear search",
     newSet: "New set",
     page: (current, total) => `Page ${String(current)} of ${String(total)}`,
@@ -168,6 +172,8 @@ const texts: Readonly<Record<DashboardLanguage, QuizPanelTexts>> = {
     options: "Answer options",
     option: (position) => `Option ${String(position)}`,
     correctAnswer: (option, question) => `Correct answer option ${String(option)} for question ${String(question)}`,
+    correctAnswerHint: "Mark the correct answer with its radio button.",
+    optionRequired: "Must not be empty.",
     addOption: "Add option",
     removeOption: (position) => `Remove option ${String(position)}`,
     removeQuestion: (position) => `Remove question ${String(position)}`,
