@@ -398,6 +398,7 @@ const expectedModuleSettings = {
     timeoutTextEnabled: true,
   },
   channel_events: {},
+  quiz: {},
   emote_slots: {
     symbols: [
       { id: "cherry", source: "emoji", code: "🍒", name: "Cherry", weight: 4, triple: 3, isJackpot: false },
@@ -902,6 +903,7 @@ describe("serialized contract shapes", () => {
         "heist",
         "moon",
         "points",
+        "quiz",
         "raid",
         "statistics",
         "sun",
