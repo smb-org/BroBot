@@ -258,16 +258,19 @@ export const setBotIdentityMissingScopesIfCurrent = async (
   expectedAccessTokenCiphertext: string,
   expectedRefreshTokenCiphertext: string,
 ): Promise<boolean> => {
+  const missingScopesJson = JSON.stringify([...missingScopes]);
   const result = await db.prepare(
     `UPDATE bot_identity
         SET missing_scopes_json = ?
       WHERE id = 1
         AND access_token_ciphertext = ?
-        AND refresh_token_ciphertext = ?`,
+        AND refresh_token_ciphertext = ?
+        AND missing_scopes_json IS NOT ?`,
   ).bind(
-    JSON.stringify([...missingScopes]),
+    missingScopesJson,
     expectedAccessTokenCiphertext,
     expectedRefreshTokenCiphertext,
+    missingScopesJson,
   ).run();
   return result.meta.changes > 0;
 };
