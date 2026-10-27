@@ -10,6 +10,7 @@ vi.mock("../../src/worker/chat", () => ({
 }));
 
 import { quizModule } from "../../src/modules/quiz";
+import type { ModuleAlarmContext } from "../../src/modules/contract";
 import { pointsDefaultSettingsForLanguage } from "../../src/modules/points/contracts";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
@@ -59,6 +60,31 @@ const openAnnouncedQuiz = async (object: ReturnType<typeof pointObject>, roundId
     await deferPointAlarmWithin(state);
   });
 };
+
+const quizAlarmContext = (object: ReturnType<typeof pointObject>): ModuleAlarmContext => {
+  const registration = quizModule.alarms?.find(({ key }) => key === "session-control");
+  if (registration === undefined) throw new Error("Quiz session alarm is unavailable.");
+  const runtime = object as unknown as {
+    moduleAlarmContext: (moduleId: string, alarm: NonNullable<typeof quizModule.alarms>[number]) => ModuleAlarmContext;
+  };
+  return runtime.moduleAlarmContext("quiz", registration);
+};
+
+const quizStreamEvent = (
+  channelId: string,
+  state: "online" | "offline",
+  timestamp: string,
+): Parameters<NonNullable<typeof quizModule.handleEvent>>[0] => ({
+  channelId,
+  subscriptionType: state === "online" ? "stream.online" : "stream.offline",
+  triggerId: crypto.randomUUID(),
+  payload: {},
+  settings: quizModule.defaultSettings,
+  receivedAt: timestamp,
+  eventSubTimestamp: timestamp,
+  actor: null,
+  chatStatus: null,
+});
 
 beforeAll(runMigrations);
 beforeEach(() => {
@@ -375,6 +401,151 @@ describe("quiz answers in the shared point round", () => {
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: false } });
   });
 
+  it("preserves queued offline and online transitions so the session still needs Resume", async () => {
+    const channelId = `quiz-queued-stream-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const openedAt = Date.now();
+    const offlineAt = new Date(openedAt + 1_000).toISOString();
+    const onlineAt = new Date(openedAt + 2_000).toISOString();
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'points', 1, '{}', 1), (?, 'quiz', 1, ?, 1)",
+    ).bind(channelId, channelId, JSON.stringify({ pot: 10, answerSeconds: 30, revealSeconds: 8, chatQuestions: false })).run();
+    await worker.DB.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
+    ).bind(channelId, new Date(openedAt - 60_000).toISOString()).run();
+    const object = pointObject(channelId);
+    await openAnnouncedQuiz(object, roundId, session(roundId));
+
+    const queuedInvocations: unknown[] = [];
+    const eventContext = {
+      streamStateTransitionAccepted: true,
+      runModuleAlarm: (_handler: string, _key: string, invocation?: unknown) => {
+        queuedInvocations.push(invocation);
+        return Promise.resolve();
+      },
+    } as Parameters<NonNullable<typeof quizModule.handleEvent>>[1];
+    await quizModule.handleEvent?.(quizStreamEvent(channelId, "offline", offlineAt), eventContext);
+    await quizModule.handleEvent?.(quizStreamEvent(channelId, "online", onlineAt), eventContext);
+    await worker.DB.prepare(
+      "UPDATE channel_stream_state SET state = 'online', changed_at = ?, source = 'eventsub' WHERE channel_id = ?",
+    ).bind(onlineAt, channelId).run();
+
+    for (const invocation of queuedInvocations) {
+      await object.runModuleAlarm("quiz", "session-control", "stream-state", invocation);
+    }
+
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({
+      data: { phase: "open", paused: true, offlineSince: null, phaseEndsAt: null },
+    });
+    expect(queuedInvocations).toEqual([
+      { streamSnapshot: { state: "offline", since: Date.parse(offlineAt) } },
+      { streamSnapshot: { state: "online", since: Date.parse(onlineAt) } },
+    ]);
+  });
+
+  it("reconciles a Helix-only offline observation and arms settlement", async () => {
+    const channelId = `quiz-helix-offline-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const openedAt = Date.now();
+    const offlineAt = openedAt + 5_000;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
+    ).bind(channelId, new Date(openedAt - 60_000).toISOString()).run();
+    const object = pointObject(channelId);
+    await openAnnouncedQuiz(object, roundId, session(roundId));
+    await worker.DB.prepare(
+      "UPDATE channel_stream_state SET state = 'offline', changed_at = ?, source = 'helix' WHERE channel_id = ?",
+    ).bind(new Date(offlineAt).toISOString(), channelId).run();
+
+    const registration = quizModule.alarms?.find(({ key }) => key === "session-control");
+    const settlementDeadline = await runPointObject(object, async (target) => {
+      const context = quizAlarmContext(target);
+      await registration?.onScheduleInputsChanged?.(context, "stream_state");
+      return context.getAlarmDeadline?.(`offline-timeout:${roundId}`);
+    });
+
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({
+      data: { paused: true, offlineSince: offlineAt },
+    });
+    expect(settlementDeadline).toBe(offlineAt + 10 * 60_000);
+  });
+
+  it("reconciles an offline observation before rejecting a quiz control", async () => {
+    const channelId = `quiz-control-offline-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const openedAt = Date.now();
+    const offlineAt = openedAt + 4_000;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
+    ).bind(channelId, new Date(openedAt - 60_000).toISOString()).run();
+    const object = pointObject(channelId);
+    await openAnnouncedQuiz(object, roundId, session(roundId));
+    await worker.DB.prepare(
+      "UPDATE channel_stream_state SET state = 'offline', changed_at = ?, source = 'helix' WHERE channel_id = ?",
+    ).bind(new Date(offlineAt).toISOString(), channelId).run();
+
+    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "next" })))
+      .resolves.toBe("stream_offline");
+
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: offlineAt } });
+    await expect(quizAlarmContext(object).getAlarmDeadline?.(`offline-timeout:${roundId}`)).resolves.toBe(offlineAt + 10 * 60_000);
+  });
+
+  it("reconciles offline state before advancing a due quiz deadline", async () => {
+    const channelId = `quiz-deadline-offline-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const openedAt = Date.now();
+    const offlineAt = openedAt + 25_000;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
+    ).bind(channelId, new Date(openedAt - 60_000).toISOString()).run();
+    const object = pointObject(channelId);
+    await openAnnouncedQuiz(object, roundId, session(roundId));
+    await worker.DB.prepare(
+      "UPDATE channel_stream_state SET state = 'offline', changed_at = ?, source = 'helix' WHERE channel_id = ?",
+    ).bind(new Date(offlineAt).toISOString(), channelId).run();
+    vi.setSystemTime(openedAt + 30_000);
+
+    await forcePointAlarm(object, roundId);
+
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({
+      data: { phase: "open", paused: true, remainingMs: 5_000, offlineSince: offlineAt },
+    });
+  });
+
+  it("arms offline recovery before publishing the pause update", async () => {
+    const channelId = `quiz-publish-recovery-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const openedAt = Date.now();
+    const offlineAt = openedAt + 5_000;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
+    ).bind(channelId, new Date(openedAt - 60_000).toISOString()).run();
+    const object = pointObject(channelId);
+    await openAnnouncedQuiz(object, roundId, session(roundId));
+    await worker.DB.prepare(
+      "UPDATE channel_stream_state SET state = 'offline', changed_at = ?, source = 'helix' WHERE channel_id = ?",
+    ).bind(new Date(offlineAt).toISOString(), channelId).run();
+    const registration = quizModule.alarms?.find(({ key }) => key === "session-control");
+    if (registration === undefined) throw new Error("Quiz session alarm is unavailable.");
+    await expect(runPointObject(object, async (target) => {
+      const context = quizAlarmContext(target);
+      vi.spyOn(context, "publishModuleOverlayMessage").mockRejectedValueOnce(new Error("overlay publish failed"));
+      const result = await registration.handle(context, "stream-state", Date.now());
+      return result;
+    })).rejects.toThrow("overlay publish failed");
+
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: offlineAt } });
+    const settlementDeadline = await runPointObject(object, (target) =>
+      quizAlarmContext(target).getAlarmDeadline?.(`offline-timeout:${roundId}`));
+    expect(settlementDeadline).toBe(offlineAt + 10 * 60_000);
+  });
+
   it("rejects Next while paused until the operator resumes the session", async () => {
     const channelId = `quiz-next-paused-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;
@@ -497,32 +668,37 @@ describe("quiz answers in the shared point round", () => {
       .resolves.toEqual({ status: "round_closed", replayed: false });
   });
 
-  it("settles offline sessions after ten minutes and pays out answers already recorded", async () => {
+  it("settles offline sessions after ten minutes without scoring backdated answers", async () => {
     const channelId = `quiz-offline-timeout-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;
     const openedAt = Date.now();
+    const offlineAt = openedAt + 5_000;
     await insertPointChannel(channelId);
     await worker.DB.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'points', 1, '{}', 1), (?, 'quiz', 1, ?, 1)",
     ).bind(channelId, channelId, JSON.stringify({ pot: 10, answerSeconds: 30, revealSeconds: 8, chatQuestions: false })).run();
     await worker.DB.prepare(
-      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'offline', ?, 'eventsub')",
-    ).bind(channelId, new Date(openedAt).toISOString()).run();
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
+    ).bind(channelId, new Date(openedAt - 60_000).toISOString()).run();
     const object = pointObject(channelId);
     await object.touchPointAccount("quiz", "offline_viewer", "moonmoss", 0);
     await openAnnouncedQuiz(object, roundId, session(roundId));
-    await object.answerGameRoundChoice("quiz", roundId, `quiz:${roundId}:answer`, "offline_viewer", "moonmoss", 0, 1, openedAt + 1_000);
+    vi.setSystemTime(openedAt + 9_000);
+    await object.answerGameRoundChoice("quiz", roundId, `quiz:${roundId}:answer`, "offline_viewer", "moonmoss", 0, 1, openedAt + 8_000);
+    await worker.DB.prepare(
+      "UPDATE channel_stream_state SET state = 'offline', changed_at = ?, source = 'helix' WHERE channel_id = ?",
+    ).bind(new Date(offlineAt).toISOString(), channelId).run();
     await object.runModuleAlarm("quiz", "session-control", "stream-state");
-    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: openedAt } });
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: offlineAt } });
 
-    vi.setSystemTime(openedAt + 10 * 60_000);
+    vi.setSystemTime(offlineAt + 10 * 60_000);
     await object.runModuleAlarm("quiz", "session-control", `offline-timeout:${roundId}`);
 
     await expect(object.activeGameRound("quiz")).resolves.toBeNull();
-    await expect(object.pointBalance("quiz", "offline_viewer")).resolves.toBe(10);
+    await expect(object.pointBalance("quiz", "offline_viewer")).resolves.toBe(0);
     await expect(object.recentlyResolvedGameRound("quiz", 60_000)).resolves.toMatchObject({
       roundId,
-      result: { ranking: [{ login: "moonmoss", correct: 1, payout: 10 }] },
+      result: { participants: 0, totalAnswers: 0, totalCorrect: 0, ranking: [] },
     });
   });
 });

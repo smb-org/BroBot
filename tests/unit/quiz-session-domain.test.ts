@@ -16,9 +16,9 @@ const questions = [
 describe("quiz session scoring", () => {
   it("ranks by correct answers and gives tied participants the same rank", () => {
     const result = scoreQuizSession(questions, [
-      { accountId: "viewer-a", login: "moonmoss", answers: [1, 0] },
-      { accountId: "viewer-b", login: "frostfern", answers: [1, 1] },
-      { accountId: "viewer-c", login: "starling", answers: [1, 1] },
+      { accountId: "viewer-a", login: "moonmoss", answers: [1, 0], answerTimes: [1_000, 2_000] },
+      { accountId: "viewer-b", login: "frostfern", answers: [1, 1], answerTimes: [1_000, 2_000] },
+      { accountId: "viewer-c", login: "starling", answers: [1, 1], answerTimes: [1_000, 2_000] },
     ], 12);
 
     expect(result.ranking.map(({ login, correct, rank, payout }) => ({ login, correct, rank, payout }))).toEqual([
@@ -32,8 +32,8 @@ describe("quiz session scoring", () => {
 
   it("leaves the indivisible remainder with the house and pays nothing for a zero pot", () => {
     const participants = [
-      { accountId: "viewer-a", login: "moonmoss", answers: [1, 0] },
-      { accountId: "viewer-b", login: "frostfern", answers: [1, 1] },
+      { accountId: "viewer-a", login: "moonmoss", answers: [1, 0], answerTimes: [1_000, 2_000] },
+      { accountId: "viewer-b", login: "frostfern", answers: [1, 1], answerTimes: [1_000, 2_000] },
     ];
 
     expect(scoreQuizSession(questions, participants, 10)).toMatchObject({
@@ -46,6 +46,22 @@ describe("quiz session scoring", () => {
       ],
     });
     expect(scoreQuizSession(questions, participants, 0)).toMatchObject({ distributed: 0, houseRemainder: 0 });
+  });
+
+  it("excludes answers timestamped inside a pause interval from scoring and payouts", () => {
+    const result = scoreQuizSession(questions, [
+      { accountId: "viewer-a", login: "moonmoss", answers: [1, 0], answerTimes: [8_000, 22_000] },
+    ], 10, [{ startedAt: 5_000, endedAt: null }]);
+
+    expect(result).toMatchObject({
+      correctCounts: [0, 0],
+      answerDistribution: [[0, 0, 0], [0, 0]],
+      participants: 0,
+      totalAnswers: 0,
+      totalCorrect: 0,
+      distributed: 0,
+      ranking: [],
+    });
   });
 });
 

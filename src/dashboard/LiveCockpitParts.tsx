@@ -55,6 +55,7 @@ export const LiveCockpitTiles = ({
   failed,
   now,
   timeZone,
+  streamState,
   onMessage,
   onRefresh,
 }: {
@@ -67,6 +68,7 @@ export const LiveCockpitTiles = ({
   failed: boolean;
   now: number;
   timeZone: string;
+  streamState?: ChannelStreamState | null | undefined;
   onMessage: (message: string, tone?: "warning") => void;
   onRefresh: () => void;
 }): ReactElement => {
@@ -260,7 +262,7 @@ export const LiveCockpitTiles = ({
           pending={busy} danger {...(duelCancelError === undefined ? {} : { error: duelCancelError })} />
       </>}
       {bossFights.map((round) => <BossFightLiveTile key={round.id} language={dashboardLanguage()} round={round} now={now} />)}
-      {quizzes.map((session) => <QuizLiveTile key={session.sessionId} channelId={channelId} language={dashboardLanguage()} session={session} now={now} canManage={roleCanManage} onRefresh={onRefresh} onMessage={onMessage} />)}
+      {quizzes.map((session) => <QuizLiveTile key={session.sessionId} channelId={channelId} language={dashboardLanguage()} session={session} streamState={streamState} now={now} canManage={roleCanManage} onRefresh={onRefresh} onMessage={onMessage} />)}
       {running === undefined && duels.length === 0 && bossFights.length === 0 && quizzes.length === 0 ? <p>{loading ? labels.liveDataLoading : failed ? labels.liveDataUnavailable : labels.noActionRunning}</p> : running === undefined ? null : running.kind === "vote"
         ? <div className="live-vote-tile" data-testid="live-vote-tile">
           <header className="live-vote-tile__header">

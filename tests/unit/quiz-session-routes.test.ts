@@ -110,7 +110,9 @@ describe("quiz session cockpit routes", () => {
 
     expect(quizModule.eventSubTypes).toContain("stream.offline");
     expect(quizModule.pauseSafeEventSubTypes).toContain("stream.offline");
-    expect(runAlarm).toHaveBeenCalledWith("session-control", "stream-state");
+    expect(runAlarm).toHaveBeenCalledWith("session-control", "stream-state", {
+      streamSnapshot: { state: "offline", since: Date.parse(event.receivedAt) },
+    });
   });
 
   it("requires a channel role before starting a session", async () => {

@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from "react";
 
+import type { ChannelStreamState } from "../../../contracts/values";
 import { Button } from "../../../dashboard/ui";
 import type { ModuleLanguage, ModuleLiveTileSnapshot } from "../../contract";
 import { quizCockpitTexts } from "../locale";
@@ -9,10 +10,11 @@ import "./live-tile.css";
 type QuizTileSnapshot = Extract<ModuleLiveTileSnapshot, { kind: "quiz" }>;
 type QuizAction = "next" | "pause" | "resume" | "end";
 
-export const QuizLiveTile = ({ channelId, language, session, now, canManage, onRefresh, onMessage }: {
+export const QuizLiveTile = ({ channelId, language, session, streamState, now, canManage, onRefresh, onMessage }: {
   channelId: string;
   language: ModuleLanguage;
   session: QuizTileSnapshot;
+  streamState: ChannelStreamState | null | undefined;
   now: number;
   canManage: boolean;
   onRefresh: () => void;
@@ -23,6 +25,7 @@ export const QuizLiveTile = ({ channelId, language, session, now, canManage, onR
   const [failed, setFailed] = useState(false);
   const remaining = session.phaseEndsAt === null ? null : Math.max(0, Math.ceil((Date.parse(session.phaseEndsAt) - now) / 1_000));
   const time = remaining === null ? null : `${String(Math.floor(remaining / 60))}:${String(remaining % 60).padStart(2, "0")}`;
+  const streamIsOnline = streamState === "online";
 
   const run = async (action: QuizAction): Promise<void> => {
     if (!canManage || busy) return;
@@ -50,8 +53,8 @@ export const QuizLiveTile = ({ channelId, language, session, now, canManage, onR
       {session.paused ? <strong>{copy.pausedLabel}</strong> : null}
     </div>
     <div className="live-cockpit-quiz__actions">
-      <Button size="compact" variant="secondary" icon="skip-forward" disabled={busy || !canManage || session.paused || session.phase === "results"} onClick={() => { void run("next"); }}>{copy.nextAction}</Button>
-      <Button size="compact" variant="secondary" icon={session.paused ? "player-play" : "player-pause"} disabled={busy || !canManage || session.phase === "results"} onClick={() => { void run(session.paused ? "resume" : "pause"); }}>{session.paused ? copy.resumeAction : copy.pauseAction}</Button>
+      <Button size="compact" variant="secondary" icon="skip-forward" disabled={busy || !canManage || !streamIsOnline || session.paused || session.phase === "results"} onClick={() => { void run("next"); }}>{copy.nextAction}</Button>
+      <Button size="compact" variant="secondary" icon={session.paused ? "player-play" : "player-pause"} disabled={busy || !canManage || !streamIsOnline || session.phase === "results"} onClick={() => { void run(session.paused ? "resume" : "pause"); }}>{session.paused ? copy.resumeAction : copy.pauseAction}</Button>
       <Button size="compact" variant="neutral" danger icon="square" disabled={busy || !canManage || session.phase === "results"} onClick={() => { void run("end"); }}>{copy.endAction}</Button>
     </div>
     <p className="live-cockpit-quiz__feedback" role="status" aria-live="polite">{failed ? copy.controlError : "\u00a0"}</p>

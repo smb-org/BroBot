@@ -192,8 +192,14 @@ const bossFightSettlement: PointSettlement = ({ round, participants, params }) =
 const quizSettlement: PointSettlement = ({ round, participants, params }) => {
   if (!isRecord(params) || Object.keys(params).length !== 0) throw new Error("invalid_settlement_params");
   const data = isRecord(round.data) ? round.data : null;
+  const rawPauseIntervals = data?.pauseIntervals;
   if (data === null || !Array.isArray(data.questions) || !Number.isSafeInteger(data.pot) ||
-      (data.pot as number) < 0 || data.questions.length === 0) throw new Error("invalid_settlement_params");
+      (data.pot as number) < 0 || data.questions.length === 0 ||
+      !(rawPauseIntervals === undefined || Array.isArray(rawPauseIntervals) && rawPauseIntervals.every((value) => {
+        if (!isRecord(value)) return false;
+        return Number.isSafeInteger(value.startedAt) && (value.startedAt as number) >= 0 && (value.endedAt === null ||
+          Number.isSafeInteger(value.endedAt) && (value.endedAt as number) >= (value.startedAt as number));
+      }))) throw new Error("invalid_settlement_params");
   const questions = data.questions.map((value) => {
     if (!isRecord(value) || typeof value.text !== "string" || !Array.isArray(value.options) ||
         !value.options.every((option) => typeof option === "string") || typeof value.correctIndex !== "number" ||
@@ -202,14 +208,24 @@ const quizSettlement: PointSettlement = ({ round, participants, params }) => {
     }
     return { text: value.text, options: value.options, correctIndex: value.correctIndex };
   });
+  const pauseIntervals = Array.isArray(rawPauseIntervals)
+    ? rawPauseIntervals.map((value) => value as { startedAt: number; endedAt: number | null })
+    : [];
   const scoringParticipants = participants.map(({ accountId, login, stake, data: participantData }) => {
     if (stake !== 0 || !isRecord(participantData) || !Array.isArray(participantData.answers) ||
-        !participantData.answers.every((answer) => answer === null || Number.isSafeInteger(answer))) {
+        !participantData.answers.every((answer) => answer === null || Number.isSafeInteger(answer)) ||
+        !(participantData.answerTimes === undefined || Array.isArray(participantData.answerTimes) &&
+          participantData.answerTimes.every((answerAt) => answerAt === null || Number.isSafeInteger(answerAt)))) {
       throw new Error("invalid_settlement_params");
     }
-    return { accountId, login, answers: participantData.answers as (number | null)[] };
+    return {
+      accountId,
+      login,
+      answers: participantData.answers as (number | null)[],
+      answerTimes: Array.isArray(participantData.answerTimes) ? participantData.answerTimes as (number | null)[] : [],
+    };
   });
-  const score = scoreQuizSession(questions, scoringParticipants, data.pot as number);
+  const score = scoreQuizSession(questions, scoringParticipants, data.pot as number, pauseIntervals);
   const movements = score.distributed === 0 ? [] : [
     { accountId: "__house", delta: -score.distributed },
     ...score.ranking.filter(({ payout }) => payout > 0).map(({ accountId, login, payout }) => ({

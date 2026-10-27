@@ -319,6 +319,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
           failed={liveQuery.data?.failed ?? liveQuery.isError}
           now={now}
           timeZone={timeZone}
+          streamState={overview.streamState}
           onMessage={(text, tone) => { showFooterMessage({ text, ...(tone === undefined ? {} : { tone }) }); }}
           onRefresh={refreshLiveData}
         />

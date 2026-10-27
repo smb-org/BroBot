@@ -9,6 +9,7 @@ import {
   onQuizRoundDeadline,
   onQuizRoundAnnounced,
   onQuizRoundResolved,
+  onQuizScheduleInputsChanged,
   quizSessionControlAlarm,
   resultChatLine,
 } from "./lifecycle";
@@ -32,13 +33,19 @@ export const quizModule: BotModule<typeof quizSettingsSchema> = {
   handleEvent: async (event, context) => {
     if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
       if (context.streamStateTransitionAccepted === true) {
-        await context.runModuleAlarm?.("session-control", "stream-state");
+        const timestamp = Date.parse(event.eventSubTimestamp ?? event.receivedAt);
+        await context.runModuleAlarm?.("session-control", "stream-state", {
+          streamSnapshot: {
+            state: event.subscriptionType === "stream.online" ? "online" : "offline",
+            since: Number.isSafeInteger(timestamp) ? timestamp : null,
+          },
+        });
       }
       return { actions: [], diagnostics: [] };
     }
     return processQuizMessage(event, context);
   },
-  alarms: [quizSessionControlAlarm],
+  alarms: [{ ...quizSessionControlAlarm, onScheduleInputsChanged: onQuizScheduleInputsChanged }],
   serializeLifecycleMutations: true,
   serializePointRoundDeadline: true,
   pointRoundCancellationNotice: false,

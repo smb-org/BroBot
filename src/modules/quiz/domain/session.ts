@@ -16,6 +16,12 @@ export interface QuizScoringParticipant {
   accountId: string;
   login: string;
   answers: readonly (number | null)[];
+  answerTimes: readonly (number | null)[];
+}
+
+export interface QuizScoringPauseInterval {
+  startedAt: number;
+  endedAt: number | null;
 }
 
 interface QuizRankingEntry {
@@ -42,15 +48,21 @@ export const scoreQuizSession = (
   questions: readonly QuizScoringQuestion[],
   participants: readonly QuizScoringParticipant[],
   pot: number,
+  pauseIntervals: readonly QuizScoringPauseInterval[] = [],
 ): QuizSessionScore => {
   if (!Number.isSafeInteger(pot) || pot < 0) throw new RangeError("invalid_quiz_pot");
   const correctCounts = questions.map(() => 0);
   const answerDistribution = questions.map((question) => question.options.map(() => 0));
   const scored = participants.map((participant) => {
     let correct = 0;
+    let acceptedAnswers = 0;
     for (const [questionIndex, question] of questions.entries()) {
       const choice = participant.answers[questionIndex];
+      const answerAt = participant.answerTimes[questionIndex];
+      if (typeof answerAt !== "number" || !Number.isSafeInteger(answerAt) || pauseIntervals.some(({ startedAt, endedAt }) =>
+        answerAt >= startedAt && (endedAt === null || answerAt < endedAt))) continue;
       if (typeof choice !== "number" || !Number.isSafeInteger(choice) || choice < 0 || choice >= question.options.length) continue;
+      acceptedAnswers += 1;
       const distribution = answerDistribution[questionIndex];
       if (distribution !== undefined) distribution[choice] = (distribution[choice] ?? 0) + 1;
       if (choice === question.correctIndex) {
@@ -58,8 +70,9 @@ export const scoreQuizSession = (
         correctCounts[questionIndex] = (correctCounts[questionIndex] ?? 0) + 1;
       }
     }
-    return { accountId: participant.accountId, login: participant.login, correct };
-  }).sort((left, right) => right.correct - left.correct || left.accountId.localeCompare(right.accountId));
+    return acceptedAnswers === 0 ? null : { accountId: participant.accountId, login: participant.login, correct };
+  }).filter((participant): participant is NonNullable<typeof participant> => participant !== null)
+    .sort((left, right) => right.correct - left.correct || left.accountId.localeCompare(right.accountId));
 
   const totalCorrect = correctCounts.reduce((total, count) => total + count, 0);
   const totalAnswers = answerDistribution.reduce((total, counts) => total + counts.reduce((sum, count) => sum + count, 0), 0);
@@ -76,7 +89,7 @@ export const scoreQuizSession = (
     ranking,
     correctCounts,
     answerDistribution,
-    participants: participants.length,
+    participants: scored.length,
     totalAnswers,
     totalCorrect,
     distributed,

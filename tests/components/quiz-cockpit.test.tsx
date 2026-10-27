@@ -54,15 +54,15 @@ describe("quiz cockpit controls", () => {
       return Promise.resolve(Response.json({ ok: true }));
     });
     vi.stubGlobal("fetch", fetcher);
-    const { rerender } = render(<QuizLiveTile channelId="channel-one" language="en" session={session} now={Date.now()} canManage onRefresh={onRefresh} onMessage={vi.fn()} />);
+    const { rerender } = render(<QuizLiveTile channelId="channel-one" language="en" session={session} streamState="online" now={Date.now()} canManage onRefresh={onRefresh} onMessage={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     await waitFor(() => expect(requestedActions(requests)).toEqual(["pause"]));
-    rerender(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, paused: true }} now={Date.now()} canManage onRefresh={onRefresh} onMessage={vi.fn()} />);
+    rerender(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, paused: true }} streamState="online" now={Date.now()} canManage onRefresh={onRefresh} onMessage={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     await waitFor(() => expect(requestedActions(requests)).toEqual(["pause", "resume"]));
-    rerender(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, paused: false }} now={Date.now()} canManage onRefresh={onRefresh} onMessage={vi.fn()} />);
+    rerender(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, paused: false }} streamState="online" now={Date.now()} canManage onRefresh={onRefresh} onMessage={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(requestedActions(requests)).toEqual(["pause", "resume", "next"]));
     fireEvent.click(screen.getByRole("button", { name: "End" }));
@@ -73,10 +73,21 @@ describe("quiz cockpit controls", () => {
   });
 
   it("disables all actions in the results phase while keeping the layout stable", () => {
-    render(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, phase: "results", phaseEndsAt: null }} now={Date.now()} canManage onRefresh={vi.fn()} onMessage={vi.fn()} />);
+    render(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, phase: "results", phaseEndsAt: null }} streamState="online" now={Date.now()} canManage onRefresh={vi.fn()} onMessage={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Pause" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "End" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it.each([
+    ["offline", "offline"],
+    ["unknown", null],
+  ] as const)("allows only End while the stream is %s", (_label, streamState) => {
+    render(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, paused: true }} streamState={streamState} now={Date.now()} canManage onRefresh={vi.fn()} onMessage={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Resume" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "End" }).hasAttribute("disabled")).toBe(false);
   });
 });
