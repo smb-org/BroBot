@@ -44,14 +44,14 @@ export const QuizLiveTile = ({ channelId, language, session, now, canManage, onR
       <div><span className="live-cockpit-quiz__name">{copy.sessionTitle}</span><strong>{session.setName}</strong></div>
       {time === null || session.paused ? null : <span className="live-cockpit-quiz__time mono">{copy.timeLeft(time)}</span>}
     </header>
-    <p className="live-cockpit-quiz__phase">
+    <div className="live-cockpit-quiz__phase">
       <span>{copy.phase[session.phase]}</span>
       <span>{copy.questionProgress(session.questionIndex + 1, session.questionCount)}</span>
       {session.paused ? <strong>{copy.pausedLabel}</strong> : null}
-    </p>
+    </div>
     <div className="live-cockpit-quiz__actions">
-      <Button size="compact" variant="secondary" icon="skip-forward" disabled={busy || !canManage} onClick={() => { void run("next"); }}>{copy.nextAction}</Button>
-      <Button size="compact" variant="secondary" icon={session.paused ? "player-play" : "player-pause"} disabled={busy || !canManage} onClick={() => { void run(session.paused ? "resume" : "pause"); }}>{session.paused ? copy.resumeAction : copy.pauseAction}</Button>
+      <Button size="compact" variant="secondary" icon="skip-forward" disabled={busy || !canManage || session.phase === "results"} onClick={() => { void run("next"); }}>{copy.nextAction}</Button>
+      <Button size="compact" variant="secondary" icon={session.paused ? "player-play" : "player-pause"} disabled={busy || !canManage || session.phase === "results"} onClick={() => { void run(session.paused ? "resume" : "pause"); }}>{session.paused ? copy.resumeAction : copy.pauseAction}</Button>
       <Button size="compact" variant="neutral" danger icon="square" disabled={busy || !canManage} onClick={() => { void run("end"); }}>{copy.endAction}</Button>
     </div>
     <p className="live-cockpit-quiz__feedback" role="status" aria-live="polite">{failed ? copy.controlError : "\u00a0"}</p>

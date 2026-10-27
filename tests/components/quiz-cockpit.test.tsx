@@ -69,4 +69,12 @@ describe("quiz cockpit controls", () => {
     expect(requests.every(({ url }) => url.endsWith("/session/action"))).toBe(true);
     expect(onRefresh).toHaveBeenCalledTimes(4);
   });
+
+  it("disables pause and next in the results phase but keeps them in the layout", () => {
+    render(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, phase: "results", phaseEndsAt: null }} now={Date.now()} canManage onRefresh={vi.fn()} onMessage={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Pause" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "End" }).hasAttribute("disabled")).toBe(false);
+  });
 });
