@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactElement } from "react";
 
-import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardLanguage } from "../../../dashboard/locale";
 import {
   Button, CollectionPage, ConfirmDialog, EmptyState, Field, Icon, NativeRadio,
-  PageHeader, SaveStatus, SwitchRow, useDraftGuard,
+  PageHeader, SaveStatus, SwitchRow, registerDashboardNavigationGuard, useDraftGuard,
 } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import {
@@ -130,6 +130,7 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
   };
 
   const guard = useDraftGuard(dirty, saveDraft, discardDraft);
+  useEffect(() => registerDashboardNavigationGuard(guard.guardSwitch), [guard.guardSwitch]);
   const requestSwitch = (proceed: () => void): void => { guard.guardSwitch(proceed); };
 
   const createSet = async (): Promise<void> => {
@@ -176,14 +177,18 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
   };
 
   const reloadConflict = async (): Promise<void> => {
-    const result = await detailQuery.refetch();
-    if (result.data !== undefined) {
-      setBaseline(result.data);
-      setDraft(draftFromSet(result.data));
-      setConflicted(false);
-      setSaveError(undefined);
-      setValidationCode(null);
+    if (selectedSetId === null) return;
+    let reloaded: QuizSet;
+    try {
+      reloaded = await refetchModuleQueryData<QuizSet>(queryClient, channelId, "quiz", `set:${selectedSetId}`);
+    } catch {
+      return; // Keep the draft and the conflict state when the reload fails.
     }
+    setBaseline(reloaded);
+    setDraft(draftFromSet(reloaded));
+    setConflicted(false);
+    setSaveError(undefined);
+    setValidationCode(null);
   };
 
   const updateQuestion = (index: number, change: (question: QuizSetInput["questions"][number]) => QuizSetInput["questions"][number]): void => {

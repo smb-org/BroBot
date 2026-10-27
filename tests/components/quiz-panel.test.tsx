@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import QuizPanel from "../../src/modules/quiz/panel";
 import { moduleQueryKey } from "../../src/dashboard/data";
 import { UiProvider } from "../../src/dashboard/ui";
+import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import type { QuizSet } from "../../src/modules/quiz/contracts";
 import { renderWithQuery } from "../query-test-utils";
 
@@ -16,9 +17,11 @@ const requestBody = (init: RequestInit | undefined): Record<string, unknown> => 
   return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
 };
 
-const installFetch = (options: { existing?: boolean; holdUpdatedRead?: boolean } = {}) => {
+const installFetch = (options: { existing?: boolean; holdUpdatedRead?: boolean; conflictThenFailReload?: boolean } = {}) => {
   let savedSet = structuredClone(set);
   const writes: unknown[] = [];
+  let conflicted = false;
+  let failedReads = 0;
   let releaseUpdatedRead: (() => void) | undefined;
   let markUpdatedReadStarted: (() => void) | undefined;
   const updatedReadStarted = new Promise<void>((resolve) => { markUpdatedReadStarted = resolve; });
@@ -39,6 +42,10 @@ const installFetch = (options: { existing?: boolean; holdUpdatedRead?: boolean }
       return response({ set: savedSet }, 201);
     }
     if (url.pathname.endsWith(`/modules/quiz/sets/${set.id}`) && method === "GET") {
+      if (conflicted) {
+        failedReads += 1;
+        return response({ error: "unavailable" }, 503);
+      }
       if (options.holdUpdatedRead && savedSet.revision > set.revision) {
         markUpdatedReadStarted?.();
         return new Promise((resolve) => {
@@ -48,6 +55,10 @@ const installFetch = (options: { existing?: boolean; holdUpdatedRead?: boolean }
       return response({ set: savedSet });
     }
     if (url.pathname.endsWith(`/modules/quiz/sets/${set.id}`) && method === "PUT") {
+      if (options.conflictThenFailReload) {
+        conflicted = true;
+        return response({ error: "quiz_set_conflict" }, 409);
+      }
       const body = requestBody(init);
       writes.push(body);
       savedSet = {
@@ -62,6 +73,7 @@ const installFetch = (options: { existing?: boolean; holdUpdatedRead?: boolean }
   }));
   return {
     writes,
+    failedReads: () => failedReads,
     updatedReadStarted,
     releaseUpdatedRead: () => releaseUpdatedRead?.(),
   };
@@ -167,5 +179,38 @@ describe("quiz set editor", () => {
     fetch.releaseUpdatedRead();
     await screen.findByText("Saved");
     expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Saved space");
+  });
+
+  it("asks before dashboard navigation leaves an unsaved draft", async () => {
+    installFetch({ existing: true });
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    fireEvent.change(await screen.findByLabelText("Set name"), { target: { value: "Edited space" } });
+
+    let navigated = false;
+    act(() => runDashboardNavigationGuards(() => { navigated = true; }, () => undefined));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    expect(navigated).toBe(false);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard and switch" }));
+    await waitFor(() => expect(navigated).toBe(true));
+  });
+
+  it("keeps the draft and the conflict when the reload after a conflict fails", async () => {
+    const fetch = installFetch({ existing: true, conflictThenFailReload: true });
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    fireEvent.change(await screen.findByLabelText("Set name"), { target: { value: "Edited space" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
+
+    await waitFor(() => expect(fetch.failedReads()).toBeGreaterThan(0));
+    const failedBeforeSettle = fetch.failedReads();
+    await waitFor(() => expect(fetch.failedReads()).toBe(failedBeforeSettle));
+    expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Edited space");
+    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
+    expect(screen.getAllByText(/The set changed while you were editing it\./u).length).toBeGreaterThan(0);
   });
 });
