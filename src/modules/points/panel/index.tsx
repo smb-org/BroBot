@@ -16,7 +16,7 @@ import { SegmentChoice } from "../../../dashboard/ui/SegmentChoice";
 import { PageHeader } from "../../../dashboard/ui/PageHeader";
 import type { ModulePanelProperties } from "../../contract";
 import type { PointsSettings } from "../contracts";
-import { DEFAULT_POINTS_SETTINGS, MAX_POINTS_ADJUSTMENT_REASON_LENGTH, pointsSettingsSchema } from "../contracts";
+import { DEFAULT_POINTS_SETTINGS, MAX_POINTS_ADJUSTMENT_REASON_LENGTH, pointsSettingsReadSchema, pointsSettingsSchema } from "../contracts";
 import type { PointsAccount, PointsAccountDetail, PointsHistoryRow } from "./service";
 import { adjustPoints, loadPointsAccount, loadPointsAccounts, loadPointsHistory, loadPointsRank, loadPointsSettings, loadPointsSummary, savePointsSettings } from "./service";
 import "./panel.css";
@@ -106,7 +106,11 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
   const accountsQuery = useModuleQuery(channelId, "points", `accounts:${sort}:${search}:${accountCursor ?? "first"}`,
     (signal) => loadPointsAccounts(channelId, sort, search, accountCursor, signal));
   const summaryQuery = useModuleQuery(channelId, "points", "summary", (signal) => loadPointsSummary(channelId, signal));
-  const settingsQuery = useModuleQuery(channelId, "points", "settings", (signal) => loadPointsSettings(channelId, signal));
+  const settingsQuery = useModuleQuery(channelId, "points", "settings", async (signal) => {
+    // Settings stored before the safety net lack its fields; apply the same defaults as the worker.
+    const loaded = await loadPointsSettings(channelId, signal);
+    return { ...loaded, settings: pointsSettingsReadSchema.parse(loaded.settings) };
+  });
   const accountDetailQuery = useModuleQuery(channelId, "points", `account:${selectedId ?? "none"}`,
     (signal) => selectedId === null ? Promise.resolve(null) : loadPointsAccount(channelId, selectedId, signal),
     { enabled: selectedId !== null });

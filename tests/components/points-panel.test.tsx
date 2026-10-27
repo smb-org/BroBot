@@ -67,6 +67,23 @@ describe("points panel", () => {
     expect(mocks.savePointsSettings).toHaveBeenCalledWith("kanal_demo", 1, nextSettings);
   });
 
+  it("saves settings stored before the safety net with default safety-net values (protects=channels with legacy saved settings can still save; fails_when=the draft lacks the safety-net fields so save stays disabled; no_claim=the service response is a settings mock)", async () => {
+    const { safetyNetEnabled, safetyNetAmount, safetyNetThreshold, ...legacy } = settings;
+    void [safetyNetEnabled, safetyNetAmount, safetyNetThreshold];
+    mocks.loadPointsSettings.mockResolvedValue({ settings: legacy, revision: 1 });
+    renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+
+    const settingsPanel = screen.getByLabelText("Points settings");
+    fireEvent.change(within(settingsPanel).getByLabelText("Currency name"), { target: { value: "Stars" } });
+    const save = within(settingsPanel).getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+
+    await waitFor(() => expect(mocks.savePointsSettings).toHaveBeenCalledOnce());
+    expect(mocks.savePointsSettings).toHaveBeenCalledWith("kanal_demo", 1, { ...settings, currencyName: "Stars" });
+  });
+
   it("disables the safety-net amount and threshold while it is off and shows the hint of the selected mode (protects=the operator cannot edit safety-net values that have no effect and the threshold hint describes only the selected mode; fails_when=amount or threshold stay editable with the switch off or the min-stake hint shows for a fixed value; no_claim=the effect on payouts is covered in the points module tests)", async () => {
     renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
