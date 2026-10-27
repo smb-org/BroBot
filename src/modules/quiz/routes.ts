@@ -85,7 +85,7 @@ quizRoutes.put("/sets/:setId", async (context) => {
   const mutation = context.env.DB.prepare(
     `UPDATE quiz_sets SET name = ?, revision = revision + 1, updated_at = ?
       WHERE channel_id = ? AND set_id = ? AND revision = ? ${authorization.sql}
-      RETURNING set_id`,
+      RETURNING set_id, revision`,
   ).bind(input.name, now, channelId, setId, expectedRevision, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
@@ -118,7 +118,16 @@ quizRoutes.put("/sets/:setId", async (context) => {
     if (current.revision !== expectedRevision) return context.json({ error: "quiz_set_conflict", current }, 409);
     return denied(context);
   }
-  return context.json({ set: await setRepository.get(channelId, setId) });
+  const savedSet = result?.results[0] as { set_id: string; revision: number } | undefined;
+  if (savedSet === undefined) return context.json({ error: "quiz_set_save_failed" }, 500);
+  return context.json({ set: {
+    id: savedSet.set_id,
+    name: input.name,
+    revision: savedSet.revision,
+    questions: input.questions.map((question, position) => ({ position, ...question })),
+    createdAt: existing.createdAt,
+    updatedAt: now,
+  } satisfies QuizSet });
 });
 
 quizRoutes.delete("/sets/:setId", async (context) => {

@@ -120,6 +120,32 @@ describe("audit sentence action templates", () => {
     expect(auditSentenceText(removed, "en")).toContain("Bob with the Manager role");
   });
 
+  it("names quiz sets from the before and after audit snapshots", () => {
+    const created = baseEntry({
+      action: "quiz.set.created",
+      moduleId: "quiz",
+      actorDisplayName: "Alice",
+      before: "null",
+      after: JSON.stringify({ setId: "set-1", name: "Space", revision: 1, questionCount: 0 }),
+    });
+    const updated = {
+      ...created,
+      action: "quiz.set.updated",
+      before: JSON.stringify({ setId: "set-1", name: "Space", revision: 1, questionCount: 0 }),
+      after: JSON.stringify({ setId: "set-1", name: "Space quiz", revision: 2, questionCount: 1 }),
+    };
+    const deleted = {
+      ...created,
+      action: "quiz.set.deleted",
+      before: JSON.stringify({ setId: "set-1", name: "Space", revision: 2, questionCount: 1 }),
+      after: "null",
+    };
+
+    expect(auditSentenceText(created, "en")).toBe("Alice created quiz set Space");
+    expect(auditSentenceText(updated, "en")).toBe("Alice updated quiz set Space quiz");
+    expect(auditSentenceText(deleted, "en")).toBe("Alice deleted quiz set Space");
+  });
+
   it("renders the corrected points account and exposes only meaningful correction fields (protects=points audit rows show the viewer and meaningful amount and reason fields; fails_when=internal metadata is rendered as an editable correction field or account identity is lost; no_claim=audit rendering uses the provided immutable entry)", () => {
     const after = JSON.stringify({
       operationId: "admin:01234567-89ab-42cd-8abc-0123456789ab",

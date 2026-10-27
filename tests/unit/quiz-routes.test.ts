@@ -77,6 +77,47 @@ describe("quiz set HTTP routes", () => {
       .bind(channelId).all()).resolves.toMatchObject({ results: [{ action: "quiz.set.created" }, { action: "quiz.set.updated" }] });
   });
 
+  it("returns the committed snapshot when another save lands before the response readback", async () => {
+    const env = await setup();
+    const created = await panelRouter.fetch(await request("fictional_editor", "POST", "", { name: "Space" }), env);
+    const { set } = await created.json<{ set: { id: string; revision: number } }>();
+    let pendingQuizSave = false;
+    let interleaved = false;
+    const interleavingDatabase = {
+      prepare: (sql: string) => {
+        if (sql.startsWith("UPDATE quiz_sets SET name")) pendingQuizSave = true;
+        return database.prepare(sql);
+      },
+      batch: async (statements: TestPreparedStatement[]) => {
+        const results = await database.batch(statements);
+        if (pendingQuizSave && !interleaved) {
+          pendingQuizSave = false;
+          interleaved = true;
+          const concurrentSave = await panelRouter.fetch(await request("fictional_editor", "PUT", `/${set.id}`, {
+            name: "B revision", revision: 2, questions: [{ ...validQuestion, text: "B question" }],
+          }), env);
+          expect(concurrentSave.status).toBe(200);
+        }
+        return results;
+      },
+    } as unknown as D1Database;
+    const interleavedEnv = { ...env, DB: interleavingDatabase } as Env;
+
+    const response = await panelRouter.fetch(await request("fictional_editor", "PUT", `/${set.id}`, {
+      name: "A revision", revision: set.revision, questions: [{ ...validQuestion, text: "A question" }],
+    }), interleavedEnv);
+
+    expect(response.status).toBe(200);
+    const savedByA = await response.json<{ set: { name: string; revision: number; questions: { text: string }[] } }>();
+    expect(savedByA.set).toMatchObject({ name: "A revision", revision: 2, questions: [{ text: "A question" }] });
+
+    const nextSave = await panelRouter.fetch(await request("fictional_editor", "PUT", `/${set.id}`, {
+      name: "A follow-up", revision: savedByA.set.revision, questions: [{ ...validQuestion, text: "A follow-up question" }],
+    }), env);
+    expect(nextSave.status).toBe(409);
+    await expect(nextSave.json()).resolves.toMatchObject({ error: "quiz_set_conflict" });
+  });
+
   it("rejects invalid option lengths without changing the set", async () => {
     const env = await setup();
     const created = await panelRouter.fetch(await request("fictional_editor", "POST", "", { name: "Space" }), env);

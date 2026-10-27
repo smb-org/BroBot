@@ -34,6 +34,7 @@ const installFetch = (options: {
   holdConflictReload?: boolean;
   conflictThenFailReload?: boolean;
   conflictThenRemoteReload?: boolean;
+  normalizeNameOnSave?: boolean;
 } = {}) => {
   const savedSets = new Map<string, QuizSet>();
   if (options.existing) savedSets.set(set.id, structuredClone(set));
@@ -140,7 +141,7 @@ const installFetch = (options: {
       if (body.revision !== current.revision) return response({ error: "quiz_set_conflict" }, 409);
       const savedSet = {
         ...current,
-        name: typeof body.name === "string" ? body.name : current.name,
+        name: typeof body.name === "string" ? (options.normalizeNameOnSave ? body.name.trim() : body.name) : current.name,
         questions: Array.isArray(body.questions) ? body.questions as QuizSet["questions"] : current.questions,
         revision: current.revision + 1,
       };
@@ -395,6 +396,21 @@ describe("quiz set editor", () => {
     fireEvent.change(screen.getByLabelText("Set name"), { target: { value: "Later draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Newer space");
+  });
+
+  it("switches after saving a padded name that the server normalizes", async () => {
+    const fetch = installFetch({ existing: true, includeOtherSet: true, normalizeNameOnSave: true });
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    const nameField = await screen.findByLabelText("Set name");
+    fireEvent.change(nameField, { target: { value: "  Renamed space  " } });
+    fireEvent.click(await screen.findByRole("button", { name: /Ocean/u }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save and switch" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Ocean"));
+    expect(fetch.writes).toHaveLength(1);
   });
 
   it("keeps the draft and blocks Save and switch when a stale save fails", async () => {
