@@ -4,6 +4,7 @@ import {
   type ChannelControlDuration,
 } from "../../contracts/values";
 import type { PanelChannelControl, PanelChannelControls } from "../../panel-contract";
+import type { ModuleLanguage } from "../../modules/contract";
 import { ANY_MEMBER_ROLES, actorGuard, bindActorGuard, type ActorContext } from "./guards";
 import { prepareAudit } from "./audit";
 
@@ -23,6 +24,7 @@ export interface ChannelControlFields {
 }
 
 interface DispatchChannelStateRow extends ChannelControlFields {
+  language: string | null;
   module_id: string | null;
   enabled: number | null;
   settings: string | null;
@@ -41,6 +43,7 @@ interface CurrentStreamFields {
 
 export interface DispatchChannelState {
   controls: PanelChannelControls;
+  language: ModuleLanguage;
   activations: { moduleId: string; enabled: boolean; settings: string; revision: number; lastDisabledRevision: number | null }[];
   streamState: string | null;
   streamStartedAt: string | null;
@@ -136,7 +139,8 @@ export const readDispatchChannelState = async (
   now: string,
 ): Promise<DispatchChannelState> => {
   const rows = await db.prepare(
-    `SELECT channel_modules.module_id, channel_modules.enabled, channel_modules.settings, channel_modules.revision,
+    `SELECT channels.language,
+            channel_modules.module_id, channel_modules.enabled, channel_modules.settings, channel_modules.revision,
             channel_modules.last_disabled_revision,
             channel_controls.muted, channel_controls.muted_until, channel_controls.mute_until_stream_end,
             channel_controls.mute_stream_started_at, channel_controls.mute_stream_id,
@@ -154,6 +158,7 @@ export const readDispatchChannelState = async (
   const first = rows.results[0];
   return {
     controls: first === undefined ? mapRow(null, now, false) : mapRow(first, now, false),
+    language: first?.language === "en" ? "en" : "de",
     activations: rows.results.flatMap((row) => row.module_id === null || row.enabled === null || row.settings === null || row.revision === null
       ? []
       : [{

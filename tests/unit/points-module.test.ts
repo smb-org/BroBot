@@ -124,6 +124,7 @@ describe("points module", () => {
     Object.assign(points, {
       getPendingWelcome: vi.fn(() => Promise.resolve({
         accountId: "viewer_demo",
+        operationId: "safety-net:viewer_demo:2026-10-19",
         messageId: "message_previous",
         text: "Safety net: +50 Points.",
         kind: "safety_net" as const,
@@ -152,6 +153,7 @@ describe("points module", () => {
     const ackWelcome = vi.fn(() => Promise.resolve());
     const pending = {
       accountId: "viewer_demo",
+      operationId: "bonus:viewer_demo",
       messageId: "message_demo",
       text: "Startguthaben 100 Punkte",
       kind: "start_bonus" as const,
@@ -174,13 +176,14 @@ describe("points module", () => {
     if (retry.kind !== "chat") throw new Error("The retry welcome action was not a chat reply.");
     await retry.onDelivery?.("sent", "claim_demo");
     expect(ackWelcome).toHaveBeenCalledOnce();
-    expect(ackWelcome).toHaveBeenCalledWith("viewer_demo", "claim_demo");
+    expect(ackWelcome).toHaveBeenCalledWith("viewer_demo", "bonus:viewer_demo", "claim_demo");
   });
 
   it("keeps the complete welcome note in a 500-character reply with its mention prefix and transport attribution (protects=welcome suffix, mention prefix and attribution survive chat truncation; fails_when=transport truncation removes part of the welcome or attribution; no_claim=the transport formatter is exercised directly without a chat send)", async () => {
     const ackWelcome = vi.fn(() => Promise.resolve());
     const pending: PendingPointWelcome = {
       accountId: "viewer_demo",
+      operationId: "bonus:viewer_demo",
       messageId: "message_demo",
       text: "Initial balance 100 points",
       kind: "start_bonus",
@@ -209,6 +212,7 @@ describe("points module", () => {
   it("leaves an oversized welcome note pending when it cannot fit in the transport limit (protects=an unrenderable welcome remains eligible for a later reply; fails_when=the welcome is marked used despite not being appended; no_claim=delivery is not simulated because no action is emitted)", () => {
     const pending: PendingPointWelcome = {
       accountId: "viewer_demo",
+      operationId: "bonus:viewer_demo",
       messageId: "message_demo",
       text: "x".repeat(500),
       kind: "start_bonus",
@@ -224,6 +228,7 @@ describe("points module", () => {
     const ackWelcome = vi.fn(() => Promise.resolve());
     const pending: PendingPointWelcome = {
       accountId: "viewer_demo",
+      operationId: "bonus:viewer_demo",
       messageId: "message_demo",
       text: "Startguthaben 100 Punkte",
       kind: "start_bonus",

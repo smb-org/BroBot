@@ -37,7 +37,13 @@ const contextFor = (object: PointsWorkerObject, live: "online" | "offline" = "on
     apply: (operationId, kind, movements, result) => object.applyPointOperation(moduleId, operationId, kind, movements, result),
     settle: (operationId, kind, actor, stake, params, options) => object.settlePointOperation(moduleId, operationId, kind, actor, stake, params, options),
     touchAccount: (accountId, login, startBonus) => object.touchPointAccount(moduleId, accountId, login, startBonus),
-    ackWelcome: (accountId, claimId) => object.acknowledgePointWelcome(moduleId, accountId, claimId),
+    prepareChatActivity: (accountId, login, startBonus, messageAt, isLive, activityRules, safetyNetRules, welcomes) =>
+      object.preparePointChat(moduleId, accountId, login, startBonus, messageAt, isLive, activityRules, safetyNetRules, welcomes),
+    getPendingWelcome: (accountId) => object.getPendingPointWelcome(moduleId, accountId),
+    storePendingWelcome: (welcome) => object.storePendingPointWelcome(moduleId, welcome),
+    claimWelcome: (accountId, operationId, claimId) => object.claimPointWelcome(moduleId, accountId, operationId, claimId),
+    releaseWelcome: (accountId, operationId, claimId) => object.releasePointWelcome(moduleId, accountId, operationId, claimId),
+    ackWelcome: (accountId, operationId, claimId) => object.acknowledgePointWelcome(moduleId, accountId, operationId, claimId),
     creditActivity: (accountId, login, messageAt, isLive, rules) => object.creditPointActivity(moduleId, accountId, login, messageAt, isLive, rules),
     balance: (accountId) => object.pointBalance(moduleId, accountId),
     getAccount: (accountId) => object.pointAccount(moduleId, accountId),
@@ -85,17 +91,23 @@ describe("points module worker events", () => {
     const claimId = "dispatch:points-module-first:points:0";
     await object.storePendingPointWelcome(moduleId, {
       accountId: "viewer_demo",
+      operationId: "bonus:viewer_demo",
       messageId: "message-nachtfalke",
       text: "Startguthaben 100 Punkte",
       kind: "start_bonus",
     });
-    expect(await object.claimPointWelcome(moduleId, "viewer_demo", claimId)).toBe(true);
+    expect(await object.claimPointWelcome(moduleId, "viewer_demo", "bonus:viewer_demo", claimId))
+      .toMatchObject({ operationId: "bonus:viewer_demo" });
     const pending = {
       accountId: "viewer_demo",
+      operationId: "bonus:viewer_demo",
       messageId: "message-nachtfalke",
       text: "Startguthaben 100 Punkte",
       kind: "start_bonus" as const,
-      access: { ackWelcome: (accountId: string, currentClaimId?: string) => object.acknowledgePointWelcome(moduleId, accountId, currentClaimId) },
+      access: {
+        ackWelcome: (accountId: string, operationId: string, currentClaimId?: string) =>
+          object.acknowledgePointWelcome(moduleId, accountId, operationId, currentClaimId),
+      },
       deliveryClaimId: claimId,
       used: false,
     };

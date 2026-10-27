@@ -296,7 +296,8 @@ describe("delayed game welcome replies", () => {
     const channelId = `game-welcome-expired-claim-${crypto.randomUUID()}`;
     const object = await dispatchGameCommand(channelId, "duel", "welcome-expired-claim-message");
     const roundId = await openedRoundId(object, "duel");
-    expect(await object.claimPointWelcome("points", viewerId, "dispatch:abandoned:points:0")).toBe(true);
+    expect(await object.claimPointWelcome("points", viewerId, `bonus:${viewerId}`, "dispatch:abandoned:points:0"))
+      .toMatchObject({ operationId: `bonus:${viewerId}` });
     await runPointObject(object, (_target, state) => {
       state.storage.sql.exec(
         "UPDATE point_welcome_notes SET claimed_at = ? WHERE account_id = ?",
@@ -482,14 +483,15 @@ describe("delayed game welcome replies", () => {
     const fetcher = prepareRealChat(messages);
     const acknowledge = await spyOnWelcomeAcknowledgement(object);
     const heldClaimId = "dispatch:held:points:0";
-    expect(await object.claimPointWelcome("points", viewerId, heldClaimId)).toBe(true);
+    expect(await object.claimPointWelcome("points", viewerId, `bonus:${viewerId}`, heldClaimId))
+      .toMatchObject({ operationId: `bonus:${viewerId}` });
 
     await runHeistConfirmation(object, roundId);
     await runPointObject(object, (target) => {
       const runtime = target as unknown as {
-        releasePointWelcome: (moduleId: string, accountId: string, claimId: string) => Promise<void>;
+        releasePointWelcome: (moduleId: string, accountId: string, operationId: string, claimId: string) => Promise<void>;
       };
-      return runtime.releasePointWelcome("points", viewerId, heldClaimId);
+      return runtime.releasePointWelcome("points", viewerId, `bonus:${viewerId}`, heldClaimId);
     });
     await runHeistConfirmation(object, roundId);
 

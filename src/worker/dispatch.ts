@@ -1,5 +1,5 @@
 import type { EventCode } from "../contracts/values";
-import type { BotModule, ChatOutputTarget, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatDelivery, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState, ModuleTextBlockConditionDefinition } from "../modules/contract";
+import type { BotModule, ChatOutputTarget, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatDelivery, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState, ModuleTextBlockConditionDefinition, StoredPointWelcome } from "../modules/contract";
 import type { RealtimeMessage } from "../realtime-contract";
 import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../modules/registry";
 import {
@@ -225,12 +225,6 @@ const followedAtFor = async (
   }
 };
 
-const channelLanguageFor = async (db: D1Database, channelId: string): Promise<ModuleLanguage> => {
-  const row = await db.prepare("SELECT language FROM channels WHERE channel_id = ?").bind(channelId)
-    .first<{ language: ModuleLanguage }>();
-  return row?.language === "en" ? "en" : "de";
-};
-
 const channelTimeZoneFor = async (db: D1Database, channelId: string): Promise<string> => {
   const row = await db.prepare("SELECT time_zone FROM channels WHERE channel_id = ?").bind(channelId)
     .first<{ time_zone: string }>();
@@ -240,21 +234,18 @@ const channelTimeZoneFor = async (db: D1Database, channelId: string): Promise<st
 const recordValue = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const enabledPointsGameMinimumStake = async (
-  db: D1Database,
-  channelId: string,
+const enabledPointsGameMinimumStake = (
+  activations: readonly { moduleId: string; enabled: boolean; settings: string }[],
   registry: readonly BotModule[],
-): Promise<number | null> => {
-  const rows = await db.prepare(
-    "SELECT module_id, settings FROM channel_modules WHERE channel_id = ? AND enabled = 1",
-  ).bind(channelId).all<{ module_id: string; settings: string }>();
+): number | null => {
   const modules = new Map(registry.map((module) => [module.id, module]));
   let minimum: number | null = null;
-  for (const row of rows.results) {
-    const module = modules.get(row.module_id);
+  for (const activation of activations) {
+    if (!activation.enabled) continue;
+    const module = modules.get(activation.moduleId);
     if (module?.requiresModules?.includes("points") !== true) continue;
     try {
-      const settings = (module.settingsReadSchema ?? module.settingsSchema).parse(JSON.parse(row.settings));
+      const settings = (module.settingsReadSchema ?? module.settingsSchema).parse(JSON.parse(activation.settings));
       const minStake = recordValue(settings) ? settings.minStake : undefined;
       if (typeof minStake === "number" && Number.isSafeInteger(minStake) && minStake > 0) {
         minimum = minimum === null ? minStake : Math.min(minimum, minStake);
@@ -408,16 +399,25 @@ const runActions = async (
         ...pendingWelcome,
         deliveryClaimId: claimId,
       };
-      const decorated = appendPointWelcome(action, module, candidate, attributions, commandResponseMessageId);
-      if (decorated !== action && pendingWelcome?.access.claimWelcome !== undefined) {
-        let claimed = false;
+      const preview = appendPointWelcome(action, module, candidate, attributions, commandResponseMessageId);
+      if (preview !== action && pendingWelcome?.access.claimWelcome !== undefined) {
+        let claimed: StoredPointWelcome | null = null;
         try {
-          claimed = await pendingWelcome.access.claimWelcome(pendingWelcome.accountId, claimId);
+          claimed = await pendingWelcome.access.claimWelcome(pendingWelcome.accountId, pendingWelcome.operationId, claimId);
         } catch {
           // If the account claim is unavailable, leave the welcome pending for a later reply.
         }
-        if (claimed) action = decorated;
-      } else action = decorated;
+        if (claimed !== null) {
+          const authoritative = appendPointWelcome(action, module, {
+            ...claimed,
+            access: pendingWelcome.access,
+            deliveryClaimId: claimId,
+            used: false,
+          }, attributions, commandResponseMessageId);
+          if (authoritative !== action) action = authoritative;
+          else await pendingWelcome.access.releaseWelcome?.(pendingWelcome.accountId, pendingWelcome.operationId, claimId);
+        }
+      } else action = preview;
     }
     const reportDelivery = async (delivery: ModuleChatDelivery, postedWelcomeClaimId?: string): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
@@ -969,7 +969,6 @@ export const dispatchEventSubNotification = async (
   let streamDetailsPromise: Promise<TemplateStreamDetails | null> | undefined;
   let botUserIdPromise: Promise<string | null> | undefined;
   let appAccessTokenPromise: Promise<string> | undefined;
-  let channelLanguagePromise: Promise<ModuleLanguage> | undefined;
   let channelTimeZonePromise: Promise<string> | undefined;
   let channelLocationPromise: ReturnType<typeof readChannelLocation> | undefined;
   let followerTotalPromise: Promise<number | null> | undefined;
@@ -1033,10 +1032,7 @@ export const dispatchEventSubNotification = async (
     }
     return pending;
   };
-  const channelLanguage = (): Promise<ModuleLanguage> => {
-    channelLanguagePromise ??= channelLanguageFor(environment.DB, event.channelId);
-    return channelLanguagePromise;
-  };
+  const channelLanguage = (): Promise<ModuleLanguage> => Promise.resolve(dispatchState.language);
   const channelTimeZone = (): Promise<string> => {
     channelTimeZonePromise ??= channelTimeZoneFor(environment.DB, event.channelId);
     return channelTimeZonePromise;
@@ -1132,6 +1128,7 @@ export const dispatchEventSubNotification = async (
 
   const streamStateTransitionAccepted = streamStateChanged !== null;
   let pendingWelcome: PendingPointWelcome | undefined;
+  let pointChatPrepared: { welcomePending: boolean; pendingWelcome: StoredPointWelcome | null } | undefined;
   const pointsMatch = matches.find(({ module }) => module.id === "points");
   const chatterUserId = textValue(event.payload.chatter_user_id);
   const chatterLogin = textValue(event.payload.chatter_user_login);
@@ -1144,54 +1141,28 @@ export const dispatchEventSubNotification = async (
       if (chatterUserId !== botUserId) {
         const settings = pointsSettingsReadSchema.parse(JSON.parse(pointsMatch.settings));
         const access = modulePoints(environment.CHANNEL, event.channelId, "points");
-        const previousAccount = await access.getAccount(chatterUserId);
-        const touched = await access.touchAccount(chatterUserId, chatterLogin, settings.startBonus);
-        const language = await channelLanguage();
-        let storedWelcome = await access.getPendingWelcome?.(chatterUserId) ?? null;
-        if (touched.welcomePending && storedWelcome === null && touched.startBonus !== null) {
-          storedWelcome = {
-            accountId: chatterUserId,
+        const threshold = !settings.safetyNetEnabled ? null : settings.safetyNetThreshold === "min_stake"
+          ? enabledPointsGameMinimumStake(dispatchState.activations, registry)
+          : settings.safetyNetThreshold;
+        const parsedTimestamp = Date.parse(event.eventSubTimestamp ?? event.receivedAt);
+        const messageAt = Number.isFinite(parsedTimestamp) ? parsedTimestamp : Date.now();
+        const prepared = await access.prepareChatActivity(
+          chatterUserId,
+          chatterLogin,
+          settings.startBonus,
+          messageAt,
+          dispatchState.streamState === "online",
+          { amount: settings.activityAmount, windowMinutes: settings.windowMinutes, dailyCap: settings.dailyCap },
+          threshold === null ? null : { amount: settings.safetyNetAmount, threshold },
+          {
             messageId,
-            text: pointsCatalog[language].chat.startBonus(touched.startBonus, settings.currencyName),
-            kind: "start_bonus",
-          };
-          await access.storePendingWelcome?.(storedWelcome);
-        } else if (touched.welcomePending && storedWelcome !== null) {
-          storedWelcome = { ...storedWelcome, messageId };
-          await access.storePendingWelcome?.(storedWelcome);
-        }
-        const startBonusPending = touched.welcomePending && (storedWelcome === null || storedWelcome.kind === "start_bonus");
-        if (touched.welcomePending && storedWelcome !== null) {
-          pendingWelcome = { ...storedWelcome, access, used: false };
-        }
-
-        if (previousAccount !== null && !startBonusPending && settings.safetyNetEnabled) {
-          const threshold = settings.safetyNetThreshold === "min_stake"
-            ? await enabledPointsGameMinimumStake(environment.DB, event.channelId, registry)
-            : settings.safetyNetThreshold;
-          if (threshold !== null && access.creditSafetyNet !== undefined) {
-            const parsedTimestamp = Date.parse(event.eventSubTimestamp ?? event.receivedAt);
-            const messageAt = Number.isFinite(parsedTimestamp) ? parsedTimestamp : Date.now();
-            const safetyNetText = pointsCatalog[language].chat.safetyNet(settings.safetyNetAmount, settings.currencyName);
-            const credited = await access.creditSafetyNet(
-              chatterUserId,
-              chatterLogin,
-              messageAt,
-              await streamState() === "online",
-              { amount: settings.safetyNetAmount, threshold },
-              { messageId, text: safetyNetText },
-            );
-            if (credited.credited > 0) {
-              pendingWelcome = {
-                accountId: chatterUserId,
-                messageId,
-                text: safetyNetText,
-                kind: "safety_net",
-                access,
-                used: false,
-              };
-            }
-          }
+            startBonusText: pointsCatalog[dispatchState.language].chat.startBonus(settings.startBonus, settings.currencyName),
+            safetyNetText: pointsCatalog[dispatchState.language].chat.safetyNet(settings.safetyNetAmount, settings.currencyName),
+          },
+        );
+        pointChatPrepared = { welcomePending: prepared.welcomePending, pendingWelcome: prepared.pendingWelcome };
+        if (prepared.pendingWelcome !== null) {
+          pendingWelcome = { ...prepared.pendingWelcome, access, used: false };
         }
       }
     } catch {
@@ -1211,7 +1182,13 @@ export const dispatchEventSubNotification = async (
         event.channelId,
         module.id,
         module.requiresModules?.includes("points") === true && pendingWelcome !== undefined && !pendingWelcome.used
-          ? { accountId: pendingWelcome.accountId, messageId: pendingWelcome.messageId, text: pendingWelcome.text, kind: pendingWelcome.kind }
+          ? {
+            accountId: pendingWelcome.accountId,
+            operationId: pendingWelcome.operationId,
+            messageId: pendingWelcome.messageId,
+            text: pendingWelcome.text,
+            kind: pendingWelcome.kind,
+          }
           : undefined,
       );
       if (module.requiresModules?.includes("points") === true && activation !== undefined) {
@@ -1236,6 +1213,7 @@ export const dispatchEventSubNotification = async (
         settings: validatedSettings,
         receivedAt: event.receivedAt,
         ...(event.eventSubTimestamp === undefined ? {} : { eventSubTimestamp: event.eventSubTimestamp }),
+        ...(module.id === "points" && pointChatPrepared !== undefined ? { pointChatPrepared } : {}),
         actor,
         chatStatus: chatStatusFor(event.subscriptionType, event.payload),
       };

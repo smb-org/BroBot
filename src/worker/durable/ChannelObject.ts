@@ -248,6 +248,7 @@ import {
   pointRoundResolutionDeliverySync,
   pointRoundRefundRequests,
   pointRoundRow,
+  preparePointChatSync,
   pendingPointRoundCancellations,
   pendingPointRoundCancellationNotices,
   pointSummary,
@@ -4744,9 +4745,11 @@ export class ChannelObject extends DurableObject<Env> {
       touchAccount: (accountId, login, startBonus) => this.touchPointAccount(moduleId, accountId, login, startBonus),
       getPendingWelcome: (accountId) => this.getPendingPointWelcome(moduleId, accountId),
       storePendingWelcome: (welcome) => this.storePendingPointWelcome(moduleId, welcome),
-      claimWelcome: (accountId, claimId) => this.claimPointWelcome(moduleId, accountId, claimId),
-      releaseWelcome: (accountId, claimId) => this.releasePointWelcome(moduleId, accountId, claimId),
-      ackWelcome: (accountId, claimId) => this.acknowledgePointWelcome(moduleId, accountId, claimId),
+      claimWelcome: (accountId, operationId, claimId) => this.claimPointWelcome(moduleId, accountId, operationId, claimId),
+      releaseWelcome: (accountId, operationId, claimId) => this.releasePointWelcome(moduleId, accountId, operationId, claimId),
+      ackWelcome: (accountId, operationId, claimId) => this.acknowledgePointWelcome(moduleId, accountId, operationId, claimId),
+      prepareChatActivity: (accountId, login, startBonus, messageAt, live, activityRules, safetyNetRules, welcomes) =>
+        this.preparePointChat(moduleId, accountId, login, startBonus, messageAt, live, activityRules, safetyNetRules, welcomes),
       creditActivity: (accountId, login, messageAt, live, rules) =>
         this.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
       creditSafetyNet: (accountId, login, messageAt, live, rules, welcome) =>
@@ -4862,13 +4865,73 @@ export class ChannelObject extends DurableObject<Env> {
       movements,
       result: { amount: startBonus },
     });
-    return this.ctx.storage.transactionSync(() => touchPointAccountSync(
+    const touched = this.ctx.storage.transactionSync(() => touchPointAccountSync(
       this.ctx.storage.sql,
       moduleId,
       accountId,
       login,
       startBonus,
       payloadHash,
+      new Date().toISOString(),
+    ));
+    return { welcomePending: touched.welcomePending, startBonus: touched.startBonus };
+  }
+
+  public async preparePointChat(
+    moduleId: string,
+    accountId: string,
+    login: string,
+    startBonus: number,
+    messageAt: number,
+    live: boolean,
+    activityRules: { amount: number; windowMinutes: number; dailyCap: number },
+    safetyNetRules: { amount: number; threshold: number } | null,
+    welcomes: { messageId: string; startBonusText: string; safetyNetText: string },
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["prepareChatActivity"]>>> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    assertPointAccountId(accountId);
+    const bonusOperationId = `bonus:${accountId}`;
+    const bonusHash = await pointPayloadHash({
+      moduleId,
+      operationId: bonusOperationId,
+      kind: "bonus",
+      movements: [
+        { accountId, delta: startBonus, login },
+        { accountId: "__house", delta: -startBonus },
+      ],
+      result: { amount: startBonus },
+    });
+    const activityWindowStart = Math.floor(messageAt / (activityRules.windowMinutes * 60_000)) *
+      activityRules.windowMinutes * 60_000;
+    const activityOperationId = `activity:${accountId}:${String(activityWindowStart)}`;
+    const activityHash = await pointPayloadHash({
+      moduleId,
+      operationId: activityOperationId,
+      kind: "activity",
+      accountId,
+    });
+    const safetyNetHash = safetyNetRules === null ? null : await pointPayloadHash({
+      moduleId,
+      operationId: `safety-net:${accountId}:${pointActivityDayKey(messageAt)}`,
+      kind: "safety_net",
+      accountId,
+      rules: safetyNetRules,
+    });
+    return this.ctx.storage.transactionSync(() => preparePointChatSync(
+      this.ctx.storage.sql,
+      moduleId,
+      accountId,
+      login,
+      startBonus,
+      bonusHash,
+      messageAt,
+      live,
+      activityRules,
+      activityHash,
+      safetyNetRules,
+      safetyNetHash,
+      welcomes,
       new Date().toISOString(),
     ));
   }
@@ -4890,28 +4953,38 @@ export class ChannelObject extends DurableObject<Env> {
     return pendingPointWelcomeSync(this.ctx.storage.sql, accountId);
   }
 
-  public async claimPointWelcome(_moduleId: string, accountId: string, claimId: string): Promise<boolean> {
+  public async claimPointWelcome(
+    _moduleId: string,
+    accountId: string,
+    operationId: string,
+    claimId: string,
+  ): Promise<StoredPointWelcome | null> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     return this.ctx.storage.transactionSync(() =>
-      claimPendingPointWelcomeSync(this.ctx.storage.sql, accountId, claimId, Date.now()) !== null);
+      claimPendingPointWelcomeSync(this.ctx.storage.sql, accountId, operationId, claimId, Date.now()));
   }
 
-  public async releasePointWelcome(_moduleId: string, accountId: string, claimId: string): Promise<void> {
+  public async releasePointWelcome(_moduleId: string, accountId: string, operationId: string, claimId: string): Promise<void> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     this.ctx.storage.transactionSync(() => {
-      releasePointWelcomeClaimSync(this.ctx.storage.sql, accountId, claimId);
+      releasePointWelcomeClaimSync(this.ctx.storage.sql, accountId, operationId, claimId);
     });
   }
 
-  public async acknowledgePointWelcome(_moduleId: string, accountId: string, claimId?: string): Promise<void> {
+  public async acknowledgePointWelcome(
+    _moduleId: string,
+    accountId: string,
+    operationId: string,
+    claimId?: string,
+  ): Promise<void> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     if (claimId === undefined) return;
     assertPointAccountId(accountId);
     this.ctx.storage.transactionSync(() => {
-      acknowledgeWelcomeSync(this.ctx.storage.sql, accountId, claimId, new Date().toISOString());
+      acknowledgeWelcomeSync(this.ctx.storage.sql, accountId, operationId, claimId, new Date().toISOString());
     });
   }
 
@@ -5703,12 +5776,15 @@ export class ChannelObject extends DurableObject<Env> {
     if (stored === null) return action;
     const pending: PendingPointWelcome = {
       accountId,
+      operationId: stored.operationId,
       messageId: action.replyToMessageId ?? stored.messageId,
       text: stored.text,
       kind: stored.kind,
       access: {
-        ackWelcome: (pendingAccountId, pendingClaimId) => this.acknowledgePointWelcome("points", pendingAccountId, pendingClaimId),
-        releaseWelcome: (pendingAccountId, pendingClaimId) => this.releasePointWelcome("points", pendingAccountId, pendingClaimId),
+        ackWelcome: (pendingAccountId, operationId, pendingClaimId) =>
+          this.acknowledgePointWelcome("points", pendingAccountId, operationId, pendingClaimId),
+        releaseWelcome: (pendingAccountId, operationId, pendingClaimId) =>
+          this.releasePointWelcome("points", pendingAccountId, operationId, pendingClaimId),
       },
       deliveryClaimId: claimId,
       used: false,
@@ -5716,14 +5792,16 @@ export class ChannelObject extends DurableObject<Env> {
     const decorated = appendPointWelcome(action, module, pending, attributions) as Extract<ModuleAction, { kind: "chat" }>;
     if (decorated === action) return action;
     const claimed = this.ctx.storage.transactionSync(() => {
-      const note = claimPendingPointWelcomeSync(this.ctx.storage.sql, accountId, claimId, claimedAt);
+      const note = claimPendingPointWelcomeSync(this.ctx.storage.sql, accountId, stored.operationId, claimId, claimedAt);
       if (note === null) return null;
       if (roundId !== undefined) {
         const appendedColumn = phase === "announce" ? "announce_welcome_appended" : "resolve_welcome_appended";
         const claimColumn = phase === "announce" ? "announce_welcome_claim_id" : "resolve_welcome_claim_id";
+        const operationColumn = phase === "announce" ? "announce_welcome_operation_id" : "resolve_welcome_operation_id";
         this.ctx.storage.sql.exec(
-          `UPDATE game_rounds SET ${appendedColumn} = 1, ${claimColumn} = ? WHERE round_id = ?`,
+          `UPDATE game_rounds SET ${appendedColumn} = 1, ${claimColumn} = ?, ${operationColumn} = ? WHERE round_id = ?`,
           claimId,
+          note.operationId,
           roundId,
         );
       }
@@ -5754,22 +5832,27 @@ export class ChannelObject extends DurableObject<Env> {
       if (round === null) return;
       const appendedColumn = phase === "announce" ? "announce_welcome_appended" : "resolve_welcome_appended";
       const claimColumn = phase === "announce" ? "announce_welcome_claim_id" : "resolve_welcome_claim_id";
-      const sendWelcome = this.ctx.storage.sql.exec<{ appended: number; claim_id: string | null }>(
-        `SELECT ${appendedColumn} AS appended, ${claimColumn} AS claim_id FROM game_rounds WHERE round_id = ?`,
+      const operationColumn = phase === "announce" ? "announce_welcome_operation_id" : "resolve_welcome_operation_id";
+      const sendWelcome = this.ctx.storage.sql.exec<{ appended: number; claim_id: string | null; operation_id: string | null }>(
+        `SELECT ${appendedColumn} AS appended, ${claimColumn} AS claim_id,
+                ${operationColumn} AS operation_id FROM game_rounds WHERE round_id = ?`,
         roundId,
       ).toArray()[0];
-      if (sendWelcome?.appended !== 1 || sendWelcome.claim_id === null) return;
+      if (sendWelcome?.appended !== 1 || sendWelcome.claim_id === null || sendWelcome.operation_id === null) return;
       const accountId = this.pointRoundWelcomeAccountId(JSON.parse(round.data_json) as unknown, phase, round.module_id);
       if (accountId === null) return;
       const receipt = await readModuleAlarmSendClaim(this.ctx.storage, `round:${roundId}:${phase}`);
       if (receipt?.status !== "sent") return;
       await finalizePointWelcomeDelivery({
         accountId,
+        operationId: sendWelcome.operation_id,
         deliveryClaimId: sendWelcome.claim_id,
         used: true,
         access: {
-          ackWelcome: (pendingAccountId, claimId) => this.acknowledgePointWelcome("points", pendingAccountId, claimId),
-          releaseWelcome: (pendingAccountId, claimId) => this.releasePointWelcome("points", pendingAccountId, claimId),
+          ackWelcome: (pendingAccountId, operationId, claimId) =>
+            this.acknowledgePointWelcome("points", pendingAccountId, operationId, claimId),
+          releaseWelcome: (pendingAccountId, operationId, claimId) =>
+            this.releasePointWelcome("points", pendingAccountId, operationId, claimId),
         },
       }, "sent", receipt.welcomeClaimId);
     } catch (error) {

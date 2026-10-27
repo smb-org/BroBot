@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../../src/modules/contract";
+import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult, StoredPointWelcome } from "../../src/modules/contract";
 import { belaboxModule } from "../../src/modules/belabox";
 import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { channelEventsModule } from "../../src/modules/channel_events";
@@ -51,6 +51,12 @@ const activation = (moduleId: string, enabled = true, settings = '{"prefix":"!"}
   ({ moduleId, enabled, settings });
 
 const environment = (database: TestD1Database, publish = vi.fn()) => {
+  const pointAccounts = new Set<string>();
+  const startBonuses = new Map<string, number>();
+  const pointBalances = new Map<string, number>();
+  const pendingPointWelcomes = new Map<string, StoredPointWelcome>();
+  const claimedPointWelcomes = new Map<string, string>();
+  const deliveredPointWelcomes = new Set<string>();
   const channelObject = {
     publish,
     notifyScheduleInputsChanged: vi.fn().mockResolvedValue(undefined),
@@ -68,8 +74,107 @@ const environment = (database: TestD1Database, publish = vi.fn()) => {
     transitionTimerStream: vi.fn().mockResolvedValue(undefined),
     touchPointAccount: vi.fn((_moduleId: string, _accountId: string, _login: string, startBonus: number) =>
       Promise.resolve({ welcomePending: true, startBonus })),
-    pointAccount: vi.fn().mockResolvedValue(null),
-    acknowledgePointWelcome: vi.fn().mockResolvedValue(undefined),
+    preparePointChat: vi.fn((
+      _moduleId: string,
+      accountId: string,
+      _login: string,
+      startBonus: number,
+      messageAt: number,
+      live: boolean,
+      _activityRules: { amount: number; windowMinutes: number; dailyCap: number },
+      safetyNetRules: { amount: number; threshold: number } | null,
+      welcomes: { messageId: string; startBonusText: string; safetyNetText: string },
+    ) => {
+      const accountExisted = pointAccounts.has(accountId);
+      if (!accountExisted) {
+        pointAccounts.add(accountId);
+        startBonuses.set(accountId, startBonus);
+        pointBalances.set(accountId, startBonus);
+      }
+      const startOperationId = `bonus:${accountId}`;
+      const startDeliveryKey = `${accountId}:${startOperationId}`;
+      if (!deliveredPointWelcomes.has(startDeliveryKey) && startBonuses.has(accountId)) {
+        const previous = pendingPointWelcomes.get(accountId);
+        if (previous?.operationId === startOperationId) {
+          if (!claimedPointWelcomes.has(accountId)) pendingPointWelcomes.set(accountId, { ...previous, messageId: welcomes.messageId });
+        } else if (previous === undefined) {
+          pendingPointWelcomes.set(accountId, {
+            accountId,
+            operationId: startOperationId,
+            messageId: welcomes.messageId,
+            text: welcomes.startBonusText,
+            kind: "start_bonus",
+          });
+        }
+      }
+      const safetyOperationId = `safety-net:${accountId}:${new Date(messageAt).toISOString().slice(0, 10)}`;
+      const safetyDeliveryKey = `${accountId}:${safetyOperationId}`;
+      if (accountExisted && live && safetyNetRules !== null && !deliveredPointWelcomes.has(safetyDeliveryKey) &&
+          (pointBalances.get(accountId) ?? 0) < safetyNetRules.threshold &&
+          pendingPointWelcomes.get(accountId)?.kind !== "start_bonus") {
+        const previous = pendingPointWelcomes.get(accountId);
+        if (previous?.operationId !== safetyOperationId) {
+          pointBalances.set(accountId, (pointBalances.get(accountId) ?? 0) + safetyNetRules.amount);
+          pendingPointWelcomes.set(accountId, {
+            accountId,
+            operationId: safetyOperationId,
+            messageId: welcomes.messageId,
+            text: welcomes.safetyNetText,
+            kind: "safety_net",
+          });
+        } else if (!claimedPointWelcomes.has(accountId)) {
+          pendingPointWelcomes.set(accountId, { ...previous, messageId: welcomes.messageId });
+        }
+      }
+      const pendingWelcome = pendingPointWelcomes.get(accountId) ?? null;
+      return Promise.resolve({
+        accountExisted,
+        welcomePending: pendingWelcome !== null,
+        startBonus: startBonuses.get(accountId) ?? null,
+        pendingWelcome,
+      });
+    }),
+    storePendingPointWelcome: vi.fn((_moduleId: string, welcome: StoredPointWelcome) => {
+      const key = `${welcome.accountId}:${welcome.operationId}`;
+      if (deliveredPointWelcomes.has(key)) return Promise.resolve();
+      if (pendingPointWelcomes.get(welcome.accountId)?.operationId === welcome.operationId) {
+        const current = pendingPointWelcomes.get(welcome.accountId);
+        if (current !== undefined && !claimedPointWelcomes.has(welcome.accountId)) {
+          pendingPointWelcomes.set(welcome.accountId, { ...current, messageId: welcome.messageId });
+        }
+      } else if (pendingPointWelcomes.get(welcome.accountId) === undefined) {
+        pendingPointWelcomes.set(welcome.accountId, welcome);
+      }
+      return Promise.resolve();
+    }),
+    getPendingPointWelcome: vi.fn((_moduleId: string, accountId: string) =>
+      Promise.resolve(pendingPointWelcomes.get(accountId) ?? null)),
+    claimPointWelcome: vi.fn((_moduleId: string, accountId: string, operationId: string, claimId: string) => {
+      const note = pendingPointWelcomes.get(accountId);
+      if (note === undefined || note.operationId !== operationId) return Promise.resolve(null);
+      claimedPointWelcomes.set(accountId, claimId);
+      return Promise.resolve(note);
+    }),
+    releasePointWelcome: vi.fn((_moduleId: string, accountId: string, operationId: string, claimId: string) => {
+      if (pendingPointWelcomes.get(accountId)?.operationId === operationId && claimedPointWelcomes.get(accountId) === claimId) {
+        claimedPointWelcomes.delete(accountId);
+      }
+      return Promise.resolve();
+    }),
+    pointAccount: vi.fn((_moduleId: string, accountId: string) => Promise.resolve(
+      pointAccounts.has(accountId)
+        ? { accountId, login: accountId, balance: pointBalances.get(accountId) ?? 0 }
+        : null,
+    )),
+    acknowledgePointWelcome: vi.fn((_moduleId: string, accountId: string, operationId: string, claimId?: string) => {
+      const note = pendingPointWelcomes.get(accountId);
+      if (note?.operationId === operationId && claimId !== undefined && claimedPointWelcomes.get(accountId) === claimId) {
+        pendingPointWelcomes.delete(accountId);
+        deliveredPointWelcomes.add(`${accountId}:${operationId}`);
+        claimedPointWelcomes.delete(accountId);
+      }
+      return Promise.resolve(undefined);
+    }),
     creditPointActivity: vi.fn().mockResolvedValue({ credited: 5 }),
     scheduleModuleAlarm: vi.fn().mockResolvedValue(undefined),
     clearModuleAlarm: vi.fn().mockResolvedValue(undefined),
@@ -693,7 +798,9 @@ describe("dispatch and execution", () => {
       expect(String(gameBody?.message).split(startBonus)).toHaveLength(2);
       expect(gameBody).not.toHaveProperty("reply_parent_message_id");
       expect(object.acknowledgePointWelcome).toHaveBeenCalledOnce();
-      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1", "dispatch:unthreaded-game-welcome:chat_voting:0");
+      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith(
+        "points", "viewer-1", "bonus:viewer-1", "dispatch:unthreaded-game-welcome:chat_voting:0",
+      );
     } finally {
       database.close();
     }
@@ -733,7 +840,9 @@ describe("dispatch and execution", () => {
       const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
         acknowledgePointWelcome: ReturnType<typeof vi.fn>;
       };
-      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith("points", "viewer-1", "dispatch:twitch-chat-message-486:points:0");
+      expect(object.acknowledgePointWelcome).toHaveBeenCalledWith(
+        "points", "viewer-1", "bonus:viewer-1", "dispatch:twitch-chat-message-486:points:0",
+      );
     } finally {
       database.close();
     }
@@ -883,7 +992,7 @@ describe("dispatch and execution", () => {
     },
   );
 
-  it("uses the booked bonus in a pending welcome after the setting changes (protects=welcome notes report the amount already credited to first contact; fails_when=a later setting is reported as the old booking; no_claim=the touch reply models the persisted Durable Object result)", async () => {
+  it("uses the booked bonus in a pending welcome after the setting changes (protects=welcome notes report the amount already credited to first contact; fails_when=a later setting is reported as the old booking; no_claim=the dispatch fixture preserves the first operation's stored welcome payload)", async () => {
     const database = new TestD1Database();
     try {
       await withBot(database);
@@ -891,21 +1000,6 @@ describe("dispatch and execution", () => {
       await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = ?")
         .bind(JSON.stringify(DEFAULT_POINTS_SETTINGS), "kanal-a", pointsModule.id).run();
       const runtime = environment(database);
-      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
-        touchPointAccount: {
-          mockImplementation: (implementation: (
-            moduleId: string,
-            accountId: string,
-            login: string,
-            configuredBonus: number,
-          ) => Promise<{ welcomePending: boolean; startBonus: number }>) => void;
-        };
-      };
-      let bookedBonus: number | undefined;
-      object.touchPointAccount.mockImplementation((_moduleId: string, _accountId: string, _login: string, configuredBonus: number) => {
-        bookedBonus ??= configuredBonus;
-        return Promise.resolve({ welcomePending: true, startBonus: bookedBonus });
-      });
       const fetcher = sent();
       const sendEvent = (triggerId: string, messageId: string, text: string) => dispatchEventSubNotification(runtime, {
         channelId: "kanal-a",

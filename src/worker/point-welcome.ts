@@ -6,6 +6,7 @@ export const POINT_WELCOME_RESULT_ACCOUNT_ID_KEY = "welcomeResultAccountId";
 
 export interface PointWelcomeNote {
   accountId: string;
+  operationId: string;
   messageId: string;
   text: string;
   kind: PointWelcomeKind;
@@ -17,7 +18,7 @@ export interface PendingPointWelcome extends PointWelcomeNote {
   used: boolean;
 }
 
-type PointWelcomeDeliveryClaim = Pick<PendingPointWelcome, "accountId" | "access" | "deliveryClaimId" | "used">;
+type PointWelcomeDeliveryClaim = Pick<PendingPointWelcome, "accountId" | "operationId" | "access" | "deliveryClaimId" | "used">;
 
 /** Finalizes a welcome only when the posted receipt proves this exact claim carried the note. */
 export const finalizePointWelcomeDelivery = async (
@@ -27,11 +28,11 @@ export const finalizePointWelcomeDelivery = async (
 ): Promise<void> => {
   const claimId = pending.deliveryClaimId;
   if (delivery === "sent" && claimId !== undefined && postedWelcomeClaimId === claimId) {
-    await pending.access.ackWelcome(pending.accountId, claimId);
+    await pending.access.ackWelcome(pending.accountId, pending.operationId, claimId);
     return;
   }
   if (delivery === "ambiguous") return;
-  if (claimId !== undefined) await pending.access.releaseWelcome?.(pending.accountId, claimId);
+  if (claimId !== undefined) await pending.access.releaseWelcome?.(pending.accountId, pending.operationId, claimId);
   pending.used = false;
 };
 

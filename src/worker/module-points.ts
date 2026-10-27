@@ -15,6 +15,7 @@ export const modulePoints = (
       apply: () => unavailable(),
       settle: () => unavailable(),
       touchAccount: () => unavailable(),
+      prepareChatActivity: () => unavailable(),
       getPendingWelcome: () => unavailable(),
       ackWelcome: () => unavailable(),
       creditActivity: () => unavailable(),
@@ -68,18 +69,21 @@ export const modulePoints = (
     storePendingWelcome: (welcome) => typeof object.storePendingPointWelcome === "function"
       ? object.storePendingPointWelcome(moduleId, {
         accountId: welcome.accountId,
+        operationId: welcome.operationId,
         messageId: welcome.messageId,
         text: welcome.text,
         kind: welcome.kind,
       })
       : Promise.resolve(),
-    claimWelcome: (accountId, claimId) => typeof object.claimPointWelcome === "function"
-      ? object.claimPointWelcome(moduleId, accountId, claimId)
-      : Promise.resolve(true),
-    releaseWelcome: (accountId, claimId) => typeof object.releasePointWelcome === "function"
-      ? object.releasePointWelcome(moduleId, accountId, claimId)
+    claimWelcome: (accountId, operationId, claimId) => typeof object.claimPointWelcome === "function"
+      ? object.claimPointWelcome(moduleId, accountId, operationId, claimId)
+      : Promise.resolve(null),
+    releaseWelcome: (accountId, operationId, claimId) => typeof object.releasePointWelcome === "function"
+      ? object.releasePointWelcome(moduleId, accountId, operationId, claimId)
       : Promise.resolve(),
-    ackWelcome: (accountId, claimId) => object.acknowledgePointWelcome(moduleId, accountId, claimId),
+    ackWelcome: (accountId, operationId, claimId) => object.acknowledgePointWelcome(moduleId, accountId, operationId, claimId),
+    prepareChatActivity: (accountId, login, startBonus, messageAt, live, activityRules, safetyNetRules, welcomes) =>
+      object.preparePointChat(moduleId, accountId, login, startBonus, messageAt, live, activityRules, safetyNetRules, welcomes),
     creditActivity: (accountId, login, messageAt, live, rules) =>
       object.creditPointActivity(moduleId, accountId, login, messageAt, live, rules),
     creditSafetyNet: (accountId, login, messageAt, live, rules, welcome) =>

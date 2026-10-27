@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { POINTS_CANCELLATION_NOTICE_ALARM_PREFIX } from "../../src/worker/durable/points";
-import type { ModuleAlarmContext } from "../../src/modules/contract";
+import type { ModuleAlarmContext, StoredPointWelcome } from "../../src/modules/contract";
 
 const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
   query: "?raw",
@@ -32,9 +32,22 @@ export interface PointsWorkerObject {
     welcomePending: boolean;
     startBonus: number | null;
   }>;
-  storePendingPointWelcome(moduleId: string, welcome: { accountId: string; messageId: string; text: string; kind: "start_bonus" | "safety_net" }): Promise<void>;
-  claimPointWelcome(moduleId: string, accountId: string, claimId: string): Promise<boolean>;
-  acknowledgePointWelcome(moduleId: string, accountId: string, claimId?: string): Promise<void>;
+  preparePointChat(
+    moduleId: string,
+    accountId: string,
+    login: string,
+    startBonus: number,
+    messageAt: number,
+    live: boolean,
+    activityRules: { amount: number; windowMinutes: number; dailyCap: number },
+    safetyNetRules: { amount: number; threshold: number } | null,
+    welcomes: { messageId: string; startBonusText: string; safetyNetText: string },
+  ): Promise<{ accountExisted: boolean; welcomePending: boolean; startBonus: number | null; pendingWelcome: StoredPointWelcome | null }>;
+  storePendingPointWelcome(moduleId: string, welcome: StoredPointWelcome): Promise<void>;
+  getPendingPointWelcome(moduleId: string, accountId: string): Promise<StoredPointWelcome | null>;
+  claimPointWelcome(moduleId: string, accountId: string, operationId: string, claimId: string): Promise<StoredPointWelcome | null>;
+  releasePointWelcome(moduleId: string, accountId: string, operationId: string, claimId: string): Promise<void>;
+  acknowledgePointWelcome(moduleId: string, accountId: string, operationId: string, claimId?: string): Promise<void>;
   pointBalance(moduleId: string, accountId: string): Promise<number>;
   pointAccount(moduleId: string, accountId: string): Promise<{ accountId: string; login: string; balance: number } | null>;
   creditPointActivity(moduleId: string, accountId: string, login: string, messageAt: number, live: boolean,

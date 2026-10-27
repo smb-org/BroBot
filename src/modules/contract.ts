@@ -1141,6 +1141,7 @@ export type PointWelcomeKind = "start_bonus" | "safety_net";
 
 export interface StoredPointWelcome {
   accountId: string;
+  operationId: string;
   messageId: string;
   text: string;
   kind: PointWelcomeKind;
@@ -1215,9 +1216,28 @@ export interface ModulePointsAccess {
   getPendingWelcome?: (accountId: string) => Promise<StoredPointWelcome | null>;
   /** Stores the note payload while the account's pending bit remains the eligibility source. */
   storePendingWelcome?: (welcome: StoredPointWelcome) => Promise<void>;
-  claimWelcome?: (accountId: string, claimId: string) => Promise<boolean>;
-  releaseWelcome?: (accountId: string, claimId: string) => Promise<void>;
-  ackWelcome: (accountId: string, claimId?: string) => Promise<void>;
+  claimWelcome?: (accountId: string, operationId: string, claimId: string) => Promise<StoredPointWelcome | null>;
+  releaseWelcome?: (accountId: string, operationId: string, claimId: string) => Promise<void>;
+  ackWelcome: (accountId: string, operationId: string, claimId?: string) => Promise<void>;
+  prepareChatActivity: (
+    accountId: string,
+    login: string,
+    startBonus: number,
+    messageAt: number,
+    live: boolean,
+    activityRules: { amount: number; windowMinutes: number; dailyCap: number },
+    safetyNetRules: { amount: number; threshold: number } | null,
+    welcomes: {
+      messageId: string;
+      startBonusText: string;
+      safetyNetText: string;
+    },
+  ) => Promise<{
+    accountExisted: boolean;
+    welcomePending: boolean;
+    startBonus: number | null;
+    pendingWelcome: StoredPointWelcome | null;
+  }>;
   creditActivity: (
     accountId: string,
     login: string,
@@ -2019,6 +2039,8 @@ export interface ModuleEvent<Settings = unknown> {
   receivedAt: string;
   /** Verified EventSub message time from the host, when available. */
   eventSubTimestamp?: string;
+  /** The host already applied points account, activity, and safety-net chat bookkeeping. */
+  pointChatPrepared?: { welcomePending: boolean; pendingWelcome: StoredPointWelcome | null };
   /** The role comes from channel_members; `null` means not a member. */
   actor: ModuleActor | null;
   /** Events unrelated to chat carry `null` here; chat events carry all matching statuses. */
