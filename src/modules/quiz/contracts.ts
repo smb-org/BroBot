@@ -43,6 +43,7 @@ export interface QuizSessionRoundData extends QuizPhaseState {
   questions: QuizSessionQuestion[];
   aggregates?: QuizSessionAggregates;
   phaseOpenedAt: number | null;
+  offlineSince: number | null;
 }
 
 export interface QuizQuestion {

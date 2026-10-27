@@ -52,7 +52,7 @@ export const QuizLiveTile = ({ channelId, language, session, now, canManage, onR
     <div className="live-cockpit-quiz__actions">
       <Button size="compact" variant="secondary" icon="skip-forward" disabled={busy || !canManage || session.phase === "results"} onClick={() => { void run("next"); }}>{copy.nextAction}</Button>
       <Button size="compact" variant="secondary" icon={session.paused ? "player-play" : "player-pause"} disabled={busy || !canManage || session.phase === "results"} onClick={() => { void run(session.paused ? "resume" : "pause"); }}>{session.paused ? copy.resumeAction : copy.pauseAction}</Button>
-      <Button size="compact" variant="neutral" danger icon="square" disabled={busy || !canManage} onClick={() => { void run("end"); }}>{copy.endAction}</Button>
+      <Button size="compact" variant="neutral" danger icon="square" disabled={busy || !canManage || session.phase === "results"} onClick={() => { void run("end"); }}>{copy.endAction}</Button>
     </div>
     <p className="live-cockpit-quiz__feedback" role="status" aria-live="polite">{failed ? copy.controlError : "\u00a0"}</p>
   </article>;

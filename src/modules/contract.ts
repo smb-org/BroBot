@@ -1190,6 +1190,13 @@ export interface PointActiveRound {
   deadlineAt: number | null;
 }
 
+export interface PointResolvedRound {
+  roundId: string;
+  data: unknown;
+  result: unknown;
+  resolvedAt: string;
+}
+
 /** Funded participants of one round: total count and stake, plus the first logins in join order. */
 export interface PointRoundParticipants {
   count: number;
@@ -1306,6 +1313,7 @@ export interface ModulePointsAccess {
     ) => Promise<{ roundId: string; replayed: boolean }>;
     active: () => Promise<PointActiveRound | null>;
     listOpen: () => Promise<PointActiveRound[]>;
+    recentlyResolved: (maxAgeMs: number) => Promise<PointResolvedRound | null>;
     markAnnounced: (roundId: string, deadlineAt: number, alarmKey: string) => Promise<void>;
     join: (roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown) => Promise<PointJoinResult>;
     /** Reads the round's participant count and total stake, with at most `nameLimit` logins. */
@@ -2215,8 +2223,12 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   alarms?: readonly ModuleAlarmDefinition[];
   /** Serializes this module's alarm and point-round lifecycle mutations per channel. */
   serializeLifecycleMutations?: boolean;
+  /** Serializes point-round deadline callbacks and defers resolution notifications to recovery alarms. */
+  serializePointRoundDeadline?: boolean;
   /** Reconciles accepted start metadata, even if the round was cancelled before announcement. */
   onPointRoundOpened?: (context: ModuleAlarmContext, round: ModulePointRoundAnnouncement) => Promise<void>;
+  /** Runs after the shared start announcement has opened the round and before its module-owned phase begins. */
+  onPointRoundAnnounced?: (context: ModuleAlarmContext, round: ModulePointRoundAnnouncement) => Promise<void>;
   /** Receives an internal, replayable notification immediately after round resolution and during watchdog recovery. */
   onPointRoundResolved?: (context: ModuleAlarmContext, round: ModulePointRoundResult) => Promise<void>;
   /** Handles a shared round deadline when a module owns multiple phases inside one points round. */

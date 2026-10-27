@@ -22,6 +22,7 @@ const repository = (context: QuizRouteContext) => createQuizSetRepository(contex
 const denied = (context: QuizRouteContext): Response => context.json({ error: "quiz_management_denied" }, 403);
 const nowIso = (): string => new Date().toISOString();
 const auditSnapshot = (set: QuizSet) => ({ setId: set.id, name: set.name, revision: set.revision, questionCount: set.questions.length });
+const QUIZ_RESULTS_DISPLAY_MS = 60_000;
 
 export const quizRoutes = new Hono<ModuleRouteEnvironment>();
 
@@ -75,9 +76,15 @@ quizRoutes.get("/session/availability", async (context) => {
 });
 
 quizRoutes.get("/session/state", async (context) => {
-  const active = await context.get("points")(channelIdFrom(context)).rounds.active();
-  const data = quizRoundData(active?.data);
-  if (active === null || data === null) return context.json({ session: null });
+  const rounds = context.get("points")(channelIdFrom(context)).rounds;
+  const active = await rounds.active();
+  const resolved = active === null ? await rounds.recentlyResolved(QUIZ_RESULTS_DISPLAY_MS) : null;
+  const data = quizRoundData(active?.data ?? resolved?.data);
+  if (data === null || (active === null && resolved === null)) return context.json({ session: null });
+  const result = resolved !== null && isRecord(resolved.result) ? resolved.result : null;
+  const ranking = result !== null && Array.isArray(result.ranking)
+    ? result.ranking.filter(isRecord).slice(0, 10).map(({ login, correct, rank, payout }) => ({ login, correct, rank, payout }))
+    : undefined;
   return context.json({
     session: {
       sessionId: data.sessionId,
@@ -88,6 +95,12 @@ quizRoutes.get("/session/state", async (context) => {
       paused: data.paused,
       phaseEndsAt: data.phaseEndsAt === null ? null : new Date(data.phaseEndsAt).toISOString(),
       remainingMs: data.paused ? data.remainingMs : null,
+      ...(resolved === null ? {} : {
+        ranking,
+        participants: result !== null && Number.isSafeInteger(result.participants) ? result.participants : 0,
+        correctRate: typeof result?.correctRate === "number" ? result.correctRate : 0,
+        distributed: result !== null && Number.isSafeInteger(result.distributed) ? result.distributed : 0,
+      }),
     },
   });
 });
@@ -149,6 +162,9 @@ quizRoutes.post("/session/action", async (context) => {
   const action = isRecord(requestBody) ? requestBody.action : null;
   if (action !== "next" && action !== "pause" && action !== "resume" && action !== "end") {
     return context.json({ error: "invalid_quiz_action" }, 400);
+  }
+  if (action !== "end" && !await streamIsOnline(context.env.DB, channelId)) {
+    return context.json({ error: "stream_offline" }, 409);
   }
   const active = await context.get("points")(channelId).rounds.active();
   if (active === null || active.state !== "open" || quizRoundData(active.data) === null) {

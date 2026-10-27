@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { POINTS_CANCELLATION_NOTICE_ALARM_PREFIX } from "../../src/worker/durable/points";
-import type { ModuleAlarmContext, StoredPointWelcome } from "../../src/modules/contract";
+import type { ModuleAlarmContext, PointResolvedRound, StoredPointWelcome } from "../../src/modules/contract";
 
 const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
   query: "?raw",
@@ -17,6 +17,7 @@ interface PointMovement {
 }
 
 export interface PointsWorkerObject {
+  alarm(): Promise<void>;
   applyPointOperation(moduleId: string, operationId: string, kind: string, movements: PointMovement[], result: unknown, identity?: unknown): Promise<{
     replayed: boolean;
     result: unknown;
@@ -89,6 +90,8 @@ export interface PointsWorkerObject {
   answerGameRoundChoice(moduleId: string, roundId: string, operationId: string, accountId: string, login: string,
     questionIndex: number, choice: number, messageAt: number): Promise<{ status: "recorded" | "round_closed"; replayed: boolean }>;
   activeGameRound(moduleId: string): Promise<{ roundId: string; state: "announcing" | "open"; data: unknown; deadlineAt: number | null } | null>;
+  recentlyResolvedGameRound(moduleId: string, maxAgeMs: number): Promise<PointResolvedRound | null>;
+  runModuleAlarm(moduleId: string, handlerKey: string, alarmKey: string, invocation?: unknown): Promise<unknown>;
   scheduleModuleAlarm(moduleId: string, handlerKey: string, alarmKey: string, deadline: number): Promise<void>;
   resolveGameRound(moduleId: string, roundId: string, settlement: { kind: string; params: unknown }): Promise<{
     replayed: boolean;

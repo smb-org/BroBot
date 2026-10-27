@@ -95,6 +95,7 @@ import type {
   PointJoinResult,
   PointRoundAnswerResult,
   PointRoundParticipants,
+  PointResolvedRound,
   PointSettlementCooldown,
   PointsApplyResult,
   PointsKind,
@@ -4785,6 +4786,7 @@ export class ChannelObject extends DurableObject<Env> {
           this.openGameRoundWithStake(moduleId, roundId, data, operationId, accountId, login, stake, cooldown),
         active: () => this.activeGameRound(moduleId),
         listOpen: () => this.listOpenGameRounds(moduleId),
+        recentlyResolved: (maxAgeMs) => this.recentlyResolvedGameRound(moduleId, maxAgeMs),
         markAnnounced: (roundId, deadlineAt, alarmKey) => this.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
         join: (roundId, operationId, accountId, login, stake, data) =>
           this.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
@@ -5238,6 +5240,38 @@ export class ChannelObject extends DurableObject<Env> {
     };
   }
 
+  public async recentlyResolvedGameRound(moduleId: string, maxAgeMs: number): Promise<PointResolvedRound | null> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    if (!Number.isSafeInteger(maxAgeMs) || maxAgeMs < 0) throw new Error("invalid_resolution_window");
+    const round = this.ctx.storage.sql.exec<{
+      round_id: string;
+      data_json: string;
+      resolved_at: string | null;
+    }>(
+      `SELECT round_id, data_json, resolved_at FROM game_rounds
+        WHERE module_id = ? AND state = 'resolved' AND resolved_at IS NOT NULL
+        ORDER BY resolved_at DESC, round_id DESC LIMIT 1`,
+      moduleId,
+    ).toArray()[0];
+    if (round === undefined || round.resolved_at === null) return null;
+    const resolvedAtMs = Date.parse(round.resolved_at);
+    if (!Number.isSafeInteger(resolvedAtMs) || Date.now() - resolvedAtMs > maxAgeMs) return null;
+    const data = JSON.parse(round.data_json) as unknown;
+    const operation = this.ctx.storage.sql.exec<{ result_json: string }>(
+      "SELECT result_json FROM point_operations WHERE operation_id = ? AND module_id = ?",
+      pointRoundResolveOperationId(round.round_id, data),
+      moduleId,
+    ).toArray()[0];
+    if (operation === undefined) return null;
+    return {
+      roundId: round.round_id,
+      data,
+      result: JSON.parse(operation.result_json) as unknown,
+      resolvedAt: round.resolved_at,
+    };
+  }
+
   public async listOpenGameRounds(moduleId: string): Promise<PointActiveRound[]> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
@@ -5443,7 +5477,9 @@ export class ChannelObject extends DurableObject<Env> {
           payloadHash,
           new Date().toISOString(),
         );
-        if (MODULES.find((module) => module.id === moduleId)?.formatPointRoundResult === undefined) {
+        const module = MODULES.find((candidate) => candidate.id === moduleId);
+        if (module?.formatPointRoundResult === undefined &&
+            (module === undefined || module.serializePointRoundDeadline !== true || module.onPointRoundResolved === undefined)) {
           recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
         }
         const round = pointRoundRow(this.ctx.storage.sql, roundId);
@@ -5465,10 +5501,12 @@ export class ChannelObject extends DurableObject<Env> {
       throw error;
     }
     await this.scheduleEarliestAlarm();
-    try {
-      await this.notifyPointRoundResolved(roundId);
-    } catch (error) {
-      console.error(`Point round ${roundId} lifecycle notification failed.`, error);
+    if (MODULES.find((module) => module.id === moduleId)?.serializePointRoundDeadline !== true) {
+      try {
+        await this.notifyPointRoundResolved(roundId);
+      } catch (error) {
+        console.error(`Point round ${roundId} lifecycle notification failed.`, error);
+      }
     }
     return { replayed: resolved.replayed, result: resolved.result, balances: resolved.balances };
   }
@@ -5509,7 +5547,9 @@ export class ChannelObject extends DurableObject<Env> {
           POINT_SETTLEMENTS,
           replyToMessageId,
         );
-        if (MODULES.find((module) => module.id === moduleId)?.formatPointRoundResult === undefined) {
+        const module = MODULES.find((candidate) => candidate.id === moduleId);
+        if (module?.formatPointRoundResult === undefined &&
+            (module === undefined || module.serializePointRoundDeadline !== true || module.onPointRoundResolved === undefined)) {
           recordPointRoundResolutionDeliverySync(this.ctx.storage.sql, roundId, "delivered");
         }
         const round = pointRoundRow(this.ctx.storage.sql, roundId);
@@ -5531,10 +5571,12 @@ export class ChannelObject extends DurableObject<Env> {
       throw error;
     }
     await this.scheduleEarliestAlarm();
-    try {
-      await this.notifyPointRoundResolved(roundId);
-    } catch (error) {
-      console.error(`Point round ${roundId} lifecycle notification failed.`, error);
+    if (MODULES.find((module) => module.id === moduleId)?.serializePointRoundDeadline !== true) {
+      try {
+        await this.notifyPointRoundResolved(roundId);
+      } catch (error) {
+        console.error(`Point round ${roundId} lifecycle notification failed.`, error);
+      }
     }
     return { replayed: resolved.replayed, result: resolved.result, balances: resolved.balances };
   }
@@ -5827,6 +5869,17 @@ export class ChannelObject extends DurableObject<Env> {
     });
     if (recorded?.cancelled === true) await this.cancelPointRounds(recorded.moduleId, [roundId]);
     else await this.scheduleEarliestAlarm();
+    if (recorded !== null && recorded.deadlineAt !== null && state !== "rate_limited") {
+      try {
+        await this.notifyPointRoundAnnounced(roundId);
+      } catch (error) {
+        this.ctx.storage.transactionSync(() => {
+          this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+        });
+        await this.scheduleEarliestAlarm();
+        throw error;
+      }
+    }
   }
 
   private appendPointRoundWelcome(
@@ -5992,24 +6045,27 @@ export class ChannelObject extends DurableObject<Env> {
       return;
     }
     if (round.state === "open") {
-      if (round.deadline_at === null) return;
-      if (round.deadline_at > now) {
+      const currentRound = round;
+      const module = MODULES.find((candidate) => candidate.id === currentRound.module_id);
+      if (currentRound.deadline_at === null && module?.onPointRoundDeadline === undefined) return;
+      const deadlineAt = currentRound.deadline_at ?? now;
+      if (deadlineAt > now) {
         if (preparedOnOpen) {
-          const deadlineAt = round.deadline_at;
           this.ctx.storage.transactionSync(() => { this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), deadlineAt); });
           await this.scheduleEarliestAlarm();
         }
         return;
       }
-      const currentRound = round;
-      const deadlineAt = currentRound.deadline_at;
-      if (deadlineAt === null) return;
-      const module = MODULES.find((candidate) => candidate.id === currentRound.module_id);
       if (module?.onPointRoundDeadline !== undefined) {
-        await module.onPointRoundDeadline(
+        const handleDeadline = () => module.onPointRoundDeadline?.(
           this.moduleAlarmContext(currentRound.module_id, POINTS_ANNOUNCEMENT_REGISTRATION, createModuleExternalFetchBudget()),
           { roundId, data: JSON.parse(currentRound.data_json) as unknown, deadlineAt },
-        );
+        ) ?? Promise.resolve();
+        if (module.serializePointRoundDeadline === true) {
+          await this.runModuleAlarmHandler(module.id, POINTS_ANNOUNCEMENT_REGISTRATION.key, handleDeadline);
+        } else {
+          await handleDeadline();
+        }
         const current = pointRoundRow(this.ctx.storage.sql, roundId);
         if (current === null) return;
         if (current.state === "resolved") {
@@ -6390,6 +6446,18 @@ export class ChannelObject extends DurableObject<Env> {
     await this.runModuleAlarmHandler(module.id, registration.key, () => onResolved(
       this.moduleAlarmContext(module.id, registration, createModuleExternalFetchBudget()),
       notification,
+    ));
+  }
+
+  private async notifyPointRoundAnnounced(roundId: string): Promise<void> {
+    const round = pointRoundRow(this.ctx.storage.sql, roundId);
+    if (round === null || round.state !== "open") return;
+    const module = MODULES.find((candidate) => candidate.id === round.module_id);
+    const onAnnounced = module?.onPointRoundAnnounced;
+    if (module === undefined || onAnnounced === undefined) return;
+    await this.runModuleAlarmHandler(module.id, module.alarms?.[0]?.key ?? POINTS_ANNOUNCEMENT_REGISTRATION.key, () => onAnnounced(
+      this.moduleAlarmContext(module.id, POINTS_ANNOUNCEMENT_REGISTRATION, createModuleExternalFetchBudget()),
+      { roundId, data: JSON.parse(round.data_json) as unknown, text: round.announce_text },
     ));
   }
 

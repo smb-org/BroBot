@@ -6,6 +6,9 @@ import { quizRoundData } from "./service";
 
 const QUESTION_ANNOUNCEMENT_LIMIT = 450;
 const ANNOUNCE_RETRY_MS = 5_000;
+const SETTLEMENT_RETRY_MS = 5_000;
+const OFFLINE_SETTLEMENT_MS = 10 * 60_000;
+const OFFLINE_TIMEOUT_PREFIX = "offline-timeout:";
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
@@ -158,18 +161,99 @@ const finishQuizSession = async (context: ModuleAlarmContext, roundId: string, c
     ...current,
     ...endQuizPhase(current),
     aggregates: aggregatesFrom(score),
+    offlineSince: null,
   };
-  await context.points.rounds.update(roundId, data, null);
+  await context.points.rounds.update(roundId, data, Date.now() + SETTLEMENT_RETRY_MS);
   await context.points.rounds.resolve(roundId, { kind: "quiz", params: {} });
 };
 
-export const onQuizRoundOpened = async (
+const readStoredStreamState = async (context: ModuleAlarmContext): Promise<{ state: string; changedAt: string | null }> => {
+  const row = await context.DB.prepare(
+    "SELECT state, changed_at FROM channel_stream_state WHERE channel_id = ?",
+  ).bind(context.channelId).first<{ state: string; changed_at: string }>();
+  return { state: row?.state ?? "unknown", changedAt: row?.changed_at ?? null };
+};
+
+const applyOfflinePause = async (
+  context: ModuleAlarmContext,
+  active: NonNullable<Awaited<ReturnType<typeof context.points.rounds.active>>>,
+  data: QuizSessionRoundData,
+  offlineSince: number,
+): Promise<void> => {
+  if (active.state !== "open") {
+    await context.schedule("stream-state", Date.now() + ANNOUNCE_RETRY_MS, undefined, null);
+    return;
+  }
+  const paused = data.paused ? data : { ...data, ...pauseQuizPhase(data, Date.now()) };
+  const updated = { ...paused, offlineSince };
+  if (!data.paused || data.offlineSince !== offlineSince) {
+    await context.points.rounds.update(active.roundId, updated, null);
+    await publishQuizPhase(context, updated);
+  }
+  await context.schedule(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, offlineSince + OFFLINE_SETTLEMENT_MS, undefined, null);
+};
+
+const reconcileQuizStreamState = async (context: ModuleAlarmContext): Promise<void> => {
+  const [stream, active] = await Promise.all([
+    readStoredStreamState(context),
+    context.points.rounds.active(),
+  ]);
+  if (active === null) return;
+  const data = quizRoundData(active.data);
+  if (data === null) return;
+  if (stream.state === "offline") {
+    const changedAt = stream.changedAt === null ? Number.NaN : Date.parse(stream.changedAt);
+    const offlineSince = Number.isSafeInteger(changedAt) ? changedAt : Date.now();
+    await applyOfflinePause(context, active, data, offlineSince);
+    return;
+  }
+  if (stream.state === "online" && data.offlineSince !== null && active.state === "open") {
+    const resumedStream: QuizSessionRoundData = { ...data, paused: true, phaseEndsAt: null, offlineSince: null };
+    await context.points.rounds.update(active.roundId, resumedStream, null);
+    await context.clear(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, undefined, null);
+    await publishQuizPhase(context, resumedStream);
+  }
+};
+
+const handleOfflineTimeout = async (context: ModuleAlarmContext, alarmKey: string): Promise<void> => {
+  const roundId = alarmKey.slice(OFFLINE_TIMEOUT_PREFIX.length);
+  if (!/^[A-Za-z0-9_-]{1,64}$/u.test(roundId)) throw new Error("invalid_quiz_session");
+  const active = await context.points.rounds.active();
+  if (active === null || active.roundId !== roundId) return;
+  const data = quizRoundData(active.data);
+  if (data === null) return;
+  const stream = await readStoredStreamState(context);
+  if (stream.state !== "offline" || data.offlineSince === null) {
+    if (stream.state === "online" && data.offlineSince !== null && active.state === "open") {
+      await reconcileQuizStreamState(context);
+    }
+    return;
+  }
+  const settleAt = data.offlineSince + OFFLINE_SETTLEMENT_MS;
+  if (Date.now() < settleAt) {
+    await context.schedule(alarmKey, settleAt, undefined, null);
+    return;
+  }
+  if (active.state !== "open") {
+    await context.schedule("stream-state", Date.now() + ANNOUNCE_RETRY_MS, undefined, null);
+    return;
+  }
+  await finishQuizSession(context, roundId, data);
+};
+
+export const onQuizRoundAnnounced = async (
   context: ModuleAlarmContext,
   round: ModulePointRoundAnnouncement,
 ): Promise<void> => {
-  const data = quizRoundData(round.data);
   const active = await context.points.rounds.active();
-  if (data === null || data.phase !== "announce" || active === null || active.roundId !== round.roundId || active.state !== "open") return;
+  const data = quizRoundData(active?.data);
+  if (data === null || data.phase !== "announce" || active === null || active.roundId !== round.roundId || active.state !== "open" || data.paused) return;
+  const stream = await readStoredStreamState(context);
+  if (stream.state === "offline") {
+    const changedAt = stream.changedAt === null ? Number.NaN : Date.parse(stream.changedAt);
+    await applyOfflinePause(context, active, data, Number.isSafeInteger(changedAt) ? changedAt : Date.now());
+    return;
+  }
   await announceCurrentQuestion(context, round.roundId, data);
 };
 
@@ -187,9 +271,11 @@ export const onQuizRoundDeadline = async (
   context: ModuleAlarmContext,
   round: ModulePointRoundDeadline,
 ): Promise<void> => {
-  const data = quizRoundData(round.data);
-  if (data === null || data.paused) return;
+  const active = await context.points.rounds.active();
+  const data = quizRoundData(active?.data);
+  if (data === null || active === null || active.roundId !== round.roundId || active.state !== "open" || data.paused) return;
   const now = Date.now();
+  if (active.deadlineAt !== null && active.deadlineAt > now) return;
   if (data.phase === "open") {
     await showReveal(context, round.roundId, data, now);
     return;
@@ -212,6 +298,14 @@ type QuizSessionAction = "next" | "pause" | "resume" | "end";
 export const quizSessionControlAlarm = {
   key: "session-control",
   handle: async (context: ModuleAlarmContext, alarmKey: string, _deadline: number, _revision?: number, invocation?: unknown): Promise<void> => {
+    if (alarmKey === "stream-state") {
+      await reconcileQuizStreamState(context);
+      return;
+    }
+    if (alarmKey.startsWith(OFFLINE_TIMEOUT_PREFIX)) {
+      await handleOfflineTimeout(context, alarmKey);
+      return;
+    }
     if (!/^[A-Za-z0-9_-]{1,64}$/u.test(alarmKey)) throw new Error("invalid_quiz_session");
     const request = typeof invocation === "object" && invocation !== null && !Array.isArray(invocation)
       ? invocation as Record<string, unknown> : null;
@@ -232,14 +326,17 @@ const controlQuizSession = async (
   if (active === null || active.state !== "open" || data === null) throw new Error("round_not_running");
   const now = Date.now();
   if (action === "pause") {
+    if (data.paused) return;
     const paused = { ...data, ...pauseQuizPhase(data, now) };
     await context.points.rounds.update(active.roundId, paused, null);
     await publishQuizPhase(context, paused);
     return;
   }
   if (action === "resume") {
-    const resumed = { ...data, ...resumeQuizPhase(data, now) };
+    if (!data.paused) return;
+    const resumed = { ...data, ...resumeQuizPhase(data, now), offlineSince: null };
     await context.points.rounds.update(active.roundId, resumed, resumed.phaseEndsAt);
+    await context.clear(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, undefined, null);
     await publishQuizPhase(context, resumed);
     return;
   }

@@ -7,7 +7,7 @@ import { processQuizMessage, quizRoundData } from "./service";
 import {
   formatQuizPointRoundAnnouncement,
   onQuizRoundDeadline,
-  onQuizRoundOpened,
+  onQuizRoundAnnounced,
   onQuizRoundResolved,
   quizSessionControlAlarm,
   resultChatLine,
@@ -26,11 +26,21 @@ export const quizModule: BotModule<typeof quizSettingsSchema> = {
   settingsReadSchema: quizSettingsSchema,
   defaultSettings: quizSettingsSchema.parse({}),
   routes: quizRoutes,
-  eventSubTypes: ["channel.chat.message"],
+  eventSubTypes: ["channel.chat.message", "stream.online", "stream.offline"],
+  pauseSafeEventSubTypes: ["stream.online", "stream.offline"],
   dryRunSilentReason: "round_answers",
-  handleEvent: (event, context) => processQuizMessage(event, context),
+  handleEvent: async (event, context) => {
+    if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
+      if (context.streamStateTransitionAccepted === true) {
+        await context.runModuleAlarm?.("session-control", "stream-state");
+      }
+      return { actions: [], diagnostics: [] };
+    }
+    return processQuizMessage(event, context);
+  },
   alarms: [quizSessionControlAlarm],
   serializeLifecycleMutations: true,
+  serializePointRoundDeadline: true,
   pointRoundCancellationNotice: false,
   overlayRealtimeElementKinds: ["quiz.session"],
   formatPointRoundAnnouncement: formatQuizPointRoundAnnouncement,
@@ -40,7 +50,7 @@ export const quizModule: BotModule<typeof quizSettingsSchema> = {
     const text = resultChatLine(data.language, round.result);
     return Promise.resolve(text === null ? null : { text });
   },
-  onPointRoundOpened: onQuizRoundOpened,
+  onPointRoundAnnounced: onQuizRoundAnnounced,
   onPointRoundDeadline: onQuizRoundDeadline,
   onPointRoundResolved: onQuizRoundResolved,
   defaultEnabled: false,

@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModulePointsAccess, ModuleRouteEnvironment } from "../../src/modules/contract";
+import type { ModuleExecutionContext, ModulePointsAccess, ModuleRouteEnvironment } from "../../src/modules/contract";
+import { quizModule } from "../../src/modules/quiz";
 import { quizRoutes } from "../../src/modules/quiz/routes";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -9,6 +10,24 @@ import { TestD1Database } from "./test-d1";
 const channelId = "quiz-session-route-channel";
 const databases: TestD1Database[] = [];
 const settings = { pot: 500, answerSeconds: 30, revealSeconds: 8, chatQuestions: true };
+const resolvedQuizData = {
+  sessionId: "resolved-session",
+  setId: "set-one",
+  setName: "Space",
+  language: "en",
+  chatQuestions: true,
+  pot: 500,
+  answerSeconds: 30,
+  revealSeconds: 8,
+  questions: [{ text: "Capital?", options: ["A", "B"], correctIndex: 1 }],
+  phase: "results",
+  questionIndex: 0,
+  phaseEndsAt: null,
+  paused: false,
+  remainingMs: null,
+  phaseOpenedAt: 1_893_456_000_000,
+  offlineSince: null,
+};
 
 const createDatabase = async (online: boolean): Promise<TestD1Database> => {
   const database = new TestD1Database();
@@ -32,6 +51,7 @@ const createDatabase = async (online: boolean): Promise<TestD1Database> => {
 const appFor = (options: {
   role?: "broadcaster" | "manager" | "operator" | null;
   active?: { roundId: string; state: "announcing" | "open"; data: unknown; deadlineAt: number | null } | null;
+  resolved?: { roundId: string; data: unknown; result: unknown; resolvedAt: string } | null;
 } = {}) => {
   const active = options.active ?? null;
   const opened = vi.fn<ModulePointsAccess["rounds"]["open"]>().mockResolvedValue(undefined);
@@ -39,18 +59,21 @@ const appFor = (options: {
   const points = {
     rounds: {
       active: vi.fn(() => Promise.resolve(active)),
+      recentlyResolved: vi.fn(() => Promise.resolve(options.resolved ?? null)),
       open: opened,
     },
   } as unknown as ModulePointsAccess;
+  const runAlarm = vi.fn(() => Promise.resolve(undefined));
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", (options.role === undefined ? "operator" : options.role) as "broadcaster" | "manager" | "operator");
     context.set("points", () => points);
     context.set("publishModuleOverlayMessage", publish);
+    context.set("runModuleAlarm", runAlarm);
     await next();
   });
   app.route("/channels/:channelId/modules/quiz", quizRoutes);
-  return { app, opened, publish };
+  return { app, opened, publish, runAlarm };
 };
 
 const startRequest = (questionCount: number | null = null): Request => new Request(
@@ -64,6 +87,29 @@ afterEach(() => {
 });
 
 describe("quiz session cockpit routes", () => {
+  it("routes accepted stream transitions through the serialized quiz lifecycle alarm", async () => {
+    const runAlarm = vi.fn(() => Promise.resolve(undefined));
+    const event = {
+      channelId,
+      subscriptionType: "stream.offline",
+      triggerId: "offline-event",
+      payload: {},
+      settings,
+      receivedAt: "2030-01-01T00:00:00.000Z",
+      actor: null,
+      chatStatus: null,
+    };
+
+    await quizModule.handleEvent?.(event, {
+      streamStateTransitionAccepted: true,
+      runModuleAlarm: runAlarm,
+    } as unknown as ModuleExecutionContext);
+
+    expect(quizModule.eventSubTypes).toContain("stream.offline");
+    expect(quizModule.pauseSafeEventSubTypes).toContain("stream.offline");
+    expect(runAlarm).toHaveBeenCalledWith("session-control", "stream-state");
+  });
+
   it("requires a channel role before starting a session", async () => {
     const database = await createDatabase(true);
     const harness = appFor({ role: null });
@@ -108,5 +154,62 @@ describe("quiz session cockpit routes", () => {
     });
     expect(roundDataRecord?.resolveOperationId).toBe("quiz:" + sessionId + ":resolve");
     expect(harness.publish).toHaveBeenCalledWith(channelId, "quiz", "phase", "quiz.session", expect.objectContaining({ phase: "announce" }));
+  });
+
+  it("returns the real resolved session and result during the cockpit results window", async () => {
+    const database = await createDatabase(true);
+    const harness = appFor({ resolved: {
+      roundId: "resolved-session",
+      data: resolvedQuizData,
+      result: {
+        ranking: [{ login: "moonmoss", correct: 1, rank: 1, payout: 500 }],
+        participants: 1,
+        correctRate: 1,
+        distributed: 500,
+      },
+      resolvedAt: new Date(Date.now()).toISOString(),
+    } });
+
+    const response = await harness.app.request(`/channels/${channelId}/modules/quiz/session/state`, {}, { DB: database as unknown as D1Database });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ session: {
+      sessionId: "resolved-session",
+      phase: "results",
+      ranking: [{ login: "moonmoss", correct: 1, rank: 1, payout: 500 }],
+      participants: 1,
+      distributed: 500,
+    } });
+  });
+
+  it("rejects offline controls except End", async () => {
+    const database = await createDatabase(false);
+    await database.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'offline', ?, 'eventsub')",
+    ).bind(channelId, "2030-01-01T00:00:00.000Z").run();
+    const activeData = { ...resolvedQuizData, phase: "open", phaseEndsAt: Date.now() + 30_000 };
+
+    for (const action of ["resume", "pause", "next"] as const) {
+      const harness = appFor({ active: { roundId: "active-quiz", state: "open", data: activeData, deadlineAt: Date.now() + 30_000 } });
+      const response = await harness.app.request(`/channels/${channelId}/modules/quiz/session/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      }, { DB: database as unknown as D1Database });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({ error: "stream_offline" });
+      expect(harness.runAlarm).not.toHaveBeenCalled();
+    }
+
+    const end = appFor({ active: { roundId: "active-quiz", state: "open", data: activeData, deadlineAt: Date.now() + 30_000 } });
+    const response = await end.app.request(`/channels/${channelId}/modules/quiz/session/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "end" }),
+    }, { DB: database as unknown as D1Database });
+
+    expect(response.status).toBe(200);
+    expect(end.runAlarm).toHaveBeenCalledOnce();
   });
 });

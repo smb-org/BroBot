@@ -15,6 +15,7 @@ export const quizRoundData = (value: unknown): QuizSessionRoundData | null => {
       !(data.phaseEndsAt === null || Number.isSafeInteger(data.phaseEndsAt)) ||
       !(data.phaseOpenedAt === null || Number.isSafeInteger(data.phaseOpenedAt)) ||
       !(data.remainingMs === null || Number.isSafeInteger(data.remainingMs)) ||
+      !(data.offlineSince === undefined || data.offlineSince === null || Number.isSafeInteger(data.offlineSince)) ||
       !["announce", "open", "reveal", "results"].includes(String(data.phase))) return null;
   if (!data.questions.every((value) => {
     const question = record(value);
@@ -24,7 +25,7 @@ export const quizRoundData = (value: unknown): QuizSessionRoundData | null => {
       (question.correctIndex as number) < question.options.length;
   })) return null;
   if ((data.questionIndex as number) < 0 || (data.questionIndex as number) >= data.questions.length) return null;
-  return data as unknown as QuizSessionRoundData;
+  return { ...data, offlineSince: Number.isSafeInteger(data.offlineSince) ? data.offlineSince as number : null } as unknown as QuizSessionRoundData;
 };
 
 export const loadEnabledQuizSettings = async (db: D1Database, channelId: string): Promise<QuizSettings | null> => {
@@ -83,6 +84,7 @@ export const openQuizSession = async (input: OpenQuizSessionInput): Promise<Open
     paused: false,
     remainingMs: null,
     phaseOpenedAt: null,
+    offlineSince: null,
   };
   await input.points.rounds.open(sessionId, {
     ...data,
