@@ -52,6 +52,7 @@ const appFor = (options: {
   role?: "broadcaster" | "manager" | "operator" | null;
   active?: { roundId: string; state: "announcing" | "open"; data: unknown; deadlineAt: number | null } | null;
   resolved?: { roundId: string; data: unknown; result: unknown; resolvedAt: string } | null;
+  alarmError?: string;
 } = {}) => {
   const active = options.active ?? null;
   const opened = vi.fn<ModulePointsAccess["rounds"]["open"]>().mockResolvedValue(undefined);
@@ -63,7 +64,9 @@ const appFor = (options: {
       open: opened,
     },
   } as unknown as ModulePointsAccess;
-  const runAlarm = vi.fn(() => Promise.resolve(undefined));
+  const runAlarm = options.alarmError === undefined
+    ? vi.fn(() => Promise.resolve(undefined))
+    : vi.fn(() => Promise.reject(new Error(options.alarmError)));
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", (options.role === undefined ? "operator" : options.role) as "broadcaster" | "manager" | "operator");
@@ -211,5 +214,24 @@ describe("quiz session cockpit routes", () => {
 
     expect(response.status).toBe(200);
     expect(end.runAlarm).toHaveBeenCalledOnce();
+  });
+
+  it("returns a clear error when Next reaches a paused session", async () => {
+    const database = await createDatabase(true);
+    const activeData = { ...resolvedQuizData, phase: "open", paused: true, phaseEndsAt: null, remainingMs: 20_000 };
+    const harness = appFor({
+      active: { roundId: "active-quiz", state: "open", data: activeData, deadlineAt: null },
+      alarmError: "quiz_session_paused",
+    });
+
+    const response = await harness.app.request(`/channels/${channelId}/modules/quiz/session/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "next" }),
+    }, { DB: database as unknown as D1Database });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "quiz_session_paused" });
+    expect(harness.runAlarm).toHaveBeenCalledOnce();
   });
 });

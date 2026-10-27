@@ -13,6 +13,7 @@ import type {
 import { POINT_WELCOME_RESULT_ACCOUNT_ID_KEY } from "../point-welcome";
 import { bossHealth } from "../../modules/boss_fight/domain/boss";
 import { pointsCatalog } from "../../modules/points/locale";
+import { POINT_SETTLEMENTS } from "./point-settlements";
 
 export const POINTS_ROUND_ALARM_HANDLER = "host:points_round";
 export const POINTS_ROUND_ALARM_PREFIX = "points:round:";
@@ -2163,11 +2164,30 @@ export const answerPointRoundChoiceSync = (
     : round.announcement_at === null
       ? round.deadline_at === null ? null : round.deadline_at - round.duration_s * 1_000
       : Date.parse(round.announcement_at);
+  const isQuizRound = moduleId === "quiz";
   const isCurrentQuizQuestion = session !== null && session.phase === "open" && session.paused !== true &&
     session.questionIndex === questionIndex && Array.isArray(options) && choice < options.length;
   const phaseOpenedAt = Number.isSafeInteger(session?.phaseOpenedAt) ? session?.phaseOpenedAt as number : announcementAt;
+  const pauseIntervals = isQuizRound && Array.isArray(session?.pauseIntervals) ? session.pauseIntervals : [];
+  const hasMalformedPauseIntervals = isQuizRound && session !== null && session.pauseIntervals !== undefined &&
+    (!Array.isArray(session.pauseIntervals) || session.pauseIntervals.some((value) => {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return true;
+      const interval = value as Record<string, unknown>;
+      return !Number.isSafeInteger(interval.startedAt) || (interval.startedAt as number) < 0 ||
+        !(interval.endedAt === null || Number.isSafeInteger(interval.endedAt) && (interval.endedAt as number) >= (interval.startedAt as number));
+    }));
+  const occurredDuringPause = isQuizRound && pauseIntervals.some((value) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const interval = value as Record<string, unknown>;
+    return Number.isSafeInteger(interval.startedAt) && messageAt >= (interval.startedAt as number) &&
+      (interval.endedAt === null || Number.isSafeInteger(interval.endedAt) && messageAt < (interval.endedAt as number));
+  });
+  const effectivePhaseEnd = isQuizRound && Number.isSafeInteger(session?.phaseEndsAt)
+    ? session?.phaseEndsAt as number
+    : isQuizRound ? round?.deadline_at ?? null : null;
   const isDuringAnswerWindow = round !== null && round.module_id === moduleId && round.state === "open" &&
     round.deadline_at !== null && round.deadline_at > nowMs && messageAt < round.deadline_at &&
+    (!isQuizRound || effectivePhaseEnd !== null && messageAt < effectivePhaseEnd && !occurredDuringPause && !hasMalformedPauseIntervals) &&
     (phaseOpenedAt === null || Number.isFinite(phaseOpenedAt) && messageAt >= phaseOpenedAt);
   const status: PointRoundChoiceResult["status"] = isCurrentQuizQuestion && isDuringAnswerWindow ? "recorded" : "round_closed";
   let first = false;
@@ -2536,6 +2556,30 @@ export const cancelPointRoundsSync = (
     if (round === null || round.module_id !== moduleId ||
         (round.state !== "announcing" && round.state !== "open" && round.state !== "resolving")) continue;
     if (expectedGateRevision !== undefined && round.gate_revision >= expectedGateRevision) continue;
+    let clearParticipantData = false;
+    if (moduleId === "quiz") {
+      try {
+        const roundData: unknown = JSON.parse(round.data_json);
+        const rawSettlement = typeof roundData === "object" && roundData !== null && !Array.isArray(roundData)
+          ? (roundData as Record<string, unknown>).settlement
+          : null;
+        if (typeof rawSettlement === "object" && rawSettlement !== null && !Array.isArray(rawSettlement) &&
+            typeof (rawSettlement as { kind?: unknown }).kind === "string") {
+          const settlement = rawSettlement as { kind: string; params: unknown };
+          const handler = POINT_SETTLEMENTS.get(settlement.kind);
+          if (handler !== undefined) {
+            clearParticipantData = handler({
+              round: { roundId, moduleId, data: roundData },
+              participants: participantsForRoundSync(sql, roundId),
+              pots: potsForModuleSync(sql, moduleId, roundId),
+              params: settlement.params,
+            }).clearParticipantData === true;
+          }
+        }
+      } catch {
+        // Cancellation must still complete when a stale round cannot produce a settlement preview.
+      }
+    }
     const refunds = pointRoundRefundRequests(sql, moduleId, [roundId]);
     for (const refund of refunds) {
       const payload = { moduleId, operationId: refund.operationId, kind: "refund", movements: refund.movements, result: refund.result };
@@ -2546,8 +2590,10 @@ export const cancelPointRoundsSync = (
     sql.exec("UPDATE game_rounds SET state = 'cancelled' WHERE round_id = ? AND module_id = ?", roundId, moduleId);
     sql.exec("DELETE FROM game_round_locks WHERE module_id = ? AND round_id = ?", moduleId, roundId);
     deleteRoundAttackStateSync(sql, moduleId, roundId);
-    sql.exec("UPDATE game_round_participants SET data_json = '{}' WHERE round_id = ?", roundId);
-    sql.exec("DELETE FROM game_round_answers WHERE module_id = ? AND round_id = ?", moduleId, roundId);
+    if (clearParticipantData) {
+      sql.exec("UPDATE game_round_participants SET data_json = '{}' WHERE round_id = ?", roundId);
+      sql.exec("DELETE FROM game_round_answers WHERE module_id = ? AND round_id = ?", moduleId, roundId);
+    }
     onRoundCancelled?.(roundId);
     cancelledCount += 1;
   }

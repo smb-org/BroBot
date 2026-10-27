@@ -50,7 +50,7 @@ export const QuizLiveTile = ({ channelId, language, session, now, canManage, onR
       {session.paused ? <strong>{copy.pausedLabel}</strong> : null}
     </div>
     <div className="live-cockpit-quiz__actions">
-      <Button size="compact" variant="secondary" icon="skip-forward" disabled={busy || !canManage || session.phase === "results"} onClick={() => { void run("next"); }}>{copy.nextAction}</Button>
+      <Button size="compact" variant="secondary" icon="skip-forward" disabled={busy || !canManage || session.paused || session.phase === "results"} onClick={() => { void run("next"); }}>{copy.nextAction}</Button>
       <Button size="compact" variant="secondary" icon={session.paused ? "player-play" : "player-pause"} disabled={busy || !canManage || session.phase === "results"} onClick={() => { void run(session.paused ? "resume" : "pause"); }}>{session.paused ? copy.resumeAction : copy.pauseAction}</Button>
       <Button size="compact" variant="neutral" danger icon="square" disabled={busy || !canManage || session.phase === "results"} onClick={() => { void run("end"); }}>{copy.endAction}</Button>
     </div>

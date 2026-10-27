@@ -484,6 +484,34 @@ describe("quiz set editor", () => {
     expect(screen.getByLabelText("Set name")).toHaveProperty("value", "New set");
   });
 
+  it("accepts a normalized save before selecting a delayed create", async () => {
+    const fetch = installFetch({ existing: true, holdCreate: true, holdSave: true, normalizeNameOnSave: true });
+    renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Space/u }));
+    await screen.findByLabelText("Set name");
+    fireEvent.click(screen.getByRole("button", { name: "New set" }));
+    await fetch.createStarted;
+    fireEvent.change(screen.getByLabelText("Set name"), { target: { value: "  Name  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await fetch.saveStarted;
+
+    await act(async () => {
+      fetch.releaseSave();
+      await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    });
+    await screen.findByText("Saved");
+    expect(screen.getByLabelText("Set name")).toHaveProperty("value", "Name");
+
+    await act(async () => {
+      fetch.releaseCreate();
+      await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    });
+
+    await waitFor(() => expect(document.querySelector(".quiz-set-row[aria-pressed='true']")?.textContent).toContain("New set"));
+    expect(screen.getByLabelText("Set name")).toHaveProperty("value", "New set");
+  });
+
   it("switches after saving a padded name that the server normalizes", async () => {
     const fetch = installFetch({ existing: true, includeOtherSet: true, normalizeNameOnSave: true });
     renderWithQuery(<UiProvider><QuizPanel channelId="fictional_channel" language="en" /></UiProvider>);

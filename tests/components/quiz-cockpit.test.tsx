@@ -59,8 +59,10 @@ describe("quiz cockpit controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     await waitFor(() => expect(requestedActions(requests)).toEqual(["pause"]));
     rerender(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, paused: true }} now={Date.now()} canManage onRefresh={onRefresh} onMessage={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     await waitFor(() => expect(requestedActions(requests)).toEqual(["pause", "resume"]));
+    rerender(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, paused: false }} now={Date.now()} canManage onRefresh={onRefresh} onMessage={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(requestedActions(requests)).toEqual(["pause", "resume", "next"]));
     fireEvent.click(screen.getByRole("button", { name: "End" }));

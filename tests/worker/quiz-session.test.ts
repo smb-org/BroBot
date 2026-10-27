@@ -16,6 +16,7 @@ import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { isModuleOverlayRealtimeEnvelope } from "../../src/realtime-contract";
 import {
   clearPointObjectAlarms,
+  capturePointError,
   deferPointAlarmWithin,
   forcePointAlarm,
   insertPointChannel,
@@ -44,6 +45,7 @@ const session = (roundId: string) => ({
   remainingMs: null,
   phaseEndsAt: Date.now() + 30_000,
   phaseOpenedAt: Date.now(),
+  pauseIntervals: [],
   chatQuestions: false,
   answerSeconds: 30,
   revealSeconds: 8,
@@ -194,6 +196,9 @@ describe("quiz answers in the shared point round", () => {
     const channelId = `quiz-settle-${action}-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
+    ).bind(channelId, new Date(Date.now()).toISOString()).run();
     const object = pointObject(channelId);
     const resolveSpy = vi.spyOn(ChannelObject.prototype, "resolveGameRound");
     await openAnnouncedQuiz(object, roundId, {
@@ -239,6 +244,42 @@ describe("quiz answers in the shared point round", () => {
     });
   });
 
+  it("preserves a failed results settlement retry deadline across stream changes and Pause", async () => {
+    const channelId = `quiz-results-stream-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const openedAt = Date.now();
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
+    ).bind(channelId, new Date(openedAt).toISOString()).run();
+    const object = pointObject(channelId);
+    const resolveSpy = vi.spyOn(ChannelObject.prototype, "resolveGameRound").mockRejectedValueOnce(new Error("settlement failed"));
+    await openAnnouncedQuiz(object, roundId, session(roundId));
+
+    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "end" })))
+      .resolves.toBe("settlement failed");
+    const retryAt = (await object.activeGameRound("quiz"))?.deadlineAt;
+    expect(retryAt).toBe(openedAt + 5_000);
+
+    await worker.DB.prepare(
+      "UPDATE channel_stream_state SET state = 'offline', changed_at = ?, source = 'eventsub' WHERE channel_id = ?",
+    ).bind(new Date(openedAt + 1_000).toISOString(), channelId).run();
+    await object.runModuleAlarm("quiz", "session-control", "stream-state");
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { phase: "results" }, deadlineAt: retryAt });
+
+    await worker.DB.prepare(
+      "UPDATE channel_stream_state SET state = 'online', changed_at = ?, source = 'eventsub' WHERE channel_id = ?",
+    ).bind(new Date(openedAt + 2_000).toISOString(), channelId).run();
+    await object.runModuleAlarm("quiz", "session-control", "stream-state");
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "pause" });
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { phase: "results" }, deadlineAt: retryAt });
+
+    vi.setSystemTime(retryAt as number);
+    await forcePointAlarm(object, roundId);
+    expect(resolveSpy).toHaveBeenCalledTimes(2);
+    await expect(object.activeGameRound("quiz")).resolves.toBeNull();
+  });
+
   it("serializes a deadline announcement before Pause so its continuation cannot undo the pause", async () => {
     const channelId = `quiz-pause-race-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;
@@ -247,6 +288,9 @@ describe("quiz answers in the shared point round", () => {
     await worker.DB.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'points', 1, '{}', 1), (?, 'quiz', 1, ?, 1)",
     ).bind(channelId, channelId, JSON.stringify({ pot: 10, answerSeconds: 30, revealSeconds: 8, chatQuestions: true })).run();
+    await worker.DB.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
+    ).bind(channelId, new Date(openedAt - 60_000).toISOString()).run();
     const object = pointObject(channelId);
     let releaseDelivery!: () => void;
     let reportDeliveryStarted!: () => void;
@@ -316,6 +360,10 @@ describe("quiz answers in the shared point round", () => {
     const paused = await object.activeGameRound("quiz");
     expect(paused).toMatchObject({ data: { paused: true, remainingMs: 25_000, offlineSince: Date.now() } });
 
+    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "resume" })))
+      .resolves.toBe("stream_offline");
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: Date.now() } });
+
     vi.setSystemTime(openedAt + 20_000);
     await worker.DB.prepare(
       "UPDATE channel_stream_state SET state = 'online', changed_at = ?, source = 'eventsub', stream_id = 'stream-two', started_at = ? WHERE channel_id = ?",
@@ -325,6 +373,128 @@ describe("quiz answers in the shared point round", () => {
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: null } });
     await object.runModuleAlarm("quiz", "session-control", roundId, { action: "resume" });
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: false } });
+  });
+
+  it("rejects Next while paused until the operator resumes the session", async () => {
+    const channelId = `quiz-next-paused-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
+    ).bind(channelId, new Date(Date.now()).toISOString()).run();
+    const object = pointObject(channelId);
+    await openAnnouncedQuiz(object, roundId, session(roundId));
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "pause" });
+
+    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "next" })))
+      .resolves.toBe("quiz_session_paused");
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { phase: "open", paused: true } });
+  });
+
+  it("rejects delayed chat answers timestamped during a pause and after the resumed deadline", async () => {
+    const channelId = `quiz-answer-pause-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const openedAt = Date.now();
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'points', 1, '{}', 1), (?, 'quiz', 1, ?, 1)",
+    ).bind(channelId, channelId, JSON.stringify({ pot: 10, answerSeconds: 30, revealSeconds: 8, chatQuestions: false })).run();
+    await worker.DB.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source, stream_id, started_at) VALUES (?, 'online', ?, 'eventsub', 'stream-one', ?)",
+    ).bind(channelId, new Date(openedAt - 60_000).toISOString(), new Date(openedAt - 60_000).toISOString()).run();
+    const object = pointObject(channelId);
+    const accountId = "quiz_pause_viewer";
+    await object.touchPointAccount("points", accountId, "moonmoss", 0);
+    const answerSpy = vi.spyOn(ChannelObject.prototype, "answerGameRoundChoice");
+    await openAnnouncedQuiz(object, roundId, {
+      ...session(roundId),
+      phaseOpenedAt: openedAt,
+      phaseEndsAt: openedAt + 30_000,
+    });
+
+    vi.setSystemTime(openedAt + 5_000);
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "pause" });
+    vi.setSystemTime(openedAt + 20_000);
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "resume" });
+
+    const dispatchAnswer = async (messageId: string, messageAt: number): Promise<void> => {
+      const timestamp = new Date(messageAt).toISOString();
+      await dispatchEventSubNotification(worker, {
+        channelId,
+        subscriptionType: "channel.chat.message",
+        triggerId: messageId,
+        payload: {
+          broadcaster_user_id: channelId,
+          broadcaster_user_login: channelId,
+          chatter_user_id: accountId,
+          chatter_user_login: "moonmoss",
+          message_id: messageId,
+          message: { text: "2", fragments: [{ type: "text", text: "2" }] },
+          badges: [],
+        },
+        receivedAt: timestamp,
+        eventSubTimestamp: timestamp,
+      }, vi.fn<typeof fetch>(() => Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }))), [quizModule]);
+    };
+
+    vi.setSystemTime(openedAt + 21_000);
+    await dispatchAnswer("quiz-paused-answer", openedAt + 10_000);
+    await expect(object.gameRoundParticipantData("quiz", roundId)).resolves.toEqual([]);
+    expect(answerSpy).toHaveBeenCalledWith("quiz", roundId, `quiz:${roundId}:q0:message:quiz-paused-answer`,
+      accountId, "moonmoss", 0, 1, openedAt + 10_000);
+
+    await expect(object.answerGameRoundChoice("quiz", roundId, "quiz:after-effective-deadline", accountId,
+      "moonmoss", 0, 1, openedAt + 46_000)).resolves.toEqual({ status: "round_closed", replayed: false });
+    await dispatchAnswer("quiz-resumed-answer", openedAt + 22_000);
+    await expect(object.gameRoundParticipantData("quiz", roundId)).resolves.toMatchObject([
+      { accountId, data: { answers: [1], answerTimes: [openedAt + 22_000] } },
+    ]);
+  });
+
+  it("keeps accepted blitz answer receipts replayable after cancellation", async () => {
+    const channelId = `blitz-cancel-replay-${crypto.randomUUID()}`;
+    const roundId = `blitz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const blitzRound = object as unknown as Pick<ChannelObject, "answerGameRound">;
+    await object.touchPointAccount("blitz_round", "blitz_viewer", "moonmoss", 0);
+    await runPointObject(object, async (target, state) => {
+      await target.openGameRound("blitz_round", roundId, {
+        durationS: 30,
+        announceText: "Blitz question",
+        settlement: { kind: "blitz", params: {} },
+      });
+      await target.markGameRoundAnnounced("blitz_round", roundId, Date.now() + 30_000, `round:${roundId}`);
+      await deferPointAlarmWithin(state);
+    });
+    const first = await blitzRound.answerGameRound("blitz_round", roundId, "blitz-answer-message", "blitz_viewer", "moonmoss", 0, Date.now());
+    expect(first).toMatchObject({ status: "recorded", replayed: false });
+
+    await object.cancelGameRound("blitz_round", roundId);
+
+    await expect(blitzRound.answerGameRound("blitz_round", roundId, "blitz-answer-message", "blitz_viewer", "moonmoss", 0, Date.now()))
+      .resolves.toMatchObject({ status: "recorded", replayed: true });
+  });
+
+  it("clears quiz answer data and receipts on cancellation through the quiz settlement opt-in", async () => {
+    const channelId = `quiz-cancel-cleanup-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const openedAt = Date.now();
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.touchPointAccount("points", "quiz_cancel_viewer", "moonmoss", 0);
+    await openAnnouncedQuiz(object, roundId, session(roundId));
+    const operationId = `quiz:${roundId}:q0:cancel-answer`;
+    await expect(object.answerGameRoundChoice("quiz", roundId, operationId, "quiz_cancel_viewer", "moonmoss", 0, 1, openedAt + 1_000))
+      .resolves.toEqual({ status: "recorded", replayed: false });
+
+    await object.cancelGameRound("quiz", roundId);
+
+    await expect(object.gameRoundParticipantData("quiz", roundId)).resolves.toEqual([
+      { accountId: "quiz_cancel_viewer", login: "moonmoss", stake: 0, data: {} },
+    ]);
+    await expect(object.answerGameRoundChoice("quiz", roundId, operationId, "quiz_cancel_viewer", "moonmoss", 0, 1, openedAt + 1_000))
+      .resolves.toEqual({ status: "round_closed", replayed: false });
   });
 
   it("settles offline sessions after ten minutes and pays out answers already recorded", async () => {

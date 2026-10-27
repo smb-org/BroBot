@@ -31,6 +31,11 @@ export interface QuizSessionAggregates {
   houseRemainder: number;
 }
 
+interface QuizPauseInterval {
+  startedAt: number;
+  endedAt: number | null;
+}
+
 export interface QuizSessionRoundData extends QuizPhaseState {
   sessionId: string;
   setId: string;
@@ -43,6 +48,7 @@ export interface QuizSessionRoundData extends QuizPhaseState {
   questions: QuizSessionQuestion[];
   aggregates?: QuizSessionAggregates;
   phaseOpenedAt: number | null;
+  pauseIntervals: QuizPauseInterval[];
   offlineSince: number | null;
 }
 

@@ -89,6 +89,21 @@ const activeRoundIs = async (context: ModuleAlarmContext, roundId: string, phase
     (questionIndex === undefined || data.questionIndex === questionIndex);
 };
 
+const startQuizPauseInterval = (data: QuizSessionRoundData, startedAt: number): QuizSessionRoundData["pauseIntervals"] => {
+  const lastInterval = data.pauseIntervals.at(-1);
+  if (data.phase !== "open" || lastInterval?.endedAt === null) return data.pauseIntervals;
+  return [...data.pauseIntervals, { startedAt, endedAt: null }];
+};
+
+const endQuizPauseInterval = (data: QuizSessionRoundData, endedAt: number): QuizSessionRoundData["pauseIntervals"] => {
+  const pauseIntervals = [...data.pauseIntervals];
+  const openIntervalIndex = pauseIntervals.findLastIndex(({ endedAt: intervalEnd }) => intervalEnd === null);
+  if (openIntervalIndex === -1) return pauseIntervals;
+  const interval = pauseIntervals[openIntervalIndex];
+  if (interval !== undefined) pauseIntervals[openIntervalIndex] = { ...interval, endedAt };
+  return pauseIntervals;
+};
+
 const sendQuestionLine = async (
   context: ModuleAlarmContext,
   roundId: string,
@@ -133,6 +148,7 @@ const announceCurrentQuestion = async (
     phase: "open",
     phaseOpenedAt,
     phaseEndsAt,
+    pauseIntervals: [],
   };
   await context.points.rounds.update(roundId, opened, phaseEndsAt);
   await publishQuizPhase(context, opened);
@@ -180,11 +196,16 @@ const applyOfflinePause = async (
   data: QuizSessionRoundData,
   offlineSince: number,
 ): Promise<void> => {
+  if (data.phase === "results") return;
   if (active.state !== "open") {
     await context.schedule("stream-state", Date.now() + ANNOUNCE_RETRY_MS, undefined, null);
     return;
   }
-  const paused = data.paused ? data : { ...data, ...pauseQuizPhase(data, Date.now()) };
+  const paused = data.paused ? data : {
+    ...data,
+    ...pauseQuizPhase(data, offlineSince),
+    pauseIntervals: startQuizPauseInterval(data, offlineSince),
+  };
   const updated = { ...paused, offlineSince };
   if (!data.paused || data.offlineSince !== offlineSince) {
     await context.points.rounds.update(active.roundId, updated, null);
@@ -201,6 +222,7 @@ const reconcileQuizStreamState = async (context: ModuleAlarmContext): Promise<vo
   if (active === null) return;
   const data = quizRoundData(active.data);
   if (data === null) return;
+  if (data.phase === "results") return;
   if (stream.state === "offline") {
     const changedAt = stream.changedAt === null ? Number.NaN : Date.parse(stream.changedAt);
     const offlineSince = Number.isSafeInteger(changedAt) ? changedAt : Date.now();
@@ -324,17 +346,28 @@ const controlQuizSession = async (
   const active = await context.points.rounds.active();
   const data = quizRoundData(active?.data);
   if (active === null || active.state !== "open" || data === null) throw new Error("round_not_running");
+  if (data.phase === "results" && action !== "end") return;
+  if (action !== "end" && (await readStoredStreamState(context)).state !== "online") throw new Error("stream_offline");
   const now = Date.now();
   if (action === "pause") {
     if (data.paused) return;
-    const paused = { ...data, ...pauseQuizPhase(data, now) };
+    const paused = {
+      ...data,
+      ...pauseQuizPhase(data, now),
+      pauseIntervals: startQuizPauseInterval(data, now),
+    };
     await context.points.rounds.update(active.roundId, paused, null);
     await publishQuizPhase(context, paused);
     return;
   }
   if (action === "resume") {
     if (!data.paused) return;
-    const resumed = { ...data, ...resumeQuizPhase(data, now), offlineSince: null };
+    const resumed = {
+      ...data,
+      ...resumeQuizPhase(data, now),
+      pauseIntervals: endQuizPauseInterval(data, now),
+      offlineSince: null,
+    };
     await context.points.rounds.update(active.roundId, resumed, resumed.phaseEndsAt);
     await context.clear(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, undefined, null);
     await publishQuizPhase(context, resumed);
@@ -344,6 +377,7 @@ const controlQuizSession = async (
     await finishQuizSession(context, active.roundId, data);
     return;
   }
+  if (data.paused) throw new Error("quiz_session_paused");
   if (data.phase === "open") {
     await showReveal(context, active.roundId, data, now);
   } else if (data.phase === "reveal") {

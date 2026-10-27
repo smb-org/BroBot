@@ -181,7 +181,10 @@ quizRoutes.post("/session/action", async (context) => {
     return context.json({ ok: true });
   } catch (failure: unknown) {
     const reason = failure instanceof Error ? failure.message : "quiz_action_failed";
-    return context.json({ error: reason === "round_not_running" ? reason : "quiz_action_failed" }, 409);
+    const error = reason === "round_not_running" || reason === "stream_offline" || reason === "quiz_session_paused"
+      ? reason
+      : "quiz_action_failed";
+    return context.json({ error }, 409);
   }
 });
 
