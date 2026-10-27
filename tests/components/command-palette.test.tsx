@@ -664,14 +664,15 @@ describe("cmdk command palette", () => {
   it("drops a delayed marker grant toast after switching palette channels", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     let resolveMarker: ((value: Awaited<ReturnType<typeof createStreamMarker>>) => void) | undefined;
-    vi.mocked(createStreamMarker).mockImplementation(() => new Promise((resolve) => { resolveMarker = resolve; }));
+    const pendingMarker = new Promise<Awaited<ReturnType<typeof createStreamMarker>>>((resolve) => { resolveMarker = resolve; });
+    vi.mocked(createStreamMarker).mockReturnValue(pendingMarker);
+    const existingToastIds = new Set(toastsSnapshot().map(({ id }) => id));
     const palette = (channelId: string) => <QueryClientProvider client={client}><UiProvider><ChannelCommandPalette
       open onOpenChange={vi.fn()} channelId={channelId} viewerUserId={channelId} ownRole="manager" streamState="online"
       modules={[{ id: "channel_events", enabled: true, settings: "{}" }]}
       onToggleModule={() => Promise.resolve()} onNavigate={vi.fn()} onOpenCommand={vi.fn()} onOpenVariable={vi.fn()}
     /></UiProvider></QueryClientProvider>;
     const view = render(palette("kanal-a"));
-    const toastCount = toastsSnapshot().length;
 
     await waitFor(() => expect(fetchStreamMarkerAvailability).toHaveBeenCalledWith("kanal-a", expect.any(AbortSignal)));
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "stream marker" } });
@@ -687,10 +688,11 @@ describe("cmdk command palette", () => {
         error: "broadcast_scope_missing",
         grantHref: "/auth/channels/kanal-a/broadcaster-scopes/broadcast",
       });
-      await Promise.resolve();
+      await pendingMarker;
     });
 
-    expect(toastsSnapshot()).toHaveLength(toastCount);
+    const grantMessage = /broadcast permission is missing|Broadcaster-Berechtigung fehlt/u;
+    expect(toastsSnapshot().some(({ id, message }) => !existingToastIds.has(id) && grantMessage.test(message))).toBe(false);
   });
 
   it("ignores a late marker-scope response after switching palette channels", async () => {

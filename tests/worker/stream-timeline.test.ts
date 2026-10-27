@@ -13,6 +13,8 @@ import { insertPointChannel, runMigrations } from "./points-test-helpers";
 const worker = env as unknown as Env;
 const encoder = new TextEncoder();
 const WINDOW_MS = 300_000;
+// Keep the alarm handler clock exactly on a statistics boundary, as the explicit alarm run depends on it.
+const TEST_NOW = (Math.floor(Date.now() / WINDOW_MS) + 1) * WINDOW_MS;
 const iso = (time: number): string => new Date(time).toISOString();
 // Stored timeline timestamps keep a fixed nine-digit fraction.
 const ns = (time: number): string => iso(time).replace(/Z$/u, "000000Z");
@@ -61,6 +63,7 @@ describe("stream timeline against D1 and the channel object", () => {
       await state.storage.deleteAlarm();
     })));
     stubs.clear();
+    vi.useRealTimers();
   });
 
   it("stores raw lifecycle rows and deduplicates a redelivery with a different message id", async () => {
@@ -264,6 +267,9 @@ describe("stream timeline against D1 and the channel object", () => {
   });
 
   it("writes an emote spike once per window across repeated window alarms", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TEST_NOW);
+
     const channelId = "timeline-spike";
     await insertPointChannel(channelId);
     const spikeStart = Math.floor((Date.now() - 20 * 60_000) / WINDOW_MS) * WINDOW_MS;
@@ -276,6 +282,9 @@ describe("stream timeline against D1 and the channel object", () => {
     await writeEventSubStreamState(worker.DB, channelId, "offline", iso(spikeStart + 250_000), null);
 
     const stub = worker.CHANNEL.get(worker.CHANNEL.idFromName(channelId));
+    const statisticsChat = stub as unknown as {
+      listDirtyCompletedStatisticsWindows(): Promise<readonly string[]>;
+    };
     stubs.add(stub);
     const message = (offset: number, emotes: number) => ({
       windowStart: iso(spikeStart),
@@ -286,9 +295,23 @@ describe("stream timeline against D1 and the channel object", () => {
     await stub.recordChatActivity("viewer-1", true, message(90_000, 12));
     // The scheduled window alarm sits on the past boundary, so it runs right away.
     await runDurableObjectAlarm(stub);
+    // The platform may already have consumed this overdue alarm; wait for its flush before dirtying the window again.
+    await vi.waitFor(async () => {
+      const rows = await timelineRows(channelId, "emote_spike");
+      expect(rows).toHaveLength(1);
+      expect(JSON.parse(rows[0]?.detail_json ?? "{}")).toMatchObject({ emotes: 12 });
+      expect(await statisticsChat.listDirtyCompletedStatisticsWindows()).not.toContain(iso(spikeStart));
+    }, { timeout: 5_000, interval: 10 });
     // A late message dirties the same window again; the retried flush must not add a second spike.
     await stub.recordChatActivity("viewer-2", true, message(150_000, 1));
     await runDurableObjectAlarm(stub);
+    await vi.waitFor(async () => {
+      const row = await worker.DB.prepare(
+        "SELECT emotes FROM channel_statistics WHERE channel_id = ? AND window_start = ?",
+      ).bind(channelId, iso(spikeStart)).first<{ emotes: number }>();
+      expect(row?.emotes).toBe(13);
+      expect(await statisticsChat.listDirtyCompletedStatisticsWindows()).not.toContain(iso(spikeStart));
+    }, { timeout: 5_000, interval: 10 });
     expect((await worker.DB.prepare(
       "SELECT emotes FROM channel_statistics WHERE channel_id = ? AND window_start = ?",
     ).bind(channelId, iso(spikeStart)).first<{ emotes: number }>())?.emotes).toBe(13);

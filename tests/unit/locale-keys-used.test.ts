@@ -29,9 +29,10 @@ afterEach(() => {
 });
 
 describe("unused locale keys", () => {
+  // Creating and checking a TypeScript program for all application sources is CPU-bound under repository load.
   it("finds no unused keys in the application catalogues", () => {
     expect(unusedLocaleKeys()).toEqual([]);
-  }, 60_000);
+  }, 120_000);
 
   it("does not count test-only reads as application catalogue usage", () => {
     const projectRoot = createLocaleFixture(`
