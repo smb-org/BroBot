@@ -74,16 +74,12 @@ const currentScore = async (context: ModuleAlarmContext, roundId: string, data: 
   return scoreQuizSession(data.questions, participants.map(({ accountId, login, data: participantData }) => {
     const storedData = record(participantData);
     const stored = storedData?.answers;
-    const storedTimes = storedData?.answerTimes;
     return {
       accountId,
       login,
       answers: Array.isArray(stored) ? stored.map((answer) => Number.isSafeInteger(answer) ? answer as number : null) : [],
-      answerTimes: Array.isArray(storedTimes)
-        ? storedTimes.map((answerAt) => Number.isSafeInteger(answerAt) ? answerAt as number : null)
-        : [],
     };
-  }), data.pot, data.pauseIntervals);
+  }), data.pot);
 };
 
 const activeRoundIs = async (context: ModuleAlarmContext, roundId: string, phase?: string, questionIndex?: number): Promise<boolean> => {
@@ -94,31 +90,14 @@ const activeRoundIs = async (context: ModuleAlarmContext, roundId: string, phase
     (questionIndex === undefined || data.questionIndex === questionIndex);
 };
 
-const startQuizPauseInterval = (data: QuizSessionRoundData, startedAt: number): QuizSessionRoundData["pauseIntervals"] => {
-  const lastInterval = data.pauseIntervals.at(-1);
-  if (data.phase !== "open" || lastInterval?.endedAt === null) return data.pauseIntervals;
-  return [...data.pauseIntervals, { startedAt, endedAt: null }];
-};
-
-const endQuizPauseInterval = (data: QuizSessionRoundData, endedAt: number): QuizSessionRoundData["pauseIntervals"] => {
-  const pauseIntervals = [...data.pauseIntervals];
-  const openIntervalIndex = pauseIntervals.findLastIndex(({ endedAt: intervalEnd }) => intervalEnd === null);
-  if (openIntervalIndex === -1) return pauseIntervals;
-  const interval = pauseIntervals[openIntervalIndex];
-  if (interval !== undefined) pauseIntervals[openIntervalIndex] = { ...interval, endedAt };
-  return pauseIntervals;
-};
-
 interface QuizStreamSnapshot {
   state: ModuleStreamState;
-  since: number | null;
 }
 
 const streamSnapshotFromInvocation = (invocation: unknown): QuizStreamSnapshot | null => {
   const snapshot = record(record(invocation)?.streamSnapshot);
-  if (snapshot === null || (snapshot.state !== "online" && snapshot.state !== "offline" && snapshot.state !== "unknown") ||
-      !(snapshot.since === null || Number.isSafeInteger(snapshot.since) && (snapshot.since as number) >= 0)) return null;
-  return { state: snapshot.state, since: snapshot.since as number | null };
+  if (snapshot === null || (snapshot.state !== "online" && snapshot.state !== "offline" && snapshot.state !== "unknown")) return null;
+  return { state: snapshot.state };
 };
 
 const sendQuestionLine = async (
@@ -139,7 +118,7 @@ const sendQuestionLine = async (
   if (result.retryable || result.delivery === "failed" || result.delivery === "rate_limited") {
     throw new Error("quiz_question_waiting_for_chat");
   }
-  return true;
+  return result.delivery !== "not_attempted";
 };
 
 const announceCurrentQuestion = async (
@@ -201,25 +180,9 @@ const finishQuizSession = async (context: ModuleAlarmContext, roundId: string, c
 
 const readStoredStreamState = async (context: ModuleAlarmContext): Promise<QuizStreamSnapshot> => {
   const row = await context.DB.prepare(
-    "SELECT state, changed_at FROM channel_stream_state WHERE channel_id = ?",
-  ).bind(context.channelId).first<{ state: ModuleStreamState; changed_at: string }>();
-  const parsedSince = row?.changed_at === undefined ? Number.NaN : Date.parse(row.changed_at);
-  return {
-    state: row?.state ?? "unknown",
-    since: Number.isSafeInteger(parsedSince) && parsedSince >= 0 ? parsedSince : null,
-  };
-};
-
-const ensureOpenQuizPauseInterval = (data: QuizSessionRoundData, startedAt: number): QuizSessionRoundData["pauseIntervals"] => {
-  if (data.phase !== "open") return data.pauseIntervals;
-  const pauseIntervals = [...data.pauseIntervals];
-  const openIntervalIndex = pauseIntervals.findLastIndex(({ endedAt }) => endedAt === null);
-  if (openIntervalIndex === -1) return [...pauseIntervals, { startedAt, endedAt: null }];
-  const openInterval = pauseIntervals[openIntervalIndex];
-  if (openInterval !== undefined && startedAt < openInterval.startedAt) {
-    pauseIntervals[openIntervalIndex] = { ...openInterval, startedAt };
-  }
-  return pauseIntervals;
+    "SELECT state FROM channel_stream_state WHERE channel_id = ?",
+  ).bind(context.channelId).first<{ state: ModuleStreamState }>();
+  return { state: row?.state ?? "unknown" };
 };
 
 const reconcileQuizStream = async (
@@ -232,28 +195,16 @@ const reconcileQuizStream = async (
   if (data === null) return;
   if (data.phase === "results") return;
   if (streamSnapshot.state === "offline") {
-    const offlineSince = streamSnapshot.since ?? data.offlineSince ?? Date.now();
+    const offlineSince = data.offlineSince ?? Date.now();
     if (active.state !== "open") {
       await context.schedule("stream-state", Date.now() + ANNOUNCE_RETRY_MS, undefined, null);
       return;
     }
-    const existingOpenInterval = [...data.pauseIntervals].reverse().find(({ endedAt }) => endedAt === null);
     const effectiveOfflinePause = data.paused
-      ? {
-        ...data,
-        ...(existingOpenInterval !== undefined && data.remainingMs !== null && offlineSince < existingOpenInterval.startedAt
-          ? { remainingMs: data.remainingMs + existingOpenInterval.startedAt - offlineSince }
-          : {}),
-        pauseIntervals: ensureOpenQuizPauseInterval(data, offlineSince),
-      }
-      : {
-        ...data,
-        ...pauseQuizPhase(data, offlineSince),
-        pauseIntervals: ensureOpenQuizPauseInterval(data, offlineSince),
-      };
+      ? data
+      : { ...data, ...pauseQuizPhase(data, offlineSince) };
     const updated = { ...effectiveOfflinePause, offlineSince };
-    const changed = !data.paused || data.offlineSince !== offlineSince ||
-      JSON.stringify(data.pauseIntervals) !== JSON.stringify(updated.pauseIntervals) || data.remainingMs !== updated.remainingMs;
+    const changed = !data.paused || data.offlineSince !== offlineSince || data.remainingMs !== updated.remainingMs;
     await context.schedule(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, offlineSince + OFFLINE_SETTLEMENT_MS, undefined, null);
     if (changed) await context.points.rounds.update(active.roundId, updated, null);
     if (changed) await publishQuizPhase(context, updated);
@@ -390,7 +341,6 @@ const controlQuizSession = async (
     const paused = {
       ...data,
       ...pauseQuizPhase(data, now),
-      pauseIntervals: startQuizPauseInterval(data, now),
     };
     await context.points.rounds.update(active.roundId, paused, null);
     await publishQuizPhase(context, paused);
@@ -401,7 +351,6 @@ const controlQuizSession = async (
     const resumed = {
       ...data,
       ...resumeQuizPhase(data, now),
-      pauseIntervals: endQuizPauseInterval(data, now),
       offlineSince: null,
     };
     await context.points.rounds.update(active.roundId, resumed, resumed.phaseEndsAt);

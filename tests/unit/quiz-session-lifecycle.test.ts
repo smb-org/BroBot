@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ModuleAlarmContext } from "../../src/modules/contract";
 import { quizModule } from "../../src/modules/quiz";
-import { onQuizRoundDeadline, quizSessionControlAlarm } from "../../src/modules/quiz/lifecycle";
+import { onQuizRoundAnnounced, onQuizRoundDeadline, quizSessionControlAlarm } from "../../src/modules/quiz/lifecycle";
 
 interface ActiveQuiz {
   roundId: string;
@@ -27,7 +27,6 @@ const sessionData = (roundId: string): Record<string, unknown> => ({
   phaseEndsAt: Date.now() + 30_000,
   paused: false,
   remainingMs: null,
-  pauseIntervals: [],
   offlineSince: null,
 });
 
@@ -55,6 +54,7 @@ const lifecycleContext = (stream: { state: string; changed_at: string | null }, 
     },
     schedule: (key: string, deadline: number) => { scheduled.push({ key, deadline }); return Promise.resolve(); },
     clear: (key: string) => { cleared.push(key); return Promise.resolve(); },
+    sendChat: () => Promise.resolve({ sent: false, reason: null, retryable: false, delivery: "delivered" as const }),
     publishModuleOverlayMessage: () => Promise.resolve(),
   } as unknown as ModuleAlarmContext;
   return { context, active, scheduled, cleared };
@@ -77,74 +77,120 @@ const streamEvent = (
 
 describe("quiz stream lifecycle reconciliation", () => {
   it("keeps the queued offline transition when the stored row is already online", async () => {
-    const now = Date.now();
-    const offlineAt = new Date(now + 1_000).toISOString();
-    const onlineAt = new Date(now + 2_000).toISOString();
-    const queuedInvocations: unknown[] = [];
-    const eventContext = {
-      streamStateTransitionAccepted: true,
-      runModuleAlarm: (_handler: string, _key: string, invocation?: unknown) => {
-        queuedInvocations.push(invocation);
-        return Promise.resolve();
-      },
-    } as Parameters<NonNullable<typeof quizModule.handleEvent>>[1];
-    if (quizModule.handleEvent === undefined) throw new Error("Quiz event handler is unavailable.");
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+    try {
+      const now = Date.now();
+      const offlineAt = new Date(now + 1_000).toISOString();
+      const onlineAt = new Date(now + 2_000).toISOString();
+      const queuedInvocations: unknown[] = [];
+      const eventContext = {
+        streamStateTransitionAccepted: true,
+        runModuleAlarm: (_handler: string, _key: string, invocation?: unknown) => {
+          queuedInvocations.push(invocation);
+          return Promise.resolve();
+        },
+      } as Parameters<NonNullable<typeof quizModule.handleEvent>>[1];
+      if (quizModule.handleEvent === undefined) throw new Error("Quiz event handler is unavailable.");
 
-    await quizModule.handleEvent(streamEvent("offline", offlineAt), eventContext);
-    await quizModule.handleEvent(streamEvent("online", onlineAt), eventContext);
+      await quizModule.handleEvent(streamEvent("offline", offlineAt), eventContext);
+      await quizModule.handleEvent(streamEvent("online", onlineAt), eventContext);
 
-    const fake = lifecycleContext({ state: "online", changed_at: onlineAt });
-    for (const invocation of queuedInvocations) {
-      await quizSessionControlAlarm.handle(fake.context, "stream-state", Date.now(), undefined, invocation);
+      const fake = lifecycleContext({ state: "online", changed_at: onlineAt });
+      const offlineObservedAt = Date.now();
+      for (const invocation of queuedInvocations) {
+        await quizSessionControlAlarm.handle(fake.context, "stream-state", Date.now(), undefined, invocation);
+      }
+
+      expect(queuedInvocations).toEqual([
+        { streamSnapshot: { state: "offline" } },
+        { streamSnapshot: { state: "online" } },
+      ]);
+      expect(fake.active.data).toMatchObject({ paused: true, offlineSince: null, phaseEndsAt: null });
+      expect(fake.scheduled).toEqual([{
+        key: "offline-timeout:quiz-round",
+        deadline: offlineObservedAt + 10 * 60_000,
+      }]);
+      expect(fake.cleared).toContain("offline-timeout:quiz-round");
+    } finally {
+      vi.useRealTimers();
     }
-
-    expect(queuedInvocations).toEqual([
-      { streamSnapshot: { state: "offline", since: Date.parse(offlineAt) } },
-      { streamSnapshot: { state: "online", since: Date.parse(onlineAt) } },
-    ]);
-    expect(fake.active.data).toMatchObject({ paused: true, offlineSince: null, phaseEndsAt: null });
-    expect(fake.scheduled).toEqual([{
-      key: "offline-timeout:quiz-round",
-      deadline: Date.parse(offlineAt) + 10 * 60_000,
-    }]);
-    expect(fake.cleared).toContain("offline-timeout:quiz-round");
   });
 
   it("persists the pause and timeout before a failed overlay publication", async () => {
-    const offlineAt = Date.now() - 5_000;
-    const fake = lifecycleContext({ state: "online", changed_at: new Date(Date.now()).toISOString() });
-    fake.context.publishModuleOverlayMessage = () => Promise.reject(new Error("overlay publish failed"));
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+    try {
+      const fake = lifecycleContext({ state: "online", changed_at: new Date(Date.now()).toISOString() });
+      const offlineObservedAt = Date.now();
+      fake.context.publishModuleOverlayMessage = () => Promise.reject(new Error("overlay publish failed"));
 
-    await expect(quizSessionControlAlarm.handle(fake.context, "stream-state", Date.now(), undefined, {
-      streamSnapshot: { state: "offline", since: offlineAt },
-    })).rejects.toThrow("overlay publish failed");
+      await expect(quizSessionControlAlarm.handle(fake.context, "stream-state", Date.now(), undefined, {
+        streamSnapshot: { state: "offline" },
+      })).rejects.toThrow("overlay publish failed");
 
-    expect(fake.active.data).toMatchObject({ paused: true, offlineSince: offlineAt });
-    expect(fake.active.deadlineAt).toBeNull();
-    expect(fake.scheduled).toEqual([{
-      key: "offline-timeout:quiz-round",
-      deadline: offlineAt + 10 * 60_000,
-    }]);
+      expect(fake.active.data).toMatchObject({ paused: true, offlineSince: offlineObservedAt });
+      expect(fake.active.deadlineAt).toBeNull();
+      expect(fake.scheduled).toEqual([{
+        key: "offline-timeout:quiz-round",
+        deadline: offlineObservedAt + 10 * 60_000,
+      }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("keeps earlier pause intervals when advancing to another question", async () => {
-    const now = Date.now();
-    const fake = lifecycleContext({ state: "online", changed_at: new Date(now).toISOString() });
-    const pauseIntervals = [{ startedAt: now - 30_000, endedAt: now - 20_000 }];
-    Object.assign(fake.active.data, {
-      questions: [
-        { text: "Capital?", options: ["A", "B"], correctIndex: 1 },
-        { text: "Ocean?", options: ["A", "B"], correctIndex: 0 },
-      ],
-      phase: "reveal",
-      questionIndex: 0,
-      phaseEndsAt: now - 1,
-      pauseIntervals,
-    });
-    fake.active.deadlineAt = now - 1;
+  it("keeps the original offline observation time across Helix refreshes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+    try {
+      const firstObservedAt = Date.now();
+      const stream = { state: "offline", changed_at: new Date(firstObservedAt - 5_000).toISOString() };
+      const fake = lifecycleContext(stream);
 
-    await onQuizRoundDeadline(fake.context, { roundId: fake.active.roundId } as Parameters<typeof onQuizRoundDeadline>[1]);
+      await quizSessionControlAlarm.handle(fake.context, "stream-state", Date.now());
 
-    expect(fake.active.data).toMatchObject({ phase: "open", questionIndex: 1, pauseIntervals });
+      expect(fake.active.data.offlineSince).toBe(firstObservedAt);
+      vi.setSystemTime(firstObservedAt + 9 * 60_000);
+      stream.changed_at = new Date(Date.now()).toISOString();
+
+      await quizSessionControlAlarm.handle(fake.context, "stream-state", Date.now());
+
+      expect(fake.active.data.offlineSince).toBe(firstObservedAt);
+      expect(fake.scheduled.filter(({ key }) => key === "offline-timeout:quiz-round").map(({ deadline }) => deadline))
+        .toEqual([firstObservedAt + 10 * 60_000, firstObservedAt + 10 * 60_000]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
+
+  it("keeps a muted question pending and retries its announcement on the next tick", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+    try {
+      const fake = lifecycleContext({ state: "online", changed_at: new Date(Date.now()).toISOString() });
+      Object.assign(fake.active.data, { phase: "announce", phaseEndsAt: null, phaseOpenedAt: null, chatQuestions: true });
+      const results = [
+        { sent: false, reason: "channel_muted", retryable: false, delivery: "not_attempted" as const },
+        { sent: true, reason: null, retryable: false, delivery: "delivered" as const },
+      ];
+      fake.context.sendChat = () => Promise.resolve(results.shift() ?? {
+        sent: false, reason: null, retryable: false, delivery: "not_attempted",
+      });
+      const announced = { roundId: fake.active.roundId } as Parameters<typeof onQuizRoundAnnounced>[1];
+
+      await onQuizRoundAnnounced(fake.context, announced);
+
+      expect(fake.active.data).toMatchObject({ phase: "announce", phaseEndsAt: null });
+      expect(fake.active.deadlineAt).toBe(Date.now() + 5_000);
+
+      vi.setSystemTime(fake.active.deadlineAt ?? Date.now());
+      await onQuizRoundDeadline(fake.context, { roundId: fake.active.roundId } as Parameters<typeof onQuizRoundDeadline>[1]);
+
+      expect(fake.active.data).toMatchObject({ phase: "open", phaseEndsAt: Date.now() + 30_000 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 });

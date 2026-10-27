@@ -2168,26 +2168,12 @@ export const answerPointRoundChoiceSync = (
   const isCurrentQuizQuestion = session !== null && session.phase === "open" && session.paused !== true &&
     session.questionIndex === questionIndex && Array.isArray(options) && choice < options.length;
   const phaseOpenedAt = Number.isSafeInteger(session?.phaseOpenedAt) ? session?.phaseOpenedAt as number : announcementAt;
-  const pauseIntervals = isQuizRound && Array.isArray(session?.pauseIntervals) ? session.pauseIntervals : [];
-  const hasMalformedPauseIntervals = isQuizRound && session !== null && session.pauseIntervals !== undefined &&
-    (!Array.isArray(session.pauseIntervals) || session.pauseIntervals.some((value) => {
-      if (typeof value !== "object" || value === null || Array.isArray(value)) return true;
-      const interval = value as Record<string, unknown>;
-      return !Number.isSafeInteger(interval.startedAt) || (interval.startedAt as number) < 0 ||
-        !(interval.endedAt === null || Number.isSafeInteger(interval.endedAt) && (interval.endedAt as number) >= (interval.startedAt as number));
-    }));
-  const occurredDuringPause = isQuizRound && pauseIntervals.some((value) => {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-    const interval = value as Record<string, unknown>;
-    return Number.isSafeInteger(interval.startedAt) && messageAt >= (interval.startedAt as number) &&
-      (interval.endedAt === null || Number.isSafeInteger(interval.endedAt) && messageAt < (interval.endedAt as number));
-  });
   const effectivePhaseEnd = isQuizRound && Number.isSafeInteger(session?.phaseEndsAt)
     ? session?.phaseEndsAt as number
     : isQuizRound ? round?.deadline_at ?? null : null;
   const isDuringAnswerWindow = round !== null && round.module_id === moduleId && round.state === "open" &&
     round.deadline_at !== null && round.deadline_at > nowMs && messageAt < round.deadline_at &&
-    (!isQuizRound || effectivePhaseEnd !== null && messageAt < effectivePhaseEnd && !occurredDuringPause && !hasMalformedPauseIntervals) &&
+    (!isQuizRound || effectivePhaseEnd !== null && messageAt < effectivePhaseEnd) &&
     (phaseOpenedAt === null || Number.isFinite(phaseOpenedAt) && messageAt >= phaseOpenedAt);
   const status: PointRoundChoiceResult["status"] = isCurrentQuizQuestion && isDuringAnswerWindow ? "recorded" : "round_closed";
   let first = false;
@@ -2199,20 +2185,13 @@ export const answerPointRoundChoiceSync = (
     ).toArray()[0];
     first = existing === undefined;
     const participantData = existing === undefined
-      ? { answers: [] as (number | null)[], answerTimes: [] as (number | null)[] }
-      : JSON.parse(existing.data_json) as { answers?: unknown; answerTimes?: unknown };
+      ? { answers: [] as (number | null)[] }
+      : JSON.parse(existing.data_json) as { answers?: unknown };
     const answers: (number | null)[] = Array.isArray(participantData.answers)
       ? participantData.answers.map((answer: unknown) => answer === null || Number.isSafeInteger(answer) ? answer as number | null : null)
       : [];
-    const answerTimes: (number | null)[] = Array.isArray(participantData.answerTimes)
-      ? participantData.answerTimes.map((value: unknown) => Number.isSafeInteger(value) ? value as number : null)
-      : [];
-    const priorTime = answerTimes[questionIndex];
-    if (!Number.isSafeInteger(priorTime) || messageAt >= (priorTime as number)) {
-      answers[questionIndex] = choice;
-      answerTimes[questionIndex] = messageAt;
-    }
-    const nextData = { answers, answerTimes };
+    answers[questionIndex] = choice;
+    const nextData = { answers };
     if (existing === undefined) {
       sql.exec(
         `INSERT INTO game_round_participants (round_id, account_id, login, stake, data_json)

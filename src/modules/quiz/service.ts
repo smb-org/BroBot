@@ -7,7 +7,6 @@ const record = (value: unknown): Record<string, unknown> | null =>
 
 export const quizRoundData = (value: unknown): QuizSessionRoundData | null => {
   const data = record(value);
-  const pauseIntervals = data?.pauseIntervals;
   if (data === null || typeof data.sessionId !== "string" || typeof data.setId !== "string" || typeof data.setName !== "string" ||
       (data.language !== "de" && data.language !== "en") || typeof data.chatQuestions !== "boolean" ||
       !Number.isSafeInteger(data.pot) || (data.pot as number) < 0 || !Number.isSafeInteger(data.answerSeconds) ||
@@ -17,11 +16,6 @@ export const quizRoundData = (value: unknown): QuizSessionRoundData | null => {
       !(data.phaseOpenedAt === null || Number.isSafeInteger(data.phaseOpenedAt)) ||
       !(data.remainingMs === null || Number.isSafeInteger(data.remainingMs)) ||
       !(data.offlineSince === undefined || data.offlineSince === null || Number.isSafeInteger(data.offlineSince)) ||
-      !(pauseIntervals === undefined || Array.isArray(pauseIntervals) && pauseIntervals.every((value) => {
-        const interval = record(value);
-        return interval !== null && Number.isSafeInteger(interval.startedAt) && (interval.startedAt as number) >= 0 &&
-          (interval.endedAt === null || Number.isSafeInteger(interval.endedAt) && (interval.endedAt as number) >= (interval.startedAt as number));
-      })) ||
       !["announce", "open", "reveal", "results"].includes(String(data.phase))) return null;
   if (!data.questions.every((value) => {
     const question = record(value);
@@ -33,7 +27,6 @@ export const quizRoundData = (value: unknown): QuizSessionRoundData | null => {
   if ((data.questionIndex as number) < 0 || (data.questionIndex as number) >= data.questions.length) return null;
   return {
     ...data,
-    pauseIntervals: Array.isArray(pauseIntervals) ? pauseIntervals as QuizSessionRoundData["pauseIntervals"] : [],
     offlineSince: Number.isSafeInteger(data.offlineSince) ? data.offlineSince as number : null,
   } as unknown as QuizSessionRoundData;
 };
@@ -94,7 +87,6 @@ export const openQuizSession = async (input: OpenQuizSessionInput): Promise<Open
     paused: false,
     remainingMs: null,
     phaseOpenedAt: null,
-    pauseIntervals: [],
     offlineSince: null,
   };
   await input.points.rounds.open(sessionId, {

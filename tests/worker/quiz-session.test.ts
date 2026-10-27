@@ -46,7 +46,6 @@ const session = (roundId: string) => ({
   remainingMs: null,
   phaseEndsAt: Date.now() + 30_000,
   phaseOpenedAt: Date.now(),
-  pauseIntervals: [],
   chatQuestions: false,
   answerSeconds: 30,
   revealSeconds: 8,
@@ -104,7 +103,7 @@ afterEach(async () => {
 });
 
 describe("quiz answers in the shared point round", () => {
-  it("replaces a viewer's answer idempotently and deletes answer data after settlement", async () => {
+  it("overwrites a viewer's answer on each accepted message and deletes data after settlement", async () => {
     const channelId = `quiz-answer-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
@@ -121,10 +120,12 @@ describe("quiz answers in the shared point round", () => {
       "viewer_one", "moonmoss", 0, 0, openedAt + 1_000)).resolves.toEqual({ status: "recorded", replayed: false });
     await expect(object.answerGameRoundChoice("quiz", roundId, `quiz:${roundId}:q0:message-2`,
       "viewer_one", "moonmoss", 0, 1, openedAt + 2_000)).resolves.toEqual({ status: "recorded", replayed: false });
+    await expect(object.answerGameRoundChoice("quiz", roundId, `quiz:${roundId}:q0:message-3`,
+      "viewer_one", "moonmoss", 0, 0, openedAt + 1_000)).resolves.toEqual({ status: "recorded", replayed: false });
     await expect(object.answerGameRoundChoice("quiz", roundId, `quiz:${roundId}:q0:message-2`,
       "viewer_one", "moonmoss", 0, 1, openedAt + 2_000)).resolves.toEqual({ status: "recorded", replayed: true });
     await expect(object.gameRoundParticipantData("quiz", roundId)).resolves.toEqual([
-      { accountId: "viewer_one", login: "moonmoss", stake: 0, data: { answers: [1], answerTimes: [openedAt + 2_000] } },
+      { accountId: "viewer_one", login: "moonmoss", stake: 0, data: { answers: [0] } },
     ]);
 
     await object.resolveGameRound("quiz", roundId, { kind: "quiz", params: {} });
@@ -439,8 +440,8 @@ describe("quiz answers in the shared point round", () => {
       data: { phase: "open", paused: true, offlineSince: null, phaseEndsAt: null },
     });
     expect(queuedInvocations).toEqual([
-      { streamSnapshot: { state: "offline", since: Date.parse(offlineAt) } },
-      { streamSnapshot: { state: "online", since: Date.parse(onlineAt) } },
+      { streamSnapshot: { state: "offline" } },
+      { streamSnapshot: { state: "online" } },
     ]);
   });
 
@@ -467,9 +468,9 @@ describe("quiz answers in the shared point round", () => {
     });
 
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({
-      data: { paused: true, offlineSince: offlineAt },
+      data: { paused: true, offlineSince: openedAt },
     });
-    expect(settlementDeadline).toBe(offlineAt + 10 * 60_000);
+    expect(settlementDeadline).toBe(openedAt + 10 * 60_000);
   });
 
   it("reconciles an offline observation before rejecting a quiz control", async () => {
@@ -490,8 +491,8 @@ describe("quiz answers in the shared point round", () => {
     await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "next" })))
       .resolves.toBe("stream_offline");
 
-    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: offlineAt } });
-    await expect(quizAlarmContext(object).getAlarmDeadline?.(`offline-timeout:${roundId}`)).resolves.toBe(offlineAt + 10 * 60_000);
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: openedAt } });
+    await expect(quizAlarmContext(object).getAlarmDeadline?.(`offline-timeout:${roundId}`)).resolves.toBe(openedAt + 10 * 60_000);
   });
 
   it("reconciles offline state before advancing a due quiz deadline", async () => {
@@ -513,7 +514,7 @@ describe("quiz answers in the shared point round", () => {
     await forcePointAlarm(object, roundId);
 
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({
-      data: { phase: "open", paused: true, remainingMs: 5_000, offlineSince: offlineAt },
+      data: { phase: "open", paused: true, remainingMs: 0, offlineSince: openedAt + 30_000 },
     });
   });
 
@@ -540,10 +541,10 @@ describe("quiz answers in the shared point round", () => {
       return result;
     })).rejects.toThrow("overlay publish failed");
 
-    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: offlineAt } });
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: openedAt } });
     const settlementDeadline = await runPointObject(object, (target) =>
       quizAlarmContext(target).getAlarmDeadline?.(`offline-timeout:${roundId}`));
-    expect(settlementDeadline).toBe(offlineAt + 10 * 60_000);
+    expect(settlementDeadline).toBe(openedAt + 10 * 60_000);
   });
 
   it("rejects Next while paused until the operator resumes the session", async () => {
@@ -562,7 +563,7 @@ describe("quiz answers in the shared point round", () => {
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { phase: "open", paused: true } });
   });
 
-  it("rejects delayed chat answers timestamped during a pause and after the resumed deadline", async () => {
+  it("rejects answers accepted during a pause and after the resumed deadline", async () => {
     const channelId = `quiz-answer-pause-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;
     const openedAt = Date.now();
@@ -585,8 +586,6 @@ describe("quiz answers in the shared point round", () => {
 
     vi.setSystemTime(openedAt + 5_000);
     await object.runModuleAlarm("quiz", "session-control", roundId, { action: "pause" });
-    vi.setSystemTime(openedAt + 20_000);
-    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "resume" });
 
     const dispatchAnswer = async (messageId: string, messageAt: number): Promise<void> => {
       const timestamp = new Date(messageAt).toISOString();
@@ -608,17 +607,20 @@ describe("quiz answers in the shared point round", () => {
       }, vi.fn<typeof fetch>(() => Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }))), [quizModule]);
     };
 
-    vi.setSystemTime(openedAt + 21_000);
+    vi.setSystemTime(openedAt + 10_000);
     await dispatchAnswer("quiz-paused-answer", openedAt + 10_000);
     await expect(object.gameRoundParticipantData("quiz", roundId)).resolves.toEqual([]);
-    expect(answerSpy).toHaveBeenCalledWith("quiz", roundId, `quiz:${roundId}:q0:message:quiz-paused-answer`,
+    expect(answerSpy).not.toHaveBeenCalledWith("quiz", roundId, `quiz:${roundId}:q0:message:quiz-paused-answer`,
       accountId, "moonmoss", 0, 1, openedAt + 10_000);
+
+    vi.setSystemTime(openedAt + 20_000);
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "resume" });
 
     await expect(object.answerGameRoundChoice("quiz", roundId, "quiz:after-effective-deadline", accountId,
       "moonmoss", 0, 1, openedAt + 46_000)).resolves.toEqual({ status: "round_closed", replayed: false });
     await dispatchAnswer("quiz-resumed-answer", openedAt + 22_000);
     await expect(object.gameRoundParticipantData("quiz", roundId)).resolves.toMatchObject([
-      { accountId, data: { answers: [1], answerTimes: [openedAt + 22_000] } },
+      { accountId, data: { answers: [1] } },
     ]);
   });
 
@@ -668,7 +670,7 @@ describe("quiz answers in the shared point round", () => {
       .resolves.toEqual({ status: "round_closed", replayed: false });
   });
 
-  it("settles offline sessions after ten minutes without scoring backdated answers", async () => {
+  it("settles offline sessions after ten minutes from the first offline observation", async () => {
     const channelId = `quiz-offline-timeout-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;
     const openedAt = Date.now();
@@ -685,20 +687,26 @@ describe("quiz answers in the shared point round", () => {
     await openAnnouncedQuiz(object, roundId, session(roundId));
     vi.setSystemTime(openedAt + 9_000);
     await object.answerGameRoundChoice("quiz", roundId, `quiz:${roundId}:answer`, "offline_viewer", "moonmoss", 0, 1, openedAt + 8_000);
+    const offlineObservedAt = Date.now();
     await worker.DB.prepare(
       "UPDATE channel_stream_state SET state = 'offline', changed_at = ?, source = 'helix' WHERE channel_id = ?",
     ).bind(new Date(offlineAt).toISOString(), channelId).run();
     await object.runModuleAlarm("quiz", "session-control", "stream-state");
-    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: offlineAt } });
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: offlineObservedAt } });
 
-    vi.setSystemTime(offlineAt + 10 * 60_000);
+    vi.setSystemTime(offlineObservedAt + 10 * 60_000);
     await object.runModuleAlarm("quiz", "session-control", `offline-timeout:${roundId}`);
 
     await expect(object.activeGameRound("quiz")).resolves.toBeNull();
-    await expect(object.pointBalance("quiz", "offline_viewer")).resolves.toBe(0);
+    await expect(object.pointBalance("quiz", "offline_viewer")).resolves.toBe(10);
     await expect(object.recentlyResolvedGameRound("quiz", 60_000)).resolves.toMatchObject({
       roundId,
-      result: { participants: 0, totalAnswers: 0, totalCorrect: 0, ranking: [] },
+      result: {
+        participants: 1,
+        totalAnswers: 1,
+        totalCorrect: 1,
+        ranking: [{ login: "moonmoss", correct: 1, payout: 10 }],
+      },
     });
   });
 });

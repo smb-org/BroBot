@@ -33,12 +33,8 @@ export const quizModule: BotModule<typeof quizSettingsSchema> = {
   handleEvent: async (event, context) => {
     if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
       if (context.streamStateTransitionAccepted === true) {
-        const timestamp = Date.parse(event.eventSubTimestamp ?? event.receivedAt);
         await context.runModuleAlarm?.("session-control", "stream-state", {
-          streamSnapshot: {
-            state: event.subscriptionType === "stream.online" ? "online" : "offline",
-            since: Number.isSafeInteger(timestamp) ? timestamp : null,
-          },
+          streamSnapshot: { state: event.subscriptionType === "stream.online" ? "online" : "offline" },
         });
       }
       return { actions: [], diagnostics: [] };
