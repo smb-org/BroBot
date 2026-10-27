@@ -16,7 +16,7 @@ import { SegmentChoice } from "../../../dashboard/ui/SegmentChoice";
 import { PageHeader } from "../../../dashboard/ui/PageHeader";
 import type { ModulePanelProperties } from "../../contract";
 import type { PointsSettings } from "../contracts";
-import { DEFAULT_POINTS_SETTINGS, MAX_POINTS_ADJUSTMENT_REASON_LENGTH, pointsSettingsSchema } from "../contracts";
+import { DEFAULT_POINTS_SETTINGS, MAX_POINTS_ADJUSTMENT_REASON_LENGTH, pointsSettingsReadSchema, pointsSettingsSchema } from "../contracts";
 import type { PointsAccount, PointsAccountDetail, PointsHistoryRow } from "./service";
 import { adjustPoints, loadPointsAccount, loadPointsAccounts, loadPointsHistory, loadPointsRank, loadPointsSettings, loadPointsSummary, savePointsSettings } from "./service";
 import "./panel.css";
@@ -30,6 +30,7 @@ const historySource = (row: PointsHistoryRow, language: "de" | "en", resolveModu
   const copy = pointsDashboardTexts[language].source;
   if (row.kind === "activity") return copy.activity;
   if (row.kind === "bonus") return copy.start;
+  if (row.kind === "safety_net") return copy.safetyNet;
   if (row.kind === "admin") {
     const detail = asRecord(row.detail);
     const reason = typeof detail?.reason === "string" ? detail.reason : "";
@@ -105,7 +106,11 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
   const accountsQuery = useModuleQuery(channelId, "points", `accounts:${sort}:${search}:${accountCursor ?? "first"}`,
     (signal) => loadPointsAccounts(channelId, sort, search, accountCursor, signal));
   const summaryQuery = useModuleQuery(channelId, "points", "summary", (signal) => loadPointsSummary(channelId, signal));
-  const settingsQuery = useModuleQuery(channelId, "points", "settings", (signal) => loadPointsSettings(channelId, signal));
+  const settingsQuery = useModuleQuery(channelId, "points", "settings", async (signal) => {
+    // Settings stored before the safety net lack its fields; apply the same defaults as the worker.
+    const loaded = await loadPointsSettings(channelId, signal);
+    return { ...loaded, settings: pointsSettingsReadSchema.parse(loaded.settings) };
+  });
   const accountDetailQuery = useModuleQuery(channelId, "points", `account:${selectedId ?? "none"}`,
     (signal) => selectedId === null ? Promise.resolve(null) : loadPointsAccount(channelId, selectedId, signal),
     { enabled: selectedId !== null });
@@ -192,6 +197,17 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
     ["windowMinutes", labels.windowMinutes, "number"],
     ["dailyCap", labels.dailyCap, "number"],
   ];
+  const safetyNetOff = !settingsDraft.safetyNetEnabled;
+  const fixedThreshold = typeof settingsDraft.safetyNetThreshold === "number";
+
+  const updateSettingsDraft = (settings: PointsSettings): void => {
+    setSettingsSaved(false);
+    setSettingsEdit({
+      revision: settingsDirty ? settingsEdit.revision : settingsRevision ?? 0,
+      base: settingsDirty ? settingsEdit.base : settingsDraft,
+      settings,
+    });
+  };
 
   const saveSettings = useCallback(async (): Promise<void> => {
     if (!canManage || settingsRevision === null || settingsPending || !settingsDirty || settingsConflict || !settingsValid) return;
@@ -329,14 +345,48 @@ function PointsPanelContent({ channelId, language, canManage = true, resolveModu
         value={String(settingsDraft[key])}
         disabled={!canManage || settingsPending || settingsRevision === null}
         onChange={(value) => {
-          setSettingsSaved(false);
-          setSettingsEdit({
-            revision: settingsDirty ? settingsEdit.revision : settingsRevision ?? 0,
-            base: settingsDirty ? settingsEdit.base : settingsDraft,
-            settings: { ...settingsDraft, [key]: type === "number" ? Number(value) : value },
-          });
+          updateSettingsDraft({ ...settingsDraft, [key]: type === "number" ? Number(value) : value });
         }}
       />)}
+      <SegmentChoice
+        label={labels.safetyNetEnabled}
+        value={settingsDraft.safetyNetEnabled ? "enabled" : "disabled"}
+        wrap
+        disabled={!canManage || settingsPending || settingsRevision === null}
+        options={[{ value: "enabled", label: labels.safetyNetOn }, { value: "disabled", label: labels.safetyNetOff }]}
+        onChange={(value) => { updateSettingsDraft({ ...settingsDraft, safetyNetEnabled: value === "enabled" }); }}
+      />
+      <Field
+        label={labels.safetyNetAmount}
+        type="text"
+        value={String(settingsDraft.safetyNetAmount)}
+        disabled={!canManage || settingsPending || settingsRevision === null || safetyNetOff}
+        onChange={(value) => { updateSettingsDraft({ ...settingsDraft, safetyNetAmount: Number(value) }); }}
+      />
+      <SegmentChoice
+        label={labels.safetyNetThreshold}
+        hint={fixedThreshold ? labels.safetyNetThresholdFixedHint : labels.safetyNetThresholdHint}
+        value={fixedThreshold ? "fixed" : "min_stake"}
+        wrap
+        disabled={!canManage || settingsPending || settingsRevision === null || safetyNetOff}
+        options={[{ value: "min_stake", label: labels.safetyNetMinimumStake }, { value: "fixed", label: labels.safetyNetFixedValue }]}
+        onChange={(value) => {
+          updateSettingsDraft({
+            ...settingsDraft,
+            safetyNetThreshold: value === "min_stake"
+              ? "min_stake"
+              : typeof settingsDraft.safetyNetThreshold === "number" ? settingsDraft.safetyNetThreshold : DEFAULT_POINTS_SETTINGS.safetyNetAmount,
+          });
+        }}
+      />
+      <Field
+        label={labels.safetyNetFixedThreshold}
+        hint={labels.safetyNetFixedThresholdHint}
+        placeholder={labels.safetyNetFixedThresholdPlaceholder}
+        value={typeof settingsDraft.safetyNetThreshold === "number" ? String(settingsDraft.safetyNetThreshold) : ""}
+        disabled={!canManage || settingsPending || settingsRevision === null || safetyNetOff || !fixedThreshold}
+        onChange={(value) => { updateSettingsDraft({ ...settingsDraft, safetyNetThreshold: Number(value) }); }}
+      />
     </div>
     {!canManage ? <p className="points-settings__hint">{labels.managementLocked}</p> : null}
   </section> : selected === null ? <div className="points-detail-empty">

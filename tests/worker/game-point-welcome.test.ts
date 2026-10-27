@@ -190,7 +190,7 @@ const prepareDelivery = async (
       reason: outcome === "delivered" ? null : "transport_failed",
       delivery: outcome,
       ...(outcome === "delivered" && pointWelcome !== undefined && args[0].includes(pointWelcome.text)
-        ? { postedWelcomeClaimId: pointWelcome.claimId }
+        ? { postedWelcomeClaimId: pointWelcome.claimId, postedWelcomeOperationId: pointWelcome.operationId }
         : {}),
     });
   });
@@ -296,7 +296,8 @@ describe("delayed game welcome replies", () => {
     const channelId = `game-welcome-expired-claim-${crypto.randomUUID()}`;
     const object = await dispatchGameCommand(channelId, "duel", "welcome-expired-claim-message");
     const roundId = await openedRoundId(object, "duel");
-    expect(await object.claimPointWelcome("points", viewerId, "dispatch:abandoned:points:0")).toBe(true);
+    expect(await object.claimPointWelcome("points", viewerId, `bonus:${viewerId}`, "dispatch:abandoned:points:0"))
+      .toMatchObject({ operationId: `bonus:${viewerId}` });
     await runPointObject(object, (_target, state) => {
       state.storage.sql.exec(
         "UPDATE point_welcome_notes SET claimed_at = ? WHERE account_id = ?",
@@ -482,14 +483,15 @@ describe("delayed game welcome replies", () => {
     const fetcher = prepareRealChat(messages);
     const acknowledge = await spyOnWelcomeAcknowledgement(object);
     const heldClaimId = "dispatch:held:points:0";
-    expect(await object.claimPointWelcome("points", viewerId, heldClaimId)).toBe(true);
+    expect(await object.claimPointWelcome("points", viewerId, `bonus:${viewerId}`, heldClaimId))
+      .toMatchObject({ operationId: `bonus:${viewerId}` });
 
     await runHeistConfirmation(object, roundId);
     await runPointObject(object, (target) => {
       const runtime = target as unknown as {
-        releasePointWelcome: (moduleId: string, accountId: string, claimId: string) => Promise<void>;
+        releasePointWelcome: (moduleId: string, accountId: string, operationId: string, claimId: string) => Promise<void>;
       };
-      return runtime.releasePointWelcome("points", viewerId, heldClaimId);
+      return runtime.releasePointWelcome("points", viewerId, `bonus:${viewerId}`, heldClaimId);
     });
     await runHeistConfirmation(object, roundId);
 
@@ -529,12 +531,47 @@ describe("delayed game welcome replies", () => {
     const welcome = pointsCatalog.en.chat.startBonus(startBonus, "Points");
     expect(messages).toHaveLength(1);
     expect(messages[0]).toContain(welcome);
-    expect(receipt).toMatchObject({ status: "sent", welcomeClaimId: confirmKey });
+    expect(receipt).toMatchObject({
+      status: "sent",
+      welcomeClaimId: confirmKey,
+      welcomeOperationId: `bonus:${viewerId}`,
+    });
 
     await runHeistConfirmation(object, roundId);
 
     expect(messages).toHaveLength(1);
     expect(acknowledge).toHaveBeenCalledOnce();
     expect(await object.touchPointAccount("points", viewerId, viewerLogin, startBonus)).toMatchObject({ welcomePending: false });
+  });
+
+  it("does not ack a different welcome from a receipt that reused its claim token", async () => {
+    const channelId = `game-welcome-heist-confirm-different-operation-${crypto.randomUUID()}`;
+    const settings = { ...heistSettingsForLanguage("de"), startTextEnabled: false, resultTextEnabled: false };
+    const object = await dispatchGameCommand(channelId, "heist", "confirm-different-operation-start-message", settings);
+    const roundId = await openedRoundId(object, "heist");
+    await forcePointAlarm(object, roundId);
+    await dispatchGameMessage(channelId, "heist", "confirm-different-operation-join-message", "!heist 10", "viewer_joiner", "moonmoss");
+    const messages: string[] = [];
+    prepareRealChat(messages);
+
+    await runHeistConfirmation(object, roundId, true);
+
+    const confirmKey = `round:${roundId}:confirm`;
+    await object.acknowledgePointWelcome("points", viewerId, `bonus:${viewerId}`, confirmKey);
+    await object.creditPointSafetyNet("points", viewerId, viewerLogin, Date.now(), true,
+      { amount: 5, threshold: startBonus + 1 }, {
+        messageId: "confirm-different-operation-safety-message",
+        text: pointsCatalog.en.chat.safetyNet(5, "Points"),
+      });
+    const acknowledge = await spyOnWelcomeAcknowledgement(object);
+
+    await runHeistConfirmation(object, roundId);
+
+    expect(messages).toHaveLength(1);
+    expect(acknowledge).not.toHaveBeenCalled();
+    await expect(object.getPendingPointWelcome("points", viewerId)).resolves.toMatchObject({
+      operationId: `safety-net:${viewerId}:2100-01-01`,
+      kind: "safety_net",
+    });
   });
 });

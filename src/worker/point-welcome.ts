@@ -1,4 +1,4 @@
-import type { BotModule, ModuleAction, ModuleChatDelivery, ModulePointsAccess } from "../modules/contract";
+import type { BotModule, ModuleAction, ModuleChatDelivery, ModulePointsAccess, PointWelcomeKind } from "../modules/contract";
 import { reserveChatTextBeforeSuffix } from "./chat";
 
 export const POINT_WELCOME_ACCOUNT_ID_KEY = "welcomeAccountId";
@@ -6,8 +6,10 @@ export const POINT_WELCOME_RESULT_ACCOUNT_ID_KEY = "welcomeResultAccountId";
 
 export interface PointWelcomeNote {
   accountId: string;
+  operationId: string;
   messageId: string;
   text: string;
+  kind: PointWelcomeKind;
 }
 
 export interface PendingPointWelcome extends PointWelcomeNote {
@@ -16,21 +18,23 @@ export interface PendingPointWelcome extends PointWelcomeNote {
   used: boolean;
 }
 
-type PointWelcomeDeliveryClaim = Pick<PendingPointWelcome, "accountId" | "access" | "deliveryClaimId" | "used">;
+type PointWelcomeDeliveryClaim = Pick<PendingPointWelcome, "accountId" | "operationId" | "access" | "deliveryClaimId" | "used">;
 
 /** Finalizes a welcome only when the posted receipt proves this exact claim carried the note. */
 export const finalizePointWelcomeDelivery = async (
   pending: PointWelcomeDeliveryClaim,
   delivery: ModuleChatDelivery,
   postedWelcomeClaimId?: string,
+  postedWelcomeOperationId?: string,
 ): Promise<void> => {
   const claimId = pending.deliveryClaimId;
-  if (delivery === "sent" && claimId !== undefined && postedWelcomeClaimId === claimId) {
-    await pending.access.ackWelcome(pending.accountId, claimId);
+  if (delivery === "sent" && claimId !== undefined && postedWelcomeClaimId === claimId &&
+      postedWelcomeOperationId === pending.operationId) {
+    await pending.access.ackWelcome(pending.accountId, pending.operationId, claimId);
     return;
   }
   if (delivery === "ambiguous") return;
-  if (claimId !== undefined) await pending.access.releaseWelcome?.(pending.accountId, claimId);
+  if (claimId !== undefined) await pending.access.releaseWelcome?.(pending.accountId, pending.operationId, claimId);
   pending.used = false;
 };
 
@@ -56,11 +60,11 @@ export const appendPointWelcome = (
     ...action,
     text,
     ...(pending.deliveryClaimId === undefined ? {} : {
-      pointWelcome: { claimId: pending.deliveryClaimId, text: pending.text },
+      pointWelcome: { claimId: pending.deliveryClaimId, operationId: pending.operationId, text: pending.text },
     }),
-    onDelivery: async (delivery, postedWelcomeClaimId) => {
-      await finalizePointWelcomeDelivery(pending, delivery, postedWelcomeClaimId);
-      await originalDelivery?.(delivery, postedWelcomeClaimId);
+    onDelivery: async (delivery, postedWelcomeClaimId, postedWelcomeOperationId) => {
+      await finalizePointWelcomeDelivery(pending, delivery, postedWelcomeClaimId, postedWelcomeOperationId);
+      await originalDelivery?.(delivery, postedWelcomeClaimId, postedWelcomeOperationId);
     },
   };
 };

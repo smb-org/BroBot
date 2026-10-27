@@ -54,6 +54,12 @@ const createHarness = (options: { role?: "manager" | "operator"; failFirstAudit?
     }),
     settle: vi.fn(() => Promise.resolve({ replayed: false, result: null, balances: {} })),
     touchAccount: vi.fn(() => Promise.resolve({ welcomePending: false, startBonus: null })),
+    prepareChatActivity: vi.fn(() => Promise.resolve({
+      accountExisted: true,
+      welcomePending: false,
+      startBonus: null,
+      pendingWelcome: null,
+    })),
     ackWelcome: vi.fn(() => Promise.resolve()),
     creditActivity: vi.fn(() => Promise.resolve({ credited: 0 })),
     balance: vi.fn((accountId: string) => Promise.resolve(accountId === "viewer_demo" ? balance : 0)),

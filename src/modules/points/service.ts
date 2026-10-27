@@ -72,13 +72,17 @@ export const processPointsMessage = async (
   const messageAt = Number.isFinite(timestamp) ? timestamp : Date.now();
   const language = await context.channelLanguage();
   const accountId = userId;
-  const welcome = await context.points.touchAccount(accountId, login, event.settings.startBonus);
-  const live = await context.streamState();
-  await context.points.creditActivity(accountId, login, messageAt, live === "online", {
-    amount: event.settings.activityAmount,
-    windowMinutes: event.settings.windowMinutes,
-    dailyCap: event.settings.dailyCap,
-  });
+  let welcomePending = event.pointChatPrepared?.welcomePending ?? false;
+  if (event.pointChatPrepared === undefined) {
+    const welcome = await context.points.touchAccount(accountId, login, event.settings.startBonus);
+    welcomePending = welcome.welcomePending;
+    const live = await context.streamState();
+    await context.points.creditActivity(accountId, login, messageAt, live === "online", {
+      amount: event.settings.activityAmount,
+      windowMinutes: event.settings.windowMinutes,
+      dailyCap: event.settings.dailyCap,
+    });
+  }
 
   const command = text.toLowerCase().split(/\s+/u, 1)[0];
   let reply: string | null = null;
@@ -95,7 +99,13 @@ export const processPointsMessage = async (
   } else if (command === "!spiele") {
     const games = await enabledGames(event.channelId, context, language);
     const catalog = pointsCatalog[language].chat;
-    reply = `${catalog.games(games)}${welcome.welcomePending ? "" : ` · ${catalog.startBonus(event.settings.startBonus, event.settings.currencyName)}`} · !punkte`;
+    const pendingNote = event.pointChatPrepared === undefined
+      ? await context.points.getPendingWelcome?.(accountId)
+      : event.pointChatPrepared.pendingWelcome;
+    const startBonusPending = pendingNote === undefined
+      ? welcomePending
+      : pendingNote?.kind === "start_bonus" || pendingNote === null && welcomePending;
+    reply = `${catalog.games(games)}${startBonusPending ? "" : ` · ${catalog.startBonus(event.settings.startBonus, event.settings.currencyName)}`} · !punkte`;
   }
 
   const messageId = textValue(event.payload.message_id);

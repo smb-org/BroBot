@@ -481,7 +481,7 @@ const expectedModuleSettings = {
   sun: {},
   moon: {},
   statistics: {},
-  points: { currencyName: "Punkte", startBonus: 100, activityAmount: 5, windowMinutes: 10, dailyCap: 150 },
+  points: { currencyName: "Punkte", startBonus: 100, activityAmount: 5, windowMinutes: 10, dailyCap: 150, safetyNetEnabled: true, safetyNetAmount: 50, safetyNetThreshold: "min_stake" },
   weather: {},
   currency: {},
   api_source: {},

@@ -26,6 +26,9 @@ const settings = {
   activityAmount: 5,
   windowMinutes: 10,
   dailyCap: 150,
+  safetyNetEnabled: true,
+  safetyNetAmount: 50,
+  safetyNetThreshold: "min_stake" as const,
 };
 
 afterEach(() => {
@@ -45,6 +48,69 @@ beforeEach(() => {
 });
 
 describe("points panel", () => {
+  it("saves the safety-net mode, amount, and fixed threshold together (protects=the explicit settings save sends all safety-net values in the points settings payload; fails_when=the UI omits a value or saves before the operator clicks Save; no_claim=the service response is a settings mock)", async () => {
+    const nextSettings = { ...settings, safetyNetEnabled: false, safetyNetAmount: 80, safetyNetThreshold: 25 };
+    mocks.savePointsSettings.mockResolvedValue({ settings: nextSettings, revision: 2 });
+    renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+
+    const settingsPanel = screen.getByLabelText("Points settings");
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Fixed value" }));
+    fireEvent.change(within(settingsPanel).getByLabelText("Fixed threshold"), { target: { value: "25" } });
+    fireEvent.change(within(settingsPanel).getByLabelText("Safety-net amount"), { target: { value: "80" } });
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Off" }));
+    expect(mocks.savePointsSettings).not.toHaveBeenCalled();
+
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.savePointsSettings).toHaveBeenCalledOnce());
+    expect(mocks.savePointsSettings).toHaveBeenCalledWith("kanal_demo", 1, nextSettings);
+  });
+
+  it("saves settings stored before the safety net with default safety-net values (protects=channels with legacy saved settings can still save; fails_when=the draft lacks the safety-net fields so save stays disabled; no_claim=the service response is a settings mock)", async () => {
+    const { safetyNetEnabled, safetyNetAmount, safetyNetThreshold, ...legacy } = settings;
+    void [safetyNetEnabled, safetyNetAmount, safetyNetThreshold];
+    mocks.loadPointsSettings.mockResolvedValue({ settings: legacy, revision: 1 });
+    renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+
+    const settingsPanel = screen.getByLabelText("Points settings");
+    fireEvent.change(within(settingsPanel).getByLabelText("Currency name"), { target: { value: "Stars" } });
+    const save = within(settingsPanel).getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+
+    await waitFor(() => expect(mocks.savePointsSettings).toHaveBeenCalledOnce());
+    expect(mocks.savePointsSettings).toHaveBeenCalledWith("kanal_demo", 1, { ...settings, currencyName: "Stars" });
+  });
+
+  it("disables the safety-net amount and threshold while it is off and shows the hint of the selected mode (protects=the operator cannot edit safety-net values that have no effect and the threshold hint describes only the selected mode; fails_when=amount or threshold stay editable with the switch off or the min-stake hint shows for a fixed value; no_claim=the effect on payouts is covered in the points module tests)", async () => {
+    renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+
+    const settingsPanel = screen.getByLabelText("Points settings");
+    const amount = within(settingsPanel).getByLabelText("Safety-net amount");
+    const fixed = within(settingsPanel).getByLabelText("Fixed threshold");
+    await waitFor(() => expect(amount).toBeEnabled());
+    expect(within(settingsPanel).getByText("Uses the smallest minimum stake among enabled games.")).toBeInTheDocument();
+    expect(within(settingsPanel).queryByText("Uses the fixed value on the right.")).toBeNull();
+
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Fixed value" }));
+    expect(fixed).toBeEnabled();
+    expect(within(settingsPanel).getByText("Uses the fixed value on the right.")).toBeInTheDocument();
+    expect(within(settingsPanel).queryByText("Uses the smallest minimum stake among enabled games.")).toBeNull();
+
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "Off" }));
+    expect(amount).toBeDisabled();
+    expect(fixed).toBeDisabled();
+    expect(within(settingsPanel).getByRole("button", { name: "Below minimum stake" })).toBeDisabled();
+    expect(within(settingsPanel).getByRole("button", { name: "Fixed value" })).toBeDisabled();
+
+    fireEvent.click(within(settingsPanel).getByRole("button", { name: "On" }));
+    expect(amount).toBeEnabled();
+    expect(fixed).toBeEnabled();
+  });
+
   it("keeps a dirty settings draft and offers the server revision reload (protects=settings drafts stay based on their original revision after a refetch; fails_when=the server value replaces the draft or save remains available without a reload choice; no_claim=the server revision is advanced through the dashboard query cache)", async () => {
     const view = renderWithQuery(<UiProvider><PointsPanel channelId="kanal_demo" language="en" canManage /></UiProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));

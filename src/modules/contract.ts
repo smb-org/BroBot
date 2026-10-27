@@ -439,9 +439,13 @@ export type ModuleAction =
     /** Chat outputs are automated by default; direct command responses set this false. */
     automated?: boolean;
     /** Host delivery proof for a welcome note appended to this action. */
-    pointWelcome?: { claimId: string; text: string };
+    pointWelcome?: { claimId: string; operationId: string; text: string };
     /** Lets a module finalize a claim after the host knows the delivery outcome. */
-    onDelivery?: (delivery: ModuleChatDelivery, postedWelcomeClaimId?: string) => Promise<void>;
+    onDelivery?: (
+      delivery: ModuleChatDelivery,
+      postedWelcomeClaimId?: string,
+      postedWelcomeOperationId?: string,
+    ) => Promise<void>;
   }
   | { kind: "clip"; cooldownSeconds: number; postClipLinkInChat: boolean; chatLinkTemplate: string }
   | { kind: "announcement"; text: string; target?: ChatOutputTarget; automated?: boolean }
@@ -842,7 +846,7 @@ export interface ModuleAlarmContext {
       replyToMessageId?: string;
       sourceBroadcasterUserId?: string;
       automated?: boolean;
-      pointWelcome?: { claimId: string; text: string };
+      pointWelcome?: { claimId: string; operationId: string; text: string };
     },
   ) => Promise<{
     sent: boolean;
@@ -851,6 +855,7 @@ export interface ModuleAlarmContext {
     delivery: "delivered" | "rate_limited" | "ambiguous" | "not_attempted" | "failed";
     attemptedAt?: number;
     postedWelcomeClaimId?: string;
+    postedWelcomeOperationId?: string;
   }>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
@@ -1135,7 +1140,17 @@ export interface ModuleBallotAccess {
   acknowledgeClosed?: (ballotId: string) => Promise<void>;
 }
 
-export type PointsKind = "bonus" | "activity" | "stake" | "game" | "resolve" | "refund" | "admin";
+export type PointsKind = "bonus" | "activity" | "safety_net" | "stake" | "game" | "resolve" | "refund" | "admin";
+
+export type PointWelcomeKind = "start_bonus" | "safety_net";
+
+export interface StoredPointWelcome {
+  accountId: string;
+  operationId: string;
+  messageId: string;
+  text: string;
+  kind: PointWelcomeKind;
+}
 
 export type PointsMovement =
   | { accountId: string; delta: number; login?: string }
@@ -1203,17 +1218,46 @@ export interface ModulePointsAccess {
     welcomePending: boolean;
     startBonus: number | null;
   }>;
+  getPendingWelcome?: (accountId: string) => Promise<StoredPointWelcome | null>;
   /** Stores the note payload while the account's pending bit remains the eligibility source. */
-  storePendingWelcome?: (welcome: { accountId: string; messageId: string; text: string }) => Promise<void>;
-  claimWelcome?: (accountId: string, claimId: string) => Promise<boolean>;
-  releaseWelcome?: (accountId: string, claimId: string) => Promise<void>;
-  ackWelcome: (accountId: string, claimId?: string) => Promise<void>;
+  storePendingWelcome?: (welcome: StoredPointWelcome) => Promise<void>;
+  claimWelcome?: (accountId: string, operationId: string, claimId: string) => Promise<StoredPointWelcome | null>;
+  releaseWelcome?: (accountId: string, operationId: string, claimId: string) => Promise<void>;
+  ackWelcome: (accountId: string, operationId: string, claimId?: string) => Promise<void>;
+  prepareChatActivity: (
+    accountId: string,
+    login: string,
+    startBonus: number,
+    messageAt: number,
+    live: boolean,
+    activityRules: { amount: number; windowMinutes: number; dailyCap: number },
+    safetyNetRules: { amount: number; threshold: number } | null,
+    welcomes: {
+      messageId: string;
+      language: ModuleLanguage;
+      currencyName: string;
+      safetyNetText: string;
+    },
+  ) => Promise<{
+    accountExisted: boolean;
+    welcomePending: boolean;
+    startBonus: number | null;
+    pendingWelcome: StoredPointWelcome | null;
+  }>;
   creditActivity: (
     accountId: string,
     login: string,
     messageAt: number,
     live: boolean,
     rules: { amount: number; windowMinutes: number; dailyCap: number },
+  ) => Promise<{ credited: number }>;
+  creditSafetyNet?: (
+    accountId: string,
+    login: string,
+    messageAt: number,
+    live: boolean,
+    rules: { amount: number; threshold: number },
+    welcome: Omit<StoredPointWelcome, "accountId" | "kind">,
   ) => Promise<{ credited: number }>;
   balance: (accountId: string) => Promise<number>;
   getAccount: (accountId: string) => Promise<{ accountId: string; login: string; balance: number } | null>;
@@ -2001,6 +2045,8 @@ export interface ModuleEvent<Settings = unknown> {
   receivedAt: string;
   /** Verified EventSub message time from the host, when available. */
   eventSubTimestamp?: string;
+  /** The host already applied points account, activity, and safety-net chat bookkeeping. */
+  pointChatPrepared?: { welcomePending: boolean; pendingWelcome: StoredPointWelcome | null };
   /** The role comes from channel_members; `null` means not a member. */
   actor: ModuleActor | null;
   /** Events unrelated to chat carry `null` here; chat events carry all matching statuses. */
