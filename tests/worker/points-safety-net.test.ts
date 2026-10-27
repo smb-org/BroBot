@@ -6,6 +6,7 @@ import { duelSettingsForLanguage } from "../../src/modules/duel/contracts";
 import { pointsDefaultSettingsForLanguage } from "../../src/modules/points/contracts";
 import { pointsModule } from "../../src/modules/points";
 import { pointsCatalog } from "../../src/modules/points/locale";
+import { ensurePointsSchema } from "../../src/worker/durable/points";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import {
@@ -45,8 +46,9 @@ const pointsSettings = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const makeChatFetch = (messages: string[], onlineStreams = false): typeof fetch => vi.fn<typeof fetch>((input, init) => {
+const makeChatFetch = (messages: string[], onlineStreams = false, requests: string[] = []) => vi.fn<typeof fetch>((input, init) => {
   const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.href;
+  requests.push(url);
   if (url.includes("/helix/chat/messages")) {
     const requestBody = init?.body;
     const body: unknown = typeof requestBody === "string" ? JSON.parse(requestBody) : null;
@@ -159,9 +161,11 @@ describe("points safety net", () => {
     const object = pointObject(channelId);
     await seedAccount(object, 0);
     const messages: string[] = [];
-    const fetcher = makeChatFetch(messages, true);
+    const requests: string[] = [];
+    const fetcher = makeChatFetch(messages, true, requests);
 
     await dispatchChat(channelId, "safety-net-trigger", "hello", fetcher);
+    expect(requests.some((url) => url.includes("/helix/streams?"))).toBe(false);
     await expect(object.pointBalance("points", accountId)).resolves.toBe(5);
     await dispatchChat(channelId, "safety-net-reply", "!punkte", fetcher);
     await dispatchChat(channelId, "safety-net-later", "!punkte", fetcher);
@@ -244,6 +248,123 @@ describe("points safety net", () => {
 
     const history = await object.pointHistory("points", accountId);
     expect(history.rows.some((row) => row.kind === "safety_net")).toBe(false);
+  });
+
+  it("reconstructs a missing start-bonus note from the booked amount", async () => {
+    const channelId = `points-safety-net-booked-bonus-${crypto.randomUUID()}`;
+    await createChannel(channelId, pointsSettings({ startBonus: 200 }));
+    const object = pointObject(channelId);
+    await object.touchPointAccount("points", accountId, login, 75);
+    const preparePointChat = vi.spyOn(ChannelObject.prototype, "preparePointChat");
+    const messages: string[] = [];
+
+    await dispatchChat(channelId, "booked-start-bonus-reply", "!punkte", makeChatFetch(messages));
+
+    expect(preparePointChat).toHaveBeenCalledOnce();
+    expect(messages[0]).toContain(pointsCatalog.en.chat.startBonus(75, "Points"));
+    expect(messages[0]).not.toContain(pointsCatalog.en.chat.startBonus(200, "Points"));
+    await expect(object.pointBalance("points", accountId)).resolves.toBe(75);
+  });
+
+  it("rebinds an expired welcome claim to the reply that reclaims it", async () => {
+    const channelId = `points-safety-net-expired-claim-${crypto.randomUUID()}`;
+    await createChannel(channelId, pointsSettings({ safetyNetAmount: 5, safetyNetThreshold: 20 }), { online: true });
+    const object = pointObject(channelId);
+    await seedAccount(object, 0);
+    const messages: string[] = [];
+    const fetcher = makeChatFetch(messages, true);
+
+    await dispatchChat(channelId, "expired-claim-credit", "hello", fetcher);
+    const operationId = `safety-net:${accountId}:2026-10-27`;
+    const oldClaimId = "dispatch:abandoned:points:0";
+    await expect(object.claimPointWelcome("points", accountId, operationId, oldClaimId))
+      .resolves.toMatchObject({ operationId });
+    await runPointObject(object, (_target, state) => {
+      state.storage.sql.exec(
+        "UPDATE point_welcome_notes SET claimed_at = ?, message_id = ? WHERE account_id = ? AND operation_id = ?",
+        Date.now() - 120_001,
+        "abandoned-message",
+        accountId,
+        operationId,
+      );
+    });
+    const preparePointChat = vi.spyOn(ChannelObject.prototype, "preparePointChat");
+
+    await dispatchChat(channelId, "expired-claim-reply", "!punkte", fetcher);
+
+    expect(preparePointChat).toHaveBeenCalledOnce();
+    expect(messages[0]).toContain(pointsCatalog.en.chat.safetyNet(5, "Points"));
+    await expect(object.getPendingPointWelcome("points", accountId)).resolves.toBeNull();
+  });
+
+  it("refreshes stale stream state before the single points preparation call", async () => {
+    const channelId = `points-safety-net-stale-stream-${crypto.randomUUID()}`;
+    await createChannel(channelId, pointsSettings({ safetyNetAmount: 5 }), { online: true });
+    await worker.DB.prepare("UPDATE channel_stream_state SET changed_at = ?, checked_at = ? WHERE channel_id = ?")
+      .bind("2026-10-27T09:00:00.000Z", "2026-10-27T09:00:00.000Z", channelId).run();
+    const object = pointObject(channelId);
+    await seedAccount(object, 0);
+    const preparePointChat = vi.spyOn(ChannelObject.prototype, "preparePointChat");
+    const requests: string[] = [];
+    const fetcher = makeChatFetch([], false, requests);
+
+    await dispatchChat(channelId, "stale-stream-points-chat", "hello", fetcher);
+
+    expect(preparePointChat).toHaveBeenCalledOnce();
+    expect(preparePointChat.mock.calls[0]?.[5]).toBe(false);
+    expect(requests.some((url) => url.includes("/helix/streams?"))).toBe(true);
+    await expect(object.pointBalance("points", accountId)).resolves.toBe(0);
+  });
+
+  it("backfills acknowledged zero-point bonuses before preparing a pending safety-net note", async () => {
+    const channelId = `points-safety-net-zero-bonus-migration-${crypto.randomUUID()}`;
+    await createChannel(channelId, pointsSettings({ startBonus: 0, safetyNetAmount: 5, safetyNetThreshold: 1 }));
+    const object = pointObject(channelId);
+    await object.touchPointAccount("points", accountId, login, 0);
+    await object.storePendingPointWelcome("points", {
+      accountId,
+      operationId: `bonus:${accountId}`,
+      messageId: "zero-bonus-message",
+      text: pointsCatalog.en.chat.startBonus(0, "Points"),
+      kind: "start_bonus",
+    });
+    await object.claimPointWelcome("points", accountId, `bonus:${accountId}`, "zero-bonus-claim");
+    await object.acknowledgePointWelcome("points", accountId, `bonus:${accountId}`, "zero-bonus-claim");
+    const operationId = `safety-net:${accountId}:2026-10-27`;
+    await object.creditPointSafetyNet("points", accountId, login, Date.now(), true,
+      { amount: 5, threshold: 1 }, {
+        messageId: "safety-net-message",
+        text: pointsCatalog.en.chat.safetyNet(5, "Points"),
+      });
+    await runPointObject(object, (_target, state) => {
+      state.storage.sql.exec(
+        "DELETE FROM point_welcome_deliveries WHERE account_id = ? AND operation_id = ?",
+        accountId,
+        `bonus:${accountId}`,
+      );
+      ensurePointsSchema(state.storage.sql);
+    });
+    const preparePointChat = vi.spyOn(ChannelObject.prototype, "preparePointChat");
+
+    await object.preparePointChat("points", accountId, login, 0, Date.now(), true,
+      { amount: 0, windowMinutes: 10, dailyCap: 0 }, null, {
+        messageId: "next-points-message",
+        language: "en",
+        currencyName: "Points",
+        safetyNetText: pointsCatalog.en.chat.safetyNet(5, "Points"),
+      });
+
+    expect(preparePointChat).toHaveBeenCalledOnce();
+    await expect(object.getPendingPointWelcome("points", accountId)).resolves.toMatchObject({
+      operationId,
+      kind: "safety_net",
+      messageId: "next-points-message",
+    });
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM point_welcome_notes WHERE account_id = ? AND operation_id = ?",
+      accountId,
+      `bonus:${accountId}`,
+    ).one().count)).resolves.toBe(0);
   });
 
   it("does not let a stale start-bonus preflight replace a later safety-net note (protects=a delivered start bonus cannot be recreated over the next operation's pending note; fails_when=the stale write repeats the welcome or hides the safety notification; no_claim=the real dispatch path delivers each note once)", async () => {
@@ -330,8 +451,10 @@ describe("points safety net", () => {
     const creditPointSafetyNet = vi.spyOn(ChannelObject.prototype, "creditPointSafetyNet");
     const recordChatActivity = vi.spyOn(ChannelObject.prototype, "recordChatActivity");
     const prepare = vi.spyOn(worker.DB, "prepare");
+    const requests: string[] = [];
+    const fetcher = makeChatFetch([], false, requests);
 
-    await dispatchChat(channelId, "disabled-safety-chat", "hello", makeChatFetch([]));
+    await dispatchChat(channelId, "disabled-safety-chat", "hello", fetcher);
 
     expect(preparePointChat).toHaveBeenCalledOnce();
     expect(recordChatActivity).toHaveBeenCalledOnce();
@@ -345,5 +468,6 @@ describe("points safety net", () => {
     expect(queries.some((query) => query.includes("SELECT module_id, settings FROM channel_modules"))).toBe(false);
     expect(queries.some((query) => /point/i.test(query))).toBe(false);
     expect(queries.filter((query) => query.includes("JOIN channel_modules"))).toHaveLength(1);
+    expect(requests.some((url) => url.includes("/helix/streams?"))).toBe(false);
   });
 });

@@ -75,7 +75,7 @@ const handleConfirm = async (context: ModuleAlarmContext, alarmKey: string): Pro
     : result.delivery === "ambiguous" ? "ambiguous"
       : result.delivery === "not_attempted" ? "not_attempted" : "rejected";
   try {
-    await action.onDelivery?.(delivery, result.postedWelcomeClaimId);
+    await action.onDelivery?.(delivery, result.postedWelcomeClaimId, result.postedWelcomeOperationId);
   } catch (error) {
     console.error("Heist confirmation welcome acknowledgement failed after a confirmed send.", error);
   }

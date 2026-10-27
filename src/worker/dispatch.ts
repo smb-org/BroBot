@@ -419,10 +419,14 @@ const runActions = async (
         }
       } else action = preview;
     }
-    const reportDelivery = async (delivery: ModuleChatDelivery, postedWelcomeClaimId?: string): Promise<void> => {
+    const reportDelivery = async (
+      delivery: ModuleChatDelivery,
+      postedWelcomeClaimId?: string,
+      postedWelcomeOperationId?: string,
+    ): Promise<void> => {
       if (action.kind !== "chat" || action.onDelivery === undefined) return;
       try {
-        await action.onDelivery(delivery, postedWelcomeClaimId);
+        await action.onDelivery(delivery, postedWelcomeClaimId, postedWelcomeOperationId);
       } catch (error: unknown) {
         diagnostics.push({ code: "host.action.failed" satisfies EventCode, detail: { message: errorMessage(error) } });
       }
@@ -485,7 +489,7 @@ const runActions = async (
           undefined,
           action.pointWelcome,
         );
-        await reportDelivery(result.delivery, result.postedWelcomeClaimId);
+        await reportDelivery(result.delivery, result.postedWelcomeClaimId, result.postedWelcomeOperationId);
         if (result.truncated) {
           diagnostics.push({ code: "template_truncated" satisfies EventCode, detail: { current: action.text.length } });
         }
@@ -1151,12 +1155,13 @@ export const dispatchEventSubNotification = async (
           chatterLogin,
           settings.startBonus,
           messageAt,
-          dispatchState.streamState === "online",
+          await streamState() === "online",
           { amount: settings.activityAmount, windowMinutes: settings.windowMinutes, dailyCap: settings.dailyCap },
           threshold === null ? null : { amount: settings.safetyNetAmount, threshold },
           {
             messageId,
-            startBonusText: pointsCatalog[dispatchState.language].chat.startBonus(settings.startBonus, settings.currencyName),
+            language: dispatchState.language,
+            currencyName: settings.currencyName,
             safetyNetText: pointsCatalog[dispatchState.language].chat.safetyNet(settings.safetyNetAmount, settings.currencyName),
           },
         );

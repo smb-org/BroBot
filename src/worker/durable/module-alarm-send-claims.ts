@@ -4,7 +4,12 @@ const MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY = "module_alarm:send_claims";
 const MODULE_ALARM_SEND_CLAIM_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 
 export type ModuleAlarmDelivery = "sent" | "rejected" | "ambiguous";
-export type ModuleAlarmSendClaim = { status: "sending" | "sent"; at: number; welcomeClaimId?: string };
+export type ModuleAlarmSendClaim = {
+  status: "sending" | "sent";
+  at: number;
+  welcomeClaimId?: string;
+  welcomeOperationId?: string;
+};
 
 interface ClaimTransaction {
   get(key: string): Promise<unknown>;
@@ -52,6 +57,7 @@ export const finishModuleAlarmSend = async (
   delivery: ModuleAlarmDelivery,
   now: number,
   welcomeClaimId?: string,
+  welcomeOperationId?: string,
 ): Promise<void> => storage.transaction(async (transaction) => {
   const stored = await transaction.get(MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY);
   const claims = isRecord(stored) ? stored : {};
@@ -62,6 +68,7 @@ export const finishModuleAlarmSend = async (
     status: "sent",
     at: now,
     ...(welcomeClaimId === undefined ? {} : { welcomeClaimId }),
+    ...(welcomeOperationId === undefined ? {} : { welcomeOperationId }),
   } satisfies ModuleAlarmSendClaim;
   await transaction.put(MODULE_ALARM_SEND_CLAIMS_STORAGE_KEY, claims);
 });
@@ -78,5 +85,6 @@ export const readModuleAlarmSendClaim = async (
     status: claim.status,
     at: claim.at,
     ...(typeof claim.welcomeClaimId === "string" ? { welcomeClaimId: claim.welcomeClaimId } : {}),
+    ...(typeof claim.welcomeOperationId === "string" ? { welcomeOperationId: claim.welcomeOperationId } : {}),
   };
 };

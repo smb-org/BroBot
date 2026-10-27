@@ -439,9 +439,13 @@ export type ModuleAction =
     /** Chat outputs are automated by default; direct command responses set this false. */
     automated?: boolean;
     /** Host delivery proof for a welcome note appended to this action. */
-    pointWelcome?: { claimId: string; text: string };
+    pointWelcome?: { claimId: string; operationId: string; text: string };
     /** Lets a module finalize a claim after the host knows the delivery outcome. */
-    onDelivery?: (delivery: ModuleChatDelivery, postedWelcomeClaimId?: string) => Promise<void>;
+    onDelivery?: (
+      delivery: ModuleChatDelivery,
+      postedWelcomeClaimId?: string,
+      postedWelcomeOperationId?: string,
+    ) => Promise<void>;
   }
   | { kind: "clip"; cooldownSeconds: number; postClipLinkInChat: boolean; chatLinkTemplate: string }
   | { kind: "announcement"; text: string; target?: ChatOutputTarget; automated?: boolean }
@@ -842,7 +846,7 @@ export interface ModuleAlarmContext {
       replyToMessageId?: string;
       sourceBroadcasterUserId?: string;
       automated?: boolean;
-      pointWelcome?: { claimId: string; text: string };
+      pointWelcome?: { claimId: string; operationId: string; text: string };
     },
   ) => Promise<{
     sent: boolean;
@@ -851,6 +855,7 @@ export interface ModuleAlarmContext {
     delivery: "delivered" | "rate_limited" | "ambiguous" | "not_attempted" | "failed";
     attemptedAt?: number;
     postedWelcomeClaimId?: string;
+    postedWelcomeOperationId?: string;
   }>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
@@ -1229,7 +1234,8 @@ export interface ModulePointsAccess {
     safetyNetRules: { amount: number; threshold: number } | null,
     welcomes: {
       messageId: string;
-      startBonusText: string;
+      language: ModuleLanguage;
+      currencyName: string;
       safetyNetText: string;
     },
   ) => Promise<{

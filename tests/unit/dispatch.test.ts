@@ -83,7 +83,7 @@ const environment = (database: TestD1Database, publish = vi.fn()) => {
       live: boolean,
       _activityRules: { amount: number; windowMinutes: number; dailyCap: number },
       safetyNetRules: { amount: number; threshold: number } | null,
-      welcomes: { messageId: string; startBonusText: string; safetyNetText: string },
+      welcomes: { messageId: string; language: "de" | "en"; currencyName: string; safetyNetText: string },
     ) => {
       const accountExisted = pointAccounts.has(accountId);
       if (!accountExisted) {
@@ -102,7 +102,7 @@ const environment = (database: TestD1Database, publish = vi.fn()) => {
             accountId,
             operationId: startOperationId,
             messageId: welcomes.messageId,
-            text: welcomes.startBonusText,
+            text: pointsCatalog[welcomes.language].chat.startBonus(startBonuses.get(accountId) ?? startBonus, welcomes.currencyName),
             kind: "start_bonus",
           });
         }

@@ -41,7 +41,7 @@ export interface PointsWorkerObject {
     live: boolean,
     activityRules: { amount: number; windowMinutes: number; dailyCap: number },
     safetyNetRules: { amount: number; threshold: number } | null,
-    welcomes: { messageId: string; startBonusText: string; safetyNetText: string },
+    welcomes: { messageId: string; language: "de" | "en"; currencyName: string; safetyNetText: string },
   ): Promise<{ accountExisted: boolean; welcomePending: boolean; startBonus: number | null; pendingWelcome: StoredPointWelcome | null }>;
   storePendingPointWelcome(moduleId: string, welcome: StoredPointWelcome): Promise<void>;
   getPendingPointWelcome(moduleId: string, accountId: string): Promise<StoredPointWelcome | null>;
@@ -52,6 +52,8 @@ export interface PointsWorkerObject {
   pointAccount(moduleId: string, accountId: string): Promise<{ accountId: string; login: string; balance: number } | null>;
   creditPointActivity(moduleId: string, accountId: string, login: string, messageAt: number, live: boolean,
     rules: { amount: number; windowMinutes: number; dailyCap: number }): Promise<{ credited: number }>;
+  creditPointSafetyNet(moduleId: string, accountId: string, login: string, messageAt: number, live: boolean,
+    rules: { amount: number; threshold: number }, welcome: { messageId: string; text: string }): Promise<{ credited: number }>;
   listPointAccounts(moduleId: string, query: { sort: "balance" | "month"; search?: string; cursor?: string; limit: number }): Promise<{
     rows: Array<{ accountId: string; login: string; balance: number; monthNet: number | null }>;
     cursor?: string;

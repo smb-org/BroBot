@@ -25,9 +25,11 @@ export const finalizePointWelcomeDelivery = async (
   pending: PointWelcomeDeliveryClaim,
   delivery: ModuleChatDelivery,
   postedWelcomeClaimId?: string,
+  postedWelcomeOperationId?: string,
 ): Promise<void> => {
   const claimId = pending.deliveryClaimId;
-  if (delivery === "sent" && claimId !== undefined && postedWelcomeClaimId === claimId) {
+  if (delivery === "sent" && claimId !== undefined && postedWelcomeClaimId === claimId &&
+      postedWelcomeOperationId === pending.operationId) {
     await pending.access.ackWelcome(pending.accountId, pending.operationId, claimId);
     return;
   }
@@ -58,11 +60,11 @@ export const appendPointWelcome = (
     ...action,
     text,
     ...(pending.deliveryClaimId === undefined ? {} : {
-      pointWelcome: { claimId: pending.deliveryClaimId, text: pending.text },
+      pointWelcome: { claimId: pending.deliveryClaimId, operationId: pending.operationId, text: pending.text },
     }),
-    onDelivery: async (delivery, postedWelcomeClaimId) => {
-      await finalizePointWelcomeDelivery(pending, delivery, postedWelcomeClaimId);
-      await originalDelivery?.(delivery, postedWelcomeClaimId);
+    onDelivery: async (delivery, postedWelcomeClaimId, postedWelcomeOperationId) => {
+      await finalizePointWelcomeDelivery(pending, delivery, postedWelcomeClaimId, postedWelcomeOperationId);
+      await originalDelivery?.(delivery, postedWelcomeClaimId, postedWelcomeOperationId);
     },
   };
 };

@@ -6,10 +6,12 @@ import type {
   PointsApplyResult,
   PointsMovement,
   PointsKind,
+  ModuleLanguage,
   PointWelcomeKind,
 } from "../../modules/contract";
 import { POINT_WELCOME_RESULT_ACCOUNT_ID_KEY } from "../point-welcome";
 import { bossHealth } from "../../modules/boss_fight/domain/boss";
+import { pointsCatalog } from "../../modules/points/locale";
 
 export const POINTS_ROUND_ALARM_HANDLER = "host:points_round";
 export const POINTS_ROUND_ALARM_PREFIX = "points:round:";
@@ -403,6 +405,23 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
        AND (operation.kind = 'safety_net' OR account.welcome_pending = 0 OR EXISTS (
          SELECT 1 FROM point_welcome_notes AS note
           WHERE note.account_id = ledger.account_id AND note.note_kind = 'safety_net'
+       ))`);
+  sql.exec(`INSERT OR IGNORE INTO point_welcome_deliveries (account_id, operation_id, acknowledged_at)
+    SELECT account.account_id, operation.operation_id, operation.created_at
+      FROM point_operations AS operation
+      JOIN point_accounts AS account ON operation.operation_id = 'bonus:' || account.account_id
+     WHERE operation.kind = 'bonus'
+       AND account.kind = 'viewer'
+       AND NOT EXISTS (
+         SELECT 1 FROM point_ledger AS ledger WHERE ledger.operation_id = operation.operation_id
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM point_welcome_notes AS note
+          WHERE note.account_id = account.account_id AND note.operation_id = operation.operation_id
+       )
+       AND (account.welcome_pending = 0 OR EXISTS (
+         SELECT 1 FROM point_welcome_notes AS note
+          WHERE note.account_id = account.account_id AND note.note_kind = 'safety_net'
        ))`);
   if (!gameRoundColumns.some(({ name }) => name === "prepare_state")) {
     sql.exec("ALTER TABLE game_rounds ADD COLUMN prepare_state TEXT NOT NULL DEFAULT 'delivered'");
@@ -1314,7 +1333,7 @@ export const preparePointChatSync = (
   activityHash: string,
   safetyNetRules: { amount: number; threshold: number } | null,
   safetyNetHash: string | null,
-  welcomes: { messageId: string; startBonusText: string; safetyNetText: string },
+  welcomes: { messageId: string; language: ModuleLanguage; currencyName: string; safetyNetText: string },
   now: string,
 ): PreparedPointChat => {
   const touched = touchPointAccountSync(sql, moduleId, accountId, login, startBonus, bonusHash, now);
@@ -1323,7 +1342,7 @@ export const preparePointChatSync = (
       accountId,
       operationId: `bonus:${accountId}`,
       messageId: welcomes.messageId,
-      text: welcomes.startBonusText,
+      text: pointsCatalog[welcomes.language].chat.startBonus(touched.startBonus, welcomes.currencyName),
       kind: "start_bonus",
     });
   }
@@ -1340,9 +1359,12 @@ export const preparePointChatSync = (
   ).toArray()[0]?.welcome_pending === 1;
   if (welcomePending) {
     sql.exec(
-      "UPDATE point_welcome_notes SET message_id = ? WHERE account_id = ? AND claim_id IS NULL",
+      `UPDATE point_welcome_notes SET message_id = ? WHERE account_id = ? AND (
+        claim_id IS NULL OR claimed_at IS NULL OR claimed_at <= ?
+      )`,
       welcomes.messageId,
       accountId,
+      Date.parse(now) - POINT_WELCOME_CLAIM_LEASE_MS,
     );
   }
   return {

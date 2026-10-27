@@ -174,7 +174,7 @@ describe("points module", () => {
 
     const retry = appendPointWelcome(action, pointsOwner, pending);
     if (retry.kind !== "chat") throw new Error("The retry welcome action was not a chat reply.");
-    await retry.onDelivery?.("sent", "claim_demo");
+    await retry.onDelivery?.("sent", "claim_demo", "bonus:viewer_demo");
     expect(ackWelcome).toHaveBeenCalledOnce();
     expect(ackWelcome).toHaveBeenCalledWith("viewer_demo", "bonus:viewer_demo", "claim_demo");
   });
@@ -205,7 +205,7 @@ describe("points module", () => {
     expect(transported.text).toHaveLength(500);
     expect(transported.text.startsWith(prefix)).toBe(true);
     expect(transported.text.endsWith(" · Initial balance 100 points · Source label")).toBe(true);
-    await decorated.onDelivery?.("sent", "claim_demo");
+    await decorated.onDelivery?.("sent", "claim_demo", "bonus:viewer_demo");
     expect(ackWelcome).toHaveBeenCalledOnce();
   });
 
@@ -249,7 +249,7 @@ describe("points module", () => {
     // Once claimed, a second points reply must not repeat the note.
     expect(appendPointWelcome(reply, pointsOwner, pending)).toBe(reply);
     if (game.kind !== "chat") throw new Error("The expected game reply was not a chat reply.");
-    await game.onDelivery?.("sent", "claim_demo");
+    await game.onDelivery?.("sent", "claim_demo", "bonus:viewer_demo");
     expect(ackWelcome).toHaveBeenCalledOnce();
   });
 });

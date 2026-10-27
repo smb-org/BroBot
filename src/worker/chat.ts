@@ -53,6 +53,7 @@ export interface ChatSendResult {
   delivery: "sent" | "rejected" | "ambiguous" | "not_attempted";
   /** Present only when the posted message carried the welcome attached to this claim. */
   postedWelcomeClaimId?: string;
+  postedWelcomeOperationId?: string;
   /** Machine-readable reason when the message was not sent. */
   reason: string | null;
   detail: Readonly<Record<string, string | number | boolean | null>>;
@@ -115,16 +116,17 @@ export const sendChatMessage = async (
     delivery: ChatSendResult["delivery"],
     reason: string | null,
     postedWelcomeClaimId?: string,
+    postedWelcomeOperationId?: string,
   ) => Promise<void>,
   target: ChatOutputTarget = "source_only",
   sourceBroadcasterUserId?: string | null,
   recordSent?: (senderId: string, text: string) => Promise<void>,
-  pointWelcome?: { claimId: string; text: string },
+  pointWelcome?: { claimId: string; operationId: string; text: string },
 ): Promise<ChatSendResult> => {
   const preparedText = truncateChatTextWithAttributions(text, attributions);
-  const postedWelcomeClaimId = pointWelcome !== undefined && preparedText.text.includes(pointWelcome.text)
-    ? pointWelcome.claimId
-    : undefined;
+  const postedWelcome = pointWelcome !== undefined && preparedText.text.includes(pointWelcome.text) ? pointWelcome : undefined;
+  const postedWelcomeClaimId = postedWelcome?.claimId;
+  const postedWelcomeOperationId = postedWelcome?.operationId;
   const textDetail = { text: truncateTo200Chars(preparedText.text) };
   // Caught rather than left to propagate: an outage here (e.g. D1 unavailable)
   // is the same known, pre-POST outcome as identity simply being absent, and
@@ -238,12 +240,13 @@ export const sendChatMessage = async (
       console.warn("Recent bot chat output could not be recorded.", error);
     }
   }
-  await afterPost?.("sent", null, postedWelcomeClaimId);
+  await afterPost?.("sent", null, postedWelcomeClaimId, postedWelcomeOperationId);
   return {
     sent: true,
     truncated: preparedText.truncated,
     delivery: "sent",
     ...(postedWelcomeClaimId === undefined ? {} : { postedWelcomeClaimId }),
+    ...(postedWelcomeOperationId === undefined ? {} : { postedWelcomeOperationId }),
     reason: null,
     detail: { messageId: readText(first.message_id), ...textDetail },
   };
