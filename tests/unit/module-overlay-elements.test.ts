@@ -79,6 +79,34 @@ describe("module overlay element declarations", () => {
     expect(tally?.mergeRealtimeState).toBeTypeOf("function");
   });
 
+  it("declares a lazy quiz session element for phase and result messages", () => {
+    const quiz = MODULES.find(({ id }) => id === "quiz")?.overlayElements?.find(({ kind }) => kind === "quiz.session");
+
+    expect(quiz).toMatchObject({
+      kind: "quiz.session",
+      configVersion: 1,
+      defaultSize: { width: 640, height: 360 },
+      defaultConfig: { showQuestionProgress: true, showPercent: true },
+      mergeRealtimeStateOnModuleMessages: ["modul.quiz.phase", "modul.quiz.results", "modul.quiz.cancel"],
+    });
+    expect(quiz?.parseConfig({ showPercent: false })).toEqual({
+      showQuestionProgress: true,
+      showPercent: false,
+      backgroundColor: "#10141b",
+      textColor: "#f2f5f9",
+      secondaryColor: "#a8b2c1",
+      accentColor: "#5fa4ff",
+      correctColor: "#32ca88",
+    });
+    expect(quiz?.parseConfig({ unsafe: true })).toBeNull();
+    expect(quiz?.initialStateFromSnapshot).toBeTypeOf("function");
+    expect(quiz?.load).toBeTypeOf("function");
+    expect(quiz?.editor).toBeTypeOf("function");
+    expect(moduleOverlayElementKindForMessage("modul.quiz.phase")).toBe("quiz.session");
+    expect(moduleOverlayElementKindForMessage("modul.quiz.results")).toBe("quiz.session");
+    expect(moduleOverlayMessageRequiresStateReload("modul.quiz.phase")).toBe(false);
+  });
+
   it("provides a client loader for every server-registered overlay element", () => {
     const serverElements = MODULES.flatMap((module) => (module.overlayElements ?? []).map(({ kind }) => ({
       moduleId: module.id,

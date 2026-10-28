@@ -985,6 +985,8 @@ describe("game rounds in the worker Durable Object", () => {
 
       const balanceAccess = target.pointBalance(pointTestModule, "viewer-a");
       const summaryAccess = target.pointSummary(pointTestModule);
+      // Recovery starts after the quiz snapshot check yields once, so let pending microtasks run before counting.
+      await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
       const attemptsBeforeRecoveryFinishes = attempts;
       releaseRecovery();
       await expect(balanceAccess).resolves.toBe(0);

@@ -3,6 +3,7 @@ import type { QuizSessionAggregates, QuizSessionRoundData } from "./contracts";
 import { endQuizPhase, pauseQuizPhase, resumeQuizPhase, scoreQuizSession, transitionQuizPhase } from "./domain/session";
 import { quizCatalog } from "./locale";
 import { quizRoundData } from "./service";
+import { quizPhasePayload } from "./overlay/payload";
 
 const QUESTION_ANNOUNCEMENT_LIMIT = 450;
 const ANNOUNCE_RETRY_MS = 5_000;
@@ -11,6 +12,16 @@ const OFFLINE_SETTLEMENT_MS = 10 * 60_000;
 const OFFLINE_TIMEOUT_PREFIX = "offline-timeout:";
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+const nextOverlayPhase = (data: QuizSessionRoundData, now = Date.now()): QuizSessionRoundData => ({
+  ...data,
+  phaseSequence: Number.isSafeInteger(data.phaseSequence) && (data.phaseSequence ?? -1) >= 0
+    ? (data.phaseSequence as number) + 1
+    : 1,
+  sessionStartedAt: typeof data.sessionStartedAt === "string" && Number.isFinite(Date.parse(data.sessionStartedAt))
+    ? data.sessionStartedAt
+    : new Date(now).toISOString(),
+});
 
 const truncate = (value: string, maximum: number): string => {
   if (value.length <= maximum) return value;
@@ -31,29 +42,58 @@ const quizQuestionLine = (data: QuizSessionRoundData, questionIndex = data.quest
   return truncate(catalog.questionLine(questionIndex + 1, data.questions.length, question.text, options), QUESTION_ANNOUNCEMENT_LIMIT);
 };
 
-export const quizPhasePayload = (data: QuizSessionRoundData): Record<string, unknown> => {
-  const question = data.questions[data.questionIndex];
-  return {
-    sessionId: data.sessionId,
-    questionIndex: data.questionIndex,
-    questionCount: data.questions.length,
-    question: question?.text ?? "",
-    options: question === undefined ? [] : [...question.options],
-    phase: data.phase,
-    phaseEndsAt: data.phaseEndsAt === null ? null : new Date(data.phaseEndsAt).toISOString(),
-    paused: data.paused,
-    remainingMs: data.paused ? data.remainingMs : null,
-  };
-};
-
-const publishQuizPhase = async (context: ModuleAlarmContext, data: QuizSessionRoundData): Promise<void> => {
+const quizPhaseOverlayPayload = (data: QuizSessionRoundData): Record<string, unknown> => {
   const question = data.questions[data.questionIndex];
   const payload = quizPhasePayload(data);
   if (data.phase === "reveal" && question !== undefined && data.aggregates !== undefined) {
     payload.correctIndex = question.correctIndex;
     payload.answerDistribution = data.aggregates.answerDistribution[data.questionIndex] ?? [];
   }
-  await context.publishModuleOverlayMessage("phase", "quiz.session", payload);
+  if (data.phase === "results") payload.ranking = [];
+  return payload;
+};
+
+const quizCancellationPayload = (data: QuizSessionRoundData): Record<string, unknown> => ({
+  sessionId: data.sessionId,
+  phase: "idle",
+  phaseSequence: data.phaseSequence ?? 0,
+  sessionStartedAt: data.sessionStartedAt ?? new Date().toISOString(),
+  });
+
+const publishQuizOverlaySnapshot = async (context: ModuleAlarmContext): Promise<void> =>
+  context.quizOverlaySnapshot.deliverPending();
+
+const retryPendingQuizOverlayBroadcast = async (context: ModuleAlarmContext): Promise<void> => {
+  const snapshot = await context.quizOverlaySnapshot.read();
+  if (snapshot !== null && snapshot.lastBroadcastSequence < snapshot.sequence) {
+    await publishQuizOverlaySnapshot(context);
+  }
+};
+
+const persistAndPublishQuizPhase = async (
+  context: ModuleAlarmContext,
+  roundId: string,
+  data: QuizSessionRoundData,
+  deadlineAt: number | null,
+): Promise<QuizSessionRoundData> => {
+  const snapshot = await context.points.rounds.update(roundId, data, deadlineAt, quizPhaseOverlayPayload(data));
+  const persisted = snapshot ?? await context.quizOverlaySnapshot.read();
+  if (persisted === null) throw new Error("quiz_overlay_snapshot_missing");
+  await publishQuizOverlaySnapshot(context);
+  return { ...data, phaseSequence: persisted.sequence };
+};
+
+const persistAndPublishQuizCancellation = async (
+  context: ModuleAlarmContext,
+  roundId: string,
+  data: QuizSessionRoundData,
+): Promise<void> => {
+  await context.points.rounds.cancel(roundId, quizCancellationPayload(data));
+  const snapshot = await context.quizOverlaySnapshot.read();
+  if (snapshot === null || snapshot.payload.sessionId !== data.sessionId || snapshot.payload.phase !== "idle") {
+    throw new Error("quiz_cancellation_snapshot_missing");
+  }
+  await publishQuizOverlaySnapshot(context);
 };
 
 const aggregatesFrom = (
@@ -126,27 +166,25 @@ const announceCurrentQuestion = async (
   roundId: string,
   current: QuizSessionRoundData,
 ): Promise<void> => {
-  const announced: QuizSessionRoundData = {
+  const proposedAnnounce = nextOverlayPhase({
     ...current,
     phase: "announce",
     phaseEndsAt: null,
     paused: false,
     remainingMs: null,
-  };
-  await context.points.rounds.update(roundId, announced, Date.now() + ANNOUNCE_RETRY_MS);
-  await publishQuizPhase(context, announced);
+  });
+  const announced = await persistAndPublishQuizPhase(context, roundId, proposedAnnounce, Date.now() + ANNOUNCE_RETRY_MS);
   const delivered = await sendQuestionLine(context, roundId, announced);
   if (!delivered) return;
   const phaseOpenedAt = Date.now();
   const phaseEndsAt = phaseOpenedAt + announced.answerSeconds * 1_000;
-  const opened: QuizSessionRoundData = {
+  const proposedOpen = nextOverlayPhase({
     ...announced,
     phase: "open",
     phaseOpenedAt,
     phaseEndsAt,
-  };
-  await context.points.rounds.update(roundId, opened, phaseEndsAt);
-  await publishQuizPhase(context, opened);
+  }, phaseOpenedAt);
+  await persistAndPublishQuizPhase(context, roundId, proposedOpen, phaseEndsAt);
 };
 
 const showReveal = async (
@@ -157,24 +195,31 @@ const showReveal = async (
 ): Promise<void> => {
   const score = await currentScore(context, roundId, current);
   const phase = transitionQuizPhase(current, current.questions.length, now, current.answerSeconds, current.revealSeconds);
-  const data: QuizSessionRoundData = {
+  const proposed = nextOverlayPhase({
     ...current,
     ...phase,
     aggregates: aggregatesFrom(score),
-  };
-  await context.points.rounds.update(roundId, data, data.phaseEndsAt);
-  await publishQuizPhase(context, data);
+  }, now);
+  await persistAndPublishQuizPhase(context, roundId, proposed, proposed.phaseEndsAt);
 };
 
 const finishQuizSession = async (context: ModuleAlarmContext, roundId: string, current: QuizSessionRoundData): Promise<void> => {
   const score = await currentScore(context, roundId, current);
-  const data: QuizSessionRoundData = {
+  const proposed = nextOverlayPhase({
     ...current,
     ...endQuizPhase(current),
     aggregates: aggregatesFrom(score),
     offlineSince: null,
-  };
-  await context.points.rounds.update(roundId, data, Date.now() + SETTLEMENT_RETRY_MS);
+  });
+  const existingSnapshot = await context.quizOverlaySnapshot.read();
+  const alreadyProvisional = existingSnapshot !== null && existingSnapshot.payload.sessionId === current.sessionId &&
+    existingSnapshot.payload.phase === "results" && Array.isArray(existingSnapshot.payload.ranking) &&
+    existingSnapshot.payload.ranking.length === 0 && existingSnapshot.payload.resultAt === undefined;
+  if (alreadyProvisional) {
+    await retryPendingQuizOverlayBroadcast(context);
+  } else {
+    await persistAndPublishQuizPhase(context, roundId, proposed, Date.now() + SETTLEMENT_RETRY_MS);
+  }
   await context.points.rounds.resolve(roundId, { kind: "quiz", params: {} });
 };
 
@@ -199,18 +244,16 @@ const reconcileQuizStream = async (
     const effectiveOfflinePause = data.paused
       ? data
       : { ...data, ...pauseQuizPhase(data, offlineSince) };
-    const updated = { ...effectiveOfflinePause, offlineSince };
+    const updated = nextOverlayPhase({ ...effectiveOfflinePause, offlineSince });
     const changed = !data.paused || data.offlineSince !== offlineSince || data.remainingMs !== updated.remainingMs;
     await context.schedule(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, offlineSince + OFFLINE_SETTLEMENT_MS, undefined, null);
-    if (changed) await context.points.rounds.update(active.roundId, updated, null);
-    if (changed) await publishQuizPhase(context, updated);
+    if (changed) await persistAndPublishQuizPhase(context, active.roundId, updated, null);
     return;
   }
   if (streamSnapshot.state === "online" && data.offlineSince !== null) {
-    const resumedStream: QuizSessionRoundData = { ...data, paused: true, phaseEndsAt: null, offlineSince: null };
-    await context.points.rounds.update(active.roundId, resumedStream, null);
+    const resumedStream = nextOverlayPhase({ ...data, paused: true, phaseEndsAt: null, offlineSince: null });
+    await persistAndPublishQuizPhase(context, active.roundId, resumedStream, null);
     await context.clear(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, undefined, null);
-    await publishQuizPhase(context, resumedStream);
   }
 };
 
@@ -218,7 +261,10 @@ const handleOfflineTimeout = async (context: ModuleAlarmContext, alarmKey: strin
   const roundId = alarmKey.slice(OFFLINE_TIMEOUT_PREFIX.length);
   if (!/^[A-Za-z0-9_-]{1,64}$/u.test(roundId)) throw new Error("invalid_quiz_session");
   const active = await context.points.rounds.active();
-  if (active === null || active.roundId !== roundId) return;
+  if (active === null || active.roundId !== roundId) {
+    await context.clear(alarmKey, undefined, null);
+    return;
+  }
   const data = quizRoundData(active.data);
   if (data === null) return;
   const streamSnapshot = await readStoredStreamState(context);
@@ -233,7 +279,7 @@ const handleOfflineTimeout = async (context: ModuleAlarmContext, alarmKey: strin
     return;
   }
   if (reconciledActive.state === "announcing") {
-    await context.points.rounds.cancel(roundId);
+    await persistAndPublishQuizCancellation(context, roundId, reconciledData);
     await context.clear(alarmKey, undefined, null);
     return;
   }
@@ -245,6 +291,7 @@ export const onQuizRoundAnnounced = async (
   context: ModuleAlarmContext,
   round: ModulePointRoundAnnouncement,
 ): Promise<void> => {
+  await retryPendingQuizOverlayBroadcast(context);
   await reconcileQuizStream(context, await readStoredStreamState(context));
   const active = await context.points.rounds.active();
   const data = quizRoundData(active?.data);
@@ -256,6 +303,7 @@ export const onQuizScheduleInputsChanged = async (
   context: ModuleAlarmContext,
   reason: ModuleScheduleInputChangeReason,
 ): Promise<void> => {
+  await retryPendingQuizOverlayBroadcast(context);
   if (reason !== "stream_state") return;
   await reconcileQuizStream(context, await readStoredStreamState(context));
 };
@@ -274,6 +322,7 @@ export const onQuizRoundDeadline = async (
   context: ModuleAlarmContext,
   round: ModulePointRoundDeadline,
 ): Promise<void> => {
+  await retryPendingQuizOverlayBroadcast(context);
   await reconcileQuizStream(context, await readStoredStreamState(context));
   const active = await context.points.rounds.active();
   const data = quizRoundData(active?.data);
@@ -302,6 +351,7 @@ type QuizSessionAction = "next" | "pause" | "resume" | "end";
 export const quizSessionControlAlarm = {
   key: "session-control",
   handle: async (context: ModuleAlarmContext, alarmKey: string, _deadline: number, _revision?: number, invocation?: unknown): Promise<void> => {
+    await retryPendingQuizOverlayBroadcast(context);
     if (alarmKey === "stream-state") {
       await reconcileQuizStream(context, streamSnapshotFromInvocation(invocation) ?? await readStoredStreamState(context));
       return;
@@ -310,6 +360,7 @@ export const quizSessionControlAlarm = {
       await handleOfflineTimeout(context, alarmKey);
       return;
     }
+    if (alarmKey === "overlay-retry") return;
     if (!/^[A-Za-z0-9_-]{1,64}$/u.test(alarmKey)) throw new Error("invalid_quiz_session");
     const request = typeof invocation === "object" && invocation !== null && !Array.isArray(invocation)
       ? invocation as Record<string, unknown> : null;
@@ -317,6 +368,9 @@ export const quizSessionControlAlarm = {
     if (action !== "next" && action !== "pause" && action !== "resume" && action !== "end") throw new Error("invalid_quiz_action");
     const active = await context.points.rounds.active();
     if (typeof request?.sessionId !== "string" || active === null || active.roundId !== alarmKey || active.roundId !== request.sessionId) {
+      const snapshot = await context.quizOverlaySnapshot.read();
+      if (action === "end" && typeof request?.sessionId === "string" && snapshot?.payload.phase === "idle" &&
+          snapshot.payload.sessionId === request.sessionId) return;
       throw new Error("session_changed");
     }
     await controlQuizSession(context, action);
@@ -336,31 +390,29 @@ const controlQuizSession = async (
   if (data.phase === "results" && action !== "end") return;
   if (action !== "end" && streamSnapshot.state !== "online") throw new Error("stream_offline");
   if (action === "end" && active.state === "announcing") {
-    await context.points.rounds.cancel(active.roundId);
+    await persistAndPublishQuizCancellation(context, active.roundId, data);
     await context.clear(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, undefined, null);
     return;
   }
   const now = Date.now();
   if (action === "pause") {
     if (data.paused) return;
-    const paused = {
+    const paused = nextOverlayPhase({
       ...data,
       ...pauseQuizPhase(data, now),
-    };
-    await context.points.rounds.update(active.roundId, paused, null);
-    await publishQuizPhase(context, paused);
+    }, now);
+    await persistAndPublishQuizPhase(context, active.roundId, paused, null);
     return;
   }
   if (action === "resume") {
     if (!data.paused) return;
-    const resumed = {
+    const resumed = nextOverlayPhase({
       ...data,
       ...resumeQuizPhase(data, now),
       offlineSince: null,
-    };
-    await context.points.rounds.update(active.roundId, resumed, resumed.phaseEndsAt);
+    }, now);
+    await persistAndPublishQuizPhase(context, active.roundId, resumed, resumed.phaseEndsAt);
     await context.clear(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, undefined, null);
-    await publishQuizPhase(context, resumed);
     return;
   }
   if (action === "end") {
@@ -383,20 +435,35 @@ export const onQuizRoundResolved = async (
   context: ModuleAlarmContext,
   round: ModulePointRoundResult,
 ): Promise<void> => {
+  await retryPendingQuizOverlayBroadcast(context);
   const data = quizRoundData(round.data);
   const result = typeof round.result === "object" && round.result !== null && !Array.isArray(round.result)
     ? round.result as Record<string, unknown> : null;
   if (data === null || result === null || !Array.isArray(result.ranking)) return;
   const ranking = result.ranking.filter((value) => typeof value === "object" && value !== null && !Array.isArray(value))
     .map((value) => value as Record<string, unknown>);
-  await context.publishModuleOverlayMessage("results", "quiz.session", {
+  const sessionStartedAt = typeof data.sessionStartedAt === "string" && Number.isFinite(Date.parse(data.sessionStartedAt))
+    ? data.sessionStartedAt
+    : round.resolvedAt;
+  const payload = {
     ...quizPhasePayload({ ...data, ...endQuizPhase(data) }),
     phase: "results",
+    sessionStartedAt,
+    resolvedAt: round.resolvedAt,
+    resultAt: round.resolvedAt,
     ranking: ranking.slice(0, 10).map(({ login, correct, rank, payout }) => ({ login, correct, rank, payout })),
     participants: Number.isSafeInteger(result.participants) ? result.participants : 0,
     correctRate: typeof result.correctRate === "number" ? result.correctRate : 0,
     distributed: Number.isSafeInteger(result.distributed) ? result.distributed : 0,
-  });
+  };
+  const currentSnapshot = await context.quizOverlaySnapshot.read();
+  const sameSettledResult = currentSnapshot !== null && currentSnapshot.payload.sessionId === data.sessionId &&
+    currentSnapshot.payload.phase === "results" && currentSnapshot.payload.resultAt === round.resolvedAt &&
+    JSON.stringify(currentSnapshot.payload.ranking) === JSON.stringify(payload.ranking);
+  if (sameSettledResult) return;
+  const snapshot = await context.quizOverlaySnapshot.write(payload, data.sessionId);
+  if (snapshot === null) return;
+  await publishQuizOverlaySnapshot(context);
 };
 
 export const resultChatLine = (language: "de" | "en", result: unknown): string | null => {

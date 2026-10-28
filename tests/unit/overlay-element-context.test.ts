@@ -5,12 +5,14 @@ const mocks = vi.hoisted(() => ({
   helixRequest: vi.fn(),
   getOverlayStreamDetails: vi.fn(),
   readBallot: vi.fn(),
+  readQuizOverlaySnapshot: vi.fn(),
 }));
 
 vi.mock("../../src/worker/app-token", () => ({ getAppAccessToken: mocks.getAppAccessToken }));
 vi.mock("../../src/worker/twitch/helix", () => ({ helixRequest: mocks.helixRequest }));
 
 import { createOverlayElementContext } from "../../src/worker/overlays/element-context";
+import * as overlayElementContext from "../../src/worker/overlays/element-context";
 
 const startedAt = "2026-09-27T12:00:00.000Z";
 let streamStateRow: Record<string, unknown> | null;
@@ -40,6 +42,7 @@ const environment = {
     get: () => ({
       getOverlayStreamDetails: mocks.getOverlayStreamDetails,
       readBallot: mocks.readBallot,
+      readQuizOverlaySnapshot: mocks.readQuizOverlaySnapshot,
     }),
   },
 } as unknown as Env;
@@ -53,6 +56,7 @@ describe("overlay element template context", () => {
     mocks.helixRequest.mockReset();
     mocks.getOverlayStreamDetails.mockReset();
     mocks.readBallot.mockReset();
+    mocks.readQuizOverlaySnapshot.mockReset();
   });
 
   it("renders viewer counts through the channel's shared stream-details cache", async () => {
@@ -79,6 +83,25 @@ describe("overlay element template context", () => {
 
     await expect(context.readBallot("poll-a")).resolves.toEqual({ counts: [4, 2], revision: 6 });
     expect(mocks.readBallot).toHaveBeenCalledWith("chat_voting", "poll-a");
+  });
+
+  it("loads the latest channel quiz snapshot without reading rounds or template catalogs", async () => {
+    const prepare = vi.spyOn(database, "prepare");
+    const context = Reflect.get(overlayElementContext, "createOverlaySnapshotContext") as
+      ((env: Env, channelId: string, now: number) => {
+      now: number;
+      readSnapshot: () => Promise<unknown>;
+    }) | undefined;
+    expect(context).toBeTypeOf("function");
+    const snapshotContext = context?.(environment, "channel-a", Date.parse(startedAt));
+    expect(snapshotContext?.now).toBe(Date.parse(startedAt));
+    expect(prepare).not.toHaveBeenCalled();
+
+    const snapshot = { sequence: 8, lastBroadcastSequence: 7, payload: { sessionId: "quiz-session", phase: "results" } };
+    mocks.readQuizOverlaySnapshot.mockResolvedValue(snapshot);
+    await expect(snapshotContext?.readSnapshot()).resolves.toEqual(snapshot.payload);
+    expect(mocks.readQuizOverlaySnapshot).toHaveBeenCalledTimes(1);
+    prepare.mockRestore();
   });
 
   it("uses the chat unavailable output when the stream viewer count cannot be read", async () => {

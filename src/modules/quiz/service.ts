@@ -1,6 +1,7 @@
-import type { ModuleEvent, ModuleExecutionContext, ModuleLanguage, ModulePointsAccess, ModuleResult } from "../contract";
+import type { ModuleEvent, ModuleExecutionContext, ModuleLanguage, ModulePointsAccess, ModuleQuizOverlaySnapshot, ModuleResult } from "../contract";
 import type { QuizSet, QuizSettings, QuizSessionQuestion, QuizSessionRoundData } from "./contracts";
 import { quizSettingsSchema } from "./contracts";
+import { quizPhasePayload } from "./overlay/payload";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -56,6 +57,7 @@ export interface OpenQuizSessionInput {
 export interface OpenQuizSessionResult {
   sessionId: string;
   data: QuizSessionRoundData;
+  overlaySnapshot?: ModuleQuizOverlaySnapshot;
 }
 
 export const openQuizSession = async (input: OpenQuizSessionInput): Promise<OpenQuizSessionResult> => {
@@ -73,6 +75,8 @@ export const openQuizSession = async (input: OpenQuizSessionInput): Promise<Open
   const sessionId = crypto.randomUUID();
   const data: QuizSessionRoundData = {
     sessionId,
+    phaseSequence: 0,
+    sessionStartedAt: new Date().toISOString(),
     setId: input.set.id,
     setName: input.set.name,
     language: input.language,
@@ -89,15 +93,15 @@ export const openQuizSession = async (input: OpenQuizSessionInput): Promise<Open
     phaseOpenedAt: null,
     offlineSince: null,
   };
-  await input.points.rounds.open(sessionId, {
+  const overlaySnapshot = await input.points.rounds.open(sessionId, {
     ...data,
     resolveOperationId: `quiz:${sessionId}:resolve`,
     durationS: input.settings.answerSeconds,
     announceText: input.settings.chatQuestions ? "quiz" : "",
     silentAnnouncement: !input.settings.chatQuestions,
     settlement: { kind: "quiz", params: {} },
-  });
-  return { sessionId, data };
+  }, quizPhasePayload(data));
+  return { sessionId, data, ...(overlaySnapshot === undefined ? {} : { overlaySnapshot }) };
 };
 
 export const processQuizMessage = async (

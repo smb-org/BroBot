@@ -33,6 +33,10 @@ export interface QuizSessionAggregates {
 
 export interface QuizSessionRoundData extends QuizPhaseState {
   sessionId: string;
+  /** Monotonic revision for every overlay phase or cancellation event in this session. */
+  phaseSequence?: number;
+  /** Persisted start time used to reject delayed messages from older sessions. */
+  sessionStartedAt?: string;
   setId: string;
   setName: string;
   language: "de" | "en";

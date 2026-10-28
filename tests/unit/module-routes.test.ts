@@ -89,6 +89,21 @@ const defaultEnabledTestModule: BotModule<typeof clipsTestSchema> = {
   settingsSchema: clipsTestSchema,
   defaultSettings: {},
 };
+const quizOverlayTestModule: BotModule<typeof clipsTestSchema> = {
+  id: "quiz",
+  navigationCategory: "participation",
+  settingsSchema: clipsTestSchema,
+  defaultSettings: {},
+  requiresModules: ["points"],
+  overlayElements: [{
+    kind: "quiz.session",
+    configVersion: 1,
+    defaultSize: { width: 300, height: 180 },
+    defaultConfig: {},
+    parseConfig: () => ({}),
+    load: () => Promise.resolve({ default: () => null }),
+  }],
+};
 
 const registeredModules = [testModule, mandatoryTestModule, defaultEnabledTestModule] as BotModule[];
 const dependencyTestSchema = z.object({});
@@ -1203,7 +1218,7 @@ describe("Module management in the panel", () => {
     expect(disableGame.status).toBe(200);
     expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2, 2);
     expect(cancelOpenRounds).toHaveBeenCalledTimes(1);
-    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
+    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2, undefined);
 
     const reenableGame = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", { enabled: true }),
@@ -1242,7 +1257,7 @@ describe("Module management in the panel", () => {
     expect(disable.status).toBe(200);
     expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2, 2);
     expect(cancelOpenRounds).toHaveBeenCalledOnce();
-    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
+    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2, undefined);
   });
 
   it(`keeps a committed disable successful and retries cancellation (${dependencyTestCard("a failed post-commit cancellation logs once, keeps the committed disable successful, and a retry recovers refunds with the original revision", "a failed cancellation returns an API error, goes unlogged, changes the committed state, or cannot recover refunds on retry", "fake ChannelObject methods model one failed refund call followed by success")})`, async () => {
@@ -1292,7 +1307,7 @@ describe("Module management in the panel", () => {
       expect(retry.status).toBe(200);
       expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2, 2);
       expect(cancelOpenRounds).toHaveBeenCalledTimes(2);
-      expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
+      expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2, undefined);
       expect(consoleError).toHaveBeenCalledOnce();
       expect(consoleError.mock.calls[0]).toEqual(["Module activation post-commit step failed.", {
         moduleId: "test_game_requires_points",
@@ -1471,6 +1486,52 @@ describe("Module management in the panel", () => {
       type: "overlay.changed",
       payload: { overlayId: "overlay-countdown", revision: 1 },
     }]);
+  });
+
+  it("delegates quiz cancellation to atomic round cancellation when disabling quiz", async () => {
+    registeredModules.push(quizOverlayTestModule);
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'quiz', 1, '{}'), ('kanal-a', 'points', 1, '{}')",
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-quiz', 'kanal-a', 'Quiz', '2026-09-25T12:00:00.000Z', '2026-09-25T12:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind)
+       VALUES ('element-quiz', 'kanal-a', 'overlay-quiz', 'quiz.session')`,
+    ).run();
+    const publish = vi.fn((messages: readonly unknown[]) => {
+      void messages;
+      return Promise.resolve();
+    });
+    const cancelOpenGameRounds = vi.fn(() => Promise.resolve(0));
+    environment = {
+      ...environment,
+      CHANNEL: {
+        idFromName: vi.fn(() => "channel-object"),
+        get: vi.fn(() => ({
+          setGameModuleGate: vi.fn(() => Promise.resolve({ applied: true })),
+          cancelOpenGameRounds,
+          publish,
+          notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()),
+        })),
+      },
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/quiz", "PATCH", { enabled: false }),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    expect(cancelOpenGameRounds).toHaveBeenCalledWith("quiz", 2, undefined);
+    expect(publish.mock.calls.flatMap(([messages]) => messages)).not.toContainEqual(
+      expect.objectContaining({ type: "modul.quiz.cancel" }),
+    );
   });
 
   it("toggles a default-enabled module off and keeps it off with no fallback resurrecting it", async () => {
