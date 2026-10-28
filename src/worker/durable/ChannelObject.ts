@@ -896,10 +896,16 @@ export class ChannelObject extends DurableObject<Env> {
     if (input.expectedCurrentSessionId !== undefined) {
       this.ensurePointsSchema();
       // Row insertion order is the durable session order; sessionStartedAt is allocated before a round opens.
-      const latestRound = this.ctx.storage.sql.exec<{ round_id: string }>(
-        "SELECT round_id FROM game_rounds WHERE module_id = 'quiz' ORDER BY rowid DESC LIMIT 1",
+      const latestRound = this.ctx.storage.sql.exec<{
+        round_id: string;
+        state: string;
+        resolve_delivery_state: string;
+      }>(
+        "SELECT round_id, state, resolve_delivery_state FROM game_rounds WHERE module_id = 'quiz' ORDER BY rowid DESC LIMIT 1",
       ).toArray()[0];
       if (latestRound?.round_id !== input.expectedCurrentSessionId) return null;
+      // Provisional results are written while the round is still open; only a suppressed delivery must not publish them.
+      if (input.payload.phase === "results" && latestRound.resolve_delivery_state === "suppressed") return null;
     }
     const sequence = (previous?.sequence ?? 0) + 1;
     const snapshot: ModuleQuizOverlaySnapshot = {

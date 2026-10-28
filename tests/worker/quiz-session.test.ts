@@ -897,6 +897,72 @@ describe("quiz answers in the shared point round", () => {
     expect(hydrated).not.toHaveProperty("ranking");
   });
 
+  it("keeps a queued suppressed result from replacing the idle overlay after re-enable", async () => {
+    const channelId = `quiz-queued-suppressed-result-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.setGameModuleGate("quiz", false, 1);
+    const sessionStartedAt = new Date(Date.now() - 30_000).toISOString();
+    await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "open" }, {
+      sessionId: roundId,
+      phase: "open",
+      sessionStartedAt,
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+    await object.markGameRoundAnnounced("quiz", roundId, Date.now() + 30_000, `round:${roundId}`);
+
+    type LifecycleQueue = {
+      serializeModuleLifecycleMutation: <Result>(operation: () => Promise<Result>) => Promise<Result>;
+    };
+    const lifecycleQueue = ChannelObject.prototype as unknown as LifecycleQueue;
+    const originalSerialize = lifecycleQueue.serializeModuleLifecycleMutation;
+    let releaseLifecycleQueue!: () => void;
+    const queueSpy = vi.spyOn(lifecycleQueue, "serializeModuleLifecycleMutation");
+    queueSpy.mockImplementation(function <Result>(this: unknown, operation: () => Promise<Result>) {
+      return originalSerialize.call(this as never, operation);
+    });
+    await runPointObject(object, (target) => {
+      const internal = target as unknown as LifecycleQueue;
+      // The gate is created inside the object; a promise from the test context cannot be awaited there.
+      const lifecycleQueueBlocked = new Promise<void>((resolve) => { releaseLifecycleQueue = resolve; });
+      void internal.serializeModuleLifecycleMutation(() => lifecycleQueueBlocked);
+    });
+
+    // Quiz notifies its result hook from the round alarm, which then waits behind the blocked lifecycle queue.
+    await object.resolveGameRound("quiz", roundId, { kind: "quiz", params: {} });
+    const resolving = runPointAlarm(object);
+    try {
+      // Poll from the test side; awaiting a promise settled inside the object would carry its I/O context over.
+      await vi.waitFor(() => { expect(queueSpy).toHaveBeenCalledTimes(2); });
+      await object.setGameModuleGate("quiz", true, 2);
+      await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+        payload: { sessionId: roundId, phase: "idle" },
+      });
+    } finally {
+      // Release from inside the object so the queued hook continues in the object's own I/O context.
+      await runPointObject(object, () => { releaseLifecycleQueue(); });
+      await resolving;
+    }
+    await object.setGameModuleGate("quiz", false, 3, 2);
+
+    const hydrated = await loadQuizOverlayState(createOverlaySnapshotContext(worker, channelId, Date.now()));
+    expect(hydrated).toMatchObject({ sessionId: roundId, phase: "idle" });
+    expect(hydrated).not.toHaveProperty("ranking");
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      state: string;
+      resolve_delivery_state: string;
+    }>("SELECT state, resolve_delivery_state FROM game_rounds WHERE round_id = ?", roundId).one()))
+      .resolves.toEqual({ state: "resolved", resolve_delivery_state: "suppressed" });
+    expect(queueSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps a newer overlay session when an older quiz result is suppressed", async () => {
     const channelId = `quiz-suppressed-stale-session-${crypto.randomUUID()}`;
     const roundId = `quiz-old-${crypto.randomUUID()}`;
