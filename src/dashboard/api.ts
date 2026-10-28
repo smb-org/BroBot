@@ -690,11 +690,18 @@ export interface PanelChannelVariablesResponse {
   maximum: number;
 }
 
+export interface PanelChannelVariableAvailabilityResponse {
+  available: boolean;
+}
+
 const variablesPath = (channelId: string, name?: string, suffix = ""): string =>
   `${channelPath(channelId, "variables")}${name === undefined ? "" : `/${encodeURIComponent(name)}`}${suffix}`;
 
 export const fetchChannelVariables = (channelId: string, signal?: AbortSignal): Promise<PanelChannelVariablesResponse> =>
   requestJson<PanelChannelVariablesResponse>(variablesPath(channelId), signal === undefined ? {} : { signal });
+
+export const fetchChannelVariableAvailability = (channelId: string, signal?: AbortSignal): Promise<PanelChannelVariableAvailabilityResponse> =>
+  requestJson<PanelChannelVariableAvailabilityResponse>(`${variablesPath(channelId)}/availability`, requestOptions(signal));
 
 export const createChannelVariable = (
   channelId: string,

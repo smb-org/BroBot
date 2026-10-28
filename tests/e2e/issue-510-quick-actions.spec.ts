@@ -94,6 +94,12 @@ const setupQuickActionCockpit = async (
       await route.fulfill(json({ variables: available ? [{ ...variable, value: score }] : [], count: available ? 1 : 0, maximum: 50 }));
       return;
     }
+    if (pathname === `/api/channels/${channelId}/variables/availability`) {
+      const available = await page.evaluate(() => document.documentElement.dataset.counterVariables !== "off");
+      onVariableAvailabilityChange(available);
+      await route.fulfill(json({ available }));
+      return;
+    }
     if (pathname === `/api/channels/${channelId}/broadcast/markers/availability` && route.request().method() === "GET") {
       const scopeAvailable = await page.evaluate(() => document.documentElement.dataset.markerScope !== "missing");
       await route.fulfill(json({ manageScopeAvailable: scopeAvailable }));

@@ -23,6 +23,13 @@ export interface ModuleQueryOptions<Value> {
   refetchInterval?: number | false | ((query: Query<Value>) => number | false);
 }
 
+/**
+ * Interval for revision-backed queries: while realtime is connected, a successfully loaded query waits for its
+ * revision; a query that failed or has no data yet keeps retrying at the fallback interval.
+ */
+export const connectedRefetchInterval = (connected: boolean, fallbackMs: number) =>
+  (query: { state: { status: string } }): number | false => connected && query.state.status === "success" ? false : fallbackMs;
+
 export type ModuleQueryWriteFunction<Value> = (baselineRevision: ModuleQueryRevision) => Promise<Value>;
 
 interface ReadOrder {

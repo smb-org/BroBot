@@ -12,15 +12,53 @@ import { votekickOverlayElements } from "./overlay/element";
 import { VOTEKICK_ELEMENT_KIND } from "./overlay/kinds";
 import { activeVotekickTimeouts } from "./domain/active-timeouts";
 import { votekickImmediateActionTexts } from "./panel/immediate-action-locale";
+import type { VotekickPanelData } from "./panel/service";
 
 const votekickIcon = { paths: ["M12 3v18", "M3 12h18", "m5 5 14 14", "M19 5 5 19"] } as const;
 const templateFields = ["startText", "passText", "failText", "expiredText", "protectedText", "busyText"] as const;
 
+export const loadVotekickForCockpit = async (channelId: string, signal: AbortSignal): Promise<VotekickPanelData> =>
+  (await import("./panel/service")).loadVotekickPanel(channelId, signal);
+
+const votekickPanelState = (value: unknown): VotekickPanelData | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return Array.isArray(record.votekicks) && typeof record.now === "string"
+    ? value as VotekickPanelData
+    : null;
+};
+
+export const votekickLiveTileSnapshots = (state: VotekickPanelData, now: string): ModuleLiveTileSnapshot[] => {
+  const running = state.running;
+  return [
+    ...(running === null ? [] : [{
+      kind: "votekick" as const,
+      id: running.id,
+      target: running.targetLogin ?? running.targetUserId ?? "—",
+      endsAt: running.endsAt,
+      yesVotes: running.yesVotes,
+      noVotes: running.noVotes,
+      threshold: running.threshold,
+    }]),
+    ...activeVotekickTimeouts(state.votekicks, now).map((item) => ({
+      kind: "votekick_recent" as const,
+      id: item.id,
+      target: item.targetLogin ?? item.targetUserId ?? "—",
+      endedAt: item.endedAt ?? item.endsAt,
+    })),
+  ];
+};
+
 const activeTimeoutExists: ModuleImmediateActionCondition = {
-  check: async ({ channelId, signal }) => {
-    const state = await (await import("./panel/service")).loadVotekickPanel(channelId, signal);
-    const timeouts = activeVotekickTimeouts(state.votekicks, state.now);
-    return { reason: timeouts.length === 0 ? votekickImmediateActionTexts.noActiveTimeouts : null };
+  query: {
+    moduleId: VOTEKICK_MODULE_ID,
+    part: "panel",
+    load: loadVotekickForCockpit,
+    evaluate: (value) => {
+      const state = votekickPanelState(value);
+      const timeouts = state === null ? [] : activeVotekickTimeouts(state.votekicks, new Date().toISOString());
+      return { reason: timeouts.length === 0 ? votekickImmediateActionTexts.noActiveTimeouts : null };
+    },
   },
 };
 
@@ -106,27 +144,9 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
   settingsEditorRelatedParts: ["panel"],
   actions: [liftTimeoutAction],
   liveTile: {
-    load: async (channelId, signal) => {
-      const state = await (await import("./panel/service")).loadVotekickPanel(channelId, signal);
-      const running = state.running;
-      return [
-        ...(running === null ? [] : [{
-        kind: "votekick",
-        id: running.id,
-        target: running.targetLogin ?? running.targetUserId ?? "—",
-        endsAt: running.endsAt,
-        yesVotes: running.yesVotes,
-        noVotes: running.noVotes,
-        threshold: running.threshold,
-        } satisfies ModuleLiveTileSnapshot]),
-        ...activeVotekickTimeouts(state.votekicks, state.now).map((item) => ({
-          kind: "votekick_recent" as const,
-          id: item.id,
-          target: item.targetLogin ?? item.targetUserId ?? "—",
-          endedAt: item.endedAt ?? item.endsAt,
-        })),
-      ];
-    },
+    load: async (channelId, signal) => votekickLiveTileSnapshots(
+      await loadVotekickForCockpit(channelId, signal), new Date().toISOString(),
+    ),
   },
   handleEvent: (event, context) => processVotekickMessage(event, createVotekickRepository(context.DB), context),
   dryRunChatMessage: dryRunVotekickMessage,

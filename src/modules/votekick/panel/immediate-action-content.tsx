@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import type { ModuleImmediateActionContentProperties } from "../../contract";
-import { useModuleQuery } from "../../../dashboard/data";
+import { connectedRefetchInterval, useModuleQuery } from "../../../dashboard/data";
+import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import { Select } from "../../../dashboard/ui";
 import { activeVotekickTimeouts } from "../domain/active-timeouts";
 import { loadVotekickPanel } from "./service";
@@ -13,13 +14,31 @@ interface TimeoutSelectionState {
 }
 
 export default function VotekickTimeoutActionContent({ channelId, language, onReadinessChange }: ModuleImmediateActionContentProperties): ReactElement {
-  // Shares the panel query with the lock card, so realtime panel revisions and the poll refresh this list.
-  const query = useModuleQuery(channelId, "votekick", "panel", (signal) => loadVotekickPanel(channelId, signal), { refetchInterval: 5_000 });
+  // Shares the revision-backed panel query with the lock card, cockpit tile and availability check.
+  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const query = useModuleQuery(channelId, "votekick", "panel", (signal) => loadVotekickPanel(channelId, signal), {
+    refetchInterval: connectedRefetchInterval(realtimeStatus === "connected", 5_000),
+  });
   const [selectionState, setSelectionState] = useState<TimeoutSelectionState>({ channelId, votekickId: null });
+  const [localNow, setLocalNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => { setLocalNow(Date.now()); }, 1_000);
+    return () => { window.clearInterval(interval); };
+  }, []);
+
+  const serverNow = query.data === undefined
+    ? null
+    : (() => {
+      const capturedAt = Date.parse(query.data.now);
+      return Number.isFinite(capturedAt)
+        ? new Date(capturedAt + Math.max(0, localNow - query.dataUpdatedAt)).toISOString()
+        : query.data.now;
+    })();
 
   const timeouts = useMemo(
-    () => query.data === undefined ? null : activeVotekickTimeouts(query.data.votekicks, query.data.now),
-    [query.data],
+    () => query.data === undefined || serverNow === null ? null : activeVotekickTimeouts(query.data.votekicks, serverNow),
+    [query.data, serverNow],
   );
   const failed = query.isError && timeouts === null;
   const availableTimeouts = timeouts ?? [];

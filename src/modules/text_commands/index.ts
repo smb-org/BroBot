@@ -48,6 +48,43 @@ const variableReferences: ModuleVariableReferences = {
         : []),
     ]);
   },
+  async usagesForVariables(db, channelId, names) {
+    const uniqueNames = [...new Set(names)];
+    const result = new Map(uniqueNames.map((name) => [name, [] as { moduleId: string; itemName: string; kind: "action" | "template" }[]]));
+    if (uniqueNames.length === 0) return result;
+    const rows = await db.prepare(
+      `SELECT requested.value AS requested_name, command.command_name, command.variable_name AS command_variable_name,
+              command.response_text, command.template_fields_json, command.timeout_fallback_text, command.timeout_reason
+         FROM json_each(?) AS requested
+         JOIN text_commands AS command
+           ON command.channel_id = ?
+          AND (command.variable_name = requested.value
+            OR instr(command.response_text, '{var.' || requested.value || '}') > 0
+            OR instr(command.template_fields_json, '{var.' || requested.value || '}') > 0
+            OR instr(command.timeout_fallback_text, '{var.' || requested.value || '}') > 0
+            OR instr(command.timeout_reason, '{var.' || requested.value || '}') > 0)
+        ORDER BY requested.value, command.command_name`,
+    ).bind(JSON.stringify(uniqueNames), channelId).all<{
+      requested_name: string;
+      command_name: string;
+      command_variable_name: string | null;
+      response_text: string;
+      template_fields_json: string;
+      timeout_fallback_text: string | null;
+      timeout_reason: string | null;
+    }>();
+    for (const row of rows.results) {
+      const usages = result.get(row.requested_name);
+      if (usages === undefined) continue;
+      const token = `{var.${row.requested_name}}`;
+      const itemName = `!${row.command_name}`;
+      if (row.command_variable_name === row.requested_name) usages.push({ moduleId: "text_commands", itemName, kind: "action" });
+      if (row.response_text.includes(token) || row.template_fields_json.includes(token) || row.timeout_fallback_text?.includes(token) === true || row.timeout_reason?.includes(token) === true) {
+        usages.push({ moduleId: "text_commands", itemName, kind: "template" });
+      }
+    }
+    return result;
+  },
   rename(db, channelId, from, to, guard) {
     const oldToken = `{var.${from}}`;
     const nextToken = `{var.${to}}`;
@@ -72,10 +109,14 @@ const variableReferences: ModuleVariableReferences = {
 const settingsSchema = z.object({});
 
 const counterHasVariables: ModuleImmediateActionCondition = {
-  check: async ({ channelId, signal }) => {
-    const { variables } = await (await import("../../dashboard/api")).fetchChannelVariables(channelId, signal);
-    const available = variables.some((variable) => Number.isFinite(variable.value));
-    return { reason: available ? null : textCommandQuickActionTexts.counter.noVariables };
+  query: {
+    moduleId: "text_commands",
+    part: "counter-availability",
+    load: async (channelId, signal) => (await import("../../dashboard/api")).fetchChannelVariableAvailability(channelId, signal),
+    evaluate: (value) => {
+      const available = typeof value === "object" && value !== null && "available" in value && value.available === true;
+      return { reason: available ? null : textCommandQuickActionTexts.counter.noVariables };
+    },
   },
 };
 

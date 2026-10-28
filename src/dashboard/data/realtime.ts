@@ -203,10 +203,16 @@ const invalidateBelaboxLiveQueries = (
   scheduledQueryRefreshes: Map<string, Promise<boolean>>,
   resourceRefreshes: Promise<boolean>[],
 ): void => {
+  const liveStreamId = queryClient.getQueryData<{ belaboxStreamId?: string | null }>(
+    queryKeys.module(channelId, "belabox", "status"),
+  )?.belaboxStreamId;
+  const liveHistoryPart = liveStreamId === undefined || liveStreamId === null
+    ? null
+    : `history-stream-${liveStreamId}`;
   const moduleQueries = queryClient.getQueryCache().findAll({ queryKey: dashboardDataKeys.module(channelId, "belabox") });
   for (const query of moduleQueries) {
     const part = query.queryKey[4];
-    if (part === "status" || part === "streams" || part === "history-live" || (typeof part === "string" && part.startsWith("history-stream-"))) {
+    if (part === "status" || part === "streams" || part === "history-live" || part === liveHistoryPart) {
       invalidate(queryClient, query.queryKey, scheduledQueryRefreshes, resourceRefreshes, channelId);
     }
   }
@@ -223,6 +229,22 @@ const invalidateModuleDataQueries = (
   for (const query of moduleQueries) {
     const part = query.queryKey[4];
     if (typeof part === "string" && part !== "settings") {
+      invalidate(queryClient, query.queryKey, scheduledQueryRefreshes, resourceRefreshes, channelId);
+    }
+  }
+};
+
+const invalidateModuleActionAvailabilityQueries = (
+  queryClient: QueryClient,
+  channelId: string,
+  moduleId: string,
+  scheduledQueryRefreshes: Map<string, Promise<boolean>>,
+  resourceRefreshes: Promise<boolean>[],
+): void => {
+  const moduleQueries = queryClient.getQueryCache().findAll({ queryKey: dashboardDataKeys.module(channelId, moduleId) });
+  for (const query of moduleQueries) {
+    const part = query.queryKey[4];
+    if (typeof part === "string" && part.startsWith("action-availability-")) {
       invalidate(queryClient, query.queryKey, scheduledQueryRefreshes, resourceRefreshes, channelId);
     }
   }
@@ -282,6 +304,7 @@ const invalidatePanelResource = (
       return;
     case "channel.variables":
       invalidate(queryClient, dashboardDataKeys.variables(channelId), scheduledQueryRefreshes, resourceRefreshes, channelId);
+      invalidate(queryClient, dashboardDataKeys.counterAvailability(channelId), scheduledQueryRefreshes, resourceRefreshes, channelId);
       invalidate(queryClient, queryKeys.module(channelId, "text_commands", "commands"), scheduledQueryRefreshes, resourceRefreshes, channelId);
       invalidateModuleSettingsQueries(queryClient, channelId, scheduledQueryRefreshes, resourceRefreshes);
       return;
@@ -310,10 +333,23 @@ const invalidatePanelResource = (
   if (moduleId === undefined || part === undefined) return;
   if (part === "data") {
     invalidateModuleDataQueries(queryClient, channelId, moduleId, scheduledQueryRefreshes, resourceRefreshes);
+    invalidate(queryClient, queryKeys.channel(channelId, "live-cockpit"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+    return;
+  }
+  invalidateModuleActionAvailabilityQueries(queryClient, channelId, moduleId, scheduledQueryRefreshes, resourceRefreshes);
+  if (moduleId === "ads" && part === "schedule") {
+    invalidate(queryClient, queryKeys.module(channelId, moduleId, part), scheduledQueryRefreshes, resourceRefreshes, channelId);
+    invalidate(queryClient, queryKeys.channel(channelId, "live-cockpit"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+    return;
+  }
+  if (moduleId === "chat_voting" && part === "panel") {
+    invalidate(queryClient, queryKeys.module(channelId, moduleId, "live"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+    invalidate(queryClient, queryKeys.module(channelId, moduleId, "current"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+    invalidate(queryClient, queryKeys.module(channelId, moduleId, part), scheduledQueryRefreshes, resourceRefreshes, channelId);
     return;
   }
   if (moduleId === "timers" && part === "panel") {
-    invalidate(queryClient, queryKeys.channel(channelId, "live-cockpit"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+    invalidate(queryClient, queryKeys.module(channelId, moduleId, "upcoming"), scheduledQueryRefreshes, resourceRefreshes, channelId);
   }
   if (moduleId === "belabox" && part === "live") {
     invalidateBelaboxLiveQueries(queryClient, channelId, scheduledQueryRefreshes, resourceRefreshes);

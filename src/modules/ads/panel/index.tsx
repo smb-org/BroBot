@@ -9,7 +9,7 @@ import { Button, Icon, LoadState, LoadStateLines, notify } from "../../../dashbo
 import { loadAdsSchedule, refreshAdsSchedule, snoozeAds } from "./service";
 import { adsPanelTexts } from "./locale";
 import { adFailureReason, rateLimitWaitMessage } from "./errors";
-import { moduleQueryKey, runModuleQueryWrite, useDashboardQueryError, useModuleQuery } from "../../../dashboard/data";
+import { connectedRefetchInterval, moduleQueryKey, runModuleQueryWrite, useDashboardQueryError, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardQueryClient } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 
@@ -53,7 +53,7 @@ const AdsPanel = ({ channelId, language = "de", canManage = false, moduleActive 
     }
   };
   const scheduleQuery = useModuleQuery(channelId, "ads", "schedule", readSchedule, {
-    refetchInterval: realtimeStatus === "connected" ? false : 60_000,
+    refetchInterval: connectedRefetchInterval(realtimeStatus === "connected", 60_000),
   });
   const schedule = scheduleQuery.data ?? null;
   const scheduleLoadFailed = scheduleError !== null;

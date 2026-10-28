@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { useModuleQuery } from "../../../dashboard/data";
+import { connectedRefetchInterval, useModuleQuery } from "../../../dashboard/data";
+import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import type { DashboardLanguage } from "../../../dashboard/locale";
 import type { ModulePanelProperties } from "../../contract";
 import { loadVotekickPanel, type VotekickPanelData } from "./service";
@@ -91,8 +92,10 @@ export const VotekickLockCard = ({ state, status, language, now }: {
 };
 
 const VotekickLockPanel = ({ channelId, language = "de" }: ModulePanelProperties): ReactElement => {
-  const votingQuery = useModuleQuery(channelId, "chat_voting", "current", (signal) => loadChatVotingLockData(channelId, signal), { refetchInterval: 5_000 });
-  const votekickQuery = useModuleQuery(channelId, "votekick", "panel", (signal) => loadVotekickPanel(channelId, signal), { refetchInterval: 5_000 });
+  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const offlineRefetchInterval = connectedRefetchInterval(realtimeStatus === "connected", 5_000);
+  const votingQuery = useModuleQuery(channelId, "chat_voting", "current", (signal) => loadChatVotingLockData(channelId, signal), { refetchInterval: offlineRefetchInterval });
+  const votekickQuery = useModuleQuery(channelId, "votekick", "panel", (signal) => loadVotekickPanel(channelId, signal), { refetchInterval: offlineRefetchInterval });
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);

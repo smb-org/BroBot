@@ -97,19 +97,87 @@ export const referencesFor = async (
   return result;
 };
 
+const referencesForVariables = async (
+  db: D1Database,
+  channelId: string,
+  names: readonly string[],
+): Promise<ReadonlyMap<string, readonly ModuleVariableReferenceUsage[]>> => {
+  const uniqueNames = [...new Set(names)];
+  const result = new Map(uniqueNames.map((name) => [name, [] as ModuleVariableReferenceUsage[]]));
+  if (uniqueNames.length === 0) return result;
+
+  const moduleUsages = await Promise.all(MODULES.flatMap((module) => {
+    const references = module.variableReferences;
+    if (references === undefined) return [];
+    if (references.usagesForVariables !== undefined) return [references.usagesForVariables(db, channelId, uniqueNames)];
+    return [Promise.all(uniqueNames.map(async (name) => [name, await references.usages(db, channelId, name)] as const))
+      .then((entries) => new Map(entries))];
+  }));
+  for (const usagesByName of moduleUsages) {
+    for (const [name, usages] of usagesByName) result.get(name)?.push(...usages);
+  }
+
+  const overlayRows = await db.prepare(
+    `SELECT requested.value AS variable_name, overlay.name AS overlay_name, element.label AS element_label,
+            element.element_id, element.overlay_id,
+            CASE WHEN element.missing_variable_name = requested.value THEN 1 ELSE 0 END AS reconnect
+       FROM json_each(?) AS requested
+       JOIN overlay_elements AS element
+         ON element.channel_id = ?
+        AND (element.variable_name = requested.value
+          OR element.missing_variable_name = requested.value
+          OR instr(element.text, '{var.' || requested.value || '}') > 0)
+       JOIN overlays AS overlay
+         ON overlay.channel_id = element.channel_id AND overlay.overlay_id = element.overlay_id
+      ORDER BY requested.value, overlay.name, element.z, element.element_id`,
+  ).bind(JSON.stringify(uniqueNames), channelId).all<{
+    variable_name: string;
+    overlay_name: string;
+    element_label: string;
+    element_id: string;
+    overlay_id: string;
+    reconnect: number;
+  }>();
+  for (const row of overlayRows.results) {
+    result.get(row.variable_name)?.push({
+      moduleId: "overlays",
+      itemName: row.overlay_name,
+      elementLabel: row.element_label || row.element_id,
+      kind: "display",
+      overlayId: row.overlay_id,
+      elementId: row.element_id,
+      ...(row.reconnect === 1 ? { reconnect: true } : {}),
+    });
+  }
+  return result;
+};
+
 export const variableRouter = new Hono<VariableRouteEnvironment>();
 variableRouter.use("/api/channels/:channelId/variables", requireChannelAuthorization());
 variableRouter.use("/api/channels/:channelId/variables/*", requireChannelAuthorization());
+
+variableRouter.get("/api/channels/:channelId/variables/availability", async (context) => {
+  const available = await context.env.DB.prepare(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM channel_variables
+        WHERE channel_id = ?
+          AND value IS NOT NULL
+     ) AS available`,
+  ).bind(context.req.param("channelId")).first<{ available: number }>();
+  return context.json({ available: available?.available === 1 });
+});
 
 variableRouter.get("/api/channels/:channelId/variables", async (context) => {
   const channelId = context.req.param("channelId");
   await reconcileLegacyChatVoteResults(context.env.CHANNEL, channelId);
   const { variables, withUsages } = await measureServerTiming(context, "d1", async () => {
     const variables = await listChannelVariables(context.env.DB, channelId);
-    const withUsages = await Promise.all(variables.map(async (variable) => ({
+    const usagesByVariable = await referencesForVariables(context.env.DB, channelId, variables.map((variable) => variable.name));
+    const withUsages = variables.map((variable) => ({
       ...variable,
-      usages: await referencesFor(context.env.DB, channelId, variable.name),
-    })));
+      usages: usagesByVariable.get(variable.name) ?? [],
+    }));
     return { variables, withUsages };
   });
   return context.json({ variables: withUsages, count: variables.length, maximum: CHANNEL_VARIABLE_MAXIMUM_COUNT });

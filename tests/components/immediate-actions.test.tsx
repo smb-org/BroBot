@@ -1,8 +1,8 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImmediateActions } from "../../src/dashboard/ImmediateActions";
-import { changeChannelVariableValue, createStreamMarker, fetchStreamMarkerAvailability, fetchChannelOverview, fetchChannelVariables, sendTestMessage, type PanelChannelVariable } from "../../src/dashboard/api";
+import { changeChannelVariableValue, createStreamMarker, fetchStreamMarkerAvailability, fetchChannelOverview, fetchChannelVariableAvailability, fetchChannelVariables, sendTestMessage, type PanelChannelVariable } from "../../src/dashboard/api";
 import { dashboardTexts } from "../../src/dashboard/locale";
 import { loadTextCommandData } from "../../src/modules/text_commands/panel/service";
 import { textCommandQuickActionTexts } from "../../src/modules/text_commands/panel/quick-action-locale";
@@ -13,6 +13,7 @@ import type { Votekick } from "../../src/modules/votekick/contracts";
 import { votekickModule } from "../../src/modules/votekick";
 import { UiProvider } from "../../src/dashboard/ui";
 import { moduleQueryKey } from "../../src/dashboard/data";
+import { setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { clickSelectOption, renderWithQuery } from "../query-test-utils";
 
 vi.mock("../../src/dashboard/api", async (importOriginal) => ({
@@ -21,6 +22,7 @@ vi.mock("../../src/dashboard/api", async (importOriginal) => ({
   createStreamMarker: vi.fn(),
   fetchStreamMarkerAvailability: vi.fn(),
   fetchChannelOverview: vi.fn(),
+  fetchChannelVariableAvailability: vi.fn(),
   fetchChannelVariables: vi.fn(),
   sendTestMessage: vi.fn(),
 }));
@@ -83,6 +85,7 @@ const activeVotekick: Votekick = {
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  setDashboardRealtimeStatus("channel-a", "offline");
 });
 
 beforeEach(() => {
@@ -90,6 +93,7 @@ beforeEach(() => {
   vi.mocked(changeChannelVariableValue).mockReset();
   vi.mocked(createStreamMarker).mockReset();
   vi.mocked(fetchStreamMarkerAvailability).mockReset().mockResolvedValue({ manageScopeAvailable: true });
+  vi.mocked(fetchChannelVariableAvailability).mockReset().mockResolvedValue({ available: true });
   vi.mocked(sendTestMessage).mockReset();
   vi.mocked(loadUpcomingTimers).mockClear();
   vi.mocked(loadUpcomingTimers).mockResolvedValue([plannedTimer]);
@@ -110,7 +114,7 @@ describe("cockpit action role mirror", () => {
   });
 
   it("locks manager actions for operators while keeping operator actions available", () => {
-    render(
+    renderWithQuery(
       <UiProvider>
         <ImmediateActions
           channelId="channel-a"
@@ -158,6 +162,55 @@ describe("cockpit action role mirror", () => {
     expect(screen.queryByRole("option", { name: /viewer_one/u, hidden: true })).toBeNull();
   });
 
+  it("expires a selected timeout while connected without polling, leaving the other timeout available", async () => {
+    const serverNow = Date.now();
+    const expiringTimeout: Votekick = {
+      ...activeVotekick,
+      id: "ballot-expiring",
+      targetUserId: "viewer-expiring",
+      targetLogin: "viewer_expiring",
+      endedAt: new Date(serverNow - 10_000).toISOString(),
+      durationSeconds: 20,
+    };
+    const remainingTimeout: Votekick = {
+      ...activeVotekick,
+      id: "ballot-remaining",
+      targetUserId: "viewer-remaining",
+      targetLogin: "viewer_remaining",
+      endedAt: new Date(serverNow - 10_000).toISOString(),
+      durationSeconds: 120,
+    };
+    vi.mocked(loadVotekickPanel).mockResolvedValue({
+      running: null,
+      votekicks: [expiringTimeout, remainingTimeout],
+      now: new Date(serverNow).toISOString(),
+    });
+    setDashboardRealtimeStatus("channel-a", "connected");
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+      modules={[{ id: "votekick", enabled: true }]} /></UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Timeout aufheben|Lift timeout/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date(serverNow));
+    try {
+      fireEvent.click(action);
+      await openViewerPicker();
+      clickSelectOption(await screen.findByRole("option", { name: /viewer_expiring/u, hidden: true }));
+      const run = screen.getByRole<HTMLButtonElement>("button", { name: dashboardTexts().streamManager.actionRun });
+      expect(run.disabled).toBe(false);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+      expect(run.disabled).toBe(true);
+      await openViewerPicker();
+      expect(screen.queryByRole("option", { name: /viewer_expiring/u, hidden: true })).toBeNull();
+      expect(screen.getByRole("option", { name: /viewer_remaining/u, hidden: true })).not.toBeNull();
+      expect(loadVotekickPanel).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("lifts the selected active Votekick timeout from the immediate action dialog", async () => {
     renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
       modules={[{ id: "votekick", enabled: true }]} /></UiProvider>);
@@ -180,7 +233,7 @@ describe("cockpit action role mirror", () => {
     });
     vi.mocked(fetchChannelOverview).mockResolvedValue({ bot: { status: "connected", reason: null, updatedAt: "" } } as never);
 
-    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
       modules={[{ id: "text_commands", enabled: true }]} botConnected />
     </UiProvider>);
 
@@ -205,7 +258,7 @@ describe("cockpit action role mirror", () => {
     });
     const onActionStart = vi.fn(() => Date.now());
 
-    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
       modules={[{ id: "text_commands", enabled: true }]} botConnected onActionStart={onActionStart} />
     </UiProvider>);
 
@@ -243,11 +296,13 @@ describe("cockpit action role mirror", () => {
         { channelId: "channel-a", name: "lives", value: 3, description: "", resetOnStreamStart: false, createdAt: "", updatedAt: "", usages: [] },
     ]);
 
-    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
       modules={[{ id: "text_commands", enabled: true }]} botConnected />
     </UiProvider>);
 
-    fireEvent.click(await screen.findByRole("button", { name: /Counter \+1|Zähler \+1/u }));
+    const counter = await screen.findByRole("button", { name: /Counter \+1|Zähler \+1/u });
+    await waitFor(() => expect((counter as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(counter);
     const picker = await screen.findByRole("combobox", { name: /variable/iu });
     expect(picker.textContent).toContain("lives");
     fireEvent.click(picker);
@@ -264,11 +319,13 @@ describe("cockpit action role mirror", () => {
     });
     vi.mocked(fetchChannelOverview).mockResolvedValue({ bot: { status: "connected", reason: null, updatedAt: "" } } as never);
 
-    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
       modules={[{ id: "text_commands", enabled: true }]} botConnected />
     </UiProvider>);
 
-    fireEvent.click(await screen.findByRole("button", { name: /Counter \+1|Zähler \+1/u }));
+    const counter = await screen.findByRole("button", { name: /Counter \+1|Zähler \+1/u });
+    await waitFor(() => expect((counter as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(counter);
     const picker = await screen.findByRole("combobox", { name: /variable/iu });
     expect(picker.textContent).toContain("score");
     fireEvent.click(await screen.findByRole("button", { name: dashboardTexts().streamManager.actionRun }));
@@ -279,9 +336,10 @@ describe("cockpit action role mirror", () => {
 
   it("keeps counter and test message visible with their unavailable reasons", async () => {
     setChannelVariables([]);
+    vi.mocked(fetchChannelVariableAvailability).mockResolvedValue({ available: false });
     vi.mocked(fetchChannelOverview).mockResolvedValue({ bot: { status: "not_connected", reason: null, updatedAt: "" } } as never);
 
-    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
       modules={[{ id: "text_commands", enabled: true }]} botConnected={false} />
     </UiProvider>);
 
@@ -296,7 +354,7 @@ describe("cockpit action role mirror", () => {
   it("shows the typed sent result for a test message", async () => {
     vi.mocked(sendTestMessage).mockResolvedValue({ result: "sent" });
 
-    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
       modules={[{ id: "text_commands", enabled: true }]} botConnected />
     </UiProvider>);
 
@@ -313,7 +371,7 @@ describe("cockpit action role mirror", () => {
     vi.mocked(sendTestMessage).mockResolvedValue({ result: "rate_limited", retryAfter: 27 });
     const onFeedbackMessage = vi.fn();
 
-    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
       modules={[{ id: "text_commands", enabled: true }]} botConnected onFeedbackMessage={onFeedbackMessage} />
     </UiProvider>);
 
@@ -326,7 +384,7 @@ describe("cockpit action role mirror", () => {
 
   it("disables timer skipping with an inline reason when no occurrence is planned", async () => {
     vi.mocked(loadUpcomingTimers).mockResolvedValue([]);
-    render(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
       modules={[{ id: "timers", enabled: true }]} />
     </UiProvider>);
 
@@ -336,7 +394,7 @@ describe("cockpit action role mirror", () => {
   });
 
   it("keeps timer skipping visible with a module-off reason", async () => {
-    render(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
       modules={[{ id: "timers", enabled: false }]} />
     </UiProvider>);
 
@@ -353,7 +411,7 @@ describe("cockpit action role mirror", () => {
       nextOccurrenceAt: "2026-10-13T12:20:00.000Z",
     });
     const onFeedbackMessage = vi.fn();
-    render(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
       modules={[{ id: "timers", enabled: true }]} onFeedbackMessage={onFeedbackMessage} />
     </UiProvider>);
 
@@ -377,7 +435,7 @@ describe("cockpit action role mirror", () => {
   it("maps an already-skipped result to a short informational message", async () => {
     vi.mocked(skipNextTimerOccurrence).mockResolvedValue({ result: "already_skipped" });
     const onFeedbackMessage = vi.fn();
-    render(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" role="operator"
       modules={[{ id: "timers", enabled: true }]} onFeedbackMessage={onFeedbackMessage} />
     </UiProvider>);
 
@@ -397,7 +455,7 @@ describe("cockpit action role mirror", () => {
   it("disables stream markers with a linked scope grant reason", async () => {
     vi.mocked(fetchStreamMarkerAvailability).mockResolvedValue({ manageScopeAvailable: false });
 
-    render(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId="channel-a" streamState="online" role="manager"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId="channel-a" streamState="online" role="manager"
       modules={[{ id: "channel_events", enabled: true }]} /></UiProvider>);
 
     const action = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
@@ -417,7 +475,7 @@ describe("cockpit action role mirror", () => {
   it("shows the owner-only grant reason without a link to other channel members", async () => {
     vi.mocked(fetchStreamMarkerAvailability).mockResolvedValue({ manageScopeAvailable: false });
 
-    render(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId="manager-1" streamState="online" role="manager"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId="manager-1" streamState="online" role="manager"
       modules={[{ id: "channel_events", enabled: true }]} /></UiProvider>);
 
     const action = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
@@ -427,7 +485,7 @@ describe("cockpit action role mirror", () => {
   });
 
   it("disables stream markers with the offline reason", async () => {
-    render(<UiProvider><ImmediateActions channelId="channel-a" streamState="offline" role="manager"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="offline" role="manager"
       modules={[{ id: "channel_events", enabled: true }]} /></UiProvider>);
 
     const action = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
@@ -440,7 +498,7 @@ describe("cockpit action role mirror", () => {
     vi.mocked(createStreamMarker).mockResolvedValue({ result: "created", positionSeconds: 323 });
     const onFeedbackMessage = vi.fn();
 
-    render(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId="channel-a" streamState="online" role="manager"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId="channel-a" streamState="online" role="manager"
       modules={[{ id: "channel_events", enabled: true }]} onFeedbackMessage={onFeedbackMessage} /></UiProvider>);
 
     const action = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
@@ -463,7 +521,7 @@ describe("cockpit action role mirror", () => {
         error: "broadcast_scope_missing",
         grantHref: "/auth/channels/channel-a/broadcaster-scopes/broadcast",
       });
-      render(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId={viewerUserId} streamState="online" role="manager"
+      renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId={viewerUserId} streamState="online" role="manager"
         modules={[{ id: "channel_events", enabled: true }]} /></UiProvider>);
 
       const marker = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
@@ -473,12 +531,12 @@ describe("cockpit action role mirror", () => {
       expect(screen.queryAllByRole("link", { name: /Grant permission|Berechtigung erteilen/u }).length > 0).toBe(hasLink);
 
       vi.mocked(fetchStreamMarkerAvailability).mockResolvedValue({ manageScopeAvailable: false });
-      await act(async () => { vi.advanceTimersByTime(4_000); await Promise.resolve(); });
+      await act(async () => { vi.advanceTimersByTime(30_000); await Promise.resolve(); });
       await waitFor(() => expect((marker as HTMLButtonElement).disabled).toBe(true));
       expect(screen.getAllByText(feedback)).not.toHaveLength(0);
 
       vi.mocked(fetchStreamMarkerAvailability).mockResolvedValue({ manageScopeAvailable: true });
-      await act(async () => { vi.advanceTimersByTime(4_000); await Promise.resolve(); });
+      await act(async () => { vi.advanceTimersByTime(30_000); await Promise.resolve(); });
       await waitFor(() => expect((marker as HTMLButtonElement).disabled).toBe(false));
       expect(screen.queryByText(feedback)).toBeNull();
       expect(screen.queryByRole("link", { name: /Grant permission|Berechtigung erteilen/u })).toBeNull();
@@ -493,7 +551,7 @@ describe("cockpit action role mirror", () => {
     const onFeedbackMessage = vi.fn();
     const actions = (channelId: string) => <UiProvider><ImmediateActions channelId={channelId} viewerUserId={channelId}
       streamState="online" role="manager" modules={[{ id: "channel_events", enabled: true }]} onFeedbackMessage={onFeedbackMessage} /></UiProvider>;
-    const view = render(actions("channel-a"));
+    const view = renderWithQuery(actions("channel-a"));
 
     const marker = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
     await waitFor(() => expect((marker as HTMLButtonElement).disabled).toBe(false));
@@ -529,7 +587,7 @@ describe("cockpit action role mirror", () => {
     vi.mocked(createStreamMarker).mockResolvedValue(result);
     const onFeedbackMessage = vi.fn();
 
-    render(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId="channel-a" streamState="online" role="manager"
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" viewerUserId="channel-a" streamState="online" role="manager"
       modules={[{ id: "channel_events", enabled: true }]} onFeedbackMessage={onFeedbackMessage} /></UiProvider>);
 
     const action = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
@@ -557,7 +615,7 @@ describe("cockpit action role mirror", () => {
     }));
     const actions = (channelId: string) => <UiProvider><ImmediateActions channelId={channelId} streamState="online" role="manager"
       modules={[{ id: "channel_events", enabled: true }]} /></UiProvider>;
-    const view = render(actions("channel-a"));
+    const view = renderWithQuery(actions("channel-a"));
     await waitFor(() => expect(resolveChannelA).toBeTypeOf("function"));
     view.rerender(actions("channel-b"));
     await waitFor(() => expect(resolveChannelB).toBeTypeOf("function"));

@@ -89,6 +89,52 @@ describe("Channel variable routes", () => {
     expect(reconcileLegacyChatVoteResultDeliveries).toHaveBeenCalledTimes(3);
   });
 
+  it("serves counter availability without reconciling legacy votes or reading usages", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+       VALUES ('channel-a', 'score', 0, '2026-09-24', '2026-09-24')`,
+    ).run();
+    reconcileLegacyChatVoteResultDeliveries.mockClear();
+    const prepared = vi.spyOn(database, "prepare");
+
+    const response = await fetchPanel("manager-a", "/api/channels/channel-a/variables/availability");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ available: true });
+    expect(reconcileLegacyChatVoteResultDeliveries).not.toHaveBeenCalled();
+    expect(prepared.mock.calls.filter(([sql]) => sql.includes("SELECT EXISTS") && sql.includes("channel_variables"))).toHaveLength(1);
+    expect(prepared.mock.calls.map(([sql]) => sql).join("\n")).not.toMatch(/FROM (?:timers|faq_entries|chat_vote_templates|overlay_elements)/u);
+  });
+
+  it("computes management usages with a fixed number of statements as variables grow", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    const variableInsert = (index: number) => database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+       VALUES (?, ?, 0, '2026-09-24', '2026-09-24')`,
+    ).bind("channel-a", `counter_${String(index)}`);
+    await database.batch(Array.from({ length: 2 }, (_, index) => variableInsert(index)));
+    const prepared = vi.spyOn(database, "prepare");
+
+    const smallResponse = await fetchPanel("manager-a", "/api/channels/channel-a/variables");
+    const twoVariableStatementCount = prepared.mock.calls.length;
+    await database.batch(Array.from({ length: 18 }, (_, index) => variableInsert(index + 2)));
+    prepared.mockClear();
+    const response = await fetchPanel("manager-a", "/api/channels/channel-a/variables");
+
+    expect(smallResponse.status).toBe(200);
+    expect((await smallResponse.json<{ variables: unknown[] }>()).variables).toHaveLength(2);
+    expect(response.status).toBe(200);
+    const body = await response.json<{ variables: unknown[] }>();
+    expect(body.variables).toHaveLength(20);
+    expect(prepared.mock.calls.length).toBe(twoVariableStatementCount);
+    expect(twoVariableStatementCount).toBeLessThan(40);
+  });
+
   it("publishes stream resets to overlays that reference a variable only in text", async () => {
     await insertChannel(database, "channel-a");
     await database.prepare(

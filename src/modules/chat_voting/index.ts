@@ -4,7 +4,7 @@ import {
   findChatVoteResultTextReferences,
   prepareChatVoteResultTextReferenceRewrite,
 } from "../contracts/chat-vote-result-text-references";
-import type { BotModule, JsonObject, ModuleOverlayElementContext, ModuleTemplateUsageSource, ModuleVariableReferences } from "../contract";
+import type { BotModule, JsonObject, ModuleLiveTileSnapshot, ModuleOverlayElementContext, ModuleTemplateUsageSource, ModuleVariableReferenceUsage, ModuleVariableReferences } from "../contract";
 import { templateTextLength } from "../../contracts/template-text-length";
 import { channelVariableTemplateToken } from "../../contracts/channel-variable-template";
 import { createChatVotingRepository } from "./repository";
@@ -18,8 +18,39 @@ import { chatVotingImmediateActionTexts } from "./action-locale";
 import { dryRunChatVotingMessage } from "./dry-run";
 import { rankVoteTerms } from "./domain";
 import { chatVoteDefaultColorAt } from "./contracts/vote-colors";
+import type { ChatVotingPanelState } from "./panel/service";
 
 const settingsSchema = chatVotingSettingsSchema;
+
+const loadChatVotingActionState = async (channelId: string, signal: AbortSignal): Promise<ChatVotingPanelState> =>
+  (await import("./panel/service")).loadChatVotingState(channelId, signal);
+
+export const chatVotingLiveTileSnapshot = (state: ChatVotingPanelState): ModuleLiveTileSnapshot[] => {
+  const vote = state.vote;
+  if (vote === null || vote.status === "closed") return [];
+  const terms = state.terms ?? [];
+  const options = vote.kind === "free_text"
+    ? rankVoteTerms(terms, terms.length).map(({ term, count, approved }, index) => ({ label: term, count, approved, color: chatVoteDefaultColorAt(index) }))
+    : vote.labels.map((label, index) => {
+      const color = vote.answerColors[index];
+      return { label, count: state.counts?.[index] ?? 0, ...(color === undefined ? {} : { color }) };
+    });
+  const totalVotes = options.reduce((total, option) => total + option.count, 0);
+  const openedAt = Date.parse(vote.openedAt);
+  const closesAt = Date.parse(vote.closesAt);
+  return [{
+    kind: "vote",
+    id: vote.id,
+    title: vote.title,
+    options,
+    totalVotes,
+    closesAt: vote.closesAt,
+    canExtend: vote.status === "open" && Number.isFinite(openedAt) && Number.isFinite(closesAt) && closesAt < openedAt + CHAT_VOTING_HARD_LIMIT_MS,
+  }];
+};
+
+const recordValue = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
 const resultVariable = {
   name: "vote.result",
@@ -59,6 +90,29 @@ const resultTextVariableReferences: ModuleVariableReferences = {
       itemName: row.item_name || row.source_id,
       kind: "template" as const,
     }));
+  },
+  async usagesForVariables(db, channelId, names) {
+    const uniqueNames = [...new Set(names)];
+    const result = new Map<string, ModuleVariableReferenceUsage[]>(uniqueNames.map((name) => [name, []]));
+    if (uniqueNames.length === 0) return result;
+    const rows = await db.prepare(
+      `SELECT requested.value AS variable_name, reference.item_name, reference.source_id
+         FROM json_each(?) AS requested
+         JOIN (${CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL}) AS reference
+           ON reference.channel_id = ?
+          AND instr(reference.result_text, '{var.' || requested.value || '}') > 0
+        ORDER BY requested.value,
+                 CASE reference.source_kind WHEN 'template' THEN 0 WHEN 'running_vote' THEN 1 WHEN 'pending_vote' THEN 2 ELSE 3 END,
+                 reference.item_name, reference.source_id`,
+    ).bind(JSON.stringify(uniqueNames), channelId).all<{ variable_name: string; item_name: string | null; source_id: string }>();
+    for (const row of rows.results) {
+      result.get(row.variable_name)?.push({
+        moduleId: CHAT_VOTING_MODULE_ID,
+        itemName: row.item_name || row.source_id,
+        kind: "template",
+      });
+    }
+    return result;
   },
   async validateRename(db, channelId, from, to) {
     const oldToken = channelVariableTemplateToken(from);
@@ -112,6 +166,21 @@ const variableReferences: ModuleVariableReferences = {
       ...await settingsReferences.usages(db, channelId, name),
       ...await resultTextVariableReferences.usages(db, channelId, name),
     ];
+  },
+  async usagesForVariables(db: D1Database, channelId: string, names: readonly string[]) {
+    const uniqueNames = [...new Set(names)];
+    const result = new Map<string, ModuleVariableReferenceUsage[]>(uniqueNames.map((name) => [name, []]));
+    const settingsReader = settingsReferences.usagesForVariables;
+    const resultReader = resultTextVariableReferences.usagesForVariables;
+    const [settingsUsages, resultUsages] = await Promise.all([
+      settingsReader === undefined ? new Map<string, readonly ModuleVariableReferenceUsage[]>() : settingsReader(db, channelId, uniqueNames),
+      resultReader === undefined ? new Map<string, readonly ModuleVariableReferenceUsage[]>() : resultReader(db, channelId, uniqueNames),
+    ]);
+    for (const name of uniqueNames) {
+      const usages = result.get(name);
+      if (usages !== undefined) usages.push(...(settingsUsages.get(name) ?? []), ...(resultUsages.get(name) ?? []));
+    }
+    return result;
   },
   async validateRename(db, channelId, from, to) {
     return await resultTextVariableReferences.validateRename?.(db, channelId, from, to) ?? {
@@ -208,28 +277,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   panel: () => import("./panel"),
   liveTile: {
     load: async (channelId, signal) => {
-      const state = await (await import("./panel/service")).loadChatVotingState(channelId, signal);
-      const vote = state.vote;
-      if (vote === null || vote.status === "closed") return [];
-      const terms = state.terms ?? [];
-      const options = vote.kind === "free_text"
-        ? rankVoteTerms(terms, terms.length).map(({ term, count, approved }, index) => ({ label: term, count, approved, color: chatVoteDefaultColorAt(index) }))
-        : vote.labels.map((label, index) => {
-          const color = vote.answerColors[index];
-          return { label, count: state.counts?.[index] ?? 0, ...(color === undefined ? {} : { color }) };
-        });
-      const totalVotes = options.reduce((total, option) => total + option.count, 0);
-      const openedAt = Date.parse(vote.openedAt);
-      const closesAt = Date.parse(vote.closesAt);
-      return [{
-        kind: "vote",
-        id: vote.id,
-        title: vote.title,
-        options,
-        totalVotes,
-        closesAt: vote.closesAt,
-        canExtend: vote.status === "open" && Number.isFinite(openedAt) && Number.isFinite(closesAt) && closesAt < openedAt + CHAT_VOTING_HARD_LIMIT_MS,
-      }];
+      return chatVotingLiveTileSnapshot(await loadChatVotingActionState(channelId, signal));
     },
   },
   actions: [{
@@ -237,25 +285,23 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
     name: chatVotingImmediateActionTexts.name,
     icon: "vote",
     conditions: ["streamLive", {
-      check: async ({ channelId, signal }) => {
-        const service = await import("./panel/service");
-        try {
-          const state = await service.loadChatVotingState(channelId, signal);
-          if (state.vote?.status === "open" || state.vote?.status === "closing") {
-            const until = Date.parse(state.vote.closesAt);
+      query: {
+        moduleId: "chat_voting",
+        part: "live",
+        load: loadChatVotingActionState,
+        evaluate: (value) => {
+          const state = recordValue(value);
+          const vote = recordValue(state?.vote);
+          if (vote?.status === "open" || vote?.status === "closing") {
+            const until = typeof vote.closesAt === "string" ? Date.parse(vote.closesAt) : Number.NaN;
             return {
               reason: chatVotingImmediateActionTexts.running,
               ...(Number.isFinite(until) ? { until } : {}),
             };
           }
-          if (state.hasOpenBallot) {
-            return { reason: chatVotingImmediateActionTexts.votekickRunning };
-          }
+          if (state?.hasOpenBallot === true) return { reason: chatVotingImmediateActionTexts.votekickRunning };
           return { reason: null };
-        } catch (error: unknown) {
-          if (error instanceof Error && error.name === "AbortError") throw error;
-          throw error;
-        }
+        },
       },
     }],
     requiredRole: "operator",
@@ -293,17 +339,16 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
     name: chatVotingImmediateActionTexts.endName,
     icon: "vote",
     conditions: [{
-      check: async ({ channelId, signal }) => {
-        const service = await import("./panel/service");
-        try {
-          const state = await service.loadChatVotingState(channelId, signal);
-          return state.vote?.status === "open"
-            ? { reason: null, pollId: state.vote.id }
+      query: {
+        moduleId: "chat_voting",
+        part: "live",
+        load: loadChatVotingActionState,
+        evaluate: (value) => {
+          const vote = recordValue(recordValue(value)?.vote);
+          return vote?.status === "open" && typeof vote.id === "string"
+            ? { reason: null, pollId: vote.id }
             : { reason: chatVotingImmediateActionTexts.notRunning };
-        } catch (error: unknown) {
-          if (error instanceof Error && error.name === "AbortError") throw error;
-          throw error;
-        }
+        },
       },
     }],
     requiredRole: "operator",

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { moduleVariableRenameTarget } from "../contract";
-import type { BotModule, ModuleVariableReferences } from "../contract";
+import type { BotModule, ModuleVariableReferenceUsage, ModuleVariableReferences } from "../contract";
 import { textLibraryModuleCatalog } from "./catalog";
 import { textLibraryRoutes } from "./routes";
 import { createTextBlockTemplateValueProvider } from "./adapters/template-expander";
@@ -25,6 +25,23 @@ const variableReferences: ModuleVariableReferences = {
       itemName: block_name,
       kind: "template" as const,
     }));
+  },
+  async usagesForVariables(db, channelId, names) {
+    const uniqueNames = [...new Set(names)];
+    const result = new Map<string, ModuleVariableReferenceUsage[]>(uniqueNames.map((name) => [name, []]));
+    if (uniqueNames.length === 0) return result;
+    const rows = await db.prepare(
+      `SELECT requested.value AS variable_name, variants.block_name
+         FROM json_each(?) AS requested
+         JOIN text_block_variants AS variants
+           ON variants.channel_id = ? AND instr(variants.texts_json, '{var.' || requested.value || '}') > 0
+        GROUP BY requested.value, variants.block_name
+        ORDER BY requested.value, variants.block_name`,
+    ).bind(JSON.stringify(uniqueNames), channelId).all<{ variable_name: string; block_name: string }>();
+    for (const row of rows.results) {
+      result.get(row.variable_name)?.push({ moduleId: "text_library", itemName: row.block_name, kind: "template" });
+    }
+    return result;
   },
   async validateRename(db, channelId, from, to) {
     const oldToken = `{var.${from}}`;
