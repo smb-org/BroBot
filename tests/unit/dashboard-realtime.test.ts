@@ -135,14 +135,16 @@ describe("dashboard realtime messages", () => {
     queryClient.clear();
   });
 
-  it("refreshes cockpit Next up when the timer panel resource changes", async () => {
+  it("refreshes the shared timer query without reloading unrelated live tiles", async () => {
     const revisionChannel = "timer-resource-live-cockpit";
     const reader = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const liveCockpit = queryKeys.channel(revisionChannel, "live-cockpit", { modules: "timers:true" });
     const timerPanel = moduleQueryKey(revisionChannel, "timers", "panel");
-    const reads = { cockpit: 0, timerPanel: 0 };
+    const timerUpcoming = moduleQueryKey(revisionChannel, "timers", "upcoming");
+    const reads = { cockpit: 0, timerPanel: 0, timerUpcoming: 0 };
     reader.setQueryData(liveCockpit, { upcoming: [] });
     reader.setQueryData(timerPanel, { timers: [] });
+    reader.setQueryData(timerUpcoming, []);
     const unsubscribers = [
       new QueryObserver(reader, {
         queryKey: liveCockpit,
@@ -152,6 +154,11 @@ describe("dashboard realtime messages", () => {
       new QueryObserver(reader, {
         queryKey: timerPanel,
         queryFn: () => { reads.timerPanel += 1; return Promise.resolve({ timers: [{ id: "timer-a" }] }); },
+        staleTime: Infinity,
+      }).subscribe(() => undefined),
+      new QueryObserver(reader, {
+        queryKey: timerUpcoming,
+        queryFn: () => { reads.timerUpcoming += 1; return Promise.resolve([{ id: "timer-a" }]); },
         staleTime: Infinity,
       }).subscribe(() => undefined),
     ];
@@ -164,7 +171,7 @@ describe("dashboard realtime messages", () => {
     await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
     revisions = { "module:timers:panel": 1 };
     await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
-    await vi.waitFor(() => { expect(reads).toEqual({ cockpit: 1, timerPanel: 1 }); });
+    await vi.waitFor(() => { expect(reads).toEqual({ cockpit: 0, timerPanel: 1, timerUpcoming: 1 }); });
 
     unsubscribers.forEach((unsubscribe) => { unsubscribe(); });
     reader.clear();
@@ -213,7 +220,9 @@ describe("dashboard realtime messages", () => {
     const overview = queryKeys.channel(channelId, "overview");
     const system = queryKeys.channel(channelId, "system");
     const channels = queryKeys.channels();
-    [overview, system, channels].forEach((key) => { addQuery(queryClient, key); });
+    const eventHistory = dashboardDataKeys.events(channelId, { origin: null, module: null, tone: null, person: null });
+    const eventHead = dashboardDataKeys.eventHeads(channelId);
+    [overview, system, channels, eventHistory, eventHead].forEach((key) => { addQuery(queryClient, key); });
 
     let revisions: Readonly<Record<string, number>> = { "channel.overview": 0, "channel.system": 0, channels: 0 };
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions }), {
@@ -234,6 +243,8 @@ describe("dashboard realtime messages", () => {
     expect(queryClient.getQueryState(overview)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(system)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(channels)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(eventHistory)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(eventHead)?.isInvalidated).toBe(true);
   });
 
   it("tracks connection state per channel for conditional fallback queries", () => {
@@ -306,10 +317,11 @@ describe("dashboard realtime messages", () => {
     const sharedChannel = "revision-two-client";
     const writer = new QueryClient();
     const reader = new QueryClient();
-    const writerEvents = queryKeys.channel(sharedChannel, "events", { origin: "twitch" });
-    const readerEvents = queryKeys.channel(sharedChannel, "events", { origin: "twitch" });
+    const eventHead = dashboardDataKeys.eventHead(sharedChannel, { origin: "channel", module: null, tone: null, person: null });
+    const writerEvents = eventHead;
+    const readerEvents = eventHead;
     const readerAudit = queryKeys.channel(sharedChannel, "audit-log", { person: "user-1" });
-    const otherChannelEvents = queryKeys.channel("revision-other-channel", "events");
+    const otherChannelEvents = dashboardDataKeys.eventHeads("revision-other-channel");
     [writerEvents].forEach((key) => { addQuery(writer, key); });
     [readerEvents, readerAudit, otherChannelEvents].forEach((key) => { addQuery(reader, key); });
     const vectors = new Map<string, Readonly<Record<string, number>>>([[sharedChannel, {}]]);
@@ -401,7 +413,7 @@ describe("dashboard realtime messages", () => {
     vi.useFakeTimers();
     const revisionChannel = "revision-read-retry";
     const reader = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const events = queryKeys.channel(revisionChannel, "events");
+    const events = dashboardDataKeys.recentEvents(revisionChannel);
     let eventReads = 0;
     reader.setQueryData(events, { revision: 0 });
     const unsubscribe = new QueryObserver(reader, {
@@ -468,7 +480,7 @@ describe("dashboard realtime messages", () => {
     vi.useFakeTimers();
     const revisionChannel = "revision-resource-retry";
     const reader = new QueryClient({ defaultOptions: { queries: { retry: 1, retryDelay: () => 0 } } });
-    const events = queryKeys.channel(revisionChannel, "events");
+    const events = dashboardDataKeys.recentEvents(revisionChannel);
     let eventReads = 0;
     reader.setQueryData(events, { revision: 0 });
     const unsubscribe = new QueryObserver(reader, {
@@ -511,7 +523,7 @@ describe("dashboard realtime messages", () => {
     vi.useFakeTimers();
     const revisionChannel = "revision-sustained-hints";
     const reader = new QueryClient();
-    const events = queryKeys.channel(revisionChannel, "events");
+    const events = dashboardDataKeys.eventHeads(revisionChannel);
     addQuery(reader, events);
     let committedRevision = 0;
     const observedRevisions: number[] = [];
@@ -604,6 +616,45 @@ describe("dashboard realtime messages", () => {
     reader.clear();
   });
 
+  it("leaves completed BELABOX stream history cached when live revisions advance", async () => {
+    vi.useFakeTimers();
+    const revisionChannel = "belabox-history-revision";
+    const reader = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const parts = ["status", "streams", "history-live", "history-stream-live", "history-stream-closed"] as const;
+    const reads = new Map<string, number>(parts.map((part) => [part, 0]));
+    const unsubscribers = parts.map((part) => {
+      const queryKey = moduleQueryKey(revisionChannel, "belabox", part);
+      reader.setQueryData(queryKey, part === "status" ? { belaboxStreamId: "live" } : { ready: true });
+      return new QueryObserver(reader, {
+        queryKey,
+        queryFn: () => {
+          reads.set(part, (reads.get(part) ?? 0) + 1);
+          return Promise.resolve({ ready: true });
+        },
+        staleTime: Infinity,
+      }).subscribe(() => undefined);
+    });
+    let revision = 0;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions: { "module:belabox:live": revision } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))));
+
+    await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    revision = 1;
+    const reconciliation = reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    await vi.advanceTimersByTimeAsync(1_250);
+    await reconciliation;
+
+    expect(reads.get("status")).toBe(1);
+    expect(reads.get("streams")).toBe(1);
+    expect(reads.get("history-live")).toBe(1);
+    expect(reads.get("history-stream-live")).toBe(1);
+    expect(reads.get("history-stream-closed")).toBe(0);
+    unsubscribers.forEach((unsubscribe) => { unsubscribe(); });
+    reader.clear();
+  });
+
   it.each([
     ["channel.overview", "overview"],
     ["channel.system", "system"],
@@ -632,7 +683,10 @@ describe("dashboard realtime messages", () => {
       settings: [queryKeys.channel(revisionChannel, "settings")],
       members: [dashboardDataKeys.members(revisionChannel)],
       modules: [queryKeys.channel(revisionChannel, "modules"), queryKeys.channel(revisionChannel, "overview")],
-      events: [queryKeys.channel(revisionChannel, "events", { module: "chat_voting" })],
+      events: [
+        dashboardDataKeys.eventHead(revisionChannel, { origin: null, module: null, tone: null, person: null }),
+        dashboardDataKeys.recentEvents(revisionChannel),
+      ],
       "audit-log": [dashboardDataKeys.audit(revisionChannel, { person: "user-1", area: null })],
       variables: [
         dashboardDataKeys.variables(revisionChannel),
@@ -655,7 +709,7 @@ describe("dashboard realtime messages", () => {
       "chat-voting": [moduleQueryKey(revisionChannel, "chat_voting", "panel")],
       votekick: [moduleQueryKey(revisionChannel, "votekick", "panel")],
       belabox: [moduleQueryKey(revisionChannel, "belabox", "streams")],
-      "module-data": [moduleQueryKey(revisionChannel, "chat_voting", "panel")],
+      "module-data": [moduleQueryKey(revisionChannel, "chat_voting", "panel"), queryKeys.channel(revisionChannel, "live-cockpit", { modules: "chat_voting:true" })],
       ads: [moduleQueryKey(revisionChannel, "ads", "schedule")],
       "channel-list": [queryKeys.channels()],
     };

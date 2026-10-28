@@ -92,6 +92,8 @@ const installVotingFixture = async (page: Page, role: "manager" | "operator" = "
       await fulfillJson(route, { text: "" });
     } else if (pathname === `/api/channels/${channelId}/overlays`) {
       await fulfillJson(route, { overlays: [], maximum: 20, elementMaximum: 20 });
+    } else if (pathname === `/api/channels/${channelId}/events/recent`) {
+      await fulfillJson(route, { entries: [], cursor: null });
     } else if (pathname === `/api/channels/${channelId}/events`) {
       await fulfillJson(route, { entries: [], nextCursor: null });
     } else if (pathname === `/api/channels/${channelId}/revisions`) {

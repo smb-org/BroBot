@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactElement, type SyntheticEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { hasRequiredChannelRole, type ChannelRole, type ChannelStreamState } from "../contracts/values";
 import { MODULES } from "../modules/registry";
 import type { ModuleImmediateActionCondition, ModuleImmediateActionContentProperties, ModuleImmediateActionDefinition, ModuleImmediateActionResult } from "../modules/contract";
 import { dashboardCommonTexts, dashboardLanguage, dashboardTexts, immediateActionUnavailableReasonText } from "./locale";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
+import { moduleQueryKey } from "./data/module-query";
+import { useDashboardRealtimeStatus } from "./data/realtime";
 import { immediateActionErrorFeedback } from "./immediate-action-errors";
 import { loadModuleImmediateActionContent, retryModuleChunkLoad } from "./module-panel-loaders";
 import type { PanelModuleState } from "../panel-contract";
@@ -12,16 +15,13 @@ import { Button, ConfirmDialog, Icon, LoadStateLines, registerDashboardNavigatio
 import { DialogContent, DialogPrimitive, DialogTitle } from "./ui/primitives/dialog";
 import { PopoverContent, PopoverPrimitive } from "./ui/primitives/popover";
 
-type CustomCondition = Extract<ModuleImmediateActionCondition, { check: unknown }>;
+type CustomCondition = Extract<ModuleImmediateActionCondition, { check: unknown } | { query: unknown }>;
 
-interface ActionConditionState {
-  channelId: string;
-  loading: boolean;
+interface ActionAvailabilityResult {
   reason: Readonly<Record<"de" | "en", string>> | null;
-  link: { href: string; label: string } | null;
-  until: number | null;
-  pollId: string | null;
-  stale: boolean;
+  link?: { href: string; label: Readonly<Record<"de" | "en", string>> };
+  until?: number;
+  pollId?: string;
 }
 
 interface ActionFeedback {
@@ -32,6 +32,16 @@ interface ActionFeedback {
   /** Availability generation at the time of a result marked as superseded by availability; a later confirmation supersedes it. */
   supersededByConfirmationAfter?: number;
 }
+
+// Only these shared reads have a complete revision fanout: chat votes and timers/votekick use
+// their module revisions; counter availability is covered by channel.variables. Helix and other
+// legacy checks keep the previous 4 s connected cadence because they have no revision guarantee.
+const REVISION_COVERED_ACTION_QUERIES = new Set([
+  "chat_voting:live",
+  "text_commands:counter-availability",
+  "timers:upcoming",
+  "votekick:panel",
+]);
 
 const remainingTime = (until: number, now: number): string => {
   const seconds = Math.max(0, Math.ceil((until - now) / 1_000));
@@ -69,110 +79,99 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
     () => action.conditions.filter((condition): condition is CustomCondition => typeof condition !== "string"),
     [action.conditions],
   );
+  const sharedCondition = customConditions.length === 1 && customConditions[0] !== undefined && "query" in customConditions[0]
+    ? customConditions[0]
+    : undefined;
   const shouldCheckConditions = meetsRole && staticAvailability.enabled && customConditions.length > 0;
-  const [conditionState, setConditionState] = useState<ActionConditionState>({
-    channelId,
-    loading: shouldCheckConditions,
-    reason: null,
-    link: null,
-    until: null,
-    pollId: null,
-    stale: false,
-  });
-  const activeConditionState = conditionState.channelId === channelId ? conditionState : {
-    channelId,
-    loading: shouldCheckConditions,
-    reason: null,
-    link: null,
-    until: null,
-    pollId: null,
-    stale: false,
-  };
   const [now, setNow] = useState(() => Date.now());
-  const [availabilityConfirmations, setAvailabilityConfirmations] = useState(0);
+  const [availabilityConfirmedAt, setAvailabilityConfirmedAt] = useState(0);
   const actionKey = `${moduleId}:${action.id}`;
-
-  useEffect(() => {
-    if (!shouldCheckConditions) {
-      onAvailabilityStateChange(actionKey, false);
-      return;
-    }
-    let active = true;
-    let inFlight = false;
-    let pendingController: AbortController | null = null;
-    const check = async (): Promise<void> => {
-      if (inFlight) return;
-      inFlight = true;
+  const lastSharedRetryGeneration = useRef(availabilityRetryGeneration);
+  const queryClient = useQueryClient();
+  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const actionAvailabilityQueryKey = sharedCondition === undefined
+    ? moduleQueryKey(channelId, moduleId, `action-availability-${action.id}`)
+    : moduleQueryKey(channelId, sharedCondition.query.moduleId, sharedCondition.query.part);
+  const sharedStateQuery = useQuery({
+    queryKey: actionAvailabilityQueryKey,
+    queryFn: async ({ signal }): Promise<unknown> => {
       const controller = new AbortController();
-      pendingController = controller;
+      const abortFromQuery = (): void => { controller.abort(signal.reason); };
+      signal.addEventListener("abort", abortFromQuery, { once: true });
       const timeout = window.setTimeout(() => {
-        if (!active) return;
-        controller.abort();
-        setConditionState((current) => ({
-          channelId,
-          loading: false,
-          reason: null,
-          link: null,
-          until: null,
-          pollId: current.channelId === channelId ? current.pollId : null,
-          stale: true,
-        }));
-        onAvailabilityStateChange(actionKey, true);
+        controller.abort(new Error("action_availability_timeout"));
       }, 10_000);
-      setConditionState((current) => current.channelId === channelId
-        ? { ...current, loading: current.reason === null && !current.stale }
-        : { channelId, loading: true, reason: null, link: null, until: null, pollId: null, stale: false });
       try {
+        if (sharedCondition !== undefined) {
+          const value = await sharedCondition.query.load(channelId, controller.signal);
+          controller.signal.throwIfAborted();
+          return value;
+        }
         let pollId: string | null = null;
         for (const condition of customConditions) {
-          const result = await condition.check({ channelId, ...(viewerUserId === undefined ? {} : { viewerUserId }), streamState, botConnected, language, signal: controller.signal });
-          if (!active || controller.signal.aborted) return;
+          const result = "query" in condition
+            ? condition.query.evaluate(await condition.query.load(channelId, controller.signal))
+            : await condition.check({ channelId, ...(viewerUserId === undefined ? {} : { viewerUserId }), streamState, botConnected, language, signal: controller.signal });
+          controller.signal.throwIfAborted();
           pollId = result.pollId ?? pollId;
-          if (result.reason !== null) {
-            setConditionState({
-              channelId,
-              loading: false,
-              reason: result.reason,
-              link: result.link === undefined ? null : { href: result.link.href, label: result.link.label[language] },
-              until: result.until ?? null,
-              pollId,
-              stale: false,
-            });
-            onAvailabilityStateChange(actionKey, false);
-            return;
-          }
+          if (result.reason !== null) return { ...result, ...(pollId === null ? {} : { pollId }) };
         }
-        if (active) {
-          setConditionState({ channelId, loading: false, reason: null, link: null, until: null, pollId, stale: false });
-          setAvailabilityConfirmations((count) => count + 1);
-          onAvailabilityStateChange(actionKey, false);
-        }
-      } catch {
-        if (!active) return;
-        setConditionState((current) => ({
-          channelId,
-          loading: false,
-          reason: null,
-          link: null,
-          until: null,
-          pollId: current.channelId === channelId ? current.pollId : null,
-          stale: true,
-        }));
-        onAvailabilityStateChange(actionKey, true);
+        return { reason: null, ...(pollId === null ? {} : { pollId }) } satisfies ActionAvailabilityResult;
+      } catch (error) {
+        signal.throwIfAborted();
+        throw error;
       } finally {
         window.clearTimeout(timeout);
-        if (pendingController === controller) pendingController = null;
-        inFlight = false;
+        signal.removeEventListener("abort", abortFromQuery);
       }
-    };
-    void check();
-    const interval = window.setInterval(() => { void check(); }, 4_000);
-    return () => {
-      active = false;
-      pendingController?.abort();
-      window.clearInterval(interval);
-    };
-  }, [actionKey, availabilityRetryGeneration, botConnected, channelId, customConditions, language, onAvailabilityStateChange, shouldCheckConditions, streamState, viewerUserId]);
+    },
+    enabled: shouldCheckConditions,
+    refetchInterval: realtimeStatus === "connected" && sharedCondition !== undefined &&
+      REVISION_COVERED_ACTION_QUERIES.has(`${sharedCondition.query.moduleId}:${sharedCondition.query.part}`)
+      ? false
+      : 4_000,
+    refetchOnWindowFocus: false,
+  });
+  const availability = sharedCondition !== undefined
+    ? sharedStateQuery.data === undefined ? null : sharedCondition.query.evaluate(sharedStateQuery.data)
+    : sharedStateQuery.data as ActionAvailabilityResult | undefined ?? null;
+  if (shouldCheckConditions && availability?.reason === null && sharedStateQuery.dataUpdatedAt > availabilityConfirmedAt) {
+    setAvailabilityConfirmedAt(sharedStateQuery.dataUpdatedAt);
+  }
+  const availabilityConfirmations = availabilityConfirmedAt;
+  const activeConditionState = {
+    loading: shouldCheckConditions && sharedStateQuery.isPending && !sharedStateQuery.isError,
+    reason: sharedStateQuery.isError ? null : availability?.reason ?? null,
+    link: availability?.link === undefined ? null : {
+      href: availability.link.href,
+      label: availability.link.label[language],
+    },
+    until: availability?.until ?? null,
+    pollId: availability?.pollId ?? null,
+    stale: sharedStateQuery.isError,
+  };
+  const lastConditionContext = useRef({ channelId, viewerUserId, streamState, botConnected, language });
+
+  useEffect(() => {
+    const retryRequested = availabilityRetryGeneration > lastSharedRetryGeneration.current;
+    lastSharedRetryGeneration.current = availabilityRetryGeneration;
+    if (!shouldCheckConditions) onAvailabilityStateChange(actionKey, false);
+    else if (sharedStateQuery.isError) onAvailabilityStateChange(actionKey, true);
+    else if (sharedStateQuery.dataUpdatedAt > 0) onAvailabilityStateChange(actionKey, false);
+    if (retryRequested && shouldCheckConditions) {
+      void queryClient.refetchQueries({ queryKey: actionAvailabilityQueryKey, exact: true });
+    }
+  }, [actionAvailabilityQueryKey, actionKey, availabilityRetryGeneration, onAvailabilityStateChange, queryClient, sharedStateQuery.dataUpdatedAt, sharedStateQuery.isError, shouldCheckConditions]);
+
+  useEffect(() => {
+    const previous = lastConditionContext.current;
+    lastConditionContext.current = { channelId, viewerUserId, streamState, botConnected, language };
+    const changed = previous.channelId !== channelId || previous.viewerUserId !== viewerUserId ||
+      previous.streamState !== streamState || previous.botConnected !== botConnected || previous.language !== language;
+    if (changed && shouldCheckConditions) {
+      void queryClient.refetchQueries({ queryKey: actionAvailabilityQueryKey, exact: true });
+    }
+  }, [actionAvailabilityQueryKey, botConnected, channelId, language, queryClient, shouldCheckConditions, streamState, viewerUserId]);
 
   useEffect(() => {
     if (activeConditionState.until === null || activeConditionState.reason === null || !activeConditionState.reason[language].includes("{time}")) return;

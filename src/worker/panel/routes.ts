@@ -28,6 +28,7 @@ import {
   getAuditLogForChannel,
   getChannelOverviewForUser,
   getEventLogForChannel,
+  getRecentEventLogForChannel,
   getSystemOverviewForUser,
   listChannelsForUser,
   type AuditQueryFilters,
@@ -677,6 +678,27 @@ panelRouter.get(
           actorDisplayName: actor?.displayName ?? null,
           ...(subjectId === null ? {} : { subjectUserId: subjectId, subjectLogin: subject?.login ?? null, subjectDisplayName: subject?.displayName ?? null }),
         };
+      }),
+    });
+  },
+);
+
+panelRouter.get(
+  "/api/channels/:channelId/events/recent",
+  requireChannelAuthorization(),
+  async (context) => {
+    const channelId = context.req.param("channelId");
+    const serializedSince = context.req.query("since");
+    const since = serializedSince === undefined ? null : decodeLogCursor(serializedSince);
+    if (serializedSince !== undefined && since === null) return context.json({ error: "pagination_cursor_invalid" }, 400);
+    const events = await getRecentEventLogForChannel(context.env.DB, channelId, 100, since);
+    const actorIds = events.entries.flatMap((entry) => entry.actorUserId === null ? [] : [entry.actorUserId]);
+    const actors = await fetchTwitchUsersById(fetch, context.env, actorIds);
+    return context.json({
+      ...events,
+      entries: events.entries.map((entry) => {
+        const actor = entry.actorUserId === null ? undefined : actors.get(entry.actorUserId);
+        return { ...entry, actorLogin: actor?.login ?? null, actorDisplayName: actor?.displayName ?? null };
       }),
     });
   },

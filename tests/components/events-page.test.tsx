@@ -950,6 +950,110 @@ describe("EventsPage failure cause icon", () => {
     rendered.unmount();
   });
 
+  it("loads older events after a cached-head refresh on each frozen feed mount", async () => {
+    const newest = entry({ eventId: "repeat-newest", createdAt: "2026-09-22T10:00:00.000Z" });
+    const older = entry({
+      eventId: "repeat-older",
+      createdAt: "2026-09-21T20:00:00.000Z",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"repeatolder","viewers":1}',
+    });
+    const response = (entries: readonly PanelEventEntry[], nextCursor: string | null) => new Response(JSON.stringify({ entries, nextCursor }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const headQueryKey = dashboardDataKeys.eventHead("kanal-a", emptyEventFilter);
+    const observers: Array<{ intersect: () => void }> = [];
+    class TestIntersectionObserver {
+      constructor(private readonly callback: IntersectionObserverCallback) {}
+
+      observe(target: Element): void {
+        observers.push({
+          intersect: () => this.callback([{ isIntersecting: true, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver),
+        });
+      }
+
+      disconnect(): void {}
+    }
+    vi.stubGlobal("IntersectionObserver", TestIntersectionObserver);
+
+    let headRequests = 0;
+    let releaseSecondHead: (() => void) | undefined;
+    let markSecondHeadStarted: (() => void) | undefined;
+    const secondHeadStarted = new Promise<void>((resolve) => { markSecondHeadStarted = resolve; });
+    const olderRequestCount = vi.fn();
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const cursor = requestUrl(input).searchParams.get("cursor");
+      if (cursor !== null) {
+        olderRequestCount();
+        return Promise.resolve(response([older], null));
+      }
+      headRequests += 1;
+      if (headRequests === 2) {
+        markSecondHeadStarted?.();
+        return new Promise<Response>((resolve) => {
+          releaseSecondHead = () => { resolve(response([newest], "older-cursor")); };
+        });
+      }
+      return Promise.resolve(response([newest], "older-cursor"));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    let queryClient: ReturnType<typeof renderWithQueryBase>["queryClient"] | null = null;
+    for (const run of [0, 1]) {
+      if (run === 1) {
+        if (queryClient === null) throw new Error("The first feed mount should create a query client.");
+        queryClient.setQueryData(queryKey, { pages: [{ entries: [newest], nextCursor: "older-cursor" }], pageParams: [null] });
+      }
+      const queryOptions = run === 0 ? {
+        gcTime: 600_000,
+        staleTime: 30_000,
+        initialData: [{ queryKey, data: { pages: [{ entries: [newest], nextCursor: "older-cursor" }], pageParams: [null] } }],
+      } : {
+        queryClient: queryClient ?? (() => { throw new Error("The first feed mount should create a query client."); })(),
+        gcTime: 600_000,
+        staleTime: 30_000,
+      };
+      const rendered = renderWithQuery(
+        <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+        undefined,
+        queryOptions,
+      );
+      const currentQueryClient = rendered.queryClient;
+      queryClient = currentQueryClient;
+      if (run === 1) await secondHeadStarted;
+      else await waitFor(() => expect(currentQueryClient.isFetching()).toBe(0));
+
+      const position = positionEventReader(rendered.container);
+      act(() => { position.away(); });
+      const rows = rendered.container.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)");
+      const frozenRows = Array.from(rows, (row) => row.textContent);
+      const frozenSections = Array.from(rendered.container.querySelectorAll<HTMLTableSectionElement>(".event-table tbody"), (body) =>
+        body.querySelector<HTMLTimeElement>("tr:not(.data-table__day-row) time")?.dateTime,
+      );
+      const observer = observers.at(-1);
+      if (observer === undefined) throw new Error("The event feed end should be observed.");
+      observer.intersect();
+
+      if (run === 1) {
+        await act(async () => { await Promise.resolve(releaseSecondHead?.()); });
+      }
+      await waitFor(() => expect(olderRequestCount).toHaveBeenCalledTimes(run + 1));
+      expect(await screen.findByText(/Raid von repeatolder/u)).toBeVisible();
+      const visibleRows = Array.from(rendered.container.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)"), (row) => row.textContent);
+      expect(visibleRows.slice(0, frozenRows.length)).toEqual(frozenRows);
+      const visibleSections = Array.from(rendered.container.querySelectorAll<HTMLTableSectionElement>(".event-table tbody"), (body) =>
+        body.querySelector<HTMLTimeElement>("tr:not(.data-table__day-row) time")?.dateTime,
+      );
+      expect(visibleSections).toEqual([...frozenSections, older.createdAt]);
+      rendered.unmount();
+    }
+    if (queryClient === null) throw new Error("The feed flow should create a query client.");
+    expect(queryClient.getQueryData(headQueryKey)).toBeDefined();
+  });
+
   it("shows a filter's refreshed cached data when returning to that filter while scrolled away", async () => {
     const filtersA = { ...emptyEventFilter, module: "channel_events" };
     const filtersB = { ...emptyEventFilter, module: "host" };

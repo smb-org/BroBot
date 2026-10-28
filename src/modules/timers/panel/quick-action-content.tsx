@@ -1,16 +1,12 @@
 import { useEffect, useState, type ReactElement } from "react";
 
 import type { ModuleImmediateActionContentProperties } from "../../contract";
+import { useModuleQuery } from "../../../dashboard/data";
+import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import { Select } from "../../../dashboard/ui";
 import type { Timer } from "../contracts";
 import { loadUpcomingTimers } from "./service";
 import { timersQuickActionTexts } from "./quick-action-locale";
-
-interface TimerListState {
-  channelId: string;
-  timers: readonly Timer[] | null;
-  failed: boolean;
-}
 
 interface TimerSelectionState {
   channelId: string;
@@ -25,35 +21,29 @@ const nextRunTime = (value: string, language: "de" | "en"): string =>
 
 export default function SkipTimerActionContent({ channelId, language, onReadinessChange }: ModuleImmediateActionContentProperties): ReactElement {
   const texts = timersQuickActionTexts;
-  const [timerListState, setTimerListState] = useState<TimerListState>({ channelId, timers: null, failed: false });
+  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const timerQuery = useModuleQuery(channelId, "timers", "upcoming", (signal) => loadUpcomingTimers(channelId, signal), {
+    refetchInterval: realtimeStatus === "connected" ? false : 5_000,
+  });
   const [selectionState, setSelectionState] = useState<TimerSelectionState>({ channelId, timerId: null });
 
-  useEffect(() => {
-    const controller = new AbortController();
-    void loadUpcomingTimers(channelId, controller.signal).then((timers) => {
-      if (!controller.signal.aborted) setTimerListState({ channelId, timers, failed: false });
-    }).catch(() => {
-      if (!controller.signal.aborted) setTimerListState({ channelId, timers: [], failed: true });
-    });
-    return () => { controller.abort(); };
-  }, [channelId]);
-
-  const timers = timerListState.channelId === channelId ? timerListState.timers : null;
+  const timers = timerQuery.data ?? null;
+  const failed = timerQuery.isError;
   const availableTimers = timers === null ? [] : plannedTimers(timers);
   const selectedId = selectionState.channelId === channelId && availableTimers.some((timer) => timer.id === selectionState.timerId)
     ? selectionState.timerId
     : null;
-  const ready = timers !== null && !timerListState.failed && selectedId !== null;
+  const ready = timers !== null && !failed && selectedId !== null;
   const readinessReason = ready
     ? null
     : timers === null
       ? texts.loading[language]
-      : timerListState.failed
+      : failed
         ? texts.loadFailed[language]
         : availableTimers.length === 0
           ? texts.noPlanned[language]
           : texts.selectionRequired[language];
-  const fieldError = timerListState.failed
+  const fieldError = failed
     ? texts.loadFailed[language]
     : timers !== null && availableTimers.length === 0
       ? texts.noPlanned[language]
@@ -78,7 +68,7 @@ export default function SkipTimerActionContent({ channelId, language, onReadines
       hint={texts.chooseTimerHint[language]}
       dropdownBelowField
       {...(fieldError === undefined ? {} : { error: fieldError })}
-      disabled={timers === null || timerListState.failed || availableTimers.length === 0}
+      disabled={timers === null || failed || availableTimers.length === 0}
       busy={timers === null}
       required
     />

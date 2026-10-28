@@ -117,6 +117,10 @@ const installMocks = async (page: Page, events: readonly unknown[] = []): Promis
       });
       return;
     }
+    if (pathname === `/api/channels/${channel.channelId}/events/recent`) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: events, cursor: null }) });
+      return;
+    }
     if (pathname === `/api/channels/${channel.channelId}/events`) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: events, nextCursor: null }) });
       return;

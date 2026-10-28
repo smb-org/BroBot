@@ -58,6 +58,7 @@ const mockDashboard = async (page: Page): Promise<{ setLocation: (location: { na
     }));
     if (pathname === `/api/channels/${channelId}/broadcast`) return route.fulfill(json({ title: "", game: null, manageScopeAvailable: false }));
     if (pathname === `/api/channels/${channelId}/overlays`) return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
+    if (pathname === `/api/channels/${channelId}/events/recent`) return route.fulfill(json({ entries: [], cursor: null }));
     if (pathname === `/api/channels/${channelId}/events`) return route.fulfill(json({ entries: [], nextCursor: null }));
     if (pathname === `/api/channels/${channelId}/audit-log`) return route.fulfill(json({ entries: [], nextCursor: null }));
     if (pathname === `/api/channels/${channelId}/revisions`) return route.fulfill(json({ revisions: {} }));

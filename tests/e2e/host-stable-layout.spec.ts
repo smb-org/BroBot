@@ -149,6 +149,10 @@ const installChannelMocks = async (page: Page, gates: ChannelGates = {}, data: C
       await route.fulfill({ status: data.moduleToggleStatus ?? 200, contentType: "application/json", body: JSON.stringify(data.moduleToggleStatus === undefined ? { module: { id: pathname.split("/").at(-1), enabled: true, settings: "{}" } } : { error: "module_update_failed" }) });
       return;
     }
+    if (pathname === `/api/channels/${channelId}/events/recent`) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: data.events?.entries ?? [], cursor: null }) });
+      return;
+    }
     if (pathname === `/api/channels/${channelId}/events`) {
       const isNextPage = new URL(route.request().url()).searchParams.has("cursor");
       const gate = isNextPage ? gates.eventsNext : gates.events;

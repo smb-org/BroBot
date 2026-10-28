@@ -283,9 +283,10 @@ test("slow availability checks are not aborted by the four-second poll", async (
   });
 
   await page.goto(`/channels/${channelId}`);
-  await expect.poll(mocks.currentStateRequestCount).toBe(3);
+  // The vote availability query is shared by the cockpit tile and the action, so one request serves both.
+  await expect.poll(mocks.currentStateRequestCount).toBe(1);
   await page.waitForTimeout(5_100);
-  expect(mocks.currentStateRequestCount()).toBe(3);
+  expect(mocks.currentStateRequestCount()).toBe(1);
   releaseCurrentState?.();
   await expect(page.getByRole("button", { name: "Abstimmung starten" })).toBeEnabled();
 });

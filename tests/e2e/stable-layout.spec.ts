@@ -265,6 +265,10 @@ test("returning from a module keeps the live cockpit header at the same position
       }) });
       return;
     }
+    if (pathname === "/api/channels/stable-channel/events/recent") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], cursor: null }) });
+      return;
+    }
     if (pathname === "/api/channels/stable-channel/events") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], nextCursor: null }) });
       return;

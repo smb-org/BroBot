@@ -59,6 +59,10 @@ test("command palette and cockpit navigation work on desktop and mobile", async 
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 0 }) });
       return;
     }
+    if (pathname === "/api/channels/kanal-e2e/events/recent") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], cursor: null }) });
+      return;
+    }
     if (pathname === "/api/channels/kanal-e2e/events") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], nextCursor: null }) });
       return;
@@ -156,6 +160,10 @@ test("waits for module data before rendering cockpit actions at desktop and mobi
     }
     if (pathname === "/api/channels/kanal-e2e/settings") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 0 }) });
+      return;
+    }
+    if (pathname === "/api/channels/kanal-e2e/events/recent") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], cursor: null }) });
       return;
     }
     if (pathname === "/api/channels/kanal-e2e/events") {

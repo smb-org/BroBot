@@ -9,6 +9,7 @@ import type {
   PanelChannelControls,
   PanelChannelsResponse,
   PanelEventsResponse,
+  PanelRecentEventsResponse,
   PanelEventFilters,
   PanelMember,
   PanelMembersResponse,
@@ -508,6 +509,20 @@ export const fetchEvents = (
   );
 };
 
+export const fetchRecentEvents = (
+  channelId: string,
+  since: string | null = null,
+  signal?: AbortSignal,
+): Promise<PanelRecentEventsResponse> => {
+  const params = new URLSearchParams();
+  if (since !== null) params.set("since", since);
+  const query = params.toString();
+  return requestJson<PanelRecentEventsResponse>(
+    `${channelPath(channelId, "events/recent")}${query.length > 0 ? `?${query}` : ""}`,
+    requestOptions(signal),
+  );
+};
+
 export const fetchMembers = (
   channelId: string,
   cursor: string | null = null,
@@ -690,11 +705,18 @@ export interface PanelChannelVariablesResponse {
   maximum: number;
 }
 
+export interface PanelChannelVariableAvailabilityResponse {
+  available: boolean;
+}
+
 const variablesPath = (channelId: string, name?: string, suffix = ""): string =>
   `${channelPath(channelId, "variables")}${name === undefined ? "" : `/${encodeURIComponent(name)}`}${suffix}`;
 
 export const fetchChannelVariables = (channelId: string, signal?: AbortSignal): Promise<PanelChannelVariablesResponse> =>
   requestJson<PanelChannelVariablesResponse>(variablesPath(channelId), signal === undefined ? {} : { signal });
+
+export const fetchChannelVariableAvailability = (channelId: string, signal?: AbortSignal): Promise<PanelChannelVariableAvailabilityResponse> =>
+  requestJson<PanelChannelVariableAvailabilityResponse>(`${variablesPath(channelId)}/availability`, requestOptions(signal));
 
 export const createChannelVariable = (
   channelId: string,

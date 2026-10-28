@@ -74,6 +74,10 @@ const setupQuickActionCockpit = async (
       await route.fulfill(json({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 0, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 }));
       return;
     }
+    if (pathname === `/api/channels/${channelId}/events/recent`) {
+      await route.fulfill(json({ entries: [], cursor: null }));
+      return;
+    }
     if (pathname === `/api/channels/${channelId}/events`) {
       await route.fulfill(json({ entries: [], nextCursor: null }));
       return;
@@ -92,6 +96,12 @@ const setupQuickActionCockpit = async (
       const available = await page.evaluate(() => document.documentElement.dataset.counterVariables !== "off");
       onVariableAvailabilityChange(available);
       await route.fulfill(json({ variables: available ? [{ ...variable, value: score }] : [], count: available ? 1 : 0, maximum: 50 }));
+      return;
+    }
+    if (pathname === `/api/channels/${channelId}/variables/availability`) {
+      const available = await page.evaluate(() => document.documentElement.dataset.counterVariables !== "off");
+      onVariableAvailabilityChange(available);
+      await route.fulfill(json({ available }));
       return;
     }
     if (pathname === `/api/channels/${channelId}/broadcast/markers/availability` && route.request().method() === "GET") {

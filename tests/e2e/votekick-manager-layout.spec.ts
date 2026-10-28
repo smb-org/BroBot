@@ -56,6 +56,8 @@ const installApi = async (page: Page): Promise<void> => {
       await fulfillJson(route, { timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 });
     } else if (pathname === `/api/channels/${channelId}/overlays`) {
       await fulfillJson(route, { overlays: [], maximum: 20, elementMaximum: 20 });
+    } else if (pathname === `/api/channels/${channelId}/events/recent`) {
+      await fulfillJson(route, { entries: [], cursor: null });
     } else if (pathname === `/api/channels/${channelId}/events`) {
       await fulfillJson(route, { entries: [], nextCursor: null });
     } else if (pathname === `/api/channels/${channelId}/revisions`) {

@@ -321,3 +321,8 @@ export interface PanelEventsResponse {
   entries: PanelEventEntry[];
   nextCursor: string | null;
 }
+
+export interface PanelRecentEventsResponse {
+  entries: PanelEventEntry[];
+  cursor: string | null;
+}

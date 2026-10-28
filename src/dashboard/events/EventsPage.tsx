@@ -1,7 +1,7 @@
 import "./EventsPage.css";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type RefCallback } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PanelEventEntry, PanelEventFilters, PanelEventsResponse, PanelModuleState } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber, formatTimestamp } from "../locale";
@@ -12,8 +12,7 @@ import { useChannelSettings } from "../data/channel-settings";
 import { browserTimeZone } from "../ui/format-relative-time";
 import { Icon } from "../ui/Icon";
 import { ChipGroup, DataTable, EmptyState, InspectorSection, ListDetail, ListToolbar, LoadState as UiLoadState, LoadStateLines, Popover, Select as UiSelect, StatusLed, SubInspector, useInspectorSelection, type QueryError, type SelectOption, type StatusLedState } from "../ui";
-import { PanelApiError } from "../api";
-import { refreshQuery } from "../data/refresh";
+import { fetchEvents, PanelApiError } from "../api";
 import { dashboardDataKeys } from "../data/keys";
 import { useEventsQuery } from "../data/lists";
 import {
@@ -305,23 +304,91 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
   const channelTimeZone = timeZoneFallback ? browserTimeZone() : settingsQuery.data?.timeZone ?? null;
   const queryClient = useQueryClient();
   const queryKey = useMemo(() => dashboardDataKeys.events(channelId, filters), [channelId, filters]);
+  const headQueryKey = useMemo(() => dashboardDataKeys.eventHead(channelId, filters), [channelId, filters]);
   const identityKey = JSON.stringify(queryKey);
+  const pendingNextPage = useRef<string | null>(null);
+  const headIsSeeded = queryClient.getQueryData<PanelEventsResponse>(headQueryKey) !== undefined;
+  // Revalidate a head when a cached filter is reactivated. On first mount, preserve
+  // the query client's stale-time policy for any history page used as initial data.
+  const refreshHeadOnActivation = useMemo(() => {
+    const hasCachedHead = queryClient.getQueryData<PanelEventsResponse>(headQueryKey) !== undefined;
+    const hasCachedHistory = queryClient.getQueryData<{ pages: PanelEventsResponse[] }>(queryKey)?.pages[0] !== undefined;
+    return hasCachedHead || (hasCachedHistory && queryClient.getDefaultOptions().queries?.staleTime !== 0);
+  }, [headQueryKey, queryClient, queryKey]);
+  const mergeHeadIntoHistory = useCallback((refreshedHead: PanelEventsResponse): void => {
+    queryClient.setQueryData<{ pages: PanelEventsResponse[]; pageParams: (string | null)[] }>(queryKey, (current) => {
+      const currentHead = current?.pages[0];
+      if (current === undefined || currentHead === undefined || currentHead === refreshedHead) return current;
+      const merged = mergeEventEntries(currentHead.entries, refreshedHead.entries);
+      const headLimit = Math.max(currentHead.entries.length, refreshedHead.entries.length);
+      const refreshedPages = [{ ...refreshedHead, entries: merged.slice(0, headLimit) }, ...current.pages.slice(1)];
+      const displaced = merged.slice(headLimit);
+      const secondPage = refreshedPages[1];
+      if (secondPage !== undefined && displaced.length > 0) {
+        refreshedPages[1] = { ...secondPage, entries: mergeEventEntries(displaced, secondPage.entries) };
+      }
+      return { ...current, pages: refreshedPages };
+    });
+  }, [queryClient, queryKey]);
+  const headQuery = useQuery({
+    queryKey: headQueryKey,
+    queryFn: async ({ signal }) => {
+      const refreshedHead = await fetchEvents(channelId, null, signal, filters);
+      mergeHeadIntoHistory(refreshedHead);
+      return refreshedHead;
+    },
+    enabled: headIsSeeded || refreshHeadOnActivation || query.data?.pages[0] !== undefined,
+    ...(!headIsSeeded ? {
+      initialData: query.data?.pages[0],
+      initialDataUpdatedAt: query.dataUpdatedAt,
+    } : {}),
+    staleTime: refreshHeadOnActivation ? 0 : queryClient.getDefaultOptions().queries?.staleTime ?? 0,
+    ...(refreshHeadOnActivation ? { refetchOnMount: "always" as const } : {}),
+    refetchOnWindowFocus: false,
+  });
   const pages = query.data?.pages ?? EMPTY_EVENT_PAGES;
   const entries = useMemo(() => mergeEventEntries([], pages.flatMap((page) => page.entries)), [pages]);
+  useEffect(() => {
+    const firstPage = query.data?.pages[0];
+    if (firstPage === undefined) return;
+    if (queryClient.getQueryData<PanelEventsResponse>(headQueryKey) === undefined) {
+      queryClient.setQueryData(headQueryKey, firstPage, { updatedAt: query.dataUpdatedAt });
+    }
+  }, [headQueryKey, query.data?.pages, query.dataUpdatedAt, queryClient]);
   const invalidateEvents = useCallback((): void => {
-    void refreshQuery(queryClient, queryKey);
-  }, [queryClient, queryKey]);
+    const targetQueryKey = query.data?.pages[0] === undefined ? queryKey : headQueryKey;
+    void queryClient.invalidateQueries({ queryKey: targetQueryKey, exact: true });
+  }, [headQueryKey, query.data?.pages, queryClient, queryKey]);
   const refreshOnReturn = useCallback((): void => {
-    if (query.isStale && !query.isFetching) invalidateEvents();
-  }, [invalidateEvents, query.isFetching, query.isStale]);
+    if (!query.isFetching && !headQuery.isFetching) invalidateEvents();
+  }, [headQuery.isFetching, invalidateEvents, query.isFetching]);
   const loadNextPage = useCallback((): void => {
-    if (query.isFetching || query.isPlaceholderData || !query.hasNextPage) return;
+    if (query.isFetchingNextPage || query.isPlaceholderData || !query.hasNextPage) return;
+    if (query.isFetching) {
+      pendingNextPage.current = identityKey;
+      return;
+    }
     void query.fetchNextPage({ cancelRefetch: false });
-  }, [query]);
+  }, [identityKey, query]);
+  useEffect(() => {
+    if (pendingNextPage.current === null) return;
+    if (pendingNextPage.current !== identityKey) {
+      pendingNextPage.current = null;
+      return;
+    }
+    if (query.isPlaceholderData || !query.hasNextPage) {
+      pendingNextPage.current = null;
+      return;
+    }
+    if (query.isFetching) return;
+    pendingNextPage.current = null;
+    void query.fetchNextPage({ cancelRefetch: false });
+  }, [identityKey, query]);
   const nextCursor = pages.at(-1)?.nextCursor ?? null;
-  const error = query.error instanceof PanelApiError
-    ? apiErrorText(query.error.code, dashboardTexts().errors.dataLoadFailed)
-    : query.isError ? dashboardTexts().errors.dataLoadFailed : null;
+  const activeError = headQuery.error ?? query.error;
+  const error = activeError instanceof PanelApiError
+    ? apiErrorText(activeError.code, dashboardTexts().errors.dataLoadFailed)
+    : query.isError || headQuery.isError ? dashboardTexts().errors.dataLoadFailed : null;
   return <EventsPageContent
     identityKey={identityKey}
     channelId={channelId}
@@ -333,8 +400,8 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     entries={entries}
     nextCursor={query.isPlaceholderData ? null : nextCursor}
     loading={query.isPending}
-    fetching={query.isFetching && !query.isFetchingNextPage}
-    queryStale={query.isStale}
+    fetching={(query.isFetching && !query.isFetchingNextPage) || headQuery.isFetching}
+    queryStale={query.isStale || headQuery.isStale}
     error={error}
     loadingNextPage={query.isFetchingNextPage}
     pages={pages}
@@ -643,7 +710,7 @@ const EventsPageFilterState = ({
                     ]}
                   />
                 </div>
-                <EventFeedEnd nextCursor={nextCursor} loadingNextPage={loadingNextPage || fetching} onNextPage={onNextPage} />
+                <EventFeedEnd nextCursor={nextCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
               </div>
               <div className="events-page__pagination-slot">
                 {loading || eventEntries.length === 0 ? null : nextCursor === null

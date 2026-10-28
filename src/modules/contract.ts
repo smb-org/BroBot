@@ -1497,6 +1497,12 @@ export interface ModuleVariableReferenceUsage {
 
 export interface ModuleVariableReferences {
   usages: (db: D1Database, channelId: string, name: string) => Promise<readonly ModuleVariableReferenceUsage[]>;
+  /** Read usages for a complete channel variable list with one query per module. */
+  usagesForVariables?: (
+    db: D1Database,
+    channelId: string,
+    names: readonly string[],
+  ) => Promise<ReadonlyMap<string, readonly ModuleVariableReferenceUsage[]>>;
   validateRename?: (
     db: D1Database,
     channelId: string,
@@ -1589,6 +1595,31 @@ export const settingsVariableReferences = (
         : [];
     });
   },
+  async usagesForVariables(db, channelId, names) {
+    const result = new Map<string, ModuleVariableReferenceUsage[]>(names.map((name) => [name, []]));
+    if (names.length === 0) return result;
+    const row = await db.prepare(
+      "SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+    ).bind(channelId, moduleId).first<{ settings: string }>();
+    if (row === null) return result;
+    let settings: unknown;
+    try {
+      settings = JSON.parse(row.settings) as unknown;
+    } catch {
+      return result;
+    }
+    if (!isRecord(settings)) return result;
+    for (const name of names) {
+      const usages = result.get(name);
+      if (usages === undefined) continue;
+      const token = channelVariableTemplateToken(name);
+      for (const field of fields) {
+        const value = settings[field];
+        if (typeof value === "string" && value.includes(token)) usages.push({ moduleId, itemName: field, kind: "template" });
+      }
+    }
+    return result;
+  },
   rename(db, channelId, from, to, guard) {
     const oldToken = channelVariableTemplateToken(from);
     const nextToken = channelVariableTemplateToken(to);
@@ -1657,6 +1688,27 @@ export const columnVariableReferences = ({
         itemName: row.item_name || row.item_id,
         kind: "template" as const,
       }));
+    },
+    async usagesForVariables(db, channelId, names) {
+      const uniqueNames = [...new Set(names)];
+      const result = new Map<string, ModuleVariableReferenceUsage[]>(uniqueNames.map((name) => [name, []]));
+      if (uniqueNames.length === 0) return result;
+      const rows = await db.prepare(
+        `SELECT requested.value AS variable_name,
+                ${quotedIdColumn} AS item_id, ${quotedItemNameColumn} AS item_name
+           FROM json_each(?) AS requested
+           JOIN ${quotedTableName} AS item
+             ON item.channel_id = ? AND instr(item.${quotedTextColumn}, '{var.' || requested.value || '}') > 0
+          ORDER BY requested.value, item.${quotedItemNameColumn}, item.${quotedIdColumn}`,
+      ).bind(JSON.stringify(uniqueNames), channelId).all<{ variable_name: string; item_id: string; item_name: string }>();
+      for (const row of rows.results) {
+        result.get(row.variable_name)?.push({
+          moduleId,
+          itemName: row.item_name || row.item_id,
+          kind: "template",
+        });
+      }
+      return result;
     },
     async validateRename(db, channelId, from, to): Promise<ModuleVariableRenameValidation> {
       const oldToken = `{var.${from}}`;
@@ -1790,6 +1842,13 @@ interface ModuleImmediateActionConditionContext {
 
 export type ModuleImmediateActionCondition = "streamLive" | "moduleEnabled" | {
   check: (context: ModuleImmediateActionConditionContext) => Promise<ModuleImmediateActionAvailability>;
+} | {
+  query: {
+    moduleId: string;
+    part: string;
+    load: (channelId: string, signal: AbortSignal) => Promise<unknown>;
+    evaluate: (value: unknown) => ModuleImmediateActionAvailability;
+  };
 };
 
 export interface ModuleImmediateActionContentProperties {

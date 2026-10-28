@@ -119,10 +119,11 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
       : streams[0]?.streamId ?? null;
   const streamId = historyRange === "stream" ? currentStreamId ?? undefined : undefined;
   const historyPart = historyRange === "live" ? "history-live" : `history-stream-${streamId ?? "latest"}`;
+  const selectedStreamIsLive = historyRange === "stream" && streamId !== undefined && streamId === status?.belaboxStreamId;
   const historyQuery = useModuleQuery(channelId, "belabox", historyPart,
     (signal) => loadBelaboxHistory(channelId, historyRange, streamId, signal), {
       enabled: status?.mode === "interval",
-      refetchInterval: realtimeStatus === "connected" ? false : 15_000,
+      refetchInterval: realtimeStatus === "connected" || (historyRange === "stream" && !selectedStreamIsLive) ? false : 60_000,
     });
   const history: readonly BelaboxHistoryPoint[] = historyQuery.data ?? [];
 

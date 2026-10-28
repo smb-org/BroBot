@@ -4,16 +4,36 @@ import { columnVariableReferences } from "../contract";
 import type {
   BotModule,
   ModuleImmediateActionCondition,
+  ModuleLiveTileSnapshot,
   ModuleScheduleInputChangeReason,
   ModuleTemplateUsageSource,
 } from "../contract";
 import { timersModuleCatalog } from "./contracts/catalog";
+import type { Timer } from "./contracts";
 import { timerRoutes } from "./routes";
 import { validateTimerTemplateMutation } from "./service";
 import { timersQuickActionTexts } from "./panel/quick-action-locale";
 
 const settingsSchema = z.object({});
 const TIMER_MODULE_ID = "timers";
+
+export const loadTimersForCockpit = async (channelId: string, signal: AbortSignal): Promise<Timer[]> =>
+  (await import("./panel/service")).loadUpcomingTimers(channelId, signal);
+
+const timersHavePlannedOccurrence = (timers: readonly Timer[]): boolean =>
+  timers.some((timer) => timer.enabled && timer.nextRunAt !== null && Number.isFinite(Date.parse(timer.nextRunAt)));
+
+export const timerLiveTileSnapshots = (timers: readonly Timer[], now: number): ModuleLiveTileSnapshot[] => timers.flatMap((timer) => {
+  if (!timer.enabled || timer.nextRunAt === null || Date.parse(timer.nextRunAt) <= now) return [];
+  return [{
+    kind: "upcoming" as const,
+    id: timer.id,
+    category: "timer" as const,
+    name: timer.name.trim() || timer.id,
+    at: timer.nextRunAt,
+    detail: null,
+  }];
+}).sort((left, right) => Date.parse(left.at) - Date.parse(right.at)).slice(0, 10);
 
 const templateUsageSources = async (db: D1Database, channelId: string): Promise<readonly ModuleTemplateUsageSource[]> => {
   const result = await db.prepare("SELECT timer_id, name, message_text FROM timers WHERE channel_id = ?")
@@ -35,10 +55,14 @@ const timerVariableReferences = columnVariableReferences({
 });
 
 const timerHasPlannedOccurrence: ModuleImmediateActionCondition = {
-  check: async ({ channelId, signal }) => {
-    const timers = await (await import("./panel/service")).loadUpcomingTimers(channelId, signal);
-    const planned = timers.some((timer) => timer.enabled && timer.nextRunAt !== null && Number.isFinite(Date.parse(timer.nextRunAt)));
-    return { reason: planned ? null : timersQuickActionTexts.noPlanned };
+  query: {
+    moduleId: TIMER_MODULE_ID,
+    part: "upcoming",
+    load: loadTimersForCockpit,
+    evaluate: (value) => {
+      const timers = Array.isArray(value) ? value as Timer[] : [];
+      return { reason: timersHavePlannedOccurrence(timers) ? null : timersQuickActionTexts.noPlanned };
+    },
   },
 };
 
@@ -87,19 +111,7 @@ export const timersModule: BotModule<typeof settingsSchema> = {
   }],
   liveTile: {
     load: async (channelId, signal) => {
-      const timers = await (await import("./panel/service")).loadUpcomingTimers(channelId, signal);
-      const now = Date.now();
-      return timers.flatMap((timer) => {
-        if (!timer.enabled || timer.nextRunAt === null || Date.parse(timer.nextRunAt) <= now) return [];
-        return [{
-          kind: "upcoming" as const,
-          id: timer.id,
-          category: "timer" as const,
-          name: timer.name.trim() || timer.id,
-          at: timer.nextRunAt,
-          detail: null,
-        }];
-      }).sort((left, right) => Date.parse(left.at) - Date.parse(right.at)).slice(0, 10);
+      return timerLiveTileSnapshots(await loadTimersForCockpit(channelId, signal), Date.now());
     },
   },
   eventSubTypes: ["channel.chat.message"],
