@@ -838,6 +838,7 @@ export class ChannelObject extends DurableObject<Env> {
   private pointsInitialization: Promise<void> | null = null;
   private pointRoundRecoveryInitialized = false;
   private pointRoundRecoveryInitialization: Promise<void> | null = null;
+  private quizOverlayDeliveryPending: boolean | null = null;
   // ponytail: This Set is per-instance memory and is empty after hibernation, so the residual window is bounded by the security alarm. Persist token IDs in DO storage if that window needs to be shorter.
   private recentlyBoundOverlayTokenIds = new Set<string>();
 
@@ -846,8 +847,7 @@ export class ChannelObject extends DurableObject<Env> {
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     void ctx.blockConcurrencyWhile(async () => {
       try {
-        await this.recoverQuizOverlaySnapshotDelivery();
-        await this.deliverPendingQuizOverlaySnapshot();
+        await this.ensureQuizOverlayDeliveryAlarm();
       } catch {
         // The pending snapshot and retry alarm remain durable for the next wake.
       }
@@ -872,6 +872,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   private writeQuizOverlaySnapshotSync(input: QuizOverlaySnapshotWrite): ModuleQuizOverlaySnapshot | null {
     const previous = this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY);
+    this.cacheQuizOverlayDeliveryStatus(previous);
     if ("broadcastSequence" in input) {
       if (previous === undefined || !Number.isSafeInteger(input.broadcastSequence) || input.broadcastSequence < 0) return null;
       const pendingSequence = this.pendingQuizOverlaySequence(previous);
@@ -884,6 +885,7 @@ export class ChannelObject extends DurableObject<Env> {
         pendingBroadcastSequence: nextPendingSequence,
       };
       this.ctx.storage.kv.put(QUIZ_OVERLAY_SNAPSHOT_KEY, updated);
+      this.cacheQuizOverlayDeliveryStatus(updated);
       if (nextPendingSequence === null) this.clearQuizOverlayDeliveryAlarmSync();
       else this.writeQuizOverlayDeliveryAlarmSync(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
       return updated;
@@ -912,6 +914,7 @@ export class ChannelObject extends DurableObject<Env> {
       },
     };
     this.ctx.storage.kv.put(QUIZ_OVERLAY_SNAPSHOT_KEY, snapshot);
+    this.cacheQuizOverlayDeliveryStatus(snapshot);
     this.writeQuizOverlayDeliveryAlarmSync(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
     return snapshot;
   }
@@ -976,7 +979,9 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public readQuizOverlaySnapshot(): Promise<ModuleQuizOverlaySnapshot | null> {
-    return Promise.resolve(this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY) ?? null);
+    const snapshot = this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY);
+    this.cacheQuizOverlayDeliveryStatus(snapshot);
+    return Promise.resolve(snapshot ?? null);
   }
 
   public async writeQuizOverlaySnapshot(input: QuizOverlaySnapshotWrite): Promise<ModuleQuizOverlaySnapshot | null> {
@@ -992,9 +997,18 @@ export class ChannelObject extends DurableObject<Env> {
     return snapshot.lastBroadcastSequence < snapshot.sequence ? snapshot.sequence : null;
   }
 
-  private async recoverQuizOverlaySnapshotDelivery(): Promise<void> {
-    const snapshot = this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY);
-    if (snapshot === undefined || this.pendingQuizOverlaySequence(snapshot) === null) return;
+  private cacheQuizOverlayDeliveryStatus(snapshot: ModuleQuizOverlaySnapshot | undefined): boolean {
+    this.quizOverlayDeliveryPending = snapshot !== undefined && this.pendingQuizOverlaySequence(snapshot) !== null;
+    return this.quizOverlayDeliveryPending;
+  }
+
+  private quizOverlayDeliveryIsPendingSync(): boolean {
+    if (this.quizOverlayDeliveryPending !== null) return this.quizOverlayDeliveryPending;
+    return this.cacheQuizOverlayDeliveryStatus(this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY));
+  }
+
+  private async ensureQuizOverlayDeliveryAlarm(): Promise<void> {
+    if (!this.quizOverlayDeliveryIsPendingSync()) return;
     const currentAlarm = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY)?.[QUIZ_OVERLAY_RETRY_ALARM_KEY];
     if (currentAlarm?.handler !== QUIZ_OVERLAY_RETRY_ALARM_HANDLER) {
       this.ctx.storage.transactionSync(() => {
@@ -1012,6 +1026,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async deliverPendingQuizOverlaySnapshot(): Promise<void> {
+    if (!this.quizOverlayDeliveryIsPendingSync()) return;
     const snapshot = await this.readQuizOverlaySnapshot();
     if (snapshot === null || this.pendingQuizOverlaySequence(snapshot) === null) return;
     const channelId = this.ownChannelId();
@@ -1032,6 +1047,7 @@ export class ChannelObject extends DurableObject<Env> {
       });
       await this.scheduleEarliestAlarm();
     } catch (error: unknown) {
+      this.quizOverlayDeliveryPending = null;
       await this.scheduleQuizOverlaySnapshotRetry();
       throw error;
     }
@@ -1056,7 +1072,6 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Restores local point alarms on the first non-snapshot entry after activation. */
   private async ensurePointRoundRecovery(): Promise<void> {
-    await this.recoverQuizOverlaySnapshotDelivery();
     const pendingInitialization = this.pointRoundRecoveryInitialization;
     if (pendingInitialization !== null) {
       await pendingInitialization;
@@ -5738,6 +5753,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (reason === "settlement_missing" || reason === "settlement_unknown" || reason === "settlement_execution_failed" ||
           reason === "monthly_overflow") {
         await this.cancelPointRounds(moduleId, [roundId]);
+        if (moduleId === "quiz") await this.deliverPendingQuizOverlaySnapshot();
         throw new Error("round_cancelled", { cause: error });
       }
       throw error;
@@ -5808,6 +5824,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (reason === "settlement_missing" || reason === "settlement_unknown" || reason === "settlement_execution_failed" ||
           reason === "monthly_overflow") {
         await this.cancelPointRounds(moduleId, [roundId]);
+        if (moduleId === "quiz") await this.deliverPendingQuizOverlaySnapshot();
         throw new Error("round_cancelled", { cause: error });
       }
       throw error;
@@ -5831,7 +5848,9 @@ export class ChannelObject extends DurableObject<Env> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
-    return this.cancelPointRounds(moduleId, [roundId], undefined, true, quizOverlayPayload);
+    const cancelled = await this.cancelPointRounds(moduleId, [roundId], undefined, true, quizOverlayPayload);
+    if (moduleId === "quiz") await this.deliverPendingQuizOverlaySnapshot();
+    return cancelled;
   }
 
   public async cancelOpenGameRounds(
@@ -5841,7 +5860,9 @@ export class ChannelObject extends DurableObject<Env> {
   ): Promise<number> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
-    return await this.cancelOpenGameRoundsInternal(moduleId, revision, true, quizOverlayPayload);
+    const cancelled = await this.cancelOpenGameRoundsInternal(moduleId, revision, true, quizOverlayPayload);
+    if (moduleId === "quiz") await this.deliverPendingQuizOverlaySnapshot();
+    return cancelled;
   }
 
   private async cancelOpenGameRoundsInternal(
@@ -5879,7 +5900,6 @@ export class ChannelObject extends DurableObject<Env> {
         result: refund.result,
       }));
     }));
-    const quizOverlaySnapshots: ModuleQuizOverlaySnapshot[] = [];
     const cancelled = this.ctx.storage.transactionSync(() => {
       const count = cancelPointRoundsSync(
         this.ctx.storage.sql,
@@ -5897,8 +5917,7 @@ export class ChannelObject extends DurableObject<Env> {
         expectedGateRevision,
         (cancelledRoundId) => {
           if (moduleId !== "quiz") return;
-          const snapshot = this.writeCancelledQuizOverlaySnapshotSync(cancelledRoundId, quizOverlayPayload);
-          if (snapshot !== null) quizOverlaySnapshots.push(snapshot);
+          this.writeCancelledQuizOverlaySnapshotSync(cancelledRoundId, quizOverlayPayload);
         },
         MODULES.find((module) => module.id === moduleId)?.pointRoundCancellationNotice !== false,
       );
@@ -5913,7 +5932,6 @@ export class ChannelObject extends DurableObject<Env> {
       return count;
     });
     if (roundIds.length > 0) await this.scheduleEarliestAlarm();
-    if (quizOverlaySnapshots.length > 0) await this.deliverPendingQuizOverlaySnapshot();
     if (expectedGateRevision !== undefined && flushCancellationNotices) await this.flushPointCancellationNotices();
     return cancelled;
   }
@@ -5933,7 +5951,8 @@ export class ChannelObject extends DurableObject<Env> {
       return { applied: false };
     }
     await this.ensurePointRoundRecovery();
-    return await this.setGameModuleGateInternal(moduleId, closed, revision, true, lastDisabledRevision);
+    const result = await this.setGameModuleGateInternal(moduleId, closed, revision, true, lastDisabledRevision);
+    return result;
   }
 
   private gameModuleGateIsCurrentSync(
@@ -6024,7 +6043,9 @@ export class ChannelObject extends DurableObject<Env> {
       if (!closed && cancellationRevision !== null) this.ensurePointCancellationNoticeAlarmsSync();
       return applied;
     });
-    if (result.applied || roundIds.length > 0 || cancellationRevision !== null || quizOverlaySnapshots.length > 0) await this.scheduleEarliestAlarm();
+    if (result.applied || roundIds.length > 0 || cancellationRevision !== null || quizOverlaySnapshots.length > 0) {
+      await this.scheduleEarliestAlarm();
+    }
     if (quizOverlaySnapshots.length > 0) await this.deliverPendingQuizOverlaySnapshot();
     if (!closed && (result.applied || cancellationRevision !== null)) {
       if (flushCancellationNotices && cancellationRevision !== null) await this.flushPointCancellationNotices();
@@ -6177,7 +6198,10 @@ export class ChannelObject extends DurableObject<Env> {
       }
       return outcome;
     });
-    if (recorded?.cancelled === true) await this.cancelPointRounds(recorded.moduleId, [roundId]);
+    if (recorded?.cancelled === true) {
+      await this.cancelPointRounds(recorded.moduleId, [roundId]);
+      if (recorded.moduleId === "quiz") await this.deliverPendingQuizOverlaySnapshot();
+    }
     else await this.scheduleEarliestAlarm();
     if (recorded !== null && recorded.deadlineAt !== null && state !== "rate_limited") {
       try {
@@ -6406,6 +6430,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (settlement === null) {
         console.error(`Point round ${roundId} has no persisted settlement.`);
         await this.cancelPointRounds(round.module_id, [roundId]);
+        if (round.module_id === "quiz") await this.deliverPendingQuizOverlaySnapshot();
         return;
       }
       try {
@@ -6426,6 +6451,7 @@ export class ChannelObject extends DurableObject<Env> {
     }
     if (round.announce_state === "failed") {
       await this.cancelPointRounds(round.module_id, [roundId]);
+      if (round.module_id === "quiz") await this.deliverPendingQuizOverlaySnapshot();
       return;
     }
     if (round.announce_state === "rate_limited" && round.announce_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS) {
@@ -8384,13 +8410,13 @@ export class ChannelObject extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     await withCommittedPanelResourceDrain(async () => {
-      await this.recoverQuizOverlaySnapshotDelivery();
+      await this.ensurePointRoundRecovery();
+      await this.ensureQuizOverlayDeliveryAlarm();
       try {
         await this.deliverPendingQuizOverlaySnapshot();
       } catch (error: unknown) {
         console.error("Pending quiz overlay delivery failed; its alarm will retry.", error);
       }
-      await this.ensurePointRoundRecovery();
       const alarmTable = await this.ctx.storage.transaction((transaction) => readAlarmScheduleTable(transaction));
       const hasTimerAlarms = Object.keys(alarmTable).some((key) =>
         key.startsWith(`${TIMER_ALARM_PREFIX}timer:`) || key.startsWith(`${TIMER_ALARM_PREFIX}mirror:`));

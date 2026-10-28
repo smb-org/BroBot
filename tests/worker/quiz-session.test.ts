@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { evictDurableObject } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSendResult, sendChatMessage } from "../../src/worker/chat";
 
@@ -448,6 +449,121 @@ describe("quiz answers in the shared point round", () => {
     await expect(object.activeGameRound("quiz")).resolves.toBeNull();
     await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
       payload: { sessionId: roundId, phase: "idle" },
+    });
+  });
+
+  it("finishes quiz cancellation recovery before the alarm delivers its overlay snapshot", async () => {
+    const channelId = `quiz-cancel-recovery-delivery-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const openedAt = Date.now();
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId).run();
+    const overlayId = `overlay-${roundId}`;
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz overlay', ?, ?)",
+    ).bind(overlayId, channelId, new Date(openedAt).toISOString(), new Date(openedAt).toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${roundId}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    const publishSpy = vi.spyOn(ChannelObject.prototype, "publish");
+    await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "announce", phaseEndsAt: null }, {
+      sessionId: roundId,
+      phase: "announce",
+      sessionStartedAt: new Date(openedAt).toISOString(),
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+    await runPointObject(object, async (_target, state) => {
+      state.storage.sql.exec("UPDATE module_gates SET closed = 1, revision = 2 WHERE module_id = 'quiz'");
+      state.storage.sql.exec(
+        "INSERT INTO game_round_cancellations (module_id, revision) VALUES ('quiz', 2)",
+      );
+      await state.storage.deleteAlarm();
+    });
+    await evictDurableObject(object as unknown as DurableObjectStub);
+    publishSpy.mockClear();
+
+    await expect(object.activeGameRound("quiz")).resolves.toBeNull();
+    expect(publishSpy).not.toHaveBeenCalled();
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      pendingBroadcastSequence: 2,
+      sequence: 2,
+      lastBroadcastSequence: 1,
+      payload: { sessionId: roundId, phase: "idle" },
+    });
+
+    const retryAt = await object.getModuleAlarmDeadline("quiz", "overlay-retry");
+    if (retryAt === null) throw new Error("Cancellation delivery alarm was not armed.");
+    vi.setSystemTime(retryAt);
+    await runPointAlarm(object);
+
+    // Only the quiz cancellation counts; panel notifications and other objects' publishes share the prototype spy.
+    expect(publishSpy.mock.calls.filter(([messages]) => JSON.stringify(messages).includes('"modul.quiz.cancel"') &&
+      JSON.stringify(messages).includes(roundId))).toHaveLength(1);
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      pendingBroadcastSequence: null,
+      sequence: 2,
+      lastBroadcastSequence: 2,
+    });
+  });
+
+  it("does no D1 or publish work while startup restores a pending overlay delivery alarm", async () => {
+    const channelId = `quiz-startup-pending-delivery-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId).run();
+    const overlayId = `overlay-${channelId}`;
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz overlay', ?, ?)",
+    ).bind(overlayId, channelId, new Date().toISOString(), new Date().toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${channelId}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    const publishSpy = vi.spyOn(ChannelObject.prototype, "publish").mockRejectedValueOnce(new Error("leave delivery pending"));
+    await expect(capturePointError(object, (target) => target.writeQuizOverlaySnapshot({
+      sessionId: "pending-session",
+      payload: { sessionId: "pending-session", phase: "idle", sessionStartedAt: new Date().toISOString() },
+    }))).resolves.toBe("leave delivery pending");
+    await evictDurableObject(object as unknown as DurableObjectStub);
+    publishSpy.mockClear();
+    const databasePrepare = vi.spyOn(worker.DB, "prepare");
+    databasePrepare.mockClear();
+
+    await expect(object.pointBalance("quiz", "startup-viewer")).resolves.toBe(0);
+
+    expect(databasePrepare).not.toHaveBeenCalled();
+    expect(publishSpy).not.toHaveBeenCalled();
+    const retryAt = await object.getModuleAlarmDeadline("quiz", "overlay-retry");
+    if (retryAt === null) throw new Error("Startup did not preserve the pending delivery alarm.");
+    publishSpy.mockResolvedValue(undefined);
+    vi.setSystemTime(retryAt);
+    await runPointAlarm(object);
+    expect(publishSpy.mock.calls.filter(([messages]) => JSON.stringify(messages).includes('"modul.quiz.cancel"') &&
+      JSON.stringify(messages).includes("pending-session"))).toHaveLength(1);
+  });
+
+  it("does not read quiz overlay storage on warm point entries without a pending snapshot", async () => {
+    const channelId = `quiz-warm-storage-read-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.pointBalance("points", "warm-viewer");
+
+    await runPointObject(object, async (target, state) => {
+      const kvGet = vi.spyOn(state.storage.kv, "get");
+      await target.pointBalance("points", "warm-viewer");
+      await target.pointAccount("points", "warm-viewer");
+
+      expect(kvGet.mock.calls.filter(([key]) => key === "module:quiz:storage:overlay-snapshot")).toHaveLength(0);
     });
   });
 
