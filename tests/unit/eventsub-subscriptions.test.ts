@@ -43,6 +43,23 @@ const insertAppToken = async (database: TestD1Database): Promise<void> => {
   ).bind(ciphertext, "2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
 };
 
+const prepareChatMaintenance = async (database: TestD1Database, channelIds: string[]): Promise<void> => {
+  for (const channelId of channelIds) {
+    await insertChannel(database, channelId);
+    await insertLoginIdentityAndSession(database, channelId, ["channel:bot"]);
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat', 1, '{}')",
+    ).bind(channelId).run();
+  }
+  await database.prepare(
+    `INSERT INTO bot_identity
+      (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+       expires_at, created_at, updated_at)
+     VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+  ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+  await insertAppToken(database);
+};
+
 const confirmBotModerator = async (database: TestD1Database, channelId: string): Promise<void> => {
   await database.prepare(
     `INSERT INTO bot_channel_status (channel_id, is_moderator, checked_at, reason)
@@ -273,7 +290,143 @@ describe("EventSub reconciliation", () => {
     ).first()).resolves.toEqual({ count: 2 });
   });
 
-  it("replaces an untracked owned subscription after create returns the already-exists conflict", async () => {
+  it("refreshes a pending webhook subscription during a coalesced pass after verification enables it", async () => {
+    await prepareChatMaintenance(database, ["kanal-a"]);
+    const subscription = (status: string) => ({
+      id: "subscription-a",
+      type: "channel.chat.message",
+      version: "1",
+      status,
+      condition: { broadcaster_user_id: "kanal-a", user_id: "bot-user" },
+      transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+    });
+    let releasePendingCreation!: (response: Response) => void;
+    const pendingCreation = new Promise<Response>((resolve) => {
+      releasePendingCreation = (response) => { resolve(response); };
+    });
+    let requestCount = 0;
+    const fetcher = vi.fn<typeof fetch>(async (_input, init) => {
+      requestCount += 1;
+      if (init?.method === "POST") return await pendingCreation;
+      if (requestCount === 1) return Response.json({ data: [], pagination: {} });
+      return Response.json({ data: [subscription("enabled")], pagination: {} });
+    });
+
+    const firstRun = maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher, "kanal-a");
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(2); });
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:01:00.000Z", fetcher, "kanal-a");
+    releasePendingCreation(Response.json({ data: [subscription("webhook_callback_verification_pending")] }, { status: 202 }));
+    await firstRun;
+
+    expect(fetcher.mock.calls.map(([, init]) => init?.method ?? "GET"))
+      .toEqual(["GET", "POST", "GET"]);
+    await expect(database.prepare(
+      "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-a" });
+  });
+
+  it("adopts a subscription created by an overlapping channel worker without replacing it", async () => {
+    await prepareChatMaintenance(database, ["kanal-a", "kanal-b"]);
+    const remoteSubscriptions: Array<Record<string, unknown>> = [];
+    let releaseChannelACreation!: (response: Response) => void;
+    const channelACreation = new Promise<Response>((resolve) => {
+      releaseChannelACreation = (response) => { resolve(response); };
+    });
+    const parseCreateRequest = (init: RequestInit | undefined): {
+      type: string;
+      version: string;
+      condition: Record<string, string>;
+      transport: { callback: string };
+    } => {
+      if (typeof init?.body !== "string") throw new Error("Expected a JSON EventSub request body.");
+      return JSON.parse(init.body) as {
+        type: string;
+        version: string;
+        condition: Record<string, string>;
+        transport: { callback: string };
+      };
+    };
+    const createdFromRequest = (init: RequestInit | undefined, id: string): Record<string, unknown> => {
+      const body = parseCreateRequest(init);
+      return {
+        id,
+        type: body.type,
+        version: body.version,
+        status: "enabled",
+        condition: body.condition,
+        transport: { method: "webhook", callback: body.transport.callback },
+      };
+    };
+    const globalFetcher = vi.fn<typeof fetch>(async (_input, init) => {
+      if (init?.method === "POST") {
+        const body = parseCreateRequest(init);
+        if (body.condition.broadcaster_user_id === "kanal-a") {
+          const response = await channelACreation;
+          return response;
+        }
+        if (remoteSubscriptions.some((subscription) =>
+          (subscription.condition as Record<string, string>).broadcaster_user_id === "kanal-b")) {
+          return Response.json({ error: "Conflict", message: "subscription already exists" }, { status: 409 });
+        }
+        const subscription = createdFromRequest(init, "unexpected-global-channel-b");
+        remoteSubscriptions.push(subscription);
+        return Response.json({ data: [subscription] }, { status: 202 });
+      }
+      return Response.json({ data: remoteSubscriptions, pagination: {} });
+    });
+    const channelFetcher = vi.fn<typeof fetch>((_input, init) => {
+      if (init?.method === "POST") {
+        const subscription = createdFromRequest(init, "subscription-b-from-channel-worker");
+        remoteSubscriptions.push(subscription);
+        return Promise.resolve(Response.json({ data: [subscription] }, { status: 202 }));
+      }
+      return Promise.resolve(Response.json({ data: remoteSubscriptions, pagination: {} }));
+    });
+
+    const globalRun = maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", globalFetcher);
+    await vi.waitFor(() => { expect(globalFetcher).toHaveBeenCalledTimes(2); });
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:01:00.000Z", channelFetcher, "kanal-b");
+    const channelBSubscription = remoteSubscriptions.find((subscription) =>
+      (subscription.condition as Record<string, string>).broadcaster_user_id === "kanal-b");
+    expect(channelBSubscription?.id).toBe("subscription-b-from-channel-worker");
+    releaseChannelACreation(Response.json({ data: [createdFromRequest(globalFetcher.mock.calls[1]?.[1], "subscription-a")] }, { status: 202 }));
+    await globalRun;
+
+    expect(globalFetcher.mock.calls.map(([, init]) => init?.method ?? "GET"))
+      .toEqual(["GET", "POST", "POST", "GET"]);
+    expect(globalFetcher.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+    await expect(database.prepare(
+      "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-b' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-b-from-channel-worker" });
+  });
+
+  it("retries the shared inventory after a transient failure", async () => {
+    await prepareChatMaintenance(database, ["kanal-a", "kanal-b"]);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ message: "temporary unavailable" }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ data: [], pagination: {} }, { status: 200 }))
+      .mockResolvedValueOnce(Response.json({ data: [{
+        id: "subscription-b",
+        type: "channel.chat.message",
+        version: "1",
+        status: "enabled",
+        condition: { broadcaster_user_id: "kanal-b", user_id: "bot-user" },
+        transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+      }] }, { status: 202 }));
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
+
+    expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? "GET"))
+      .toEqual(["GET", "GET", "POST"]);
+    await expect(database.prepare(
+      "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toMatchObject({ status: "error" });
+    await expect(database.prepare(
+      "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-b' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-b" });
+  });
+
+  it("adopts an untracked owned subscription after create returns the already-exists conflict", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
     await database.prepare(
@@ -298,21 +451,19 @@ describe("EventSub reconciliation", () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Conflict", message: "subscription already exists; id=e6c8e776-adopted" }), { status: 409 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [remote], pagination: {} }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ ...remote, id: "replacement-id" }] }), { status: 202 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [remote], pagination: {} }), { status: 200 }));
 
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher, "kanal-a");
 
     expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? "GET"))
-      .toEqual(["GET", "POST", "GET", "DELETE", "POST"]);
+      .toEqual(["GET", "POST", "GET"]);
     await expect(database.prepare(
       "SELECT status, reason, subscription_id, secret_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
     ).first()).resolves.toEqual({
       status: "enabled",
       reason: null,
-      subscription_id: "replacement-id",
-      secret_id: "eventsub-v1",
+      subscription_id: "e6c8e776-adopted",
+      secret_id: null,
     });
   });
 
@@ -502,11 +653,12 @@ describe("EventSub reconciliation", () => {
 
     const v1Fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription("1", "v1"), shoutout], pagination: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription("1", "v1"), shoutout], pagination: {} }), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [subscription("2", "v2-replaced")], pagination: {} }), { status: 202 }));
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T02:00:00.000Z", v1Fetcher);
-    expect(v1Fetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? "GET")).toEqual(["GET", "DELETE", "POST"]);
-    const replacementBody = (v1Fetcher.mock.calls[2]?.[1] as RequestInit).body;
+    expect(v1Fetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? "GET")).toEqual(["GET", "GET", "DELETE", "POST"]);
+    const replacementBody = (v1Fetcher.mock.calls[3]?.[1] as RequestInit).body;
     expect(typeof replacementBody).toBe("string");
     const parsedReplacementBody: unknown = JSON.parse(typeof replacementBody === "string" ? replacementBody : "{}");
     expect(parsedReplacementBody).toMatchObject({ version: "2" });
@@ -746,11 +898,22 @@ describe("EventSub reconciliation", () => {
         }],
         pagination: {},
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [{
+          id: "subscription-a",
+          type: "channel.chat.message",
+          version: "1",
+          status: "enabled",
+          condition: { broadcaster_user_id: "kanal-a", user_id: "bot-user" },
+          transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+        }],
+        pagination: {},
+      }), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
 
-    expect(fetcher).toHaveBeenNthCalledWith(2, "https://api.twitch.tv/helix/eventsub/subscriptions?id=subscription-a", expect.objectContaining({ method: "DELETE" }));
+    expect(fetcher).toHaveBeenNthCalledWith(3, "https://api.twitch.tv/helix/eventsub/subscriptions?id=subscription-a", expect.objectContaining({ method: "DELETE" }));
     await expect(database.prepare(
       "SELECT status, subscription_id, reason FROM eventsub_subscriptions WHERE channel_id = 'kanal-a'",
     ).first()).resolves.toEqual({ status: "missing", subscription_id: null, reason: "channel_or_consent_missing" });

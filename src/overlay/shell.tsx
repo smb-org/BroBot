@@ -418,11 +418,11 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
           if (next.overlay !== null) startRealtime();
           return true;
         },
-        onOpen: (reconnected, bootstrapReused) => {
+        onOpen: () => {
           stopReloadTimer();
           stopMaximumReloadTimer();
           stopRetryTimer();
-          if (reconnected && !bootstrapReused) void load();
+          void load();
         },
         onMessage: (message) => {
           const current = bootstrapRef.current;

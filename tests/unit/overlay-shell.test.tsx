@@ -1021,18 +1021,19 @@ describe("OverlayShell and OverlayCanvas", () => {
     await waitFor(() => expect(container.querySelector('[data-element="element-first"] .brobot-variable__value')).toHaveTextContent("3,400"));
   });
 
-  it("reuses the initial bootstrap after the first successful socket open", async () => {
+  it("reconciles the initial bootstrap after the first successful socket open", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(overlayPayload());
     vi.stubGlobal("fetch", fetcher);
 
     render(<OverlayShell token="fictional-token" elementId={null} />);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     act(() => realtimeCallbacks?.onOpen?.(false));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
 
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("installs a pre-connect bootstrap and skips the duplicate load after reconnect", async () => {
+  it("installs a pre-connect bootstrap and reconciles after reconnect", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(overlayPayload(1200));
     vi.stubGlobal("fetch", fetcher);
 
@@ -1047,8 +1048,7 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(bootstrapReused).toBe(true);
     expect(container.querySelector('[data-element="element-first"] .brobot-variable__value')?.textContent).toContain("3,400");
     act(() => realtimeCallbacks?.onOpen?.(true, true));
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
   });
 
   it("keeps the last rendered content through a transient bootstrap reload failure and retries", async () => {
