@@ -2138,12 +2138,6 @@ describe("ChannelObject realtime path", () => {
         PRIMARY KEY (channel_id, module_id, name)
       )`,
     ).run();
-    // The BELABOX sample write coalesces its live revision through these tables.
-    await database.prepare(
-      `CREATE TABLE IF NOT EXISTS panel_belabox_sample_batch_markers (
-        channel_id TEXT PRIMARY KEY, changed INTEGER NOT NULL DEFAULT 0
-      )`,
-    ).run();
     await database.prepare(
       `CREATE TABLE IF NOT EXISTS panel_resource_revisions (
         channel_id TEXT NOT NULL, resource TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,

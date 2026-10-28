@@ -1114,33 +1114,8 @@ export const writeBelaboxFetch = async (
     historyWrites.push(minuteWrite, streamWrite);
   }
   const beforeSampleWrites = [...(input.beforeSampleWrites ?? [])];
-  const coalesceSampleBatch = hasHistory || beforeSampleWrites.length > 0;
-  const sampleBatchMarker = coalesceSampleBatch
-    ? db.prepare("INSERT INTO panel_belabox_sample_batch_markers (channel_id) VALUES (?)").bind(input.channelId)
-    : null;
-  const finalizeSampleBatch = coalesceSampleBatch
-    ? db.prepare(
-      `INSERT INTO panel_resource_revisions (channel_id, resource, revision)
-       SELECT DISTINCT marker.channel_id, dependency.resource, 1
-         FROM panel_belabox_sample_batch_markers AS marker
-         JOIN panel_resource_dependencies AS dependency
-           ON dependency.source_table IN ('belabox_status', 'belabox_minutes', 'belabox_streams')
-        WHERE marker.channel_id = ? AND marker.changed = 1
-       ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1`,
-    ).bind(input.channelId)
-    : null;
-  const clearSampleBatchMarker = coalesceSampleBatch
-    ? db.prepare("DELETE FROM panel_belabox_sample_batch_markers WHERE channel_id = ?").bind(input.channelId)
-    : null;
-  const statusResultIndex = beforeSampleWrites.length + Number(sampleBatchMarker !== null);
-  const results = await db.batch([
-    ...(sampleBatchMarker === null ? [] : [sampleBatchMarker]),
-    ...beforeSampleWrites,
-    statusWrite,
-    ...historyWrites,
-    ...(finalizeSampleBatch === null ? [] : [finalizeSampleBatch]),
-    ...(clearSampleBatchMarker === null ? [] : [clearSampleBatchMarker]),
-  ]);
+  const statusResultIndex = beforeSampleWrites.length;
+  const results = await db.batch([...beforeSampleWrites, statusWrite, ...historyWrites]);
   const statusResult = results[statusResultIndex];
   if ((statusResult?.meta.changes ?? 0) === 0) return null;
   const returnedStatus = statusResult?.results[0] as { revision?: unknown; sample_json?: unknown } | undefined;

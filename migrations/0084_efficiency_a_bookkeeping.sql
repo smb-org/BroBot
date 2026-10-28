@@ -9,11 +9,6 @@ CREATE TABLE panel_event_log_retention_resources (
   PRIMARY KEY (channel_id, resource)
 );
 
-CREATE TABLE panel_belabox_sample_batch_markers (
-  channel_id TEXT PRIMARY KEY,
-  changed INTEGER NOT NULL DEFAULT 0 CHECK (changed IN (0, 1))
-);
-
 INSERT OR IGNORE INTO panel_global_resource_revisions (resource, revision)
 VALUES ('bot.identity.status', 1);
 
@@ -42,8 +37,8 @@ BEGIN
 END;
 
 -- `checked_at` is visible on the channel overview and system panel. A newer
--- moderator check refreshes that channel's local data without invalidating the
--- shared channel list; changes to the moderator result keep the old fan-out.
+-- moderator check refreshes this channel's local data and list entry; changes
+-- to the moderator result keep the global fan-out.
 DROP TRIGGER panel_rev_bot_status_update;
 CREATE TRIGGER panel_rev_bot_status_update AFTER UPDATE ON bot_channel_status
 WHEN OLD.is_moderator IS NOT NEW.is_moderator
@@ -59,11 +54,13 @@ WHEN OLD.is_moderator IS NEW.is_moderator
   AND OLD.checked_at IS NOT NEW.checked_at
 BEGIN
   INSERT INTO panel_resource_revisions SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'bot_channel_status' AND resource NOT IN ('channels') ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
+  INSERT INTO panel_resource_revisions (channel_id, resource, revision) VALUES (NEW.channel_id, 'channels', 1) ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
 END;
 
 -- The overview reads stream state and its freshness; the Belabox live panel
 -- also depends on stream lifecycle. Heartbeat-only observations advance those
--- local resources. State/session transitions still revise the global list.
+-- local resources and this channel's list entry. State/session transitions
+-- still revise the global list.
 DROP TRIGGER panel_rev_stream_update;
 CREATE TRIGGER panel_rev_stream_update AFTER UPDATE ON channel_stream_state
 WHEN OLD.state IS NOT NEW.state
@@ -83,6 +80,7 @@ WHEN OLD.state IS NEW.state
   AND (OLD.changed_at IS NOT NEW.changed_at OR OLD.checked_at IS NOT NEW.checked_at)
 BEGIN
   INSERT INTO panel_resource_revisions SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'channel_stream_state' AND resource <> 'channels' ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
+  INSERT INTO panel_resource_revisions (channel_id, resource, revision) VALUES (NEW.channel_id, 'channels', 1) ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
 END;
 
 -- Bot status `updated_at` is a global health heartbeat. Only actual status or
@@ -205,87 +203,19 @@ BEGIN
   INSERT INTO panel_resource_revisions SELECT OLD.channel_id, 'module:ads:schedule', 1 WHERE OLD.module_id = 'ads' ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
 END;
 
--- A sample status row is always written by writeBelaboxFetch. During a sample
--- batch, status and history triggers stage a changed marker and advance the
--- shared live resource once at the end. This includes earlier stream
--- finalizers, even when a later status write loses its optimistic guard.
-DROP TRIGGER panel_rev_belabox_status_insert;
-DROP TRIGGER panel_rev_belabox_status_update;
-CREATE TRIGGER panel_rev_belabox_status_insert AFTER INSERT ON belabox_status
-WHEN NOT EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-BEGIN
-  INSERT INTO panel_resource_revisions SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'belabox_status' ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
-END;
-CREATE TRIGGER panel_rev_belabox_status_update AFTER UPDATE ON belabox_status
-WHEN NOT EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-BEGIN
-  INSERT INTO panel_resource_revisions SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'belabox_status' ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
-END;
-
-CREATE TRIGGER panel_rev_belabox_status_sample_insert AFTER INSERT ON belabox_status
-WHEN EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-BEGIN
-  UPDATE panel_belabox_sample_batch_markers SET changed = 1 WHERE channel_id = NEW.channel_id;
-END;
-CREATE TRIGGER panel_rev_belabox_status_sample_update AFTER UPDATE ON belabox_status
-WHEN EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-BEGIN
-  UPDATE panel_belabox_sample_batch_markers SET changed = 1 WHERE channel_id = NEW.channel_id;
-END;
-
-DROP TRIGGER panel_rev_belabox_minutes_insert;
 DROP TRIGGER panel_rev_belabox_minutes_update;
-CREATE TRIGGER panel_rev_belabox_minutes_insert AFTER INSERT ON belabox_minutes
-WHEN NOT EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-BEGIN
-  INSERT INTO panel_resource_revisions SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'belabox_minutes' ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
-END;
 CREATE TRIGGER panel_rev_belabox_minutes_update AFTER UPDATE ON belabox_minutes
-WHEN NOT EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-  AND (OLD.channel_id IS NOT NEW.channel_id
-    OR OLD.minute_at IS NOT NEW.minute_at
-    OR OLD.stream_id IS NOT NEW.stream_id
-    OR OLD.samples IS NOT NEW.samples
-    OR OLD.connected_samples IS NOT NEW.connected_samples
-    OR OLD.bitrate_min IS NOT NEW.bitrate_min
-    OR OLD.bitrate_max IS NOT NEW.bitrate_max
-    OR OLD.bitrate_sum IS NOT NEW.bitrate_sum
-    OR OLD.rtt_max IS NOT NEW.rtt_max
-    OR OLD.rtt_sum IS NOT NEW.rtt_sum
-    OR OLD.dropped_delta IS NOT NEW.dropped_delta)
+WHEN OLD.channel_id IS NOT NEW.channel_id
+  OR OLD.minute_at IS NOT NEW.minute_at
+  OR OLD.stream_id IS NOT NEW.stream_id
+  OR OLD.samples IS NOT NEW.samples
+  OR OLD.connected_samples IS NOT NEW.connected_samples
+  OR OLD.bitrate_min IS NOT NEW.bitrate_min
+  OR OLD.bitrate_max IS NOT NEW.bitrate_max
+  OR OLD.bitrate_sum IS NOT NEW.bitrate_sum
+  OR OLD.rtt_max IS NOT NEW.rtt_max
+  OR OLD.rtt_sum IS NOT NEW.rtt_sum
+  OR OLD.dropped_delta IS NOT NEW.dropped_delta
 BEGIN
   INSERT INTO panel_resource_revisions SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'belabox_minutes' ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
-END;
-CREATE TRIGGER panel_rev_belabox_minutes_sample_insert AFTER INSERT ON belabox_minutes
-WHEN EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-BEGIN
-  UPDATE panel_belabox_sample_batch_markers SET changed = 1 WHERE channel_id = NEW.channel_id;
-END;
-CREATE TRIGGER panel_rev_belabox_minutes_sample_update AFTER UPDATE ON belabox_minutes
-WHEN EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-BEGIN
-  UPDATE panel_belabox_sample_batch_markers SET changed = 1 WHERE channel_id = NEW.channel_id;
-END;
-
-DROP TRIGGER panel_rev_belabox_streams_insert;
-DROP TRIGGER panel_rev_belabox_streams_update;
-CREATE TRIGGER panel_rev_belabox_streams_insert AFTER INSERT ON belabox_streams
-WHEN NOT EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-BEGIN
-  INSERT INTO panel_resource_revisions SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'belabox_streams' ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
-END;
-CREATE TRIGGER panel_rev_belabox_streams_sample_insert AFTER INSERT ON belabox_streams
-WHEN EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-BEGIN
-  UPDATE panel_belabox_sample_batch_markers SET changed = 1 WHERE channel_id = NEW.channel_id;
-END;
-CREATE TRIGGER panel_rev_belabox_streams_sample_update AFTER UPDATE ON belabox_streams
-WHEN EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-BEGIN
-  UPDATE panel_belabox_sample_batch_markers SET changed = 1 WHERE channel_id = NEW.channel_id;
-END;
-CREATE TRIGGER panel_rev_belabox_streams_update AFTER UPDATE ON belabox_streams
-WHEN NOT EXISTS (SELECT 1 FROM panel_belabox_sample_batch_markers WHERE channel_id = NEW.channel_id)
-BEGIN
-  INSERT INTO panel_resource_revisions SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'belabox_streams' ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
 END;

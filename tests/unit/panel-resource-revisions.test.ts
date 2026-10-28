@@ -1592,7 +1592,6 @@ describe("panel resource revisions", () => {
         "api_source_quota",
         "auth_sessions",
         "belabox_bitrate_windows",
-        "panel_belabox_sample_batch_markers",
         "bot_channel_status_check_locks",
         "channel_game_history",
         "channel_statistics",

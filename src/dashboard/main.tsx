@@ -1055,8 +1055,8 @@ export const DashboardApp = (): ReactElement => {
   const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
   const realtimeStatus = useDashboardRealtimeStatus(realtimeChannelId ?? "");
   const offlineRefetchInterval = realtimeStatus === "connected" ? false : 180_000;
-  // The global bot heartbeat is carried by /api/channels, which has no
-  // per-channel socket fan-out and needs a connected-state refresh.
+  // The global bot heartbeat is carried by /api/channels and the System
+  // snapshot; both need a connected-state refresh without socket fan-out.
   const botHeartbeatRefetchInterval = realtimeStatus === "connected" ? 180_000 : offlineRefetchInterval;
   const routeRef = useRef(route);
   useLayoutEffect(() => { routeRef.current = route; }, [route]);
@@ -1131,7 +1131,7 @@ export const DashboardApp = (): ReactElement => {
   const systemQuery = useSystemQuery(
     systemChannelId ?? "",
     !authenticationRequired && systemChannelId !== null,
-    systemChannelId === null ? false : offlineRefetchInterval,
+    systemChannelId === null ? false : botHeartbeatRefetchInterval,
   );
   const [, setFreshnessTick] = useState(0);
   const routeKey = dashboardRoutePath(route);

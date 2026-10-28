@@ -393,6 +393,9 @@ describe("D1 no-op writes and panel revisions", () => {
     expect(resourceRevision(after, "moderator-checked", "channel.overview")).toBe(
       resourceRevision(before, "moderator-checked", "channel.overview") + 1,
     );
+    expect(resourceRevision(after, "moderator-checked", "channels")).toBe(
+      resourceRevision(before, "moderator-checked", "channels") + 1,
+    );
     expect(after.resources.filter(({ channel_id }) => channel_id === "moderator-other")).toEqual(
       before.resources.filter(({ channel_id }) => channel_id === "moderator-other"),
     );
@@ -418,6 +421,9 @@ describe("D1 no-op writes and panel revisions", () => {
     const after = readPanelRevisionState(database);
     expect(resourceRevision(after, "stream-checked", "channel.overview")).toBe(
       resourceRevision(before, "stream-checked", "channel.overview") + 1,
+    );
+    expect(resourceRevision(after, "stream-checked", "channels")).toBe(
+      resourceRevision(before, "stream-checked", "channels") + 1,
     );
     expect(after.resources.filter(({ channel_id }) => channel_id === "stream-other")).toEqual(
       before.resources.filter(({ channel_id }) => channel_id === "stream-other"),
@@ -549,7 +555,7 @@ describe("D1 no-op writes and panel revisions", () => {
     }
   });
 
-  it("revises the Belabox live resource once for a sample with history writes", async () => {
+  it("revises the Belabox live resource for each sample write", async () => {
     await insertChannel(database, "belabox-sample");
     await insertChannel(database, "belabox-other");
     await database.prepare(
@@ -607,12 +613,9 @@ describe("D1 no-op writes and panel revisions", () => {
     await expect(database.prepare(
       "SELECT (SELECT COUNT(*) FROM belabox_minutes WHERE channel_id = 'belabox-sample') AS minutes, (SELECT COUNT(*) FROM belabox_streams WHERE channel_id = 'belabox-sample') AS streams",
     ).first()).resolves.toEqual({ minutes: 1, streams: 2 });
-    await expect(database.prepare(
-      "SELECT COUNT(*) AS count FROM panel_belabox_sample_batch_markers WHERE channel_id = 'belabox-sample'",
-    ).first()).resolves.toEqual({ count: 0 });
     const after = readPanelRevisionState(database);
     expect(resourceRevision(after, "belabox-sample", "module:belabox:live")).toBe(
-      resourceRevision(before, "belabox-sample", "module:belabox:live") + 1,
+      resourceRevision(before, "belabox-sample", "module:belabox:live") + 4,
     );
     expect(after.resources.filter(({ channel_id }) => channel_id === "belabox-other")).toEqual(
       before.resources.filter(({ channel_id }) => channel_id === "belabox-other"),
