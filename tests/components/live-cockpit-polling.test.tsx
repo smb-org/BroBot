@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ImmediateActions as ImmediateActionsComponent } from "../../src/dashboard/ImmediateActions";
 
-const mockActions = vi.hoisted(() => ({ recordManualFailure: false }));
+const mockActions = vi.hoisted(() => ({ manualResult: null as "failure" | "success" | null }));
 
 vi.mock("../../src/dashboard/LiveCockpitBroadcast", () => ({ LiveCockpitBroadcast: () => null }));
 vi.mock("../../src/dashboard/LiveCockpitParts", () => ({
@@ -14,14 +14,20 @@ vi.mock("../../src/dashboard/ImmediateActions", async (importOriginal) => {
   return {
     ...original,
     ImmediateActions: (props: Parameters<typeof original.ImmediateActions>[0]) => {
-      if (!mockActions.recordManualFailure) {
+      if (mockActions.manualResult === null) {
         const OriginalImmediateActions = original.ImmediateActions;
         return <OriginalImmediateActions {...props} />;
       }
       return <button onClick={() => {
         const observedAt = props.onActionStart?.("belabox", "check-belabox") ?? Date.now();
-        props.onActionFailure?.("belabox", "check-belabox", observedAt);
-      }}>Record manual BELABOX failure</button>;
+        if (mockActions.manualResult === "failure") {
+          props.onActionFailure?.("belabox", "check-belabox", observedAt);
+        } else {
+          props.onActionResult?.("belabox", {
+            belaboxSample: { connected: true, bitrateKbps: 2_500, sampledAt: Date.now() },
+          }, observedAt);
+        }
+      }}>{mockActions.manualResult === "failure" ? "Record manual BELABOX failure" : "Record manual BELABOX success"}</button>;
     },
   };
 });
@@ -34,6 +40,7 @@ import { moduleQueryKey } from "../../src/dashboard/data/module-query";
 import { renderWithQuery } from "../query-test-utils";
 
 const channelId = "idle-cockpit-channel";
+const belaboxLed = (): HTMLElement | null => document.querySelector(".live-cockpit-header__indicators .status-led:nth-child(2)");
 
 const overview = {
   channelId,
@@ -67,7 +74,7 @@ const responseBody = (path: string): unknown => {
 
 afterEach(() => {
   cleanup();
-  mockActions.recordManualFailure = false;
+  mockActions.manualResult = null;
   vi.unstubAllGlobals();
   vi.useRealTimers();
   setDashboardRealtimeStatus(channelId, "offline");
@@ -171,7 +178,7 @@ describe("idle live cockpit polling", () => {
   });
 
   it("keeps a later manual BELABOX check ahead of a status request that finishes afterward", async () => {
-    mockActions.recordManualFailure = true;
+    mockActions.manualResult = "failure";
     const paths: string[] = [];
     let finishStatus: ((response: Response) => void) | undefined;
     const delayedStatus = new Promise<Response>((resolve) => { finishStatus = resolve; });
@@ -210,5 +217,109 @@ describe("idle live cockpit polling", () => {
     });
 
     await waitFor(() => expect(screen.getByText((text) => text.includes(unavailable)).textContent).toContain(unavailable));
+  });
+
+  it("lets a later healthy status observation replace a manual failure", async () => {
+    mockActions.manualResult = "failure";
+    let statusCalls = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(input, window.location.href);
+      if (url.pathname.endsWith("/modules/belabox/status")) {
+        statusCalls += 1;
+        if (statusCalls === 1) return Promise.resolve(new Response(JSON.stringify({ error: "temporary_failure" }), { status: 503 }));
+        return Promise.resolve(new Response(JSON.stringify({
+          configured: true,
+          updatedAt: new Date().toISOString(),
+          mode: "interval",
+          sample: {
+            at: new Date().toISOString(), connected: true, bitrateKbps: 2_500, rttMs: 1, latencyMs: 1, network: 0,
+            droppedPackets: 0, phase: "healthy",
+          },
+          errorCode: null, polling: true, pollingDesired: true, streamId: "stream-1", belaboxStreamId: "stream-1",
+          alertNotice: null, fetchFailureNotice: false, intervalSeconds: 30,
+        }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      return Promise.resolve(new Response(JSON.stringify(responseBody(url.pathname)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+    const view = renderWithQuery(<LiveCockpit overview={overview} modules={modules} modulesLoaded viewerUserId={channelId} onNavigate={() => undefined} />, {}, {
+      gcTime: 600_000,
+      staleTime: 600_000,
+    });
+
+    const unavailable = dashboardTexts().liveCockpit.belaboxUnavailable;
+    await waitFor(() => expect(screen.getByText((text) => text.includes(unavailable)).textContent).toContain(unavailable));
+    fireEvent.click(screen.getByRole("button", { name: "Record manual BELABOX failure" }));
+
+    await act(async () => {
+      await view.queryClient.refetchQueries({ queryKey: moduleQueryKey(channelId, "belabox", "status"), exact: true });
+    });
+
+    await waitFor(() => expect(belaboxLed()?.textContent).toContain("2.500"));
+  });
+
+  it("lets a newer successful manual check replace a status-query error", async () => {
+    mockActions.manualResult = "success";
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(input, window.location.href);
+      if (url.pathname.endsWith("/modules/belabox/status")) {
+        return Promise.resolve(new Response(JSON.stringify({ error: "temporary_failure" }), { status: 503 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify(responseBody(url.pathname)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+    renderWithQuery(<LiveCockpit overview={overview} modules={modules} modulesLoaded viewerUserId={channelId} onNavigate={() => undefined} />, {}, {
+      gcTime: 600_000,
+      staleTime: 600_000,
+    });
+
+    const unavailable = dashboardTexts().liveCockpit.belaboxUnavailable;
+    await waitFor(() => expect(screen.getByText((text) => text.includes(unavailable)).textContent).toContain(unavailable));
+    fireEvent.click(screen.getByRole("button", { name: "Record manual BELABOX success" }));
+
+    await waitFor(() => expect(belaboxLed()?.textContent).toContain("2.500"));
+  });
+
+  it("retains the request timestamp when a status refetch structurally shares response data", async () => {
+    mockActions.manualResult = "failure";
+    const healthyStatus = {
+      configured: true,
+      updatedAt: new Date().toISOString(),
+      mode: "interval",
+      sample: {
+        at: new Date().toISOString(), connected: true, bitrateKbps: 2_500, rttMs: 1, latencyMs: 1, network: 0,
+        droppedPackets: 0, phase: "healthy",
+      },
+      errorCode: null, polling: true, pollingDesired: true, streamId: "stream-1", belaboxStreamId: "stream-1",
+      alertNotice: null, fetchFailureNotice: false, intervalSeconds: 30,
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(input, window.location.href);
+      const body = url.pathname.endsWith("/modules/belabox/status") ? healthyStatus : responseBody(url.pathname);
+      return Promise.resolve(new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+    const view = renderWithQuery(<LiveCockpit overview={overview} modules={modules} modulesLoaded viewerUserId={channelId} onNavigate={() => undefined} />, {}, {
+      gcTime: 600_000,
+      staleTime: 600_000,
+    });
+
+    await waitFor(() => expect(belaboxLed()?.textContent).toContain("2.500"));
+    fireEvent.click(screen.getByRole("button", { name: "Record manual BELABOX failure" }));
+    const unavailable = dashboardTexts().liveCockpit.belaboxUnavailable;
+    await waitFor(() => expect(screen.getByText((text) => text.includes(unavailable)).textContent).toContain(unavailable));
+
+    await act(async () => {
+      await view.queryClient.refetchQueries({ queryKey: moduleQueryKey(channelId, "belabox", "status"), exact: true });
+    });
+
+    await waitFor(() => expect(belaboxLed()?.textContent).toContain("2.500"));
+    expect(view.queryClient.getQueryData<{ observedAt?: number }>(moduleQueryKey(channelId, "belabox", "status"))?.observedAt).toEqual(expect.any(Number));
   });
 });

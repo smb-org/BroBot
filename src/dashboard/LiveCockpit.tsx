@@ -35,7 +35,19 @@ import {
   type LiveCockpitBelaboxObservation,
 } from "./live-cockpit-belabox";
 
-const belaboxStatusRequestStarts = new WeakMap<BelaboxStatusResponse, number>();
+interface BelaboxStatusQueryData extends BelaboxStatusResponse {
+  observedAt: number;
+}
+
+class BelaboxStatusQueryError extends Error {
+  readonly observedAt: number;
+
+  constructor(observedAt: number) {
+    super("BELABOX status request failed.");
+    this.name = "BelaboxStatusQueryError";
+    this.observedAt = observedAt;
+  }
+}
 
 const formatDuration = (startedAt: string | null | undefined, now: number): string => {
   if (startedAt == null) return "—";
@@ -122,12 +134,16 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
     enabled: modulesLoaded && moduleState.get("votekick") === true,
     refetchInterval: realtimeStatus === "connected" ? false : 5_000,
   });
-  const belaboxStatusQuery = useModuleQuery<BelaboxStatusResponse>(overview.channelId, "belabox", "status", async (signal) => {
-    const service = await import("../modules/belabox/panel/service");
+  const belaboxStatusQuery = useModuleQuery<BelaboxStatusQueryData>(overview.channelId, "belabox", "status", async (signal) => {
     const observedAt = nextBelaboxObservationAt();
-    const status = await service.loadBelaboxStatus(overview.channelId, signal);
-    belaboxStatusRequestStarts.set(status, observedAt);
-    return status;
+    try {
+      const service = await import("../modules/belabox/panel/service");
+      const status = await service.loadBelaboxStatus(overview.channelId, signal);
+      return { ...status, observedAt };
+    } catch (error) {
+      if (signal.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+      throw new BelaboxStatusQueryError(observedAt);
+    }
   }, {
       enabled: belaboxEnabled,
       refetchInterval: realtimeStatus === "connected" ? false : 5_000,
@@ -184,13 +200,21 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
 
   const polledBelaboxObservation = belaboxStatusQuery.data === undefined
     ? null
-    : belaboxObservationFromStatus(belaboxStatusQuery.data, belaboxStatusRequestStarts.get(belaboxStatusQuery.data) ?? 0);
+    : belaboxObservationFromStatus(belaboxStatusQuery.data, Number.isFinite(belaboxStatusQuery.data.observedAt)
+      ? belaboxStatusQuery.data.observedAt
+      : belaboxStatusQuery.dataUpdatedAt);
   const savedBelaboxObservation = belaboxObservationState?.channelId === overview.channelId ? belaboxObservationState.observation : null;
-  const belaboxObservation = polledBelaboxObservation === null
+  const latestSuccessObservation = polledBelaboxObservation === null
     ? savedBelaboxObservation
     : savedBelaboxObservation === null ? polledBelaboxObservation : latestBelaboxObservation(savedBelaboxObservation, polledBelaboxObservation);
-  const belaboxUnavailable = belaboxStatusQuery.isError || (belaboxObservation !== null &&
-    (belaboxObservation.failed || belaboxObservationIsExpired(belaboxObservation, now)));
+  const statusFailureObservation = belaboxStatusQuery.error instanceof BelaboxStatusQueryError
+    ? failedBelaboxObservation(belaboxStatusQuery.error.observedAt, latestSuccessObservation)
+    : null;
+  const belaboxObservation = [polledBelaboxObservation, savedBelaboxObservation, statusFailureObservation]
+    .filter((observation): observation is LiveCockpitBelaboxObservation => observation !== null)
+    .reduce<LiveCockpitBelaboxObservation | null>((latest, observation) => latestBelaboxObservation(latest, observation), null);
+  const belaboxUnavailable = belaboxObservation !== null &&
+    (belaboxObservation.failed || belaboxObservationIsExpired(belaboxObservation, now));
   const sampleConnected = belaboxObservation !== null && !belaboxUnavailable &&
     belaboxObservation.sampledAt !== null && belaboxObservation.connected;
   const sampleBitrate = belaboxObservation?.bitrateKbps ?? 0;
@@ -204,7 +228,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
   const chatVotingFailed = chatVotingEnabled && chatVotingQuery.isError;
   const timerFailed = modulesLoaded && moduleState.get("timers") === true && timerQuery.isError;
   const votekickFailed = modulesLoaded && moduleState.get("votekick") === true && votekickQuery.isError;
-  const belaboxFailed = belaboxEnabled && belaboxStatusQuery.isError;
+  const belaboxFailed = belaboxEnabled && belaboxObservation?.failed === true;
   const liveDataFailed = liveQuery.isError || liveQuery.data?.failed === true || overlaysQuery.isError || eventsQuery.isError || currentBroadcastQueryState === "error" || chatVotingFailed || timerFailed || votekickFailed || belaboxFailed;
   const liveDataPending = liveQuery.isPending || overlaysQuery.isPending || eventsQuery.isPending || currentBroadcastQueryState === "pending" || (chatVotingEnabled && chatVotingQuery.isPending) || (modulesLoaded && moduleState.get("timers") === true && timerQuery.isPending) || (modulesLoaded && moduleState.get("votekick") === true && votekickQuery.isPending);
   const footerStatus: "ok" | "warn" | "loading" = !botConnected || liveDataFailed
