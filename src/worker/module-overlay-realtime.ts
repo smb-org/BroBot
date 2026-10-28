@@ -41,7 +41,8 @@ export const prepareModuleOverlayRealtimeMessage = async (
   modules: readonly BotModule[] = MODULES,
 ): Promise<ModuleOverlayMessageResult> => {
   if (!OVERLAY_ACTION_TYPE_PATTERN.test(action.type) || !action.elementKind.startsWith(`${moduleId}.`) ||
-      !modules.find((module) => module.id === moduleId)?.overlayElements?.some(({ kind }) => kind === action.elementKind) ||
+      !(modules.find((module) => module.id === moduleId)?.overlayElements?.some(({ kind }) => kind === action.elementKind) === true ||
+        modules.find((module) => module.id === moduleId)?.overlayRealtimeElementKinds?.includes(action.elementKind) === true) ||
       action.recipientConfig !== undefined && (!/^[a-z][A-Za-z0-9_]{0,31}$/u.test(action.recipientConfig.field) ||
         action.recipientConfig.value.length === 0 || action.recipientConfig.value.length > 80)) {
     return { outcome: "rejected" };

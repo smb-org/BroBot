@@ -289,6 +289,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
           ? nextBelaboxObservationAt()
           : Date.now()}
         onActionResult={(moduleId: string, result: ModuleImmediateActionResult, observedAt: number) => {
+          if (moduleId === "quiz") refreshLiveData();
           if (moduleId === "belabox" && result.belaboxSample !== undefined) {
             recordBelaboxObservation(overview.channelId, (previous) => successfulManualBelaboxObservation(
               observedAt,
@@ -318,6 +319,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
           failed={liveQuery.data?.failed ?? liveQuery.isError}
           now={now}
           timeZone={timeZone}
+          streamState={overview.streamState}
           onMessage={(text, tone) => { showFooterMessage({ text, ...(tone === undefined ? {} : { tone }) }); }}
           onRefresh={refreshLiveData}
         />

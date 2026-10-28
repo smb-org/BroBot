@@ -137,14 +137,15 @@ export default function QuizSetEditor({ channelId, language, canManage, deleting
         const changedWhileSaving = JSON.stringify(draftRef.current) !== submittedDraft;
         if (mounted.current) {
           baselineDraftRef.current = committedDraft;
-          dirtyRef.current = changedWhileSaving;
           if (changedWhileSaving) advanceBaseline(committedDraft);
           else {
             draftRef.current = committedDraft;
             acceptDraft(committedDraft);
           }
+          const currentDraftDirty = JSON.stringify(draftRef.current) !== JSON.stringify(committedDraft);
+          dirtyRef.current = currentDraftDirty;
           setBaselineRevision(savedSet.revision);
-          setSaved(!changedWhileSaving);
+          setSaved(!currentDraftDirty);
           setValidationCode(null);
           setSaveError(undefined);
           setConflicted(false);

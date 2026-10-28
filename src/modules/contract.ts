@@ -1034,6 +1034,12 @@ export interface ModulePointRoundResult {
   resolvedAt: string;
 }
 
+export interface ModulePointRoundDeadline {
+  roundId: string;
+  data: unknown;
+  deadlineAt: number;
+}
+
 export interface ModulePointRoundAnnouncement {
   roundId: string;
   data: unknown;
@@ -1184,11 +1190,30 @@ export interface PointActiveRound {
   deadlineAt: number | null;
 }
 
+export interface PointResolvedRound {
+  roundId: string;
+  data: unknown;
+  result: unknown;
+  resolvedAt: string;
+}
+
 /** Funded participants of one round: total count and stake, plus the first logins in join order. */
 export interface PointRoundParticipants {
   count: number;
   totalStake: number;
   logins: string[];
+}
+
+interface PointRoundParticipantRecord {
+  accountId: string;
+  login: string;
+  stake: number;
+  data: unknown;
+}
+
+export interface PointRoundChoiceResult {
+  status: "recorded" | "round_closed";
+  replayed: boolean;
 }
 
 export interface PointRoundAttackResult {
@@ -1288,10 +1313,25 @@ export interface ModulePointsAccess {
     ) => Promise<{ roundId: string; replayed: boolean }>;
     active: () => Promise<PointActiveRound | null>;
     listOpen: () => Promise<PointActiveRound[]>;
+    recentlyResolved: (maxAgeMs: number) => Promise<PointResolvedRound | null>;
     markAnnounced: (roundId: string, deadlineAt: number, alarmKey: string) => Promise<void>;
     join: (roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown) => Promise<PointJoinResult>;
     /** Reads the round's participant count and total stake, with at most `nameLimit` logins. */
     participants: (roundId: string, nameLimit: number) => Promise<PointRoundParticipants>;
+    /** Reads participant data inside the channel Durable Object for round reveal and settlement work. */
+    participantRecords: (roundId: string) => Promise<PointRoundParticipantRecord[]>;
+    /** Replaces one participant's response for the active quiz question, keyed by the chat message operation id. */
+    answerChoice: (
+      roundId: string,
+      operationId: string,
+      accountId: string,
+      login: string,
+      questionIndex: number,
+      choice: number,
+      messageAt: number,
+    ) => Promise<PointRoundChoiceResult>;
+    /** Persists module round state and resets its shared deadline/alarm; a null deadline pauses the round. */
+    update: (roundId: string, data: unknown, deadlineAt: number | null) => Promise<void>;
     answer: (roundId: string, operationId: string, accountId: string, login: string, graceS: number, messageAt: number) => Promise<PointRoundAnswerResult>;
     attack: (roundId: string, operationId: string, accountId: string, login: string, damage: number, messageAt: number) => Promise<PointRoundAttackResult>;
     resolve: (roundId: string, settlement: { kind: string; params: unknown }) => Promise<PointsApplyResult>;
@@ -1726,7 +1766,7 @@ export interface ModulePanelProperties {
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
 
-type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "duel" | "counter" | "test-message" | "marker" | "timer";
+type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "duel" | "quiz" | "skip-forward" | "player-pause" | "player-play" | "square" | "counter" | "test-message" | "marker" | "timer";
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
@@ -1835,6 +1875,16 @@ export type ModuleLiveTileSnapshot =
     maxHp: number;
     attackers: number;
     closesAt: string;
+  }
+  | {
+    kind: "quiz";
+    sessionId: string;
+    setName: string;
+    phase: "announce" | "open" | "reveal" | "results";
+    questionIndex: number;
+    questionCount: number;
+    paused: boolean;
+    phaseEndsAt: string | null;
   }
   | {
     kind: "upcoming";
@@ -2167,14 +2217,26 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   routes?: Hono<ModuleRouteEnvironment>;
   /** Overlay presentation declarations, with view and editor chunks loaded on demand. */
   overlayElements?: readonly ModuleOverlayElementDefinition[];
+  /** Realtime element kinds a later overlay slice will implement without registering an element UI yet. */
+  overlayRealtimeElementKinds?: readonly string[];
   /** Durable alarm handlers registered through the shared host contract. */
   alarms?: readonly ModuleAlarmDefinition[];
   /** Serializes this module's alarm and point-round lifecycle mutations per channel. */
   serializeLifecycleMutations?: boolean;
+  /** Serializes point-round deadline callbacks and defers resolution notifications to recovery alarms. */
+  serializePointRoundDeadline?: boolean;
   /** Reconciles accepted start metadata, even if the round was cancelled before announcement. */
   onPointRoundOpened?: (context: ModuleAlarmContext, round: ModulePointRoundAnnouncement) => Promise<void>;
+  /** Runs after the shared start announcement has opened the round and before its module-owned phase begins. */
+  onPointRoundAnnounced?: (context: ModuleAlarmContext, round: ModulePointRoundAnnouncement) => Promise<void>;
   /** Receives an internal, replayable notification immediately after round resolution and during watchdog recovery. */
   onPointRoundResolved?: (context: ModuleAlarmContext, round: ModulePointRoundResult) => Promise<void>;
+  /** Handles a shared round deadline when a module owns multiple phases inside one points round. */
+  onPointRoundDeadline?: (context: ModuleAlarmContext, round: ModulePointRoundDeadline) => Promise<void>;
+  /** Preserves a module-owned deadline when its post-announcement lifecycle hook fails. */
+  preservePointRoundDeadlineOnAnnouncementFailure?: boolean;
+  /** Retries channel-control-suppressed start announcements without consuming the attempt limit. */
+  retrySuppressedPointRoundAnnouncements?: boolean;
   /** Whether cancelling funded rounds queues the shared refund notice. Defaults to true. */
   pointRoundCancellationNotice?: boolean;
   /** Formats the persisted result of a resolved points round for retryable chat delivery. */

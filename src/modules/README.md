@@ -1408,8 +1408,7 @@ und Paneltexte sind zweisprachig in Modul- und Panelkatalogen hinterlegt.
 ### Quiz (`quiz`)
 
 Quiz verwaltet kanalbezogene Fragensets in `quiz_sets` und ihre geordneten Fragen
-in `quiz_questions`. Es benötigt das Punkte-Modul, enthält aber in diesem Slice
-weder Chatbefehle noch Sitzungs- oder Spielablauf. Beim ersten Aktivieren erhält
+in `quiz_questions`. Es benötigt das Punkte-Modul. Beim ersten Aktivieren erhält
 ein leerer Kanal ein fünf Fragen kleines Beispielset in seiner Kanalsprache;
 beim erneuten Aktivieren bleiben vorhandene Sets erhalten.
 
@@ -1419,6 +1418,32 @@ zwei bis vier Optionen und genau einen markierten Lösungseintrag. Änderungen
 werden als Entwurf gesammelt und explizit gespeichert. Set- und Fragenmutationen
 verwenden die FAQ-Autorisierung und den Audit-Batch; die Revisionstrigger der
 beiden Tabellen aktualisieren `module:quiz:data`.
+
+Das Cockpit kann bei laufendem Stream eine Sitzung aus einem Set mit aktiven
+Fragen starten und alle oder die ersten N Fragen einfrieren. Eine Quizsitzung
+liegt als gemeinsamer `game_rounds`-Round im Channel Durable Object. Pro Frage
+läuft sie durch Ankündigung, Antwortfenster und Lösung; die Antwortzeit beginnt
+erst nach dem Senden der Frage. Die Standardeinstellungen sind 30 Sekunden für
+Antworten, 8 Sekunden für die Lösung und ein Hauspott von 500 Punkten. `0` Punkte
+schaltet die Auszahlung aus, nicht die Rangliste. Chatankündigungen lassen sich
+abschalten. Die Einstellungen öffnen im Fragensets-Panel über „Einstellungen“
+(`panelManagesSettings`) und werden explizit gespeichert.
+
+Im Chat zählen exakt gesendete Zahlen von `1` bis zur Optionszahl. Die letzte
+Nachricht eines Viewers pro Frage zählt; Twitch-Nachrichten-IDs verhindern eine
+doppelte Verarbeitung. Die Rangliste sortiert nach richtigen Antworten und teilt
+Plätze bei Gleichstand. Der Pott wird gleichmäßig je richtiger Antwort verteilt;
+ganze Restpunkte verbleiben beim Hauskonto. `Weiter`, `Pause`/`Fortsetzen` und
+`Beenden` wirken auf die laufende Sitzung. Ein frühes Ende verteilt die Punkte
+für bereits beantwortete Fragen; das Deaktivieren des Moduls bricht die Sitzung
+ohne Auszahlung ab.
+
+Die Sitzung speichert beim Start einen Fragen-Snapshot, sodass spätere Set-Edits
+den Ablauf nicht ändern. Nach der Abrechnung werden die einzelnen Antworten
+gelöscht; im Round-Ergebnis bleiben Fragen, Antwortverteilungen, Teilnehmerzahl,
+Trefferquote und die Rangliste für Ergebnisanzeige und Statistiken erhalten.
+Phasen-, Lösungs- und Ergebnisereignisse werden über Quiz-Realtime-Nachrichten
+für das spätere Overlay-Modul veröffentlicht.
 
 ## Checkliste für ein neues Modul
 

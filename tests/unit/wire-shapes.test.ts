@@ -398,7 +398,7 @@ const expectedModuleSettings = {
     timeoutTextEnabled: true,
   },
   channel_events: {},
-  quiz: {},
+  quiz: { answerSeconds: 30, chatQuestions: true, pot: 500, revealSeconds: 8 },
   emote_slots: {
     symbols: [
       { id: "cherry", source: "emoji", code: "🍒", name: "Cherry", weight: 4, triple: 3, isJackpot: false },
