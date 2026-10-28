@@ -505,8 +505,9 @@ const ensureAccountSync = (sql: PointsSql, accountId: string, login: string | nu
     `INSERT INTO point_accounts (account_id, kind, login, balance, welcome_pending, updated_at)
      VALUES (?, ?, ?, 0, 0, ?)
      ON CONFLICT(account_id) DO UPDATE SET
-       login = CASE WHEN excluded.login IS NULL THEN point_accounts.login ELSE excluded.login END,
-       updated_at = CASE WHEN excluded.login IS NULL THEN point_accounts.updated_at ELSE excluded.updated_at END`,
+       login = excluded.login,
+       updated_at = excluded.updated_at
+     WHERE excluded.login IS NOT NULL AND point_accounts.login IS NOT excluded.login`,
     accountId,
     kind,
     login,
@@ -815,7 +816,9 @@ export const touchPointAccountSync = (
     return { accountExisted: false, welcomePending: true, startBonus };
   }
   if (existing.kind !== "viewer") throw new Error("account_kind_conflict");
-  sql.exec("UPDATE point_accounts SET login = ?, updated_at = ? WHERE account_id = ?", login, now, accountId);
+  if (existing.login !== login) {
+    sql.exec("UPDATE point_accounts SET login = ?, updated_at = ? WHERE account_id = ?", login, now, accountId);
+  }
   const bonus = operationSync(sql, `bonus:${accountId}`);
   let bookedStartBonus: number | null = null;
   if (bonus !== null) {

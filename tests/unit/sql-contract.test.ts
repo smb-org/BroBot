@@ -224,6 +224,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["belaboxHistoryModuleRevisionGuard", belaboxHistoryModuleRevisionGuard],
   ["belaboxStreamStateSnapshotGuard", belaboxStreamStateSnapshotGuard],
   ["expectedOpenStreamSetGuard.sql", belaboxExpectedOpenStreamSetGuard("channel-id", null, []).sql],
+  ["channelScope", "WHERE channel_id = ?"],
   ["assignments.join(\",\\n            \")", "polling = 0, history_sample_json = NULL, history_module_revision = NULL, revision = revision + 1"],
   ["changes.join(\" OR \")", "polling != 0 OR history_sample_json IS NOT NULL OR history_module_revision IS NOT NULL"],
   ["guard", authorizeModuleMutation("channel-id", actor, now).sql],

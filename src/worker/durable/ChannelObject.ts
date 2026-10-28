@@ -5924,8 +5924,40 @@ export class ChannelObject extends DurableObject<Env> {
     revision: number,
     lastDisabledRevision: number | null = null,
   ): Promise<{ applied: boolean }> {
+    if (this.pointRoundRecoveryInitialized && this.gameModuleGateIsCurrentSync(
+      moduleId,
+      closed,
+      revision,
+      lastDisabledRevision,
+    )) {
+      return { applied: false };
+    }
     await this.ensurePointRoundRecovery();
     return await this.setGameModuleGateInternal(moduleId, closed, revision, true, lastDisabledRevision);
+  }
+
+  private gameModuleGateIsCurrentSync(
+    moduleId: string,
+    closed: boolean,
+    revision: number,
+    lastDisabledRevision: number | null,
+  ): boolean {
+    this.ensurePointsSchema();
+    const existingGate = this.ctx.storage.sql.exec<{
+      revision: number;
+      closed: number;
+      last_disabled_revision: number;
+    }>(
+      "SELECT revision, closed, last_disabled_revision FROM module_gates WHERE module_id = ?",
+      moduleId,
+    ).toArray()[0];
+    if (existingGate === undefined || existingGate.revision !== revision || existingGate.closed !== Number(closed) ||
+        (lastDisabledRevision ?? 0) > existingGate.last_disabled_revision) return false;
+    if (closed) return true;
+    return this.ctx.storage.sql.exec<{ present: number }>(
+      "SELECT EXISTS(SELECT 1 FROM game_round_cancellations WHERE module_id = ?) AS present",
+      moduleId,
+    ).one().present === 0;
   }
 
   private async setGameModuleGateInternal(
@@ -5938,6 +5970,9 @@ export class ChannelObject extends DurableObject<Env> {
     await this.ensurePointsInitialized();
     if (lastDisabledRevision !== null && (!Number.isSafeInteger(lastDisabledRevision) || lastDisabledRevision < 1)) {
       throw new Error("invalid_revision");
+    }
+    if (this.gameModuleGateIsCurrentSync(moduleId, closed, revision, lastDisabledRevision)) {
+      return { applied: false };
     }
     const cancellation = closed
       ? undefined
@@ -5989,7 +6024,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (!closed && cancellationRevision !== null) this.ensurePointCancellationNoticeAlarmsSync();
       return applied;
     });
-    await this.scheduleEarliestAlarm();
+    if (result.applied || roundIds.length > 0 || cancellationRevision !== null || quizOverlaySnapshots.length > 0) await this.scheduleEarliestAlarm();
     if (quizOverlaySnapshots.length > 0) await this.deliverPendingQuizOverlaySnapshot();
     if (!closed && (result.applied || cancellationRevision !== null)) {
       if (flushCancellationNotices && cancellationRevision !== null) await this.flushPointCancellationNotices();
@@ -6797,7 +6832,7 @@ export class ChannelObject extends DurableObject<Env> {
       termFilter,
     );
     if (result.status === "opened" || result.activeBallot !== undefined) {
-      await this.notifyCommittedPanelResources();
+      await this.publishCommittedDurablePanelResources();
     }
     if (result.status === "opened") {
       return { status: "opened" };
@@ -6817,7 +6852,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
     const result = await castStoredBallot(this.ballotStorage(moduleId), channelId, moduleId, ballotId, userId, choice, options);
     if (result.status === "counted" || result.status === "changed") {
-      await this.notifyCommittedPanelResources();
+      await this.publishCommittedDurablePanelResources();
     }
     return result;
   }
@@ -6834,7 +6869,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (channelId === null) return { status: "not_open", counts: [], revision: 0 };
     const result = await castStoredBallotTerm(this.ballotStorage(moduleId), channelId, moduleId, ballotId, userId, term, matchText);
     if (result.status === "counted" || result.status === "changed" || result.status === "overflow") {
-      await this.notifyCommittedPanelResources();
+      await this.publishCommittedDurablePanelResources();
     }
     return result;
   }
@@ -6846,7 +6881,7 @@ export class ChannelObject extends DurableObject<Env> {
   ): Promise<BallotSnapshot | null> {
     await this.ensurePointRoundRecovery();
     const snapshot = await setStoredBallotBlockedTerms(this.ballotStorage(moduleId), moduleId, ballotId, blockedTerms);
-    if (snapshot !== null) await this.notifyCommittedPanelResources();
+    if (snapshot !== null) await this.publishCommittedDurablePanelResources();
     return snapshot;
   }
 
@@ -6868,7 +6903,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (approval === null) return { status: "not_open", snapshot: null };
     const result = await approveStoredBallotTerm(this.ballotStorage(moduleId), moduleId, ballotId, term);
     if (result.status === "approved" && result.snapshot !== null) {
-      await this.notifyCommittedPanelResources();
+      await this.publishCommittedDurablePanelResources();
     }
     return result;
   }
@@ -6884,7 +6919,7 @@ export class ChannelObject extends DurableObject<Env> {
       );
     });
     if (snapshot?.outcome !== undefined) {
-      await this.notifyCommittedPanelResources();
+      await this.publishCommittedDurablePanelResources();
     }
     return snapshot;
   }
@@ -6913,7 +6948,7 @@ export class ChannelObject extends DurableObject<Env> {
         hardDeleteAt,
       );
     });
-    if (!hasOpen) await this.notifyCommittedPanelResources();
+    if (!hasOpen) await this.publishCommittedDurablePanelResources();
     return hasOpen;
   }
 
@@ -6924,7 +6959,7 @@ export class ChannelObject extends DurableObject<Env> {
   public async closeBallot(moduleId: string, ballotId: string): Promise<BallotSnapshot | null> {
     await this.ensurePointRoundRecovery();
     const result = await closeStoredBallot(this.ballotStorage(moduleId), moduleId, ballotId);
-    if (result !== null) await this.notifyCommittedPanelResources();
+    if (result !== null) await this.publishCommittedDurablePanelResources();
     await this.clearAlarmEntry(ballotExpiryAlarmKey(moduleId, ballotId));
     return result;
   }
@@ -6940,7 +6975,7 @@ export class ChannelObject extends DurableObject<Env> {
       );
     });
     if (result.outcome !== "not_open" && result.outcome !== "open") {
-      await this.notifyCommittedPanelResources();
+      await this.publishCommittedDurablePanelResources();
     }
     return result;
   }
@@ -7030,6 +7065,10 @@ export class ChannelObject extends DurableObject<Env> {
     const channelId = this.ownChannelId();
     if (channelId === null) return;
     await notifyCommittedResources(this.env, channelId, (revisions) => this.reconcilePanelResources(revisions));
+  }
+
+  private async publishCommittedDurablePanelResources(): Promise<void> {
+    await this.notifyCommittedPanelResources();
   }
 
   public async getPanelResourceRevisions(): Promise<PanelResourceRevisionVector> {
@@ -7485,10 +7524,10 @@ export class ChannelObject extends DurableObject<Env> {
       const table = await this.ensureAlarmScheduleTable();
       const nextAlarmAt = earliestAlarmAt(table, Date.now());
       if (nextAlarmAt === null) {
-        await this.ctx.storage.deleteAlarm();
+        if (await this.ctx.storage.getAlarm() !== null) await this.ctx.storage.deleteAlarm();
         return;
       }
-      await this.ctx.storage.setAlarm(nextAlarmAt);
+      if (await this.ctx.storage.getAlarm() !== nextAlarmAt) await this.ctx.storage.setAlarm(nextAlarmAt);
     } finally {
       release();
     }

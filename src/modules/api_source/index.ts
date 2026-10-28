@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { BotModule, ModuleExternalFetchBudget, ModuleTextBlockConditionDefinition, ModuleTemplateConditionContext, ModuleTemplateValueContext } from "../contract";
 import { apiSourceTemplateVariable, apiSourceModuleCatalog } from "./contracts";
 import type { ApiSource } from "./contracts";
-import { getApiSource, listApiSources, recordApiSourceStatus } from "./adapters/d1";
+import { listApiSources, recordApiSourceStatus } from "./adapters/d1";
 import { ApiSourceFetchError, fetchCachedApiSourceResult, readCachedApiSourceJson } from "./adapters/fetch-json";
 import { evaluateApiSourceExpression, formatApiSourceValue, parseApiSourceName } from "./domain";
 import { apiSourceRoutes } from "./routes";
@@ -18,6 +18,7 @@ const OVERLAY_REFRESH_MS = 60_000;
 const MAXIMUM_EVALUATIONS_PER_RENDER = 10;
 const payloadCacheByInvocation = new WeakMap<ModuleExternalFetchBudget, Map<string, ReturnType<typeof fetchCachedApiSourceResult>>>();
 const evaluationCacheByInvocation = new WeakMap<ModuleExternalFetchBudget, Map<string, Promise<unknown>>>();
+const sourceCatalogByInvocation = new WeakMap<ModuleExternalFetchBudget, Map<string, Promise<readonly ApiSource[]>>>();
 
 const apiSourceNameForVariable = (name: string): string | null => {
   const match = /^api\.([a-z][a-z0-9_]{0,31})$/u.exec(name);
@@ -126,7 +127,20 @@ const outputFor = async (
   name: string,
   context: ModuleTemplateValueContext | ModuleTemplateConditionContext,
 ): Promise<unknown> => {
-  const source = await getApiSource(context.DB, context.channelId, name);
+  let catalog: Promise<readonly ApiSource[]>;
+  const budget = context.externalFetchBudget;
+  if (budget === undefined) {
+    catalog = listApiSources(context.DB, context.channelId);
+  } else {
+    let catalogs = sourceCatalogByInvocation.get(budget);
+    if (catalogs === undefined) {
+      catalogs = new Map();
+      sourceCatalogByInvocation.set(budget, catalogs);
+    }
+    catalog = catalogs.get(context.channelId) ?? listApiSources(context.DB, context.channelId);
+    catalogs.set(context.channelId, catalog);
+  }
+  const source = (await catalog).find((candidate) => candidate.name === name) ?? null;
   if (source === null) throw new Error("API source was not found.");
   const payload = await sourcePayload(source, context);
   let value: unknown;
@@ -202,6 +216,7 @@ export const apiSourceModule: BotModule<typeof settingsSchema> = {
     order: 35,
   },
   templateVariableNamespace: "api_sources",
+  textBlockConditionNamespace: "api_source.",
   templateVariableCatalog: [],
   resolveOverlayTemplateValues: resolveOverlayValues,
   templateUnavailableText: unavailableText,

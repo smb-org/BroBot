@@ -100,14 +100,19 @@ const clearDeliveredPanelResources = async (
   ]);
 };
 
+/** Uses the existing channel index to check one queue entry before the claim. */
+const hasPendingPanelResources = async (database: D1Database): Promise<boolean> =>
+  await database.prepare(
+    `SELECT channel_id FROM panel_resource_pending
+      ORDER BY channel_id
+      LIMIT 1`,
+  ).first<{ channel_id: string }>() !== null;
+
 /** Claims every queued resource for a bounded set of channels in one atomic D1 statement. */
-const claimPendingChannels = async (
-  database: D1Database,
-  preferredChannelId?: string,
-): Promise<ClaimedPanelChannels> => {
+const claimPendingChannels = async (database: D1Database): Promise<ClaimedPanelChannels> => {
   const claimToken = crypto.randomUUID();
   const now = Date.now();
-  await database.prepare(
+  const result = await database.prepare(
     `UPDATE panel_resource_pending
         SET claimed_until = ?, claim_token = ?
       WHERE channel_id IN (
@@ -115,24 +120,18 @@ const claimPendingChannels = async (
           FROM panel_resource_pending
          GROUP BY channel_id
         HAVING MAX(COALESCE(claimed_until, 0)) <= ?
-         ORDER BY CASE WHEN channel_id = ? THEN 0 ELSE 1 END, channel_id
+         ORDER BY channel_id
          LIMIT ?
-      )`,
+      )
+      RETURNING channel_id`,
   ).bind(
     now + PANEL_RESOURCE_CLAIM_LEASE_MS,
     claimToken,
     now,
-    preferredChannelId ?? "",
     MAX_PENDING_CHANNELS_PER_CLAIM,
-  ).run();
-  const result = await database.prepare(
-    `SELECT DISTINCT channel_id
-       FROM panel_resource_pending
-      WHERE claim_token = ?
-      ORDER BY channel_id`,
-  ).bind(claimToken).all<{ channel_id: string }>();
-  const channelIds = result.results.flatMap(({ channel_id }) =>
-    typeof channel_id === "string" && channel_id.length > 0 ? [channel_id] : []);
+  ).all<{ channel_id: string }>();
+  const channelIds = [...new Set(result.results.flatMap(({ channel_id }) =>
+    typeof channel_id === "string" && channel_id.length > 0 ? [channel_id] : []))];
   return { channelIds, claimToken };
 };
 
@@ -219,11 +218,11 @@ export const notifyCommittedResources = async (
 ): Promise<void> => {
   let localChannelWasReconciled = false;
   try {
-    let claim = await claimPendingChannels(env.DB, channelId);
-    while (claim.channelIds.length > 0) {
+    while (await hasPendingPanelResources(env.DB)) {
+      const claim = await claimPendingChannels(env.DB);
+      if (claim.channelIds.length === 0) break;
       const localWasReconciled = await reconcileClaimedChannels(env, claim, channelId, reconcileLocal);
       localChannelWasReconciled = localChannelWasReconciled || localWasReconciled;
-      claim = await claimPendingChannels(env.DB, channelId);
     }
   } catch (error: unknown) {
     console.warn("Committed panel resources could not be claimed.", errorMessage(error));

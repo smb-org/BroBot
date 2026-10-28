@@ -3,6 +3,7 @@ import { evictDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { ModuleAlarmContext, ModuleAlarmDefinition, ModuleExternalFetchBudget } from "../../src/modules/contract";
 import { templateLanguageText } from "../../src/modules/template-language";
+import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { AUTOMATED_CHAT_OUTPUT_LAST_ATTEMPT_STORAGE_KEY } from "../../src/worker/durable/automated-chat-output";
 import type { ChatSendResult, sendChatMessage } from "../../src/worker/chat";
 
@@ -866,6 +867,33 @@ describe("game rounds in the worker Durable Object", () => {
       announceText: "The round starts",
       settlement: { kind: "test", params: { payouts: [] } },
     }, Date.now() + 60_000);
+  });
+
+  it("does not reschedule alarms or write gate rows for an unchanged activation revision", async () => {
+    const channelId = `round-gate-unchanged-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await expect(object.setGameModuleGate(pointTestModule, true, 4)).resolves.toEqual({ applied: true });
+
+    const scheduleEarliestAlarm = vi.spyOn(
+      ChannelObject.prototype as unknown as { scheduleEarliestAlarm: () => Promise<void> },
+      "scheduleEarliestAlarm",
+    );
+    const sqlPrototype = await runPointObject<{ exec: (...args: unknown[]) => unknown }>(
+      object,
+      (_target, state) => {
+        const prototype = Reflect.getPrototypeOf(state.storage.sql);
+        if (prototype === null) throw new Error("SQL storage prototype was unavailable.");
+        return prototype as unknown as { exec: (...args: unknown[]) => unknown };
+      },
+    );
+    const exec = vi.spyOn(sqlPrototype, "exec");
+
+    await expect(object.setGameModuleGate(pointTestModule, true, 4)).resolves.toEqual({ applied: false });
+
+    expect(scheduleEarliestAlarm).not.toHaveBeenCalled();
+    expect(exec.mock.calls.map(([statement]) => String(statement)).filter((statement) => /^(?:INSERT|UPDATE|DELETE)\b/iu.test(statement)))
+      .toEqual([]);
   });
 
   it(`refunds a pending cancellation before a newer activation clears its intent (${testCard("re-enabling commits outstanding refunds before clearing cancellation intent", "re-enabling strands an escrowed stake or permits settlement")})`, async () => {

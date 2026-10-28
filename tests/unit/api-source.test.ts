@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleEvent, ModuleRouteEnvironment } from "../../src/modules/contract";
+import type { ModuleEvent, ModuleRouteEnvironment, ModuleTemplateValueContext } from "../../src/modules/contract";
 import { apiSourceFailureText } from "../../src/dashboard/locale";
 import { apiSourceModule } from "../../src/modules/api_source";
 import { fetchCachedApiSourceJson } from "../../src/modules/api_source/adapters/fetch-json";
@@ -22,6 +22,7 @@ import { apiSourceRoutes } from "../../src/modules/api_source/routes";
 import { testApiSource } from "../../src/modules/api_source/test-source";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { createTemplateRenderer, type TemplateResolverSources } from "../../src/worker/template-resolver";
+import { createModuleExternalFetchBudget } from "../../src/worker/external-fetch-budget";
 import { createTextBlockTemplateValueProvider } from "../../src/modules/text_library/adapters/template-expander";
 import { readPanelResourceRevisions } from "../../src/worker/panel-resources";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
@@ -121,6 +122,37 @@ describe("API source URL policy", () => {
 });
 
 describe("API source outbound fetch", () => {
+  it("loads the channel source catalog once when a render first resolves API values", async () => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    const url = "https://api.sample-provider.net/shared";
+    await insertSource(database, "first", "$.value", url);
+    await insertSource(database, "second", "$.value", url);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({ value: 42 }, { "Cache-Control": "max-age=60" }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const externalFetchBudget = createModuleExternalFetchBudget();
+    const context = {
+      DB: db,
+      channelId: CHANNEL_ID,
+      publicOrigin: "https://brobot.esembe.app",
+      externalFetchBudget,
+      now: NOW,
+      channelLanguage: () => Promise.resolve("en"),
+    } as unknown as ModuleTemplateValueContext;
+    const prepare = vi.spyOn(database, "prepare");
+
+    await expect(apiSourceModule.resolveTemplateValues?.(["api.first", "api.second"], context)).resolves.toEqual({
+      "api.first": "42",
+      "api.second": "42",
+    });
+
+    expect(prepare.mock.calls.filter(([sql]) => /FROM api_sources WHERE channel_id = \? ORDER BY source_name/iu.test(sql)))
+      .toHaveLength(1);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it("uses only fixed headers, omits credentials, and caches successful JSON by channel and URL", async () => {
     const database = await createDatabase();
     await insertChannel(database, "api-source-cache-unrelated");

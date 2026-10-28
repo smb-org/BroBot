@@ -348,7 +348,7 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     payload: target.payload,
     receivedAt: now,
     eventSubTimestamp: timestamp,
-  });
+  }, fetch);
 
   try {
     await dispatchNotification();
@@ -361,6 +361,6 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     }
     return response(null, 204);
   } finally {
-    await notifyCommittedResources(context.env, notifierChannelId);
+    await notifyCommittedResources(context.env);
   }
 });

@@ -23,8 +23,10 @@ import { AUTOMATED_CHAT_OUTPUT_LAST_ATTEMPT_STORAGE_KEY } from "../../src/worker
 
 type StorageDouble = {
   values: Map<string, unknown>;
+  alarm: number | null;
   get: ReturnType<typeof vi.fn>;
   list: ReturnType<typeof vi.fn>;
+  getAlarm: ReturnType<typeof vi.fn>;
   setAlarm: ReturnType<typeof vi.fn>;
   deleteAlarm: ReturnType<typeof vi.fn>;
 };
@@ -38,10 +40,12 @@ const objectFor = (channelId: string): ChannelObject => {
   const values = new Map<string, unknown>();
   const storage: StorageDouble = {
     values,
+    alarm: null,
     get: vi.fn((key: string) => Promise.resolve(values.get(key))),
     list: vi.fn(() => Promise.resolve(new Map())),
-    setAlarm: vi.fn(),
-    deleteAlarm: vi.fn(),
+    getAlarm: vi.fn(() => Promise.resolve(storage.alarm)),
+    setAlarm: vi.fn((alarm: number) => { storage.alarm = alarm; }),
+    deleteAlarm: vi.fn(() => { storage.alarm = null; }),
   };
   const state = {
     id: { name: channelId },
