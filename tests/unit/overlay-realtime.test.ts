@@ -42,6 +42,7 @@ describe("overlay realtime client", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     FakeWebSocket.instances = [];
   });
 
@@ -60,6 +61,7 @@ describe("overlay realtime client", () => {
 
   it("reconnects with exponential backoff after a transient close", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     vi.stubGlobal("WebSocket", FakeWebSocket);
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 })));
     const stop = connectOverlayRealtime("z".repeat(43));
@@ -79,8 +81,78 @@ describe("overlay realtime client", () => {
     stop();
   });
 
+  it("jitters reconnect delays", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const stop = connectOverlayRealtime("z".repeat(43));
+
+    FakeWebSocket.instances[0]?.dispatch("close", { code: 1006, reason: "network" } as CloseEvent);
+    await vi.advanceTimersByTimeAsync(124);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    stop();
+  });
+
+  it("resets reconnect backoff only after a stable connection period", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const stop = connectOverlayRealtime("z".repeat(43));
+
+    FakeWebSocket.instances[0]?.dispatch("open", new Event("open"));
+    FakeWebSocket.instances[0]?.dispatch("close", { code: 1006, reason: "network" } as CloseEvent);
+    await vi.advanceTimersByTimeAsync(250);
+    FakeWebSocket.instances[1]?.dispatch("open", new Event("open"));
+    FakeWebSocket.instances[1]?.dispatch("close", { code: 1006, reason: "network" } as CloseEvent);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+
+    FakeWebSocket.instances[2]?.dispatch("open", new Event("open"));
+    await vi.advanceTimersByTimeAsync(30_000);
+    FakeWebSocket.instances[2]?.dispatch("close", { code: 1006, reason: "network" } as CloseEvent);
+    await vi.advanceTimersByTimeAsync(249);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.instances).toHaveLength(4);
+
+    stop();
+  });
+
+  it("reuses the scoped pre-connect bootstrap after a reconnect", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const payload = { language: "en", overlay: null, variables: {} };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    const onBootstrap = vi.fn(() => true);
+    const onOpen = vi.fn();
+    const stop = connectOverlayRealtime("z".repeat(43), undefined, { onBootstrap, onOpen }, {
+      bootstrapUrl: "/api/overlay/bootstrap?elementId=element-a",
+    });
+
+    FakeWebSocket.instances[0]?.dispatch("open", new Event("open"));
+    FakeWebSocket.instances[0]?.dispatch("close", { code: 1006, reason: "network" } as CloseEvent);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(fetcher).toHaveBeenCalledWith("/api/overlay/bootstrap?elementId=element-a", {
+      headers: { Authorization: `Bearer ${"z".repeat(43)}` },
+      cache: "no-store",
+    });
+    expect(onBootstrap).toHaveBeenCalledWith(payload);
+    FakeWebSocket.instances[1]?.dispatch("open", new Event("open"));
+    expect(onOpen).toHaveBeenLastCalledWith(true, true);
+
+    stop();
+  });
+
   it("revalidates before reconnecting and stops when bootstrap reports a revoked token", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     vi.stubGlobal("WebSocket", FakeWebSocket);
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 401 }));
     vi.stubGlobal("fetch", fetcher);
@@ -103,6 +175,7 @@ describe("overlay realtime client", () => {
 
   it("keeps retrying when bootstrap revalidation has a transient network failure", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     vi.stubGlobal("WebSocket", FakeWebSocket);
     const fetcher = vi.fn<typeof fetch>()
       .mockRejectedValueOnce(new Error("network unavailable"))
@@ -126,6 +199,7 @@ describe("overlay realtime client", () => {
 
   it("revalidates after three consecutive abnormal handshakes", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     vi.stubGlobal("WebSocket", FakeWebSocket);
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", fetcher);
@@ -144,6 +218,7 @@ describe("overlay realtime client", () => {
 
   it("reconnects after the server marks a close as transient", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     vi.stubGlobal("WebSocket", FakeWebSocket);
     const stop = connectOverlayRealtime("z".repeat(43));
 
@@ -195,6 +270,7 @@ describe("overlay realtime client", () => {
 
   it("reports typed messages and whether an open follows a reconnect", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     vi.stubGlobal("WebSocket", FakeWebSocket);
     const opened: boolean[] = [];
     const messages: unknown[] = [];
@@ -302,6 +378,7 @@ describe("overlay realtime client", () => {
 
   it("reports connection state across initial connect, reconnect, and terminal close", async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     vi.stubGlobal("WebSocket", FakeWebSocket);
     const states: string[] = [];
     const stop = connectOverlayRealtime("z".repeat(43), undefined, {

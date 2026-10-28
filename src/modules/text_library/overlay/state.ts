@@ -21,6 +21,21 @@ interface VariantRow {
   texts_json: string;
 }
 
+interface TextBlockReadCache {
+  blocks: Map<string, Promise<TextBlock | null>>;
+}
+
+const textBlockReadCaches = new WeakMap<ModuleOverlayElementContext, TextBlockReadCache>();
+
+const readCacheFor = (context: ModuleOverlayElementContext): TextBlockReadCache => {
+  let cache = textBlockReadCaches.get(context);
+  if (cache === undefined) {
+    cache = { blocks: new Map() };
+    textBlockReadCaches.set(context, cache);
+  }
+  return cache;
+};
+
 const parseJson = <T,>(value: string, fallback: T): T => {
   try { return JSON.parse(value) as T; } catch { return fallback; }
 };
@@ -51,6 +66,21 @@ const loadBlock = async (db: D1Database, channelId: string, name: string): Promi
   };
 };
 
+const loadBlockFromCache = (
+  db: D1Database,
+  channelId: string,
+  name: string,
+  cache: TextBlockReadCache,
+): Promise<TextBlock | null> => {
+  const key = `${channelId}\u0000${name}`;
+  let pending = cache.blocks.get(key);
+  if (pending === undefined) {
+    pending = loadBlock(db, channelId, name);
+    cache.blocks.set(key, pending);
+  }
+  return pending;
+};
+
 const dataConditionIdsFor = (block: TextBlock): string[] => [...new Set(block.variants.flatMap((variant) =>
   Object.keys(variant.conditions.data ?? {})))];
 
@@ -58,6 +88,7 @@ const referencedBlocksFor = async (
   db: D1Database,
   channelId: string,
   root: TextBlock,
+  cache: TextBlockReadCache,
 ): Promise<TextBlock[]> => {
   const found = new Map([[root.name, root]]);
   let frontier = [root];
@@ -65,7 +96,7 @@ const referencedBlocksFor = async (
     const names = [...new Set(frontier.flatMap((block) => block.variants.flatMap((variant) =>
       variant.texts.flatMap(blockReferencesInText))))]
       .filter((name) => TEXT_BLOCK_NAME_PATTERN.test(name) && !found.has(name));
-    const loaded = await Promise.all(names.map((name) => loadBlock(db, channelId, name)));
+    const loaded = await Promise.all(names.map((name) => loadBlockFromCache(db, channelId, name, cache)));
     frontier = loaded.filter((block): block is TextBlock => block !== null);
     for (const block of frontier) found.set(block.name, block);
   }
@@ -140,9 +171,10 @@ export const textBlockOverlayState = async (
 ): Promise<JsonObject | null> => {
   const name = rawConfig.blockName;
   if (typeof name !== "string" || !TEXT_BLOCK_NAME_PATTERN.test(name) || context === undefined) return null;
-  const block = await loadBlock(db, channelId, name);
+  const cache = readCacheFor(context);
+  const block = await loadBlockFromCache(db, channelId, name, cache);
   if (block === null || block.variants.length === 0) return null;
-  const dependencyBlocks = await referencedBlocksFor(db, channelId, block);
+  const dependencyBlocks = await referencedBlocksFor(db, channelId, block, cache);
   const nestedBlocks = dependencyBlocks.filter((dependency) => dependency.name !== block.name);
   const referencedTemplateNames = templateNamesIn(dependencyBlocks.flatMap((dependency) =>
     dependency.variants.flatMap((variant) => variant.texts)));

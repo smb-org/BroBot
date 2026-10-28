@@ -64,6 +64,87 @@ interface SyncedPointActivation {
 
 const syncedPointActivationsByNamespace = new WeakMap<object, Map<string, SyncedPointActivation>>();
 
+const CHANNEL_DETAILS_CACHE_TTL_MS = 15_000;
+const STREAM_DETAILS_CACHE_TTL_MS = 5_000;
+const USER_CREATED_AT_CACHE_TTL_MS = 60 * 60 * 1_000;
+const FOLLOWED_AT_CACHE_TTL_MS = 5_000;
+const TOTAL_CACHE_TTL_MS = 5_000;
+
+interface SharedLookupEntry {
+  expiresAt: number;
+  value: unknown;
+  hasValue: boolean;
+  invalidated: boolean;
+  pending: Promise<unknown> | null;
+}
+
+class SharedLookupCache {
+  private readonly entries = new Map<string, SharedLookupEntry>();
+
+  public get<T>(key: string, ttlMs: number, load: () => Promise<T>, cacheable: (value: T) => boolean): Promise<T> {
+    const existing = this.entries.get(key);
+    if (existing?.hasValue === true && existing.expiresAt > Date.now()) {
+      this.entries.delete(key);
+      this.entries.set(key, existing);
+      return Promise.resolve(existing.value as T);
+    }
+    if (existing?.pending !== null && existing?.pending !== undefined) return existing.pending as Promise<T>;
+    if (existing !== undefined) this.entries.delete(key);
+
+    const entry: SharedLookupEntry = {
+      expiresAt: 0,
+      value: undefined,
+      hasValue: false,
+      invalidated: false,
+      pending: null,
+    };
+    const pending = Promise.resolve().then(load).then((value) => {
+      if (this.entries.get(key) === entry && !entry.invalidated && cacheable(value)) {
+        entry.value = value;
+        entry.expiresAt = Date.now() + ttlMs;
+        entry.hasValue = true;
+        entry.pending = null;
+      } else if (this.entries.get(key) === entry) {
+        this.entries.delete(key);
+      }
+      return value;
+    }, (error: unknown) => {
+      if (this.entries.get(key) === entry) this.entries.delete(key);
+      throw error;
+    });
+    entry.pending = pending;
+    this.entries.set(key, entry);
+    while (this.entries.size > 2_048) {
+      const oldestKey = this.entries.keys().next().value;
+      if (oldestKey === undefined) break;
+      const oldest = this.entries.get(oldestKey);
+      if (oldest !== undefined) oldest.invalidated = true;
+      this.entries.delete(oldestKey);
+    }
+    return pending;
+  }
+
+  public invalidate(key: string): void {
+    const entry = this.entries.get(key);
+    if (entry !== undefined) entry.invalidated = true;
+    this.entries.delete(key);
+  }
+}
+
+const sharedLookupsByFetcher = new WeakMap<typeof fetch, SharedLookupCache>();
+
+const sharedLookupsFor = (fetcher: typeof fetch): SharedLookupCache => {
+  let cache = sharedLookupsByFetcher.get(fetcher);
+  if (cache === undefined) {
+    cache = new SharedLookupCache();
+    sharedLookupsByFetcher.set(fetcher, cache);
+  }
+  return cache;
+};
+
+const scopedLookupKey = (kind: string, clientId: string, channelId: string, suffix = ""): string =>
+  `${kind}:${clientId}:${channelId}${suffix.length === 0 ? "" : `:${suffix}`}`;
+
 /** The host logs actions and their outcome; modules justify inaction. */
 const HOST_MODULE_ID = "host";
 
@@ -140,19 +221,6 @@ const streamDetailsFor = async (
   } catch {
     return null;
   }
-};
-
-const channelInfoFor = async (
-  environment: DispatchEnvironment,
-  channelId: string,
-  accessTokenFor: () => Promise<string>,
-  fetcher: typeof fetch,
-): Promise<ModuleChannelInfo | null> => {
-  const [channel, stream] = await Promise.all([
-    channelDetailsFor(environment, channelId, accessTokenFor, fetcher),
-    streamDetailsFor(environment, channelId, accessTokenFor, fetcher),
-  ]);
-  return channel === null || stream === null ? null : { ...channel, ...stream };
 };
 
 const totalFor = async (
@@ -741,6 +809,20 @@ export const dispatchEventSubNotification = async (
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
   const externalFetchBudget = createModuleExternalFetchBudget();
+  const sharedLookups = sharedLookupsFor(fetcher);
+  if (event.subscriptionType === "channel.update") {
+    sharedLookups.invalidate(scopedLookupKey("channel-details", environment.TWITCH_CLIENT_ID, event.channelId));
+  }
+  if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
+    sharedLookups.invalidate(scopedLookupKey("stream-details", environment.TWITCH_CLIENT_ID, event.channelId));
+  }
+  if (event.subscriptionType === "channel.follow" || event.subscriptionType === "channel.unfollow") {
+    const userId = textValue(event.payload.user_id);
+    if (userId !== null) {
+      sharedLookups.invalidate(scopedLookupKey("followed-at", environment.TWITCH_CLIENT_ID, event.channelId, userId));
+    }
+    sharedLookups.invalidate(scopedLookupKey("follower-total", environment.TWITCH_CLIENT_ID, event.channelId));
+  }
   if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
     const online = event.subscriptionType === "stream.online";
     if (online) {
@@ -1010,15 +1092,26 @@ export const dispatchEventSubNotification = async (
     return await channelObject.isRecentBotChatMessage(senderId, text);
   };
   const channelDetails = (): Promise<TemplateChannelDetails | null> => {
-    channelDetailsPromise ??= channelDetailsFor(environment, event.channelId, appAccessToken, fetcher);
+    channelDetailsPromise ??= sharedLookups.get(
+      scopedLookupKey("channel-details", environment.TWITCH_CLIENT_ID, event.channelId),
+      CHANNEL_DETAILS_CACHE_TTL_MS,
+      () => channelDetailsFor(environment, event.channelId, appAccessToken, fetcher),
+      (value) => value !== null,
+    );
     return channelDetailsPromise;
   };
   const streamDetails = (): Promise<TemplateStreamDetails | null> => {
-    streamDetailsPromise ??= streamDetailsFor(environment, event.channelId, appAccessToken, fetcher);
+    streamDetailsPromise ??= sharedLookups.get(
+      scopedLookupKey("stream-details", environment.TWITCH_CLIENT_ID, event.channelId),
+      STREAM_DETAILS_CACHE_TTL_MS,
+      () => streamDetailsFor(environment, event.channelId, appAccessToken, fetcher),
+      (value) => value !== null,
+    );
     return streamDetailsPromise;
   };
   const channelInfo = (): Promise<ModuleChannelInfo | null> => {
-    channelInfoPromise ??= channelInfoFor(environment, event.channelId, appAccessToken, fetcher);
+    channelInfoPromise ??= Promise.all([channelDetails(), streamDetails()]).then(([channel, stream]) =>
+      channel === null || stream === null ? null : { ...channel, ...stream });
     return channelInfoPromise;
   };
   const channelGameId = async (): Promise<string | null> => {
@@ -1039,7 +1132,12 @@ export const dispatchEventSubNotification = async (
   const followedAt = (userId: string): Promise<ModuleFollowedAt> => {
     let pending = followedAtPromises.get(userId);
     if (pending === undefined) {
-      pending = followedAtFor(environment, event.channelId, userId, fetcher);
+      pending = sharedLookups.get(
+        scopedLookupKey("followed-at", environment.TWITCH_CLIENT_ID, event.channelId, userId),
+        FOLLOWED_AT_CACHE_TTL_MS,
+        () => followedAtFor(environment, event.channelId, userId, fetcher),
+        (value) => value !== "unavailable",
+      );
       followedAtPromises.set(userId, pending);
     }
     return pending;
@@ -1054,17 +1152,32 @@ export const dispatchEventSubNotification = async (
     return channelLocationPromise;
   };
   const followerTotal = (): Promise<number | null> => {
-    followerTotalPromise ??= totalFor(environment, event.channelId, "followers", fetcher);
+    followerTotalPromise ??= sharedLookups.get(
+      scopedLookupKey("follower-total", environment.TWITCH_CLIENT_ID, event.channelId),
+      TOTAL_CACHE_TTL_MS,
+      () => totalFor(environment, event.channelId, "followers", fetcher),
+      (value) => value !== null,
+    );
     return followerTotalPromise;
   };
   const chattersTotal = (): Promise<number | null> => {
-    chattersTotalPromise ??= totalFor(environment, event.channelId, "chatters", fetcher);
+    chattersTotalPromise ??= sharedLookups.get(
+      scopedLookupKey("chatters-total", environment.TWITCH_CLIENT_ID, event.channelId),
+      TOTAL_CACHE_TTL_MS,
+      () => totalFor(environment, event.channelId, "chatters", fetcher),
+      (value) => value !== null,
+    );
     return chattersTotalPromise;
   };
   const userCreatedAt = (userId: string): Promise<string | null> => {
     let pending = userCreatedAtPromises.get(userId);
     if (pending === undefined) {
-      pending = userCreatedAtFor(environment, userId, fetcher);
+      pending = sharedLookups.get(
+        scopedLookupKey("user-created-at", environment.TWITCH_CLIENT_ID, userId),
+        USER_CREATED_AT_CACHE_TTL_MS,
+        () => userCreatedAtFor(environment, userId, fetcher),
+        (value) => value !== null,
+      );
       userCreatedAtPromises.set(userId, pending);
     }
     return pending;

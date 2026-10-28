@@ -359,6 +359,44 @@ export const fetchEventSubSubscriptions = async (
   });
 };
 
+interface EventSubInventoryCache {
+  get: (appAccessToken: string, refresh?: boolean) => Promise<EventSubRemoteSubscription[]>;
+  add: (subscription: EventSubRemoteSubscription) => void;
+  remove: (subscriptionId: string) => void;
+}
+
+const createEventSubInventoryCache = (
+  fetcher: typeof fetch,
+  clientId: string,
+): EventSubInventoryCache => {
+  let subscriptions: EventSubRemoteSubscription[] | null = null;
+  let pending: Promise<EventSubRemoteSubscription[]> | null = null;
+  return {
+    get: (appAccessToken, refresh = false) => {
+      if (!refresh && subscriptions !== null) return Promise.resolve(subscriptions);
+      if (!refresh && pending !== null) return pending;
+      const request = fetchEventSubSubscriptions(fetcher, clientId, appAccessToken).then((loaded) => {
+        if (subscriptions === null) subscriptions = loaded;
+        else subscriptions.splice(0, subscriptions.length, ...loaded);
+        return subscriptions;
+      });
+      pending = request;
+      return request;
+    },
+    add: (subscription) => {
+      if (subscriptions === null) return;
+      const index = subscriptions.findIndex(({ id }) => id === subscription.id);
+      if (index === -1) subscriptions.push(subscription);
+      else subscriptions[index] = subscription;
+    },
+    remove: (subscriptionId) => {
+      if (subscriptions === null) return;
+      const index = subscriptions.findIndex(({ id }) => id === subscriptionId);
+      if (index !== -1) subscriptions.splice(index, 1);
+    },
+  };
+};
+
 const callbackUrl = (publicOrigin: string): string => `${publicOrigin}${EVENTSUB_CALLBACK_PATH}`;
 
 const isOwnedByTarget = (
@@ -466,8 +504,9 @@ const adoptRemoteSubscription = async (
   appAccessToken: string,
   activeSecretId: string,
   fetcher: typeof fetch,
+  inventory: EventSubInventoryCache,
 ): Promise<boolean> => {
-  const remote = await fetchEventSubSubscriptions(fetcher, env.TWITCH_CLIENT_ID, appAccessToken);
+  const remote = await inventory.get(appAccessToken, true);
   const adopted = remote.find((subscription) => subscription.status === "enabled" &&
     isOwnedByTarget(subscription, target, botUserId, callbackUrl(env.PUBLIC_ORIGIN)));
   if (adopted === undefined) {
@@ -477,7 +516,9 @@ const adoptRemoteSubscription = async (
   // Twitch does not disclose which webhook secret a remote subscription uses.
   // An untracked subscription therefore cannot be assigned the active key id.
   await deleteSubscription(fetcher, env.TWITCH_CLIENT_ID, appAccessToken, adopted.id);
+  inventory.remove(adopted.id);
   const replacement = await createSubscription(env, target, botUserId, appAccessToken, fetcher);
+  inventory.add(replacement);
   await mark(env.DB, target, "enabled", null, replacement.id, now, activeSecretId);
   return true;
 };
@@ -508,7 +549,9 @@ export const reconcileEventSubSubscriptions = async (
   botUserId: string,
   fetcher: typeof fetch = fetch,
   channelId?: string,
+  inventoryCache?: EventSubInventoryCache,
 ): Promise<void> => {
+  const inventory = inventoryCache ?? createEventSubInventoryCache(fetcher, env.TWITCH_CLIENT_ID);
   const allTargets = await listDesiredEventSubTargets(env.DB, channelId);
   const deferredTargets = allTargets.filter((target) => target.deferredReason !== undefined);
   const targets = allTargets.filter((target) => target.deferredReason === undefined);
@@ -530,7 +573,7 @@ export const reconcileEventSubSubscriptions = async (
 
   let remote: EventSubRemoteSubscription[];
   try {
-    remote = await fetchEventSubSubscriptions(fetcher, env.TWITCH_CLIENT_ID, appAccessToken);
+    remote = await inventory.get(appAccessToken);
   } catch (error: unknown) {
     const desiredKeys = allDesiredKeys;
     if (targets.length === 0 && currentStates.size === 0) {
@@ -567,7 +610,7 @@ export const reconcileEventSubSubscriptions = async (
   const matched = new Set<string>();
   const blocked = new Set<string>();
   const failedStaleCleanup = new Set<string>();
-  for (const subscription of remote) {
+  for (const subscription of [...remote]) {
     const definition = eventSubDefinitionForCondition(subscription.type, subscription.condition);
     const remoteChannelId = definition?.channelIdFromCondition(subscription.condition) ?? null;
     if (channelId !== undefined && remoteChannelId !== channelId) continue;
@@ -594,6 +637,7 @@ export const reconcileEventSubSubscriptions = async (
           state.subscriptionId !== subscription.id) {
         try {
           await deleteSubscription(fetcher, env.TWITCH_CLIENT_ID, appAccessToken, subscription.id);
+          inventory.remove(subscription.id);
         } catch (error: unknown) {
           blocked.add(targetKey);
           await markError(desired, error, subscription.id);
@@ -608,6 +652,7 @@ export const reconcileEventSubSubscriptions = async (
     const duplicate = desired !== undefined && kept.has(targetKey);
     try {
       await deleteSubscription(fetcher, env.TWITCH_CLIENT_ID, appAccessToken, subscription.id);
+      inventory.remove(subscription.id);
       if (desired !== undefined && !duplicate) {
         await mark(env.DB, desired, "missing", "subscription_replaced", null, now, activeSecretId);
       }
@@ -646,11 +691,12 @@ export const reconcileEventSubSubscriptions = async (
     if (matched.has(targetKey) || blocked.has(targetKey)) continue;
     try {
       const subscription = await createSubscription(env, target, botUserId, appAccessToken, fetcher);
+      inventory.add(subscription);
       await mark(env.DB, target, "enabled", null, subscription.id, now, activeSecretId);
     } catch (error: unknown) {
       if (isAlreadyExistsConflict(error)) {
         try {
-          await adoptRemoteSubscription(env, target, botUserId, now, appAccessToken, activeSecretId, fetcher);
+          await adoptRemoteSubscription(env, target, botUserId, now, appAccessToken, activeSecretId, fetcher, inventory);
         } catch (adoptionError: unknown) {
           await markError(target, adoptionError);
         }
@@ -683,6 +729,7 @@ const maintainEventSubSubscriptionsPass = async (
   now: string,
   fetcher: typeof fetch = fetch,
   channelId: string,
+  inventory: EventSubInventoryCache,
 ): Promise<void> => {
   let targets: EventSubTarget[];
   try {
@@ -726,7 +773,7 @@ const maintainEventSubSubscriptionsPass = async (
     return;
   }
   try {
-    await reconcileEventSubSubscriptions(env, now, appAccessToken, botIdentity.userId, fetcher, channelId);
+    await reconcileEventSubSubscriptions(env, now, appAccessToken, botIdentity.userId, fetcher, channelId, inventory);
   } catch (error: unknown) {
     const details = maintenanceErrorDetails(error, reasonFor(error));
     if (actionableTargets.length === 0) {
@@ -751,6 +798,7 @@ const maintainChannelWithLease = async (
   now: string,
   fetcher: typeof fetch,
   channelId: string,
+  inventory: EventSubInventoryCache,
 ): Promise<void> => {
   const ownerId = crypto.randomUUID();
   const wallClock = new Date().toISOString();
@@ -770,7 +818,7 @@ const maintainChannelWithLease = async (
   if (lease?.owner_id !== ownerId) return;
 
   for (;;) {
-    await maintainEventSubSubscriptionsPass(env, now, fetcher, channelId);
+    await maintainEventSubSubscriptionsPass(env, now, fetcher, channelId, inventory);
     const released = await env.DB.prepare(
       `DELETE FROM eventsub_maintenance_locks
         WHERE channel_id = ? AND owner_id = ? AND rerun_needed = 0`,
@@ -812,5 +860,6 @@ export const maintainEventSubSubscriptions = async (
       return;
     }
   }
-  for (const id of channelIds) await maintainChannelWithLease(env, now, fetcher, id);
+  const inventory = createEventSubInventoryCache(fetcher, env.TWITCH_CLIENT_ID);
+  for (const id of channelIds) await maintainChannelWithLease(env, now, fetcher, id, inventory);
 };

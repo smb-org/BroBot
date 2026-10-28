@@ -229,6 +229,33 @@ describe("overlay access routes", () => {
     await expect(bootstrap.json()).resolves.toMatchObject({ overlay: null, variables: {} });
   });
 
+  it("scopes an isolated element bootstrap and its variable values to the requested element", async () => {
+    await database.prepare(
+      `INSERT INTO channel_variables (channel_id, name, value, created_at, updated_at)
+       VALUES ('channel-a', 'score', 12, '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z'),
+              ('channel-a', 'secret_count', 99, '2026-09-24T00:00:00.000Z', '2026-09-24T00:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements
+        (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json)
+       VALUES ('element-score', 'channel-a', 'overlay-a', 'variable', 'Score', 'score', '{value}', '{}'),
+              ('element-secret', 'channel-a', 'overlay-a', 'variable', 'Secret', 'secret_count', '{value}', '{}')`,
+    ).run();
+    const issued = await issueAccess(environment, "OBS element");
+    const bootstrap = await authRouter.fetch(new Request(
+      `https://brobot.example/api/overlay/bootstrap?elementId=element-score`,
+      { headers: { Authorization: `Bearer ${tokenFromUrl(issued.overlayUrl)}` } },
+    ), environment);
+    const body = await bootstrap.json<{
+      overlay: { elements: Array<{ id: string }> } | null;
+      variables: Record<string, number>;
+    }>();
+
+    expect(bootstrap.status).toBe(200);
+    expect(body.overlay?.elements.map(({ id }) => id)).toEqual(["element-score"]);
+    expect(body.variables).toEqual({ score: 12 });
+  });
+
   it.each([
     ["enabled", 1, true],
     ["disabled", 0, false],

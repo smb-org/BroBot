@@ -226,6 +226,53 @@ describe("EventSub reconciliation", () => {
     ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-1" });
   });
 
+  it("fetches the application subscription inventory once for a multi-channel maintenance run", async () => {
+    for (const channelId of ["kanal-a", "kanal-b"]) {
+      await insertChannel(database, channelId);
+      await insertLoginIdentityAndSession(database, channelId, ["channel:bot"]);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'chat', 1, '{}')",
+      ).bind(channelId).run();
+    }
+    await database.prepare(
+      `INSERT INTO bot_identity
+        (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+         expires_at, created_at, updated_at)
+       VALUES (1, 'bot-user', 'bot', '[]', 'access', 'refresh', ?, ?, ?)`,
+    ).bind("2099-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z", "2026-09-19T00:00:00.000Z").run();
+    await insertAppToken(database);
+    let created = 0;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((_input, init) => {
+      if (init?.method !== "POST" || typeof init.body !== "string") {
+        return Promise.resolve(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }));
+      }
+      created += 1;
+      const body = JSON.parse(init.body) as {
+        type: string;
+        version: string;
+        condition: { broadcaster_user_id: string; user_id: string };
+        transport: { callback: string };
+      };
+      return Promise.resolve(new Response(JSON.stringify({ data: [{
+        id: `subscription-${String(created)}`,
+        type: body.type,
+        version: body.version,
+        status: "enabled",
+        condition: body.condition,
+        transport: { method: "webhook", callback: body.transport.callback },
+      }] }), { status: 202 }));
+    });
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
+
+    const inventoryRequests = fetcher.mock.calls.filter(([, init]) => init?.method !== "POST");
+    expect(inventoryRequests).toHaveLength(1);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    await expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM eventsub_subscriptions WHERE status = 'enabled'",
+    ).first()).resolves.toEqual({ count: 2 });
+  });
+
   it("replaces an untracked owned subscription after create returns the already-exists conflict", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
@@ -349,7 +396,7 @@ describe("EventSub reconciliation", () => {
     releaseInitialList(Response.json({ data: [], pagination: {} }));
     await firstRun;
 
-    expect(requestCount).toBe(3);
+    expect(requestCount).toBe(2);
     expect(maximumConcurrentCalls).toBe(1);
     await expect(database.prepare(
       "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
@@ -588,12 +635,14 @@ describe("EventSub reconciliation", () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: "quota" }), { status: 429 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         data: [{ id: "subscription-b", type: "channel.chat.message", version: "1", status: "enabled", condition: { broadcaster_user_id: "kanal-b", user_id: "bot-user" }, transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" } }],
       }), { status: 202 }));
 
     await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
+
+    expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? "GET"))
+      .toEqual(["GET", "POST", "POST"]);
 
     await expect(database.prepare(
       "SELECT channel_id, status, reason FROM eventsub_subscriptions ORDER BY channel_id, subscription_type",

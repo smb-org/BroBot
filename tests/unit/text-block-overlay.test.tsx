@@ -84,6 +84,21 @@ describe("text block overlay rendering", () => {
     expect(serialized).toContain(sunset);
   });
 
+  it("reuses block and variant rows within one bootstrap context", async () => {
+    const db = overlayDatabase([variant("default", "Welcome", {})]);
+    const prepare = vi.spyOn(db, "prepare");
+    const context = contextFor();
+
+    await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+    const blockReadsAfterFirstElement = prepare.mock.calls.filter(([sql]) =>
+      sql.includes("FROM text_blocks") || sql.includes("FROM text_block_variants")).length;
+    await textBlockOverlayState(db, channelId, { blockName: "sun" }, context);
+
+    expect(blockReadsAfterFirstElement).toBe(2);
+    expect(prepare.mock.calls.filter(([sql]) =>
+      sql.includes("FROM text_blocks") || sql.includes("FROM text_block_variants")).length).toBe(2);
+  });
+
   it("includes provider attribution for a condition-selected candidate", async () => {
     const db = overlayDatabase([
       variant("rain", "Rain is coming", { data: { "weather.condition": "rain" } }),

@@ -290,14 +290,15 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
     if (overlayId === null) {
       return context.json({ language: record.language, overlay: null, variables: {} });
     }
-    const overlay = await getOverlayForChannel(context.env.DB, record.channelId, overlayId);
+    const elementId = context.req.query("elementId");
+    const overlay = await getOverlayForChannel(context.env.DB, record.channelId, overlayId, elementId);
     if (overlay === null) {
       return context.json({ language: record.language, overlay: null, variables: {} });
     }
     if (overlay.elements.some((element) => element.kind === ADS_COUNTDOWN_ELEMENT_KIND)) {
       await hydrateCachedAdsCountdownSnapshot(context.env, record.channelId);
     }
-    const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId);
+    const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId, elementId);
     const contextModuleIds = [...new Set(overlay.elements.flatMap((element) => {
       const declaration = moduleOverlayElementForKind(element.kind);
       return declaration?.definition.initialStateNeedsContext === true || declaration?.definition.initialStateNeedsSnapshotContext === true
