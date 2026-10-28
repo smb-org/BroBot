@@ -39,6 +39,7 @@ export const prepareModuleOverlayRealtimeMessage = async (
   action: Extract<ModuleAction, { kind: "overlay" }>,
   mandatory = false,
   modules: readonly BotModule[] = MODULES,
+  includeDisabledModule = false,
 ): Promise<ModuleOverlayMessageResult> => {
   if (!OVERLAY_ACTION_TYPE_PATTERN.test(action.type) || !action.elementKind.startsWith(`${moduleId}.`) ||
       !(modules.find((module) => module.id === moduleId)?.overlayElements?.some(({ kind }) => kind === action.elementKind) === true ||
@@ -73,7 +74,7 @@ export const prepareModuleOverlayRealtimeMessage = async (
              AND module.module_id = ? AND module.enabled = 1
         ))
       ORDER BY element.overlay_id`,
-  ).bind(channelId, action.elementKind, ...recipientBindings, mandatory ? 1 : 0, moduleId).all<{ overlay_id: string }>();
+  ).bind(channelId, action.elementKind, ...recipientBindings, mandatory || includeDisabledModule ? 1 : 0, moduleId).all<{ overlay_id: string }>();
   const overlayIds = [...new Set(recipients.results.map(({ overlay_id }) => overlay_id))];
   if (overlayIds.length === 0) {
     return { outcome: "no_recipients" };

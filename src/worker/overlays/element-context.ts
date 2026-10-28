@@ -1,9 +1,12 @@
 import type {
   BotModule,
+  JsonObject,
   ModuleChannelInfo,
   ModuleEvent,
   ModuleLanguage,
   ModuleOverlayElementContext,
+  ModuleOverlaySnapshotContext,
+  ModuleQuizOverlaySnapshot,
   ModuleOverlayTemplateConditions,
   ModuleOverlayTemplateValue,
   ModuleTemplateConditionContext,
@@ -26,6 +29,23 @@ import { createModuleSecretReadAccess } from "../module-secrets";
 
 const moduleIsEnabled = (module: BotModule, enabled: ReadonlyMap<string, boolean>): boolean =>
   module.mandatory === true || enabled.get(module.id) === true;
+
+/** Creates the small context used by overlays that hydrate a persisted snapshot. */
+export const createOverlaySnapshotContext = (
+  env: Env,
+  channelId: string,
+  now: number,
+): ModuleOverlaySnapshotContext => ({
+  kind: "snapshot",
+  now,
+  readSnapshot: async () => {
+    const channelObject = env.CHANNEL.get(env.CHANNEL.idFromName(channelId)) as unknown as {
+      readQuizOverlaySnapshot: () => Promise<ModuleQuizOverlaySnapshot | null>;
+    };
+    const snapshot = await channelObject.readQuizOverlaySnapshot();
+    return (snapshot?.payload as JsonObject | undefined) ?? null;
+  },
+});
 
 /** Builds the same registered template providers used by chat, in deterministic overlay mode. */
 export const createOverlayElementContext = async (
@@ -320,6 +340,7 @@ export const createOverlayElementContext = async (
     return pending;
   };
   return {
+    kind: "template",
     now,
     language,
     channelTimeZone,

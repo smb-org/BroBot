@@ -441,6 +441,13 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     try {
       const module = MODULES.find((candidate) => candidate.id === moduleId);
       if (module === undefined) return;
+      if (moduleId === "quiz" && elementKind === "quiz.session") {
+        const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)) as unknown as {
+          deliverPendingQuizOverlaySnapshot: () => Promise<void>;
+        };
+        await channelObject.deliverPendingQuizOverlaySnapshot();
+        return;
+      }
       const prepared = await prepareModuleOverlayRealtimeMessage(
         context.env.DB,
         channelId,

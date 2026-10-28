@@ -422,6 +422,8 @@ describe("Overlay composition editor", () => {
     const outputMarkup = output.container.querySelector(".brobot-overlay")?.outerHTML;
     expect(previewMarkup).toBe(outputMarkup);
     expect(previewDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent).toContain(".brobot-variable");
+    // Vitest serves imported CSS as an empty string, so only the installed element is checked here.
+    expect(previewDocument?.querySelector("style[data-brobot-overlay-quiz-css]")).not.toBeNull();
     expect(previewMarkup).toMatchInlineSnapshot(`"<div class="brobot-overlay" style="position: relative; width: 1280px; height: 720px;"><div data-element="element-a" data-kind="variable" class="brobot-overlay-composition-element" style="position: absolute; left: 30px; top: 49px; width: max-content; transform: scale(1) translateX(var(--brobot-overlay-anchor-x, 0%)); transform-origin: top left; z-index: 0;"><div class="brobot-variable" data-variable="score"><span class="brobot-variable__text">Score: </span><span class="brobot-variable__value">1,234</span></div></div></div>"`);
     output.unmount();
 

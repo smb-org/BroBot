@@ -11,7 +11,9 @@ import {
 import { createQuizSetRepository } from "./adapters/d1";
 import { validateQuizSet } from "./domain/sets";
 import { loadEnabledQuizSettings, openQuizSession, quizRoundData } from "./service";
-import { quizPhasePayload, quizSessionControlAlarm } from "./lifecycle";
+import { quizSessionControlAlarm } from "./lifecycle";
+import { quizPhasePayload } from "./overlay/payload";
+import { QUIZ_RESULTS_DISPLAY_MS } from "./overlay/state";
 
 type QuizRouteContext = Context<ModuleRouteEnvironment>;
 const body = async (request: Request): Promise<unknown> => request.json().catch(() => null);
@@ -22,8 +24,6 @@ const repository = (context: QuizRouteContext) => createQuizSetRepository(contex
 const denied = (context: QuizRouteContext): Response => context.json({ error: "quiz_management_denied" }, 403);
 const nowIso = (): string => new Date().toISOString();
 const auditSnapshot = (set: QuizSet) => ({ setId: set.id, name: set.name, revision: set.revision, questionCount: set.questions.length });
-const QUIZ_RESULTS_DISPLAY_MS = 60_000;
-
 export const quizRoutes = new Hono<ModuleRouteEnvironment>();
 
 const streamIsOnline = async (db: D1Database, channelId: string): Promise<boolean> =>
@@ -141,7 +141,7 @@ quizRoutes.post("/session/start", async (context) => {
       QUIZ_MODULE_ID,
       "phase",
       "quiz.session",
-      quizPhasePayload(opened.data),
+      opened.overlaySnapshot?.payload ?? quizPhasePayload(opened.data),
     );
     return context.json({ sessionId: opened.sessionId }, 201);
   } catch (failure: unknown) {
@@ -165,22 +165,26 @@ quizRoutes.post("/session/action", async (context) => {
   }
   const sessionId = isRecord(requestBody) ? requestBody.sessionId : null;
   const active = await context.get("points")(channelId).rounds.active();
-  if (typeof sessionId !== "string" || active === null || active.roundId !== sessionId) {
+  if (typeof sessionId !== "string") {
     return context.json({ error: "session_changed" }, 409);
   }
-  const canControlPending = active.state === "announcing" && (action === "end" || action === "pause" || action === "resume");
-  if ((active.state !== "open" && !canControlPending) || quizRoundData(active.data) === null) {
-    return context.json({ error: "round_not_running" }, 409);
-  }
-  if (action !== "end" && !await streamIsOnline(context.env.DB, channelId)) {
-    return context.json({ error: "stream_offline" }, 409);
+  if (active === null || active.roundId !== sessionId) {
+    if (action !== "end") return context.json({ error: "session_changed" }, 409);
+  } else {
+    const canControlPending = active.state === "announcing" && (action === "end" || action === "pause" || action === "resume");
+    if ((active.state !== "open" && !canControlPending) || quizRoundData(active.data) === null) {
+      return context.json({ error: "round_not_running" }, 409);
+    }
+    if (action !== "end" && !await streamIsOnline(context.env.DB, channelId)) {
+      return context.json({ error: "stream_offline" }, 409);
+    }
   }
   try {
     await context.get("runModuleAlarm")(
       channelId,
       QUIZ_MODULE_ID,
       quizSessionControlAlarm.key,
-      active.roundId,
+      sessionId,
       { action, sessionId },
     );
     return context.json({ ok: true });

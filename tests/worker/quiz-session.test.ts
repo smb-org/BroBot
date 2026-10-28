@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { evictDurableObject } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSendResult, sendChatMessage } from "../../src/worker/chat";
 
@@ -11,9 +12,11 @@ vi.mock("../../src/worker/chat", () => ({
 
 import { quizModule } from "../../src/modules/quiz";
 import type { ModuleAlarmContext } from "../../src/modules/contract";
+import { loadQuizOverlayState } from "../../src/modules/quiz/overlay/state";
 import { pointsDefaultSettingsForLanguage } from "../../src/modules/points/contracts";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
+import { createOverlaySnapshotContext } from "../../src/worker/overlays/element-context";
 import { isModuleOverlayRealtimeEnvelope } from "../../src/realtime-contract";
 import {
   clearPointObjectAlarms,
@@ -104,6 +107,24 @@ afterEach(async () => {
 });
 
 describe("quiz answers in the shared point round", () => {
+  it("uses an ordered resolution index for the latest resolved round lookup", async () => {
+    const channelId = `quiz-resolution-index-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.recentlyResolvedGameRound("quiz", 60_000);
+
+    const queryPlan = await runPointObject(object, (_target, state) => state.storage.sql.exec<{ detail: string }>(
+      `EXPLAIN QUERY PLAN
+       SELECT round_id, data_json, resolved_at FROM game_rounds
+        WHERE module_id = ? AND state = 'resolved' AND resolved_at >= ?
+        ORDER BY resolved_at DESC, round_id DESC LIMIT 1`,
+      "quiz",
+      new Date(Date.now() - 60_000).toISOString(),
+    ).toArray());
+
+    expect(queryPlan.map(({ detail }) => detail).join(" ")).not.toMatch(/TEMP B-TREE/u);
+  });
+
   it("rearms the persisted quiz deadline after the first open-phase publication fails", async () => {
     const channelId = `quiz-open-publish-retry-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;
@@ -240,9 +261,788 @@ describe("quiz answers in the shared point round", () => {
 
     await object.runModuleAlarm("quiz", "session-control", roundId, { action: "end", sessionId: roundId });
 
-    expect(cancelSpy).toHaveBeenCalledWith("quiz", roundId);
+    expect(cancelSpy).toHaveBeenCalledWith("quiz", roundId, expect.objectContaining({ phase: "idle" }));
     expect(resolveSpy).not.toHaveBeenCalled();
     await expect(object.activeGameRound("quiz")).resolves.toBeNull();
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      sequence: 1,
+      lastBroadcastSequence: 1,
+      payload: { sessionId: roundId, phase: "idle", phaseSequence: 1 },
+    });
+  });
+
+  it("recovers a failed cancellation publication from the persisted snapshot on retry", async () => {
+    const channelId = `quiz-cancel-publish-retry-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'points', 1, '{}', 1), (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId, channelId).run();
+    const overlayId = `overlay-${roundId}`;
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz overlay', ?, ?)",
+    ).bind(overlayId, channelId, new Date().toISOString(), new Date().toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${roundId}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    await runPointObject(object, async (target, state) => {
+      await target.openGameRound("quiz", roundId, { ...session(roundId), phase: "announce", phaseEndsAt: null }, {
+        sessionId: roundId,
+        phase: "announce",
+        phaseSequence: 0,
+        sessionStartedAt: new Date(Date.now()).toISOString(),
+        questionIndex: 0,
+        questionCount: 1,
+        question: "Capital?",
+        options: ["A", "B"],
+        phaseEndsAt: null,
+        paused: false,
+        remainingMs: null,
+      });
+      await deferPointAlarmWithin(state);
+    });
+    let failCancellation = true;
+    const publishSpy = vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
+      const publishesCancellation = JSON.stringify(messages).includes('"phase":"idle"');
+      if (publishesCancellation && failCancellation) {
+        failCancellation = false;
+        return Promise.reject(new Error("cancel publication failed"));
+      }
+      return Promise.resolve();
+    });
+
+    // Inside the object: a rejection crossing the stub would also surface as an unhandled rejection in the runner.
+    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "end", sessionId: roundId })))
+      .resolves.toBe("cancel publication failed");
+    await expect(object.getModuleAlarmDeadline("quiz", "overlay-retry")).resolves.toBe(Date.now() + 5_000);
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      sequence: 2,
+      lastBroadcastSequence: 1,
+      payload: { sessionId: roundId, phase: "idle", phaseSequence: 2 },
+    });
+
+    await object.runModuleAlarm("quiz", "session-control", "overlay-retry");
+    await expect(object.runModuleAlarm("quiz", "session-control", roundId, { action: "end", sessionId: roundId }))
+      .resolves.toBeUndefined();
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      sequence: 2,
+      lastBroadcastSequence: 2,
+      payload: { sessionId: roundId, phase: "idle" },
+    });
+    expect(failCancellation).toBe(false);
+    // One failed publication plus one retry; other publishes (and spy calls from earlier tests) are not counted.
+    const cancellations = publishSpy.mock.calls.filter(([messages]) => JSON.stringify(messages).includes(`"modul.quiz.cancel"`) &&
+      JSON.stringify(messages).includes(roundId));
+    expect(cancellations).toHaveLength(2);
+  });
+
+  it("rejects a retried old result after a newer session owns the overlay snapshot", async () => {
+    const channelId = `quiz-stale-result-snapshot-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const oldSessionId = `quiz-old-${crypto.randomUUID()}`;
+    const newSessionId = `quiz-new-${crypto.randomUUID()}`;
+    const oldResult = await object.writeQuizOverlaySnapshot({
+      sessionId: oldSessionId,
+      payload: { sessionId: oldSessionId, phase: "results", sessionStartedAt: new Date(Date.now() - 10_000).toISOString() },
+    });
+    if (oldResult === null) throw new Error("Initial results snapshot was not stored.");
+    const newSession = await object.writeQuizOverlaySnapshot({
+      sessionId: newSessionId,
+      payload: { sessionId: newSessionId, phase: "announce", sessionStartedAt: new Date(Date.now()).toISOString() },
+    });
+    if (newSession === null) throw new Error("Newer session snapshot was not stored.");
+
+    const retriedResult = await object.writeQuizOverlaySnapshot({
+      sessionId: oldSessionId,
+      expectedCurrentSessionId: oldSessionId,
+      payload: { sessionId: oldSessionId, phase: "results", resultAt: new Date(Date.now() - 5_000).toISOString() },
+    });
+
+    expect(retriedResult).toBeNull();
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      sequence: newSession.sequence,
+      payload: { sessionId: newSessionId, phase: "announce" },
+    });
+  });
+
+  it("rejects a delayed disable cancellation after quiz has reopened with a newer session", async () => {
+    const channelId = `quiz-delayed-disable-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const disabledSessionId = `quiz-disabled-${crypto.randomUUID()}`;
+    const newerSessionId = `quiz-enabled-${crypto.randomUUID()}`;
+    const disabledPayload = {
+      sessionId: disabledSessionId,
+      phase: "idle",
+      sessionStartedAt: new Date(Date.now() - 60_000).toISOString(),
+    };
+
+    await object.openGameRound("quiz", disabledSessionId, { ...session(disabledSessionId), phase: "announce" }, {
+      ...disabledPayload,
+      phase: "announce",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Old question",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+    await object.setGameModuleGate("quiz", true, 2);
+    await object.setGameModuleGate("quiz", false, 3, 2);
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      payload: { sessionId: disabledSessionId, phase: "idle" },
+    });
+    await object.openGameRound("quiz", newerSessionId, { ...session(newerSessionId), phase: "announce" }, {
+      sessionId: newerSessionId,
+      phase: "announce",
+      sessionStartedAt: new Date(Date.now()).toISOString(),
+      questionIndex: 0,
+      questionCount: 1,
+      question: "New question",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+
+    await expect(object.cancelOpenGameRounds("quiz", 2, disabledPayload)).resolves.toBe(0);
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      payload: { sessionId: newerSessionId, phase: "announce" },
+    });
+  });
+
+  it("writes idle when activation recovery cancels a quiz disabled and re-enabled outside the object", async () => {
+    const channelId = `quiz-activation-recovery-cancel-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId).run();
+    const object = pointObject(channelId);
+
+    await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "announce" }, {
+      sessionId: roundId,
+      phase: "announce",
+      sessionStartedAt: new Date(Date.now()).toISOString(),
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+    await worker.DB.prepare(
+      "UPDATE channel_modules SET enabled = 0, revision = 2, last_disabled_revision = 2 WHERE channel_id = ? AND module_id = 'quiz'",
+    ).bind(channelId).run();
+    await worker.DB.prepare(
+      "UPDATE channel_modules SET enabled = 1, revision = 3 WHERE channel_id = ? AND module_id = 'quiz'",
+    ).bind(channelId).run();
+
+    await runPointObject(object, (target) => (target as unknown as {
+      reconcilePointModuleActivation: (moduleId: string, flushCancellationNotices: boolean) => Promise<void>;
+    }).reconcilePointModuleActivation("quiz", false));
+
+    await expect(object.activeGameRound("quiz")).resolves.toBeNull();
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      payload: { sessionId: roundId, phase: "idle" },
+    });
+  });
+
+  it("finishes quiz cancellation recovery before the alarm delivers its overlay snapshot", async () => {
+    const channelId = `quiz-cancel-recovery-delivery-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const openedAt = Date.now();
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId).run();
+    const overlayId = `overlay-${roundId}`;
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz overlay', ?, ?)",
+    ).bind(overlayId, channelId, new Date(openedAt).toISOString(), new Date(openedAt).toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${roundId}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    const publishSpy = vi.spyOn(ChannelObject.prototype, "publish");
+    await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "announce", phaseEndsAt: null }, {
+      sessionId: roundId,
+      phase: "announce",
+      sessionStartedAt: new Date(openedAt).toISOString(),
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+    await runPointObject(object, async (_target, state) => {
+      state.storage.sql.exec("UPDATE module_gates SET closed = 1, revision = 2 WHERE module_id = 'quiz'");
+      state.storage.sql.exec(
+        "INSERT INTO game_round_cancellations (module_id, revision) VALUES ('quiz', 2)",
+      );
+      await state.storage.deleteAlarm();
+    });
+    await evictDurableObject(object as unknown as DurableObjectStub);
+    publishSpy.mockClear();
+
+    await expect(object.activeGameRound("quiz")).resolves.toBeNull();
+    expect(publishSpy).not.toHaveBeenCalled();
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      pendingBroadcastSequence: 2,
+      sequence: 2,
+      lastBroadcastSequence: 1,
+      payload: { sessionId: roundId, phase: "idle" },
+    });
+
+    const retryAt = await object.getModuleAlarmDeadline("quiz", "overlay-retry");
+    if (retryAt === null) throw new Error("Cancellation delivery alarm was not armed.");
+    vi.setSystemTime(retryAt);
+    await runPointAlarm(object);
+
+    // Only the quiz cancellation counts; panel notifications and other objects' publishes share the prototype spy.
+    expect(publishSpy.mock.calls.filter(([messages]) => JSON.stringify(messages).includes('"modul.quiz.cancel"') &&
+      JSON.stringify(messages).includes(roundId))).toHaveLength(1);
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      pendingBroadcastSequence: null,
+      sequence: 2,
+      lastBroadcastSequence: 2,
+    });
+  });
+
+  it("does no D1 or publish work while startup restores a pending overlay delivery alarm", async () => {
+    const channelId = `quiz-startup-pending-delivery-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId).run();
+    const overlayId = `overlay-${channelId}`;
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz overlay', ?, ?)",
+    ).bind(overlayId, channelId, new Date().toISOString(), new Date().toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${channelId}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    const publishSpy = vi.spyOn(ChannelObject.prototype, "publish").mockRejectedValueOnce(new Error("leave delivery pending"));
+    await expect(capturePointError(object, (target) => target.writeQuizOverlaySnapshot({
+      sessionId: "pending-session",
+      payload: { sessionId: "pending-session", phase: "idle", sessionStartedAt: new Date().toISOString() },
+    }))).resolves.toBe("leave delivery pending");
+    await evictDurableObject(object as unknown as DurableObjectStub);
+    publishSpy.mockClear();
+    const databasePrepare = vi.spyOn(worker.DB, "prepare");
+    databasePrepare.mockClear();
+
+    await expect(object.pointBalance("quiz", "startup-viewer")).resolves.toBe(0);
+
+    expect(databasePrepare).not.toHaveBeenCalled();
+    expect(publishSpy).not.toHaveBeenCalled();
+    const retryAt = await object.getModuleAlarmDeadline("quiz", "overlay-retry");
+    if (retryAt === null) throw new Error("Startup did not preserve the pending delivery alarm.");
+    publishSpy.mockResolvedValue(undefined);
+    vi.setSystemTime(retryAt);
+    await runPointAlarm(object);
+    expect(publishSpy.mock.calls.filter(([messages]) => JSON.stringify(messages).includes('"modul.quiz.cancel"') &&
+      JSON.stringify(messages).includes("pending-session"))).toHaveLength(1);
+  });
+
+  it("does not read quiz overlay storage on warm point entries without a pending snapshot", async () => {
+    const channelId = `quiz-warm-storage-read-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.pointBalance("points", "warm-viewer");
+
+    await runPointObject(object, async (target, state) => {
+      const kvGet = vi.spyOn(state.storage.kv, "get");
+      await target.pointBalance("points", "warm-viewer");
+      await target.pointAccount("points", "warm-viewer");
+
+      expect(kvGet.mock.calls.filter(([key]) => key === "module:quiz:storage:overlay-snapshot")).toHaveLength(0);
+    });
+  });
+
+  it("does not persist a session snapshot when its round fails to open", async () => {
+    const channelId = `quiz-failed-open-snapshot-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const firstSessionId = `quiz-first-${crypto.randomUUID()}`;
+    const declinedSessionId = `quiz-declined-${crypto.randomUUID()}`;
+    const payload = (sessionId: string) => ({
+      sessionId,
+      phase: "announce",
+      sessionStartedAt: new Date(Date.now()).toISOString(),
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+
+    await object.openGameRound("quiz", firstSessionId, { ...session(firstSessionId), phase: "announce" }, payload(firstSessionId));
+    await expect(capturePointError(object, (target) => target.openGameRound(
+      "quiz",
+      declinedSessionId,
+      { ...session(declinedSessionId), phase: "announce" },
+      payload(declinedSessionId),
+    ))).resolves.toBe("round_active");
+
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      sequence: 1,
+      payload: { sessionId: firstSessionId, phase: "announce" },
+    });
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ roundId: firstSessionId });
+  });
+
+  it("arms overlay delivery in the same durable write that persists a quiz snapshot", async () => {
+    const channelId = `quiz-overlay-delivery-armed-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId).run();
+    const overlayId = `overlay-${crypto.randomUUID()}`;
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz', ?, ?)",
+    ).bind(overlayId, channelId, new Date().toISOString(), new Date().toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${crypto.randomUUID()}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    const publishSpy = vi.spyOn(ChannelObject.prototype, "publish").mockRejectedValueOnce(new Error("crash before delivery"));
+
+    await expect(capturePointError(object, (target) => target.writeQuizOverlaySnapshot({
+      sessionId: "pending-session",
+      payload: {
+        sessionId: "pending-session",
+        phase: "idle",
+        sessionStartedAt: new Date(Date.now()).toISOString(),
+      },
+    }))).resolves.toBe("crash before delivery");
+
+    await expect(object.getModuleAlarmDeadline("quiz", "overlay-retry")).resolves.not.toBeNull();
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      pendingBroadcastSequence: 1,
+      sequence: 1,
+      lastBroadcastSequence: 0,
+    });
+    const retryDeadline = await object.getModuleAlarmDeadline("quiz", "overlay-retry");
+    if (retryDeadline === null) throw new Error("Overlay retry alarm was not armed.");
+    publishSpy.mockResolvedValue(undefined);
+    vi.setSystemTime(retryDeadline);
+    await runPointAlarm(object);
+
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      pendingBroadcastSequence: null,
+      sequence: 1,
+      lastBroadcastSequence: 1,
+    });
+  });
+
+  it("refreshes serverNow on a delayed result retry without extending its results window", async () => {
+    const channelId = `quiz-result-retry-clock-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId).run();
+    const overlayId = `overlay-${crypto.randomUUID()}`;
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz', ?, ?)",
+    ).bind(overlayId, channelId, new Date().toISOString(), new Date().toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${crypto.randomUUID()}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    const resultAt = new Date(Date.now()).toISOString();
+    const deliveredPayloads: Record<string, unknown>[] = [];
+    let failFirstPublish = true;
+    vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
+      const resultsMessage = messages.find(({ type }) => type.endsWith(".results"));
+      if (resultsMessage !== undefined) {
+        if (failFirstPublish) {
+          failFirstPublish = false;
+          return Promise.reject(new Error("temporary results delivery failure"));
+        }
+        deliveredPayloads.push(resultsMessage.payload);
+      }
+      return Promise.resolve();
+    });
+
+    await expect(capturePointError(object, (target) => target.writeQuizOverlaySnapshot({
+      sessionId: "quiz-clock-session",
+      payload: {
+        sessionId: "quiz-clock-session",
+        phase: "results",
+        sessionStartedAt: new Date(Date.now() - 30_000).toISOString(),
+        questionIndex: 0,
+        questionCount: 1,
+        question: "Question",
+        options: ["One", "Two"],
+        phaseEndsAt: null,
+        paused: false,
+        remainingMs: null,
+        resultAt,
+        ranking: [{ login: "winner", correct: 1, rank: 1 }],
+      },
+    }))).resolves.toBe("temporary results delivery failure");
+
+    vi.setSystemTime(Date.now() + 75_000);
+    await object.runModuleAlarm("quiz", "session-control", "overlay-retry");
+
+    expect(deliveredPayloads).toHaveLength(1);
+    expect(deliveredPayloads[0]).toMatchObject({
+      serverNow: new Date(Date.now()).toISOString(),
+      resultAt,
+    });
+    await expect(loadQuizOverlayState({
+      now: Date.now(),
+      readSnapshot: () => Promise.resolve(deliveredPayloads[0] as never),
+    })).resolves.toMatchObject({ phase: "idle" });
+  });
+
+  it("writes idle when a host cancels a quiz round without an explicit overlay payload", async () => {
+    const channelId = `quiz-host-cancel-idle-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+
+    await object.openGameRound("quiz", roundId, {
+      ...session(roundId),
+      phase: "announce",
+      phaseEndsAt: null,
+      sessionStartedAt: new Date(Date.now()).toISOString(),
+    }, {
+      sessionId: roundId,
+      phase: "announce",
+      phaseSequence: 0,
+      sessionStartedAt: new Date(Date.now()).toISOString(),
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+
+    await object.cancelGameRound("quiz", roundId);
+
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      payload: { sessionId: roundId, phase: "idle" },
+      pendingBroadcastSequence: null,
+    });
+  });
+
+  it("retries a disabled quiz cancellation using disabled-recipient routing", async () => {
+    const channelId = `quiz-disabled-cancel-retry-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'points', 1, '{}', 1), (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId, channelId).run();
+    const overlayId = `overlay-${roundId}`;
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz', ?, ?)",
+    ).bind(overlayId, channelId, new Date().toISOString(), new Date().toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${roundId}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    const roundData = { ...session(roundId), phase: "announce", phaseEndsAt: null };
+    await object.openGameRound("quiz", roundId, roundData, {
+      sessionId: roundId,
+      phase: "announce",
+      sessionStartedAt: new Date(Date.now()).toISOString(),
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+    vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
+      if (JSON.stringify(messages).includes('"phase":"idle"')) return Promise.reject(new Error("temporary publish failure"));
+      return Promise.resolve();
+    });
+    await object.setGameModuleGate("quiz", true, 2);
+    await worker.DB.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'quiz'")
+      .bind(channelId).run();
+
+    await expect(capturePointError(object, (target) => target.cancelGameRound("quiz", roundId)))
+      .resolves.toBe("temporary publish failure");
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      includeDisabledModule: true,
+      payload: { sessionId: roundId, phase: "idle" },
+      lastBroadcastSequence: 1,
+      pendingBroadcastSequence: 2,
+    });
+
+    const publishSpy = vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
+      void messages;
+      return Promise.resolve();
+    });
+    await object.runModuleAlarm("quiz", "session-control", "overlay-retry");
+
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      lastBroadcastSequence: 2,
+      pendingBroadcastSequence: null,
+    });
+    expect(publishSpy).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ type: "modul.quiz.cancel", overlayIds: [overlayId] }),
+    ]));
+  });
+
+  it("hydrates the cancelled latest session as idle after an older results window", async () => {
+    const channelId = `quiz-overlay-bootstrap-cancel-${crypto.randomUUID()}`;
+    const olderSessionId = `quiz-old-${crypto.randomUUID()}`;
+    const roundId = `quiz-new-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const olderResults = await object.writeQuizOverlaySnapshot({
+      sessionId: olderSessionId,
+      payload: {
+        sessionId: olderSessionId,
+        phase: "results",
+        phaseSequence: 0,
+        sessionStartedAt: new Date(Date.now() - 30_000).toISOString(),
+        questionIndex: 0,
+        questionCount: 1,
+        question: "Older question",
+        options: ["A", "B"],
+        phaseEndsAt: null,
+        paused: false,
+        remainingMs: null,
+        resultAt: new Date(Date.now() - 1_000).toISOString(),
+        ranking: [{ login: "winner", correct: 1, rank: 1 }],
+      },
+    });
+    if (olderResults === null) throw new Error("Initial results snapshot was not written.");
+    const sessionStartedAt = new Date(Date.now()).toISOString();
+    const started = await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "announce", phaseEndsAt: null }, {
+      sessionId: roundId,
+      phase: "announce",
+      phaseSequence: 0,
+      sessionStartedAt,
+      questionIndex: 0,
+      questionCount: 1,
+      question: "New question",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+    await object.cancelGameRound("quiz", roundId, {
+      sessionId: roundId,
+      phase: "idle",
+      phaseSequence: 0,
+      sessionStartedAt,
+    });
+
+    const hydrated = await loadQuizOverlayState(createOverlaySnapshotContext(worker, channelId, Date.now()));
+    expect(hydrated).toMatchObject({ sessionId: roundId, phase: "idle" });
+    expect(hydrated).not.toHaveProperty("ranking");
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      sequence: (started?.sequence ?? 0) + 1,
+      payload: { sessionId: roundId, phase: "idle" },
+    });
+    expect(started?.sequence).toBe(olderResults.sequence + 1);
+  });
+
+  it("hydrates a suppressed resolved quiz as idle after re-enable, even a day later", async () => {
+    const channelId = `quiz-suppressed-result-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.setGameModuleGate("quiz", false, 1);
+    const sessionStartedAt = new Date(Date.now() - 30_000).toISOString();
+    await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "results" }, {
+      sessionId: roundId,
+      phase: "results",
+      phaseSequence: 4,
+      sessionStartedAt,
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      ranking: [],
+    });
+    await object.markGameRoundAnnounced("quiz", roundId, Date.now() + 30_000, `round:${roundId}`);
+    await object.resolveGameRound("quiz", roundId, { kind: "quiz", params: {} });
+
+    await object.setGameModuleGate("quiz", true, 2);
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      state: string;
+      resolve_delivery_state: string;
+    }>("SELECT state, resolve_delivery_state FROM game_rounds WHERE round_id = ?", roundId).one()))
+      .resolves.toEqual({ state: "resolved", resolve_delivery_state: "suppressed" });
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      payload: { sessionId: roundId, phase: "idle" },
+    });
+
+    await object.setGameModuleGate("quiz", false, 3, 2);
+    vi.setSystemTime(Date.now() + 24 * 60 * 60_000);
+    const hydrated = await loadQuizOverlayState(createOverlaySnapshotContext(worker, channelId, Date.now()));
+
+    expect(hydrated).toMatchObject({ sessionId: roundId, phase: "idle" });
+    expect(hydrated).not.toHaveProperty("ranking");
+  });
+
+  it("delivers the suppression idle snapshot to the disabled quiz overlay before clearing its pending delivery", async () => {
+    const channelId = `quiz-suppressed-routing-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const overlayId = `overlay-${roundId}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz overlay', ?, ?)",
+    ).bind(overlayId, channelId, new Date().toISOString(), new Date().toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${roundId}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    await object.setGameModuleGate("quiz", false, 1);
+    await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "results" }, {
+      sessionId: roundId,
+      phase: "results",
+      sessionStartedAt: new Date(Date.now() - 30_000).toISOString(),
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      ranking: [],
+    });
+    await object.markGameRoundAnnounced("quiz", roundId, Date.now() + 30_000, `round:${roundId}`);
+    await object.resolveGameRound("quiz", roundId, { kind: "quiz", params: {} });
+
+    // D1 already marks the quiz disabled when the gate closes, so only explicit disabled-module routing finds the overlay.
+    await worker.DB.prepare("UPDATE channel_modules SET enabled = 0, revision = 2 WHERE channel_id = ? AND module_id = 'quiz'")
+      .bind(channelId).run();
+    const publishSpy = vi.spyOn(ChannelObject.prototype, "publish").mockRejectedValueOnce(new Error("hold delivery"));
+    await capturePointError(object, (target) => target.setGameModuleGate("quiz", true, 2));
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      includeDisabledModule: true,
+      pendingBroadcastSequence: expect.any(Number) as number,
+      payload: { sessionId: roundId, phase: "idle" },
+    });
+
+    publishSpy.mockResolvedValue(undefined);
+    const retryAt = await object.getModuleAlarmDeadline("quiz", "overlay-retry");
+    if (retryAt === null) throw new Error("The failed suppression delivery did not keep its retry alarm.");
+    vi.setSystemTime(retryAt);
+    await runPointAlarm(object);
+
+    const cancellations = publishSpy.mock.calls.flatMap(([messages]) => messages)
+      .filter((message) => JSON.stringify(message).includes('"modul.quiz.cancel"') && JSON.stringify(message).includes(roundId));
+    expect(cancellations.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(cancellations.at(-1))).toContain(overlayId);
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({ pendingBroadcastSequence: null });
+  });
+
+  it("keeps a queued suppressed result from replacing the idle overlay after re-enable", async () => {
+    const channelId = `quiz-queued-suppressed-result-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.setGameModuleGate("quiz", false, 1);
+    const sessionStartedAt = new Date(Date.now() - 30_000).toISOString();
+    await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "open" }, {
+      sessionId: roundId,
+      phase: "open",
+      sessionStartedAt,
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+    await object.markGameRoundAnnounced("quiz", roundId, Date.now() + 30_000, `round:${roundId}`);
+
+    type LifecycleQueue = {
+      serializeModuleLifecycleMutation: <Result>(operation: () => Promise<Result>) => Promise<Result>;
+    };
+    const lifecycleQueue = ChannelObject.prototype as unknown as LifecycleQueue;
+    const originalSerialize = lifecycleQueue.serializeModuleLifecycleMutation;
+    let releaseLifecycleQueue!: () => void;
+    const queueSpy = vi.spyOn(lifecycleQueue, "serializeModuleLifecycleMutation");
+    queueSpy.mockImplementation(function <Result>(this: unknown, operation: () => Promise<Result>) {
+      return originalSerialize.call(this as never, operation);
+    });
+    await runPointObject(object, (target) => {
+      const internal = target as unknown as LifecycleQueue;
+      // The gate is created inside the object; a promise from the test context cannot be awaited there.
+      const lifecycleQueueBlocked = new Promise<void>((resolve) => { releaseLifecycleQueue = resolve; });
+      void internal.serializeModuleLifecycleMutation(() => lifecycleQueueBlocked);
+    });
+
+    // Quiz notifies its result hook from the round alarm, which then waits behind the blocked lifecycle queue.
+    await object.resolveGameRound("quiz", roundId, { kind: "quiz", params: {} });
+    const resolving = runPointAlarm(object);
+    try {
+      // Poll from the test side; awaiting a promise settled inside the object would carry its I/O context over.
+      await vi.waitFor(() => { expect(queueSpy).toHaveBeenCalledTimes(2); });
+      await object.setGameModuleGate("quiz", true, 2);
+      await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+        payload: { sessionId: roundId, phase: "idle" },
+      });
+    } finally {
+      // Release from inside the object so the queued hook continues in the object's own I/O context.
+      await runPointObject(object, () => { releaseLifecycleQueue(); });
+      await resolving;
+    }
+    await object.setGameModuleGate("quiz", false, 3, 2);
+
+    const hydrated = await loadQuizOverlayState(createOverlaySnapshotContext(worker, channelId, Date.now()));
+    expect(hydrated).toMatchObject({ sessionId: roundId, phase: "idle" });
+    expect(hydrated).not.toHaveProperty("ranking");
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      state: string;
+      resolve_delivery_state: string;
+    }>("SELECT state, resolve_delivery_state FROM game_rounds WHERE round_id = ?", roundId).one()))
+      .resolves.toEqual({ state: "resolved", resolve_delivery_state: "suppressed" });
+    expect(queueSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a newer overlay session when an older quiz result is suppressed", async () => {
+    const channelId = `quiz-suppressed-stale-session-${crypto.randomUUID()}`;
+    const roundId = `quiz-old-${crypto.randomUUID()}`;
+    const newerSessionId = `quiz-new-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.setGameModuleGate("quiz", false, 1);
+    await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "results" });
+    await object.markGameRoundAnnounced("quiz", roundId, Date.now() + 30_000, `round:${roundId}`);
+    await object.resolveGameRound("quiz", roundId, { kind: "quiz", params: {} });
+    await object.writeQuizOverlaySnapshot({
+      sessionId: newerSessionId,
+      payload: {
+        sessionId: newerSessionId,
+        phase: "open",
+        sessionStartedAt: new Date(Date.now()).toISOString(),
+      },
+    });
+
+    await object.setGameModuleGate("quiz", true, 2);
+
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      payload: { sessionId: newerSessionId, phase: "open" },
+    });
   });
 
   it("keeps an offline pending start paused after the stream comes back", async () => {
@@ -264,7 +1064,7 @@ describe("quiz answers in the shared point round", () => {
       paused: true,
       offlineSince: offlineObservedAt,
       remainingMs: 0,
-    }), null);
+    }), null, expect.objectContaining({ phase: "announce" }));
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({
       state: "announcing",
       deadlineAt: null,
@@ -305,7 +1105,7 @@ describe("quiz answers in the shared point round", () => {
     });
     await runPointAlarm(object);
 
-    expect(cancelSpy).toHaveBeenCalledWith("quiz", roundId);
+    expect(cancelSpy).toHaveBeenCalledWith("quiz", roundId, expect.objectContaining({ phase: "idle" }));
     await expect(object.activeGameRound("quiz")).resolves.toBeNull();
   });
 
@@ -440,7 +1240,9 @@ describe("quiz answers in the shared point round", () => {
     ]);
     expect(quizEventTypes.slice(4).every((type) => type === "modul.quiz.results")).toBe(true);
     expect(quizEvents[2]?.payload).toMatchObject({ phase: "reveal", correctIndex: 1, answerDistribution: [0, 1] });
-    expect(quizEvents[3]?.payload).toMatchObject({ phase: "results", ranking: [{ login: "moonmoss", correct: 1, payout: 10 }] });
+    // The first results event is provisional (empty ranking); the settled ranking follows with the next sequence.
+    expect(quizEvents[3]?.payload).toMatchObject({ phase: "results", phaseSequence: 4, ranking: [] });
+    expect(quizEvents[4]?.payload).toMatchObject({ phase: "results", phaseSequence: 5, ranking: [{ login: "moonmoss", correct: 1, payout: 10 }] });
   });
 
   it.each(["end", "next"] as const)("settles the final reveal with %s and releases later lifecycle work", async (action) => {
@@ -751,6 +1553,16 @@ describe("quiz answers in the shared point round", () => {
     await worker.DB.prepare(
       "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'online', ?, 'eventsub')",
     ).bind(channelId, new Date(openedAt - 60_000).toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId).run();
+    const overlayId = `overlay-${roundId}`;
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz', ?, ?)",
+    ).bind(overlayId, channelId, new Date().toISOString(), new Date().toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${roundId}`, channelId, overlayId).run();
     const object = pointObject(channelId);
     await openAnnouncedQuiz(object, roundId, session(roundId));
     await worker.DB.prepare(
@@ -758,9 +1570,9 @@ describe("quiz answers in the shared point round", () => {
     ).bind(new Date(offlineAt).toISOString(), channelId).run();
     const registration = quizModule.alarms?.find(({ key }) => key === "session-control");
     if (registration === undefined) throw new Error("Quiz session alarm is unavailable.");
+    vi.spyOn(ChannelObject.prototype, "publish").mockRejectedValueOnce(new Error("overlay publish failed"));
     await expect(runPointObject(object, async (target) => {
       const context = quizAlarmContext(target);
-      vi.spyOn(context, "publishModuleOverlayMessage").mockRejectedValueOnce(new Error("overlay publish failed"));
       const result = await registration.handle(context, "stream-state", Date.now());
       return result;
     })).rejects.toThrow("overlay publish failed");

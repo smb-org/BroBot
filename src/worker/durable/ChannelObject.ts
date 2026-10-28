@@ -82,6 +82,7 @@ import type {
   ModuleDryRunBallotSnapshot,
   ModuleExternalFetchBudget,
   ModulePointsAccess,
+  ModuleQuizOverlaySnapshot,
   ModulePointRoundAnnouncement,
   ModulePointRoundResult,
   ModuleScheduleInputChangeReason,
@@ -322,6 +323,9 @@ const POINTS_ACTIVATION_RECONCILIATION_ALARM_KEY = "points:activation_reconcilia
 const POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER = "host:points_activation_reconciliation";
 const POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY = "points:activation_reconciliation_modules";
 const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
+const QUIZ_OVERLAY_SNAPSHOT_KEY = "module:quiz:storage:overlay-snapshot";
+const QUIZ_OVERLAY_RETRY_ALARM_KEY = "module:quiz:overlay-retry";
+const QUIZ_OVERLAY_RETRY_ALARM_HANDLER = "module:quiz:session-control";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
 const MAX_TIMER_SKIP_PREPARATION_ATTEMPTS = 3;
@@ -625,6 +629,12 @@ const isStoredClipJob = (value: unknown): value is StoredClipJob => {
 };
 
 type AlarmScheduleTable = Record<string, AlarmScheduleEntry>;
+type QuizOverlaySnapshotWrite = {
+  sessionId: string;
+  expectedCurrentSessionId?: string;
+  payload: Readonly<Record<string, unknown>>;
+  includeDisabledModule?: boolean;
+} | { broadcastSequence: number };
 type ModuleAlarmPlanFenceRecord = {
   identity: ModuleAlarmIdentity | null;
   planSequence: number;
@@ -828,12 +838,20 @@ export class ChannelObject extends DurableObject<Env> {
   private pointsInitialization: Promise<void> | null = null;
   private pointRoundRecoveryInitialized = false;
   private pointRoundRecoveryInitialization: Promise<void> | null = null;
+  private quizOverlayDeliveryPending: boolean | null = null;
   // ponytail: This Set is per-instance memory and is empty after hibernation, so the residual window is bounded by the security alarm. Persist token IDs in DO storage if that window needs to be shorter.
   private recentlyBoundOverlayTokenIds = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    void ctx.blockConcurrencyWhile(async () => {
+      try {
+        await this.ensureQuizOverlayDeliveryAlarm();
+      } catch {
+        // The pending snapshot and retry alarm remain durable for the next wake.
+      }
+    });
   }
 
   /** Atomically reserves one quick-action test message per channel every 30 seconds. */
@@ -850,6 +868,203 @@ export class ChannelObject extends DurableObject<Env> {
     if (this.pointsSchemaReady) return;
     ensurePointsSchema(this.ctx.storage.sql);
     this.pointsSchemaReady = true;
+  }
+
+  private writeQuizOverlaySnapshotSync(input: QuizOverlaySnapshotWrite): ModuleQuizOverlaySnapshot | null {
+    const previous = this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY);
+    this.cacheQuizOverlayDeliveryStatus(previous);
+    if ("broadcastSequence" in input) {
+      if (previous === undefined || !Number.isSafeInteger(input.broadcastSequence) || input.broadcastSequence < 0) return null;
+      const pendingSequence = this.pendingQuizOverlaySequence(previous);
+      const nextPendingSequence = previous.sequence > input.broadcastSequence && pendingSequence !== null
+        ? pendingSequence
+        : null;
+      const updated: ModuleQuizOverlaySnapshot = {
+        ...previous,
+        lastBroadcastSequence: Math.max(previous.lastBroadcastSequence, input.broadcastSequence),
+        pendingBroadcastSequence: nextPendingSequence,
+      };
+      this.ctx.storage.kv.put(QUIZ_OVERLAY_SNAPSHOT_KEY, updated);
+      this.cacheQuizOverlayDeliveryStatus(updated);
+      if (nextPendingSequence === null) this.clearQuizOverlayDeliveryAlarmSync();
+      else this.writeQuizOverlayDeliveryAlarmSync(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+      return updated;
+    }
+    if (input.sessionId.length === 0 || input.sessionId.length > 128 || input.payload.sessionId !== input.sessionId) {
+      throw new Error("invalid_quiz_overlay_session");
+    }
+    if (input.expectedCurrentSessionId !== undefined) {
+      this.ensurePointsSchema();
+      // Row insertion order is the durable session order; sessionStartedAt is allocated before a round opens.
+      const latestRound = this.ctx.storage.sql.exec<{
+        round_id: string;
+        state: string;
+        resolve_delivery_state: string;
+      }>(
+        "SELECT round_id, state, resolve_delivery_state FROM game_rounds WHERE module_id = 'quiz' ORDER BY rowid DESC LIMIT 1",
+      ).toArray()[0];
+      if (latestRound?.round_id !== input.expectedCurrentSessionId) return null;
+      // Provisional results are written while the round is still open; only a suppressed delivery must not publish them.
+      if (input.payload.phase === "results" && latestRound.resolve_delivery_state === "suppressed") return null;
+    }
+    const sequence = (previous?.sequence ?? 0) + 1;
+    const snapshot: ModuleQuizOverlaySnapshot = {
+      sequence,
+      lastBroadcastSequence: previous?.lastBroadcastSequence ?? 0,
+      pendingBroadcastSequence: sequence,
+      includeDisabledModule: input.includeDisabledModule ?? false,
+      payload: {
+        ...input.payload,
+        phaseSequence: sequence,
+        serverNow: new Date().toISOString(),
+      },
+    };
+    this.ctx.storage.kv.put(QUIZ_OVERLAY_SNAPSHOT_KEY, snapshot);
+    this.cacheQuizOverlayDeliveryStatus(snapshot);
+    this.writeQuizOverlayDeliveryAlarmSync(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+    return snapshot;
+  }
+
+  private writeCancelledQuizOverlaySnapshotSync(
+    roundId: string,
+    suppliedPayload?: Readonly<Record<string, unknown>>,
+    includeDisabledModule?: boolean,
+  ): ModuleQuizOverlaySnapshot | null {
+    const round = pointRoundRow(this.ctx.storage.sql, roundId);
+    if (round === null || round.module_id !== "quiz") return null;
+    let roundData: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(round.data_json);
+      if (isRecord(parsed)) roundData = parsed;
+    } catch {
+      // A malformed round still needs an idle overlay snapshot on cancellation.
+    }
+    const supplied = suppliedPayload?.sessionId === roundId ? suppliedPayload : {};
+    const sessionStartedAt = typeof roundData.sessionStartedAt === "string" &&
+      Number.isFinite(Date.parse(roundData.sessionStartedAt))
+      ? roundData.sessionStartedAt
+      : round.created_at;
+    const payload = {
+      ...supplied,
+      sessionId: roundId,
+      phase: "idle",
+      phaseSequence: Number.isSafeInteger(roundData.phaseSequence) && Number(roundData.phaseSequence) >= 0
+        ? Number(roundData.phaseSequence) + 1
+        : 1,
+      sessionStartedAt,
+    };
+    const moduleGate = this.ctx.storage.sql.exec<{ closed: number }>(
+      "SELECT closed FROM module_gates WHERE module_id = ?",
+      "quiz",
+    ).toArray()[0];
+    return this.writeQuizOverlaySnapshotSync({
+      sessionId: roundId,
+      expectedCurrentSessionId: roundId,
+      payload,
+      includeDisabledModule: includeDisabledModule ?? moduleGate?.closed === 1,
+    });
+  }
+
+  private writeSuppressedQuizOverlaySnapshotSync(roundId: string): ModuleQuizOverlaySnapshot | null {
+    const snapshot = this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY);
+    if (snapshot?.payload.sessionId !== roundId) return null;
+    // Suppression only happens for a disabled quiz; the gate row may not be closed yet while this runs, so route explicitly.
+    return this.writeCancelledQuizOverlaySnapshotSync(roundId, undefined, true);
+  }
+
+  private writeQuizOverlayDeliveryAlarmSync(deadline: number): void {
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    const table = stored === undefined ? {} : { ...stored };
+    table[QUIZ_OVERLAY_RETRY_ALARM_KEY] = {
+      deadline,
+      handler: QUIZ_OVERLAY_RETRY_ALARM_HANDLER,
+      revision: (table[QUIZ_OVERLAY_RETRY_ALARM_KEY]?.revision ?? 0) + 1,
+    };
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private clearQuizOverlayDeliveryAlarmSync(): void {
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    if (stored === undefined || !Object.hasOwn(stored, QUIZ_OVERLAY_RETRY_ALARM_KEY)) return;
+    const table = { ...stored };
+    Reflect.deleteProperty(table, QUIZ_OVERLAY_RETRY_ALARM_KEY);
+    if (Object.keys(table).length === 0) this.ctx.storage.kv.delete(ALARM_TABLE_KEY);
+    else this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  public readQuizOverlaySnapshot(): Promise<ModuleQuizOverlaySnapshot | null> {
+    const snapshot = this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY);
+    this.cacheQuizOverlayDeliveryStatus(snapshot);
+    return Promise.resolve(snapshot ?? null);
+  }
+
+  public async writeQuizOverlaySnapshot(input: QuizOverlaySnapshotWrite): Promise<ModuleQuizOverlaySnapshot | null> {
+    const snapshot = this.ctx.storage.transactionSync(() => this.writeQuizOverlaySnapshotSync(input));
+    if (snapshot === null) return null;
+    await this.scheduleEarliestAlarm();
+    await this.deliverPendingQuizOverlaySnapshot();
+    return snapshot;
+  }
+
+  private pendingQuizOverlaySequence(snapshot: ModuleQuizOverlaySnapshot): number | null {
+    if (Number.isSafeInteger(snapshot.pendingBroadcastSequence)) return snapshot.pendingBroadcastSequence ?? null;
+    return snapshot.lastBroadcastSequence < snapshot.sequence ? snapshot.sequence : null;
+  }
+
+  private cacheQuizOverlayDeliveryStatus(snapshot: ModuleQuizOverlaySnapshot | undefined): boolean {
+    this.quizOverlayDeliveryPending = snapshot !== undefined && this.pendingQuizOverlaySequence(snapshot) !== null;
+    return this.quizOverlayDeliveryPending;
+  }
+
+  private quizOverlayDeliveryIsPendingSync(): boolean {
+    if (this.quizOverlayDeliveryPending !== null) return this.quizOverlayDeliveryPending;
+    return this.cacheQuizOverlayDeliveryStatus(this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY));
+  }
+
+  private async ensureQuizOverlayDeliveryAlarm(): Promise<void> {
+    if (!this.quizOverlayDeliveryIsPendingSync()) return;
+    const currentAlarm = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY)?.[QUIZ_OVERLAY_RETRY_ALARM_KEY];
+    if (currentAlarm?.handler !== QUIZ_OVERLAY_RETRY_ALARM_HANDLER) {
+      this.ctx.storage.transactionSync(() => {
+        this.writeQuizOverlayDeliveryAlarmSync(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+      });
+    }
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async scheduleQuizOverlaySnapshotRetry(): Promise<void> {
+    this.ctx.storage.transactionSync(() => {
+      this.writeQuizOverlayDeliveryAlarmSync(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+    });
+    await this.scheduleEarliestAlarm();
+  }
+
+  public async deliverPendingQuizOverlaySnapshot(): Promise<void> {
+    if (!this.quizOverlayDeliveryIsPendingSync()) return;
+    const snapshot = await this.readQuizOverlaySnapshot();
+    if (snapshot === null || this.pendingQuizOverlaySequence(snapshot) === null) return;
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Quiz overlay delivery requires a named Durable Object.");
+    const type = snapshot.payload.phase === "idle" ? "cancel"
+      : snapshot.payload.phase === "results" ? "results" : "phase";
+    try {
+      const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, "quiz", {
+        kind: "overlay",
+        type,
+        elementKind: "quiz.session",
+        payload: { ...snapshot.payload, serverNow: new Date().toISOString() },
+      }, false, MODULES, snapshot.includeDisabledModule === true);
+      if (prepared.outcome === "rejected") throw new Error("quiz_overlay_message_rejected");
+      if (prepared.outcome === "ready") await this.publish([prepared.message]);
+      this.ctx.storage.transactionSync(() => {
+        this.writeQuizOverlaySnapshotSync({ broadcastSequence: snapshot.sequence });
+      });
+      await this.scheduleEarliestAlarm();
+    } catch (error: unknown) {
+      this.quizOverlayDeliveryPending = null;
+      await this.scheduleQuizOverlaySnapshotRetry();
+      throw error;
+    }
   }
 
   private async ensurePointsInitialized(): Promise<void> {
@@ -3447,6 +3662,18 @@ export class ChannelObject extends DurableObject<Env> {
       ),
       ballots: this.ballotAccess(moduleId),
       points: this.pointAccess(moduleId),
+      quizOverlaySnapshot: {
+        read: () => this.readQuizOverlaySnapshot(),
+        write: (payload, expectedCurrentSessionId) => {
+          if (typeof payload.sessionId !== "string") throw new Error("invalid_quiz_overlay_session");
+          return this.writeQuizOverlaySnapshot({
+            sessionId: payload.sessionId,
+            expectedCurrentSessionId: expectedCurrentSessionId ?? payload.sessionId,
+            payload,
+          });
+        },
+        deliverPending: () => this.deliverPendingQuizOverlaySnapshot(),
+      },
       decoratePointWelcome: (action, accountId, claimId, attributions) => this.appendPointRoundWelcome(
         action,
         MODULES.find((candidate) => candidate.id === moduleId),
@@ -3541,6 +3768,10 @@ export class ChannelObject extends DurableObject<Env> {
         );
       },
       publishModuleOverlayMessage: async (type, elementKind, payload) => {
+        if (moduleId === "quiz" && elementKind === "quiz.session") {
+          await this.deliverPendingQuizOverlaySnapshot();
+          return;
+        }
         const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, moduleId, {
           kind: "overlay",
           type,
@@ -4782,7 +5013,7 @@ export class ChannelObject extends DurableObject<Env> {
       pendingAudits: () => this.pendingPointAudits(moduleId),
       claimCooldown: (key, seconds) => this.claimPointCooldown(moduleId, key, seconds),
       rounds: {
-        open: (roundId, data) => this.openGameRound(moduleId, roundId, data),
+        open: (roundId, data, overlayPayload) => this.openGameRound(moduleId, roundId, data, overlayPayload),
         openWithStake: (roundId, data, operationId, accountId, login, stake, cooldown) =>
           this.openGameRoundWithStake(moduleId, roundId, data, operationId, accountId, login, stake, cooldown),
         active: () => this.activeGameRound(moduleId),
@@ -4795,7 +5026,7 @@ export class ChannelObject extends DurableObject<Env> {
         participantRecords: (roundId) => this.gameRoundParticipantData(moduleId, roundId),
         answerChoice: (roundId, operationId, accountId, login, questionIndex, choice, messageAt) =>
           this.answerGameRoundChoice(moduleId, roundId, operationId, accountId, login, questionIndex, choice, messageAt),
-        update: (roundId, data, deadlineAt) => this.updateGameRound(moduleId, roundId, data, deadlineAt),
+        update: (roundId, data, deadlineAt, overlayPayload) => this.updateGameRound(moduleId, roundId, data, deadlineAt, overlayPayload),
         answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
           this.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
         attack: (roundId, operationId, accountId, login, damage, messageAt) =>
@@ -4803,8 +5034,8 @@ export class ChannelObject extends DurableObject<Env> {
         resolve: (roundId, settlement) => this.resolveGameRound(moduleId, roundId, settlement),
         accept: (roundId, operationId, accountId, login, replyToMessageId) =>
           this.acceptGameRound(moduleId, roundId, operationId, accountId, login, replyToMessageId),
-        cancel: (roundId) => this.cancelGameRound(moduleId, roundId),
-        cancelOpenRounds: (revision) => this.cancelOpenGameRounds(moduleId, revision),
+        cancel: (roundId, overlayPayload) => this.cancelGameRound(moduleId, roundId, overlayPayload),
+        cancelOpenRounds: (revision, overlayPayload) => this.cancelOpenGameRounds(moduleId, revision, overlayPayload),
         setGate: (closed, revision, lastDisabledRevision) =>
           this.setGameModuleGate(moduleId, closed, revision, lastDisabledRevision),
       },
@@ -5151,22 +5382,36 @@ export class ChannelObject extends DurableObject<Env> {
     return Promise.resolve(this.ctx.storage.transactionSync(() => pointCooldownRemainingSync(this.ctx.storage.sql, moduleId, key, now)));
   }
 
-  public async openGameRound(moduleId: string, roundId: string, data: unknown): Promise<void> {
+  public async openGameRound(
+    moduleId: string,
+    roundId: string,
+    data: unknown,
+    quizOverlayPayload?: Readonly<Record<string, unknown>>,
+  ): Promise<ModuleQuizOverlaySnapshot | undefined> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
     await this.reconcilePointModuleActivation(moduleId, true);
     const alarmKey = pointRoundAlarmKey(roundId);
-    this.ctx.storage.transactionSync(() => {
+    const snapshot = this.ctx.storage.transactionSync(() => {
       const opened = openPointRoundSync(this.ctx.storage.sql, moduleId, roundId, data, new Date().toISOString(), POINT_SETTLEMENTS);
-      if (opened.opened) {
-        if (MODULES.find((module) => module.id === moduleId)?.onPointRoundOpened !== undefined) {
-          this.ctx.storage.sql.exec("UPDATE game_rounds SET prepare_state = 'pending' WHERE round_id = ?", roundId);
-        }
-        this.writePointRoundAlarmSync(alarmKey, Date.now());
+      if (!opened.opened) return undefined;
+      const candidate = moduleId === "quiz" && quizOverlayPayload !== undefined
+        ? this.writeQuizOverlaySnapshotSync({ sessionId: roundId, payload: quizOverlayPayload })
+        : undefined;
+      if (candidate === null) throw new Error("session_changed");
+      if (candidate !== undefined && isRecord(data)) {
+        updatePointRoundSync(this.ctx.storage.sql, moduleId, roundId, { ...data, phaseSequence: candidate.sequence }, null);
       }
+      if (MODULES.find((module) => module.id === moduleId)?.onPointRoundOpened !== undefined) {
+        this.ctx.storage.sql.exec("UPDATE game_rounds SET prepare_state = 'pending' WHERE round_id = ?", roundId);
+      }
+      this.writePointRoundAlarmSync(alarmKey, Date.now());
+      return candidate;
     });
     await this.scheduleEarliestAlarm();
+    if (snapshot !== undefined) await this.deliverPendingQuizOverlaySnapshot();
+    return snapshot;
   }
 
   public async openGameRoundWithStake(
@@ -5227,8 +5472,9 @@ export class ChannelObject extends DurableObject<Env> {
       state: "announcing" | "open";
       deadline_at: number | null;
       data_json: string;
+      created_at: string;
     }>(
-      `SELECT round_id, state, deadline_at, data_json FROM game_rounds
+      `SELECT round_id, state, deadline_at, data_json, created_at FROM game_rounds
         WHERE module_id = ? AND state IN ('announcing', 'open')
         ORDER BY created_at, round_id LIMIT 1`,
       moduleId,
@@ -5238,6 +5484,7 @@ export class ChannelObject extends DurableObject<Env> {
       state: round.state,
       data: JSON.parse(round.data_json) as unknown,
       deadlineAt: round.deadline_at,
+      createdAt: round.created_at,
     };
   }
 
@@ -5249,11 +5496,13 @@ export class ChannelObject extends DurableObject<Env> {
       round_id: string;
       data_json: string;
       resolved_at: string | null;
+      created_at: string;
     }>(
-      `SELECT round_id, data_json, resolved_at FROM game_rounds
-        WHERE module_id = ? AND state = 'resolved' AND resolved_at IS NOT NULL
+      `SELECT round_id, data_json, resolved_at, created_at FROM game_rounds
+        WHERE module_id = ? AND state = 'resolved' AND resolved_at >= ?
         ORDER BY resolved_at DESC, round_id DESC LIMIT 1`,
       moduleId,
+      new Date(Math.max(-8_640_000_000_000_000, Date.now() - maxAgeMs)).toISOString(),
     ).toArray()[0];
     if (round === undefined || round.resolved_at === null) return null;
     const resolvedAtMs = Date.parse(round.resolved_at);
@@ -5270,6 +5519,7 @@ export class ChannelObject extends DurableObject<Env> {
       data,
       result: JSON.parse(operation.result_json) as unknown,
       resolvedAt: round.resolved_at,
+      createdAt: round.created_at,
     };
   }
 
@@ -5290,16 +5540,36 @@ export class ChannelObject extends DurableObject<Env> {
     await this.scheduleEarliestAlarm();
   }
 
-  public async updateGameRound(moduleId: string, roundId: string, data: unknown, deadlineAt: number | null): Promise<void> {
+  public async updateGameRound(
+    moduleId: string,
+    roundId: string,
+    data: unknown,
+    deadlineAt: number | null,
+    quizOverlayPayload?: Readonly<Record<string, unknown>>,
+  ): Promise<ModuleQuizOverlaySnapshot | undefined> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
-    this.ctx.storage.transactionSync(() => {
-      updatePointRoundSync(this.ctx.storage.sql, moduleId, roundId, data, deadlineAt);
+    const snapshot = this.ctx.storage.transactionSync(() => {
+      const candidate = moduleId === "quiz" && quizOverlayPayload !== undefined
+        ? this.writeQuizOverlaySnapshotSync({
+          sessionId: roundId,
+          expectedCurrentSessionId: roundId,
+          payload: quizOverlayPayload,
+        })
+        : undefined;
+      if (candidate === null) throw new Error("session_changed");
+      const roundData = candidate !== undefined && isRecord(data)
+        ? { ...data, phaseSequence: candidate.sequence }
+        : data;
+      updatePointRoundSync(this.ctx.storage.sql, moduleId, roundId, roundData, deadlineAt);
       if (deadlineAt === null) this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       else this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), deadlineAt);
+      return candidate;
     });
     await this.scheduleEarliestAlarm();
+    if (snapshot !== undefined) await this.deliverPendingQuizOverlaySnapshot();
+    return snapshot;
   }
 
   public async joinGameRound(
@@ -5497,6 +5767,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (reason === "settlement_missing" || reason === "settlement_unknown" || reason === "settlement_execution_failed" ||
           reason === "monthly_overflow") {
         await this.cancelPointRounds(moduleId, [roundId]);
+        if (moduleId === "quiz") await this.deliverPendingQuizOverlaySnapshot();
         throw new Error("round_cancelled", { cause: error });
       }
       throw error;
@@ -5567,6 +5838,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (reason === "settlement_missing" || reason === "settlement_unknown" || reason === "settlement_execution_failed" ||
           reason === "monthly_overflow") {
         await this.cancelPointRounds(moduleId, [roundId]);
+        if (moduleId === "quiz") await this.deliverPendingQuizOverlaySnapshot();
         throw new Error("round_cancelled", { cause: error });
       }
       throw error;
@@ -5582,23 +5854,36 @@ export class ChannelObject extends DurableObject<Env> {
     return { replayed: resolved.replayed, result: resolved.result, balances: resolved.balances };
   }
 
-  public async cancelGameRound(moduleId: string, roundId: string): Promise<number> {
+  public async cancelGameRound(
+    moduleId: string,
+    roundId: string,
+    quizOverlayPayload?: Readonly<Record<string, unknown>>,
+  ): Promise<number> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     assertPointRoundId(roundId);
-    return this.cancelPointRounds(moduleId, [roundId]);
+    const cancelled = await this.cancelPointRounds(moduleId, [roundId], undefined, true, quizOverlayPayload);
+    if (moduleId === "quiz") await this.deliverPendingQuizOverlaySnapshot();
+    return cancelled;
   }
 
-  public async cancelOpenGameRounds(moduleId: string, revision: number): Promise<number> {
+  public async cancelOpenGameRounds(
+    moduleId: string,
+    revision: number,
+    quizOverlayPayload?: Readonly<Record<string, unknown>>,
+  ): Promise<number> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
-    return await this.cancelOpenGameRoundsInternal(moduleId, revision, true);
+    const cancelled = await this.cancelOpenGameRoundsInternal(moduleId, revision, true, quizOverlayPayload);
+    if (moduleId === "quiz") await this.deliverPendingQuizOverlaySnapshot();
+    return cancelled;
   }
 
   private async cancelOpenGameRoundsInternal(
     moduleId: string,
     revision: number,
     flushCancellationNotices: boolean,
+    quizOverlayPayload?: Readonly<Record<string, unknown>>,
   ): Promise<number> {
     this.ensurePointsSchema();
     const roundIds = this.ctx.storage.sql.exec<{ round_id: string }>(
@@ -5608,7 +5893,7 @@ export class ChannelObject extends DurableObject<Env> {
       moduleId,
       revision,
     ).toArray().map(({ round_id }) => round_id);
-    return await this.cancelPointRounds(moduleId, roundIds, revision, flushCancellationNotices);
+    return await this.cancelPointRounds(moduleId, roundIds, revision, flushCancellationNotices, quizOverlayPayload);
   }
 
   private async cancelPointRounds(
@@ -5616,6 +5901,7 @@ export class ChannelObject extends DurableObject<Env> {
     roundIds: readonly string[],
     expectedGateRevision?: number,
     flushCancellationNotices = true,
+    quizOverlayPayload?: Readonly<Record<string, unknown>>,
   ): Promise<number> {
     const refundRequests = pointRoundRefundRequests(this.ctx.storage.sql, moduleId, roundIds);
     const hashes = new Map<string, string>();
@@ -5643,7 +5929,10 @@ export class ChannelObject extends DurableObject<Env> {
         },
         roundIds,
         expectedGateRevision,
-        undefined,
+        (cancelledRoundId) => {
+          if (moduleId !== "quiz") return;
+          this.writeCancelledQuizOverlaySnapshotSync(cancelledRoundId, quizOverlayPayload);
+        },
         MODULES.find((module) => module.id === moduleId)?.pointRoundCancellationNotice !== false,
       );
       if (count > 0) {
@@ -5676,7 +5965,8 @@ export class ChannelObject extends DurableObject<Env> {
       return { applied: false };
     }
     await this.ensurePointRoundRecovery();
-    return await this.setGameModuleGateInternal(moduleId, closed, revision, true, lastDisabledRevision);
+    const result = await this.setGameModuleGateInternal(moduleId, closed, revision, true, lastDisabledRevision);
+    return result;
   }
 
   private gameModuleGateIsCurrentSync(
@@ -5744,6 +6034,7 @@ export class ChannelObject extends DurableObject<Env> {
       }));
     }));
     const now = new Date().toISOString();
+    const quizOverlaySnapshots: ModuleQuizOverlaySnapshot[] = [];
     const result = this.ctx.storage.transactionSync(() => {
       const applied = setGameModuleGateSync(this.ctx.storage.sql, moduleId, closed, revision, (value) => {
         if (typeof value !== "object" || value === null || !("operationId" in value) || typeof value.operationId !== "string") {
@@ -5753,16 +6044,27 @@ export class ChannelObject extends DurableObject<Env> {
         if (hash === undefined) throw new Error("refund_retry_required");
         return hash;
       }, now, lastDisabledRevision, (roundId) => {
+        if (moduleId === "quiz") {
+          const snapshot = this.writeCancelledQuizOverlaySnapshotSync(roundId);
+          if (snapshot !== null) quizOverlaySnapshots.push(snapshot);
+        }
         if (pointRoundRow(this.ctx.storage.sql, roundId)?.prepare_state === "pending") {
           this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now());
         } else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       }, (roundId) => {
+        if (moduleId === "quiz") {
+          const snapshot = this.writeSuppressedQuizOverlaySnapshotSync(roundId);
+          if (snapshot !== null) quizOverlaySnapshots.push(snapshot);
+        }
         this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       }, MODULES.find((module) => module.id === moduleId)?.pointRoundCancellationNotice !== false);
       if (!closed && cancellationRevision !== null) this.ensurePointCancellationNoticeAlarmsSync();
       return applied;
     });
-    if (result.applied || roundIds.length > 0 || cancellationRevision !== null) await this.scheduleEarliestAlarm();
+    if (result.applied || roundIds.length > 0 || cancellationRevision !== null || quizOverlaySnapshots.length > 0) {
+      await this.scheduleEarliestAlarm();
+    }
+    if (quizOverlaySnapshots.length > 0) await this.deliverPendingQuizOverlaySnapshot();
     if (!closed && (result.applied || cancellationRevision !== null)) {
       if (flushCancellationNotices && cancellationRevision !== null) await this.flushPointCancellationNotices();
     }
@@ -5914,7 +6216,10 @@ export class ChannelObject extends DurableObject<Env> {
       }
       return outcome;
     });
-    if (recorded?.cancelled === true) await this.cancelPointRounds(recorded.moduleId, [roundId]);
+    if (recorded?.cancelled === true) {
+      await this.cancelPointRounds(recorded.moduleId, [roundId]);
+      if (recorded.moduleId === "quiz") await this.deliverPendingQuizOverlaySnapshot();
+    }
     else await this.scheduleEarliestAlarm();
     if (recorded !== null && recorded.deadlineAt !== null && state !== "rate_limited") {
       try {
@@ -6143,6 +6448,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (settlement === null) {
         console.error(`Point round ${roundId} has no persisted settlement.`);
         await this.cancelPointRounds(round.module_id, [roundId]);
+        if (round.module_id === "quiz") await this.deliverPendingQuizOverlaySnapshot();
         return;
       }
       try {
@@ -6163,6 +6469,7 @@ export class ChannelObject extends DurableObject<Env> {
     }
     if (round.announce_state === "failed") {
       await this.cancelPointRounds(round.module_id, [roundId]);
+      if (round.module_id === "quiz") await this.deliverPendingQuizOverlaySnapshot();
       return;
     }
     if (round.announce_state === "rate_limited" && round.announce_attempts >= POINTS_ANNOUNCE_MAX_ATTEMPTS) {
@@ -8122,6 +8429,12 @@ export class ChannelObject extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     await withCommittedPanelResourceDrain(async () => {
       await this.ensurePointRoundRecovery();
+      await this.ensureQuizOverlayDeliveryAlarm();
+      try {
+        await this.deliverPendingQuizOverlaySnapshot();
+      } catch (error: unknown) {
+        console.error("Pending quiz overlay delivery failed; its alarm will retry.", error);
+      }
       const alarmTable = await this.ctx.storage.transaction((transaction) => readAlarmScheduleTable(transaction));
       const hasTimerAlarms = Object.keys(alarmTable).some((key) =>
         key.startsWith(`${TIMER_ALARM_PREFIX}timer:`) || key.startsWith(`${TIMER_ALARM_PREFIX}mirror:`));
