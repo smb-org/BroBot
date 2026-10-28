@@ -101,19 +101,18 @@
   }
 
   .quiz-session-overlay__rank {
-    position: relative;
     display: grid;
     min-width: 0;
-    grid-template-columns: 36px minmax(0, 1fr) 120px;
+    grid-template-columns: 26px 200px minmax(0, 1fr) 88px;
     align-items: center;
     gap: 12px;
     border-bottom: 1px solid color-mix(in srgb, var(--quiz-secondary) 25%, transparent);
   }
 
-  .quiz-session-overlay__rank-number { width: 26px; height: 22px; font-size: 14px; }
-  .quiz-session-overlay__login { min-width: 0; overflow: hidden; font-size: 18px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .quiz-session-overlay__rank-number { width: 26px; height: 20px; font-size: 14px; }
+  .quiz-session-overlay__login { min-width: 0; overflow: hidden; font-size: 18px; font-weight: 600; line-height: 22px; text-overflow: ellipsis; white-space: nowrap; }
   .quiz-session-overlay__correct-count { color: var(--quiz-secondary); font-size: 16px; text-align: right; white-space: nowrap; }
-  .quiz-session-overlay__rank-bar { position: absolute; inset-inline-start: 38px; inset-block-end: 1px; display: block; width: calc(100% - 180px); height: 3px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--quiz-text) 16%, var(--quiz-background)); }
-  .quiz-session-overlay__rank-bar > span { display: block; height: 100%; background: var(--quiz-accent); }
+  .quiz-session-overlay__rank-bar { display: block; height: 8px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--quiz-text) 16%, var(--quiz-background)); }
+  .quiz-session-overlay__rank-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--quiz-accent); }
   .quiz-session-overlay__empty { display: grid; place-items: center; grid-row: 1 / -1; color: var(--quiz-secondary); font-size: 18px; }
 }

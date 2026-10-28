@@ -85,10 +85,10 @@ const QuizOverlay = ({ config: rawConfig, state: rawState, language = "en" }: Mo
         return <li className="quiz-session-overlay__rank" key={`${String(entry.rank)}:${entry.login}`}>
           <span className="quiz-session-overlay__rank-number">{entry.rank}</span>
           <span className="quiz-session-overlay__login" title={entry.login}>{entry.login}</span>
-          <span className="quiz-session-overlay__correct-count">{labels.correctAnswers(entry.correct)}</span>
           <span className="quiz-session-overlay__rank-bar" aria-hidden="true">
             <span style={{ width: `${String(percent)}%` }} />
           </span>
+          <span className="quiz-session-overlay__correct-count">{labels.correctAnswers(entry.correct)}</span>
         </li>;
       })}
     </ol> : <ol className={`quiz-session-overlay__options${current.phase === "reveal" ? " is-reveal" : ""}`}>

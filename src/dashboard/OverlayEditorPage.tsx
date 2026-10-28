@@ -47,7 +47,7 @@ import "./overlay-editor.css";
 
 const installPreviewStylesheet = (
   frameDocument: Document,
-  attribute: "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css",
+  attribute: "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css" | "data-brobot-overlay-quiz-css",
   css: string,
 ): void => {
   let style = frameDocument.head.querySelector<HTMLStyleElement>(`style[${attribute}]`);
@@ -705,10 +705,12 @@ function OverlayEditorWorkspace({
     void Promise.all([
       import("../overlay/tally/overlay-tally.css?inline"),
       import("../modules/emote_slots/overlay/slot.css?inline"),
-    ]).then(([{ default: overlayTallyCss }, { default: slotCss }]) => {
+      import("../modules/quiz/overlay/view.css?inline"),
+    ]).then(([{ default: overlayTallyCss }, { default: slotCss }, { default: quizCss }]) => {
       if (!frame.isConnected || frame.contentDocument !== frameDocument) return;
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-tally-css", overlayTallyCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-slot-css", slotCss);
+      installPreviewStylesheet(frameDocument, "data-brobot-overlay-quiz-css", quizCss);
       canvasRef.current = root;
       previewFrameRootRef.current = root;
       setPreviewFrameRoot(root);
