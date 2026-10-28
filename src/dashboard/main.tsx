@@ -1119,7 +1119,7 @@ export const DashboardApp = (): ReactElement => {
       );
       return mergeAndRememberChannelStreamVersion(withLatestModuleToggles, latestStreamByChannel.current);
     },
-    refetchInterval: overviewChannelId === null ? false : offlineRefetchInterval,
+    refetchInterval: overviewChannelId === null ? false : botHeartbeatRefetchInterval,
     enabled: !authenticationRequired && overviewChannelId !== null &&
       (route.kind === "module" || (route.kind === "channel" && route.section === "overview")),
     placeholderData: (previousData, previousQuery) =>
