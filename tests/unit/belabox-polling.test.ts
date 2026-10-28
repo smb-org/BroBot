@@ -2021,7 +2021,7 @@ describe("BELABOX polling", () => {
     const delayedDatabase = {
       prepare: (sql: string) => database.prepare(sql),
       batch: async (statements: Parameters<TestD1Database["batch"]>[0]) => {
-        if (!changed && statements.length === 3) {
+        if (!changed && statements.some((statement) => statement.sql.includes("INSERT INTO belabox_status"))) {
           changed = true;
           await database.prepare(
             `UPDATE channel_modules SET enabled = 0, revision = revision + 1
@@ -2069,7 +2069,7 @@ describe("BELABOX polling", () => {
     const delayedDatabase = {
       prepare: (sql: string) => database.prepare(sql),
       batch: async (statements: Parameters<TestD1Database["batch"]>[0]) => {
-        if (!changed && statements.length === 3) {
+        if (!changed && statements.some((statement) => statement.sql.includes("INSERT INTO belabox_status"))) {
           changed = true;
           await setStoredStreamId(database, "stream-after-snapshot");
         }

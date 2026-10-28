@@ -2498,10 +2498,11 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("button", { name: "Stummschaltung aufheben" })).toBeInTheDocument();
   });
 
-  it("polls shell queries while realtime is offline and stops polling while connected", async () => {
+  it("refreshes the open System bot snapshot across a connected heartbeat", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));
     const channel = { ...healthyChannel("kanal-a", "Alpha"), modules: [] };
+    let heartbeatUpdatedAt = "2026-09-23T09:00:00.000Z";
     let channelCalls = 0;
     let overviewCalls = 0;
     let systemCalls = 0;
@@ -2509,7 +2510,8 @@ describe("Dashboard skeleton", () => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") {
         channelCalls += 1;
-        return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+        const bot = { ...channel.bot, updatedAt: heartbeatUpdatedAt };
+        return Promise.resolve(jsonResponse({ channels: [{ ...channel, bot }], bot }));
       }
       if (path === "/api/channels/kanal-a/overview") {
         overviewCalls += 1;
@@ -2517,7 +2519,7 @@ describe("Dashboard skeleton", () => {
       }
       if (path === "/api/channels/kanal-a/system") {
         systemCalls += 1;
-        return Promise.resolve(jsonResponse(system));
+        return Promise.resolve(jsonResponse({ ...system, bot: { ...system.bot, updatedAt: heartbeatUpdatedAt } }));
       }
       return Promise.resolve(jsonResponse({}, 404));
     }));
@@ -2543,11 +2545,47 @@ describe("Dashboard skeleton", () => {
     expect(TestWebSocket.instances).toHaveLength(1);
     TestWebSocket.instances[0]?.open();
     await flushQueryUpdates();
-    const connectedCounts = [channelCalls, overviewCalls, systemCalls];
+    const connectedCounts = [channelCalls, overviewCalls, systemCalls] as const;
+    const botUpdatedRow = screen.getByText("Bot zuletzt aktualisiert").closest("div");
+    const displayedHeartbeat = botUpdatedRow?.querySelector("dd")?.textContent;
+    expect(displayedHeartbeat).toBeTruthy();
+    heartbeatUpdatedAt = "2026-09-23T09:06:00.000Z";
 
     await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 1); });
     await flushQueryUpdates();
-    expect([channelCalls, overviewCalls, systemCalls]).toEqual(connectedCounts);
+    expect(channelCalls).toBe(connectedCounts[0] + 1);
+    expect(overviewCalls).toBe(connectedCounts[1]);
+    expect(systemCalls).toBe(connectedCounts[2] + 1);
+    expect(botUpdatedRow?.querySelector("dd")?.textContent).not.toBe(displayedHeartbeat);
+  });
+
+  it("refreshes the open overview with the connected heartbeat so the header is not marked overdue", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), modules: [] };
+    // Fifty-nine minutes old: not yet overdue, but it crosses the hour while the socket is connected.
+    let heartbeatUpdatedAt = new Date(Date.now() - 59 * 60 * 1000).toISOString();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = requestUrl(input).pathname;
+      const bot = { ...channel.bot, updatedAt: heartbeatUpdatedAt };
+      if (path === "/api/channels") return Promise.resolve(jsonResponse({ channels: [{ ...channel, bot }], bot }));
+      if (path === "/api/channels/kanal-a/overview") return Promise.resolve(jsonResponse(overview({ ...channel, bot })));
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    vi.stubGlobal("WebSocket", TestWebSocket);
+    window.history.replaceState({}, "", "/channels/kanal-a");
+
+    render(<DashboardApp />);
+    await flushQueryUpdates();
+    expect(TestWebSocket.instances).toHaveLength(1);
+    TestWebSocket.instances[0]?.open();
+    await flushQueryUpdates();
+    expect(screen.queryByText("Wartung überfällig")).not.toBeInTheDocument();
+
+    heartbeatUpdatedAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 1); });
+    await flushQueryUpdates();
+    expect(screen.queryByText("Wartung überfällig")).not.toBeInTheDocument();
   });
 
   it("shows stale token expiry as neutral, reloads, then marks server-confirmed expiry red", async () => {

@@ -97,15 +97,60 @@ export const writeModuleDiagnostics = async (
   return written;
 };
 
+/**
+ * Deletes a retention batch and advances each affected channel/resource pair
+ * once. The staging table and its trigger guard stay inside D1's atomic batch,
+ * so the revision/outbox commit remains coupled to the event deletions.
+ */
+const deleteEventLogEntries = async (
+  db: D1Database,
+  candidateRowsQuery: string,
+  deleteQuery: string,
+  bindings: readonly (string | number)[],
+): Promise<void> => {
+  await db.batch([
+    db.prepare("DELETE FROM panel_event_log_retention_resources"),
+    db.prepare(
+      `WITH candidates AS (${candidateRowsQuery})
+       INSERT OR IGNORE INTO panel_event_log_retention_resources (channel_id, resource)
+       SELECT candidate.channel_id, dependency.resource
+         FROM candidates AS candidate
+         JOIN panel_resource_dependencies AS dependency ON dependency.source_table = 'event_log'
+        WHERE dependency.resource NOT LIKE 'module:%*%'
+       UNION
+       SELECT candidate.channel_id, replace(dependency.resource, '*', candidate.module_id)
+         FROM candidates AS candidate
+         JOIN panel_resource_dependencies AS dependency ON dependency.source_table = 'event_log'
+        WHERE dependency.resource = 'module:*:data' AND candidate.module_id IS NOT NULL
+       UNION
+       SELECT candidate.channel_id, 'module:ads:schedule'
+         FROM candidates AS candidate
+        WHERE candidate.module_id = 'ads'`,
+    ).bind(...bindings),
+    db.prepare(deleteQuery).bind(...bindings),
+    db.prepare(
+      `INSERT INTO panel_resource_revisions (channel_id, resource, revision)
+       SELECT channel_id, resource, 1
+         FROM panel_event_log_retention_resources
+        WHERE 1
+       ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1`,
+    ),
+    db.prepare("DELETE FROM panel_event_log_retention_resources"),
+  ]);
+};
+
 /** Deletes events whose creation time is more than 14 days in the past. */
 export const purgeOldEventLogEntries = async (db: D1Database, now: string): Promise<void> => {
   const cutoff = new Date(
     Date.parse(now) - EVENT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString();
-  await db.prepare(
-    `DELETE FROM event_log
-      WHERE created_at < ?`,
-  ).bind(cutoff).run();
+  const candidates = "SELECT channel_id, module_id FROM event_log WHERE created_at < ?";
+  await deleteEventLogEntries(
+    db,
+    candidates,
+    "DELETE FROM event_log WHERE created_at < ?",
+    [cutoff],
+  );
 };
 
 /**
@@ -114,8 +159,14 @@ export const purgeOldEventLogEntries = async (db: D1Database, now: string): Prom
  * scheduled handler, at `EVENT_LOG_DAILY_TRIM_HOUR`.
  */
 export const trimEventLogToLimit = async (db: D1Database): Promise<void> => {
-  await db.prepare(
-    `DELETE FROM event_log
+  const candidates = `
+    SELECT channel_id, module_id FROM (
+      SELECT channel_id, module_id,
+             ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY created_at DESC, event_id DESC) AS rank
+        FROM event_log
+    )
+    WHERE rank > ?`;
+  const deletion = `DELETE FROM event_log
       WHERE event_id IN (
         SELECT event_id FROM (
           SELECT event_id,
@@ -123,6 +174,6 @@ export const trimEventLogToLimit = async (db: D1Database): Promise<void> => {
             FROM event_log
         )
        WHERE rank > ?
-      )`,
-  ).bind(EVENT_LOG_LIMIT).run();
+      )`;
+  await deleteEventLogEntries(db, candidates, deletion, [EVENT_LOG_LIMIT]);
 };
