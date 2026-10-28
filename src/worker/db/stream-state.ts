@@ -347,11 +347,26 @@ const prepareRefreshHelixStreamState = (
             started_at_seconds = ?, started_at_fraction = ?, stream_id = ?,
             started_at_epoch_ms = ?, changed_at_epoch_ms = ?
       WHERE channel_id = ?
-        AND julianday(?) >= julianday(changed_at)`,
+        AND julianday(?) >= julianday(changed_at)
+        AND (
+          state IS NOT ?
+          OR changed_at IS NOT ?
+          OR source IS NOT 'helix'
+          OR started_at IS NOT ?
+          OR checked_at IS NOT ?
+          OR started_at_seconds IS NOT ?
+          OR started_at_fraction IS NOT ?
+          OR stream_id IS NOT ?
+          OR started_at_epoch_ms IS NOT ?
+          OR changed_at_epoch_ms IS NOT ?
+        )`,
   ).bind(state, state, streamId, streamId, streamId, timestampEpochMilliseconds(startedAt),
     state, changedAt, startedAt, changedAt, startedAtSeconds, startedAtFraction,
     state === "online" ? streamId : null, timestampEpochMilliseconds(startedAt),
-    timestampEpochMilliseconds(changedAt), channelId, changedAt);
+    timestampEpochMilliseconds(changedAt), channelId, changedAt,
+    state, changedAt, startedAt, changedAt, startedAtSeconds, startedAtFraction,
+    state === "online" ? streamId : null, timestampEpochMilliseconds(startedAt),
+    timestampEpochMilliseconds(changedAt));
 };
 
 export const refreshHelixStreamState = async (

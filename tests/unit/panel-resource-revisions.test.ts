@@ -1684,6 +1684,7 @@ describe("panel resource revisions", () => {
         "faq_entry_user_cooldowns",
         "faq_order_revision",
         "oauth_transactions",
+        "panel_event_log_retention_resources",
         "panel_global_resource_revisions",
         "panel_global_resource_publications",
         "panel_resource_dependencies",

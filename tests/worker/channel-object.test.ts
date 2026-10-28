@@ -2139,6 +2139,17 @@ describe("ChannelObject realtime path", () => {
       )`,
     ).run();
     await database.prepare(
+      `CREATE TABLE IF NOT EXISTS panel_resource_revisions (
+        channel_id TEXT NOT NULL, resource TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (channel_id, resource)
+      )`,
+    ).run();
+    await database.prepare(
+      `CREATE TABLE IF NOT EXISTS panel_resource_dependencies (
+        source_table TEXT NOT NULL, resource TEXT NOT NULL, PRIMARY KEY (source_table, resource)
+      )`,
+    ).run();
+    await database.prepare(
       `CREATE TABLE IF NOT EXISTS belabox_status (
         channel_id TEXT PRIMARY KEY, sampled_at TEXT, sample_json TEXT, error_code TEXT,
         polling INTEGER NOT NULL DEFAULT 0, stream_id TEXT, belabox_stream_id TEXT,
