@@ -16,6 +16,17 @@ const installQuizApi = async (page: Page) => {
     updatedAt: string;
   } | null = null;
 
+  let settings = { pot: 500, answerSeconds: 30, revealSeconds: 8, chatQuestions: true };
+  let settingsRevision = 1;
+  await page.route(`**/api/channels/${channelId}/modules/quiz/settings`, (route) => {
+    if (route.request().method() === "PATCH") {
+      const body = route.request().postDataJSON() as { settings: typeof settings };
+      settings = body.settings;
+      settingsRevision += 1;
+      return route.fulfill(json({ settings, revision: settingsRevision, warnings: [] }));
+    }
+    return route.fulfill(json({ settings, revision: settingsRevision, variables: [] }));
+  });
   await page.route(`**${collectionPath}**`, async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -47,7 +58,7 @@ const installQuizApi = async (page: Page) => {
     return route.fallback();
   });
 
-  return { getSavedSet: () => savedSet };
+  return { getSavedSet: () => savedSet, getSettings: () => settings };
 };
 
 test("create a question set, save a question, and reload the saved editor", async ({ page }) => {
@@ -80,4 +91,28 @@ test("create a question set, save a question, and reload the saved editor", asyn
   await expect(page.getByLabel("Question text")).toHaveValue("What is frozen water called?");
   await expect(page.getByRole("textbox", { name: "Option 1" })).toHaveValue("Ice");
   await expect(page.getByRole("textbox", { name: "Option 2" })).toHaveValue("Steam");
+});
+
+test("opens the quiz settings from the sets page and saves them explicitly", async ({ page }) => {
+  await installLiveCockpitMocks(page, {
+    channelId,
+    modules: [
+      { id: "points", enabled: true, settings: "{}" },
+      { id: "quiz", enabled: true, settings: "{}" },
+    ],
+  });
+  const api = await installQuizApi(page);
+
+  await page.goto(`/channels/${channelId}/modules/quiz?lang=en`);
+  await expect(page.getByRole("button", { name: "New set" })).toBeVisible();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const pot = page.getByLabel("Points pot");
+  await expect(pot).toHaveValue("500");
+  await pot.fill("250");
+  expect(api.getSettings().pot).toBe(500);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+
+  await expect.poll(() => api.getSettings().pot).toBe(250);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByLabel("Points pot")).toHaveValue("250");
 });

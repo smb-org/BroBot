@@ -35,9 +35,13 @@ export const modulePoints = (
         openWithStake: () => unavailable(),
         active: () => unavailable(),
         listOpen: () => unavailable(),
+        recentlyResolved: () => unavailable(),
         markAnnounced: () => unavailable(),
         join: () => unavailable(),
         participants: () => unavailable(),
+        participantRecords: () => unavailable(),
+        answerChoice: () => unavailable(),
+        update: () => unavailable(),
         answer: () => unavailable(),
         attack: () => unavailable(),
         resolve: () => unavailable(),
@@ -106,10 +110,15 @@ export const modulePoints = (
         object.openGameRoundWithStake(moduleId, roundId, withPointWelcome(data, accountId), operationId, accountId, login, stake, cooldown),
       active: () => object.activeGameRound(moduleId),
       listOpen: () => object.listOpenGameRounds(moduleId),
+      recentlyResolved: (maxAgeMs) => object.recentlyResolvedGameRound(moduleId, maxAgeMs),
       markAnnounced: (roundId, deadlineAt, alarmKey) => object.markGameRoundAnnounced(moduleId, roundId, deadlineAt, alarmKey),
       join: (roundId, operationId, accountId, login, stake, data) =>
         object.joinGameRound(moduleId, roundId, operationId, accountId, login, stake, data),
       participants: (roundId, nameLimit) => object.gameRoundParticipants(moduleId, roundId, nameLimit),
+      participantRecords: (roundId) => object.gameRoundParticipantData(moduleId, roundId),
+      answerChoice: (roundId, operationId, accountId, login, questionIndex, choice, messageAt) =>
+        object.answerGameRoundChoice(moduleId, roundId, operationId, accountId, login, questionIndex, choice, messageAt),
+      update: (roundId, data, deadlineAt) => object.updateGameRound(moduleId, roundId, data, deadlineAt),
       answer: (roundId, operationId, accountId, login, graceS, messageAt) =>
         object.answerGameRound(moduleId, roundId, operationId, accountId, login, graceS, messageAt),
       attack: (roundId, operationId, accountId, login, damage, messageAt) =>

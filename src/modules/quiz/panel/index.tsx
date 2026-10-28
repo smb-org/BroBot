@@ -16,8 +16,9 @@ import type { SaveStatusProps } from "../../../dashboard/ui/SaveStatus";
 import type { ModulePanelProperties } from "../../contract";
 import { QUIZ_SET_MAXIMUM_COUNT, QUIZ_SET_PAGE_SIZE, type QuizSet } from "../contracts";
 import { quizPanelTexts } from "../locale";
-import { createQuizSet, deleteQuizSet, loadQuizSet, loadQuizSets, quizErrorCode } from "./service";
+import { createQuizSet, deleteQuizSet, loadQuizSet, loadQuizSets, loadQuizSettings, quizErrorCode } from "./service";
 import QuizSetEditor, { type QuizEditorControl } from "./QuizSetEditor";
+import QuizSettingsView from "./QuizSettingsView";
 import "./panel.css";
 
 const isQuizQuery = (channelId: string, query: { queryKey: readonly unknown[] }): boolean =>
@@ -31,6 +32,7 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const selectedSetIdRef = useRef<string | null>(null);
   const activeEditorRef = useRef<QuizEditorControl | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatusProps | null>(null);
@@ -48,10 +50,13 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
       ? Promise.reject(new Error("quiz_set_not_selected"))
       : loadQuizSet(channelId, selectedSetId, signal),
     { enabled: selectedSetId !== null });
+  const settingsQuery = useModuleQuery(channelId, "quiz", "settings", (signal) => loadQuizSettings(channelId, signal),
+    { enabled: settingsOpen });
   const data = collectionQuery.data;
   const isManager = canManage !== false;
 
   const selectSet = useCallback((setId: string | null): void => {
+    setSettingsOpen(false);
     if (selectedSetIdRef.current === setId) return;
     selectedSetIdRef.current = setId;
     setSelectedSetId(setId);
@@ -78,6 +83,14 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
     const editor = activeEditorRef.current;
     if (editor === null) proceed();
     else editor.guardSwitch(proceed);
+  };
+
+  const openSettings = (): void => {
+    if (settingsOpen) return;
+    requestSwitch(() => {
+      selectSet(null);
+      setSettingsOpen(true);
+    });
   };
 
   const createSet = async (): Promise<void> => {
@@ -188,7 +201,25 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
 
   const selectedSet = detailQuery.data?.id === selectedSetId ? detailQuery.data : undefined;
   const empty = data !== undefined && data.total === 0;
-  const detail = selectedSet !== undefined && selectedSetId !== null ? (
+  const detail = settingsOpen ? (
+    settingsQuery.data === undefined ? (
+      <div className="quiz-editor-placeholder" aria-busy={settingsQuery.isPending}>
+        {settingsQuery.isError ? <>
+          <p>{labels.settingsLoadError}</p>
+          <Button disabled={settingsQuery.isFetching} onClick={() => { void settingsQuery.refetch(); }}>{labels.retry}</Button>
+        </> : null}
+      </div>
+    ) : (
+      <QuizSettingsView
+        channelId={channelId}
+        language={activeLanguage}
+        canManage={isManager}
+        state={settingsQuery.data}
+        onRegisterEditor={registerEditor}
+        onSaveStatus={updateSaveStatus}
+      />
+    )
+  ) : selectedSet !== undefined && selectedSetId !== null ? (
     <QuizSetEditor
       key={selectedSetId}
       channelId={channelId}
@@ -228,7 +259,7 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
   return <section className="module-stack quiz-panel" aria-label={labels.title}>
     <CollectionPage
       title={labels.title}
-      heading={<div className="quiz-page-heading"><PageHeader title={labels.title} subtitle={labels.subtitle} icon={<Icon name="quiz" size={20} />} /><div className="quiz-page-save"><SaveStatus {...(saveStatus ?? fallbackSaveStatus)} /></div></div>}
+      heading={<div className="quiz-page-heading"><PageHeader title={labels.title} subtitle={labels.subtitle} icon={<Icon name="quiz" size={20} />} pageActions={<Button variant={settingsOpen ? "secondary" : "neutral"} icon="tabSettings" ariaPressed={settingsOpen} onClick={openSettings}>{labels.settings}</Button>} /><div className="quiz-page-save"><SaveStatus {...(saveStatus ?? fallbackSaveStatus)} /></div></div>}
       toolbar={listToolbar}
       list={collectionQuery.isError && data === undefined
         ? <div className="quiz-list-error" role="status">{labels.saveError}</div>
@@ -239,7 +270,7 @@ export default function QuizPanel({ channelId, language, canManage }: ModulePane
           : <div className="quiz-set-list">{setRows}</div>}
       empty={collectionQuery.isError ? labels.saveError : labels.noSets}
       detail={detail}
-      detailOpen={selectedSetId !== null}
+      detailOpen={selectedSetId !== null || settingsOpen}
       onCloseDetail={() => requestSwitch(() => { selectSet(null); })}
       backLabel={labels.selectSet}
     />

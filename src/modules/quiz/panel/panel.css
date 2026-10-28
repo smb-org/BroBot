@@ -112,6 +112,17 @@
   color: var(--color-text-3);
 }
 
+.quiz-settings {
+  display: grid;
+  gap: var(--spacing-s3);
+  min-width: 0;
+  padding-top: var(--spacing-s3);
+}
+
+.quiz-settings__title {
+  margin: 0;
+}
+
 .quiz-detail {
   display: grid;
   gap: var(--spacing-s3);
