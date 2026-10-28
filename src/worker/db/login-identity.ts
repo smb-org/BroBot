@@ -222,12 +222,14 @@ export const setLoginIdentityTokenScopes = async (
           SET token_scopes_json = ?, updated_at = ?
         WHERE user_id = ?
           AND status <> 'revoked'
+          AND token_scopes_json IS NOT ?
           AND access_token_ciphertext = ?
           AND refresh_token_ciphertext = ?`,
     ).bind(
       scopesJson,
       updatedAt,
       userId,
+      scopesJson,
       expectedAccessTokenCiphertext,
       expectedRefreshTokenCiphertext,
     )
@@ -235,8 +237,9 @@ export const setLoginIdentityTokenScopes = async (
         `UPDATE twitch_login_identity
           SET token_scopes_json = ?, updated_at = ?
         WHERE user_id = ?
-          AND status <> 'revoked'`,
-    ).bind(scopesJson, updatedAt, userId);
+          AND status <> 'revoked'
+          AND token_scopes_json IS NOT ?`,
+    ).bind(scopesJson, updatedAt, userId, scopesJson);
   await statement.run();
 };
 
@@ -248,16 +251,21 @@ export const setLoginIdentityStatus = async (
   updatedAt: string,
 ): Promise<void> => {
   const clearLease = status === "revoked" ? ", refresh_lease_owner = NULL, refresh_lease_until = NULL" : "";
+  const clearLeaseGuard = status === "revoked"
+    ? " OR refresh_lease_owner IS NOT NULL OR refresh_lease_until IS NOT NULL"
+    : "";
   await db.prepare(
     `UPDATE twitch_login_identity
         SET status = ?, reason = ?, updated_at = ?${clearLease}
-      WHERE user_id = ?`,
-  ).bind(status, reason, updatedAt, userId).run();
+      WHERE user_id = ?
+        AND (status IS NOT ? OR reason IS NOT ?${clearLeaseGuard})`,
+  ).bind(status, reason, updatedAt, userId, status, reason).run();
   if (status === "revoked") {
     await db.prepare(
       `UPDATE twitch_login_identity
           SET scopes_json = '[]', token_scopes_json = '[]'
-        WHERE user_id = ? AND status = 'revoked'`,
+        WHERE user_id = ? AND status = 'revoked'
+          AND (scopes_json IS NOT '[]' OR token_scopes_json IS NOT '[]')`,
     ).bind(userId).run();
   }
 };
@@ -272,13 +280,17 @@ export const setLoginIdentityStatusIfCurrent = async (
   expectedRefreshTokenCiphertext: string,
 ): Promise<boolean> => {
   const clearLease = status === "revoked" ? ", refresh_lease_owner = NULL, refresh_lease_until = NULL" : "";
+  const clearLeaseGuard = status === "revoked"
+    ? " OR refresh_lease_owner IS NOT NULL OR refresh_lease_until IS NOT NULL"
+    : "";
   const result = await db.prepare(
     `UPDATE twitch_login_identity
         SET status = ?, reason = ?, updated_at = ?${clearLease}
       WHERE user_id = ?
         AND status <> 'revoked'
         AND access_token_ciphertext = ?
-        AND refresh_token_ciphertext = ?`,
+        AND refresh_token_ciphertext = ?
+        AND (status IS NOT ? OR reason IS NOT ?${clearLeaseGuard})`,
   ).bind(
     status,
     reason,
@@ -286,6 +298,8 @@ export const setLoginIdentityStatusIfCurrent = async (
     userId,
     expectedAccessTokenCiphertext,
     expectedRefreshTokenCiphertext,
+    status,
+    reason,
   ).run();
   if (result.meta.changes > 0 && status === "revoked") {
     await db.prepare(
@@ -293,7 +307,8 @@ export const setLoginIdentityStatusIfCurrent = async (
           SET scopes_json = '[]', token_scopes_json = '[]'
         WHERE user_id = ? AND status = 'revoked'
           AND access_token_ciphertext = ?
-          AND refresh_token_ciphertext = ?`,
+          AND refresh_token_ciphertext = ?
+          AND (scopes_json IS NOT '[]' OR token_scopes_json IS NOT '[]')`,
     ).bind(userId, expectedAccessTokenCiphertext, expectedRefreshTokenCiphertext).run();
   }
   return result.meta.changes > 0;
@@ -534,13 +549,15 @@ export const rotateLoginTokensForUser = async (
       WHERE user_id = ?
         AND status <> 'revoked'
         AND access_token_ciphertext = ?
-        AND refresh_token_ciphertext = ?`,
+        AND refresh_token_ciphertext = ?
+        AND token_scopes_json IS NOT ?`,
   ).bind(
     tokenScopesJson,
     updatedAt,
     userId,
     accessTokenCiphertext,
     refreshTokenCiphertext,
+    tokenScopesJson,
   );
   const sessionRecovery = db.prepare(
     `UPDATE auth_sessions

@@ -51,7 +51,7 @@ export class TestPreparedStatement {
   public constructor(
     private readonly database: DatabaseSync,
     private readonly statement: ReturnType<DatabaseSync["prepare"]>,
-    private readonly sql: string,
+    public readonly sql: string,
   ) {}
 
   public bind(...values: SQLInputValue[]): this {

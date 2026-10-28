@@ -1113,8 +1113,10 @@ export const writeBelaboxFetch = async (
     );
     historyWrites.push(minuteWrite, streamWrite);
   }
-  const results = await db.batch([...(input.beforeSampleWrites ?? []), statusWrite, ...historyWrites]);
-  const statusResult = results[input.beforeSampleWrites?.length ?? 0];
+  const beforeSampleWrites = [...(input.beforeSampleWrites ?? [])];
+  const statusResultIndex = beforeSampleWrites.length;
+  const results = await db.batch([...beforeSampleWrites, statusWrite, ...historyWrites]);
+  const statusResult = results[statusResultIndex];
   if ((statusResult?.meta.changes ?? 0) === 0) return null;
   const returnedStatus = statusResult?.results[0] as { revision?: unknown; sample_json?: unknown } | undefined;
   const writtenStatus = returnedStatus ?? await db.prepare(

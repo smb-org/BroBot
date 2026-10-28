@@ -1055,6 +1055,9 @@ export const DashboardApp = (): ReactElement => {
   const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
   const realtimeStatus = useDashboardRealtimeStatus(realtimeChannelId ?? "");
   const offlineRefetchInterval = realtimeStatus === "connected" ? false : 180_000;
+  // The global bot heartbeat is carried by /api/channels and the System
+  // snapshot; both need a connected-state refresh without socket fan-out.
+  const botHeartbeatRefetchInterval = realtimeStatus === "connected" ? 180_000 : offlineRefetchInterval;
   const routeRef = useRef(route);
   useLayoutEffect(() => { routeRef.current = route; }, [route]);
   const queryClient = useQueryClient();
@@ -1079,7 +1082,7 @@ export const DashboardApp = (): ReactElement => {
         ),
       };
     },
-    refetchInterval: offlineRefetchInterval,
+    refetchInterval: botHeartbeatRefetchInterval,
     enabled: !authenticationRequired,
   });
   const channelsResponse = channelsQuery.data;
@@ -1116,7 +1119,7 @@ export const DashboardApp = (): ReactElement => {
       );
       return mergeAndRememberChannelStreamVersion(withLatestModuleToggles, latestStreamByChannel.current);
     },
-    refetchInterval: overviewChannelId === null ? false : offlineRefetchInterval,
+    refetchInterval: overviewChannelId === null ? false : botHeartbeatRefetchInterval,
     enabled: !authenticationRequired && overviewChannelId !== null &&
       (route.kind === "module" || (route.kind === "channel" && route.section === "overview")),
     placeholderData: (previousData, previousQuery) =>
@@ -1128,7 +1131,7 @@ export const DashboardApp = (): ReactElement => {
   const systemQuery = useSystemQuery(
     systemChannelId ?? "",
     !authenticationRequired && systemChannelId !== null,
-    systemChannelId === null ? false : offlineRefetchInterval,
+    systemChannelId === null ? false : botHeartbeatRefetchInterval,
   );
   const [, setFreshnessTick] = useState(0);
   const routeKey = dashboardRoutePath(route);
