@@ -120,6 +120,30 @@ describe("quiz overlay state", () => {
     });
   });
 
+  it("hydrates results without a resolution timestamp as idle", async () => {
+    const readSnapshot = vi.fn().mockResolvedValue({
+      sessionId: "unresolved-session",
+      phaseSequence: 12,
+      sessionStartedAt,
+      phase: "results",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Question",
+      options: ["One", "Two"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      ranking: [],
+    });
+
+    await expect(loadQuizOverlayState({ now, readSnapshot })).resolves.toMatchObject({
+      sessionId: "unresolved-session",
+      phase: "idle",
+      phaseSequence: 12,
+      serverNow: new Date(now).toISOString(),
+    });
+  });
+
   it("accepts set-valid Unicode question and option lengths", () => {
     const question = `${"a".repeat(199)}😀`;
     const option = `${"b".repeat(79)}😀`;

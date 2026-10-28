@@ -855,6 +855,74 @@ describe("quiz answers in the shared point round", () => {
     expect(started?.sequence).toBe(olderResults.sequence + 1);
   });
 
+  it("hydrates a suppressed resolved quiz as idle after re-enable, even a day later", async () => {
+    const channelId = `quiz-suppressed-result-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.setGameModuleGate("quiz", false, 1);
+    const sessionStartedAt = new Date(Date.now() - 30_000).toISOString();
+    await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "results" }, {
+      sessionId: roundId,
+      phase: "results",
+      phaseSequence: 4,
+      sessionStartedAt,
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      ranking: [],
+    });
+    await object.markGameRoundAnnounced("quiz", roundId, Date.now() + 30_000, `round:${roundId}`);
+    await object.resolveGameRound("quiz", roundId, { kind: "quiz", params: {} });
+
+    await object.setGameModuleGate("quiz", true, 2);
+    await expect(runPointObject(object, (_target, state) => state.storage.sql.exec<{
+      state: string;
+      resolve_delivery_state: string;
+    }>("SELECT state, resolve_delivery_state FROM game_rounds WHERE round_id = ?", roundId).one()))
+      .resolves.toEqual({ state: "resolved", resolve_delivery_state: "suppressed" });
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      payload: { sessionId: roundId, phase: "idle" },
+    });
+
+    await object.setGameModuleGate("quiz", false, 3, 2);
+    vi.setSystemTime(Date.now() + 24 * 60 * 60_000);
+    const hydrated = await loadQuizOverlayState(createOverlaySnapshotContext(worker, channelId, Date.now()));
+
+    expect(hydrated).toMatchObject({ sessionId: roundId, phase: "idle" });
+    expect(hydrated).not.toHaveProperty("ranking");
+  });
+
+  it("keeps a newer overlay session when an older quiz result is suppressed", async () => {
+    const channelId = `quiz-suppressed-stale-session-${crypto.randomUUID()}`;
+    const roundId = `quiz-old-${crypto.randomUUID()}`;
+    const newerSessionId = `quiz-new-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.setGameModuleGate("quiz", false, 1);
+    await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "results" });
+    await object.markGameRoundAnnounced("quiz", roundId, Date.now() + 30_000, `round:${roundId}`);
+    await object.resolveGameRound("quiz", roundId, { kind: "quiz", params: {} });
+    await object.writeQuizOverlaySnapshot({
+      sessionId: newerSessionId,
+      payload: {
+        sessionId: newerSessionId,
+        phase: "open",
+        sessionStartedAt: new Date(Date.now()).toISOString(),
+      },
+    });
+
+    await object.setGameModuleGate("quiz", true, 2);
+
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      payload: { sessionId: newerSessionId, phase: "open" },
+    });
+  });
+
   it("keeps an offline pending start paused after the stream comes back", async () => {
     const channelId = `quiz-pending-offline-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;

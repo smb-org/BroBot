@@ -161,8 +161,8 @@ export const loadQuizOverlayState = async (
   const state = parseQuizOverlayState(await context.readSnapshot());
   if (state === null) return null;
   const serverNow = new Date(context.now).toISOString();
-  if (state.phase === "results" && state.resultAt !== undefined &&
-      context.now >= Date.parse(state.resultAt) + QUIZ_RESULTS_DISPLAY_MS) {
+  if (state.phase === "results" && (state.resultAt === undefined ||
+      context.now >= Date.parse(state.resultAt) + QUIZ_RESULTS_DISPLAY_MS)) {
     return {
       sessionId: state.sessionId,
       phaseSequence: state.phaseSequence,

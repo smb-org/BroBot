@@ -958,6 +958,12 @@ export class ChannelObject extends DurableObject<Env> {
     });
   }
 
+  private writeSuppressedQuizOverlaySnapshotSync(roundId: string): ModuleQuizOverlaySnapshot | null {
+    const snapshot = this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY);
+    if (snapshot?.payload.sessionId !== roundId) return null;
+    return this.writeCancelledQuizOverlaySnapshotSync(roundId);
+  }
+
   private writeQuizOverlayDeliveryAlarmSync(deadline: number): void {
     const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
     const table = stored === undefined ? {} : { ...stored };
@@ -6038,6 +6044,10 @@ export class ChannelObject extends DurableObject<Env> {
           this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now());
         } else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       }, (roundId) => {
+        if (moduleId === "quiz") {
+          const snapshot = this.writeSuppressedQuizOverlaySnapshotSync(roundId);
+          if (snapshot !== null) quizOverlaySnapshots.push(snapshot);
+        }
         this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       }, MODULES.find((module) => module.id === moduleId)?.pointRoundCancellationNotice !== false);
       if (!closed && cancellationRevision !== null) this.ensurePointCancellationNoticeAlarmsSync();
