@@ -12,7 +12,7 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import type { ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext, PointActiveRound } from "../../modules/contract";
+import type { ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import {
   combineCommandCollisionWriteGuards,
@@ -438,44 +438,15 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     return resolved;
   });
   context.set("publishModuleOverlayMessage", async (channelId, moduleId, type, elementKind, payload, recipientConfig) => {
-    let quizSnapshotSequence: number | undefined;
-    let scheduleQuizSnapshotRetry: (() => Promise<void>) | undefined;
     try {
       const module = MODULES.find((candidate) => candidate.id === moduleId);
       if (module === undefined) return;
-      let effectivePayload = payload;
-      let effectiveType = type;
       if (moduleId === "quiz" && elementKind === "quiz.session") {
         const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)) as unknown as {
-          readQuizOverlaySnapshot: () => Promise<{
-            sequence: number;
-            payload: Record<string, unknown>;
-          } | null>;
-          persistQuizOverlaySnapshot: (snapshotPayload: Readonly<Record<string, unknown>>) => Promise<{
-            sequence: number;
-            payload: Record<string, unknown>;
-          }>;
-          markQuizOverlaySnapshotBroadcast: (sequence: number) => Promise<void>;
-          scheduleQuizOverlaySnapshotRetry: () => Promise<void>;
+          deliverPendingQuizOverlaySnapshot: () => Promise<void>;
         };
-        scheduleQuizSnapshotRetry = () => channelObject.scheduleQuizOverlaySnapshotRetry();
-        const currentSnapshot = await channelObject.readQuizOverlaySnapshot();
-        const incomingSequence = Number.isSafeInteger(payload.phaseSequence) ? Number(payload.phaseSequence) : -1;
-        const incomingStartedAt = typeof payload.sessionStartedAt === "string" ? Date.parse(payload.sessionStartedAt) : Number.NaN;
-        const currentStartedAt = currentSnapshot === null || typeof currentSnapshot.payload.sessionStartedAt !== "string"
-          ? Number.NaN : Date.parse(currentSnapshot.payload.sessionStartedAt);
-        const isCurrentOrNewerSnapshot = currentSnapshot !== null && incomingSequence >= 0 &&
-          currentSnapshot.sequence >= incomingSequence;
-        const isNewerSessionSnapshot = currentSnapshot !== null && currentSnapshot.payload.sessionId !== payload.sessionId &&
-          incomingSequence < 0 &&
-          Number.isFinite(incomingStartedAt) && Number.isFinite(currentStartedAt) && currentStartedAt > incomingStartedAt;
-        const useCurrentSnapshot = isCurrentOrNewerSnapshot || isNewerSessionSnapshot;
-        const snapshot = currentSnapshot !== null && useCurrentSnapshot
-          ? currentSnapshot : await channelObject.persistQuizOverlaySnapshot(payload);
-        effectivePayload = snapshot.payload;
-        quizSnapshotSequence = snapshot.sequence;
-        effectiveType = snapshot.payload.phase === "idle" ? "cancel"
-          : snapshot.payload.phase === "results" ? "results" : "phase";
+        await channelObject.deliverPendingQuizOverlaySnapshot();
+        return;
       }
       const prepared = await prepareModuleOverlayRealtimeMessage(
         context.env.DB,
@@ -483,33 +454,15 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
         moduleId,
         {
           kind: "overlay",
-          type: effectiveType,
+          type,
           elementKind,
-          payload: effectivePayload,
+          payload,
           ...(recipientConfig === undefined ? {} : { recipientConfig }),
         },
         module.mandatory === true,
       );
-      if (prepared.outcome === "ready") {
-        await publishRealtimeMessages(context.env.CHANNEL, [prepared.message]);
-        if (quizSnapshotSequence !== undefined) {
-          const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-          await channelObject.markQuizOverlaySnapshotBroadcast(quizSnapshotSequence);
-        }
-      } else if (prepared.outcome === "no_recipients" && quizSnapshotSequence !== undefined) {
-        const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-        await channelObject.markQuizOverlaySnapshotBroadcast(quizSnapshotSequence);
-      } else if (quizSnapshotSequence !== undefined) {
-        await scheduleQuizSnapshotRetry?.();
-      }
+      if (prepared.outcome === "ready") await publishRealtimeMessages(context.env.CHANNEL, [prepared.message]);
     } catch (error: unknown) {
-      if (quizSnapshotSequence !== undefined) {
-        try {
-          await scheduleQuizSnapshotRetry?.();
-        } catch {
-          // Keep the persisted snapshot available for the next bootstrap if retry scheduling is unavailable.
-        }
-      }
       console.warn("Module overlay update could not be sent.", error);
     }
   });
@@ -1076,7 +1029,6 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
-  let quizRoundToCancel: PointActiveRound | null = null;
   const initialize = enabled && existing?.initialized !== true;
   const reusedTextCommandName = initialize && module.onEnableCommandTokens?.includes("!befehle") === true
     ? "befehle"
@@ -1223,32 +1175,6 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     }
     return context.json({ error: "module_changed_concurrently" }, 409);
   }
-  if (moduleId === "quiz" && !enabled) {
-    try {
-      const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)) as unknown as {
-        activeGameRound: (targetModuleId: string) => Promise<PointActiveRound | null>;
-      };
-      quizRoundToCancel = await channelObject.activeGameRound("quiz");
-    } catch {
-      // The overlay bootstrap refresh below still clears a disabled quiz element.
-    }
-  }
-  const cancelledQuizRound = quizRoundToCancel;
-  const quizCancellationSnapshot: Record<string, unknown> | undefined = module.id === "quiz" && !enabled && cancelledQuizRound !== null
-    ? (() => {
-      const roundData = isRecord(cancelledQuizRound.data) ? cancelledQuizRound.data : {};
-      return {
-        sessionId: cancelledQuizRound.roundId,
-        phase: "idle",
-        phaseSequence: Number.isSafeInteger(roundData.phaseSequence) && Number(roundData.phaseSequence) >= 0
-          ? Number(roundData.phaseSequence) + 1
-          : 1,
-        sessionStartedAt: typeof roundData.sessionStartedAt === "string" && Number.isFinite(Date.parse(roundData.sessionStartedAt))
-          ? roundData.sessionStartedAt
-          : cancelledQuizRound.createdAt ?? now,
-      };
-    })()
-    : undefined;
   if ((module.requiresModules?.length ?? 0) > 0 || module.id === "points") {
     await runPostCommitStep(module.id, "module_gate_update", async () => {
       const points = context.get("points")(channelId);
@@ -1257,7 +1183,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     if (!enabled && (module.requiresModules?.length ?? 0) > 0) {
       await runPostCommitStep(module.id, "dependent_round_cancellation", async () => {
         const points = context.get("points")(channelId);
-        await points.rounds.cancelOpenRounds(revision, quizCancellationSnapshot);
+        await points.rounds.cancelOpenRounds(revision);
       });
     }
   }
@@ -1272,42 +1198,6 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   } else if ((existing?.enabled === true) !== enabled) {
     await runPostCommitStep(module.id, "schedule_notification", () =>
       notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "activation"));
-  }
-  if (module.id === "quiz" && !enabled && cancelledQuizRound !== null) {
-    await runPostCommitStep(module.id, "overlay_cancel", async () => {
-      if (quizCancellationSnapshot === undefined) return;
-      const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)) as unknown as {
-        readQuizOverlaySnapshot: () => Promise<{ sequence: number; payload: Record<string, unknown> } | null>;
-        persistQuizOverlaySnapshot: (payload: Readonly<Record<string, unknown>>) => Promise<{
-          sequence: number;
-          payload: Record<string, unknown>;
-        }>;
-        markQuizOverlaySnapshotBroadcast: (sequence: number) => Promise<void>;
-        scheduleQuizOverlaySnapshotRetry: () => Promise<void>;
-      };
-      const currentSnapshot = await channelObject.readQuizOverlaySnapshot();
-      const matchesCancellation = currentSnapshot !== null &&
-        currentSnapshot.payload.sessionId === cancelledQuizRound.roundId && currentSnapshot.payload.phase === "idle" &&
-        currentSnapshot.sequence === quizCancellationSnapshot.phaseSequence;
-      const snapshot = matchesCancellation ? currentSnapshot : await channelObject.persistQuizOverlaySnapshot(quizCancellationSnapshot);
-      try {
-        const prepared = await prepareModuleOverlayRealtimeMessage(context.env.DB, channelId, module.id, {
-          kind: "overlay",
-          type: "cancel",
-          elementKind: "quiz.session",
-          payload: snapshot.payload,
-        }, false, MODULES, true);
-        if (prepared.outcome === "ready") {
-          await publishRealtimeMessages(context.env.CHANNEL, [prepared.message]);
-          await channelObject.markQuizOverlaySnapshotBroadcast(snapshot.sequence);
-        } else if (prepared.outcome === "no_recipients") {
-          await channelObject.markQuizOverlaySnapshotBroadcast(snapshot.sequence);
-        } else await channelObject.scheduleQuizOverlaySnapshotRetry();
-      } catch (error: unknown) {
-        await channelObject.scheduleQuizOverlaySnapshotRetry();
-        throw error;
-      }
-    });
   }
   const overlayKinds = module.overlayElements?.map(({ kind }) => kind) ?? [];
   if (overlayKinds.length > 0) {

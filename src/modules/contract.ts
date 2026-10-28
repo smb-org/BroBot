@@ -247,14 +247,18 @@ export interface ModuleTemplateConditionTransition {
 export interface ModuleQuizOverlaySnapshot {
   sequence: number;
   lastBroadcastSequence: number;
+  pendingBroadcastSequence?: number | null;
+  includeDisabledModule?: boolean;
   payload: Readonly<Record<string, unknown>>;
 }
 
 interface ModuleQuizOverlaySnapshotAccess {
   read: () => Promise<ModuleQuizOverlaySnapshot | null>;
-  write: (payload: Readonly<Record<string, unknown>>) => Promise<ModuleQuizOverlaySnapshot>;
-  markBroadcast: (sequence: number) => Promise<void>;
-  scheduleRetry: () => Promise<void>;
+  write: (
+    payload: Readonly<Record<string, unknown>>,
+    expectedCurrentSessionId?: string,
+  ) => Promise<ModuleQuizOverlaySnapshot | null>;
+  deliverPending: () => Promise<void>;
 }
 
 export interface ModuleOverlaySnapshotContext {

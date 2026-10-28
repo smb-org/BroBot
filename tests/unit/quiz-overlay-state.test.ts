@@ -313,7 +313,7 @@ describe("quiz overlay state", () => {
       phaseEndsAt: "2030-01-01T00:01:00.000Z",
       paused: false,
       remainingMs: null,
-      phaseSequence: 1,
+      phaseSequence: 9,
       sessionStartedAt: "2030-01-01T00:00:10.000Z",
       serverNow: "2030-01-01T00:00:20.000Z",
     };
@@ -334,6 +334,49 @@ describe("quiz overlay state", () => {
       sessionStartedAt: "2030-01-01T00:00:10.000Z",
       serverNow: "2030-01-01T00:02:00.000Z",
     });
+  });
+
+  it("orders a later session by channel sequence even when its start timestamp is earlier", () => {
+    const current = {
+      sessionId: "finished-session",
+      phase: "idle",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "",
+      options: [],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      phaseSequence: 12,
+      sessionStartedAt: "2030-01-01T00:00:10.000Z",
+      serverNow: "2030-01-01T00:00:20.000Z",
+    };
+    const delayedStart = {
+      sessionId: "delayed-session",
+      phase: "announce",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Delayed question",
+      options: ["One", "Two"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      phaseSequence: 13,
+      sessionStartedAt: "2030-01-01T00:00:00.000Z",
+      serverNow: "2030-01-01T00:00:21.000Z",
+    };
+
+    expect(mergeQuizOverlayRealtimeState(current, delayedStart)).toMatchObject({
+      sessionId: "delayed-session",
+      phase: "announce",
+      phaseSequence: 13,
+    });
+    expect(mergeQuizOverlayRealtimeState(delayedStart, {
+      ...delayedStart,
+      phase: "open",
+      phaseSequence: 14,
+      sessionStartedAt: "2029-12-31T23:59:59.000Z",
+    })).toMatchObject({ sessionId: "delayed-session", phase: "open", phaseSequence: 14 });
   });
 
   it("does not restart a results window when the same persisted result is retried", () => {

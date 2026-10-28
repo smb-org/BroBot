@@ -78,7 +78,13 @@ export interface PointsWorkerObject {
     data: unknown,
     quizOverlayPayload?: Readonly<Record<string, unknown>>,
   ): Promise<ModuleQuizOverlaySnapshot | undefined>;
-  persistQuizOverlaySnapshot(payload: Readonly<Record<string, unknown>>): Promise<ModuleQuizOverlaySnapshot>;
+  writeQuizOverlaySnapshot(input: {
+    sessionId: string;
+    expectedCurrentSessionId?: string;
+    payload: Readonly<Record<string, unknown>>;
+    includeDisabledModule?: boolean;
+  }): Promise<ModuleQuizOverlaySnapshot | null>;
+  deliverPendingQuizOverlaySnapshot(): Promise<void>;
   openGameRoundWithStake(moduleId: string, roundId: string, data: unknown, operationId: string, accountId: string, login: string,
     stake: number, cooldown?: { key: string; seconds: number }): Promise<{ roundId: string; replayed: boolean }>;
   listOpenGameRounds(moduleId: string): Promise<Array<{ roundId: string; state: "announcing" | "open"; data: unknown; deadlineAt: number | null }>>;
@@ -106,7 +112,7 @@ export interface PointsWorkerObject {
     result: unknown;
     balances: Record<string, number>;
   }>;
-  cancelOpenGameRounds(moduleId: string, revision: number): Promise<number>;
+  cancelOpenGameRounds(moduleId: string, revision: number, quizOverlayPayload?: Readonly<Record<string, unknown>>): Promise<number>;
   setGameModuleGate(moduleId: string, closed: boolean, revision: number, lastDisabledRevision?: number | null): Promise<{ applied: boolean }>;
   claimGameCooldown(moduleId: string, key: string, seconds: number): Promise<boolean>;
   markPointAuditWritten(moduleId: string, operationId: string): Promise<void>;

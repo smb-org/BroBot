@@ -201,15 +201,7 @@ export const mergeQuizOverlayRealtimeState = (
     ...(calibratedServerNow === undefined ? {} : { serverNow: calibratedServerNow }),
   });
 
-  if (parsed.sessionId === previous.sessionId) {
-    if (parsed.phaseSequence <= previous.phaseSequence) return retainPrevious();
-  } else {
-    const previousStartedAt = Date.parse(previous.sessionStartedAt);
-    const incomingStartedAt = Date.parse(parsed.sessionStartedAt);
-    if (!Number.isFinite(previousStartedAt) || !Number.isFinite(incomingStartedAt) || incomingStartedAt <= previousStartedAt) {
-      return retainPrevious();
-    }
-  }
+  if (parsed.phaseSequence <= previous.phaseSequence) return retainPrevious();
 
   return {
     ...parsed,

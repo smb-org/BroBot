@@ -1,4 +1,4 @@
-import type { ModuleAlarmContext, ModulePointRoundAnnouncement, ModulePointRoundDeadline, ModulePointRoundResult, ModuleQuizOverlaySnapshot, ModuleScheduleInputChangeReason, ModuleStreamState } from "../contract";
+import type { ModuleAlarmContext, ModulePointRoundAnnouncement, ModulePointRoundDeadline, ModulePointRoundResult, ModuleScheduleInputChangeReason, ModuleStreamState } from "../contract";
 import type { QuizSessionAggregates, QuizSessionRoundData } from "./contracts";
 import { endQuizPhase, pauseQuizPhase, resumeQuizPhase, scoreQuizSession, transitionQuizPhase } from "./domain/session";
 import { quizCatalog } from "./locale";
@@ -60,25 +60,13 @@ const quizCancellationPayload = (data: QuizSessionRoundData): Record<string, unk
   sessionStartedAt: data.sessionStartedAt ?? new Date().toISOString(),
   });
 
-const publishQuizOverlaySnapshot = async (
-  context: ModuleAlarmContext,
-  snapshot: ModuleQuizOverlaySnapshot,
-): Promise<void> => {
-  const type = snapshot.payload.phase === "idle" ? "cancel"
-    : snapshot.payload.phase === "results" ? "results" : "phase";
-  try {
-    await context.publishModuleOverlayMessage(type, "quiz.session", snapshot.payload);
-    await context.quizOverlaySnapshot.markBroadcast(snapshot.sequence);
-  } catch (error: unknown) {
-    await context.quizOverlaySnapshot.scheduleRetry();
-    throw error;
-  }
-};
+const publishQuizOverlaySnapshot = async (context: ModuleAlarmContext): Promise<void> =>
+  context.quizOverlaySnapshot.deliverPending();
 
 const retryPendingQuizOverlayBroadcast = async (context: ModuleAlarmContext): Promise<void> => {
   const snapshot = await context.quizOverlaySnapshot.read();
   if (snapshot !== null && snapshot.lastBroadcastSequence < snapshot.sequence) {
-    await publishQuizOverlaySnapshot(context, snapshot);
+    await publishQuizOverlaySnapshot(context);
   }
 };
 
@@ -91,7 +79,7 @@ const persistAndPublishQuizPhase = async (
   const snapshot = await context.points.rounds.update(roundId, data, deadlineAt, quizPhaseOverlayPayload(data));
   const persisted = snapshot ?? await context.quizOverlaySnapshot.read();
   if (persisted === null) throw new Error("quiz_overlay_snapshot_missing");
-  await publishQuizOverlaySnapshot(context, persisted);
+  await publishQuizOverlaySnapshot(context);
   return { ...data, phaseSequence: persisted.sequence };
 };
 
@@ -105,7 +93,7 @@ const persistAndPublishQuizCancellation = async (
   if (snapshot === null || snapshot.payload.sessionId !== data.sessionId || snapshot.payload.phase !== "idle") {
     throw new Error("quiz_cancellation_snapshot_missing");
   }
-  await publishQuizOverlaySnapshot(context, snapshot);
+  await publishQuizOverlaySnapshot(context);
 };
 
 const aggregatesFrom = (
@@ -473,8 +461,9 @@ export const onQuizRoundResolved = async (
     currentSnapshot.payload.phase === "results" && currentSnapshot.payload.resultAt === round.resolvedAt &&
     JSON.stringify(currentSnapshot.payload.ranking) === JSON.stringify(payload.ranking);
   if (sameSettledResult) return;
-  const snapshot = await context.quizOverlaySnapshot.write(payload);
-  await publishQuizOverlaySnapshot(context, snapshot);
+  const snapshot = await context.quizOverlaySnapshot.write(payload, data.sessionId);
+  if (snapshot === null) return;
+  await publishQuizOverlaySnapshot(context);
 };
 
 export const resultChatLine = (language: "de" | "en", result: unknown): string | null => {

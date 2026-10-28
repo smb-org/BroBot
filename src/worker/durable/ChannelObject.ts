@@ -324,6 +324,8 @@ const POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER = "host:points_activation_r
 const POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY = "points:activation_reconciliation_modules";
 const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
 const QUIZ_OVERLAY_SNAPSHOT_KEY = "module:quiz:storage:overlay-snapshot";
+const QUIZ_OVERLAY_RETRY_ALARM_KEY = "module:quiz:overlay-retry";
+const QUIZ_OVERLAY_RETRY_ALARM_HANDLER = "module:quiz:session-control";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
 const MAX_TIMER_SKIP_PREPARATION_ATTEMPTS = 3;
@@ -627,6 +629,12 @@ const isStoredClipJob = (value: unknown): value is StoredClipJob => {
 };
 
 type AlarmScheduleTable = Record<string, AlarmScheduleEntry>;
+type QuizOverlaySnapshotWrite = {
+  sessionId: string;
+  expectedCurrentSessionId?: string;
+  payload: Readonly<Record<string, unknown>>;
+  includeDisabledModule?: boolean;
+} | { broadcastSequence: number };
 type ModuleAlarmPlanFenceRecord = {
   identity: ModuleAlarmIdentity | null;
   planSequence: number;
@@ -836,6 +844,14 @@ export class ChannelObject extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    void ctx.blockConcurrencyWhile(async () => {
+      try {
+        await this.recoverQuizOverlaySnapshotDelivery();
+        await this.deliverPendingQuizOverlaySnapshot();
+      } catch {
+        // The pending snapshot and retry alarm remain durable for the next wake.
+      }
+    });
   }
 
   /** Atomically reserves one quick-action test message per channel every 30 seconds. */
@@ -854,57 +870,171 @@ export class ChannelObject extends DurableObject<Env> {
     this.pointsSchemaReady = true;
   }
 
-  private prepareQuizOverlaySnapshotSync(payload: Readonly<Record<string, unknown>>): ModuleQuizOverlaySnapshot {
+  private writeQuizOverlaySnapshotSync(input: QuizOverlaySnapshotWrite): ModuleQuizOverlaySnapshot | null {
     const previous = this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY);
+    if ("broadcastSequence" in input) {
+      if (previous === undefined || !Number.isSafeInteger(input.broadcastSequence) || input.broadcastSequence < 0) return null;
+      const pendingSequence = this.pendingQuizOverlaySequence(previous);
+      const nextPendingSequence = previous.sequence > input.broadcastSequence && pendingSequence !== null
+        ? pendingSequence
+        : null;
+      const updated: ModuleQuizOverlaySnapshot = {
+        ...previous,
+        lastBroadcastSequence: Math.max(previous.lastBroadcastSequence, input.broadcastSequence),
+        pendingBroadcastSequence: nextPendingSequence,
+      };
+      this.ctx.storage.kv.put(QUIZ_OVERLAY_SNAPSHOT_KEY, updated);
+      if (nextPendingSequence === null) this.clearQuizOverlayDeliveryAlarmSync();
+      else this.writeQuizOverlayDeliveryAlarmSync(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+      return updated;
+    }
+    if (input.sessionId.length === 0 || input.sessionId.length > 128 || input.payload.sessionId !== input.sessionId) {
+      throw new Error("invalid_quiz_overlay_session");
+    }
+    if (input.expectedCurrentSessionId !== undefined) {
+      this.ensurePointsSchema();
+      // Row insertion order is the durable session order; sessionStartedAt is allocated before a round opens.
+      const latestRound = this.ctx.storage.sql.exec<{ round_id: string }>(
+        "SELECT round_id FROM game_rounds WHERE module_id = 'quiz' ORDER BY rowid DESC LIMIT 1",
+      ).toArray()[0];
+      if (latestRound?.round_id !== input.expectedCurrentSessionId) return null;
+    }
     const sequence = (previous?.sequence ?? 0) + 1;
-    return {
+    const snapshot: ModuleQuizOverlaySnapshot = {
       sequence,
       lastBroadcastSequence: previous?.lastBroadcastSequence ?? 0,
+      pendingBroadcastSequence: sequence,
+      includeDisabledModule: input.includeDisabledModule ?? false,
       payload: {
-        ...payload,
+        ...input.payload,
         phaseSequence: sequence,
         serverNow: new Date().toISOString(),
       },
     };
+    this.ctx.storage.kv.put(QUIZ_OVERLAY_SNAPSHOT_KEY, snapshot);
+    this.writeQuizOverlayDeliveryAlarmSync(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+    return snapshot;
   }
 
-  private putQuizOverlaySnapshotSync(snapshot: ModuleQuizOverlaySnapshot): void {
-    this.ctx.storage.kv.put(QUIZ_OVERLAY_SNAPSHOT_KEY, snapshot);
+  private writeCancelledQuizOverlaySnapshotSync(
+    roundId: string,
+    suppliedPayload?: Readonly<Record<string, unknown>>,
+  ): ModuleQuizOverlaySnapshot | null {
+    const round = pointRoundRow(this.ctx.storage.sql, roundId);
+    if (round === null || round.module_id !== "quiz") return null;
+    let roundData: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(round.data_json);
+      if (isRecord(parsed)) roundData = parsed;
+    } catch {
+      // A malformed round still needs an idle overlay snapshot on cancellation.
+    }
+    const supplied = suppliedPayload?.sessionId === roundId ? suppliedPayload : {};
+    const sessionStartedAt = typeof roundData.sessionStartedAt === "string" &&
+      Number.isFinite(Date.parse(roundData.sessionStartedAt))
+      ? roundData.sessionStartedAt
+      : round.created_at;
+    const payload = {
+      ...supplied,
+      sessionId: roundId,
+      phase: "idle",
+      phaseSequence: Number.isSafeInteger(roundData.phaseSequence) && Number(roundData.phaseSequence) >= 0
+        ? Number(roundData.phaseSequence) + 1
+        : 1,
+      sessionStartedAt,
+    };
+    const moduleGate = this.ctx.storage.sql.exec<{ closed: number }>(
+      "SELECT closed FROM module_gates WHERE module_id = ?",
+      "quiz",
+    ).toArray()[0];
+    return this.writeQuizOverlaySnapshotSync({
+      sessionId: roundId,
+      expectedCurrentSessionId: roundId,
+      payload,
+      includeDisabledModule: moduleGate?.closed === 1,
+    });
+  }
+
+  private writeQuizOverlayDeliveryAlarmSync(deadline: number): void {
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    const table = stored === undefined ? {} : { ...stored };
+    table[QUIZ_OVERLAY_RETRY_ALARM_KEY] = {
+      deadline,
+      handler: QUIZ_OVERLAY_RETRY_ALARM_HANDLER,
+      revision: (table[QUIZ_OVERLAY_RETRY_ALARM_KEY]?.revision ?? 0) + 1,
+    };
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private clearQuizOverlayDeliveryAlarmSync(): void {
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    if (stored === undefined || !Object.hasOwn(stored, QUIZ_OVERLAY_RETRY_ALARM_KEY)) return;
+    const table = { ...stored };
+    Reflect.deleteProperty(table, QUIZ_OVERLAY_RETRY_ALARM_KEY);
+    if (Object.keys(table).length === 0) this.ctx.storage.kv.delete(ALARM_TABLE_KEY);
+    else this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
   }
 
   public readQuizOverlaySnapshot(): Promise<ModuleQuizOverlaySnapshot | null> {
     return Promise.resolve(this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY) ?? null);
   }
 
-  public persistQuizOverlaySnapshot(payload: Readonly<Record<string, unknown>>): Promise<ModuleQuizOverlaySnapshot> {
-    return Promise.resolve(this.ctx.storage.transactionSync(() => {
-      const snapshot = this.prepareQuizOverlaySnapshotSync(payload);
-      this.putQuizOverlaySnapshotSync(snapshot);
-      return snapshot;
-    }));
+  public async writeQuizOverlaySnapshot(input: QuizOverlaySnapshotWrite): Promise<ModuleQuizOverlaySnapshot | null> {
+    const snapshot = this.ctx.storage.transactionSync(() => this.writeQuizOverlaySnapshotSync(input));
+    if (snapshot === null) return null;
+    await this.scheduleEarliestAlarm();
+    await this.deliverPendingQuizOverlaySnapshot();
+    return snapshot;
   }
 
-  public markQuizOverlaySnapshotBroadcast(sequence: number): Promise<void> {
+  private pendingQuizOverlaySequence(snapshot: ModuleQuizOverlaySnapshot): number | null {
+    if (Number.isSafeInteger(snapshot.pendingBroadcastSequence)) return snapshot.pendingBroadcastSequence ?? null;
+    return snapshot.lastBroadcastSequence < snapshot.sequence ? snapshot.sequence : null;
+  }
+
+  private async recoverQuizOverlaySnapshotDelivery(): Promise<void> {
+    const snapshot = this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY);
+    if (snapshot === undefined || this.pendingQuizOverlaySequence(snapshot) === null) return;
+    const currentAlarm = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY)?.[QUIZ_OVERLAY_RETRY_ALARM_KEY];
+    if (currentAlarm?.handler !== QUIZ_OVERLAY_RETRY_ALARM_HANDLER) {
+      this.ctx.storage.transactionSync(() => {
+        this.writeQuizOverlayDeliveryAlarmSync(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
+      });
+    }
+    await this.scheduleEarliestAlarm();
+  }
+
+  private async scheduleQuizOverlaySnapshotRetry(): Promise<void> {
     this.ctx.storage.transactionSync(() => {
-      const current = this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY);
-      if (current === undefined || !Number.isSafeInteger(sequence) || sequence < 0 || current.lastBroadcastSequence >= sequence) return;
-      this.ctx.storage.kv.put(QUIZ_OVERLAY_SNAPSHOT_KEY, {
-        ...current,
-        lastBroadcastSequence: sequence,
-      } satisfies ModuleQuizOverlaySnapshot);
+      this.writeQuizOverlayDeliveryAlarmSync(Date.now() + POINTS_ANNOUNCE_RETRY_MS);
     });
-    return Promise.resolve();
+    await this.scheduleEarliestAlarm();
   }
 
-  public async scheduleQuizOverlaySnapshotRetry(): Promise<void> {
-    await this.scheduleAlarmEntry(
-      "module:quiz:overlay-retry",
-      "module:quiz:session-control",
-      Date.now() + POINTS_ANNOUNCE_RETRY_MS,
-      undefined,
-      undefined,
-      null,
-    );
+  public async deliverPendingQuizOverlaySnapshot(): Promise<void> {
+    const snapshot = await this.readQuizOverlaySnapshot();
+    if (snapshot === null || this.pendingQuizOverlaySequence(snapshot) === null) return;
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Quiz overlay delivery requires a named Durable Object.");
+    const type = snapshot.payload.phase === "idle" ? "cancel"
+      : snapshot.payload.phase === "results" ? "results" : "phase";
+    try {
+      const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, "quiz", {
+        kind: "overlay",
+        type,
+        elementKind: "quiz.session",
+        payload: { ...snapshot.payload, serverNow: new Date().toISOString() },
+      }, false, MODULES, snapshot.includeDisabledModule === true);
+      if (prepared.outcome === "rejected") throw new Error("quiz_overlay_message_rejected");
+      if (prepared.outcome === "ready") await this.publish([prepared.message]);
+      this.ctx.storage.transactionSync(() => {
+        this.writeQuizOverlaySnapshotSync({ broadcastSequence: snapshot.sequence });
+      });
+      await this.scheduleEarliestAlarm();
+    } catch (error: unknown) {
+      await this.scheduleQuizOverlaySnapshotRetry();
+      throw error;
+    }
   }
 
   private async ensurePointsInitialized(): Promise<void> {
@@ -926,6 +1056,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Restores local point alarms on the first non-snapshot entry after activation. */
   private async ensurePointRoundRecovery(): Promise<void> {
+    await this.recoverQuizOverlaySnapshotDelivery();
     const pendingInitialization = this.pointRoundRecoveryInitialization;
     if (pendingInitialization !== null) {
       await pendingInitialization;
@@ -3504,9 +3635,15 @@ export class ChannelObject extends DurableObject<Env> {
       points: this.pointAccess(moduleId),
       quizOverlaySnapshot: {
         read: () => this.readQuizOverlaySnapshot(),
-        write: (payload) => this.persistQuizOverlaySnapshot(payload),
-        markBroadcast: (sequence) => this.markQuizOverlaySnapshotBroadcast(sequence),
-        scheduleRetry: () => this.scheduleQuizOverlaySnapshotRetry(),
+        write: (payload, expectedCurrentSessionId) => {
+          if (typeof payload.sessionId !== "string") throw new Error("invalid_quiz_overlay_session");
+          return this.writeQuizOverlaySnapshot({
+            sessionId: payload.sessionId,
+            expectedCurrentSessionId: expectedCurrentSessionId ?? payload.sessionId,
+            payload,
+          });
+        },
+        deliverPending: () => this.deliverPendingQuizOverlaySnapshot(),
       },
       decoratePointWelcome: (action, accountId, claimId, attributions) => this.appendPointRoundWelcome(
         action,
@@ -3602,6 +3739,10 @@ export class ChannelObject extends DurableObject<Env> {
         );
       },
       publishModuleOverlayMessage: async (type, elementKind, payload) => {
+        if (moduleId === "quiz" && elementKind === "quiz.session") {
+          await this.deliverPendingQuizOverlaySnapshot();
+          return;
+        }
         const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, moduleId, {
           kind: "overlay",
           type,
@@ -5224,24 +5365,23 @@ export class ChannelObject extends DurableObject<Env> {
     await this.reconcilePointModuleActivation(moduleId, true);
     const alarmKey = pointRoundAlarmKey(roundId);
     const snapshot = this.ctx.storage.transactionSync(() => {
+      const opened = openPointRoundSync(this.ctx.storage.sql, moduleId, roundId, data, new Date().toISOString(), POINT_SETTLEMENTS);
+      if (!opened.opened) return undefined;
       const candidate = moduleId === "quiz" && quizOverlayPayload !== undefined
-        ? this.prepareQuizOverlaySnapshotSync(quizOverlayPayload)
+        ? this.writeQuizOverlaySnapshotSync({ sessionId: roundId, payload: quizOverlayPayload })
         : undefined;
-      const roundData = candidate !== undefined && isRecord(data)
-        ? { ...data, phaseSequence: candidate.sequence }
-        : data;
-      const opened = openPointRoundSync(this.ctx.storage.sql, moduleId, roundId, roundData, new Date().toISOString(), POINT_SETTLEMENTS);
-      if (opened.opened) {
-        if (candidate !== undefined) this.putQuizOverlaySnapshotSync(candidate);
-        if (MODULES.find((module) => module.id === moduleId)?.onPointRoundOpened !== undefined) {
-          this.ctx.storage.sql.exec("UPDATE game_rounds SET prepare_state = 'pending' WHERE round_id = ?", roundId);
-        }
-        this.writePointRoundAlarmSync(alarmKey, Date.now());
-        return candidate;
+      if (candidate === null) throw new Error("session_changed");
+      if (candidate !== undefined && isRecord(data)) {
+        updatePointRoundSync(this.ctx.storage.sql, moduleId, roundId, { ...data, phaseSequence: candidate.sequence }, null);
       }
-      return undefined;
+      if (MODULES.find((module) => module.id === moduleId)?.onPointRoundOpened !== undefined) {
+        this.ctx.storage.sql.exec("UPDATE game_rounds SET prepare_state = 'pending' WHERE round_id = ?", roundId);
+      }
+      this.writePointRoundAlarmSync(alarmKey, Date.now());
+      return candidate;
     });
     await this.scheduleEarliestAlarm();
+    if (snapshot !== undefined) await this.deliverPendingQuizOverlaySnapshot();
     return snapshot;
   }
 
@@ -5383,18 +5523,23 @@ export class ChannelObject extends DurableObject<Env> {
     assertPointRoundId(roundId);
     const snapshot = this.ctx.storage.transactionSync(() => {
       const candidate = moduleId === "quiz" && quizOverlayPayload !== undefined
-        ? this.prepareQuizOverlaySnapshotSync(quizOverlayPayload)
+        ? this.writeQuizOverlaySnapshotSync({
+          sessionId: roundId,
+          expectedCurrentSessionId: roundId,
+          payload: quizOverlayPayload,
+        })
         : undefined;
+      if (candidate === null) throw new Error("session_changed");
       const roundData = candidate !== undefined && isRecord(data)
         ? { ...data, phaseSequence: candidate.sequence }
         : data;
       updatePointRoundSync(this.ctx.storage.sql, moduleId, roundId, roundData, deadlineAt);
-      if (candidate !== undefined) this.putQuizOverlaySnapshotSync(candidate);
       if (deadlineAt === null) this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
       else this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), deadlineAt);
       return candidate;
     });
     await this.scheduleEarliestAlarm();
+    if (snapshot !== undefined) await this.deliverPendingQuizOverlaySnapshot();
     return snapshot;
   }
 
@@ -5734,10 +5879,8 @@ export class ChannelObject extends DurableObject<Env> {
         result: refund.result,
       }));
     }));
+    const quizOverlaySnapshots: ModuleQuizOverlaySnapshot[] = [];
     const cancelled = this.ctx.storage.transactionSync(() => {
-      const overlaySnapshot = moduleId === "quiz" && quizOverlayPayload !== undefined
-        ? this.prepareQuizOverlaySnapshotSync(quizOverlayPayload)
-        : undefined;
       const count = cancelPointRoundsSync(
         this.ctx.storage.sql,
         moduleId,
@@ -5752,11 +5895,14 @@ export class ChannelObject extends DurableObject<Env> {
         },
         roundIds,
         expectedGateRevision,
-        undefined,
+        (cancelledRoundId) => {
+          if (moduleId !== "quiz") return;
+          const snapshot = this.writeCancelledQuizOverlaySnapshotSync(cancelledRoundId, quizOverlayPayload);
+          if (snapshot !== null) quizOverlaySnapshots.push(snapshot);
+        },
         MODULES.find((module) => module.id === moduleId)?.pointRoundCancellationNotice !== false,
       );
       if (count > 0) {
-        if (overlaySnapshot !== undefined) this.putQuizOverlaySnapshotSync(overlaySnapshot);
         for (const roundId of roundIds) {
           if (pointRoundRow(this.ctx.storage.sql, roundId)?.prepare_state === "pending") {
             this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now());
@@ -5767,6 +5913,7 @@ export class ChannelObject extends DurableObject<Env> {
       return count;
     });
     if (roundIds.length > 0) await this.scheduleEarliestAlarm();
+    if (quizOverlaySnapshots.length > 0) await this.deliverPendingQuizOverlaySnapshot();
     if (expectedGateRevision !== undefined && flushCancellationNotices) await this.flushPointCancellationNotices();
     return cancelled;
   }
@@ -5819,6 +5966,7 @@ export class ChannelObject extends DurableObject<Env> {
       }));
     }));
     const now = new Date().toISOString();
+    const quizOverlaySnapshots: ModuleQuizOverlaySnapshot[] = [];
     const result = this.ctx.storage.transactionSync(() => {
       const applied = setGameModuleGateSync(this.ctx.storage.sql, moduleId, closed, revision, (value) => {
         if (typeof value !== "object" || value === null || !("operationId" in value) || typeof value.operationId !== "string") {
@@ -5828,6 +5976,10 @@ export class ChannelObject extends DurableObject<Env> {
         if (hash === undefined) throw new Error("refund_retry_required");
         return hash;
       }, now, lastDisabledRevision, (roundId) => {
+        if (moduleId === "quiz") {
+          const snapshot = this.writeCancelledQuizOverlaySnapshotSync(roundId);
+          if (snapshot !== null) quizOverlaySnapshots.push(snapshot);
+        }
         if (pointRoundRow(this.ctx.storage.sql, roundId)?.prepare_state === "pending") {
           this.writePointRoundAlarmSync(pointRoundAlarmKey(roundId), Date.now());
         } else this.clearPointRoundAlarmSync(pointRoundAlarmKey(roundId));
@@ -5838,6 +5990,7 @@ export class ChannelObject extends DurableObject<Env> {
       return applied;
     });
     await this.scheduleEarliestAlarm();
+    if (quizOverlaySnapshots.length > 0) await this.deliverPendingQuizOverlaySnapshot();
     if (!closed && (result.applied || cancellationRevision !== null)) {
       if (flushCancellationNotices && cancellationRevision !== null) await this.flushPointCancellationNotices();
     }
@@ -8192,6 +8345,12 @@ export class ChannelObject extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     await withCommittedPanelResourceDrain(async () => {
+      await this.recoverQuizOverlaySnapshotDelivery();
+      try {
+        await this.deliverPendingQuizOverlaySnapshot();
+      } catch (error: unknown) {
+        console.error("Pending quiz overlay delivery failed; its alarm will retry.", error);
+      }
       await this.ensurePointRoundRecovery();
       const alarmTable = await this.ctx.storage.transaction((transaction) => readAlarmScheduleTable(transaction));
       const hasTimerAlarms = Object.keys(alarmTable).some((key) =>

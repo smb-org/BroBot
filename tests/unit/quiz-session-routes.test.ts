@@ -57,9 +57,10 @@ const appFor = (options: {
   const active = options.active ?? null;
   const opened = vi.fn<ModulePointsAccess["rounds"]["open"]>().mockResolvedValue(undefined);
   const publish = vi.fn(() => Promise.resolve());
+  const activeRound = vi.fn(() => Promise.resolve(active));
   const points = {
     rounds: {
-      active: vi.fn(() => Promise.resolve(active)),
+      active: activeRound,
       recentlyResolved: vi.fn(() => Promise.resolve(options.resolved ?? null)),
       open: opened,
     },
@@ -76,7 +77,7 @@ const appFor = (options: {
     await next();
   });
   app.route("/channels/:channelId/modules/quiz", quizRoutes);
-  return { app, opened, publish, runAlarm };
+  return { app, opened, publish, runAlarm, activeRound };
 };
 
 const startRequest = (questionCount: number | null = null): Request => new Request(
@@ -257,11 +258,43 @@ describe("quiz session cockpit routes", () => {
     });
   });
 
+  it("delegates an HTTP End retry after cancellation to the idempotent Durable Object handler", async () => {
+    const database = await createDatabase(true);
+    const active = {
+      roundId: "ended-quiz",
+      state: "open" as const,
+      data: { ...resolvedQuizData, sessionId: "ended-quiz", phase: "open" },
+      deadlineAt: Date.now() + 30_000,
+    };
+    const harness = appFor({ active });
+    harness.activeRound.mockResolvedValueOnce(active).mockResolvedValueOnce(null);
+    const request = (): Request => new Request(`https://brobot.example/channels/${channelId}/modules/quiz/session/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "end", sessionId: "ended-quiz" }),
+    });
+
+    const first = await harness.app.fetch(request(), { DB: database as unknown as D1Database });
+    const retry = await harness.app.fetch(request(), { DB: database as unknown as D1Database });
+
+    expect(first.status).toBe(200);
+    expect(retry.status).toBe(200);
+    expect(harness.runAlarm).toHaveBeenNthCalledWith(1, channelId, "quiz", "session-control", "ended-quiz", {
+      action: "end",
+      sessionId: "ended-quiz",
+    });
+    expect(harness.runAlarm).toHaveBeenNthCalledWith(2, channelId, "quiz", "session-control", "ended-quiz", {
+      action: "end",
+      sessionId: "ended-quiz",
+    });
+  });
+
   it("rejects a control when its displayed session has been replaced", async () => {
     const database = await createDatabase(true);
     const replacementData = { ...resolvedQuizData, sessionId: "replacement-quiz", phase: "open" };
     const harness = appFor({
       active: { roundId: "replacement-quiz", state: "open", data: replacementData, deadlineAt: Date.now() + 30_000 },
+      alarmError: "session_changed",
     });
 
     const response = await harness.app.request(`/channels/${channelId}/modules/quiz/session/action`, {
@@ -272,6 +305,6 @@ describe("quiz session cockpit routes", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "session_changed" });
-    expect(harness.runAlarm).not.toHaveBeenCalled();
+    expect(harness.runAlarm).toHaveBeenCalledOnce();
   });
 });

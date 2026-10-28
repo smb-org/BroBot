@@ -165,22 +165,26 @@ quizRoutes.post("/session/action", async (context) => {
   }
   const sessionId = isRecord(requestBody) ? requestBody.sessionId : null;
   const active = await context.get("points")(channelId).rounds.active();
-  if (typeof sessionId !== "string" || active === null || active.roundId !== sessionId) {
+  if (typeof sessionId !== "string") {
     return context.json({ error: "session_changed" }, 409);
   }
-  const canControlPending = active.state === "announcing" && (action === "end" || action === "pause" || action === "resume");
-  if ((active.state !== "open" && !canControlPending) || quizRoundData(active.data) === null) {
-    return context.json({ error: "round_not_running" }, 409);
-  }
-  if (action !== "end" && !await streamIsOnline(context.env.DB, channelId)) {
-    return context.json({ error: "stream_offline" }, 409);
+  if (active === null || active.roundId !== sessionId) {
+    if (action !== "end") return context.json({ error: "session_changed" }, 409);
+  } else {
+    const canControlPending = active.state === "announcing" && (action === "end" || action === "pause" || action === "resume");
+    if ((active.state !== "open" && !canControlPending) || quizRoundData(active.data) === null) {
+      return context.json({ error: "round_not_running" }, 409);
+    }
+    if (action !== "end" && !await streamIsOnline(context.env.DB, channelId)) {
+      return context.json({ error: "stream_offline" }, 409);
+    }
   }
   try {
     await context.get("runModuleAlarm")(
       channelId,
       QUIZ_MODULE_ID,
       quizSessionControlAlarm.key,
-      active.roundId,
+      sessionId,
       { action, sessionId },
     );
     return context.json({ ok: true });

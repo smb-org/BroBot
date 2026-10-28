@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ModuleAlarmContext } from "../../src/modules/contract";
+import type { JsonObject, ModuleAlarmContext } from "../../src/modules/contract";
 import { quizModule } from "../../src/modules/quiz";
 import { onQuizRoundAnnounced, onQuizRoundDeadline, quizSessionControlAlarm } from "../../src/modules/quiz/lifecycle";
-import { mergeQuizOverlayRealtimeState } from "../../src/modules/quiz/overlay/state";
+import { loadQuizOverlayState, mergeQuizOverlayRealtimeState } from "../../src/modules/quiz/overlay/state";
 
 interface ActiveQuiz {
   roundId: string;
@@ -47,25 +47,47 @@ const lifecycleContext = (
   const canceled: string[] = [];
   const published: Array<{ type: string; elementKind: string; payload: Record<string, unknown> }> = [];
   let roundIsActive = true;
-  let snapshot: { sequence: number; lastBroadcastSequence: number; payload: Record<string, unknown> } | null = null;
+  let snapshot: {
+    sequence: number;
+    lastBroadcastSequence: number;
+    pendingBroadcastSequence?: number | null;
+    payload: Record<string, unknown>;
+  } | null = null;
+  const contextRef: { current: ModuleAlarmContext | null } = { current: null };
   const snapshotAccess = {
     read: () => Promise.resolve(snapshot),
-    write: (payload: Readonly<Record<string, unknown>>) => {
+    write: (payload: Readonly<Record<string, unknown>>, expectedCurrentSessionId?: string) => {
+      if (expectedCurrentSessionId !== undefined && snapshot !== null && snapshot.payload.sessionId !== expectedCurrentSessionId) {
+        return Promise.resolve(null);
+      }
       const sequence = (snapshot?.sequence ?? 0) + 1;
       snapshot = {
         sequence,
         lastBroadcastSequence: snapshot?.lastBroadcastSequence ?? 0,
+        pendingBroadcastSequence: sequence,
         payload: { ...payload, phaseSequence: sequence, serverNow: new Date().toISOString() },
       };
       return Promise.resolve(snapshot);
     },
-    markBroadcast: (sequence: number) => {
-      if (snapshot !== null) snapshot.lastBroadcastSequence = Math.max(snapshot.lastBroadcastSequence, sequence);
-      return Promise.resolve();
-    },
-    scheduleRetry: () => {
-      scheduled.push({ key: "overlay-retry", deadline: Date.now() + 5_000 });
-      return Promise.resolve();
+    deliverPending: async () => {
+      if (snapshot === null || snapshot.lastBroadcastSequence >= snapshot.sequence) return;
+      const current = snapshot;
+      const type = current.payload.phase === "idle" ? "cancel"
+        : current.payload.phase === "results" ? "results" : "phase";
+      try {
+        const activeContext = contextRef.current;
+        if (activeContext === null) throw new Error("Quiz alarm context was not initialized.");
+        await activeContext.publishModuleOverlayMessage(type, "quiz.session", {
+          ...current.payload,
+          serverNow: new Date().toISOString(),
+        });
+        if (snapshot.sequence === current.sequence) {
+          snapshot = { ...snapshot, lastBroadcastSequence: current.sequence, pendingBroadcastSequence: null };
+        }
+      } catch (error: unknown) {
+        scheduled.push({ key: "overlay-retry", deadline: Date.now() + 5_000 });
+        throw error;
+      }
     },
   };
   const context = {
@@ -79,7 +101,8 @@ const lifecycleContext = (
           active.data = data as Record<string, unknown>;
           active.deadlineAt = deadlineAt;
           if (overlayPayload === undefined) return Promise.resolve();
-          return snapshotAccess.write(overlayPayload).then((stored) => {
+          return snapshotAccess.write(overlayPayload, _roundId).then((stored) => {
+            if (stored === null) return undefined;
             active.data.phaseSequence = stored.sequence;
             return stored;
           });
@@ -88,7 +111,7 @@ const lifecycleContext = (
           canceled.push(roundId);
           roundIsActive = false;
           if (overlayPayload === undefined) return Promise.resolve(1);
-          return snapshotAccess.write(overlayPayload).then(() => 1);
+          return snapshotAccess.write(overlayPayload, roundId).then(() => 1);
         },
       },
     },
@@ -100,6 +123,7 @@ const lifecycleContext = (
       return Promise.resolve();
     },
   } as unknown as ModuleAlarmContext;
+  contextRef.current = context;
   return { context, active, scheduled, cleared, canceled, published };
 };
 
@@ -269,7 +293,8 @@ describe("quiz stream lifecycle reconciliation", () => {
       remainingMs: null,
       ranking: [],
     });
-    await snapshotStore.markBroadcast(stored.sequence);
+    if (stored === null) throw new Error("Provisional result snapshot was not stored.");
+    await snapshotStore.deliverPending();
 
     const handler = quizModule.onPointRoundResolved;
     if (handler === undefined) throw new Error("Quiz result handler is unavailable.");
@@ -301,6 +326,77 @@ describe("quiz stream lifecycle reconciliation", () => {
       sequence: stored.sequence + 1,
       payload: { phase: "results", ranking: [{ login: "winner" }] },
     });
+  });
+
+  it("does not let a retried settled result replace a newer session snapshot", async () => {
+    const fake = lifecycleContext({ state: "online", changed_at: new Date(Date.now()).toISOString() });
+    const current = await fake.context.quizOverlaySnapshot.write({
+      sessionId: "new-session",
+      phase: "open",
+      sessionStartedAt: "2030-01-01T00:00:10.000Z",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "New question",
+      options: ["One", "Two"],
+      phaseEndsAt: "2030-01-01T00:01:00.000Z",
+      paused: false,
+      remainingMs: null,
+    });
+    if (current === null) throw new Error("Current session snapshot was not stored.");
+    await fake.context.quizOverlaySnapshot.deliverPending();
+    const handler = quizModule.onPointRoundResolved;
+    if (handler === undefined) throw new Error("Quiz result handler is unavailable.");
+
+    await handler(fake.context, {
+      roundId: "old-session",
+      data: { ...sessionData("old-session"), phaseSequence: 4, phase: "results" },
+      result: { ranking: [{ login: "winner", correct: 1, rank: 1 }] },
+      resolvedAt: "2030-01-01T00:00:05.000Z",
+    });
+
+    await expect(fake.context.quizOverlaySnapshot.read()).resolves.toMatchObject({
+      sequence: current.sequence,
+      payload: { sessionId: "new-session", phase: "open" },
+    });
+  });
+
+  it("refreshes server clock calibration when a pending snapshot is delivered", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+    try {
+      const fake = lifecycleContext({ state: "online", changed_at: new Date(Date.now()).toISOString() });
+      const resultAt = new Date(Date.now()).toISOString();
+      await fake.context.quizOverlaySnapshot.write({
+        sessionId: "quiz-round",
+        phase: "results",
+        sessionStartedAt: new Date(Date.now() - 60_000).toISOString(),
+        questionIndex: 0,
+        questionCount: 1,
+        question: "Question",
+        options: ["One", "Two"],
+        phaseEndsAt: null,
+        paused: false,
+        remainingMs: null,
+        resultAt,
+        ranking: [{ login: "winner", correct: 1, rank: 1 }],
+      });
+      fake.published.length = 0;
+      vi.setSystemTime(Date.now() + 75_000);
+
+      await quizSessionControlAlarm.handle(fake.context, "overlay-retry", Date.now());
+
+      const delivered = fake.published.at(-1)?.payload;
+      expect(delivered).toMatchObject({
+        serverNow: new Date(Date.now()).toISOString(),
+        resultAt,
+      });
+      const hydratedSnapshot = delivered as unknown as JsonObject | null;
+      const hydrated = await loadQuizOverlayState({ now: Date.now(), readSnapshot: () => Promise.resolve(hydratedSnapshot) });
+      expect(hydrated).toMatchObject({ phase: "idle" });
+      expect(hydrated).not.toHaveProperty("resultAt");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("recovers a failed cancellation broadcast from the snapshot when End is retried", async () => {
