@@ -22,6 +22,7 @@ export interface TemplateValueProvider {
   templateVariableNamespace?: "text_blocks" | "api_sources";
   variables: readonly TemplateVariable[];
   textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
+  textBlockConditionNamespace?: string;
   templateUnavailableText?: Readonly<Record<ModuleLanguage, string>>;
   resolveTemplateConditions?: (
     ids: readonly string[],
@@ -43,6 +44,7 @@ export interface TemplateResolverSources {
   moduleSecrets?: (moduleId: string) => ModuleSecretReadAccess;
   publicOrigin?: string;
   externalFetchBudget?: ModuleExternalFetchBudget;
+  onCommittedPanelResourceChange?: ModuleTemplateValueContext["onCommittedPanelResourceChange"];
   readOnly?: boolean;
   dryRun?: boolean;
   textBlockSelectionState?: Map<string, number>;
@@ -386,6 +388,7 @@ export const createTemplateRenderer = (
     channelLocation: sources.channelLocation,
     ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
     externalFetchBudget,
+    ...(sources.onCommittedPanelResourceChange === undefined ? {} : { onCommittedPanelResourceChange: sources.onCommittedPanelResourceChange }),
     ...(sources.readOnly === true ? { readOnly: true } : {}),
     ...(sources.dryRun === true ? { dryRun: true } : {}),
     ...(sources.textBlockSelectionState === undefined ? {} : { textBlockSelectionState: sources.textBlockSelectionState }),
@@ -401,7 +404,8 @@ export const createTemplateRenderer = (
       for (const provider of sources.templateValueProviders ?? []) {
         if (provider.resolveTemplateConditions === undefined) continue;
         const declared = new Set((provider.textBlockConditions ?? []).map(({ id }) => id));
-        const names = ids.filter((id) => requested.has(id) && declared.has(id));
+        const names = ids.filter((id) => requested.has(id) && (declared.has(id) ||
+          (provider.textBlockConditionNamespace !== undefined && id.startsWith(provider.textBlockConditionNamespace))));
         if (names.length === 0) continue;
         let values: Readonly<Record<string, string>>;
         try {
@@ -412,6 +416,7 @@ export const createTemplateRenderer = (
             channelLocation: sources.channelLocation,
             ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
             externalFetchBudget,
+            ...(sources.onCommittedPanelResourceChange === undefined ? {} : { onCommittedPanelResourceChange: sources.onCommittedPanelResourceChange }),
             ...(sources.readOnly === true ? { readOnly: true } : {}),
             ...(sources.dryRun === true ? { dryRun: true } : {}),
             ...(commandInput === undefined ? {} : { commandInput }),

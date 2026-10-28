@@ -20,7 +20,8 @@ app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes, async (context, next) =>
   } finally {
     const channelId = context.req.param("channelId");
     const isDryRun = /^\/api\/channels\/[^/]+\/dry-run\/?$/u.test(context.req.path);
-    if (!isDryRun && channelId.length > 0 && authorizedContextHas(context, "session")) {
+    if (!isDryRun && mutatingMethods.has(context.req.method.toUpperCase()) && channelId.length > 0 &&
+        authorizedContextHas(context, "session")) {
       await notifyCommittedResources(context.env);
     }
   }

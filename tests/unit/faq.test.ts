@@ -314,7 +314,7 @@ describe("FAQ literal matcher", () => {
     expect(result.matches.map(({ module }) => module.id)).toEqual(["text_commands", "faq"]);
   });
 
-  it("answers the first matching block once and commits cooldown after confirmed delivery", async () => {
+  it("claims before rendering so later matches skip rendering during cooldown", async () => {
     const database = new TestD1Database();
     try {
       await insertChannel(database, "channel-a");
@@ -335,7 +335,7 @@ describe("FAQ literal matcher", () => {
       if (action?.kind !== "chat" || action.onDelivery === undefined) throw new Error("FAQ answer delivery callback is missing.");
       await action.onDelivery("sent");
       expect(second.actions).toEqual([]);
-      expect(context.renderTemplate).toHaveBeenCalledTimes(2);
+      expect(context.renderTemplate).toHaveBeenCalledTimes(1);
     } finally {
       database.close();
     }

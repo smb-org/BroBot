@@ -407,7 +407,7 @@ describe("panel resource revisions", () => {
     const worker = readFileSync(resolve(root, "src/worker/app-routes.ts"), "utf8");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.platformRoutes");
-    expect(worker).toMatch(/finally \{\s*const channelId = context\.req\.param\("channelId"\);\s*const isDryRun = .*context\.req\.path\);\s*if \(!isDryRun && channelId\.length > 0 && authorizedContextHas\(context, "session"\)\) \{\s*await notifyCommittedResources\(context\.env\);/u);
+    expect(worker).toMatch(/finally \{\s*const channelId = context\.req\.param\("channelId"\);\s*const isDryRun = .*context\.req\.path\);\s*if \(!isDryRun && mutatingMethods\.has\(context\.req\.method\.toUpperCase\(\)\) && channelId\.length > 0 &&\s*authorizedContextHas\(context, "session"\)\) \{\s*await notifyCommittedResources\(context\.env\);/u);
     expect(worker).not.toContain("PANEL_RESOURCE_NOTIFIER_COVERAGE.authRoutes");
     expect(worker).not.toMatch(/context\.res\.status !== 401/u);
     const deferredSources = new Map(sourceFilesUnder(resolve(root, "src")).map((path) => [
@@ -439,14 +439,14 @@ describe("panel resource revisions", () => {
     const ballotTermCastStart = channelObject.indexOf("public async castBallotTerm(", ballotCastStart);
     const ballotCast = ballotCastStart < 0 || ballotTermCastStart < 0 ? "" : channelObject.slice(ballotCastStart, ballotTermCastStart);
     expect(ballotCast).toContain("choice, options");
-    expect(ballotCast).toMatch(/result\.status === "counted" \|\| result\.status === "changed"\) \{\s*await this\.notifyCommittedPanelResources\(\);/u);
+    expect(ballotCast).toMatch(/result\.status === "counted" \|\| result\.status === "changed"\) \{\s*await this\.publishCommittedDurablePanelResources\(\);/u);
     const ballotTermCastEnd = channelObject.indexOf("public async setBlockedTerms(", ballotTermCastStart);
     const ballotTermCast = ballotTermCastStart < 0 || ballotTermCastEnd < 0 ? "" : channelObject.slice(ballotTermCastStart, ballotTermCastEnd);
     expect(ballotTermCast).toContain("castStoredBallotTerm");
     expect(ballotTermCast).toContain('result.status === "overflow"');
-    expect(ballotTermCast).toContain("await this.notifyCommittedPanelResources()");
+    expect(ballotTermCast).toContain("await this.publishCommittedDurablePanelResources()");
     const eventSubSource = readFileSync(resolve(root, "src/worker/eventsub.ts"), "utf8");
-    expect(eventSubSource).toMatch(/finally \{\s*await notifyCommittedResources\(context\.env, notifierChannelId\);/u);
+    expect(eventSubSource).toMatch(/finally \{\s*if \(didCommitPanelResourceChange\(\)\) \{\s*await notifyCommittedResources\(context\.env, notifierChannelId, undefined, true\);/u);
     expect(eventSubSource).toMatch(/revokeRealtimeUserFromAllChannels\([\s\S]*?revocation\.authorizationIdentity\.userId/u);
     const authSource = readFileSync(resolve(root, "src/worker/auth/routes.ts"), "utf8");
     expect(authSource.match(/finally \{\s*await notifyCommittedResources\(env\);/gu) ?? []).toHaveLength(2);
@@ -605,7 +605,7 @@ describe("panel resource revisions", () => {
     expect(idFromName).not.toHaveBeenCalled();
   });
 
-  it("publishes every channel queued by an authenticated channel request", async () => {
+  it("does not drain committed panel changes from an authenticated read-only channel request", async () => {
     const database = new TestD1Database();
     const visitedChannels: string[] = [];
     const cookieKeys = JSON.stringify({ active: { id: "cookie-v1", key: testKey(1) }, retired: [] });
@@ -644,12 +644,11 @@ describe("panel resource revisions", () => {
       ), env);
 
       expect(response.status).toBe(200);
-      expect(visitedChannels.sort((left, right) => left.localeCompare(right)))
-        .toEqual(["cross-channel-a", "cross-channel-b"]);
+      expect(visitedChannels).toEqual([]);
       const remaining = await database.prepare(
         "SELECT channel_id FROM panel_resource_pending ORDER BY channel_id LIMIT 1",
       ).first<{ channel_id: string }>();
-      expect(remaining).toBeNull();
+      expect(remaining).toEqual({ channel_id: "cross-channel-a" });
     } finally {
       database.close();
     }
