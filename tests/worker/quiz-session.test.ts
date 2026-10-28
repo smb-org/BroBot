@@ -897,6 +897,62 @@ describe("quiz answers in the shared point round", () => {
     expect(hydrated).not.toHaveProperty("ranking");
   });
 
+  it("delivers the suppression idle snapshot to the disabled quiz overlay before clearing its pending delivery", async () => {
+    const channelId = `quiz-suppressed-routing-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const overlayId = `overlay-${roundId}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz overlay', ?, ?)",
+    ).bind(overlayId, channelId, new Date().toISOString(), new Date().toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${roundId}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    await object.setGameModuleGate("quiz", false, 1);
+    await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "results" }, {
+      sessionId: roundId,
+      phase: "results",
+      sessionStartedAt: new Date(Date.now() - 30_000).toISOString(),
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      ranking: [],
+    });
+    await object.markGameRoundAnnounced("quiz", roundId, Date.now() + 30_000, `round:${roundId}`);
+    await object.resolveGameRound("quiz", roundId, { kind: "quiz", params: {} });
+
+    // D1 already marks the quiz disabled when the gate closes, so only explicit disabled-module routing finds the overlay.
+    await worker.DB.prepare("UPDATE channel_modules SET enabled = 0, revision = 2 WHERE channel_id = ? AND module_id = 'quiz'")
+      .bind(channelId).run();
+    const publishSpy = vi.spyOn(ChannelObject.prototype, "publish").mockRejectedValueOnce(new Error("hold delivery"));
+    await capturePointError(object, (target) => target.setGameModuleGate("quiz", true, 2));
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      includeDisabledModule: true,
+      pendingBroadcastSequence: expect.any(Number) as number,
+      payload: { sessionId: roundId, phase: "idle" },
+    });
+
+    publishSpy.mockResolvedValue(undefined);
+    const retryAt = await object.getModuleAlarmDeadline("quiz", "overlay-retry");
+    if (retryAt === null) throw new Error("The failed suppression delivery did not keep its retry alarm.");
+    vi.setSystemTime(retryAt);
+    await runPointAlarm(object);
+
+    const cancellations = publishSpy.mock.calls.flatMap(([messages]) => messages)
+      .filter((message) => JSON.stringify(message).includes('"modul.quiz.cancel"') && JSON.stringify(message).includes(roundId));
+    expect(cancellations.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(cancellations.at(-1))).toContain(overlayId);
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({ pendingBroadcastSequence: null });
+  });
+
   it("keeps a queued suppressed result from replacing the idle overlay after re-enable", async () => {
     const channelId = `quiz-queued-suppressed-result-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;

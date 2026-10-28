@@ -928,6 +928,7 @@ export class ChannelObject extends DurableObject<Env> {
   private writeCancelledQuizOverlaySnapshotSync(
     roundId: string,
     suppliedPayload?: Readonly<Record<string, unknown>>,
+    includeDisabledModule?: boolean,
   ): ModuleQuizOverlaySnapshot | null {
     const round = pointRoundRow(this.ctx.storage.sql, roundId);
     if (round === null || round.module_id !== "quiz") return null;
@@ -960,14 +961,15 @@ export class ChannelObject extends DurableObject<Env> {
       sessionId: roundId,
       expectedCurrentSessionId: roundId,
       payload,
-      includeDisabledModule: moduleGate?.closed === 1,
+      includeDisabledModule: includeDisabledModule ?? moduleGate?.closed === 1,
     });
   }
 
   private writeSuppressedQuizOverlaySnapshotSync(roundId: string): ModuleQuizOverlaySnapshot | null {
     const snapshot = this.ctx.storage.kv.get<ModuleQuizOverlaySnapshot>(QUIZ_OVERLAY_SNAPSHOT_KEY);
     if (snapshot?.payload.sessionId !== roundId) return null;
-    return this.writeCancelledQuizOverlaySnapshotSync(roundId);
+    // Suppression only happens for a disabled quiz; the gate row may not be closed yet while this runs, so route explicitly.
+    return this.writeCancelledQuizOverlaySnapshotSync(roundId, undefined, true);
   }
 
   private writeQuizOverlayDeliveryAlarmSync(deadline: number): void {
