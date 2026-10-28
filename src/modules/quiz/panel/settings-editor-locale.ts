@@ -47,7 +47,7 @@ const catalog = (language: DashboardLanguage): SettingsEditorCatalog => {
     sections: {
       rules: de ? "Ablauf" : "Timing",
       reward: de ? "Punkte" : "Points",
-      chat: de ? "Chat" : "Chat",
+      chat: "Chat",
     },
     fields: {
       answerSeconds: {
