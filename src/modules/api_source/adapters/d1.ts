@@ -104,7 +104,15 @@ export const claimApiSourceQuota = async (
        WHERE request_count < ?
      RETURNING request_count`,
   ).bind(channelId, windowStart, maximum).first<{ request_count: number }>();
-  await db.prepare("DELETE FROM api_source_quota WHERE window_start < ?")
-    .bind(new Date(hour - 48 * 3_600_000).toISOString()).run();
   return row !== null;
+};
+
+const API_SOURCE_QUOTA_RETENTION_HOURS = 48;
+
+export const purgeExpiredApiSourceQuota = async (db: D1Database, now: string): Promise<void> => {
+  const nowMilliseconds = Date.parse(now);
+  if (!Number.isFinite(nowMilliseconds)) return;
+  const currentHour = Math.floor(nowMilliseconds / 3_600_000) * 3_600_000;
+  const cutoff = new Date(currentHour - API_SOURCE_QUOTA_RETENTION_HOURS * 3_600_000).toISOString();
+  await db.prepare("DELETE FROM api_source_quota WHERE window_start < ?").bind(cutoff).run();
 };
