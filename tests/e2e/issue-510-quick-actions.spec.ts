@@ -74,10 +74,6 @@ const setupQuickActionCockpit = async (
       await route.fulfill(json({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 0, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 }));
       return;
     }
-    if (pathname === `/api/channels/${channelId}/events/recent`) {
-      await route.fulfill(json({ entries: [], cursor: null }));
-      return;
-    }
     if (pathname === `/api/channels/${channelId}/events`) {
       await route.fulfill(json({ entries: [], nextCursor: null }));
       return;

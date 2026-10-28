@@ -51,13 +51,4 @@ export const dashboardDataKeys = {
     tones: filters.tones === undefined ? null : [...filters.tones].sort((a, b) => a.localeCompare(b)).join(","),
     person: filters.person,
   }),
-  eventHead: (channelId: string, filters: PanelEventFilters) => queryKeys.channel(channelId, "event-head", {
-    origin: filters.origin,
-    module: filters.module,
-    tone: filters.tone,
-    tones: filters.tones === undefined ? null : [...filters.tones].sort((a, b) => a.localeCompare(b)).join(","),
-    person: filters.person,
-  }),
-  eventHeads: (channelId: string) => queryKeys.channel(channelId, "event-head"),
-  recentEvents: (channelId: string) => queryKeys.channel(channelId, "recent-events"),
 };

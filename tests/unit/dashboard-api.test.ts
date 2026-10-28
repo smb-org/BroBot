@@ -9,7 +9,6 @@ import {
   fetchChannelOverview,
   fetchChannelVariableAvailability,
   fetchEvents,
-  fetchRecentEvents,
   fetchMembers,
   removeChannelMember,
   refreshModeratorStatus,
@@ -143,19 +142,6 @@ describe("dashboard API request boundary", () => {
         "/api/channels/kanal-a/events?cursor=cursor+%2F%3F%23%26&origin=module&module=text_commands&tone=error&actor=person+%2F%3F%23%26",
         window.location.origin,
       ),
-      { credentials: "same-origin", signal: controller.signal },
-    );
-  });
-
-  it("fetches the recent event head with its incremental cursor", async () => {
-    const controller = new AbortController();
-    const fetcher = vi.fn().mockResolvedValueOnce(jsonResponse({ entries: [], cursor: "next-cursor" }));
-    vi.stubGlobal("fetch", fetcher);
-
-    await fetchRecentEvents("kanal-a", "cursor /?#&", controller.signal);
-
-    expect(fetcher).toHaveBeenCalledWith(
-      new URL("/api/channels/kanal-a/events/recent?since=cursor+%2F%3F%23%26", window.location.origin),
       { credentials: "same-origin", signal: controller.signal },
     );
   });

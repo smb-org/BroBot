@@ -14,7 +14,7 @@ import type { Timer } from "../modules/timers/contracts";
 import type { VotekickPanelData } from "../modules/votekick/panel/service";
 import type { DashboardRoute } from "./router";
 import { dashboardTexts, formatNumber } from "./locale";
-import { useOverlaysQuery, useRecentEventsQuery } from "./data/lists";
+import { useEventsQuery, useOverlaysQuery } from "./data/lists";
 import { useModuleQuery } from "./data/module-query";
 import { useDashboardRealtimeStatus } from "./data/realtime";
 import { queryKeys } from "./data/keys";
@@ -25,6 +25,7 @@ import "./cockpit.css";
 import { LiveCockpitBroadcast } from "./LiveCockpitBroadcast";
 import { browserTimeZone } from "./ui/format-relative-time";
 import { useChannelSettings } from "./data/channel-settings";
+import { emptyEventFilter } from "./events/model";
 import {
   belaboxObservationFromStatus,
   belaboxObservationIsExpired,
@@ -33,6 +34,8 @@ import {
   successfulManualBelaboxObservation,
   type LiveCockpitBelaboxObservation,
 } from "./live-cockpit-belabox";
+
+const belaboxStatusRequestStarts = new WeakMap<BelaboxStatusResponse, number>();
 
 const formatDuration = (startedAt: string | null | undefined, now: number): string => {
   if (startedAt == null) return "—";
@@ -78,7 +81,10 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
   const realtimeStatus = useDashboardRealtimeStatus(overview.channelId);
   const [broadcastQueryState, setBroadcastQueryState] = useState<{ channelId: string; state: "pending" | "ready" | "error" } | null>(null);
   const moduleState = useMemo(() => new Map(modules.map((module) => [module.id, module.enabled])), [modules]);
-  const belaboxEnabled = moduleState.get("belabox") === true;
+  const belaboxEnabled = modulesLoaded && moduleState.get("belabox") === true;
+  const chatVotingEnabled = modulesLoaded && moduleState.get("chat_voting") === true;
+  const timersEnabled = modulesLoaded && moduleState.get("timers") === true;
+  const votekickEnabled = modulesLoaded && moduleState.get("votekick") === true;
   const [belaboxObservationState, setBelaboxObservationState] = useState<{ channelId: string; observation: LiveCockpitBelaboxObservation } | null>(null);
   const belaboxObservationClock = useRef(0);
   const nextBelaboxObservationAt = useCallback((): number => {
@@ -96,11 +102,11 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
     });
   }, []);
   const overlaysQuery = useOverlaysQuery(overview.channelId);
-  // Polling classification: event heads use event revisions (30 s only while realtime is down); overlay LEDs use overlay revisions and no interval.
+  // Polling classification: event feed and Helix viewer counts keep their previous 30 s cadence; overlay LEDs use overlay revisions and no interval.
   // Votes, votekick, timers/markers, BELABOX, and counter availability use mapped revisions, with the old 4–5 s fallback only while disconnected.
   // Remaining composite tiles include clock-driven ads schedules, so their old 5 s cadence stays active while connected and offline.
   // Header bot/stream state follows overview revisions; Helix viewer counts keep the overview's old 30 s connected refresh.
-  const eventsQuery = useRecentEventsQuery(overview.channelId, realtimeStatus === "connected" ? false : 30_000);
+  const eventsQuery = useEventsQuery(overview.channelId, emptyEventFilter, 30_000);
   const channelSettings = useChannelSettings(overview.channelId);
   const timeZone = channelSettings.data?.timeZone ?? browserTimeZone();
   const chatVotingQuery = useModuleQuery<ChatVotingPanelState>(overview.channelId, "chat_voting", "live", async (signal) =>
@@ -116,8 +122,13 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
     enabled: modulesLoaded && moduleState.get("votekick") === true,
     refetchInterval: realtimeStatus === "connected" ? false : 5_000,
   });
-  const belaboxStatusQuery = useModuleQuery<BelaboxStatusResponse>(overview.channelId, "belabox", "status", async (signal) =>
-    (await import("../modules/belabox/panel/service")).loadBelaboxStatus(overview.channelId, signal), {
+  const belaboxStatusQuery = useModuleQuery<BelaboxStatusResponse>(overview.channelId, "belabox", "status", async (signal) => {
+    const service = await import("../modules/belabox/panel/service");
+    const observedAt = nextBelaboxObservationAt();
+    const status = await service.loadBelaboxStatus(overview.channelId, signal);
+    belaboxStatusRequestStarts.set(status, observedAt);
+    return status;
+  }, {
       enabled: belaboxEnabled,
       refetchInterval: realtimeStatus === "connected" ? false : 5_000,
     });
@@ -173,7 +184,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
 
   const polledBelaboxObservation = belaboxStatusQuery.data === undefined
     ? null
-    : belaboxObservationFromStatus(belaboxStatusQuery.data, belaboxStatusQuery.dataUpdatedAt);
+    : belaboxObservationFromStatus(belaboxStatusQuery.data, belaboxStatusRequestStarts.get(belaboxStatusQuery.data) ?? 0);
   const savedBelaboxObservation = belaboxObservationState?.channelId === overview.channelId ? belaboxObservationState.observation : null;
   const belaboxObservation = polledBelaboxObservation === null
     ? savedBelaboxObservation
@@ -184,10 +195,11 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
     belaboxObservation.sampledAt !== null && belaboxObservation.connected;
   const sampleBitrate = belaboxObservation?.bitrateKbps ?? 0;
   const belaboxWeak = belaboxEnabled && !belaboxUnavailable && belaboxObservation?.configured === true && belaboxObservation.phase === "low";
-  const chatVotingEnabled = modulesLoaded && moduleState.get("chat_voting") === true;
-  const chatVotingSnapshot = chatVotingQuery.data === undefined ? [] : chatVotingLiveTileSnapshot(chatVotingQuery.data);
-  const timerSnapshots = timerQuery.data === undefined ? [] : timerLiveTileSnapshots(timerQuery.data, now);
-  const votekickSnapshots = votekickQuery.data === undefined ? [] : votekickLiveTileSnapshots(votekickQuery.data, new Date(now).toISOString());
+  const chatVotingSnapshot = chatVotingEnabled && chatVotingQuery.data !== undefined ? chatVotingLiveTileSnapshot(chatVotingQuery.data) : [];
+  const timerSnapshots = timersEnabled && timerQuery.data !== undefined ? timerLiveTileSnapshots(timerQuery.data, now) : [];
+  const votekickSnapshots = votekickEnabled && votekickQuery.data !== undefined
+    ? votekickLiveTileSnapshots(votekickQuery.data, new Date(now).toISOString())
+    : [];
   const liveSnapshots = [...(liveQuery.data?.snapshots ?? []), ...chatVotingSnapshot, ...timerSnapshots, ...votekickSnapshots];
   const chatVotingFailed = chatVotingEnabled && chatVotingQuery.isError;
   const timerFailed = modulesLoaded && moduleState.get("timers") === true && timerQuery.isError;

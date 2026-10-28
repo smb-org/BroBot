@@ -958,10 +958,9 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText("alt")).toBeInTheDocument();
     await waitFor(() => {
       const requests = fetcher.mock.calls.map(([input]) => requestUrl(input)).filter((url) => url.pathname.endsWith("/events"));
-      // Refreshes fetch the bounded head only; older history pages are no longer re-fetched.
-      expect(requests).toHaveLength(3);
+      expect(requests).toHaveLength(4);
       expect(requests[2]?.searchParams.has("cursor")).toBe(false);
-      expect(requests.slice(2).some((url) => url.searchParams.get("cursor") === "cursor-1")).toBe(false);
+      expect(requests[3]?.searchParams.get("cursor")).toBe("cursor-1");
     });
   });
 

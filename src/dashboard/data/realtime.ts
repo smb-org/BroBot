@@ -296,26 +296,7 @@ const invalidatePanelResource = (
       invalidate(queryClient, queryKeys.channel(channelId, "overview"), scheduledQueryRefreshes, resourceRefreshes, channelId);
       return;
     case "channel.events":
-      for (const query of queryClient.getQueryCache().findAll({ queryKey: queryKeys.channel(channelId, "events") })) {
-        const firstPage = (query.state.data as { pages?: unknown[] } | undefined)?.pages?.[0];
-        const filterParameters = query.queryKey[3];
-        if (firstPage === undefined || typeof filterParameters !== "object" || filterParameters === null || Array.isArray(filterParameters)) continue;
-        const headQueryKey = queryKeys.channel(channelId, "event-head", filterParameters as Record<string, string | number | boolean | null | undefined>);
-        if (queryClient.getQueryData(headQueryKey) === undefined) {
-          queryClient.setQueryData(headQueryKey, firstPage, { updatedAt: query.state.dataUpdatedAt });
-        }
-      }
-      invalidate(queryClient, dashboardDataKeys.eventHeads(channelId), scheduledQueryRefreshes, resourceRefreshes, channelId);
-      invalidate(queryClient, dashboardDataKeys.recentEvents(channelId), scheduledQueryRefreshes, resourceRefreshes, channelId);
-      // During the very first history load, the separate head has not been
-      // seeded yet. Refresh that in-flight first page once so an event hint
-      // is not lost; after it is seeded, only the bounded head is refreshed.
-      for (const query of queryClient.getQueryCache().findAll({ queryKey: queryKeys.channel(channelId, "events") })) {
-        if (query.state.data === undefined && query.isActive()) {
-          invalidate(queryClient, query.queryKey, scheduledQueryRefreshes, resourceRefreshes, channelId);
-        }
-      }
-      invalidate(queryClient, queryKeys.channel(channelId, "live-cockpit"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+      invalidate(queryClient, queryKeys.channel(channelId, "events"), scheduledQueryRefreshes, resourceRefreshes, channelId);
       return;
     case "channel.audit":
       invalidate(queryClient, queryKeys.channel(channelId, "audit-log"), scheduledQueryRefreshes, resourceRefreshes, channelId);
@@ -616,10 +597,7 @@ export const reconcileDashboardRealtimeMessage = (
   ? Promise.resolve()
   : reconcileDashboardPanelResourceRevisions(queryClient, message.channelId);
 
-/** A reconnect marks cached channel resources stale; event feeds use their own revision-driven heads. */
+/** A successful reconnect makes every cached resource for that channel stale. */
 export const invalidateDashboardChannelQueries = (queryClient: QueryClient, channelId: string): void => {
-  void queryClient.invalidateQueries({
-    queryKey: ["channel", channelId],
-    predicate: (query) => !["events", "recent-events"].includes(String(query.queryKey[2])),
-  });
+  invalidate(queryClient, ["channel", channelId], undefined, undefined, channelId);
 };

@@ -9,7 +9,6 @@ import type {
   PanelChannelControls,
   PanelChannelsResponse,
   PanelEventsResponse,
-  PanelRecentEventsResponse,
   PanelEventFilters,
   PanelMember,
   PanelMembersResponse,
@@ -505,20 +504,6 @@ export const fetchEvents = (
   const query = params.toString();
   return requestJson<PanelEventsResponse>(
     `${channelPath(channelId, "events")}${query.length > 0 ? `?${query}` : ""}`,
-    requestOptions(signal),
-  );
-};
-
-export const fetchRecentEvents = (
-  channelId: string,
-  since: string | null = null,
-  signal?: AbortSignal,
-): Promise<PanelRecentEventsResponse> => {
-  const params = new URLSearchParams();
-  if (since !== null) params.set("since", since);
-  const query = params.toString();
-  return requestJson<PanelRecentEventsResponse>(
-    `${channelPath(channelId, "events/recent")}${query.length > 0 ? `?${query}` : ""}`,
     requestOptions(signal),
   );
 };

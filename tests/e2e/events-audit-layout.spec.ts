@@ -87,7 +87,6 @@ const mockApi = async (page: Page, options: MockApiOptions = {}): Promise<{ revi
       return route.fulfill(json({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 }, options.settingsStatus));
     }
     if (pathname === `/api/channels/${channelId}/modules`) return route.fulfill(json({ modules: [{ id: "votekick", enabled: true, settings: "{}" }] }));
-    if (pathname === `/api/channels/${channelId}/events/recent`) return route.fulfill(json({ entries: options.eventEntries ?? events, cursor: null }, options.eventStatus));
     if (pathname === `/api/channels/${channelId}/events`) return route.fulfill(json({ entries: options.eventEntries ?? events, nextCursor: null }, options.eventStatus));
     if (pathname === `/api/channels/${channelId}/audit-log` || pathname === `/api/channels/${channelId}/audit`) {
       const cursor = new URL(route.request().url()).searchParams.get("cursor");

@@ -50,8 +50,6 @@ test("keeps one channel socket open while dashboard navigation changes pages", a
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ modules: [] }) });
     } else if (pathname === `/api/channels/${channelId}/settings`) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ timeZone: "UTC", revision: 1, location: null, locationRevision: 0 }) });
-    } else if (pathname === `/api/channels/${channelId}/events/recent`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], cursor: null }) });
     } else if (pathname === `/api/channels/${channelId}/events`) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], nextCursor: null }) });
     } else if (pathname === `/api/channels/${channelId}/members`) {

@@ -90,8 +90,6 @@ const installApiMocks = async (page: Page): Promise<void> => {
         chatSubscription: channel.chatSubscription,
         tokens: channel.tokens,
       };
-    } else if (pathname === `/api/channels/${channelId}/events/recent`) {
-      body = { entries: [], cursor: null };
     } else if (pathname === `/api/channels/${channelId}/events`) {
       body = { entries: [], nextCursor: null };
     } else if (pathname === "/api/csrf") {

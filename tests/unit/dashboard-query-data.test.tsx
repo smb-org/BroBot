@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PanelApiError } from "../../src/dashboard/api";
@@ -9,7 +9,7 @@ import { moduleQueryKey, refetchModuleQueryData, runModuleQueryWrite, useModuleQ
 import { queryKeys } from "../../src/dashboard/data/keys";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import { reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus, useDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
-import { useEventsQuery, useOverlayQuery, useRecentEventsQuery } from "../../src/dashboard/data/lists";
+import { useOverlayQuery } from "../../src/dashboard/data/lists";
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
 import { emptyAuditFilter } from "../../src/dashboard/audit/model";
 import { emptyEventFilter } from "../../src/dashboard/events/model";
@@ -19,7 +19,6 @@ import { renderWithQuery } from "../query-test-utils";
 const channelId = "channel-a";
 
 afterEach(() => {
-  cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
   setDashboardRealtimeStatus(channelId, "offline");
@@ -133,56 +132,6 @@ describe("dashboard query data layer", () => {
     expect(screen.queryByText("Overlay A")).not.toBeInTheDocument();
     releaseOverlayB?.();
     expect(await screen.findByText("Overlay B")).toBeInTheDocument();
-    view.unmount();
-  });
-
-  it("loads only the recent event delta and merges it into the retained feed head", async () => {
-    const fetcher = vi.fn((input: RequestInfo | URL) => {
-      const url = input instanceof Request ? new URL(input.url) : new URL(input instanceof URL ? input.href : input, window.location.href);
-      const body = fetcher.mock.calls.length === 1
-        ? { entries: [{ eventId: "event-one", createdAt: "2026-10-01T00:00:00.000Z", moduleId: "raid", triggerId: "one", code: "raid", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null }], cursor: "cursor-one" }
-        : { entries: [{ eventId: "event-two", createdAt: "2026-10-01T00:00:01.000Z", moduleId: "raid", triggerId: "two", code: "raid", detail: "{}", actorUserId: null, actorLogin: null, actorDisplayName: null }], cursor: "cursor-two" };
-      expect(url.pathname).toBe(`/api/channels/${channelId}/events/recent`);
-      return Promise.resolve(new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } }));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    function RecentEventsProbe() {
-      const query = useRecentEventsQuery(channelId);
-      return <p>{query.data?.entries.map((entry) => entry.eventId).join(",") ?? "Loading"}</p>;
-    }
-
-    const view = renderWithQuery(<RecentEventsProbe />, {}, { gcTime: 600_000, staleTime: 0 });
-    expect((await screen.findByText("event-one")).textContent).toBe("event-one");
-    await act(async () => {
-      await view.queryClient.refetchQueries({ queryKey: dashboardDataKeys.recentEvents(channelId), exact: true });
-    });
-
-    expect((await screen.findByText("event-two,event-one")).textContent).toBe("event-two,event-one");
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    const secondUrl = new URL(fetcher.mock.calls[1]?.[0] as string, window.location.href);
-    expect(secondUrl.searchParams.get("since")).toBe("cursor-one");
-    view.unmount();
-  });
-
-  it("retains no more than ten history pages", async () => {
-    const fetcher = vi.fn(() => Promise.resolve(new Response(JSON.stringify({
-      entries: [],
-      nextCursor: fetcher.mock.calls.length < 12 ? `cursor-${String(fetcher.mock.calls.length)}` : null,
-    }), { headers: { "Content-Type": "application/json" } })));
-    vi.stubGlobal("fetch", fetcher);
-    function EventHistoryProbe() {
-      const query = useEventsQuery(channelId, emptyEventFilter);
-      return <><p>{String(query.data?.pages.length ?? 0)}</p><button onClick={() => { void query.fetchNextPage(); }}>Next page</button></>;
-    }
-
-    const view = renderWithQuery(<EventHistoryProbe />, {}, { gcTime: 600_000, staleTime: 600_000 });
-    expect((await screen.findByText("1")).textContent).toBe("1");
-    for (let page = 0; page < 11; page += 1) {
-      fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(page + 2));
-    }
-
-    expect(screen.getByText("10").textContent).toBe("10");
     view.unmount();
   });
 

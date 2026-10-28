@@ -106,7 +106,6 @@ const mockDashboard = async (page: Page, options: {
       title: "", game: null, manageScopeAvailable: false,
     }));
     if (pathname === `/api/channels/${channelId}/overlays`) return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
-    if (pathname === `/api/channels/${channelId}/events/recent`) return route.fulfill(json({ entries: [], cursor: null }));
     if (pathname === `/api/channels/${channelId}/events`) return route.fulfill(json({ entries: [], nextCursor: null }));
     if (pathname === `/api/channels/${channelId}/modules/belabox/status`) return route.fulfill(json({
       configured: true, updatedAt: timestamp, mode: "relay",

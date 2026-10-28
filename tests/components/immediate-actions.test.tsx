@@ -13,6 +13,7 @@ import type { Votekick } from "../../src/modules/votekick/contracts";
 import { votekickModule } from "../../src/modules/votekick";
 import { UiProvider } from "../../src/dashboard/ui";
 import { moduleQueryKey } from "../../src/dashboard/data";
+import { setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { clickSelectOption, renderWithQuery } from "../query-test-utils";
 
 vi.mock("../../src/dashboard/api", async (importOriginal) => ({
@@ -84,6 +85,7 @@ const activeVotekick: Votekick = {
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  setDashboardRealtimeStatus("channel-a", "offline");
 });
 
 beforeEach(() => {
@@ -158,6 +160,55 @@ describe("cockpit action role mirror", () => {
     await openViewerPicker();
     expect(await screen.findByRole("option", { name: /viewer_two/u, hidden: true })).not.toBeNull();
     expect(screen.queryByRole("option", { name: /viewer_one/u, hidden: true })).toBeNull();
+  });
+
+  it("expires a selected timeout while connected without polling, leaving the other timeout available", async () => {
+    const serverNow = Date.now();
+    const expiringTimeout: Votekick = {
+      ...activeVotekick,
+      id: "ballot-expiring",
+      targetUserId: "viewer-expiring",
+      targetLogin: "viewer_expiring",
+      endedAt: new Date(serverNow - 10_000).toISOString(),
+      durationSeconds: 20,
+    };
+    const remainingTimeout: Votekick = {
+      ...activeVotekick,
+      id: "ballot-remaining",
+      targetUserId: "viewer-remaining",
+      targetLogin: "viewer_remaining",
+      endedAt: new Date(serverNow - 10_000).toISOString(),
+      durationSeconds: 120,
+    };
+    vi.mocked(loadVotekickPanel).mockResolvedValue({
+      running: null,
+      votekicks: [expiringTimeout, remainingTimeout],
+      now: new Date(serverNow).toISOString(),
+    });
+    setDashboardRealtimeStatus("channel-a", "connected");
+    renderWithQuery(<UiProvider><ImmediateActions channelId="channel-a" streamState="online" role="operator"
+      modules={[{ id: "votekick", enabled: true }]} /></UiProvider>);
+
+    const action = await screen.findByRole("button", { name: /Timeout aufheben|Lift timeout/u });
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date(serverNow));
+    try {
+      fireEvent.click(action);
+      await openViewerPicker();
+      clickSelectOption(await screen.findByRole("option", { name: /viewer_expiring/u, hidden: true }));
+      const run = screen.getByRole<HTMLButtonElement>("button", { name: dashboardTexts().streamManager.actionRun });
+      expect(run.disabled).toBe(false);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+      expect(run.disabled).toBe(true);
+      await openViewerPicker();
+      expect(screen.queryByRole("option", { name: /viewer_expiring/u, hidden: true })).toBeNull();
+      expect(screen.getByRole("option", { name: /viewer_remaining/u, hidden: true })).not.toBeNull();
+      expect(loadVotekickPanel).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("lifts the selected active Votekick timeout from the immediate action dialog", async () => {

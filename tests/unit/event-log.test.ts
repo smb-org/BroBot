@@ -434,33 +434,6 @@ describe("event log", () => {
     expect(third.nextCursor).toBeNull();
  });
 
-  it("reads only events newer than the recent-feed cursor", async () => {
-    await insertChannel(database, "kanal-a");
-    await insertLoginIdentityAndSession(database, "user-1");
-    await insertMember(database, "kanal-a", "user-1", "operator");
-    await insertEvent(database, "event-old", "kanal-a", "2026-09-18T04:00:00.000Z");
-
-    const headResponse = await panelRouter.fetch(
-      await makeRequest("user-1", "/api/channels/kanal-a/events/recent"),
-      makeEnvironment(database),
-    );
-    const head = await headResponse.json<{ entries: Array<{ eventId: string }>; cursor: string | null }>();
-    await insertEvent(database, "event-new", "kanal-a", "2026-09-18T04:00:01.000Z");
-
-    const deltaResponse = await panelRouter.fetch(
-      await makeRequest("user-1", `/api/channels/kanal-a/events/recent?since=${encodeURIComponent(head.cursor ?? "")}`),
-      makeEnvironment(database),
-    );
-    const delta = await deltaResponse.json<{ entries: Array<{ eventId: string }>; cursor: string | null }>();
-
-    expect(headResponse.status).toBe(200);
-    expect(head.entries.map(({ eventId }) => eventId)).toEqual(["event-old"]);
-    expect(head.cursor).toEqual(expect.any(String));
-    expect(deltaResponse.status).toBe(200);
-    expect(delta.entries.map(({ eventId }) => eventId)).toEqual(["event-new"]);
-    expect(delta.cursor).not.toBe(head.cursor);
-  });
-
   it("resolves a stored actor via Twitch and keeps the ID", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "viewer-1");

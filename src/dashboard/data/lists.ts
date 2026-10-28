@@ -1,7 +1,7 @@
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
-import { fetchAuditLog, fetchChannelVariables, fetchEvents, fetchMembers, fetchOverlay, fetchOverlayAccesses, fetchOverlayTokens, fetchOverlays, fetchRecentEvents, fetchSystemOverview } from "../api";
-import type { PanelAuditFilters, PanelEventEntry, PanelEventFilters, PanelRecentEventsResponse } from "../../panel-contract";
+import { fetchAuditLog, fetchChannelVariables, fetchEvents, fetchMembers, fetchOverlay, fetchOverlayAccesses, fetchOverlayTokens, fetchOverlays, fetchSystemOverview } from "../api";
+import type { PanelAuditFilters, PanelEventFilters } from "../../panel-contract";
 import { dashboardDataKeys } from "./keys";
 
 export const useMembersQuery = (channelId: string) => useInfiniteQuery({
@@ -27,48 +27,13 @@ export const useEventsQuery = (channelId: string, filters: PanelEventFilters, re
   const queryKey = dashboardDataKeys.events(channelId, filters);
   return useInfiniteQuery({
     queryKey,
-    // History pages stay put; event revisions refresh the separate bounded head query.
-    staleTime: Infinity,
+    // A cached filter becomes stale immediately so switching back revalidates it in the background.
+    staleTime: 0,
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => fetchEvents(channelId, pageParam, signal, filters),
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    maxPages: 10,
     // Filters own separate displayed snapshots; do not borrow another filter's cached rows while loading.
     placeholderData: () => undefined,
-    refetchInterval,
-    refetchOnWindowFocus: false,
-  });
-};
-
-const RECENT_EVENT_LIMIT = 100;
-
-const mergeRecentEvents = (
-  current: readonly PanelEventEntry[],
-  incoming: readonly PanelEventEntry[],
-): PanelEventEntry[] => {
-  const entries = new Map(current.map((entry) => [entry.eventId, entry]));
-  for (const entry of incoming) entries.set(entry.eventId, entry);
-  return [...entries.values()]
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.eventId.localeCompare(left.eventId))
-    .slice(0, RECENT_EVENT_LIMIT);
-};
-
-export const useRecentEventsQuery = (channelId: string, refetchInterval: number | false = false) => {
-  const queryClient = useQueryClient();
-  const queryKey = dashboardDataKeys.recentEvents(channelId);
-  return useQuery({
-    queryKey,
-    queryFn: async ({ signal }): Promise<PanelRecentEventsResponse> => {
-      const current = queryClient.getQueryData<PanelRecentEventsResponse>(queryKey);
-      const latest = await fetchRecentEvents(channelId, current?.cursor ?? null, signal);
-      return current === undefined
-        ? latest
-        : {
-          entries: mergeRecentEvents(current.entries, latest.entries),
-          cursor: latest.cursor ?? current.cursor,
-        };
-    },
-    staleTime: 0,
     refetchInterval,
     refetchOnWindowFocus: false,
   });

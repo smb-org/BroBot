@@ -1,12 +1,36 @@
-import { act } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ImmediateActions as ImmediateActionsComponent } from "../../src/dashboard/ImmediateActions";
+
+const mockActions = vi.hoisted(() => ({ recordManualFailure: false }));
 
 vi.mock("../../src/dashboard/LiveCockpitBroadcast", () => ({ LiveCockpitBroadcast: () => null }));
-vi.mock("../../src/dashboard/LiveCockpitParts", () => ({ LiveCockpitEventFeed: () => null, LiveCockpitTiles: () => null }));
+vi.mock("../../src/dashboard/LiveCockpitParts", () => ({
+  LiveCockpitEventFeed: () => null,
+  LiveCockpitTiles: ({ snapshots }: { snapshots: readonly { kind: string }[] }) => <div data-testid="live-tiles">{snapshots.map(({ kind }) => kind).join(",")}</div>,
+}));
+vi.mock("../../src/dashboard/ImmediateActions", async (importOriginal) => {
+  const original = await importOriginal<{ ImmediateActions: typeof ImmediateActionsComponent }>();
+  return {
+    ...original,
+    ImmediateActions: (props: Parameters<typeof original.ImmediateActions>[0]) => {
+      if (!mockActions.recordManualFailure) {
+        const OriginalImmediateActions = original.ImmediateActions;
+        return <OriginalImmediateActions {...props} />;
+      }
+      return <button onClick={() => {
+        const observedAt = props.onActionStart?.("belabox", "check-belabox") ?? Date.now();
+        props.onActionFailure?.("belabox", "check-belabox", observedAt);
+      }}>Record manual BELABOX failure</button>;
+    },
+  };
+});
 
 import { LiveCockpit } from "../../src/dashboard/LiveCockpit";
+import { dashboardTexts } from "../../src/dashboard/locale";
 import type { PanelChannelOverview, PanelModuleState } from "../../src/panel-contract";
 import { setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
+import { moduleQueryKey } from "../../src/dashboard/data/module-query";
 import { renderWithQuery } from "../query-test-utils";
 
 const channelId = "idle-cockpit-channel";
@@ -25,7 +49,7 @@ const overview = {
 const modules = ["ads", "belabox", "chat_voting", "text_commands"].map((id) => ({ id, enabled: true })) as PanelModuleState[];
 
 const responseBody = (path: string): unknown => {
-  if (path.endsWith("/events/recent")) return { entries: [], cursor: null };
+  if (path.endsWith("/events")) return { entries: [], nextCursor: null };
   if (path.endsWith("/overlays")) return { overlays: [] };
   if (path.endsWith("/settings")) return { timeZone: "Europe/Berlin" };
   if (path.endsWith("/variables/availability")) return { available: true };
@@ -42,6 +66,8 @@ const responseBody = (path: string): unknown => {
 };
 
 afterEach(() => {
+  cleanup();
+  mockActions.recordManualFailure = false;
   vi.unstubAllGlobals();
   vi.useRealTimers();
   setDashboardRealtimeStatus(channelId, "offline");
@@ -74,7 +100,7 @@ describe("idle live cockpit polling", () => {
       await waitOnRealClock(50);
     });
     expect(paths).toEqual(expect.arrayContaining([
-      `/api/channels/${channelId}/events/recent`,
+      `/api/channels/${channelId}/events`,
       `/api/channels/${channelId}/overlays`,
       `/api/channels/${channelId}/settings`,
       `/api/channels/${channelId}/variables/availability`,
@@ -88,16 +114,101 @@ describe("idle live cockpit polling", () => {
     // The ad schedule is time-driven; revision-backed resources stay at their single request.
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
 
-    expect(paths).toHaveLength(initialRequestCount + 12);
+    expect(paths).toHaveLength(initialRequestCount + 14);
     for (const path of [
-      `/api/channels/${channelId}/events/recent`,
       `/api/channels/${channelId}/variables/availability`,
       `/api/channels/${channelId}/modules/chat_voting/current`,
       `/api/channels/${channelId}/modules/belabox/status`,
     ]) {
       expect(paths.filter((requestPath) => requestPath === path)).toHaveLength(1);
     }
+    expect(paths.filter((requestPath) => requestPath === `/api/channels/${channelId}/events`)).toHaveLength(3);
     expect(paths.filter((requestPath) => requestPath === `/api/channels/${channelId}/modules/ads/schedule`)).toHaveLength(13);
     view.unmount();
+  });
+
+  it("hides cached tiles and their controls after their modules are disabled", async () => {
+    const now = Date.now();
+    const disabledModules = ["chat_voting", "timers", "votekick"].map((id) => ({ id, enabled: false })) as PanelModuleState[];
+    const cachedVote = {
+      vote: {
+        id: "cached-vote", channelId, kind: "poll", optionCount: 2, labels: ["Yes", "No"], answerColors: [], title: "Cached ballot",
+        status: "open", openedAt: new Date(now).toISOString(), closesAt: new Date(now + 60_000).toISOString(),
+        requestedDurationSeconds: 60, closedAt: null, closeReason: "timer", counts: [3, 1], voterCount: 4,
+      },
+      counts: [3, 1], revision: 4, terms: null, moreTerms: null, hasOpenBallot: true, defaultDurationSeconds: 60,
+    };
+    const cachedTimer = [{ id: "cached-timer", name: "Cached timer", enabled: true, nextRunAt: new Date(now + 60_000).toISOString() }];
+    const cachedVotekick = {
+      running: { id: "cached-votekick", targetLogin: "cachedviewer", targetUserId: "user-1", endsAt: new Date(now + 60_000).toISOString(), yesVotes: 3, noVotes: 0, threshold: 3 },
+      votekicks: [], now: new Date(now).toISOString(),
+    };
+    const paths: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(input, window.location.href);
+      paths.push(url.pathname);
+      return Promise.resolve(new Response(JSON.stringify(responseBody(url.pathname)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+    const view = renderWithQuery(<LiveCockpit overview={overview} modules={disabledModules} modulesLoaded viewerUserId={channelId} onNavigate={() => undefined} />, {}, {
+      gcTime: 600_000,
+      staleTime: 600_000,
+      initialData: [
+        { queryKey: moduleQueryKey(channelId, "chat_voting", "live"), data: cachedVote },
+        { queryKey: moduleQueryKey(channelId, "timers", "upcoming"), data: cachedTimer },
+        { queryKey: moduleQueryKey(channelId, "votekick", "panel"), data: cachedVotekick },
+      ],
+    });
+
+    await act(async () => { await Promise.resolve(); });
+    expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "chat_voting", "live"))).toBe(cachedVote);
+    expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "timers", "upcoming"))).toBe(cachedTimer);
+    expect(view.queryClient.getQueryData(moduleQueryKey(channelId, "votekick", "panel"))).toBe(cachedVotekick);
+    expect(screen.getByTestId("live-tiles").textContent).toBe("");
+    expect(paths).not.toContain(`/api/channels/${channelId}/modules/chat_voting/current`);
+  });
+
+  it("keeps a later manual BELABOX check ahead of a status request that finishes afterward", async () => {
+    mockActions.recordManualFailure = true;
+    const paths: string[] = [];
+    let finishStatus: ((response: Response) => void) | undefined;
+    const delayedStatus = new Promise<Response>((resolve) => { finishStatus = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(input, window.location.href);
+      paths.push(url.pathname);
+      if (url.pathname.endsWith("/modules/belabox/status")) return delayedStatus;
+      return Promise.resolve(new Response(JSON.stringify(responseBody(url.pathname)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+    renderWithQuery(<LiveCockpit overview={overview} modules={modules} modulesLoaded viewerUserId={channelId} onNavigate={() => undefined} />, {}, {
+      gcTime: 600_000,
+      staleTime: 600_000,
+    });
+
+    await waitFor(() => expect(paths).toContain(`/api/channels/${channelId}/modules/belabox/status`));
+    fireEvent.click(screen.getByRole("button", { name: "Record manual BELABOX failure" }));
+    const unavailable = dashboardTexts().liveCockpit.belaboxUnavailable;
+    expect(screen.getByText((text) => text.includes(unavailable)).textContent).toContain(unavailable);
+
+    await act(async () => {
+      finishStatus?.(new Response(JSON.stringify({
+        configured: true,
+        updatedAt: new Date().toISOString(),
+        mode: "interval",
+        sample: {
+          at: new Date().toISOString(), connected: true, bitrateKbps: 2_500, rttMs: 1, latencyMs: 1, network: 0,
+          droppedPackets: 0, phase: "healthy",
+        },
+        errorCode: null, polling: true, pollingDesired: true, streamId: "stream-1", belaboxStreamId: "stream-1",
+        alertNotice: null, fetchFailureNotice: false, intervalSeconds: 30,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      await delayedStatus;
+    });
+
+    await waitFor(() => expect(screen.getByText((text) => text.includes(unavailable)).textContent).toContain(unavailable));
   });
 });

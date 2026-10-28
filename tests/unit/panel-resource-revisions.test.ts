@@ -107,7 +107,7 @@ const panelWriteRegressions: readonly PanelWriteRegressionCase[] = [
   },
   {
     name: "events and module data",
-    keys: (id) => [dashboardDataKeys.eventHead(id, { origin: null, module: null, tone: null, person: null }), moduleQueryKey(id, "chat_voting", "panel")],
+    keys: (id) => [queryKeys.channel(id, "events", { module: null }), moduleQueryKey(id, "chat_voting", "panel")],
     write: async (database, id) => {
       await database.prepare(
         `INSERT INTO event_log (event_id, channel_id, created_at, module_id, code, detail_json)

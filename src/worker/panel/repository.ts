@@ -15,7 +15,6 @@ import type {
   PanelEventEntry,
   PanelEventFilters,
   PanelEventsResponse,
-  PanelRecentEventsResponse,
 } from "../../panel-contract";
 import type {
   AuditActorKind,
@@ -682,47 +681,5 @@ export const getEventLogForChannel = async (
     nextCursor: hasNextPage && last !== undefined
       ? encodeCursor({ createdAt: last.created_at, id: last.event_id })
       : null,
-  };
-};
-
-export const getRecentEventLogForChannel = async (
-  db: D1Database,
-  channelId: string,
-  limit: number,
-  since: LogCursor | null,
-): Promise<PanelRecentEventsResponse> => {
-  const query = since === null
-    ? `SELECT event_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id
-         FROM event_log
-        WHERE channel_id = ?
-        ORDER BY created_at DESC, event_id DESC
-        LIMIT ?`
-    : `SELECT event_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id
-         FROM event_log
-        WHERE channel_id = ?
-          AND (created_at > ? OR (created_at = ? AND event_id > ?))
-        ORDER BY created_at DESC, event_id DESC
-        LIMIT ?`;
-  const values = since === null
-    ? [channelId, limit]
-    : [channelId, since.createdAt, since.createdAt, since.id, limit];
-  const result = await db.prepare(query).bind(...values).all<EventLogRow>();
-  const entries: PanelEventEntry[] = result.results.map((row) => ({
-    eventId: row.event_id,
-    createdAt: row.created_at,
-    moduleId: row.module_id,
-    triggerId: row.trigger_id,
-    code: row.code,
-    detail: row.detail_json,
-    actorUserId: row.actor_user_id,
-    actorLogin: null,
-    actorDisplayName: null,
-  }));
-  const latest = result.results[0];
-  return {
-    entries,
-    cursor: latest === undefined
-      ? since === null ? null : encodeCursor(since)
-      : encodeCursor({ createdAt: latest.created_at, id: latest.event_id }),
   };
 };

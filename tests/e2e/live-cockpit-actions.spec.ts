@@ -88,10 +88,6 @@ test("vote action keeps its draft while templates load and guards every close pa
       }));
       return;
     }
-    if (pathname === `/api/channels/${channelId}/events/recent`) {
-      await route.fulfill(json({ entries: [], cursor: null }));
-      return;
-    }
     if (pathname === `/api/channels/${channelId}/events`) {
       await route.fulfill(json({ entries: [], nextCursor: null }));
       return;

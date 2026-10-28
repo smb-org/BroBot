@@ -12,7 +12,7 @@ import { snoozeAds } from "../modules/ads/panel/service";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber, immediateActionUnavailableReasonText } from "./locale";
 import { moduleName } from "./module-labels";
 import { eventDetail } from "./events/model";
-import type { useRecentEventsQuery } from "./data/lists";
+import type { useEventsQuery } from "./data/lists";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { immediateActionErrorFeedback } from "./immediate-action-errors";
 import { adSnoozeRetryMessage } from "./ad-snooze-retry";
@@ -24,7 +24,6 @@ import { BossFightLiveTile } from "../modules/boss_fight/panel/live-tile";
 import { QuizLiveTile } from "../modules/quiz/panel/live-tile";
 
 type EventFilter = "all" | "raids" | "community" | "chat";
-const EMPTY_EVENT_ENTRIES: readonly PanelEventEntry[] = [];
 
 const eventCategory = (entry: PanelEventEntry): Exclude<EventFilter, "all"> | null => {
   if (entry.moduleId === "channel_events" && /\.raid\./u.test(entry.code)) return "raids";
@@ -327,7 +326,7 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, timeZone, eventQuer
   role: ChannelRole;
   now: number;
   timeZone: string;
-  eventQuery: ReturnType<typeof useRecentEventsQuery>;
+  eventQuery: ReturnType<typeof useEventsQuery>;
   streamState: ChannelStreamState | null | undefined;
   raidEnabled: boolean;
   onMessage: (message: string) => void;
@@ -338,7 +337,7 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, timeZone, eventQuer
   const [search, setSearch] = useState("");
   const [busyEntry, setBusyEntry] = useState<string | null>(null);
   const language = dashboardLanguage();
-  const entries = eventQuery.data?.entries ?? EMPTY_EVENT_ENTRIES;
+  const entries = useMemo(() => eventQuery.data?.pages.flatMap((page) => page.entries) ?? [], [eventQuery.data]);
   const query = search.trim().toLocaleLowerCase(language);
   const filtered = useMemo(() => entries.filter((entry) => {
     const category = eventCategory(entry);

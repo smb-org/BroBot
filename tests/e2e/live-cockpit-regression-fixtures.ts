@@ -151,11 +151,6 @@ export const installLiveCockpitMocks = async (page: Page, options: LiveCockpitMo
       await options.waitForOverlays?.();
       return route.fulfill(json({ overlays: [], maximum: 20, elementMaximum: 20 }));
     }
-    if (pathname === `${channelPrefix}/events/recent`) {
-      eventRequests += 1;
-      if (eventsFailed) return route.fulfill(json({ error: "temporarily_unavailable" }, 503));
-      return route.fulfill(json({ entries: options.events ?? [], cursor: null }));
-    }
     if (pathname === `${channelPrefix}/events`) {
       eventRequests += 1;
       if (eventsFailed) return route.fulfill(json({ error: "temporarily_unavailable" }, 503));

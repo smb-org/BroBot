@@ -216,7 +216,6 @@ test("the main shell scroller receives PageDown before the members page is click
     if (pathname === `/api/channels/${channelId}/overview`) return route.fulfill(json({ ...channel, activeModules: [] }));
     if (pathname === `/api/channels/${channelId}/modules`) return route.fulfill(json({ modules: [] }));
     if (pathname === `/api/channels/${channelId}/members`) return route.fulfill(json({ members, broadcasterCount: 1, viewerUserId: "viewer", nextCursor: null }));
-    if (pathname === `/api/channels/${channelId}/events/recent`) return route.fulfill(json({ entries: [], cursor: null }));
     if (pathname === `/api/channels/${channelId}/events`) return route.fulfill(json({ entries: [], nextCursor: null }));
     return route.fulfill(json({}));
   });

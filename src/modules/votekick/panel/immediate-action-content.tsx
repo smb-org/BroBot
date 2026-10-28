@@ -20,10 +20,25 @@ export default function VotekickTimeoutActionContent({ channelId, language, onRe
     refetchInterval: realtimeStatus === "connected" ? false : 5_000,
   });
   const [selectionState, setSelectionState] = useState<TimeoutSelectionState>({ channelId, votekickId: null });
+  const [localNow, setLocalNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => { setLocalNow(Date.now()); }, 1_000);
+    return () => { window.clearInterval(interval); };
+  }, []);
+
+  const serverNow = query.data === undefined
+    ? null
+    : (() => {
+      const capturedAt = Date.parse(query.data.now);
+      return Number.isFinite(capturedAt)
+        ? new Date(capturedAt + Math.max(0, localNow - query.dataUpdatedAt)).toISOString()
+        : query.data.now;
+    })();
 
   const timeouts = useMemo(
-    () => query.data === undefined ? null : activeVotekickTimeouts(query.data.votekicks, query.data.now),
-    [query.data],
+    () => query.data === undefined || serverNow === null ? null : activeVotekickTimeouts(query.data.votekicks, serverNow),
+    [query.data, serverNow],
   );
   const failed = query.isError && timeouts === null;
   const availableTimeouts = timeouts ?? [];

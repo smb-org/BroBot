@@ -144,7 +144,7 @@ test("event feed shows loading then a retryable error at desktop size", async ({
   let holdFirstEventResponse = true;
   const eventsRequestStarted = new Promise<void>((resolve) => { startEventsResponse = resolve; });
   const heldEventsResponse = new Promise<void>((resolve) => { releaseEventsResponse = resolve; });
-  await page.route(`**/api/channels/${channelId}/events/recent`, async (route) => {
+  await page.route(`**/api/channels/${channelId}/events`, async (route) => {
     if (holdFirstEventResponse) {
       holdFirstEventResponse = false;
       startEventsResponse();
