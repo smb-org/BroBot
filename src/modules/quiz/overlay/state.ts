@@ -1,4 +1,5 @@
-import type { JsonObject, ModuleOverlayElementContext, ModuleOverlayPointRoundContext, PointActiveRound, PointResolvedRound } from "../../contract";
+import type { JsonObject, ModuleOverlaySnapshotContext } from "../../contract";
+import { quizTextLength } from "../domain/sets";
 
 type QuizOverlayPhase = "idle" | "announce" | "open" | "reveal" | "results";
 export const QUIZ_RESULTS_DISPLAY_MS = 60_000;
@@ -107,9 +108,9 @@ export const parseQuizOverlayState = (value: unknown): QuizOverlayState | null =
   if (
       !isNonNegativeInteger(state.questionIndex) || !isNonNegativeInteger(state.questionCount) ||
       state.questionCount === 0 || state.questionIndex >= state.questionCount ||
-      typeof state.question !== "string" || state.question.length > 200 ||
+      typeof state.question !== "string" || quizTextLength(state.question) > 200 ||
       !Array.isArray(state.options) || state.options.length < 2 || state.options.length > 4 ||
-      !state.options.every((option) => typeof option === "string" && option.length <= 80) ||
+      !state.options.every((option) => typeof option === "string" && quizTextLength(option) <= 80) ||
       !(state.phaseEndsAt === null || typeof state.phaseEndsAt === "string" && Number.isFinite(Date.parse(state.phaseEndsAt))) ||
       typeof state.paused !== "boolean" || !(state.remainingMs === null || isNonNegativeInteger(state.remainingMs))) return null;
 
@@ -138,8 +139,7 @@ export const parseQuizOverlayState = (value: unknown): QuizOverlayState | null =
 
   if (parsed.phase === "results") {
     const resultAt = isDateString(state.resultAt) ? state.resultAt
-      : isDateString(state.resolvedAt) ? state.resolvedAt
-        : parsed.serverNow;
+      : isDateString(state.resolvedAt) ? state.resolvedAt : undefined;
     if (resultAt !== undefined) parsed.resultAt = resultAt;
     const ranking = Array.isArray(state.ranking) ? state.ranking.slice(0, 10).flatMap((entry) => {
       const rank = record(entry);
@@ -154,81 +154,31 @@ export const parseQuizOverlayState = (value: unknown): QuizOverlayState | null =
   return parsed;
 };
 
-const dataForRound = (round: PointActiveRound | PointResolvedRound, now: number): QuizOverlayState | null => {
-  const data = record(round.data);
-  if (data === null || typeof data.sessionId !== "string" ||
-      !(data.phase === "announce" || data.phase === "open" || data.phase === "reveal" || data.phase === "results") ||
-      !isNonNegativeInteger(data.questionIndex) || !Array.isArray(data.questions) || data.questionIndex >= data.questions.length) return null;
-  const questionCount = data.questions.length;
-  if (!isNonNegativeInteger(questionCount) || questionCount === 0) return null;
-  const question = record(data.questions[data.questionIndex]);
-  if (question === null || typeof question.text !== "string" || !Array.isArray(question.options) ||
-      question.options.length < 2 || question.options.length > 4 ||
-      !question.options.every((option) => typeof option === "string" && option.length <= 80)) return null;
-
-  const result = "result" in round ? record(round.result) : null;
-  const resolvedAt = "resolvedAt" in round ? Date.parse(round.resolvedAt) : Number.NaN;
-  const resultAt = Number.isFinite(resolvedAt) ? new Date(resolvedAt).toISOString() : null;
-  const createdAt = "createdAt" in round && isDateString(round.createdAt) ? round.createdAt : null;
-  const sessionStartedAt = isDateString(data.sessionStartedAt)
-    ? data.sessionStartedAt
-    : createdAt ?? resultAt ?? new Date(now).toISOString();
-  const phaseEndsAt = data.phaseEndsAt === null ? null
-    : isNonNegativeInteger(data.phaseEndsAt) ? new Date(data.phaseEndsAt).toISOString() : null;
-  const paused = data.paused === true;
-  const state: Record<string, unknown> = {
-    sessionId: data.sessionId,
-    phaseSequence: isNonNegativeInteger(data.phaseSequence) ? data.phaseSequence : 0,
-    sessionStartedAt,
-    phase: data.phase,
-    questionIndex: data.questionIndex,
-    questionCount,
-    question: question.text,
-    options: question.options,
-    phaseEndsAt,
-    paused,
-    remainingMs: paused && isNonNegativeInteger(data.remainingMs) ? data.remainingMs : null,
-    serverNow: new Date(now).toISOString(),
-  };
-
-  if (data.phase === "reveal") {
-    const aggregates = record(data.aggregates);
-    const answerDistribution = aggregates?.answerDistribution;
-    const distributions = Array.isArray(answerDistribution)
-      ? (answerDistribution as unknown[])[data.questionIndex]
-      : undefined;
-    state.correctIndex = question.correctIndex;
-    state.answerDistribution = Array.isArray(distributions) && distributions.length === question.options.length &&
-      (distributions as unknown[]).every(isNonNegativeInteger)
-      ? distributions as number[]
-      : question.options.map(() => 0);
-  }
-
-  if (data.phase === "results") {
-    if (resultAt !== null) state.resultAt = resultAt;
-    state.ranking = result !== null && Array.isArray(result.ranking)
-      ? result.ranking.slice(0, 10)
-      : [];
-  }
-
-  return parseQuizOverlayState(state);
-};
-
-export const quizOverlayStateForPointRound = (
-  round: PointActiveRound | PointResolvedRound | null,
-  now: number,
-): JsonObject | null => {
-  if (round === null) return null;
-  const state = dataForRound(round, now);
-  return state === null ? null : state as unknown as JsonObject;
-};
-
 export const loadQuizOverlayState = async (
-  context: Pick<ModuleOverlayElementContext | ModuleOverlayPointRoundContext, "now" | "readPointRound"> | undefined,
+  context: Pick<ModuleOverlaySnapshotContext, "now" | "readSnapshot"> | undefined,
 ): Promise<JsonObject | null> => {
-  if (context?.readPointRound === undefined) return null;
-  const round = await context.readPointRound(QUIZ_RESULTS_DISPLAY_MS);
-  return quizOverlayStateForPointRound(round, context.now);
+  if (context?.readSnapshot === undefined) return null;
+  const state = parseQuizOverlayState(await context.readSnapshot());
+  if (state === null) return null;
+  const serverNow = new Date(context.now).toISOString();
+  if (state.phase === "results" && state.resultAt !== undefined &&
+      context.now >= Date.parse(state.resultAt) + QUIZ_RESULTS_DISPLAY_MS) {
+    return {
+      sessionId: state.sessionId,
+      phaseSequence: state.phaseSequence,
+      sessionStartedAt: state.sessionStartedAt,
+      phase: "idle",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "",
+      options: [],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      serverNow,
+    };
+  }
+  return { ...state, serverNow } as unknown as JsonObject;
 };
 
 /** Phase sequence orders quiz snapshots and events independently of clock calibration. */

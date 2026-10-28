@@ -99,7 +99,7 @@ describe("module overlay element declarations", () => {
       correctColor: "#32ca88",
     });
     expect(quiz?.parseConfig({ unsafe: true })).toBeNull();
-    expect(quiz?.initialStateFromPointRound).toBeTypeOf("function");
+    expect(quiz?.initialStateFromSnapshot).toBeTypeOf("function");
     expect(quiz?.load).toBeTypeOf("function");
     expect(quiz?.editor).toBeTypeOf("function");
     expect(moduleOverlayElementKindForMessage("modul.quiz.phase")).toBe("quiz.session");

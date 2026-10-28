@@ -1,4 +1,4 @@
-import type { JsonObject, ModuleLanguage, ModuleOverlayPointRoundContext } from "../../contract";
+import type { JsonObject, ModuleLanguage, ModuleOverlaySnapshotContext } from "../../contract";
 import { QUIZ_SESSION_OVERLAY_ELEMENT_KIND } from "./kinds";
 import { quizOverlayTexts } from "./locale";
 import { DEFAULT_QUIZ_OVERLAY_CONFIG, loadQuizOverlayState, mergeQuizOverlayRealtimeState, parseQuizOverlayConfig } from "./state";
@@ -30,10 +30,10 @@ const quizSessionOverlayElement = {
   editorLabel: { de: german.editorLabel, en: english.editorLabel },
   editorDescription: { de: german.editorDescription, en: english.editorDescription },
   editorModuleLabel: { de: german.editorModuleLabel, en: english.editorModuleLabel },
-  initialStateNeedsPointRoundContext: true,
+  initialStateNeedsSnapshotContext: true,
   mergeRealtimeStateOnModuleMessages: ["modul.quiz.phase", "modul.quiz.results", "modul.quiz.cancel"],
   mergeRealtimeState: mergeQuizOverlayRealtimeState,
-  initialStateFromPointRound: async (_db: D1Database, _channelId: string, _config: JsonObject, context: ModuleOverlayPointRoundContext) =>
+  initialStateFromSnapshot: async (_db: D1Database, _channelId: string, _config: JsonObject, context: ModuleOverlaySnapshotContext) =>
     loadQuizOverlayState(context),
   parseConfig: (raw: unknown) => {
     const config = parseQuizOverlayConfig(raw);

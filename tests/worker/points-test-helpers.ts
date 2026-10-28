@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { POINTS_CANCELLATION_NOTICE_ALARM_PREFIX } from "../../src/worker/durable/points";
-import type { ModuleAlarmContext, PointResolvedRound, StoredPointWelcome } from "../../src/modules/contract";
+import type { ModuleAlarmContext, ModuleQuizOverlaySnapshot, PointResolvedRound, StoredPointWelcome } from "../../src/modules/contract";
 
 const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
   query: "?raw",
@@ -72,14 +72,20 @@ export interface PointsWorkerObject {
   readBallotSnapshot(moduleId: string, ballotId: string): Promise<unknown>;
   readBallotDryRunSnapshot(moduleId: string, ballotId: string, voterId?: string): Promise<unknown>;
   hasOpenBallotSnapshot(): Promise<boolean>;
-  openGameRound(moduleId: string, roundId: string, data: unknown): Promise<void>;
+  openGameRound(
+    moduleId: string,
+    roundId: string,
+    data: unknown,
+    quizOverlayPayload?: Readonly<Record<string, unknown>>,
+  ): Promise<ModuleQuizOverlaySnapshot | undefined>;
+  persistQuizOverlaySnapshot(payload: Readonly<Record<string, unknown>>): Promise<ModuleQuizOverlaySnapshot>;
   openGameRoundWithStake(moduleId: string, roundId: string, data: unknown, operationId: string, accountId: string, login: string,
     stake: number, cooldown?: { key: string; seconds: number }): Promise<{ roundId: string; replayed: boolean }>;
   listOpenGameRounds(moduleId: string): Promise<Array<{ roundId: string; state: "announcing" | "open"; data: unknown; deadlineAt: number | null }>>;
   acceptGameRound(moduleId: string, roundId: string, operationId: string, accountId: string, login: string): Promise<{
     replayed: boolean; result: unknown; balances: Record<string, number>;
   }>;
-  cancelGameRound(moduleId: string, roundId: string): Promise<number>;
+  cancelGameRound(moduleId: string, roundId: string, quizOverlayPayload?: Readonly<Record<string, unknown>>): Promise<number>;
   markGameRoundAnnounced(moduleId: string, roundId: string, deadlineAt: number, alarmKey: string): Promise<void>;
   joinGameRound(moduleId: string, roundId: string, operationId: string, accountId: string, login: string, stake: number, data: unknown): Promise<{
     status: "joined" | "already_joined" | "round_closed";
@@ -91,8 +97,10 @@ export interface PointsWorkerObject {
     questionIndex: number, choice: number, messageAt: number): Promise<{ status: "recorded" | "round_closed"; replayed: boolean }>;
   activeGameRound(moduleId: string): Promise<{ roundId: string; state: "announcing" | "open"; data: unknown; deadlineAt: number | null } | null>;
   recentlyResolvedGameRound(moduleId: string, maxAgeMs: number): Promise<PointResolvedRound | null>;
+  readQuizOverlaySnapshot(): Promise<ModuleQuizOverlaySnapshot | null>;
   runModuleAlarm(moduleId: string, handlerKey: string, alarmKey: string, invocation?: unknown): Promise<unknown>;
   scheduleModuleAlarm(moduleId: string, handlerKey: string, alarmKey: string, deadline: number): Promise<void>;
+  getModuleAlarmDeadline(moduleId: string, alarmKey: string): Promise<number | null>;
   resolveGameRound(moduleId: string, roundId: string, settlement: { kind: string; params: unknown }): Promise<{
     replayed: boolean;
     result: unknown;

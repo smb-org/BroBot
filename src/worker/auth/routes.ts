@@ -75,7 +75,7 @@ import { hydrateModuleOverlayElements } from "../overlays/module-state";
 import type { ModuleOverlayInitialStateContext } from "../../modules/contract";
 import { hydrateCachedAdsCountdownSnapshot } from "../overlays/ads-countdown-cache";
 import { ADS_COUNTDOWN_ELEMENT_KIND } from "../../modules/ads/overlay/kinds";
-import { createOverlayElementContext, createOverlayPointRoundContext } from "../overlays/element-context";
+import { createOverlayElementContext, createOverlaySnapshotContext } from "../overlays/element-context";
 import { notifyCommittedResources, schedulePanelResourceBackgroundWork } from "../panel-resources";
 
 const nowIso = (): string => new Date().toISOString();
@@ -300,7 +300,7 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
     const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId);
     const contextModuleIds = [...new Set(overlay.elements.flatMap((element) => {
       const declaration = moduleOverlayElementForKind(element.kind);
-      return declaration?.definition.initialStateNeedsContext === true || declaration?.definition.initialStateNeedsPointRoundContext === true
+      return declaration?.definition.initialStateNeedsContext === true || declaration?.definition.initialStateNeedsSnapshotContext === true
         ? [declaration.module.id]
         : [];
     }))];
@@ -311,10 +311,10 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
           const declaration = moduleOverlayElementForKind(element.kind);
           return declaration?.module.id === moduleId ? [declaration.definition] : [];
         });
-        const pointRoundOnly = declarations.some(({ initialStateNeedsPointRoundContext }) => initialStateNeedsPointRoundContext === true) &&
+        const snapshotOnly = declarations.some(({ initialStateNeedsSnapshotContext }) => initialStateNeedsSnapshotContext === true) &&
           !declarations.some(({ initialStateNeedsContext }) => initialStateNeedsContext === true);
-        const moduleContext = pointRoundOnly
-          ? createOverlayPointRoundContext(context.env, record.channelId, moduleId, contextNow)
+        const moduleContext = snapshotOnly
+          ? createOverlaySnapshotContext(context.env, record.channelId, contextNow)
           : await createOverlayElementContext(context.env, record.channelId, moduleId, record.language, contextNow);
         return [moduleId, moduleContext] as const;
       }),

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ModuleAlarmContext } from "../../src/modules/contract";
 import { quizModule } from "../../src/modules/quiz";
 import { onQuizRoundAnnounced, onQuizRoundDeadline, quizSessionControlAlarm } from "../../src/modules/quiz/lifecycle";
+import { mergeQuizOverlayRealtimeState } from "../../src/modules/quiz/overlay/state";
 
 interface ActiveQuiz {
   roundId: string;
@@ -45,18 +46,50 @@ const lifecycleContext = (
   const cleared: string[] = [];
   const canceled: string[] = [];
   const published: Array<{ type: string; elementKind: string; payload: Record<string, unknown> }> = [];
+  let roundIsActive = true;
+  let snapshot: { sequence: number; lastBroadcastSequence: number; payload: Record<string, unknown> } | null = null;
+  const snapshotAccess = {
+    read: () => Promise.resolve(snapshot),
+    write: (payload: Readonly<Record<string, unknown>>) => {
+      const sequence = (snapshot?.sequence ?? 0) + 1;
+      snapshot = {
+        sequence,
+        lastBroadcastSequence: snapshot?.lastBroadcastSequence ?? 0,
+        payload: { ...payload, phaseSequence: sequence, serverNow: new Date().toISOString() },
+      };
+      return Promise.resolve(snapshot);
+    },
+    markBroadcast: (sequence: number) => {
+      if (snapshot !== null) snapshot.lastBroadcastSequence = Math.max(snapshot.lastBroadcastSequence, sequence);
+      return Promise.resolve();
+    },
+    scheduleRetry: () => {
+      scheduled.push({ key: "overlay-retry", deadline: Date.now() + 5_000 });
+      return Promise.resolve();
+    },
+  };
   const context = {
     channelId: "channel-one",
     DB: { prepare: () => ({ bind: () => ({ first: () => Promise.resolve(stream) }) }) },
+    quizOverlaySnapshot: snapshotAccess,
     points: {
       rounds: {
-        active: () => Promise.resolve(active),
-        update: (_roundId: string, data: unknown, deadlineAt: number | null) => {
+        active: () => Promise.resolve(roundIsActive ? active : null),
+        update: (_roundId: string, data: unknown, deadlineAt: number | null, overlayPayload?: Record<string, unknown>) => {
           active.data = data as Record<string, unknown>;
           active.deadlineAt = deadlineAt;
-          return Promise.resolve();
+          if (overlayPayload === undefined) return Promise.resolve();
+          return snapshotAccess.write(overlayPayload).then((stored) => {
+            active.data.phaseSequence = stored.sequence;
+            return stored;
+          });
         },
-        cancel: (roundId: string) => { canceled.push(roundId); return Promise.resolve(1); },
+        cancel: (roundId: string, overlayPayload?: Record<string, unknown>) => {
+          canceled.push(roundId);
+          roundIsActive = false;
+          if (overlayPayload === undefined) return Promise.resolve(1);
+          return snapshotAccess.write(overlayPayload).then(() => 1);
+        },
       },
     },
     schedule: (key: string, deadline: number) => { scheduled.push({ key, deadline }); return Promise.resolve(); },
@@ -117,10 +150,10 @@ describe("quiz stream lifecycle reconciliation", () => {
         { streamSnapshot: { state: "online" } },
       ]);
       expect(fake.active.data).toMatchObject({ paused: true, offlineSince: null, phaseEndsAt: null });
-      expect(fake.scheduled).toEqual([{
+      expect(fake.scheduled).toContainEqual({
         key: "offline-timeout:quiz-round",
         deadline: offlineObservedAt + 10 * 60_000,
-      }]);
+      });
       expect(fake.cleared).toContain("offline-timeout:quiz-round");
     } finally {
       vi.useRealTimers();
@@ -141,10 +174,11 @@ describe("quiz stream lifecycle reconciliation", () => {
 
       expect(fake.active.data).toMatchObject({ paused: true, offlineSince: offlineObservedAt });
       expect(fake.active.deadlineAt).toBeNull();
-      expect(fake.scheduled).toEqual([{
+      expect(fake.scheduled).toContainEqual({
         key: "offline-timeout:quiz-round",
         deadline: offlineObservedAt + 10 * 60_000,
-      }]);
+      });
+      expect(fake.scheduled).toContainEqual({ key: "overlay-retry", deadline: offlineObservedAt + 5_000 });
     } finally {
       vi.useRealTimers();
     }
@@ -212,14 +246,30 @@ describe("quiz stream lifecycle reconciliation", () => {
     expect(fake.published.at(-1)?.payload).toMatchObject({
       sessionId: "quiz-round",
       phase: "idle",
-      phaseSequence: 4,
+      phaseSequence: 1,
     });
   });
 
-  it("publishes the persisted resolution time and sequence with retried results", async () => {
+  it("publishes settled results at a newer snapshot sequence after provisional bootstrap", async () => {
     const fake = lifecycleContext({ state: "online", changed_at: new Date(Date.now()).toISOString() });
     const resolvedAt = "2030-01-01T00:00:05.000Z";
     const data = { ...sessionData("quiz-round"), phase: "results", phaseSequence: 4, sessionStartedAt: "2030-01-01T00:00:00.000Z" };
+    const snapshotStore = fake.context.quizOverlaySnapshot;
+    const stored = await snapshotStore.write({
+      sessionId: "quiz-round",
+      phase: "results",
+      phaseSequence: 8,
+      sessionStartedAt: "2030-01-01T00:00:00.000Z",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Capital?",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      ranking: [],
+    });
+    await snapshotStore.markBroadcast(stored.sequence);
 
     const handler = quizModule.onPointRoundResolved;
     if (handler === undefined) throw new Error("Quiz result handler is unavailable.");
@@ -236,11 +286,48 @@ describe("quiz stream lifecycle reconciliation", () => {
       payload: {
         sessionId: "quiz-round",
         phase: "results",
-        phaseSequence: 4,
+        phaseSequence: stored.sequence + 1,
         sessionStartedAt: "2030-01-01T00:00:00.000Z",
         resultAt: resolvedAt,
+        ranking: [{ login: "winner", correct: 1, rank: 1 }],
       },
     });
+    expect(mergeQuizOverlayRealtimeState(stored.payload, fake.published.at(-1)?.payload ?? {})).toMatchObject({
+      phase: "results",
+      phaseSequence: stored.sequence + 1,
+      ranking: [{ login: "winner", correct: 1 }],
+    });
+    await expect(fake.context.quizOverlaySnapshot.read()).resolves.toMatchObject({
+      sequence: stored.sequence + 1,
+      payload: { phase: "results", ranking: [{ login: "winner" }] },
+    });
+  });
+
+  it("recovers a failed cancellation broadcast from the snapshot when End is retried", async () => {
+    const fake = lifecycleContext({ state: "online", changed_at: new Date(Date.now()).toISOString() }, "quiz-round", "announcing");
+    Object.assign(fake.active.data, { phase: "announce", phaseEndsAt: null, phaseSequence: 3 });
+    fake.context.publishModuleOverlayMessage = () => Promise.reject(new Error("overlay publish failed"));
+
+    await expect(quizSessionControlAlarm.handle(fake.context, "quiz-round", Date.now(), undefined, {
+      action: "end",
+      sessionId: "quiz-round",
+    })).rejects.toThrow("overlay publish failed");
+    await expect(fake.context.quizOverlaySnapshot.read()).resolves.toMatchObject({
+      payload: { sessionId: "quiz-round", phase: "idle" },
+      lastBroadcastSequence: 0,
+    });
+
+    fake.context.publishModuleOverlayMessage = (type: string, elementKind: string, payload: Record<string, unknown>) => {
+      fake.published.push({ type, elementKind, payload });
+      return Promise.resolve();
+    };
+    await expect(quizSessionControlAlarm.handle(fake.context, "quiz-round", Date.now(), undefined, {
+      action: "end",
+      sessionId: "quiz-round",
+    })).resolves.toBeUndefined();
+
+    expect(fake.published.at(-1)).toMatchObject({ type: "cancel", payload: { sessionId: "quiz-round", phase: "idle" } });
+    await expect(fake.context.quizOverlaySnapshot.read()).resolves.toMatchObject({ lastBroadcastSequence: 1 });
   });
 
   it("keeps the original offline observation time across Helix refreshes", async () => {

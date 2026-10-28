@@ -14,7 +14,7 @@ export type QuizSetValidation =
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-const length = (value: string): number => Array.from(value).length;
+export const quizTextLength = (value: string): number => Array.from(value).length;
 
 export const validateQuizSet = (value: unknown): QuizSetValidation => {
   if (!isRecord(value)) return { ok: false, code: "invalid_set" };
@@ -31,7 +31,7 @@ export const validateQuizSet = (value: unknown): QuizSetValidation => {
       return { ok: false, code: "question_text_required" };
     }
     const text = candidate.text.trim();
-    if (length(text) > QUIZ_QUESTION_TEXT_MAXIMUM_LENGTH) return { ok: false, code: "question_too_long" };
+    if (quizTextLength(text) > QUIZ_QUESTION_TEXT_MAXIMUM_LENGTH) return { ok: false, code: "question_too_long" };
     if (!Array.isArray(candidate.options) || candidate.options.length < QUIZ_OPTION_MINIMUM_COUNT || candidate.options.length > QUIZ_OPTION_MAXIMUM_COUNT) {
       return { ok: false, code: "option_count_invalid" };
     }
@@ -39,7 +39,7 @@ export const validateQuizSet = (value: unknown): QuizSetValidation => {
       return { ok: false, code: "option_invalid" };
     }
     const options = candidate.options.map((option) => (option as string).trim());
-    if (options.some((option) => length(option) > QUIZ_OPTION_MAXIMUM_LENGTH)) return { ok: false, code: "option_too_long" };
+    if (options.some((option) => quizTextLength(option) > QUIZ_OPTION_MAXIMUM_LENGTH)) return { ok: false, code: "option_too_long" };
     if (!Number.isSafeInteger(candidate.correctIndex) || (candidate.correctIndex as number) < 0 || (candidate.correctIndex as number) >= options.length) {
       return { ok: false, code: "correct_index_invalid" };
     }

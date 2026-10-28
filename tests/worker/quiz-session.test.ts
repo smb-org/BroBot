@@ -11,9 +11,11 @@ vi.mock("../../src/worker/chat", () => ({
 
 import { quizModule } from "../../src/modules/quiz";
 import type { ModuleAlarmContext } from "../../src/modules/contract";
+import { loadQuizOverlayState } from "../../src/modules/quiz/overlay/state";
 import { pointsDefaultSettingsForLanguage } from "../../src/modules/points/contracts";
 import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
+import { createOverlaySnapshotContext } from "../../src/worker/overlays/element-context";
 import { isModuleOverlayRealtimeEnvelope } from "../../src/realtime-contract";
 import {
   clearPointObjectAlarms,
@@ -258,9 +260,132 @@ describe("quiz answers in the shared point round", () => {
 
     await object.runModuleAlarm("quiz", "session-control", roundId, { action: "end", sessionId: roundId });
 
-    expect(cancelSpy).toHaveBeenCalledWith("quiz", roundId);
+    expect(cancelSpy).toHaveBeenCalledWith("quiz", roundId, expect.objectContaining({ phase: "idle" }));
     expect(resolveSpy).not.toHaveBeenCalled();
     await expect(object.activeGameRound("quiz")).resolves.toBeNull();
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      sequence: 1,
+      lastBroadcastSequence: 1,
+      payload: { sessionId: roundId, phase: "idle", phaseSequence: 1 },
+    });
+  });
+
+  it("recovers a failed cancellation publication from the persisted snapshot on retry", async () => {
+    const channelId = `quiz-cancel-publish-retry-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'points', 1, '{}', 1), (?, 'quiz', 1, '{}', 1)",
+    ).bind(channelId, channelId).run();
+    const overlayId = `overlay-${roundId}`;
+    await worker.DB.prepare(
+      "INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at) VALUES (?, ?, 'Quiz overlay', ?, ?)",
+    ).bind(overlayId, channelId, new Date().toISOString(), new Date().toISOString()).run();
+    await worker.DB.prepare(
+      "INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind) VALUES (?, ?, ?, 'quiz.session')",
+    ).bind(`element-${roundId}`, channelId, overlayId).run();
+    const object = pointObject(channelId);
+    await runPointObject(object, async (target, state) => {
+      await target.openGameRound("quiz", roundId, { ...session(roundId), phase: "announce", phaseEndsAt: null }, {
+        sessionId: roundId,
+        phase: "announce",
+        phaseSequence: 0,
+        sessionStartedAt: new Date(Date.now()).toISOString(),
+        questionIndex: 0,
+        questionCount: 1,
+        question: "Capital?",
+        options: ["A", "B"],
+        phaseEndsAt: null,
+        paused: false,
+        remainingMs: null,
+      });
+      await deferPointAlarmWithin(state);
+    });
+    let failCancellation = true;
+    const publishSpy = vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
+      const publishesCancellation = JSON.stringify(messages).includes('"phase":"idle"');
+      if (publishesCancellation && failCancellation) {
+        failCancellation = false;
+        return Promise.reject(new Error("cancel publication failed"));
+      }
+      return Promise.resolve();
+    });
+
+    // Inside the object: a rejection crossing the stub would also surface as an unhandled rejection in the runner.
+    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "end", sessionId: roundId })))
+      .resolves.toBe("cancel publication failed");
+    await expect(object.getModuleAlarmDeadline("quiz", "overlay-retry")).resolves.toBe(Date.now() + 5_000);
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      sequence: 2,
+      lastBroadcastSequence: 1,
+      payload: { sessionId: roundId, phase: "idle", phaseSequence: 2 },
+    });
+
+    await object.runModuleAlarm("quiz", "session-control", "overlay-retry");
+    await expect(object.runModuleAlarm("quiz", "session-control", roundId, { action: "end", sessionId: roundId }))
+      .resolves.toBeUndefined();
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      sequence: 2,
+      lastBroadcastSequence: 2,
+      payload: { sessionId: roundId, phase: "idle" },
+    });
+    expect(failCancellation).toBe(false);
+    // One failed publication plus one retry; other publishes (and spy calls from earlier tests) are not counted.
+    const cancellations = publishSpy.mock.calls.filter(([messages]) => JSON.stringify(messages).includes(`"modul.quiz.cancel"`) &&
+      JSON.stringify(messages).includes(roundId));
+    expect(cancellations).toHaveLength(2);
+  });
+
+  it("hydrates the cancelled latest session as idle after an older results window", async () => {
+    const channelId = `quiz-overlay-bootstrap-cancel-${crypto.randomUUID()}`;
+    const olderSessionId = `quiz-old-${crypto.randomUUID()}`;
+    const roundId = `quiz-new-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const olderResults = await object.persistQuizOverlaySnapshot({
+      sessionId: olderSessionId,
+      phase: "results",
+      phaseSequence: 0,
+      sessionStartedAt: new Date(Date.now() - 30_000).toISOString(),
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Older question",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      resultAt: new Date(Date.now() - 1_000).toISOString(),
+      ranking: [{ login: "winner", correct: 1, rank: 1 }],
+    });
+    const sessionStartedAt = new Date(Date.now()).toISOString();
+    const started = await object.openGameRound("quiz", roundId, { ...session(roundId), phase: "announce", phaseEndsAt: null }, {
+      sessionId: roundId,
+      phase: "announce",
+      phaseSequence: 0,
+      sessionStartedAt,
+      questionIndex: 0,
+      questionCount: 1,
+      question: "New question",
+      options: ["A", "B"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    });
+    await object.cancelGameRound("quiz", roundId, {
+      sessionId: roundId,
+      phase: "idle",
+      phaseSequence: 0,
+      sessionStartedAt,
+    });
+
+    const hydrated = await loadQuizOverlayState(createOverlaySnapshotContext(worker, channelId, Date.now()));
+    expect(hydrated).toMatchObject({ sessionId: roundId, phase: "idle" });
+    expect(hydrated).not.toHaveProperty("ranking");
+    await expect(object.readQuizOverlaySnapshot()).resolves.toMatchObject({
+      sequence: (started?.sequence ?? 0) + 1,
+      payload: { sessionId: roundId, phase: "idle" },
+    });
+    expect(started?.sequence).toBe(olderResults.sequence + 1);
   });
 
   it("keeps an offline pending start paused after the stream comes back", async () => {
@@ -282,7 +407,7 @@ describe("quiz answers in the shared point round", () => {
       paused: true,
       offlineSince: offlineObservedAt,
       remainingMs: 0,
-    }), null);
+    }), null, expect.objectContaining({ phase: "announce" }));
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({
       state: "announcing",
       deadlineAt: null,
@@ -323,7 +448,7 @@ describe("quiz answers in the shared point round", () => {
     });
     await runPointAlarm(object);
 
-    expect(cancelSpy).toHaveBeenCalledWith("quiz", roundId);
+    expect(cancelSpy).toHaveBeenCalledWith("quiz", roundId, expect.objectContaining({ phase: "idle" }));
     await expect(object.activeGameRound("quiz")).resolves.toBeNull();
   });
 
@@ -458,7 +583,9 @@ describe("quiz answers in the shared point round", () => {
     ]);
     expect(quizEventTypes.slice(4).every((type) => type === "modul.quiz.results")).toBe(true);
     expect(quizEvents[2]?.payload).toMatchObject({ phase: "reveal", correctIndex: 1, answerDistribution: [0, 1] });
-    expect(quizEvents[3]?.payload).toMatchObject({ phase: "results", ranking: [{ login: "moonmoss", correct: 1, payout: 10 }] });
+    // The first results event is provisional (empty ranking); the settled ranking follows with the next sequence.
+    expect(quizEvents[3]?.payload).toMatchObject({ phase: "results", phaseSequence: 4, ranking: [] });
+    expect(quizEvents[4]?.payload).toMatchObject({ phase: "results", phaseSequence: 5, ranking: [{ login: "moonmoss", correct: 1, payout: 10 }] });
   });
 
   it.each(["end", "next"] as const)("settles the final reveal with %s and releases later lifecycle work", async (action) => {

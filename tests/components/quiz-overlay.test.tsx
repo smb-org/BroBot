@@ -36,6 +36,18 @@ describe("quiz session overlay", () => {
     expect(container.querySelector(".quiz-session-overlay")?.getAttribute("data-phase")).toBe("announce");
   });
 
+  it("renders set-valid Unicode question and option lengths", () => {
+    const question = `${"a".repeat(199)}😀`;
+    const option = `${"b".repeat(79)}😀`;
+    render(<QuizOverlay config={{}} state={state("open", {
+      question,
+      options: [option, "Other"],
+    })} now={serverNow} language="en" />);
+
+    expect(screen.getByText(question)).not.toBeNull();
+    expect(screen.getByText(option)).not.toBeNull();
+  });
+
   it("counts down locally from the phase end time", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(serverNow);
@@ -90,7 +102,10 @@ describe("quiz session overlay", () => {
   it("hides results after their display window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(serverNow);
-    const { container } = render(<QuizOverlay config={{}} state={state("results", { ranking: [] })} now={serverNow} language="en" />);
+    const { container } = render(<QuizOverlay config={{}} state={state("results", {
+      resultAt: new Date(serverNow).toISOString(),
+      ranking: [],
+    })} now={serverNow} language="en" />);
     expect(container.querySelector(".quiz-session-overlay")).not.toBeNull();
 
     await vi.advanceTimersByTimeAsync(60_000);

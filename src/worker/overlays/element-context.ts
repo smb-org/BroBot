@@ -1,18 +1,18 @@
 import type {
   BotModule,
+  JsonObject,
   ModuleChannelInfo,
   ModuleEvent,
   ModuleLanguage,
   ModuleOverlayElementContext,
-  ModuleOverlayPointRoundContext,
+  ModuleOverlaySnapshotContext,
+  ModuleQuizOverlaySnapshot,
   ModuleOverlayTemplateConditions,
   ModuleOverlayTemplateValue,
   ModuleTemplateConditionContext,
   ModuleTemplateConditionTimelineContext,
   ModuleTextBlockConditionDefinition,
-  PointResolvedRound,
   ModuleTemplateConditionTransition,
-  PointActiveRound,
 } from "../../modules/contract";
 import { MODULES, variablesForModuleTemplateContext } from "../../modules/registry";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
@@ -30,33 +30,21 @@ import { createModuleSecretReadAccess } from "../module-secrets";
 const moduleIsEnabled = (module: BotModule, enabled: ReadonlyMap<string, boolean>): boolean =>
   module.mandatory === true || enabled.get(module.id) === true;
 
-const pointRoundReader = (env: Env, channelId: string, moduleId: string) => {
-  const snapshots = new Map<number, Promise<PointActiveRound | PointResolvedRound | null>>();
-  return (recentlyResolvedMs: number): Promise<PointActiveRound | PointResolvedRound | null> => {
-    let snapshot = snapshots.get(recentlyResolvedMs);
-    if (snapshot === undefined) {
-      snapshot = (async () => {
-        const channelObject = env.CHANNEL.get(env.CHANNEL.idFromName(channelId));
-        const active = await channelObject.activeGameRound(moduleId) as PointActiveRound | null;
-        if (active !== null) return active;
-        return channelObject.recentlyResolvedGameRound(moduleId, recentlyResolvedMs);
-      })();
-      snapshots.set(recentlyResolvedMs, snapshot);
-    }
-    return snapshot;
-  };
-};
-
-/** Creates the small context used by overlays that only hydrate a point round. */
-export const createOverlayPointRoundContext = (
+/** Creates the small context used by overlays that hydrate a persisted snapshot. */
+export const createOverlaySnapshotContext = (
   env: Env,
   channelId: string,
-  moduleId: string,
   now: number,
-): ModuleOverlayPointRoundContext => ({
-  kind: "point-round",
+): ModuleOverlaySnapshotContext => ({
+  kind: "snapshot",
   now,
-  readPointRound: pointRoundReader(env, channelId, moduleId),
+  readSnapshot: async () => {
+    const channelObject = env.CHANNEL.get(env.CHANNEL.idFromName(channelId)) as unknown as {
+      readQuizOverlaySnapshot: () => Promise<ModuleQuizOverlaySnapshot | null>;
+    };
+    const snapshot = await channelObject.readQuizOverlaySnapshot();
+    return (snapshot?.payload as JsonObject | undefined) ?? null;
+  },
 });
 
 /** Builds the same registered template providers used by chat, in deterministic overlay mode. */
@@ -395,6 +383,5 @@ export const createOverlayElementContext = async (
     dynamicTemplateVariableNames,
     overlayTemplateVariableNames,
     readBallot: (ballotId) => moduleBallots(env.CHANNEL, channelId, moduleId).read(ballotId),
-    readPointRound: pointRoundReader(env, channelId, moduleId),
   };
 };

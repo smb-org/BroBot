@@ -5,8 +5,7 @@ const mocks = vi.hoisted(() => ({
   helixRequest: vi.fn(),
   getOverlayStreamDetails: vi.fn(),
   readBallot: vi.fn(),
-  activeGameRound: vi.fn(),
-  recentlyResolvedGameRound: vi.fn(),
+  readQuizOverlaySnapshot: vi.fn(),
 }));
 
 vi.mock("../../src/worker/app-token", () => ({ getAppAccessToken: mocks.getAppAccessToken }));
@@ -43,8 +42,7 @@ const environment = {
     get: () => ({
       getOverlayStreamDetails: mocks.getOverlayStreamDetails,
       readBallot: mocks.readBallot,
-      activeGameRound: mocks.activeGameRound,
-      recentlyResolvedGameRound: mocks.recentlyResolvedGameRound,
+      readQuizOverlaySnapshot: mocks.readQuizOverlaySnapshot,
     }),
   },
 } as unknown as Env;
@@ -58,8 +56,7 @@ describe("overlay element template context", () => {
     mocks.helixRequest.mockReset();
     mocks.getOverlayStreamDetails.mockReset();
     mocks.readBallot.mockReset();
-    mocks.activeGameRound.mockReset();
-    mocks.recentlyResolvedGameRound.mockReset();
+    mocks.readQuizOverlaySnapshot.mockReset();
   });
 
   it("renders viewer counts through the channel's shared stream-details cache", async () => {
@@ -88,37 +85,22 @@ describe("overlay element template context", () => {
     expect(mocks.readBallot).toHaveBeenCalledWith("chat_voting", "poll-a");
   });
 
-  it("hydrates an overlay from the active or recently resolved module round", async () => {
-    const active = { roundId: "quiz-active", state: "open", data: { phase: "open" }, deadlineAt: 10_000 };
-    const resolved = { roundId: "quiz-results", data: { phase: "results" }, result: { ranking: [] }, resolvedAt: startedAt };
-    mocks.activeGameRound.mockResolvedValueOnce(active).mockResolvedValueOnce(null);
-    mocks.recentlyResolvedGameRound.mockResolvedValueOnce(resolved);
-    const context = await createOverlayElementContext(environment, "channel-a", "quiz", "en", Date.parse(startedAt));
-
-    await expect(context.readPointRound?.(60_000)).resolves.toEqual(active);
-    await expect(context.readPointRound?.(60_000)).resolves.toEqual(active);
-    expect(mocks.activeGameRound).toHaveBeenCalledTimes(1);
-    expect(mocks.activeGameRound).toHaveBeenCalledWith("quiz");
-    expect(mocks.recentlyResolvedGameRound).not.toHaveBeenCalled();
-  });
-
-  it("creates a point-round-only context without loading channel or template catalogs", async () => {
+  it("loads the latest channel quiz snapshot without reading rounds or template catalogs", async () => {
     const prepare = vi.spyOn(database, "prepare");
-    const createPointRoundContext = Reflect.get(overlayElementContext, "createOverlayPointRoundContext") as
-      ((env: Env, channelId: string, moduleId: string, now: number) => unknown) | undefined;
-
-    expect(createPointRoundContext).toBeTypeOf("function");
-    const context = createPointRoundContext?.(environment, "channel-a", "quiz", Date.parse(startedAt)) as {
+    const context = Reflect.get(overlayElementContext, "createOverlaySnapshotContext") as
+      ((env: Env, channelId: string, now: number) => {
       now: number;
-      readPointRound: (maxAgeMs: number) => Promise<unknown>;
-    };
-    expect(context.now).toBe(Date.parse(startedAt));
+      readSnapshot: () => Promise<unknown>;
+    }) | undefined;
+    expect(context).toBeTypeOf("function");
+    const snapshotContext = context?.(environment, "channel-a", Date.parse(startedAt));
+    expect(snapshotContext?.now).toBe(Date.parse(startedAt));
     expect(prepare).not.toHaveBeenCalled();
 
-    const active = { roundId: "quiz-active", state: "open", data: { phase: "open" }, deadlineAt: 10_000 };
-    mocks.activeGameRound.mockResolvedValue(active);
-    await expect(context.readPointRound(60_000)).resolves.toEqual(active);
-    expect(mocks.activeGameRound).toHaveBeenCalledWith("quiz");
+    const snapshot = { sequence: 8, lastBroadcastSequence: 7, payload: { sessionId: "quiz-session", phase: "results" } };
+    mocks.readQuizOverlaySnapshot.mockResolvedValue(snapshot);
+    await expect(snapshotContext?.readSnapshot()).resolves.toEqual(snapshot.payload);
+    expect(mocks.readQuizOverlaySnapshot).toHaveBeenCalledTimes(1);
     prepare.mockRestore();
   });
 

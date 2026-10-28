@@ -244,11 +244,24 @@ export interface ModuleTemplateConditionTransition {
   values: Readonly<Record<string, string>>;
 }
 
-export interface ModuleOverlayPointRoundContext {
-  kind: "point-round";
+export interface ModuleQuizOverlaySnapshot {
+  sequence: number;
+  lastBroadcastSequence: number;
+  payload: Readonly<Record<string, unknown>>;
+}
+
+interface ModuleQuizOverlaySnapshotAccess {
+  read: () => Promise<ModuleQuizOverlaySnapshot | null>;
+  write: (payload: Readonly<Record<string, unknown>>) => Promise<ModuleQuizOverlaySnapshot>;
+  markBroadcast: (sequence: number) => Promise<void>;
+  scheduleRetry: () => Promise<void>;
+}
+
+export interface ModuleOverlaySnapshotContext {
+  kind: "snapshot";
   now: number;
-  /** Reads this module's active round or its recent resolution, cached for this bootstrap. */
-  readPointRound: NonNullable<ModuleOverlayElementContext["readPointRound"]>;
+  /** Reads the latest persisted module overlay state for this channel. */
+  readSnapshot: () => Promise<JsonObject | null>;
 }
 
 export interface ModuleOverlayElementContext {
@@ -277,11 +290,9 @@ export interface ModuleOverlayElementContext {
   overlayTemplateVariableNames: ReadonlySet<string>;
   /** Reads only this overlay element's module ballot in the current channel. */
   readBallot: (ballotId: string) => Promise<BallotSnapshot | null>;
-  /** Reads this module's active round, or its recent resolution while a result overlay is visible. */
-  readPointRound?: (recentlyResolvedMs: number) => Promise<PointActiveRound | PointResolvedRound | null>;
 }
 
-export type ModuleOverlayInitialStateContext = ModuleOverlayElementContext | ModuleOverlayPointRoundContext;
+export type ModuleOverlayInitialStateContext = ModuleOverlayElementContext | ModuleOverlaySnapshotContext;
 
 export interface ModuleOverlayTemplateConditions {
   values: Readonly<Record<string, string>>;
@@ -317,8 +328,8 @@ export interface ModuleOverlayElementDefinition {
   parseConfig: (raw: unknown) => JsonObject | null;
   /** The module initial state uses host template, condition, or channel context. */
   initialStateNeedsContext?: boolean;
-  /** The module initial state needs only the current point round and bootstrap time. */
-  initialStateNeedsPointRoundContext?: boolean;
+  /** The module initial state needs only its persisted snapshot and bootstrap time. */
+  initialStateNeedsSnapshotContext?: boolean;
   /** Module realtime message types that require the host to reload this element's state. */
   reloadStateOnModuleMessages?: readonly string[];
   /** Module realtime message types merged directly into this element's current state. */
@@ -338,11 +349,11 @@ export interface ModuleOverlayElementDefinition {
     config: JsonObject,
     context?: ModuleOverlayElementContext,
   ) => Promise<JsonObject | null>;
-  initialStateFromPointRound?: (
+  initialStateFromSnapshot?: (
     db: D1Database,
     channelId: string,
     config: JsonObject,
-    context: ModuleOverlayPointRoundContext,
+    context: ModuleOverlaySnapshotContext,
   ) => Promise<JsonObject | null>;
   load: () => Promise<{ default: ComponentType<ModuleOverlayElementProps> }>;
   editor?: () => Promise<{ default: ComponentType<OverlayElementEditorProps> }>;
@@ -802,6 +813,8 @@ export interface ModuleAlarmContext {
   ballots: ModuleBallotAccess;
   /** Point ledger access bound to this alarm's channel and module. */
   points: ModulePointsAccess;
+  /** Durable, revisioned quiz overlay state used by reconnect bootstrap and broadcast retries. */
+  quizOverlaySnapshot: ModuleQuizOverlaySnapshotAccess;
   /** Adds the currently pending account welcome to a threaded game reply. */
   decoratePointWelcome?: (
     action: Extract<ModuleAction, { kind: "chat" }>,
@@ -1323,7 +1336,7 @@ export interface ModulePointsAccess {
   pendingAudits: () => Promise<{ operationId: string; detail: unknown }[]>;
   claimCooldown: (key: string, seconds: number) => Promise<boolean>;
   rounds: {
-    open: (roundId: string, data: unknown) => Promise<void>;
+    open: (roundId: string, data: unknown, quizOverlaySnapshot?: Readonly<Record<string, unknown>>) => Promise<ModuleQuizOverlaySnapshot | undefined>;
     openWithStake: (
       roundId: string,
       data: unknown,
@@ -1353,13 +1366,18 @@ export interface ModulePointsAccess {
       messageAt: number,
     ) => Promise<PointRoundChoiceResult>;
     /** Persists module round state and resets its shared deadline/alarm; a null deadline pauses the round. */
-    update: (roundId: string, data: unknown, deadlineAt: number | null) => Promise<void>;
+    update: (
+      roundId: string,
+      data: unknown,
+      deadlineAt: number | null,
+      quizOverlaySnapshot?: Readonly<Record<string, unknown>>,
+    ) => Promise<ModuleQuizOverlaySnapshot | undefined>;
     answer: (roundId: string, operationId: string, accountId: string, login: string, graceS: number, messageAt: number) => Promise<PointRoundAnswerResult>;
     attack: (roundId: string, operationId: string, accountId: string, login: string, damage: number, messageAt: number) => Promise<PointRoundAttackResult>;
     resolve: (roundId: string, settlement: { kind: string; params: unknown }) => Promise<PointsApplyResult>;
     accept: (roundId: string, operationId: string, accountId: string, login: string, replyToMessageId?: string) => Promise<PointsApplyResult>;
-    cancel: (roundId: string) => Promise<number>;
-    cancelOpenRounds: (revision: number) => Promise<number>;
+    cancel: (roundId: string, quizOverlaySnapshot?: Readonly<Record<string, unknown>>) => Promise<number>;
+    cancelOpenRounds: (revision: number, quizOverlaySnapshot?: Readonly<Record<string, unknown>>) => Promise<number>;
     setGate: (closed: boolean, revision: number, lastDisabledRevision?: number | null) => Promise<{ applied: boolean }>;
   };
 }

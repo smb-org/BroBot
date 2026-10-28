@@ -44,18 +44,18 @@ export const hydrateModuleOverlayElements = async <Element extends ModuleOverlay
   for (const item of moduleElements) {
     const moduleEnabled = item.module.mandatory === true || enabledById.get(item.module.id) === true;
     let state: JsonObject | null = null;
-    if (moduleEnabled && (item.definition.initialState !== undefined || item.definition.initialStateFromPointRound !== undefined)) {
+    if (moduleEnabled && (item.definition.initialState !== undefined || item.definition.initialStateFromSnapshot !== undefined)) {
       const config = item.definition.parseConfig(item.element.config);
       if (config !== null) {
         const moduleContext = typeof context === "function" ? context(item.module.id) : context;
         try {
-          if (item.definition.initialStateFromPointRound !== undefined) {
-            const pointRoundContext = moduleContext?.kind === "point-round" ? moduleContext : undefined;
-            if (pointRoundContext !== undefined) {
-              state = await item.definition.initialStateFromPointRound(db, channelId, config, pointRoundContext);
+          if (item.definition.initialStateFromSnapshot !== undefined) {
+            const snapshotContext = moduleContext?.kind === "snapshot" ? moduleContext : undefined;
+            if (snapshotContext !== undefined) {
+              state = await item.definition.initialStateFromSnapshot(db, channelId, config, snapshotContext);
             }
           } else if (item.definition.initialState !== undefined) {
-            const templateContext = moduleContext?.kind === "point-round" ? undefined : moduleContext;
+            const templateContext = moduleContext?.kind === "snapshot" ? undefined : moduleContext;
             state = await item.definition.initialState(db, channelId, config, templateContext);
           }
         } catch (error: unknown) {

@@ -11,7 +11,8 @@ import {
 import { createQuizSetRepository } from "./adapters/d1";
 import { validateQuizSet } from "./domain/sets";
 import { loadEnabledQuizSettings, openQuizSession, quizRoundData } from "./service";
-import { quizPhasePayload, quizSessionControlAlarm } from "./lifecycle";
+import { quizSessionControlAlarm } from "./lifecycle";
+import { quizPhasePayload } from "./overlay/payload";
 import { QUIZ_RESULTS_DISPLAY_MS } from "./overlay/state";
 
 type QuizRouteContext = Context<ModuleRouteEnvironment>;
@@ -140,7 +141,7 @@ quizRoutes.post("/session/start", async (context) => {
       QUIZ_MODULE_ID,
       "phase",
       "quiz.session",
-      quizPhasePayload(opened.data),
+      opened.overlaySnapshot?.payload ?? quizPhasePayload(opened.data),
     );
     return context.json({ sessionId: opened.sessionId }, 201);
   } catch (failure: unknown) {

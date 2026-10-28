@@ -1,38 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { PointActiveRound, PointResolvedRound } from "../../src/modules/contract";
-import { QUIZ_RESULTS_DISPLAY_MS } from "../../src/modules/quiz/overlay/state";
 import {
   loadQuizOverlayState,
   mergeQuizOverlayRealtimeState,
   parseQuizOverlayConfig,
   parseQuizOverlayState,
-  quizOverlayStateForPointRound,
 } from "../../src/modules/quiz/overlay/state";
 
 const now = Date.parse("2030-01-01T00:00:00.000Z");
 const sessionStartedAt = "2029-12-31T23:59:00.000Z";
-
-const sessionData = (phase: "announce" | "open" | "reveal" | "results", overrides: Record<string, unknown> = {}) => ({
-  sessionId: "quiz-session",
-  phase,
-  questionIndex: 0,
-  questions: [{ text: "Which city sits on the Spree?", options: ["Berlin", "Bonn", "Bremen"], correctIndex: 0 }],
-  phaseEndsAt: now + 20_000,
-  paused: false,
-  remainingMs: null,
-  phaseSequence: 0,
-  sessionStartedAt,
-  aggregates: { answerDistribution: [[5, 2, 1]] },
-  ...overrides,
-});
-
-const activeRound = (phase: "announce" | "open" | "reveal" | "results", overrides: Record<string, unknown> = {}): PointActiveRound => ({
-  roundId: "quiz-session",
-  state: "open",
-  data: sessionData(phase, overrides),
-  deadlineAt: now + 20_000,
-});
 
 describe("quiz overlay state", () => {
   it("applies defaults and rejects unknown or unsafe style values", () => {
@@ -74,12 +50,20 @@ describe("quiz overlay state", () => {
   });
 
   it("hydrates the current phase, freezes paused time, and returns null while idle", async () => {
-    const readPointRound = vi.fn().mockResolvedValue(activeRound("open", {
-      paused: true,
+    const readSnapshot = vi.fn().mockResolvedValue({
+      sessionId: "quiz-session",
+      phaseSequence: 0,
+      sessionStartedAt,
+      phase: "open",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Which city sits on the Spree?",
+      options: ["Berlin", "Bonn"],
       phaseEndsAt: null,
+      paused: true,
       remainingMs: 12_500,
-    }));
-    const context = { now, readPointRound } as never;
+    });
+    const context = { now, readSnapshot };
 
     await expect(loadQuizOverlayState(context)).resolves.toMatchObject({
       phase: "open",
@@ -90,27 +74,121 @@ describe("quiz overlay state", () => {
       phaseSequence: 0,
       sessionStartedAt,
     });
-    expect(readPointRound).toHaveBeenCalledWith(QUIZ_RESULTS_DISPLAY_MS);
-    expect(quizOverlayStateForPointRound(null, now)).toBeNull();
+    expect(readSnapshot).toHaveBeenCalledTimes(1);
   });
 
-  it("hydrates reveal answers only in reveal and limits resolved rankings to ten", () => {
-    const reveal = quizOverlayStateForPointRound(activeRound("reveal"), now);
-    const resolvedRound: PointResolvedRound = {
-      roundId: "quiz-session",
-      data: sessionData("results"),
-      result: {
-        ranking: Array.from({ length: 12 }, (_, index) => ({
-          login: `viewer${String(index + 1)}`,
-          correct: 12 - index,
-          rank: index + 1,
-          payout: 10,
-        })),
-      },
-      resolvedAt: new Date(now).toISOString(),
-    };
-    const results = quizOverlayStateForPointRound(resolvedRound, now + 5_000);
-    const open = quizOverlayStateForPointRound(activeRound("open"), now);
+  it("hydrates a cancelled session as idle from the latest snapshot", async () => {
+    const readSnapshot = vi.fn().mockResolvedValue({
+      sessionId: "cancelled-session",
+      phaseSequence: 9,
+      sessionStartedAt: new Date(now - 5_000).toISOString(),
+      phase: "idle",
+      serverNow: new Date(now - 4_000).toISOString(),
+    });
+
+    await expect(loadQuizOverlayState({ now, readSnapshot })).resolves.toMatchObject({
+      sessionId: "cancelled-session",
+      phase: "idle",
+      phaseSequence: 9,
+      serverNow: new Date(now).toISOString(),
+    });
+  });
+
+  it("expires hydrated results from the stored resolution time", async () => {
+    const resultAt = new Date(now - 60_001).toISOString();
+    const readSnapshot = vi.fn().mockResolvedValue({
+      sessionId: "resolved-session",
+      phaseSequence: 12,
+      sessionStartedAt,
+      phase: "results",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Question",
+      options: ["One", "Two"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      resultAt,
+      ranking: [{ login: "winner", correct: 1, rank: 1 }],
+    });
+
+    await expect(loadQuizOverlayState({ now, readSnapshot })).resolves.toMatchObject({
+      sessionId: "resolved-session",
+      phase: "idle",
+      phaseSequence: 12,
+      serverNow: new Date(now).toISOString(),
+    });
+  });
+
+  it("accepts set-valid Unicode question and option lengths", () => {
+    const question = `${"a".repeat(199)}😀`;
+    const option = `${"b".repeat(79)}😀`;
+
+    expect(parseQuizOverlayState({
+      sessionId: "unicode-session",
+      phaseSequence: 1,
+      sessionStartedAt,
+      phase: "open",
+      questionIndex: 0,
+      questionCount: 1,
+      question,
+      options: [option, "Other"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+    })).toMatchObject({ question, options: [option, "Other"] });
+  });
+
+  it("keeps answer data only in reveal and limits snapshot rankings to ten", () => {
+    const reveal = parseQuizOverlayState({
+      sessionId: "quiz-session",
+      phaseSequence: 1,
+      sessionStartedAt,
+      phase: "reveal",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Question",
+      options: ["One", "Two", "Three"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      correctIndex: 0,
+      answerDistribution: [5, 2, 1],
+    });
+    const results = parseQuizOverlayState({
+      sessionId: "quiz-session",
+      phaseSequence: 2,
+      sessionStartedAt,
+      phase: "results",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Question",
+      options: ["One", "Two"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      resultAt: new Date(now).toISOString(),
+      ranking: Array.from({ length: 12 }, (_, index) => ({
+        login: `viewer${String(index + 1)}`,
+        correct: 12 - index,
+        rank: index + 1,
+      })),
+    });
+    const open = parseQuizOverlayState({
+      sessionId: "quiz-session",
+      phaseSequence: 0,
+      sessionStartedAt,
+      phase: "open",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "Question",
+      options: ["One", "Two"],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      correctIndex: 0,
+      answerDistribution: [5, 2],
+    });
 
     expect(reveal).toMatchObject({ correctIndex: 0, answerDistribution: [5, 2, 1] });
     expect(open).not.toHaveProperty("correctIndex");
@@ -118,10 +196,7 @@ describe("quiz overlay state", () => {
     const ranking = results?.ranking as readonly Record<string, unknown>[] | undefined;
     expect(ranking).toHaveLength(10);
     expect(ranking?.[9]).toMatchObject({ login: "viewer10", correct: 3 });
-    expect(results).toMatchObject({
-      serverNow: new Date(now + 5_000).toISOString(),
-      resultAt: new Date(now).toISOString(),
-    });
+    expect(results).toMatchObject({ resultAt: new Date(now).toISOString() });
   });
 
   it("replaces stale reveal state when the next open phase arrives", () => {

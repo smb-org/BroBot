@@ -1217,7 +1217,7 @@ describe("Module management in the panel", () => {
     expect(disableGame.status).toBe(200);
     expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2, 2);
     expect(cancelOpenRounds).toHaveBeenCalledTimes(1);
-    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
+    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2, undefined);
 
     const reenableGame = await panelRouter.fetch(
       await requestFor("user-1", "/api/channels/channel-demo/modules/test_game_requires_points", "PATCH", { enabled: true }),
@@ -1256,7 +1256,7 @@ describe("Module management in the panel", () => {
     expect(disable.status).toBe(200);
     expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2, 2);
     expect(cancelOpenRounds).toHaveBeenCalledOnce();
-    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
+    expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2, undefined);
   });
 
   it(`keeps a committed disable successful and retries cancellation (${dependencyTestCard("a failed post-commit cancellation logs once, keeps the committed disable successful, and a retry recovers refunds with the original revision", "a failed cancellation returns an API error, goes unlogged, changes the committed state, or cannot recover refunds on retry", "fake ChannelObject methods model one failed refund call followed by success")})`, async () => {
@@ -1306,7 +1306,7 @@ describe("Module management in the panel", () => {
       expect(retry.status).toBe(200);
       expect(setGate).toHaveBeenLastCalledWith("test_game_requires_points", true, 2, 2);
       expect(cancelOpenRounds).toHaveBeenCalledTimes(2);
-      expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2);
+      expect(cancelOpenRounds).toHaveBeenLastCalledWith("test_game_requires_points", 2, undefined);
       expect(consoleError).toHaveBeenCalledOnce();
       expect(consoleError.mock.calls[0]).toEqual(["Module activation post-commit step failed.", {
         moduleId: "test_game_requires_points",
@@ -1522,6 +1522,10 @@ describe("Module management in the panel", () => {
           activeGameRound,
           publish,
           notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()),
+          readQuizOverlaySnapshot: vi.fn(() => Promise.resolve(null)),
+          persistQuizOverlaySnapshot: vi.fn((payload: { phaseSequence: number }) => Promise.resolve({ sequence: payload.phaseSequence, payload })),
+          markQuizOverlaySnapshotBroadcast: vi.fn(() => Promise.resolve()),
+          scheduleQuizOverlaySnapshotRetry: vi.fn(() => Promise.resolve()),
         })),
       },
     } as unknown as Env;

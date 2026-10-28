@@ -438,24 +438,78 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     return resolved;
   });
   context.set("publishModuleOverlayMessage", async (channelId, moduleId, type, elementKind, payload, recipientConfig) => {
+    let quizSnapshotSequence: number | undefined;
+    let scheduleQuizSnapshotRetry: (() => Promise<void>) | undefined;
     try {
       const module = MODULES.find((candidate) => candidate.id === moduleId);
       if (module === undefined) return;
+      let effectivePayload = payload;
+      let effectiveType = type;
+      if (moduleId === "quiz" && elementKind === "quiz.session") {
+        const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)) as unknown as {
+          readQuizOverlaySnapshot: () => Promise<{
+            sequence: number;
+            payload: Record<string, unknown>;
+          } | null>;
+          persistQuizOverlaySnapshot: (snapshotPayload: Readonly<Record<string, unknown>>) => Promise<{
+            sequence: number;
+            payload: Record<string, unknown>;
+          }>;
+          markQuizOverlaySnapshotBroadcast: (sequence: number) => Promise<void>;
+          scheduleQuizOverlaySnapshotRetry: () => Promise<void>;
+        };
+        scheduleQuizSnapshotRetry = () => channelObject.scheduleQuizOverlaySnapshotRetry();
+        const currentSnapshot = await channelObject.readQuizOverlaySnapshot();
+        const incomingSequence = Number.isSafeInteger(payload.phaseSequence) ? Number(payload.phaseSequence) : -1;
+        const incomingStartedAt = typeof payload.sessionStartedAt === "string" ? Date.parse(payload.sessionStartedAt) : Number.NaN;
+        const currentStartedAt = currentSnapshot === null || typeof currentSnapshot.payload.sessionStartedAt !== "string"
+          ? Number.NaN : Date.parse(currentSnapshot.payload.sessionStartedAt);
+        const isCurrentOrNewerSnapshot = currentSnapshot !== null && incomingSequence >= 0 &&
+          currentSnapshot.sequence >= incomingSequence;
+        const isNewerSessionSnapshot = currentSnapshot !== null && currentSnapshot.payload.sessionId !== payload.sessionId &&
+          incomingSequence < 0 &&
+          Number.isFinite(incomingStartedAt) && Number.isFinite(currentStartedAt) && currentStartedAt > incomingStartedAt;
+        const useCurrentSnapshot = isCurrentOrNewerSnapshot || isNewerSessionSnapshot;
+        const snapshot = currentSnapshot !== null && useCurrentSnapshot
+          ? currentSnapshot : await channelObject.persistQuizOverlaySnapshot(payload);
+        effectivePayload = snapshot.payload;
+        quizSnapshotSequence = snapshot.sequence;
+        effectiveType = snapshot.payload.phase === "idle" ? "cancel"
+          : snapshot.payload.phase === "results" ? "results" : "phase";
+      }
       const prepared = await prepareModuleOverlayRealtimeMessage(
         context.env.DB,
         channelId,
         moduleId,
         {
           kind: "overlay",
-          type,
+          type: effectiveType,
           elementKind,
-          payload,
+          payload: effectivePayload,
           ...(recipientConfig === undefined ? {} : { recipientConfig }),
         },
         module.mandatory === true,
       );
-      if (prepared.outcome === "ready") await publishRealtimeMessages(context.env.CHANNEL, [prepared.message]);
+      if (prepared.outcome === "ready") {
+        await publishRealtimeMessages(context.env.CHANNEL, [prepared.message]);
+        if (quizSnapshotSequence !== undefined) {
+          const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+          await channelObject.markQuizOverlaySnapshotBroadcast(quizSnapshotSequence);
+        }
+      } else if (prepared.outcome === "no_recipients" && quizSnapshotSequence !== undefined) {
+        const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+        await channelObject.markQuizOverlaySnapshotBroadcast(quizSnapshotSequence);
+      } else if (quizSnapshotSequence !== undefined) {
+        await scheduleQuizSnapshotRetry?.();
+      }
     } catch (error: unknown) {
+      if (quizSnapshotSequence !== undefined) {
+        try {
+          await scheduleQuizSnapshotRetry?.();
+        } catch {
+          // Keep the persisted snapshot available for the next bootstrap if retry scheduling is unavailable.
+        }
+      }
       console.warn("Module overlay update could not be sent.", error);
     }
   });
@@ -1179,6 +1233,22 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       // The overlay bootstrap refresh below still clears a disabled quiz element.
     }
   }
+  const cancelledQuizRound = quizRoundToCancel;
+  const quizCancellationSnapshot: Record<string, unknown> | undefined = module.id === "quiz" && !enabled && cancelledQuizRound !== null
+    ? (() => {
+      const roundData = isRecord(cancelledQuizRound.data) ? cancelledQuizRound.data : {};
+      return {
+        sessionId: cancelledQuizRound.roundId,
+        phase: "idle",
+        phaseSequence: Number.isSafeInteger(roundData.phaseSequence) && Number(roundData.phaseSequence) >= 0
+          ? Number(roundData.phaseSequence) + 1
+          : 1,
+        sessionStartedAt: typeof roundData.sessionStartedAt === "string" && Number.isFinite(Date.parse(roundData.sessionStartedAt))
+          ? roundData.sessionStartedAt
+          : cancelledQuizRound.createdAt ?? now,
+      };
+    })()
+    : undefined;
   if ((module.requiresModules?.length ?? 0) > 0 || module.id === "points") {
     await runPostCommitStep(module.id, "module_gate_update", async () => {
       const points = context.get("points")(channelId);
@@ -1187,7 +1257,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     if (!enabled && (module.requiresModules?.length ?? 0) > 0) {
       await runPostCommitStep(module.id, "dependent_round_cancellation", async () => {
         const points = context.get("points")(channelId);
-        await points.rounds.cancelOpenRounds(revision);
+        await points.rounds.cancelOpenRounds(revision, quizCancellationSnapshot);
       });
     }
   }
@@ -1203,28 +1273,40 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     await runPostCommitStep(module.id, "schedule_notification", () =>
       notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "activation"));
   }
-  const cancelledQuizRound = quizRoundToCancel;
   if (module.id === "quiz" && !enabled && cancelledQuizRound !== null) {
     await runPostCommitStep(module.id, "overlay_cancel", async () => {
-      const roundData = isRecord(cancelledQuizRound.data) ? cancelledQuizRound.data : {};
-      const phaseSequence = Number.isSafeInteger(roundData.phaseSequence) && Number(roundData.phaseSequence) >= 0
-        ? Number(roundData.phaseSequence) + 1
-        : 1;
-      const sessionStartedAt = typeof roundData.sessionStartedAt === "string" && Number.isFinite(Date.parse(roundData.sessionStartedAt))
-        ? roundData.sessionStartedAt
-        : cancelledQuizRound.createdAt ?? now;
-      const prepared = await prepareModuleOverlayRealtimeMessage(context.env.DB, channelId, module.id, {
-        kind: "overlay",
-        type: "cancel",
-        elementKind: "quiz.session",
-        payload: {
-          sessionId: cancelledQuizRound.roundId,
-          phase: "idle",
-          phaseSequence,
-          sessionStartedAt,
-        },
-      }, false, MODULES, true);
-      if (prepared.outcome === "ready") await publishRealtimeMessages(context.env.CHANNEL, [prepared.message]);
+      if (quizCancellationSnapshot === undefined) return;
+      const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)) as unknown as {
+        readQuizOverlaySnapshot: () => Promise<{ sequence: number; payload: Record<string, unknown> } | null>;
+        persistQuizOverlaySnapshot: (payload: Readonly<Record<string, unknown>>) => Promise<{
+          sequence: number;
+          payload: Record<string, unknown>;
+        }>;
+        markQuizOverlaySnapshotBroadcast: (sequence: number) => Promise<void>;
+        scheduleQuizOverlaySnapshotRetry: () => Promise<void>;
+      };
+      const currentSnapshot = await channelObject.readQuizOverlaySnapshot();
+      const matchesCancellation = currentSnapshot !== null &&
+        currentSnapshot.payload.sessionId === cancelledQuizRound.roundId && currentSnapshot.payload.phase === "idle" &&
+        currentSnapshot.sequence === quizCancellationSnapshot.phaseSequence;
+      const snapshot = matchesCancellation ? currentSnapshot : await channelObject.persistQuizOverlaySnapshot(quizCancellationSnapshot);
+      try {
+        const prepared = await prepareModuleOverlayRealtimeMessage(context.env.DB, channelId, module.id, {
+          kind: "overlay",
+          type: "cancel",
+          elementKind: "quiz.session",
+          payload: snapshot.payload,
+        }, false, MODULES, true);
+        if (prepared.outcome === "ready") {
+          await publishRealtimeMessages(context.env.CHANNEL, [prepared.message]);
+          await channelObject.markQuizOverlaySnapshotBroadcast(snapshot.sequence);
+        } else if (prepared.outcome === "no_recipients") {
+          await channelObject.markQuizOverlaySnapshotBroadcast(snapshot.sequence);
+        } else await channelObject.scheduleQuizOverlaySnapshotRetry();
+      } catch (error: unknown) {
+        await channelObject.scheduleQuizOverlaySnapshotRetry();
+        throw error;
+      }
     });
   }
   const overlayKinds = module.overlayElements?.map(({ kind }) => kind) ?? [];
