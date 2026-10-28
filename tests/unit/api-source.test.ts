@@ -26,7 +26,8 @@ import { createModuleExternalFetchBudget } from "../../src/worker/external-fetch
 import { createTextBlockTemplateValueProvider } from "../../src/modules/text_library/adapters/template-expander";
 import { readPanelResourceRevisions } from "../../src/worker/panel-resources";
 import { prepareModuleAudit } from "../../src/worker/module-audit";
-import { insertChannel } from "./fixtures";
+import { scheduled } from "../../src/worker/scheduled";
+import { insertChannel, testKey } from "./fixtures";
 import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "api-source-test-channel";
@@ -75,6 +76,7 @@ const sharedBudget = (maximum = 3): { claim: () => boolean; count: () => number 
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const database of databaseInstances.splice(0)) database.close();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -314,6 +316,64 @@ describe("API source outbound fetch", () => {
     expect(await claimApiSourceQuota(db, CHANNEL_ID, NOW + 1_000, 2)).toBe(true);
     expect(await claimApiSourceQuota(db, CHANNEL_ID, NOW + 2_000, 2)).toBe(false);
     expect(await claimApiSourceQuota(db, "another-channel", NOW, 2)).toBe(true);
+  });
+
+  it("defers expired quota deletion to hourly maintenance and saves one statement per quota attempt", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const database = await createDatabase();
+    const cutoff = Math.floor(NOW / 3_600_000) * 3_600_000 - 48 * 3_600_000;
+    const expiredRows = Array.from({ length: 50 }, (_, index) => database.prepare(
+      "INSERT INTO api_source_quota (channel_id, window_start, request_count) VALUES (?, ?, 1)",
+    ).bind(CHANNEL_ID, new Date(cutoff - (index + 1) * 3_600_000).toISOString()));
+    await database.batch(expiredRows);
+    await database.prepare(
+      "INSERT INTO api_source_quota (channel_id, window_start, request_count) VALUES (?, ?, 1), (?, ?, 1)",
+    ).bind(
+      CHANNEL_ID,
+      new Date(cutoff).toISOString(),
+      CHANNEL_ID,
+      new Date(cutoff + 3_600_000).toISOString(),
+    ).run();
+
+    const preparedSql: string[] = [];
+    const tracedDatabase = {
+      prepare: (sql: string) => {
+        preparedSql.push(sql);
+        return database.prepare(sql);
+      },
+      batch: database.batch.bind(database),
+    } as unknown as D1Database;
+    await expect(claimApiSourceQuota(tracedDatabase, CHANNEL_ID, NOW, 2)).resolves.toBe(true);
+
+    expect(preparedSql).toHaveLength(1);
+    expect(preparedSql[0]).toContain("INSERT INTO api_source_quota");
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM api_source_quota WHERE window_start < ?")
+      .bind(new Date(cutoff).toISOString()).first()).resolves.toEqual({ count: 50 });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ access_token: "scheduled-token", expires_in: 7200 })));
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_CLIENT_ID: "client-id",
+      TWITCH_CLIENT_SECRET: "client-secret",
+      SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: testKey(3) }, retired: [] }),
+      TOKEN_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: testKey(3) }, retired: [] }),
+    } as Env;
+    await scheduled(
+      {} as ScheduledController,
+      environment,
+      { waitUntil: vi.fn() } as unknown as ExecutionContext,
+    );
+
+    await expect(database.prepare(
+      "SELECT window_start FROM api_source_quota ORDER BY window_start",
+    ).all<{ window_start: string }>()).resolves.toMatchObject({
+      results: [
+        { window_start: new Date(cutoff).toISOString() },
+        { window_start: new Date(cutoff + 3_600_000).toISOString() },
+        { window_start: new Date(Math.floor(NOW / 3_600_000) * 3_600_000).toISOString() },
+      ],
+    });
   });
 });
 
