@@ -44,6 +44,7 @@ const lifecycleContext = (
   const scheduled: Array<{ key: string; deadline: number }> = [];
   const cleared: string[] = [];
   const canceled: string[] = [];
+  const published: Array<{ type: string; elementKind: string; payload: Record<string, unknown> }> = [];
   const context = {
     channelId: "channel-one",
     DB: { prepare: () => ({ bind: () => ({ first: () => Promise.resolve(stream) }) }) },
@@ -61,9 +62,12 @@ const lifecycleContext = (
     schedule: (key: string, deadline: number) => { scheduled.push({ key, deadline }); return Promise.resolve(); },
     clear: (key: string) => { cleared.push(key); return Promise.resolve(); },
     sendChat: () => Promise.resolve({ sent: false, reason: null, retryable: false, delivery: "delivered" as const }),
-    publishModuleOverlayMessage: () => Promise.resolve(),
+    publishModuleOverlayMessage: (type: string, elementKind: string, payload: Record<string, unknown>) => {
+      published.push({ type, elementKind, payload });
+      return Promise.resolve();
+    },
   } as unknown as ModuleAlarmContext;
-  return { context, active, scheduled, cleared, canceled };
+  return { context, active, scheduled, cleared, canceled, published };
 };
 
 const streamEvent = (
@@ -184,10 +188,59 @@ describe("quiz stream lifecycle reconciliation", () => {
       await quizSessionControlAlarm.handle(fake.context, "offline-timeout:quiz-round", Date.now());
 
       expect(fake.canceled).toEqual(["quiz-round"]);
+      expect(fake.published.at(-1)?.payload).toMatchObject({
+        sessionId: "quiz-round",
+        phase: "idle",
+        phaseSequence: 2,
+      });
       expect(fake.cleared).toContain("offline-timeout:quiz-round");
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("publishes an idle cancellation when End cancels a pending start", async () => {
+    const fake = lifecycleContext({ state: "online", changed_at: new Date(Date.now()).toISOString() }, "quiz-round", "announcing");
+    Object.assign(fake.active.data, { phase: "announce", phaseEndsAt: null, phaseSequence: 3 });
+
+    await quizSessionControlAlarm.handle(fake.context, "quiz-round", Date.now(), undefined, {
+      action: "end",
+      sessionId: "quiz-round",
+    });
+
+    expect(fake.canceled).toEqual(["quiz-round"]);
+    expect(fake.published.at(-1)?.payload).toMatchObject({
+      sessionId: "quiz-round",
+      phase: "idle",
+      phaseSequence: 4,
+    });
+  });
+
+  it("publishes the persisted resolution time and sequence with retried results", async () => {
+    const fake = lifecycleContext({ state: "online", changed_at: new Date(Date.now()).toISOString() });
+    const resolvedAt = "2030-01-01T00:00:05.000Z";
+    const data = { ...sessionData("quiz-round"), phase: "results", phaseSequence: 4, sessionStartedAt: "2030-01-01T00:00:00.000Z" };
+
+    const handler = quizModule.onPointRoundResolved;
+    if (handler === undefined) throw new Error("Quiz result handler is unavailable.");
+    await handler(fake.context, {
+      roundId: "quiz-round",
+      data,
+      result: { ranking: [{ login: "winner", correct: 1, rank: 1 }] },
+      resolvedAt,
+    });
+
+    expect(fake.published.at(-1)).toMatchObject({
+      type: "results",
+      elementKind: "quiz.session",
+      payload: {
+        sessionId: "quiz-round",
+        phase: "results",
+        phaseSequence: 4,
+        sessionStartedAt: "2030-01-01T00:00:00.000Z",
+        resultAt: resolvedAt,
+      },
+    });
   });
 
   it("keeps the original offline observation time across Helix refreshes", async () => {

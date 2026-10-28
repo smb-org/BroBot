@@ -1,5 +1,9 @@
 import { moduleOverlayElementForKind, MODULES } from "../../modules/registry";
-import type { BotModule, JsonObject, ModuleOverlayElementContext } from "../../modules/contract";
+import type {
+  BotModule,
+  JsonObject,
+  ModuleOverlayInitialStateContext,
+} from "../../modules/contract";
 
 interface ModuleOverlayStateInput {
   id: string;
@@ -20,7 +24,7 @@ export const hydrateModuleOverlayElements = async <Element extends ModuleOverlay
   channelId: string,
   elements: readonly Element[],
   modules: readonly BotModule[] = MODULES,
-  context?: ModuleOverlayElementContext | ((moduleId: string) => ModuleOverlayElementContext | undefined),
+  context?: ModuleOverlayInitialStateContext | ((moduleId: string) => ModuleOverlayInitialStateContext | undefined),
 ): Promise<(Element & { moduleEnabled?: boolean; state?: JsonObject | null })[]> => {
   const moduleElements = elements.flatMap((element) => {
     const declaration = moduleOverlayElementForKind(element.kind, modules);
@@ -40,12 +44,20 @@ export const hydrateModuleOverlayElements = async <Element extends ModuleOverlay
   for (const item of moduleElements) {
     const moduleEnabled = item.module.mandatory === true || enabledById.get(item.module.id) === true;
     let state: JsonObject | null = null;
-    if (moduleEnabled && item.definition.initialState !== undefined) {
+    if (moduleEnabled && (item.definition.initialState !== undefined || item.definition.initialStateFromPointRound !== undefined)) {
       const config = item.definition.parseConfig(item.element.config);
       if (config !== null) {
         const moduleContext = typeof context === "function" ? context(item.module.id) : context;
         try {
-          state = await item.definition.initialState(db, channelId, config, moduleContext);
+          if (item.definition.initialStateFromPointRound !== undefined) {
+            const pointRoundContext = moduleContext?.kind === "point-round" ? moduleContext : undefined;
+            if (pointRoundContext !== undefined) {
+              state = await item.definition.initialStateFromPointRound(db, channelId, config, pointRoundContext);
+            }
+          } else if (item.definition.initialState !== undefined) {
+            const templateContext = moduleContext?.kind === "point-round" ? undefined : moduleContext;
+            state = await item.definition.initialState(db, channelId, config, templateContext);
+          }
         } catch (error: unknown) {
           console.warn(`Module overlay initial state failed for ${item.definition.kind}.`, error);
           // Don't blank the element on a transient error: keep a short retry

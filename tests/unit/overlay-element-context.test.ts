@@ -13,6 +13,7 @@ vi.mock("../../src/worker/app-token", () => ({ getAppAccessToken: mocks.getAppAc
 vi.mock("../../src/worker/twitch/helix", () => ({ helixRequest: mocks.helixRequest }));
 
 import { createOverlayElementContext } from "../../src/worker/overlays/element-context";
+import * as overlayElementContext from "../../src/worker/overlays/element-context";
 
 const startedAt = "2026-09-27T12:00:00.000Z";
 let streamStateRow: Record<string, unknown> | null;
@@ -95,9 +96,30 @@ describe("overlay element template context", () => {
     const context = await createOverlayElementContext(environment, "channel-a", "quiz", "en", Date.parse(startedAt));
 
     await expect(context.readPointRound?.(60_000)).resolves.toEqual(active);
-    await expect(context.readPointRound?.(60_000)).resolves.toEqual(resolved);
+    await expect(context.readPointRound?.(60_000)).resolves.toEqual(active);
+    expect(mocks.activeGameRound).toHaveBeenCalledTimes(1);
     expect(mocks.activeGameRound).toHaveBeenCalledWith("quiz");
-    expect(mocks.recentlyResolvedGameRound).toHaveBeenCalledWith("quiz", 60_000);
+    expect(mocks.recentlyResolvedGameRound).not.toHaveBeenCalled();
+  });
+
+  it("creates a point-round-only context without loading channel or template catalogs", async () => {
+    const prepare = vi.spyOn(database, "prepare");
+    const createPointRoundContext = Reflect.get(overlayElementContext, "createOverlayPointRoundContext") as
+      ((env: Env, channelId: string, moduleId: string, now: number) => unknown) | undefined;
+
+    expect(createPointRoundContext).toBeTypeOf("function");
+    const context = createPointRoundContext?.(environment, "channel-a", "quiz", Date.parse(startedAt)) as {
+      now: number;
+      readPointRound: (maxAgeMs: number) => Promise<unknown>;
+    };
+    expect(context.now).toBe(Date.parse(startedAt));
+    expect(prepare).not.toHaveBeenCalled();
+
+    const active = { roundId: "quiz-active", state: "open", data: { phase: "open" }, deadlineAt: 10_000 };
+    mocks.activeGameRound.mockResolvedValue(active);
+    await expect(context.readPointRound(60_000)).resolves.toEqual(active);
+    expect(mocks.activeGameRound).toHaveBeenCalledWith("quiz");
+    prepare.mockRestore();
   });
 
   it("uses the chat unavailable output when the stream viewer count cannot be read", async () => {

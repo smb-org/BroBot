@@ -495,6 +495,7 @@ export const ensurePointsSchema = (sql: PointsSql): void => {
   sql.exec("CREATE INDEX IF NOT EXISTS point_monthly_rank ON point_monthly (month, net_won DESC, reached_at ASC, account_id ASC)");
   sql.exec("CREATE INDEX IF NOT EXISTS point_ledger_account_history ON point_ledger (account_id, operation_id)");
   sql.exec("CREATE INDEX IF NOT EXISTS game_rounds_module_state ON game_rounds (module_id, state)");
+  sql.exec("CREATE INDEX IF NOT EXISTS game_rounds_module_resolution ON game_rounds (module_id, state, resolved_at DESC, round_id DESC)");
 };
 
 const ensureAccountSync = (sql: PointsSql, accountId: string, login: string | null, now: string): AccountRow => {

@@ -12,7 +12,7 @@ import {
   type ChannelAuthorizationVariables,
 } from "../auth/guards";
 import { canManage, type AuditAction } from "../../contracts/values";
-import type { ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext } from "../../modules/contract";
+import type { ModuleChannelVariable, ModuleEvent, ModuleExternalFetchBudget, ModuleLanguage, ModuleOverlayHostEvent, ModuleRouteVariables, ModuleStreamState, ModuleTemplateConditionContext, PointActiveRound } from "../../modules/contract";
 import { MODULES } from "../../modules/registry";
 import {
   combineCommandCollisionWriteGuards,
@@ -1022,6 +1022,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
+  let quizRoundToCancel: PointActiveRound | null = null;
   const initialize = enabled && existing?.initialized !== true;
   const reusedTextCommandName = initialize && module.onEnableCommandTokens?.includes("!befehle") === true
     ? "befehle"
@@ -1168,6 +1169,16 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
     }
     return context.json({ error: "module_changed_concurrently" }, 409);
   }
+  if (moduleId === "quiz" && !enabled) {
+    try {
+      const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)) as unknown as {
+        activeGameRound: (targetModuleId: string) => Promise<PointActiveRound | null>;
+      };
+      quizRoundToCancel = await channelObject.activeGameRound("quiz");
+    } catch {
+      // The overlay bootstrap refresh below still clears a disabled quiz element.
+    }
+  }
   if ((module.requiresModules?.length ?? 0) > 0 || module.id === "points") {
     await runPostCommitStep(module.id, "module_gate_update", async () => {
       const points = context.get("points")(channelId);
@@ -1191,6 +1202,30 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   } else if ((existing?.enabled === true) !== enabled) {
     await runPostCommitStep(module.id, "schedule_notification", () =>
       notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "activation"));
+  }
+  const cancelledQuizRound = quizRoundToCancel;
+  if (module.id === "quiz" && !enabled && cancelledQuizRound !== null) {
+    await runPostCommitStep(module.id, "overlay_cancel", async () => {
+      const roundData = isRecord(cancelledQuizRound.data) ? cancelledQuizRound.data : {};
+      const phaseSequence = Number.isSafeInteger(roundData.phaseSequence) && Number(roundData.phaseSequence) >= 0
+        ? Number(roundData.phaseSequence) + 1
+        : 1;
+      const sessionStartedAt = typeof roundData.sessionStartedAt === "string" && Number.isFinite(Date.parse(roundData.sessionStartedAt))
+        ? roundData.sessionStartedAt
+        : cancelledQuizRound.createdAt ?? now;
+      const prepared = await prepareModuleOverlayRealtimeMessage(context.env.DB, channelId, module.id, {
+        kind: "overlay",
+        type: "cancel",
+        elementKind: "quiz.session",
+        payload: {
+          sessionId: cancelledQuizRound.roundId,
+          phase: "idle",
+          phaseSequence,
+          sessionStartedAt,
+        },
+      }, false, MODULES, true);
+      if (prepared.outcome === "ready") await publishRealtimeMessages(context.env.CHANNEL, [prepared.message]);
+    });
   }
   const overlayKinds = module.overlayElements?.map(({ kind }) => kind) ?? [];
   if (overlayKinds.length > 0) {

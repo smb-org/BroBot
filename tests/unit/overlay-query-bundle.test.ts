@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { assertOverlayBundleHasNoTanstack } from "../../scripts/overlay-bundle-check";
 
@@ -73,5 +75,12 @@ describe("overlay bundle dependency boundary", () => {
     };
 
     expect(() => { assertOverlayBundleHasNoTanstack(bundle); }).not.toThrow();
+  });
+
+  it("imports the quiz overlay icon from its lightweight module instead of the dashboard barrel", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/modules/quiz/overlay/view.tsx"), "utf8");
+
+    expect(source).toContain('from "../../../dashboard/ui/Icon"');
+    expect(source).not.toMatch(/from\s+["']\.\.\/\.\.\/\.\.\/dashboard\/ui["']/u);
   });
 });

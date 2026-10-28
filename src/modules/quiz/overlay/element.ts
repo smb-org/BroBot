@@ -1,4 +1,4 @@
-import type { JsonObject, ModuleLanguage } from "../../contract";
+import type { JsonObject, ModuleLanguage, ModuleOverlayPointRoundContext } from "../../contract";
 import { QUIZ_SESSION_OVERLAY_ELEMENT_KIND } from "./kinds";
 import { quizOverlayTexts } from "./locale";
 import { DEFAULT_QUIZ_OVERLAY_CONFIG, loadQuizOverlayState, mergeQuizOverlayRealtimeState, parseQuizOverlayConfig } from "./state";
@@ -13,6 +13,8 @@ const quizSessionOverlayElement = {
   defaultConfig: DEFAULT_QUIZ_OVERLAY_CONFIG as unknown as JsonObject,
   previewState: (_config: JsonObject, language: ModuleLanguage, now: number): JsonObject => ({
     sessionId: "quiz-editor-preview",
+    phaseSequence: 1,
+    sessionStartedAt: new Date(now).toISOString(),
     phase: "reveal",
     questionIndex: 1,
     questionCount: 5,
@@ -28,10 +30,10 @@ const quizSessionOverlayElement = {
   editorLabel: { de: german.editorLabel, en: english.editorLabel },
   editorDescription: { de: german.editorDescription, en: english.editorDescription },
   editorModuleLabel: { de: german.editorModuleLabel, en: english.editorModuleLabel },
-  initialStateNeedsContext: true,
-  mergeRealtimeStateOnModuleMessages: ["modul.quiz.phase", "modul.quiz.results"],
+  initialStateNeedsPointRoundContext: true,
+  mergeRealtimeStateOnModuleMessages: ["modul.quiz.phase", "modul.quiz.results", "modul.quiz.cancel"],
   mergeRealtimeState: mergeQuizOverlayRealtimeState,
-  initialState: async (_db: D1Database, _channelId: string, _config: JsonObject, context: Parameters<typeof loadQuizOverlayState>[0]) =>
+  initialStateFromPointRound: async (_db: D1Database, _channelId: string, _config: JsonObject, context: ModuleOverlayPointRoundContext) =>
     loadQuizOverlayState(context),
   parseConfig: (raw: unknown) => {
     const config = parseQuizOverlayConfig(raw);

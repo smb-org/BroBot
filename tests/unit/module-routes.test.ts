@@ -89,6 +89,20 @@ const defaultEnabledTestModule: BotModule<typeof clipsTestSchema> = {
   settingsSchema: clipsTestSchema,
   defaultSettings: {},
 };
+const quizOverlayTestModule: BotModule<typeof clipsTestSchema> = {
+  id: "quiz",
+  navigationCategory: "participation",
+  settingsSchema: clipsTestSchema,
+  defaultSettings: {},
+  overlayElements: [{
+    kind: "quiz.session",
+    configVersion: 1,
+    defaultSize: { width: 300, height: 180 },
+    defaultConfig: {},
+    parseConfig: () => ({}),
+    load: () => Promise.resolve({ default: () => null }),
+  }],
+};
 
 const registeredModules = [testModule, mandatoryTestModule, defaultEnabledTestModule] as BotModule[];
 const dependencyTestSchema = z.object({});
@@ -1471,6 +1485,64 @@ describe("Module management in the panel", () => {
       type: "overlay.changed",
       payload: { overlayId: "overlay-countdown", revision: 1 },
     }]);
+  });
+
+  it("publishes a quiz cancellation when disabling quiz", async () => {
+    registeredModules.push(quizOverlayTestModule);
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'quiz', 1, '{}')",
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlays (overlay_id, channel_id, name, created_at, updated_at)
+       VALUES ('overlay-quiz', 'kanal-a', 'Quiz', '2026-09-25T12:00:00.000Z', '2026-09-25T12:00:00.000Z')`,
+    ).run();
+    await database.prepare(
+      `INSERT INTO overlay_elements (element_id, channel_id, overlay_id, kind)
+       VALUES ('element-quiz', 'kanal-a', 'overlay-quiz', 'quiz.session')`,
+    ).run();
+    const publish = vi.fn((messages: readonly unknown[]) => {
+      void messages;
+      return Promise.resolve();
+    });
+    const activeGameRound = vi.fn(() => Promise.resolve({
+      roundId: "quiz-round",
+      state: "announcing" as const,
+      data: { phaseSequence: 5, sessionStartedAt: "2026-09-25T12:01:00.000Z" },
+      deadlineAt: null,
+      createdAt: "2026-09-25T12:01:00.000Z",
+    }));
+    environment = {
+      ...environment,
+      CHANNEL: {
+        idFromName: vi.fn(() => "channel-object"),
+        get: vi.fn(() => ({
+          activeGameRound,
+          publish,
+          notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()),
+        })),
+      },
+    } as unknown as Env;
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/quiz", "PATCH", { enabled: false }),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    expect(activeGameRound).toHaveBeenCalledWith("quiz");
+    expect(publish.mock.calls[0]?.[0]).toContainEqual(expect.objectContaining({
+      type: "modul.quiz.cancel",
+      payload: {
+        sessionId: "quiz-round",
+        phase: "idle",
+        phaseSequence: 6,
+        sessionStartedAt: "2026-09-25T12:01:00.000Z",
+      },
+      overlayIds: ["overlay-quiz"],
+    }));
   });
 
   it("toggles a default-enabled module off and keeps it off with no fallback resurrecting it", async () => {

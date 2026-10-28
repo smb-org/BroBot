@@ -4,11 +4,13 @@ import type {
   ModuleEvent,
   ModuleLanguage,
   ModuleOverlayElementContext,
+  ModuleOverlayPointRoundContext,
   ModuleOverlayTemplateConditions,
   ModuleOverlayTemplateValue,
   ModuleTemplateConditionContext,
   ModuleTemplateConditionTimelineContext,
   ModuleTextBlockConditionDefinition,
+  PointResolvedRound,
   ModuleTemplateConditionTransition,
   PointActiveRound,
 } from "../../modules/contract";
@@ -27,6 +29,35 @@ import { createModuleSecretReadAccess } from "../module-secrets";
 
 const moduleIsEnabled = (module: BotModule, enabled: ReadonlyMap<string, boolean>): boolean =>
   module.mandatory === true || enabled.get(module.id) === true;
+
+const pointRoundReader = (env: Env, channelId: string, moduleId: string) => {
+  const snapshots = new Map<number, Promise<PointActiveRound | PointResolvedRound | null>>();
+  return (recentlyResolvedMs: number): Promise<PointActiveRound | PointResolvedRound | null> => {
+    let snapshot = snapshots.get(recentlyResolvedMs);
+    if (snapshot === undefined) {
+      snapshot = (async () => {
+        const channelObject = env.CHANNEL.get(env.CHANNEL.idFromName(channelId));
+        const active = await channelObject.activeGameRound(moduleId) as PointActiveRound | null;
+        if (active !== null) return active;
+        return channelObject.recentlyResolvedGameRound(moduleId, recentlyResolvedMs);
+      })();
+      snapshots.set(recentlyResolvedMs, snapshot);
+    }
+    return snapshot;
+  };
+};
+
+/** Creates the small context used by overlays that only hydrate a point round. */
+export const createOverlayPointRoundContext = (
+  env: Env,
+  channelId: string,
+  moduleId: string,
+  now: number,
+): ModuleOverlayPointRoundContext => ({
+  kind: "point-round",
+  now,
+  readPointRound: pointRoundReader(env, channelId, moduleId),
+});
 
 /** Builds the same registered template providers used by chat, in deterministic overlay mode. */
 export const createOverlayElementContext = async (
@@ -321,6 +352,7 @@ export const createOverlayElementContext = async (
     return pending;
   };
   return {
+    kind: "template",
     now,
     language,
     channelTimeZone,
@@ -363,11 +395,6 @@ export const createOverlayElementContext = async (
     dynamicTemplateVariableNames,
     overlayTemplateVariableNames,
     readBallot: (ballotId) => moduleBallots(env.CHANNEL, channelId, moduleId).read(ballotId),
-    readPointRound: async (recentlyResolvedMs) => {
-      const channelObject = env.CHANNEL.get(env.CHANNEL.idFromName(channelId));
-      const active = await channelObject.activeGameRound(moduleId) as PointActiveRound | null;
-      if (active !== null) return active;
-      return channelObject.recentlyResolvedGameRound(moduleId, recentlyResolvedMs);
-    },
+    readPointRound: pointRoundReader(env, channelId, moduleId),
   };
 };

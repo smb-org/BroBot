@@ -12,6 +12,16 @@ const OFFLINE_TIMEOUT_PREFIX = "offline-timeout:";
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
+const nextOverlayPhase = (data: QuizSessionRoundData, now = Date.now()): QuizSessionRoundData => ({
+  ...data,
+  phaseSequence: Number.isSafeInteger(data.phaseSequence) && (data.phaseSequence ?? -1) >= 0
+    ? (data.phaseSequence as number) + 1
+    : 1,
+  sessionStartedAt: typeof data.sessionStartedAt === "string" && Number.isFinite(Date.parse(data.sessionStartedAt))
+    ? data.sessionStartedAt
+    : new Date(now).toISOString(),
+});
+
 const truncate = (value: string, maximum: number): string => {
   if (value.length <= maximum) return value;
   if (maximum <= 1) return "…";
@@ -35,6 +45,8 @@ export const quizPhasePayload = (data: QuizSessionRoundData): Record<string, unk
   const question = data.questions[data.questionIndex];
   return {
     sessionId: data.sessionId,
+    phaseSequence: data.phaseSequence ?? 0,
+    sessionStartedAt: data.sessionStartedAt ?? new Date().toISOString(),
     questionIndex: data.questionIndex,
     questionCount: data.questions.length,
     question: question?.text ?? "",
@@ -54,6 +66,18 @@ const publishQuizPhase = async (context: ModuleAlarmContext, data: QuizSessionRo
     payload.answerDistribution = data.aggregates.answerDistribution[data.questionIndex] ?? [];
   }
   await context.publishModuleOverlayMessage("phase", "quiz.session", payload);
+};
+
+const publishQuizCancellation = async (context: ModuleAlarmContext, data: QuizSessionRoundData): Promise<void> => {
+  const sequence = Number.isSafeInteger(data.phaseSequence) && (data.phaseSequence ?? -1) >= 0
+    ? (data.phaseSequence as number) + 1
+    : 1;
+  await context.publishModuleOverlayMessage("cancel", "quiz.session", {
+    sessionId: data.sessionId,
+    phase: "idle",
+    phaseSequence: sequence,
+    sessionStartedAt: data.sessionStartedAt ?? new Date().toISOString(),
+  });
 };
 
 const aggregatesFrom = (
@@ -126,25 +150,25 @@ const announceCurrentQuestion = async (
   roundId: string,
   current: QuizSessionRoundData,
 ): Promise<void> => {
-  const announced: QuizSessionRoundData = {
+  const announced = nextOverlayPhase({
     ...current,
     phase: "announce",
     phaseEndsAt: null,
     paused: false,
     remainingMs: null,
-  };
+  });
   await context.points.rounds.update(roundId, announced, Date.now() + ANNOUNCE_RETRY_MS);
   await publishQuizPhase(context, announced);
   const delivered = await sendQuestionLine(context, roundId, announced);
   if (!delivered) return;
   const phaseOpenedAt = Date.now();
   const phaseEndsAt = phaseOpenedAt + announced.answerSeconds * 1_000;
-  const opened: QuizSessionRoundData = {
+  const opened = nextOverlayPhase({
     ...announced,
     phase: "open",
     phaseOpenedAt,
     phaseEndsAt,
-  };
+  }, phaseOpenedAt);
   await context.points.rounds.update(roundId, opened, phaseEndsAt);
   await publishQuizPhase(context, opened);
 };
@@ -157,23 +181,23 @@ const showReveal = async (
 ): Promise<void> => {
   const score = await currentScore(context, roundId, current);
   const phase = transitionQuizPhase(current, current.questions.length, now, current.answerSeconds, current.revealSeconds);
-  const data: QuizSessionRoundData = {
+  const data = nextOverlayPhase({
     ...current,
     ...phase,
     aggregates: aggregatesFrom(score),
-  };
+  }, now);
   await context.points.rounds.update(roundId, data, data.phaseEndsAt);
   await publishQuizPhase(context, data);
 };
 
 const finishQuizSession = async (context: ModuleAlarmContext, roundId: string, current: QuizSessionRoundData): Promise<void> => {
   const score = await currentScore(context, roundId, current);
-  const data: QuizSessionRoundData = {
+  const data = nextOverlayPhase({
     ...current,
     ...endQuizPhase(current),
     aggregates: aggregatesFrom(score),
     offlineSince: null,
-  };
+  });
   await context.points.rounds.update(roundId, data, Date.now() + SETTLEMENT_RETRY_MS);
   await context.points.rounds.resolve(roundId, { kind: "quiz", params: {} });
 };
@@ -199,7 +223,7 @@ const reconcileQuizStream = async (
     const effectiveOfflinePause = data.paused
       ? data
       : { ...data, ...pauseQuizPhase(data, offlineSince) };
-    const updated = { ...effectiveOfflinePause, offlineSince };
+    const updated = nextOverlayPhase({ ...effectiveOfflinePause, offlineSince });
     const changed = !data.paused || data.offlineSince !== offlineSince || data.remainingMs !== updated.remainingMs;
     await context.schedule(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, offlineSince + OFFLINE_SETTLEMENT_MS, undefined, null);
     if (changed) await context.points.rounds.update(active.roundId, updated, null);
@@ -207,7 +231,7 @@ const reconcileQuizStream = async (
     return;
   }
   if (streamSnapshot.state === "online" && data.offlineSince !== null) {
-    const resumedStream: QuizSessionRoundData = { ...data, paused: true, phaseEndsAt: null, offlineSince: null };
+    const resumedStream = nextOverlayPhase({ ...data, paused: true, phaseEndsAt: null, offlineSince: null });
     await context.points.rounds.update(active.roundId, resumedStream, null);
     await context.clear(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, undefined, null);
     await publishQuizPhase(context, resumedStream);
@@ -234,6 +258,7 @@ const handleOfflineTimeout = async (context: ModuleAlarmContext, alarmKey: strin
   }
   if (reconciledActive.state === "announcing") {
     await context.points.rounds.cancel(roundId);
+    await publishQuizCancellation(context, reconciledData);
     await context.clear(alarmKey, undefined, null);
     return;
   }
@@ -337,27 +362,28 @@ const controlQuizSession = async (
   if (action !== "end" && streamSnapshot.state !== "online") throw new Error("stream_offline");
   if (action === "end" && active.state === "announcing") {
     await context.points.rounds.cancel(active.roundId);
+    await publishQuizCancellation(context, data);
     await context.clear(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, undefined, null);
     return;
   }
   const now = Date.now();
   if (action === "pause") {
     if (data.paused) return;
-    const paused = {
+    const paused = nextOverlayPhase({
       ...data,
       ...pauseQuizPhase(data, now),
-    };
+    }, now);
     await context.points.rounds.update(active.roundId, paused, null);
     await publishQuizPhase(context, paused);
     return;
   }
   if (action === "resume") {
     if (!data.paused) return;
-    const resumed = {
+    const resumed = nextOverlayPhase({
       ...data,
       ...resumeQuizPhase(data, now),
       offlineSince: null,
-    };
+    }, now);
     await context.points.rounds.update(active.roundId, resumed, resumed.phaseEndsAt);
     await context.clear(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, undefined, null);
     await publishQuizPhase(context, resumed);
@@ -389,9 +415,16 @@ export const onQuizRoundResolved = async (
   if (data === null || result === null || !Array.isArray(result.ranking)) return;
   const ranking = result.ranking.filter((value) => typeof value === "object" && value !== null && !Array.isArray(value))
     .map((value) => value as Record<string, unknown>);
+  const sessionStartedAt = typeof data.sessionStartedAt === "string" && Number.isFinite(Date.parse(data.sessionStartedAt))
+    ? data.sessionStartedAt
+    : round.resolvedAt;
   await context.publishModuleOverlayMessage("results", "quiz.session", {
     ...quizPhasePayload({ ...data, ...endQuizPhase(data) }),
     phase: "results",
+    phaseSequence: data.phaseSequence ?? 0,
+    sessionStartedAt,
+    resolvedAt: round.resolvedAt,
+    resultAt: round.resolvedAt,
     ranking: ranking.slice(0, 10).map(({ login, correct, rank, payout }) => ({ login, correct, rank, payout })),
     participants: Number.isSafeInteger(result.participants) ? result.participants : 0,
     correctRate: typeof result.correctRate === "number" ? result.correctRate : 0,

@@ -9,6 +9,8 @@ const question = "Which city sits on the Spree?";
 const options = ["Berlin", "Bonn", "Bremen", "Dresden"];
 const phaseState = (phase: "announce" | "open" | "paused" | "reveal" | "results") => ({
   sessionId: "quiz-e2e-fixture",
+  phaseSequence: 1,
+  sessionStartedAt: new Date(now).toISOString(),
   phase: phase === "paused" ? "open" : phase,
   questionIndex: 0,
   questionCount: 3,

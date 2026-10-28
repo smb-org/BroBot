@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
-import { Icon } from "../../../dashboard/ui";
+import { Icon } from "../../../dashboard/ui/Icon";
 import { quizOverlayTexts } from "./locale";
 import { DEFAULT_QUIZ_OVERLAY_CONFIG, QUIZ_RESULTS_DISPLAY_MS, parseQuizOverlayConfig, parseQuizOverlayState } from "./state";
 
@@ -39,7 +39,7 @@ const QuizOverlay = ({ config: rawConfig, state: rawState, language = "en" }: Mo
     return () => window.clearInterval(timer);
   }, [current?.phase, current?.paused, current?.resultAt, serverNow]);
 
-  if (current === null) return null;
+  if (current === null || current.phase === "idle") return null;
 
   const progress = config.showQuestionProgress
     ? labels.questionProgress(current.questionIndex + 1, current.questionCount)

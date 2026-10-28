@@ -6,7 +6,10 @@ import { prepareModuleOverlayHostEventMessages, prepareModuleOverlayRealtimeMess
 
 const databaseFor = (overlayIds: readonly string[]) => {
   const statement = {
-    bind: vi.fn(() => ({ all: () => Promise.resolve({ results: overlayIds.map((overlay_id) => ({ overlay_id })) }) })),
+    bind: vi.fn((...values: unknown[]) => {
+      void values;
+      return { all: () => Promise.resolve({ results: overlayIds.map((overlay_id) => ({ overlay_id })) }) };
+    }),
   };
   const prepare = vi.fn((sql: string) => {
     void sql;
@@ -96,6 +99,30 @@ describe("module overlay realtime routing", () => {
     expect(database.prepare.mock.calls[0]?.[0]).toContain("element.kind = ?");
     expect(database.statement.bind.mock.calls[0]).toEqual(["kanal-a", "ads_beta.countdown", 1, null, null, 0, "ads_beta"]);
     expect(result).toMatchObject({ outcome: "ready", message: { type: "modul.ads_beta.countdown" } });
+  });
+
+  it("can route a quiz cancellation to its overlay after module disable", async () => {
+    const module: BotModule = {
+      id: "quiz",
+      navigationCategory: "chat",
+      settingsSchema: { parse: (value: unknown) => value } as never,
+      defaultSettings: {},
+      overlayElements: [declaration("quiz.session")],
+    };
+    const database = databaseFor(["overlay-quiz"]);
+
+    const result = await prepareModuleOverlayRealtimeMessage(database.database, "kanal-a", "quiz", {
+      kind: "overlay",
+      type: "cancel",
+      elementKind: "quiz.session",
+      payload: { sessionId: "quiz-disabled", phase: "idle", phaseSequence: 0 },
+    }, false, [module], true);
+
+    expect(database.statement.bind.mock.calls[0]?.[5]).toBe(1);
+    expect(result).toMatchObject({
+      outcome: "ready",
+      message: { type: "modul.quiz.cancel", overlayIds: ["overlay-quiz"] },
+    });
   });
 
   it("routes block invalidations only to overlays selecting that block", async () => {

@@ -87,7 +87,7 @@ describe("module overlay element declarations", () => {
       configVersion: 1,
       defaultSize: { width: 640, height: 360 },
       defaultConfig: { showQuestionProgress: true, showPercent: true },
-      mergeRealtimeStateOnModuleMessages: ["modul.quiz.phase", "modul.quiz.results"],
+      mergeRealtimeStateOnModuleMessages: ["modul.quiz.phase", "modul.quiz.results", "modul.quiz.cancel"],
     });
     expect(quiz?.parseConfig({ showPercent: false })).toEqual({
       showQuestionProgress: true,
@@ -99,7 +99,7 @@ describe("module overlay element declarations", () => {
       correctColor: "#32ca88",
     });
     expect(quiz?.parseConfig({ unsafe: true })).toBeNull();
-    expect(quiz?.initialState).toBeTypeOf("function");
+    expect(quiz?.initialStateFromPointRound).toBeTypeOf("function");
     expect(quiz?.load).toBeTypeOf("function");
     expect(quiz?.editor).toBeTypeOf("function");
     expect(moduleOverlayElementKindForMessage("modul.quiz.phase")).toBe("quiz.session");

@@ -72,9 +72,10 @@ import { findChannelVariable } from "../db/channel-variables";
 import { getOverlayBindingForToken } from "./overlay-token-repository";
 import { getOverlayForChannel, getOverlayVariableValues } from "../db/overlays";
 import { hydrateModuleOverlayElements } from "../overlays/module-state";
+import type { ModuleOverlayInitialStateContext } from "../../modules/contract";
 import { hydrateCachedAdsCountdownSnapshot } from "../overlays/ads-countdown-cache";
 import { ADS_COUNTDOWN_ELEMENT_KIND } from "../../modules/ads/overlay/kinds";
-import { createOverlayElementContext } from "../overlays/element-context";
+import { createOverlayElementContext, createOverlayPointRoundContext } from "../overlays/element-context";
 import { notifyCommittedResources, schedulePanelResourceBackgroundWork } from "../panel-resources";
 
 const nowIso = (): string => new Date().toISOString();
@@ -299,13 +300,24 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
     const variables = await getOverlayVariableValues(context.env.DB, record.channelId, overlayId);
     const contextModuleIds = [...new Set(overlay.elements.flatMap((element) => {
       const declaration = moduleOverlayElementForKind(element.kind);
-      return declaration?.definition.initialStateNeedsContext === true ? [declaration.module.id] : [];
+      return declaration?.definition.initialStateNeedsContext === true || declaration?.definition.initialStateNeedsPointRoundContext === true
+        ? [declaration.module.id]
+        : [];
     }))];
-    const elementContext = contextModuleIds.length === 0 ? undefined : new Map(await Promise.all(
-      contextModuleIds.map(async (moduleId) => [
-        moduleId,
-        await createOverlayElementContext(context.env, record.channelId, moduleId, record.language, Date.now()),
-      ] as const),
+    const contextNow = Date.now();
+    const elementContext = contextModuleIds.length === 0 ? undefined : new Map<string, ModuleOverlayInitialStateContext>(await Promise.all(
+      contextModuleIds.map(async (moduleId) => {
+        const declarations = overlay.elements.flatMap((element) => {
+          const declaration = moduleOverlayElementForKind(element.kind);
+          return declaration?.module.id === moduleId ? [declaration.definition] : [];
+        });
+        const pointRoundOnly = declarations.some(({ initialStateNeedsPointRoundContext }) => initialStateNeedsPointRoundContext === true) &&
+          !declarations.some(({ initialStateNeedsContext }) => initialStateNeedsContext === true);
+        const moduleContext = pointRoundOnly
+          ? createOverlayPointRoundContext(context.env, record.channelId, moduleId, contextNow)
+          : await createOverlayElementContext(context.env, record.channelId, moduleId, record.language, contextNow);
+        return [moduleId, moduleContext] as const;
+      }),
     ));
     const elements = await hydrateModuleOverlayElements(
       context.env.DB,

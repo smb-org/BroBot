@@ -1,6 +1,6 @@
-import type { JsonObject, ModuleOverlayElementContext, PointActiveRound, PointResolvedRound } from "../../contract";
+import type { JsonObject, ModuleOverlayElementContext, ModuleOverlayPointRoundContext, PointActiveRound, PointResolvedRound } from "../../contract";
 
-type QuizOverlayPhase = "announce" | "open" | "reveal" | "results";
+type QuizOverlayPhase = "idle" | "announce" | "open" | "reveal" | "results";
 export const QUIZ_RESULTS_DISPLAY_MS = 60_000;
 
 interface QuizOverlayRankingEntry {
@@ -11,6 +11,8 @@ interface QuizOverlayRankingEntry {
 
 export interface QuizOverlayState {
   sessionId: string;
+  phaseSequence: number;
+  sessionStartedAt: string;
   phase: QuizOverlayPhase;
   questionIndex: number;
   questionCount: number;
@@ -51,6 +53,8 @@ const record = (value: unknown): Record<string, unknown> | null =>
 
 const isNonNegativeInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const isDateString = (value: unknown): value is string =>
+  typeof value === "string" && Number.isFinite(Date.parse(value));
 
 const isColor = (value: unknown): value is string => typeof value === "string" && /^#[0-9a-f]{6}$/iu.test(value);
 
@@ -80,7 +84,27 @@ export const parseQuizOverlayConfig = (value: unknown): QuizOverlayConfig | null
 export const parseQuizOverlayState = (value: unknown): QuizOverlayState | null => {
   const state = record(value);
   if (state === null || typeof state.sessionId !== "string" || state.sessionId.length === 0 ||
-      !(state.phase === "announce" || state.phase === "open" || state.phase === "reveal" || state.phase === "results") ||
+      !isNonNegativeInteger(state.phaseSequence) || !isDateString(state.sessionStartedAt) ||
+      !(state.phase === "idle" || state.phase === "announce" || state.phase === "open" || state.phase === "reveal" || state.phase === "results")) return null;
+
+  if (state.phase === "idle") {
+    return {
+      sessionId: state.sessionId,
+      phaseSequence: state.phaseSequence,
+      sessionStartedAt: state.sessionStartedAt,
+      phase: "idle",
+      questionIndex: 0,
+      questionCount: 1,
+      question: "",
+      options: [],
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      ...(isDateString(state.serverNow) ? { serverNow: state.serverNow } : {}),
+    };
+  }
+
+  if (
       !isNonNegativeInteger(state.questionIndex) || !isNonNegativeInteger(state.questionCount) ||
       state.questionCount === 0 || state.questionIndex >= state.questionCount ||
       typeof state.question !== "string" || state.question.length > 200 ||
@@ -91,6 +115,8 @@ export const parseQuizOverlayState = (value: unknown): QuizOverlayState | null =
 
   const parsed: QuizOverlayState = {
     sessionId: state.sessionId,
+    phaseSequence: state.phaseSequence,
+    sessionStartedAt: state.sessionStartedAt,
     phase: state.phase,
     questionIndex: state.questionIndex,
     questionCount: state.questionCount,
@@ -111,9 +137,9 @@ export const parseQuizOverlayState = (value: unknown): QuizOverlayState | null =
   }
 
   if (parsed.phase === "results") {
-    const resultAt = typeof state.resultAt === "string" && Number.isFinite(Date.parse(state.resultAt))
-      ? state.resultAt
-      : parsed.serverNow;
+    const resultAt = isDateString(state.resultAt) ? state.resultAt
+      : isDateString(state.resolvedAt) ? state.resolvedAt
+        : parsed.serverNow;
     if (resultAt !== undefined) parsed.resultAt = resultAt;
     const ranking = Array.isArray(state.ranking) ? state.ranking.slice(0, 10).flatMap((entry) => {
       const rank = record(entry);
@@ -143,11 +169,17 @@ const dataForRound = (round: PointActiveRound | PointResolvedRound, now: number)
   const result = "result" in round ? record(round.result) : null;
   const resolvedAt = "resolvedAt" in round ? Date.parse(round.resolvedAt) : Number.NaN;
   const resultAt = Number.isFinite(resolvedAt) ? new Date(resolvedAt).toISOString() : null;
+  const createdAt = "createdAt" in round && isDateString(round.createdAt) ? round.createdAt : null;
+  const sessionStartedAt = isDateString(data.sessionStartedAt)
+    ? data.sessionStartedAt
+    : createdAt ?? resultAt ?? new Date(now).toISOString();
   const phaseEndsAt = data.phaseEndsAt === null ? null
     : isNonNegativeInteger(data.phaseEndsAt) ? new Date(data.phaseEndsAt).toISOString() : null;
   const paused = data.paused === true;
   const state: Record<string, unknown> = {
     sessionId: data.sessionId,
+    phaseSequence: isNonNegativeInteger(data.phaseSequence) ? data.phaseSequence : 0,
+    sessionStartedAt,
     phase: data.phase,
     questionIndex: data.questionIndex,
     questionCount,
@@ -192,14 +224,14 @@ export const quizOverlayStateForPointRound = (
 };
 
 export const loadQuizOverlayState = async (
-  context: ModuleOverlayElementContext | undefined,
+  context: Pick<ModuleOverlayElementContext | ModuleOverlayPointRoundContext, "now" | "readPointRound"> | undefined,
 ): Promise<JsonObject | null> => {
   if (context?.readPointRound === undefined) return null;
   const round = await context.readPointRound(QUIZ_RESULTS_DISPLAY_MS);
   return quizOverlayStateForPointRound(round, context.now);
 };
 
-/** Phase events replace the snapshot so a later open phase cannot retain reveal-only answers. */
+/** Phase sequence orders quiz snapshots and events independently of clock calibration. */
 export const mergeQuizOverlayRealtimeState = (
   current: Readonly<Record<string, unknown>> | null,
   incoming: Readonly<Record<string, unknown>>,
@@ -211,19 +243,26 @@ export const mergeQuizOverlayRealtimeState = (
 
   const previousTime = previous.serverNow === undefined ? Number.NaN : Date.parse(previous.serverNow);
   const incomingTime = parsed.serverNow === undefined ? Number.NaN : Date.parse(parsed.serverNow);
-  if (Number.isFinite(previousTime) && Number.isFinite(incomingTime) && incomingTime < previousTime) {
-    return previous as unknown as Readonly<Record<string, unknown>>;
-  }
+  const calibratedServerNow = Number.isFinite(previousTime) && Number.isFinite(incomingTime)
+    ? incomingTime > previousTime ? parsed.serverNow : previous.serverNow
+    : parsed.serverNow ?? previous.serverNow;
+  const retainPrevious = (): Readonly<Record<string, unknown>> => ({
+    ...previous,
+    ...(calibratedServerNow === undefined ? {} : { serverNow: calibratedServerNow }),
+  });
 
   if (parsed.sessionId === previous.sessionId) {
-    if (parsed.questionIndex < previous.questionIndex) return previous as unknown as Readonly<Record<string, unknown>>;
-    const phaseOrder: Readonly<Record<QuizOverlayPhase, number>> = { announce: 0, open: 1, reveal: 2, results: 3 };
-    if (parsed.questionIndex === previous.questionIndex && phaseOrder[parsed.phase] < phaseOrder[previous.phase]) {
-      return previous as unknown as Readonly<Record<string, unknown>>;
+    if (parsed.phaseSequence <= previous.phaseSequence) return retainPrevious();
+  } else {
+    const previousStartedAt = Date.parse(previous.sessionStartedAt);
+    const incomingStartedAt = Date.parse(parsed.sessionStartedAt);
+    if (!Number.isFinite(previousStartedAt) || !Number.isFinite(incomingStartedAt) || incomingStartedAt <= previousStartedAt) {
+      return retainPrevious();
     }
-  } else if (!Number.isFinite(previousTime) || !Number.isFinite(incomingTime)) {
-    return previous as unknown as Readonly<Record<string, unknown>>;
   }
 
-  return parsed as unknown as Readonly<Record<string, unknown>>;
+  return {
+    ...parsed,
+    ...(calibratedServerNow === undefined ? {} : { serverNow: calibratedServerNow }),
+  };
 };

@@ -7,6 +7,8 @@ const serverNow = Date.parse("2030-01-01T00:00:00.000Z");
 
 const state = (phase: "announce" | "open" | "reveal" | "results", overrides: Record<string, unknown> = {}) => ({
   sessionId: "quiz-component-test",
+  phaseSequence: 1,
+  sessionStartedAt: new Date(serverNow).toISOString(),
   phase,
   questionIndex: 0,
   questionCount: 3,

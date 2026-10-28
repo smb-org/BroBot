@@ -244,7 +244,15 @@ export interface ModuleTemplateConditionTransition {
   values: Readonly<Record<string, string>>;
 }
 
+export interface ModuleOverlayPointRoundContext {
+  kind: "point-round";
+  now: number;
+  /** Reads this module's active round or its recent resolution, cached for this bootstrap. */
+  readPointRound: NonNullable<ModuleOverlayElementContext["readPointRound"]>;
+}
+
 export interface ModuleOverlayElementContext {
+  kind?: "template";
   now: number;
   language: ModuleLanguage;
   channelTimeZone: () => Promise<string>;
@@ -272,6 +280,8 @@ export interface ModuleOverlayElementContext {
   /** Reads this module's active round, or its recent resolution while a result overlay is visible. */
   readPointRound?: (recentlyResolvedMs: number) => Promise<PointActiveRound | PointResolvedRound | null>;
 }
+
+export type ModuleOverlayInitialStateContext = ModuleOverlayElementContext | ModuleOverlayPointRoundContext;
 
 export interface ModuleOverlayTemplateConditions {
   values: Readonly<Record<string, string>>;
@@ -307,6 +317,8 @@ export interface ModuleOverlayElementDefinition {
   parseConfig: (raw: unknown) => JsonObject | null;
   /** The module initial state uses host template, condition, or channel context. */
   initialStateNeedsContext?: boolean;
+  /** The module initial state needs only the current point round and bootstrap time. */
+  initialStateNeedsPointRoundContext?: boolean;
   /** Module realtime message types that require the host to reload this element's state. */
   reloadStateOnModuleMessages?: readonly string[];
   /** Module realtime message types merged directly into this element's current state. */
@@ -325,6 +337,12 @@ export interface ModuleOverlayElementDefinition {
     channelId: string,
     config: JsonObject,
     context?: ModuleOverlayElementContext,
+  ) => Promise<JsonObject | null>;
+  initialStateFromPointRound?: (
+    db: D1Database,
+    channelId: string,
+    config: JsonObject,
+    context: ModuleOverlayPointRoundContext,
   ) => Promise<JsonObject | null>;
   load: () => Promise<{ default: ComponentType<ModuleOverlayElementProps> }>;
   editor?: () => Promise<{ default: ComponentType<OverlayElementEditorProps> }>;
@@ -1190,6 +1208,7 @@ export interface PointActiveRound {
   state: "announcing" | "open";
   data: unknown;
   deadlineAt: number | null;
+  createdAt?: string;
 }
 
 export interface PointResolvedRound {
@@ -1197,6 +1216,7 @@ export interface PointResolvedRound {
   data: unknown;
   result: unknown;
   resolvedAt: string;
+  createdAt?: string;
 }
 
 /** Funded participants of one round: total count and stake, plus the first logins in join order. */

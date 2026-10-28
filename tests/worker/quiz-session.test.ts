@@ -104,6 +104,24 @@ afterEach(async () => {
 });
 
 describe("quiz answers in the shared point round", () => {
+  it("uses an ordered resolution index for the latest resolved round lookup", async () => {
+    const channelId = `quiz-resolution-index-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    await object.recentlyResolvedGameRound("quiz", 60_000);
+
+    const queryPlan = await runPointObject(object, (_target, state) => state.storage.sql.exec<{ detail: string }>(
+      `EXPLAIN QUERY PLAN
+       SELECT round_id, data_json, resolved_at FROM game_rounds
+        WHERE module_id = ? AND state = 'resolved' AND resolved_at >= ?
+        ORDER BY resolved_at DESC, round_id DESC LIMIT 1`,
+      "quiz",
+      new Date(Date.now() - 60_000).toISOString(),
+    ).toArray());
+
+    expect(queryPlan.map(({ detail }) => detail).join(" ")).not.toMatch(/TEMP B-TREE/u);
+  });
+
   it("rearms the persisted quiz deadline after the first open-phase publication fails", async () => {
     const channelId = `quiz-open-publish-retry-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;

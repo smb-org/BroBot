@@ -73,6 +73,8 @@ export const openQuizSession = async (input: OpenQuizSessionInput): Promise<Open
   const sessionId = crypto.randomUUID();
   const data: QuizSessionRoundData = {
     sessionId,
+    phaseSequence: 0,
+    sessionStartedAt: new Date().toISOString(),
     setId: input.set.id,
     setName: input.set.name,
     language: input.language,

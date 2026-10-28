@@ -5227,8 +5227,9 @@ export class ChannelObject extends DurableObject<Env> {
       state: "announcing" | "open";
       deadline_at: number | null;
       data_json: string;
+      created_at: string;
     }>(
-      `SELECT round_id, state, deadline_at, data_json FROM game_rounds
+      `SELECT round_id, state, deadline_at, data_json, created_at FROM game_rounds
         WHERE module_id = ? AND state IN ('announcing', 'open')
         ORDER BY created_at, round_id LIMIT 1`,
       moduleId,
@@ -5238,6 +5239,7 @@ export class ChannelObject extends DurableObject<Env> {
       state: round.state,
       data: JSON.parse(round.data_json) as unknown,
       deadlineAt: round.deadline_at,
+      createdAt: round.created_at,
     };
   }
 
@@ -5249,11 +5251,13 @@ export class ChannelObject extends DurableObject<Env> {
       round_id: string;
       data_json: string;
       resolved_at: string | null;
+      created_at: string;
     }>(
-      `SELECT round_id, data_json, resolved_at FROM game_rounds
-        WHERE module_id = ? AND state = 'resolved' AND resolved_at IS NOT NULL
+      `SELECT round_id, data_json, resolved_at, created_at FROM game_rounds
+        WHERE module_id = ? AND state = 'resolved' AND resolved_at >= ?
         ORDER BY resolved_at DESC, round_id DESC LIMIT 1`,
       moduleId,
+      new Date(Math.max(-8_640_000_000_000_000, Date.now() - maxAgeMs)).toISOString(),
     ).toArray()[0];
     if (round === undefined || round.resolved_at === null) return null;
     const resolvedAtMs = Date.parse(round.resolved_at);
@@ -5270,6 +5274,7 @@ export class ChannelObject extends DurableObject<Env> {
       data,
       result: JSON.parse(operation.result_json) as unknown,
       resolvedAt: round.resolved_at,
+      createdAt: round.created_at,
     };
   }
 
