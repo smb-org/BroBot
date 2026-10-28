@@ -196,6 +196,7 @@ export const dryRunChatMessage = async (
       });
       const context: ModuleDryRunContext = {
         DB: db,
+        readOnly: true,
         defaultChatTarget,
         botUserId: () => Promise.resolve(botIdentity?.userId ?? null),
         streamState: () => Promise.resolve(streamState),

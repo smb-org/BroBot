@@ -335,6 +335,51 @@ describe("EventSub inbound", () => {
     });
   });
 
+  it("publishes a stream.online channel-list revision to other channels on the same event", async () => {
+    const sourceChannelId = "stream-online-notifier-a";
+    const watchingChannelId = "stream-online-notifier-b";
+    await insertChannel(database, sourceChannelId);
+    await insertChannel(database, watchingChannelId);
+    await database.prepare("DELETE FROM panel_resource_pending").run();
+    const previousWatchingRevision = await database.prepare(
+      "SELECT revision FROM panel_resource_revisions WHERE channel_id = ? AND resource = 'channels'",
+    ).bind(watchingChannelId).first<{ revision: number }>();
+    const delivered: Array<{ channelId: string; revisions: Readonly<Record<string, number>> }> = [];
+    const channel = {
+      idFromName: (channelId: string) => channelId,
+      get: (channelId: string) => ({
+        transitionTimerStream: () => Promise.resolve(),
+        clearAdPrewarning: () => Promise.resolve(),
+        publish: () => Promise.resolve(),
+        reconcilePanelResources: (revisions: Readonly<Record<string, number>>) => {
+          delivered.push({ channelId, revisions });
+          return Promise.resolve();
+        },
+      }),
+    } as unknown as Env["CHANNEL"];
+    const body = JSON.stringify({
+      subscription: {
+        type: "stream.online",
+        condition: { broadcaster_user_id: sourceChannelId },
+      },
+      event: {
+        id: "stream-session-a",
+        broadcaster_user_id: sourceChannelId,
+        started_at: "2026-09-19T09:00:00.000Z",
+      },
+    });
+
+    const response = await eventSubRouter.fetch(
+      signedRequest(secret, "notification", body, "stream-online-cross-channel"),
+      environment(channel),
+    );
+
+    expect(response.status).toBe(204);
+    const watchingChannelDelivery = delivered.find(({ channelId }) => channelId === watchingChannelId);
+    expect(watchingChannelDelivery?.revisions.channels).toBeGreaterThan(previousWatchingRevision?.revision ?? 0);
+    await expect(database.prepare("SELECT 1 FROM panel_resource_pending LIMIT 1").first()).resolves.toBeNull();
+  });
+
   it("keeps newer online state and stream-end brakes when a delayed offline reaches the HTTP handler", async () => {
     const channelId = "channel-stream-order";
     await insertChannel(database, channelId);
@@ -746,7 +791,10 @@ describe("EventSub inbound", () => {
       ...environment(),
       CHANNEL: {
         idFromName: (channelId: string) => channelId,
-        get: () => ({ publish: (messages: readonly unknown[]) => { realtimeMessages.push(...messages); } }),
+        get: () => ({
+          publish: (messages: readonly unknown[]) => { realtimeMessages.push(...messages); },
+          reconcilePanelResources: () => Promise.resolve(),
+        }),
       },
     } as unknown as Env;
 

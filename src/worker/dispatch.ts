@@ -56,6 +56,14 @@ export interface DispatchEnvironment {
   CHANNEL?: Env["CHANNEL"];
 }
 
+interface SyncedPointActivation {
+  revision: number;
+  closed: boolean;
+  lastDisabledRevision: number | null;
+}
+
+const syncedPointActivationsByNamespace = new WeakMap<object, Map<string, SyncedPointActivation>>();
+
 /** The host logs actions and their outcome; modules justify inaction. */
 const HOST_MODULE_ID = "host";
 
@@ -1079,10 +1087,12 @@ export const dispatchEventSubNotification = async (
     let dynamicConditions: readonly ModuleTextBlockConditionDefinition[];
     try {
       [dynamicVariables, dynamicConditions] = await Promise.all([
-        module.templateVariableNamespace === "text_blocks"
+        module.templateVariableNamespace === "text_blocks" || module.templateVariableNamespace === "api_sources"
           ? Promise.resolve([] as readonly TemplateVariable[])
           : module.templateVariables?.(environment.DB, event.channelId) ?? Promise.resolve([]),
-        module.textBlockConditionsForChannel?.(environment.DB, event.channelId) ?? Promise.resolve([]),
+        module.textBlockConditionNamespace !== undefined
+          ? Promise.resolve([] as readonly ModuleTextBlockConditionDefinition[])
+          : module.textBlockConditionsForChannel?.(environment.DB, event.channelId) ?? Promise.resolve([]),
       ]);
     } catch {
       dynamicVariables = [];
@@ -1108,6 +1118,7 @@ export const dispatchEventSubNotification = async (
       ...(provider.templateVariableNamespace === undefined ? {} : { templateVariableNamespace: provider.templateVariableNamespace }),
       variables: registeredModuleVariables.get(provider.id) ?? [],
       textBlockConditions: registeredModuleConditions.get(provider.id) ?? [],
+      ...(provider.textBlockConditionNamespace === undefined ? {} : { textBlockConditionNamespace: provider.textBlockConditionNamespace }),
       ...(provider.templateUnavailableText === undefined ? {} : { templateUnavailableText: provider.templateUnavailableText }),
       ...(provider.resolveTemplateConditions === undefined ? {} : { resolveTemplateConditions: provider.resolveTemplateConditions }),
       ...(provider.dynamicTemplateVariableNames === undefined ? {} : { dynamicTemplateVariableNames: provider.dynamicTemplateVariableNames }),
@@ -1197,7 +1208,28 @@ export const dispatchEventSubNotification = async (
           : undefined,
       );
       if (module.requiresModules?.includes("points") === true && activation !== undefined) {
-        await points.rounds.setGate(!activation.enabled, activation.revision, activation.lastDisabledRevision);
+        const namespace = environment.CHANNEL;
+        if (namespace === undefined) {
+          await points.rounds.setGate(!activation.enabled, activation.revision, activation.lastDisabledRevision);
+        } else {
+          let syncedByChannel = syncedPointActivationsByNamespace.get(namespace);
+          if (syncedByChannel === undefined) {
+            syncedByChannel = new Map();
+            syncedPointActivationsByNamespace.set(namespace, syncedByChannel);
+          }
+          const key = `${event.channelId}\u0000${module.id}`;
+          const next: SyncedPointActivation = {
+            revision: activation.revision,
+            closed: !activation.enabled,
+            lastDisabledRevision: activation.lastDisabledRevision,
+          };
+          const previous = syncedByChannel.get(key);
+          if (previous === undefined || previous.revision !== next.revision || previous.closed !== next.closed ||
+              previous.lastDisabledRevision !== next.lastDisabledRevision) {
+            await points.rounds.setGate(next.closed, next.revision, next.lastDisabledRevision);
+            if (previous === undefined || next.revision >= previous.revision) syncedByChannel.set(key, next);
+          }
+        }
       }
       const validatedSettings: unknown = (module.settingsReadSchema ?? module.settingsSchema).parse(JSON.parse(settings));
       isCommandResponseHandler = commandRouteMatchesModule(module, event, validatedSettings);
@@ -1388,7 +1420,7 @@ export const dispatchEventSubNotification = async (
       }
     }
 
-    newEntries.push(...await writeModuleDiagnostics(
+    const diagnosticEntries = await writeModuleDiagnostics(
       environment.DB,
       event.channelId,
       module.id,
@@ -1396,7 +1428,8 @@ export const dispatchEventSubNotification = async (
       actor?.userId ?? null,
       diagnostics,
       event.receivedAt,
-    ));
+    );
+    newEntries.push(...diagnosticEntries);
   }
 
   if (event.subscriptionType === "stream.offline" && environment.CHANNEL !== undefined) {
@@ -1407,7 +1440,9 @@ export const dispatchEventSubNotification = async (
     }
   }
 
-  if (newEntries.length === 0 && changedVariables.size === 0 && streamStateChanged === null) return;
+  if (newEntries.length === 0 && changedVariables.size === 0 && streamStateChanged === null) {
+    return;
+  }
   const realtimeMessages: RealtimeMessage[] = newEntries.length === 0 ? [] : [{
     version: 1,
     id: crypto.randomUUID(),

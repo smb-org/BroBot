@@ -741,6 +741,8 @@ export type ModuleDryRunContext = Pick<ModuleExecutionContext,
   activeChatters?: Pick<ModuleExecutionContext["activeChatters"], "count" | "seen">;
   /** Reads a module cooldown without claiming or changing it. */
   pointCooldownRemaining?: (moduleId: string, key: string) => Promise<number>;
+  /** Marks template rendering as a side-effect-free dry-run simulation. */
+  readOnly?: boolean;
 };
 
 /** Durable storage and alarm access given to a module alarm handler. */
@@ -2165,6 +2167,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   templateUnavailableText?: Readonly<Record<ModuleLanguage, string>>;
   /** Declares generic conditions that module-owned text blocks can select. */
   textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
+  /** Dynamic condition IDs accepted without loading a channel catalog up front. */
+  textBlockConditionNamespace?: string;
   /** Channel-specific condition choices backed by module-owned data. */
   textBlockConditionsForChannel?: (
     db: D1Database,

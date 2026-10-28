@@ -257,6 +257,7 @@ export const createFaqPeekRepository = (
       recordClaim?.(result);
       return result;
     },
+    releaseClaim: () => Promise.resolve(),
   };
 };
 
