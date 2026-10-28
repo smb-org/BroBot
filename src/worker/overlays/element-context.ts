@@ -10,6 +10,7 @@ import type {
   ModuleTemplateConditionTimelineContext,
   ModuleTextBlockConditionDefinition,
   ModuleTemplateConditionTransition,
+  PointActiveRound,
 } from "../../modules/contract";
 import { MODULES, variablesForModuleTemplateContext } from "../../modules/registry";
 import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
@@ -362,5 +363,11 @@ export const createOverlayElementContext = async (
     dynamicTemplateVariableNames,
     overlayTemplateVariableNames,
     readBallot: (ballotId) => moduleBallots(env.CHANNEL, channelId, moduleId).read(ballotId),
+    readPointRound: async (recentlyResolvedMs) => {
+      const channelObject = env.CHANNEL.get(env.CHANNEL.idFromName(channelId));
+      const active = await channelObject.activeGameRound(moduleId) as PointActiveRound | null;
+      if (active !== null) return active;
+      return channelObject.recentlyResolvedGameRound(moduleId, recentlyResolvedMs);
+    },
   };
 };

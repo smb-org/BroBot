@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   helixRequest: vi.fn(),
   getOverlayStreamDetails: vi.fn(),
   readBallot: vi.fn(),
+  activeGameRound: vi.fn(),
+  recentlyResolvedGameRound: vi.fn(),
 }));
 
 vi.mock("../../src/worker/app-token", () => ({ getAppAccessToken: mocks.getAppAccessToken }));
@@ -40,6 +42,8 @@ const environment = {
     get: () => ({
       getOverlayStreamDetails: mocks.getOverlayStreamDetails,
       readBallot: mocks.readBallot,
+      activeGameRound: mocks.activeGameRound,
+      recentlyResolvedGameRound: mocks.recentlyResolvedGameRound,
     }),
   },
 } as unknown as Env;
@@ -53,6 +57,8 @@ describe("overlay element template context", () => {
     mocks.helixRequest.mockReset();
     mocks.getOverlayStreamDetails.mockReset();
     mocks.readBallot.mockReset();
+    mocks.activeGameRound.mockReset();
+    mocks.recentlyResolvedGameRound.mockReset();
   });
 
   it("renders viewer counts through the channel's shared stream-details cache", async () => {
@@ -79,6 +85,19 @@ describe("overlay element template context", () => {
 
     await expect(context.readBallot("poll-a")).resolves.toEqual({ counts: [4, 2], revision: 6 });
     expect(mocks.readBallot).toHaveBeenCalledWith("chat_voting", "poll-a");
+  });
+
+  it("hydrates an overlay from the active or recently resolved module round", async () => {
+    const active = { roundId: "quiz-active", state: "open", data: { phase: "open" }, deadlineAt: 10_000 };
+    const resolved = { roundId: "quiz-results", data: { phase: "results" }, result: { ranking: [] }, resolvedAt: startedAt };
+    mocks.activeGameRound.mockResolvedValueOnce(active).mockResolvedValueOnce(null);
+    mocks.recentlyResolvedGameRound.mockResolvedValueOnce(resolved);
+    const context = await createOverlayElementContext(environment, "channel-a", "quiz", "en", Date.parse(startedAt));
+
+    await expect(context.readPointRound?.(60_000)).resolves.toEqual(active);
+    await expect(context.readPointRound?.(60_000)).resolves.toEqual(resolved);
+    expect(mocks.activeGameRound).toHaveBeenCalledWith("quiz");
+    expect(mocks.recentlyResolvedGameRound).toHaveBeenCalledWith("quiz", 60_000);
   });
 
   it("uses the chat unavailable output when the stream viewer count cannot be read", async () => {

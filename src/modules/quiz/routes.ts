@@ -12,6 +12,7 @@ import { createQuizSetRepository } from "./adapters/d1";
 import { validateQuizSet } from "./domain/sets";
 import { loadEnabledQuizSettings, openQuizSession, quizRoundData } from "./service";
 import { quizPhasePayload, quizSessionControlAlarm } from "./lifecycle";
+import { QUIZ_RESULTS_DISPLAY_MS } from "./overlay/state";
 
 type QuizRouteContext = Context<ModuleRouteEnvironment>;
 const body = async (request: Request): Promise<unknown> => request.json().catch(() => null);
@@ -22,8 +23,6 @@ const repository = (context: QuizRouteContext) => createQuizSetRepository(contex
 const denied = (context: QuizRouteContext): Response => context.json({ error: "quiz_management_denied" }, 403);
 const nowIso = (): string => new Date().toISOString();
 const auditSnapshot = (set: QuizSet) => ({ setId: set.id, name: set.name, revision: set.revision, questionCount: set.questions.length });
-const QUIZ_RESULTS_DISPLAY_MS = 60_000;
-
 export const quizRoutes = new Hono<ModuleRouteEnvironment>();
 
 const streamIsOnline = async (db: D1Database, channelId: string): Promise<boolean> =>

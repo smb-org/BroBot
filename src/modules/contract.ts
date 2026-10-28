@@ -269,6 +269,8 @@ export interface ModuleOverlayElementContext {
   overlayTemplateVariableNames: ReadonlySet<string>;
   /** Reads only this overlay element's module ballot in the current channel. */
   readBallot: (ballotId: string) => Promise<BallotSnapshot | null>;
+  /** Reads this module's active round, or its recent resolution while a result overlay is visible. */
+  readPointRound?: (recentlyResolvedMs: number) => Promise<PointActiveRound | PointResolvedRound | null>;
 }
 
 export interface ModuleOverlayTemplateConditions {

@@ -90,6 +90,27 @@ const slotOverlayPayload = (
     variables: {},
   }), { status: 200, headers: { "Content-Type": "application/json" } });
 
+const quizOverlayPayload = (state: Record<string, unknown> | null): Response => new Response(JSON.stringify({
+  language: "en",
+  overlay: {
+    id: "overlay-quiz-fixture",
+    revision: 1,
+    width: 1920,
+    height: 1080,
+    css: "",
+    elements: [{
+      ...element("quiz-element", 0, 0, 100, 1, true, "", "quiz.session"),
+      label: "Quiz",
+      variableName: null,
+      text: "",
+      config: {},
+      state,
+      moduleEnabled: true,
+    }],
+  },
+  variables: {},
+}), { status: 200, headers: { "Content-Type": "application/json" } });
+
 const slotSpinState = {
   spinId: "spin-shell-fixture",
   login: "pixelwanderer",
@@ -132,6 +153,61 @@ describe("OverlayShell and OverlayCanvas", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     document.head.querySelector("style[data-brobot-overlay-css]")?.remove();
+  });
+
+  it("applies quiz phase events without answer leakage and hydrates results after reconnect", async () => {
+    const announce = {
+      sessionId: "quiz-shell-fixture", phase: "announce", questionIndex: 0, questionCount: 2,
+      question: "First question", options: ["One", "Two"], phaseEndsAt: null, paused: false, remainingMs: null,
+      serverNow: "2030-01-01T00:00:00.000Z",
+    };
+    const reveal = {
+      ...announce, phase: "reveal", correctIndex: 1, answerDistribution: [1, 4],
+    };
+    const nextOpen = {
+      ...announce, phase: "open", questionIndex: 1, question: "Second question",
+      phaseEndsAt: "2030-01-01T00:00:20.000Z",
+    };
+    const results = {
+      ...nextOpen, phase: "results", phaseEndsAt: null,
+      ranking: [{ login: "sampleviewer", correct: 2, rank: 1 }],
+    };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(quizOverlayPayload(announce))
+      .mockResolvedValueOnce(quizOverlayPayload(results));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await waitFor(() => expect(container.querySelector(".quiz-session-overlay")?.getAttribute("data-phase")).toBe("announce"));
+    expect(container.textContent).toContain("First question");
+    expect(container.textContent).not.toContain("Correct");
+
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "quiz-reveal",
+      createdAt: "2030-01-01T00:00:03.000Z",
+      channelId: "fictional-channel",
+      type: "modul.quiz.phase",
+      payload: reveal,
+    }));
+    await waitFor(() => expect(container.querySelector("[data-correct=\"true\"]")?.textContent).toContain("Two"));
+
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "quiz-next-open",
+      createdAt: "2030-01-01T00:00:04.000Z",
+      channelId: "fictional-channel",
+      type: "modul.quiz.phase",
+      payload: nextOpen,
+    }));
+    await waitFor(() => expect(container.querySelector(".quiz-session-overlay")?.getAttribute("data-phase")).toBe("open"));
+    expect(container.textContent).toContain("Second question");
+    expect(container.textContent).not.toContain("Correct");
+
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(container.querySelector(".quiz-session-overlay")?.getAttribute("data-phase")).toBe("results"));
+    expect(container.textContent).toContain("sampleviewer");
   });
 
   it("uses one bootstrap and one socket for a three-element composition", async () => {

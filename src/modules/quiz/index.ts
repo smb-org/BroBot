@@ -14,6 +14,7 @@ import {
   resultChatLine,
 } from "./lifecycle";
 import { startQuizSession } from "./panel/service";
+import { quizOverlayElements } from "./overlay/element";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -47,7 +48,7 @@ export const quizModule: BotModule<typeof quizSettingsSchema> = {
   preservePointRoundDeadlineOnAnnouncementFailure: true,
   retrySuppressedPointRoundAnnouncements: true,
   pointRoundCancellationNotice: false,
-  overlayRealtimeElementKinds: ["quiz.session"],
+  overlayElements: quizOverlayElements,
   formatPointRoundAnnouncement: formatQuizPointRoundAnnouncement,
   formatPointRoundResult: (_context, round: ModulePointRoundResult) => {
     const data = quizRoundData(round.data);
