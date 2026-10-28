@@ -739,12 +739,8 @@ export const dispatchEventSubNotification = async (
   },
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
-  onCommittedPanelResourceChange?: () => void,
 ): Promise<void> => {
   const externalFetchBudget = createModuleExternalFetchBudget();
-  const noteCommittedPanelResourceChange = (): void => {
-    onCommittedPanelResourceChange?.();
-  };
   if (event.subscriptionType === "stream.online" || event.subscriptionType === "stream.offline") {
     const online = event.subscriptionType === "stream.online";
     if (online) {
@@ -1267,7 +1263,6 @@ export const dispatchEventSubNotification = async (
         DB: environment.DB,
         moduleSecrets: (providerModuleId) => createModuleSecretReadAccess(environment, event.channelId, providerModuleId),
         externalFetchBudget,
-        onCommittedPanelResourceChange: noteCommittedPanelResourceChange,
         ...(environment.CHANNEL === undefined ? {} : {
           runModuleAlarm: (moduleId: string, handlerKey: string, alarmKey: string, invocation?: unknown) => {
             const object = environment.CHANNEL?.get(environment.CHANNEL.idFromName(event.channelId));
@@ -1313,7 +1308,6 @@ export const dispatchEventSubNotification = async (
             },
             isChannelModerator: (userId) => isTwitchChannelModerator(environment, event.channelId, userId, fetcher),
             isRecentBotMessage,
-            onCommittedPanelResourceChange: noteCommittedPanelResourceChange,
             streamState,
             streamStateTransitionAccepted,
             ...(streamStateTransitionAccepted && streamStateTransitionGeneration !== undefined
@@ -1395,7 +1389,6 @@ export const dispatchEventSubNotification = async (
 
     if (result !== null) {
       diagnostics.push(...result.diagnostics);
-      if (result.actions.length > 0) noteCommittedPanelResourceChange();
       for (const change of result.variableChanges ?? []) {
         changedVariables.set(change.name, change.value);
         overlayIdsByVariable.set(change.name, change.overlayIds);
@@ -1436,7 +1429,6 @@ export const dispatchEventSubNotification = async (
       diagnostics,
       event.receivedAt,
     );
-    if (diagnosticEntries.length > 0) noteCommittedPanelResourceChange();
     newEntries.push(...diagnosticEntries);
   }
 
@@ -1480,7 +1472,6 @@ export const dispatchEventSubNotification = async (
     }
   }
   if (changedVariables.size > 0) {
-    noteCommittedPanelResourceChange();
     await publishVariablesChanged(
       environment.CHANNEL,
       environment.DB,

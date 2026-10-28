@@ -53,7 +53,6 @@ const routeHasNotifier = (
   nonPanelReads: ReadonlySet<string> = new Set(PANEL_RESOURCE_NOTIFIER_COVERAGE.nonPanelGetRoutes),
 ): boolean => {
   const routeKey = `${route.method} ${route.path}`;
-  if (route.method === "GET" && routeIsCovered(route.path, PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes)) return false;
   if (explicitRoutes.has(routeKey) || nonPanelWrites.has(routeKey) || nonPanelAllRoutes.has(routeKey)) return true;
   if (route.method === "GET") {
     return nonPanelReads.has(route.path) || routeIsCovered(route.path, PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes);
@@ -339,7 +338,7 @@ describe("panel resource revisions", () => {
       routePatterns,
       explicitRoutes,
       hypotheticalChannelWritingGet,
-    )).toBe(false);
+    )).toBe(true);
     const unnotifiedPlatformWritingGet = { method: "GET", path: "/api/platform/writing-get" };
     expect(routeHasNotifier(
       unnotifiedPlatformWritingGet,
@@ -407,7 +406,7 @@ describe("panel resource revisions", () => {
     const worker = readFileSync(resolve(root, "src/worker/app-routes.ts"), "utf8");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.channelRoutes");
     expect(worker).toContain("app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.platformRoutes");
-    expect(worker).toMatch(/finally \{\s*const channelId = context\.req\.param\("channelId"\);\s*const isDryRun = .*context\.req\.path\);\s*if \(!isDryRun && mutatingMethods\.has\(context\.req\.method\.toUpperCase\(\)\) && channelId\.length > 0 &&\s*authorizedContextHas\(context, "session"\)\) \{\s*await notifyCommittedResources\(context\.env\);/u);
+    expect(worker).toMatch(/finally \{\s*const channelId = context\.req\.param\("channelId"\);\s*const isDryRun = .*context\.req\.path\);\s*if \(!isDryRun && channelId\.length > 0 &&\s*authorizedContextHas\(context, "session"\)\) \{\s*await notifyCommittedResources\(context\.env\);/u);
     expect(worker).not.toContain("PANEL_RESOURCE_NOTIFIER_COVERAGE.authRoutes");
     expect(worker).not.toMatch(/context\.res\.status !== 401/u);
     const deferredSources = new Map(sourceFilesUnder(resolve(root, "src")).map((path) => [
@@ -446,7 +445,8 @@ describe("panel resource revisions", () => {
     expect(ballotTermCast).toContain('result.status === "overflow"');
     expect(ballotTermCast).toContain("await this.publishCommittedDurablePanelResources()");
     const eventSubSource = readFileSync(resolve(root, "src/worker/eventsub.ts"), "utf8");
-    expect(eventSubSource).toMatch(/finally \{\s*if \(didCommitPanelResourceChange\(\)\) \{\s*await notifyCommittedResources\(context\.env, notifierChannelId, undefined, true\);/u);
+    expect(eventSubSource).toMatch(/finally \{\s*await notifyCommittedResources\(context\.env\);/u);
+    expect(eventSubSource).not.toContain("didCommitPanelResourceChange");
     expect(eventSubSource).toMatch(/revokeRealtimeUserFromAllChannels\([\s\S]*?revocation\.authorizationIdentity\.userId/u);
     const authSource = readFileSync(resolve(root, "src/worker/auth/routes.ts"), "utf8");
     expect(authSource.match(/finally \{\s*await notifyCommittedResources\(env\);/gu) ?? []).toHaveLength(2);
@@ -605,7 +605,7 @@ describe("panel resource revisions", () => {
     expect(idFromName).not.toHaveBeenCalled();
   });
 
-  it("does not drain committed panel changes from an authenticated read-only channel request", async () => {
+  it("drains pending panel changes after an authenticated read-only channel request", async () => {
     const database = new TestD1Database();
     const visitedChannels: string[] = [];
     const cookieKeys = JSON.stringify({ active: { id: "cookie-v1", key: testKey(1) }, retired: [] });
@@ -644,12 +644,91 @@ describe("panel resource revisions", () => {
       ), env);
 
       expect(response.status).toBe(200);
-      expect(visitedChannels).toEqual([]);
+      expect(visitedChannels).toEqual(["cross-channel-a", "cross-channel-b"]);
       const remaining = await database.prepare(
         "SELECT channel_id FROM panel_resource_pending ORDER BY channel_id LIMIT 1",
       ).first<{ channel_id: string }>();
-      expect(remaining).toEqual({ channel_id: "cross-channel-a" });
+      expect(remaining).toBeNull();
     } finally {
+      database.close();
+    }
+  });
+
+  it("probes an empty pending queue once without issuing a claim", async () => {
+    const database = new TestD1Database();
+    const prepare = vi.spyOn(database, "prepare");
+    const getChannel = vi.fn();
+    try {
+      const env = {
+        DB: database as unknown as D1Database,
+        CHANNEL: { idFromName: (channelId: string) => channelId, get: getChannel },
+      } as unknown as Env;
+
+      await notifyCommittedResources(env);
+
+      expect(prepare.mock.calls.map(([sql]) => sql.replace(/\s+/gu, " ").trim())).toEqual([
+        "SELECT channel_id FROM panel_resource_pending ORDER BY channel_id LIMIT 1",
+      ]);
+      expect(getChannel).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("delivers a weather cache write committed by an authenticated GET", async () => {
+    const database = new TestD1Database();
+    const channelId = "weather-get-channel";
+    const userId = "weather-get-manager";
+    const cookieKeys = JSON.stringify({ active: { id: "cookie-v1", key: testKey(31) }, retired: [] });
+    const encryptionKeys = JSON.stringify({ active: { id: "encryption-v1", key: testKey(32) }, retired: [] });
+    const reconciled: PanelResourceRevisionVector[] = [];
+    try {
+      await insertChannel(database, channelId);
+      await database.prepare(
+        `UPDATE channels
+            SET location_name = 'Berlin', location_latitude = 52.5, location_longitude = 13.4,
+                location_time_zone = 'Europe/Berlin'
+          WHERE channel_id = ?`,
+      ).bind(channelId).run();
+      await insertLoginIdentityAndSession(database, userId);
+      await insertMember(database, channelId, userId, "manager");
+      await database.prepare("DELETE FROM panel_resource_pending").run();
+      const before = await readPanelResourceRevisions(database as unknown as D1Database, channelId);
+      const sessionCookie = await createSessionCookie({ sessionId: `session-${userId}` }, cookieKeys, encryptionKeys);
+      const env = {
+        DB: database as unknown as D1Database,
+        SESSION_COOKIE_KEYS: cookieKeys,
+        SESSION_ENCRYPTION_KEYS: encryptionKeys,
+        CHANNEL: {
+          idFromName: (id: string) => id,
+          get: () => ({
+            reconcilePanelResources: (revisions: PanelResourceRevisionVector) => {
+              reconciled.push(revisions);
+              return Promise.resolve();
+            },
+          }),
+        },
+      } as unknown as Env;
+      vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockRejectedValue(new Error("weather provider unavailable")));
+
+      const response = await app.fetch(new Request(
+        `https://brobot.example/api/channels/${channelId}/modules/weather/current`,
+        { headers: { Cookie: `__Host-brobot_session=${sessionCookie}` } },
+      ), env);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ status: "provider_error" });
+      const cache = await database.prepare(
+        "SELECT payload_json FROM weather_cache WHERE provider = 'met_norway' LIMIT 1",
+      ).first<{ payload_json: string }>();
+      expect(cache).not.toBeNull();
+      const after = await readPanelResourceRevisions(database as unknown as D1Database, channelId);
+      expect(after["channel.library"]).toBe((before["channel.library"] ?? 0) + 1);
+      expect(reconciled).toHaveLength(1);
+      expect(reconciled[0]?.["channel.library"]).toBe(after["channel.library"]);
+      await expect(database.prepare("SELECT 1 FROM panel_resource_pending LIMIT 1").first()).resolves.toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
       database.close();
     }
   });

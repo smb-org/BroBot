@@ -4,7 +4,7 @@ import type { FaqRepository } from "./repository";
 
 type FaqMessageContext = Pick<ModuleExecutionContext, "renderTemplate"> & Partial<Pick<
   ModuleExecutionContext,
-  "botUserId" | "isRecentBotMessage" | "channelGameId" | "onCommittedPanelResourceChange"
+  "botUserId" | "isRecentBotMessage" | "channelGameId"
 >> & { readOnly?: boolean };
 
 const messageText = (event: ModuleEvent): string | null => {
@@ -59,7 +59,6 @@ export const processFaqMessage = async (
   } else {
     const claim = await repository.claim(event.channelId, match.entry, senderId, new Date().toISOString());
     if (!claim.claimed) return { actions: [], diagnostics: [] };
-    context.onCommittedPanelResourceChange?.();
     try {
       rendered = await context.renderTemplate(match.entry.answerText, {});
     } catch (error: unknown) {

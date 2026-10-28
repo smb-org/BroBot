@@ -6805,7 +6805,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async publishCommittedDurablePanelResources(): Promise<void> {
-    await this.reconcilePanelResources({});
+    await this.notifyCommittedPanelResources();
   }
 
   public async getPanelResourceRevisions(): Promise<PanelResourceRevisionVector> {

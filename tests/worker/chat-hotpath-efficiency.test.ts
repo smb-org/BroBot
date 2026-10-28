@@ -93,6 +93,7 @@ describe("ordinary chat dispatch efficiency", () => {
         "SELECT updated_at FROM point_accounts WHERE account_id = ?",
         "hotpath-viewer",
       ).one().updated_at);
+    await worker.DB.prepare("DELETE FROM panel_resource_pending").run();
 
     gameGate.mockClear();
     recordChatActivity.mockClear();
@@ -110,10 +111,12 @@ describe("ordinary chat dispatch efficiency", () => {
     });
     expect(response.status).toBe(204);
 
-    const statementSql = databasePrepare.mock.calls.map(([sql]) => sql.toLowerCase());
-    expect(statementSql).toHaveLength(6);
+    const statementSql = databasePrepare.mock.calls.map(([sql]) => sql.toLowerCase().replaceAll(/\s+/g, " ").trim());
+    expect(statementSql).toHaveLength(7);
     expect(statementSql.some((sql) => sql.includes("from api_sources"))).toBe(false);
-    expect(statementSql.some((sql) => sql.includes("panel_resource_pending"))).toBe(false);
+    expect(statementSql.filter((sql) => sql.includes("panel_resource_pending"))).toEqual([
+      "select channel_id from panel_resource_pending order by channel_id limit 1",
+    ]);
     expect(gameGate).not.toHaveBeenCalled();
     expect(isRecentBotChatMessage).not.toHaveBeenCalled();
     expect(recordChatActivity).toHaveBeenCalledTimes(1);

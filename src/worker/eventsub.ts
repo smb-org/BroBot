@@ -340,7 +340,6 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     return response("Invalid EventSub notification.", 400);
   }
 
-  let dispatchCommittedPanelResources = false;
   const dispatchNotification = (): Promise<void> => dispatchEventSubNotification(context.env, {
     channelId: target.channelId,
     subscriptionType: target.subscriptionType,
@@ -349,8 +348,7 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     payload: target.payload,
     receivedAt: now,
     eventSubTimestamp: timestamp,
-  }, fetch, undefined, () => { dispatchCommittedPanelResources = true; });
-  const didCommitPanelResourceChange = (): boolean => dispatchCommittedPanelResources;
+  }, fetch);
 
   try {
     await dispatchNotification();
@@ -363,8 +361,6 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     }
     return response(null, 204);
   } finally {
-    if (didCommitPanelResourceChange()) {
-      await notifyCommittedResources(context.env, notifierChannelId, undefined, true);
-    }
+    await notifyCommittedResources(context.env);
   }
 });

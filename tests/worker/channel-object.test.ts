@@ -2828,6 +2828,57 @@ describe("ChannelObject realtime path", () => {
     });
   });
 
+  it("publishes a DO-only ballot revision on top of the D1 baseline", async () => {
+    const resource = "module:chat_voting:panel";
+    const panel = socketFor(validPrincipal());
+    const values = new Map<string, unknown>([
+      ["ballot:active", { moduleId: "chat_voting", ballotId: "published-ballot" }],
+      ["ballot:chat_voting:published-ballot", {
+        moduleId: "chat_voting",
+        ballotId: "published-ballot",
+        key: new Uint8Array(32),
+        optionCount: 2,
+        counts: [0, 0],
+        revision: 1,
+        openedAt: 10_000,
+        expiresAt: Date.now() + 60_000,
+      }],
+      ["channel:panel_resource_revisions", { [resource]: 1 }],
+      ["panel:published_resource_revisions", { [resource]: 6 }],
+    ]);
+    const object = objectFor([panel], undefined, values);
+    const internals = object as unknown as { env: Env };
+    const database = internals.env.DB;
+    const originalPrepare = database.prepare.bind(database);
+    internals.env.DB = new Proxy(database, {
+      get(target, property, receiver) {
+        if (property === "prepare") {
+          return (sql: string) => {
+            if (/SELECT resource, revision[\s\S]*FROM panel_resource_revisions/u.test(sql)) {
+              return {
+                bind: () => ({ all: () => Promise.resolve({ results: [{ resource, revision: 5 }] }) }),
+              };
+            }
+            return originalPrepare(sql);
+          };
+        }
+        const value: unknown = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) as unknown : value;
+      },
+    });
+
+    await expect(object.castBallot("chat_voting", "published-ballot", "viewer-1", 1)).resolves.toMatchObject({
+      status: "counted",
+      revision: 2,
+    });
+
+    expect(panel.send.mock.calls).toHaveLength(1);
+    expect(JSON.parse(panel.send.mock.calls[0]?.[0] ?? "null")).toMatchObject({
+      type: "panel.resources.changed",
+      payload: { resources: [resource], revisions: { [resource]: 7 } },
+    });
+  });
+
   it("rejects a post-deadline cast without deleting its unfinalized tally", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(10_000);

@@ -44,7 +44,6 @@ export interface TemplateResolverSources {
   moduleSecrets?: (moduleId: string) => ModuleSecretReadAccess;
   publicOrigin?: string;
   externalFetchBudget?: ModuleExternalFetchBudget;
-  onCommittedPanelResourceChange?: ModuleTemplateValueContext["onCommittedPanelResourceChange"];
   readOnly?: boolean;
   dryRun?: boolean;
   textBlockSelectionState?: Map<string, number>;
@@ -388,7 +387,6 @@ export const createTemplateRenderer = (
     channelLocation: sources.channelLocation,
     ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
     externalFetchBudget,
-    ...(sources.onCommittedPanelResourceChange === undefined ? {} : { onCommittedPanelResourceChange: sources.onCommittedPanelResourceChange }),
     ...(sources.readOnly === true ? { readOnly: true } : {}),
     ...(sources.dryRun === true ? { dryRun: true } : {}),
     ...(sources.textBlockSelectionState === undefined ? {} : { textBlockSelectionState: sources.textBlockSelectionState }),
@@ -416,7 +414,6 @@ export const createTemplateRenderer = (
             channelLocation: sources.channelLocation,
             ...(sources.publicOrigin === undefined ? {} : { publicOrigin: sources.publicOrigin }),
             externalFetchBudget,
-            ...(sources.onCommittedPanelResourceChange === undefined ? {} : { onCommittedPanelResourceChange: sources.onCommittedPanelResourceChange }),
             ...(sources.readOnly === true ? { readOnly: true } : {}),
             ...(sources.dryRun === true ? { dryRun: true } : {}),
             ...(commandInput === undefined ? {} : { commandInput }),

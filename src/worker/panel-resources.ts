@@ -100,22 +100,24 @@ const clearDeliveredPanelResources = async (
   ]);
 };
 
+/** Uses the existing channel index to check one queue entry before the claim. */
+const hasPendingPanelResources = async (database: D1Database): Promise<boolean> =>
+  await database.prepare(
+    `SELECT channel_id FROM panel_resource_pending
+      ORDER BY channel_id
+      LIMIT 1`,
+  ).first<{ channel_id: string }>() !== null;
+
 /** Claims every queued resource for a bounded set of channels in one atomic D1 statement. */
-const claimPendingChannels = async (
-  database: D1Database,
-  preferredChannelId?: string,
-  channelScoped = false,
-): Promise<ClaimedPanelChannels> => {
+const claimPendingChannels = async (database: D1Database): Promise<ClaimedPanelChannels> => {
   const claimToken = crypto.randomUUID();
   const now = Date.now();
-  const channelScope = channelScoped && preferredChannelId !== undefined ? "WHERE channel_id = ?" : "";
   const result = await database.prepare(
     `UPDATE panel_resource_pending
         SET claimed_until = ?, claim_token = ?
       WHERE channel_id IN (
         SELECT channel_id
           FROM panel_resource_pending
-          ${channelScope}
          GROUP BY channel_id
         HAVING MAX(COALESCE(claimed_until, 0)) <= ?
          ORDER BY channel_id
@@ -125,7 +127,6 @@ const claimPendingChannels = async (
   ).bind(
     now + PANEL_RESOURCE_CLAIM_LEASE_MS,
     claimToken,
-    ...(channelScope.length === 0 ? [] : [preferredChannelId]),
     now,
     MAX_PENDING_CHANNELS_PER_CLAIM,
   ).all<{ channel_id: string }>();
@@ -214,15 +215,14 @@ export const notifyCommittedResources = async (
   env: Pick<Env, "DB" | "CHANNEL">,
   channelId?: string,
   reconcileLocal?: (revisions: PanelResourceRevisionVector) => Promise<void>,
-  channelScoped = false,
 ): Promise<void> => {
   let localChannelWasReconciled = false;
   try {
-    let claim = await claimPendingChannels(env.DB, channelId, channelScoped);
-    while (claim.channelIds.length > 0) {
+    while (await hasPendingPanelResources(env.DB)) {
+      const claim = await claimPendingChannels(env.DB);
+      if (claim.channelIds.length === 0) break;
       const localWasReconciled = await reconcileClaimedChannels(env, claim, channelId, reconcileLocal);
       localChannelWasReconciled = localChannelWasReconciled || localWasReconciled;
-      claim = await claimPendingChannels(env.DB, channelId, channelScoped);
     }
   } catch (error: unknown) {
     console.warn("Committed panel resources could not be claimed.", errorMessage(error));

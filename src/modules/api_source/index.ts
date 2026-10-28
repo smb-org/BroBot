@@ -40,7 +40,6 @@ const recordFailure = async (
 ): Promise<void> => {
   if ("readOnly" in context && context.readOnly) return;
   await recordApiSourceStatus(context.DB, context.channelId, source.name, source.url, source.revision, lastFetchedAt, "error", reason);
-  context.onCommittedPanelResourceChange?.();
 };
 
 const sourcePayload = (
@@ -75,7 +74,6 @@ const sourcePayload = (
       const result = await pending;
       if (result.fetchedAt !== null) {
         await recordApiSourceStatus(context.DB, context.channelId, source.name, source.url, source.revision, result.fetchedAt, "ok", null);
-        context.onCommittedPanelResourceChange?.();
       }
       return result.payload;
     } catch (failure: unknown) {

@@ -623,8 +623,6 @@ export interface ModuleExecutionContext {
   isChannelModerator?: (userId: string) => Promise<boolean | null>;
   /** Checks the channel's recent bot send history for an identity or exact text match. */
   isRecentBotMessage?: (senderId: string | null, text: string) => Promise<boolean>;
-  /** Marks a committed D1 change whose panel revisions must be delivered after dispatch. */
-  onCommittedPanelResourceChange?: () => void;
   /** True only when this EventSub notification committed a real stream-state transition. */
   streamStateTransitionAccepted?: boolean;
   /** Stream identity captured before an accepted offline transition changed channel state. */
@@ -1421,8 +1419,6 @@ export interface ModuleTemplateValueContext {
   publicOrigin?: string;
   /** Shared across the providers involved in a single template render. */
   externalFetchBudget?: ModuleExternalFetchBudget;
-  /** Marks provider writes that committed panel-visible channel state. */
-  onCommittedPanelResourceChange?: () => void;
   /** Resolves provider values from cache only and suppresses provider status writes. */
   readOnly?: boolean;
   /** Marks template resolution performed as part of a chat dry run. */
@@ -1455,8 +1451,6 @@ export interface ModuleTemplateConditionContext {
   publicOrigin?: string;
   /** Shared across the providers involved in a single template render. */
   externalFetchBudget?: ModuleExternalFetchBudget;
-  /** Marks provider writes that committed panel-visible channel state. */
-  onCommittedPanelResourceChange?: () => void;
   /** Prevents provider lookups or cache fills when resolving a panel read. */
   readOnly?: boolean;
   /** Marks template condition resolution performed as part of a chat dry run. */
