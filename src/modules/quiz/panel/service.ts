@@ -90,11 +90,15 @@ export const startQuizSession = async (channelId: string, setId: string, questio
   }));
 };
 
-export const controlQuizSession = async (channelId: string, action: "next" | "pause" | "resume" | "end"): Promise<void> => {
+export const controlQuizSession = async (
+  channelId: string,
+  sessionId: string,
+  action: "next" | "pause" | "resume" | "end",
+): Promise<void> => {
   const token = await csrf();
   await readJson<{ ok: true }>(await fetch(`${basePath(channelId)}/session/action`, {
     method: "POST",
     headers: { "X-CSRF-Token": token, "Content-Type": "application/json" },
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({ action, sessionId }),
   }));
 };

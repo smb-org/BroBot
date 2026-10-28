@@ -199,7 +199,7 @@ describe("quiz session cockpit routes", () => {
       const response = await harness.app.request(`/channels/${channelId}/modules/quiz/session/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, sessionId: "active-quiz" }),
       }, { DB: database as unknown as D1Database });
 
       expect(response.status).toBe(409);
@@ -211,7 +211,7 @@ describe("quiz session cockpit routes", () => {
     const response = await end.app.request(`/channels/${channelId}/modules/quiz/session/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "end" }),
+      body: JSON.stringify({ action: "end", sessionId: "active-quiz" }),
     }, { DB: database as unknown as D1Database });
 
     expect(response.status).toBe(200);
@@ -229,11 +229,49 @@ describe("quiz session cockpit routes", () => {
     const response = await harness.app.request(`/channels/${channelId}/modules/quiz/session/action`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "next" }),
+      body: JSON.stringify({ action: "next", sessionId: "active-quiz" }),
     }, { DB: database as unknown as D1Database });
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "quiz_session_paused" });
     expect(harness.runAlarm).toHaveBeenCalledOnce();
+  });
+
+  it("allows End to cancel a pending announcing start while offline", async () => {
+    const database = await createDatabase(false);
+    const pendingData = { ...resolvedQuizData, sessionId: "pending-quiz", phase: "announce", paused: true };
+    const harness = appFor({
+      active: { roundId: "pending-quiz", state: "announcing", data: pendingData, deadlineAt: null },
+    });
+
+    const response = await harness.app.request(`/channels/${channelId}/modules/quiz/session/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "end", sessionId: "pending-quiz" }),
+    }, { DB: database as unknown as D1Database });
+
+    expect(response.status).toBe(200);
+    expect(harness.runAlarm).toHaveBeenCalledWith(channelId, "quiz", "session-control", "pending-quiz", {
+      action: "end",
+      sessionId: "pending-quiz",
+    });
+  });
+
+  it("rejects a control when its displayed session has been replaced", async () => {
+    const database = await createDatabase(true);
+    const replacementData = { ...resolvedQuizData, sessionId: "replacement-quiz", phase: "open" };
+    const harness = appFor({
+      active: { roundId: "replacement-quiz", state: "open", data: replacementData, deadlineAt: Date.now() + 30_000 },
+    });
+
+    const response = await harness.app.request(`/channels/${channelId}/modules/quiz/session/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "end", sessionId: "old-quiz" }),
+    }, { DB: database as unknown as D1Database });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "session_changed" });
+    expect(harness.runAlarm).not.toHaveBeenCalled();
   });
 });

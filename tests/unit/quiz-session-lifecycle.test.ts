@@ -6,7 +6,7 @@ import { onQuizRoundAnnounced, onQuizRoundDeadline, quizSessionControlAlarm } fr
 
 interface ActiveQuiz {
   roundId: string;
-  state: "open";
+  state: "announcing" | "open";
   deadlineAt: number | null;
   data: Record<string, unknown>;
 }
@@ -30,15 +30,20 @@ const sessionData = (roundId: string): Record<string, unknown> => ({
   offlineSince: null,
 });
 
-const lifecycleContext = (stream: { state: string; changed_at: string | null }, roundId = "quiz-round") => {
+const lifecycleContext = (
+  stream: { state: string; changed_at: string | null },
+  roundId = "quiz-round",
+  state: ActiveQuiz["state"] = "open",
+) => {
   const active: ActiveQuiz = {
     roundId,
-    state: "open",
+    state,
     deadlineAt: Date.now() + 30_000,
     data: sessionData(roundId),
   };
   const scheduled: Array<{ key: string; deadline: number }> = [];
   const cleared: string[] = [];
+  const canceled: string[] = [];
   const context = {
     channelId: "channel-one",
     DB: { prepare: () => ({ bind: () => ({ first: () => Promise.resolve(stream) }) }) },
@@ -50,6 +55,7 @@ const lifecycleContext = (stream: { state: string; changed_at: string | null }, 
           active.deadlineAt = deadlineAt;
           return Promise.resolve();
         },
+        cancel: (roundId: string) => { canceled.push(roundId); return Promise.resolve(1); },
       },
     },
     schedule: (key: string, deadline: number) => { scheduled.push({ key, deadline }); return Promise.resolve(); },
@@ -57,7 +63,7 @@ const lifecycleContext = (stream: { state: string; changed_at: string | null }, 
     sendChat: () => Promise.resolve({ sent: false, reason: null, retryable: false, delivery: "delivered" as const }),
     publishModuleOverlayMessage: () => Promise.resolve(),
   } as unknown as ModuleAlarmContext;
-  return { context, active, scheduled, cleared };
+  return { context, active, scheduled, cleared, canceled };
 };
 
 const streamEvent = (
@@ -135,6 +141,50 @@ describe("quiz stream lifecycle reconciliation", () => {
         key: "offline-timeout:quiz-round",
         deadline: offlineObservedAt + 10 * 60_000,
       }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("persists an offline observation for an announcing pending start", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+    try {
+      const offlineObservedAt = Date.now();
+      const fake = lifecycleContext({ state: "offline", changed_at: new Date(offlineObservedAt).toISOString() }, "quiz-round", "announcing");
+      Object.assign(fake.active.data, { phase: "announce", phaseEndsAt: null, phaseOpenedAt: null });
+
+      await quizSessionControlAlarm.handle(fake.context, "stream-state", Date.now(), undefined, {
+        streamSnapshot: { state: "offline" },
+      });
+
+      expect(fake.active.data).toMatchObject({ paused: true, offlineSince: offlineObservedAt, remainingMs: 0 });
+      expect(fake.active.deadlineAt).toBeNull();
+      expect(fake.scheduled).toContainEqual({
+        key: "offline-timeout:quiz-round",
+        deadline: offlineObservedAt + 10 * 60_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels an announcing start after ten minutes offline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+    try {
+      const offlineObservedAt = Date.now();
+      const fake = lifecycleContext({ state: "offline", changed_at: new Date(offlineObservedAt).toISOString() }, "quiz-round", "announcing");
+      Object.assign(fake.active.data, { phase: "announce", phaseEndsAt: null, phaseOpenedAt: null });
+      await quizSessionControlAlarm.handle(fake.context, "stream-state", Date.now(), undefined, {
+        streamSnapshot: { state: "offline" },
+      });
+
+      vi.setSystemTime(offlineObservedAt + 10 * 60_000);
+      await quizSessionControlAlarm.handle(fake.context, "offline-timeout:quiz-round", Date.now());
+
+      expect(fake.canceled).toEqual(["quiz-round"]);
+      expect(fake.cleared).toContain("offline-timeout:quiz-round");
     } finally {
       vi.useRealTimers();
     }

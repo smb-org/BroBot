@@ -1784,9 +1784,11 @@ export const updatePointRoundSync = (
   assertPointRoundId(roundId);
   if (deadlineAt !== null && (!Number.isSafeInteger(deadlineAt) || deadlineAt < 0)) throw new Error("invalid_deadline");
   const round = pointRoundRow(sql, roundId);
-  if (round === null || round.module_id !== moduleId || round.state !== "open") throw new Error("round_closed");
+  if (round === null || round.module_id !== moduleId || (round.state !== "announcing" && round.state !== "open")) {
+    throw new Error("round_closed");
+  }
   sql.exec(
-    "UPDATE game_rounds SET data_json = ?, deadline_at = ? WHERE round_id = ? AND module_id = ? AND state = 'open'",
+    "UPDATE game_rounds SET data_json = ?, deadline_at = ? WHERE round_id = ? AND module_id = ? AND state IN ('announcing', 'open')",
     jsonValue(stableValue(data)),
     deadlineAt,
     roundId,

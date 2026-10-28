@@ -196,10 +196,6 @@ const reconcileQuizStream = async (
   if (data.phase === "results") return;
   if (streamSnapshot.state === "offline") {
     const offlineSince = data.offlineSince ?? Date.now();
-    if (active.state !== "open") {
-      await context.schedule("stream-state", Date.now() + ANNOUNCE_RETRY_MS, undefined, null);
-      return;
-    }
     const effectiveOfflinePause = data.paused
       ? data
       : { ...data, ...pauseQuizPhase(data, offlineSince) };
@@ -210,7 +206,7 @@ const reconcileQuizStream = async (
     if (changed) await publishQuizPhase(context, updated);
     return;
   }
-  if (streamSnapshot.state === "online" && data.offlineSince !== null && active.state === "open") {
+  if (streamSnapshot.state === "online" && data.offlineSince !== null) {
     const resumedStream: QuizSessionRoundData = { ...data, paused: true, phaseEndsAt: null, offlineSince: null };
     await context.points.rounds.update(active.roundId, resumedStream, null);
     await context.clear(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, undefined, null);
@@ -236,8 +232,9 @@ const handleOfflineTimeout = async (context: ModuleAlarmContext, alarmKey: strin
     await context.schedule(alarmKey, settleAt, undefined, null);
     return;
   }
-  if (reconciledActive.state !== "open") {
-    await context.schedule("stream-state", Date.now() + ANNOUNCE_RETRY_MS, undefined, null);
+  if (reconciledActive.state === "announcing") {
+    await context.points.rounds.cancel(roundId);
+    await context.clear(alarmKey, undefined, null);
     return;
   }
   await finishQuizSession(context, roundId, reconciledData);
@@ -319,7 +316,9 @@ export const quizSessionControlAlarm = {
     const action = request?.action;
     if (action !== "next" && action !== "pause" && action !== "resume" && action !== "end") throw new Error("invalid_quiz_action");
     const active = await context.points.rounds.active();
-    if (active === null || active.roundId !== alarmKey) throw new Error("round_not_running");
+    if (typeof request?.sessionId !== "string" || active === null || active.roundId !== alarmKey || active.roundId !== request.sessionId) {
+      throw new Error("session_changed");
+    }
     await controlQuizSession(context, action);
   },
 };
@@ -332,9 +331,15 @@ const controlQuizSession = async (
   await reconcileQuizStream(context, streamSnapshot);
   const active = await context.points.rounds.active();
   const data = quizRoundData(active?.data);
-  if (active === null || active.state !== "open" || data === null) throw new Error("round_not_running");
+  const canControlPending = active?.state === "announcing" && (action === "end" || action === "pause" || action === "resume");
+  if (active === null || (active.state !== "open" && !canControlPending) || data === null) throw new Error("round_not_running");
   if (data.phase === "results" && action !== "end") return;
   if (action !== "end" && streamSnapshot.state !== "online") throw new Error("stream_offline");
+  if (action === "end" && active.state === "announcing") {
+    await context.points.rounds.cancel(active.roundId);
+    await context.clear(`${OFFLINE_TIMEOUT_PREFIX}${active.roundId}`, undefined, null);
+    return;
+  }
   const now = Date.now();
   if (action === "pause") {
     if (data.paused) return;

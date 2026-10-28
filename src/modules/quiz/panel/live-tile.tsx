@@ -32,7 +32,7 @@ export const QuizLiveTile = ({ channelId, language, session, streamState, now, c
     setBusy(true);
     setFailed(false);
     try {
-      await controlQuizSession(channelId, action);
+      await controlQuizSession(channelId, session.sessionId, action);
       onMessage(action === "next" ? copy.advanced : action === "pause" ? copy.paused : action === "resume" ? copy.resumed : copy.ended);
       onRefresh();
     } catch {

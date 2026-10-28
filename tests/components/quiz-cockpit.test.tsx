@@ -14,11 +14,14 @@ const session = {
   paused: false,
   phaseEndsAt: new Date(Date.now() + 30_000).toISOString(),
 };
-const requestedActions = (requests: readonly { body: string }[]): string[] => requests.map(({ body }) => {
+const requestedActions = (requests: readonly { body: string }[]): Array<{ action: string; sessionId: string | null }> => requests.map(({ body }) => {
   const parsed: unknown = JSON.parse(body);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return "";
-  const action = (parsed as Record<string, unknown>).action;
-  return typeof action === "string" ? action : "";
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { action: "", sessionId: null };
+  const request = parsed as Record<string, unknown>;
+  return {
+    action: typeof request.action === "string" ? request.action : "",
+    sessionId: typeof request.sessionId === "string" ? request.sessionId : null,
+  };
 });
 
 afterEach(() => {
@@ -57,16 +60,28 @@ describe("quiz cockpit controls", () => {
     const { rerender } = render(<QuizLiveTile channelId="channel-one" language="en" session={session} streamState="online" now={Date.now()} canManage onRefresh={onRefresh} onMessage={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-    await waitFor(() => expect(requestedActions(requests)).toEqual(["pause"]));
+    await waitFor(() => expect(requestedActions(requests)).toEqual([{ action: "pause", sessionId: "session-one" }]));
     rerender(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, paused: true }} streamState="online" now={Date.now()} canManage onRefresh={onRefresh} onMessage={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
-    await waitFor(() => expect(requestedActions(requests)).toEqual(["pause", "resume"]));
+    await waitFor(() => expect(requestedActions(requests)).toEqual([
+      { action: "pause", sessionId: "session-one" },
+      { action: "resume", sessionId: "session-one" },
+    ]));
     rerender(<QuizLiveTile channelId="channel-one" language="en" session={{ ...session, paused: false }} streamState="online" now={Date.now()} canManage onRefresh={onRefresh} onMessage={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await waitFor(() => expect(requestedActions(requests)).toEqual(["pause", "resume", "next"]));
+    await waitFor(() => expect(requestedActions(requests)).toEqual([
+      { action: "pause", sessionId: "session-one" },
+      { action: "resume", sessionId: "session-one" },
+      { action: "next", sessionId: "session-one" },
+    ]));
     fireEvent.click(screen.getByRole("button", { name: "End" }));
-    await waitFor(() => expect(requestedActions(requests)).toEqual(["pause", "resume", "next", "end"]));
+    await waitFor(() => expect(requestedActions(requests)).toEqual([
+      { action: "pause", sessionId: "session-one" },
+      { action: "resume", sessionId: "session-one" },
+      { action: "next", sessionId: "session-one" },
+      { action: "end", sessionId: "session-one" },
+    ]));
 
     expect(requests.every(({ url }) => url.endsWith("/session/action"))).toBe(true);
     expect(onRefresh).toHaveBeenCalledTimes(4);

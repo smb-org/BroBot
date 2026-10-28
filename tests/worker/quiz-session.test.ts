@@ -23,6 +23,7 @@ import {
   insertPointChannel,
   pointObject,
   runMigrations,
+  runPointAlarm,
   runPointObject,
   scheduleAlarmKeyWithin,
 } from "./points-test-helpers";
@@ -225,6 +226,107 @@ describe("quiz answers in the shared point round", () => {
     expect(deliveredLines[1]).toContain("Capital?");
   });
 
+  it("cancels an announcing pending start when End is requested", async () => {
+    const channelId = `quiz-pending-end-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const cancelSpy = vi.spyOn(ChannelObject.prototype, "cancelGameRound");
+    const resolveSpy = vi.spyOn(ChannelObject.prototype, "resolveGameRound");
+    await runPointObject(object, async (target, state) => {
+      await target.openGameRound("quiz", roundId, { ...session(roundId), phase: "announce", phaseEndsAt: null });
+      await deferPointAlarmWithin(state);
+    });
+
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "end", sessionId: roundId });
+
+    expect(cancelSpy).toHaveBeenCalledWith("quiz", roundId);
+    expect(resolveSpy).not.toHaveBeenCalled();
+    await expect(object.activeGameRound("quiz")).resolves.toBeNull();
+  });
+
+  it("keeps an offline pending start paused after the stream comes back", async () => {
+    const channelId = `quiz-pending-offline-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const updateSpy = vi.spyOn(ChannelObject.prototype, "updateGameRound");
+    await runPointObject(object, async (target, state) => {
+      await target.openGameRound("quiz", roundId, {
+        ...session(roundId), phase: "announce", phaseEndsAt: null, phaseOpenedAt: null, offlineSince: null,
+      });
+      await deferPointAlarmWithin(state);
+    });
+
+    await object.runModuleAlarm("quiz", "session-control", "stream-state", { streamSnapshot: { state: "offline" } });
+    const offlineObservedAt = Date.now();
+    expect(updateSpy).toHaveBeenCalledWith("quiz", roundId, expect.objectContaining({
+      paused: true,
+      offlineSince: offlineObservedAt,
+      remainingMs: 0,
+    }), null);
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({
+      state: "announcing",
+      deadlineAt: null,
+      data: { paused: true, offlineSince: offlineObservedAt, phase: "announce" },
+    });
+
+    await object.runModuleAlarm("quiz", "session-control", "stream-state", { streamSnapshot: { state: "online" } });
+
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({
+      state: "announcing",
+      deadlineAt: null,
+      data: { paused: true, offlineSince: null, phase: "announce" },
+    });
+    expect(updateSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels a pending start after ten minutes continuously offline", async () => {
+    const channelId = `quiz-pending-timeout-${crypto.randomUUID()}`;
+    const roundId = `quiz-${crypto.randomUUID()}`;
+    const offlineSince = Date.now();
+    await insertPointChannel(channelId);
+    await worker.DB.prepare(
+      "INSERT INTO channel_stream_state (channel_id, state, changed_at, source) VALUES (?, 'offline', ?, 'eventsub')",
+    ).bind(channelId, new Date(offlineSince).toISOString()).run();
+    const object = pointObject(channelId);
+    const cancelSpy = vi.spyOn(ChannelObject.prototype, "cancelGameRound");
+    await runPointObject(object, async (target, state) => {
+      await target.openGameRound("quiz", roundId, {
+        ...session(roundId), phase: "announce", phaseEndsAt: null, phaseOpenedAt: null, offlineSince: null,
+      });
+      await deferPointAlarmWithin(state);
+    });
+
+    await object.runModuleAlarm("quiz", "session-control", "stream-state", { streamSnapshot: { state: "offline" } });
+    vi.setSystemTime(offlineSince + 10 * 60_000);
+    await runPointObject(object, async (_target, state) => {
+      await scheduleAlarmKeyWithin(state, `module:quiz:offline-timeout:${roundId}`);
+    });
+    await runPointAlarm(object);
+
+    expect(cancelSpy).toHaveBeenCalledWith("quiz", roundId);
+    await expect(object.activeGameRound("quiz")).resolves.toBeNull();
+  });
+
+  it("rejects a delayed control carrying the id of a replaced session", async () => {
+    const channelId = `quiz-stale-control-${crypto.randomUUID()}`;
+    const oldRoundId = `quiz-${crypto.randomUUID()}`;
+    const replacementRoundId = `quiz-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    const cancelSpy = vi.spyOn(ChannelObject.prototype, "cancelGameRound");
+    await openAnnouncedQuiz(object, replacementRoundId, session(replacementRoundId));
+
+    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", replacementRoundId, {
+      action: "end",
+      sessionId: oldRoundId,
+    }))).resolves.toBe("session_changed");
+
+    expect(cancelSpy).not.toHaveBeenCalled();
+    await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ roundId: replacementRoundId, state: "open" });
+  });
+
   it("overwrites a viewer's answer on each accepted message and deletes data after settlement", async () => {
     const channelId = `quiz-answer-${crypto.randomUUID()}`;
     const roundId = `quiz-${crypto.randomUUID()}`;
@@ -356,13 +458,13 @@ describe("quiz answers in the shared point round", () => {
       phaseEndsAt: Date.now(),
     });
 
-    await expect(object.runModuleAlarm("quiz", "session-control", roundId, { action })).resolves.toBeUndefined();
+    await expect(object.runModuleAlarm("quiz", "session-control", roundId, { action, sessionId: roundId })).resolves.toBeUndefined();
     expect(resolveSpy).toHaveBeenCalledOnce();
     await expect(object.activeGameRound("quiz")).resolves.toBeNull();
 
     const nextRoundId = `quiz-${crypto.randomUUID()}`;
     await openAnnouncedQuiz(object, nextRoundId, session(nextRoundId));
-    await expect(object.runModuleAlarm("quiz", "session-control", nextRoundId, { action: "pause" })).resolves.toBeUndefined();
+    await expect(object.runModuleAlarm("quiz", "session-control", nextRoundId, { action: "pause", sessionId: nextRoundId })).resolves.toBeUndefined();
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true } });
   });
 
@@ -378,7 +480,7 @@ describe("quiz answers in the shared point round", () => {
       balances: {},
     });
 
-    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "end" });
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "end", sessionId: roundId });
     const retry = await object.activeGameRound("quiz");
     expect(retry).toMatchObject({ data: { phase: "results" } });
     expect(retry?.deadlineAt).toBe(Date.now() + 5_000);
@@ -405,7 +507,7 @@ describe("quiz answers in the shared point round", () => {
     const resolveSpy = vi.spyOn(ChannelObject.prototype, "resolveGameRound").mockRejectedValueOnce(new Error("settlement failed"));
     await openAnnouncedQuiz(object, roundId, session(roundId));
 
-    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "end" })))
+    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "end", sessionId: roundId })))
       .resolves.toBe("settlement failed");
     const retryAt = (await object.activeGameRound("quiz"))?.deadlineAt;
     expect(retryAt).toBe(openedAt + 5_000);
@@ -420,7 +522,7 @@ describe("quiz answers in the shared point round", () => {
       "UPDATE channel_stream_state SET state = 'online', changed_at = ?, source = 'eventsub' WHERE channel_id = ?",
     ).bind(new Date(openedAt + 2_000).toISOString(), channelId).run();
     await object.runModuleAlarm("quiz", "session-control", "stream-state");
-    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "pause" });
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "pause", sessionId: roundId });
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { phase: "results" }, deadlineAt: retryAt });
 
     vi.setSystemTime(retryAt as number);
@@ -478,7 +580,7 @@ describe("quiz answers in the shared point round", () => {
       await scheduleAlarmKeyWithin(state, `points:round:${roundId}`);
       const deadline = target.alarm();
       await deliveryStarted;
-      const pause = target.runModuleAlarm("quiz", "session-control", roundId, { action: "pause" });
+      const pause = target.runModuleAlarm("quiz", "session-control", roundId, { action: "pause", sessionId: roundId });
       releaseDelivery();
       await Promise.all([deadline, pause]);
     });
@@ -509,7 +611,7 @@ describe("quiz answers in the shared point round", () => {
     const paused = await object.activeGameRound("quiz");
     expect(paused).toMatchObject({ data: { paused: true, remainingMs: 25_000, offlineSince: Date.now() } });
 
-    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "resume" })))
+    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "resume", sessionId: roundId })))
       .resolves.toBe("stream_offline");
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: Date.now() } });
 
@@ -520,7 +622,7 @@ describe("quiz answers in the shared point round", () => {
     await object.runModuleAlarm("quiz", "session-control", "stream-state");
 
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: null } });
-    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "resume" });
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "resume", sessionId: roundId });
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: false } });
   });
 
@@ -610,7 +712,7 @@ describe("quiz answers in the shared point round", () => {
       "UPDATE channel_stream_state SET state = 'offline', changed_at = ?, source = 'helix' WHERE channel_id = ?",
     ).bind(new Date(offlineAt).toISOString(), channelId).run();
 
-    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "next" })))
+    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "next", sessionId: roundId })))
       .resolves.toBe("stream_offline");
 
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { paused: true, offlineSince: openedAt } });
@@ -678,9 +780,9 @@ describe("quiz answers in the shared point round", () => {
     ).bind(channelId, new Date(Date.now()).toISOString()).run();
     const object = pointObject(channelId);
     await openAnnouncedQuiz(object, roundId, session(roundId));
-    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "pause" });
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "pause", sessionId: roundId });
 
-    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "next" })))
+    await expect(capturePointError(object, (target) => target.runModuleAlarm("quiz", "session-control", roundId, { action: "next", sessionId: roundId })))
       .resolves.toBe("quiz_session_paused");
     await expect(object.activeGameRound("quiz")).resolves.toMatchObject({ data: { phase: "open", paused: true } });
   });
@@ -707,7 +809,7 @@ describe("quiz answers in the shared point round", () => {
     });
 
     vi.setSystemTime(openedAt + 5_000);
-    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "pause" });
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "pause", sessionId: roundId });
 
     const dispatchAnswer = async (messageId: string, messageAt: number): Promise<void> => {
       const timestamp = new Date(messageAt).toISOString();
@@ -736,7 +838,7 @@ describe("quiz answers in the shared point round", () => {
       accountId, "moonmoss", 0, 1, openedAt + 10_000);
 
     vi.setSystemTime(openedAt + 20_000);
-    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "resume" });
+    await object.runModuleAlarm("quiz", "session-control", roundId, { action: "resume", sessionId: roundId });
 
     await expect(object.answerGameRoundChoice("quiz", roundId, "quiz:after-effective-deadline", accountId,
       "moonmoss", 0, 1, openedAt + 46_000)).resolves.toEqual({ status: "round_closed", replayed: false });
