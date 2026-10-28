@@ -134,6 +134,50 @@ describe("idle live cockpit polling", () => {
     view.unmount();
   });
 
+  it("keeps retrying failed revision-backed reads at the fallback interval while connected, then goes quiet", async () => {
+    const counts = new Map<string, number>();
+    const failing = ["/modules/chat_voting/current", "/modules/belabox/status"];
+    const realSetTimeout = globalThis.setTimeout;
+    const waitOnRealClock = (duration: number): Promise<void> => new Promise((resolve) => {
+      realSetTimeout(resolve, duration);
+    });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(input, window.location.href);
+      const failingSuffix = failing.find((suffix) => url.pathname.endsWith(suffix));
+      if (failingSuffix !== undefined) {
+        const count = (counts.get(failingSuffix) ?? 0) + 1;
+        counts.set(failingSuffix, count);
+        // The initial load and the first fallback poll fail; the second fallback poll succeeds.
+        if (count <= 2) return Promise.resolve(new Response(JSON.stringify({ error: "temporary_failure" }), { status: 503 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify(responseBody(url.pathname)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+    setDashboardRealtimeStatus(channelId, "connected");
+    vi.useFakeTimers();
+
+    const view = renderWithQuery(<LiveCockpit overview={overview} modules={modules} modulesLoaded viewerUserId={channelId} onNavigate={() => undefined} />, {}, {
+      gcTime: 600_000,
+      staleTime: 600_000,
+    });
+    await act(async () => { await waitOnRealClock(50); });
+    expect(failing.map((suffix) => counts.get(suffix))).toEqual([1, 1]);
+
+    // Both queries are in error without data: the connected cockpit still polls them at the 5 s fallback.
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(failing.map((suffix) => counts.get(suffix))).toEqual([2, 2]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(failing.map((suffix) => counts.get(suffix))).toEqual([3, 3]);
+    expect(view.queryClient.getQueryState(moduleQueryKey(channelId, "belabox", "status"))?.status).toBe("success");
+
+    // Once loaded, they wait for their revision again.
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(failing.map((suffix) => counts.get(suffix))).toEqual([3, 3]);
+    view.unmount();
+  });
+
   it("hides cached tiles and their controls after their modules are disabled", async () => {
     const now = Date.now();
     const disabledModules = ["chat_voting", "timers", "votekick"].map((id) => ({ id, enabled: false })) as PanelModuleState[];

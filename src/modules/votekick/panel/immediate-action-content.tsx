@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import type { ModuleImmediateActionContentProperties } from "../../contract";
-import { useModuleQuery } from "../../../dashboard/data";
+import { connectedRefetchInterval, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import { Select } from "../../../dashboard/ui";
 import { activeVotekickTimeouts } from "../domain/active-timeouts";
@@ -17,7 +17,7 @@ export default function VotekickTimeoutActionContent({ channelId, language, onRe
   // Shares the revision-backed panel query with the lock card, cockpit tile and availability check.
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const query = useModuleQuery(channelId, "votekick", "panel", (signal) => loadVotekickPanel(channelId, signal), {
-    refetchInterval: realtimeStatus === "connected" ? false : 5_000,
+    refetchInterval: connectedRefetchInterval(realtimeStatus === "connected", 5_000),
   });
   const [selectionState, setSelectionState] = useState<TimeoutSelectionState>({ channelId, votekickId: null });
   const [localNow, setLocalNow] = useState(() => Date.now());

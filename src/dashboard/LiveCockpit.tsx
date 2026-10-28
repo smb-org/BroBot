@@ -15,7 +15,7 @@ import type { VotekickPanelData } from "../modules/votekick/panel/service";
 import type { DashboardRoute } from "./router";
 import { dashboardTexts, formatNumber } from "./locale";
 import { useEventsQuery, useOverlaysQuery } from "./data/lists";
-import { useModuleQuery } from "./data/module-query";
+import { connectedRefetchInterval, useModuleQuery } from "./data/module-query";
 import { useDashboardRealtimeStatus } from "./data/realtime";
 import { queryKeys } from "./data/keys";
 import { Button, Dialog, Icon, StatusLed } from "./ui";
@@ -124,15 +124,15 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
   const chatVotingQuery = useModuleQuery<ChatVotingPanelState>(overview.channelId, "chat_voting", "live", async (signal) =>
     (await import("../modules/chat_voting/panel/service")).loadChatVotingState(overview.channelId, signal), {
       enabled: modulesLoaded && moduleState.get("chat_voting") === true,
-      refetchInterval: realtimeStatus === "connected" ? false : 5_000,
+      refetchInterval: connectedRefetchInterval(realtimeStatus === "connected", 5_000),
     });
   const timerQuery = useModuleQuery<Timer[]>(overview.channelId, "timers", "upcoming", (signal) => loadTimersForCockpit(overview.channelId, signal), {
     enabled: modulesLoaded && moduleState.get("timers") === true,
-    refetchInterval: realtimeStatus === "connected" ? false : 5_000,
+    refetchInterval: connectedRefetchInterval(realtimeStatus === "connected", 5_000),
   });
   const votekickQuery = useModuleQuery<VotekickPanelData>(overview.channelId, "votekick", "panel", (signal) => loadVotekickForCockpit(overview.channelId, signal), {
     enabled: modulesLoaded && moduleState.get("votekick") === true,
-    refetchInterval: realtimeStatus === "connected" ? false : 5_000,
+    refetchInterval: connectedRefetchInterval(realtimeStatus === "connected", 5_000),
   });
   const belaboxStatusQuery = useModuleQuery<BelaboxStatusQueryData>(overview.channelId, "belabox", "status", async (signal) => {
     const observedAt = nextBelaboxObservationAt();
@@ -146,7 +146,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
     }
   }, {
       enabled: belaboxEnabled,
-      refetchInterval: realtimeStatus === "connected" ? false : 5_000,
+      refetchInterval: connectedRefetchInterval(realtimeStatus === "connected", 5_000),
     });
   const liveQuery = useQuery({
     queryKey: queryKeys.channel(overview.channelId, "live-cockpit", { modules: modules.map((module) => `${module.id}:${String(module.enabled)}`).sort((left, right) => left.localeCompare(right)).join(",") }),

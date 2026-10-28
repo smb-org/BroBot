@@ -126,8 +126,10 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
       }
     },
     enabled: shouldCheckConditions,
-    refetchInterval: realtimeStatus === "connected" && sharedCondition !== undefined &&
-      REVISION_COVERED_ACTION_QUERIES.has(`${sharedCondition.query.moduleId}:${sharedCondition.query.part}`)
+    // A failed or still empty query keeps its fallback retry even while connected; only loaded data waits for revisions.
+    refetchInterval: (query) => realtimeStatus === "connected" && sharedCondition !== undefined &&
+      REVISION_COVERED_ACTION_QUERIES.has(`${sharedCondition.query.moduleId}:${sharedCondition.query.part}`) &&
+      query.state.status === "success"
       ? false
       : 4_000,
     refetchOnWindowFocus: false,

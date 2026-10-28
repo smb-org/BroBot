@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 
 import type { ModuleImmediateActionContentProperties } from "../../contract";
-import { useModuleQuery } from "../../../dashboard/data";
+import { connectedRefetchInterval, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import { Select } from "../../../dashboard/ui";
 import type { Timer } from "../contracts";
@@ -23,7 +23,7 @@ export default function SkipTimerActionContent({ channelId, language, onReadines
   const texts = timersQuickActionTexts;
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const timerQuery = useModuleQuery(channelId, "timers", "upcoming", (signal) => loadUpcomingTimers(channelId, signal), {
-    refetchInterval: realtimeStatus === "connected" ? false : 5_000,
+    refetchInterval: connectedRefetchInterval(realtimeStatus === "connected", 5_000),
   });
   const [selectionState, setSelectionState] = useState<TimerSelectionState>({ channelId, timerId: null });
 

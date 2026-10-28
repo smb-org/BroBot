@@ -10,7 +10,7 @@ import type { BelaboxHistoryPoint, BelaboxStatusResponse, BelaboxStreamSummary }
 import { belaboxReasonText, belaboxPanelTexts } from "./locale";
 import { BelaboxHistorySection } from "./history-chart";
 import { loadBelaboxHistory, loadBelaboxStatus, loadBelaboxStreams, removeBelaboxStatsUrl, retryBelaboxPolling, testBelaboxConnection } from "./service";
-import { moduleQueryKey, refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { connectedRefetchInterval, moduleQueryKey, refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 
 interface BelaboxPanelProperties extends ModulePanelProperties {
@@ -63,7 +63,8 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
     }
   }, [channelId, labels.testFailed]);
   const statusQuery = useModuleQuery(channelId, "belabox", "status", readStatus, {
-    refetchInterval: realtimeStatus === "connected" ? false : (query) => {
+    refetchInterval: (query) => {
+      if (realtimeStatus === "connected" && query.state.status === "success") return false;
       const current = query.state.data;
       return current?.pollingDesired === true
         ? Math.max(5, current.intervalSeconds) * 1_000
@@ -109,7 +110,7 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
 
   const streamsQuery = useModuleQuery(channelId, "belabox", "streams", (signal) => loadBelaboxStreams(channelId, signal), {
     enabled: status?.mode === "interval",
-    refetchInterval: realtimeStatus === "connected" ? false : 60_000,
+    refetchInterval: connectedRefetchInterval(realtimeStatus === "connected", 60_000),
   });
   const streams: readonly BelaboxStreamSummary[] = streamsQuery.data ?? [];
   const currentStreamId = selectedStreamId !== null && streams.some((stream) => stream.streamId === selectedStreamId)
@@ -123,7 +124,9 @@ export default function BelaboxPanel({ channelId, language = "de", canManage = f
   const historyQuery = useModuleQuery(channelId, "belabox", historyPart,
     (signal) => loadBelaboxHistory(channelId, historyRange, streamId, signal), {
       enabled: status?.mode === "interval",
-      refetchInterval: realtimeStatus === "connected" || (historyRange === "stream" && !selectedStreamIsLive) ? false : 60_000,
+      refetchInterval: historyRange === "stream" && !selectedStreamIsLive
+        ? false
+        : connectedRefetchInterval(realtimeStatus === "connected", 60_000),
     });
   const history: readonly BelaboxHistoryPoint[] = historyQuery.data ?? [];
 
