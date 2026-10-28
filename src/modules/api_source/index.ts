@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { BotModule, ModuleExternalFetchBudget, ModuleTextBlockConditionDefinition, ModuleTemplateConditionContext, ModuleTemplateValueContext } from "../contract";
 import { apiSourceTemplateVariable, apiSourceModuleCatalog } from "./contracts";
 import type { ApiSource } from "./contracts";
-import { listApiSources, recordApiSourceStatus } from "./adapters/d1";
+import { listApiSources, purgeExpiredApiSourceQuota, recordApiSourceStatus } from "./adapters/d1";
 import { ApiSourceFetchError, fetchCachedApiSourceResult, readCachedApiSourceJson } from "./adapters/fetch-json";
 import { evaluateApiSourceExpression, formatApiSourceValue, parseApiSourceName } from "./domain";
 import { apiSourceRoutes } from "./routes";
@@ -216,6 +216,7 @@ export const apiSourceModule: BotModule<typeof settingsSchema> = {
     order: 35,
   },
   templateVariableNamespace: "api_sources",
+  scheduledMaintenance: purgeExpiredApiSourceQuota,
   textBlockConditionNamespace: "api_source.",
   templateVariableCatalog: [],
   resolveOverlayTemplateValues: resolveOverlayValues,
