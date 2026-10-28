@@ -359,6 +359,7 @@ describe("event log", () => {
         preparedSql.push(sql);
         return database.prepare(sql);
       },
+      batch: database.batch.bind(database),
     } as unknown as D1Database;
     await purgeOldEventLogEntries(tracedDatabase, "2026-09-18T12:00:00.000Z");
     const deleteSql = preparedSql.find((sql) => sql.includes("DELETE FROM event_log"));

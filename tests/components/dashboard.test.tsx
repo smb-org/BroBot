@@ -2498,7 +2498,7 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByRole("button", { name: "Stummschaltung aufheben" })).toBeInTheDocument();
   });
 
-  it("polls shell queries while realtime is offline and stops polling while connected", async () => {
+  it("polls shell queries while offline and refreshes only global bot health while connected", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-23T09:00:00.000Z"));
     const channel = { ...healthyChannel("kanal-a", "Alpha"), modules: [] };
@@ -2543,11 +2543,12 @@ describe("Dashboard skeleton", () => {
     expect(TestWebSocket.instances).toHaveLength(1);
     TestWebSocket.instances[0]?.open();
     await flushQueryUpdates();
-    const connectedCounts = [channelCalls, overviewCalls, systemCalls];
+    const connectedCounts = [channelCalls, overviewCalls, systemCalls] as const;
 
     await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 1); });
     await flushQueryUpdates();
-    expect([channelCalls, overviewCalls, systemCalls]).toEqual(connectedCounts);
+    expect(channelCalls).toBe(connectedCounts[0] + 1);
+    expect([overviewCalls, systemCalls]).toEqual(connectedCounts.slice(1));
   });
 
   it("shows stale token expiry as neutral, reloads, then marks server-confirmed expiry red", async () => {

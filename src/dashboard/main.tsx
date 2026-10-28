@@ -1055,6 +1055,9 @@ export const DashboardApp = (): ReactElement => {
   const realtimeChannelId = route.kind === "channel" || route.kind === "module" ? route.channelId : null;
   const realtimeStatus = useDashboardRealtimeStatus(realtimeChannelId ?? "");
   const offlineRefetchInterval = realtimeStatus === "connected" ? false : 180_000;
+  // The global bot heartbeat is carried by /api/channels, which has no
+  // per-channel socket fan-out and needs a connected-state refresh.
+  const botHeartbeatRefetchInterval = realtimeStatus === "connected" ? 180_000 : offlineRefetchInterval;
   const routeRef = useRef(route);
   useLayoutEffect(() => { routeRef.current = route; }, [route]);
   const queryClient = useQueryClient();
@@ -1079,7 +1082,7 @@ export const DashboardApp = (): ReactElement => {
         ),
       };
     },
-    refetchInterval: offlineRefetchInterval,
+    refetchInterval: botHeartbeatRefetchInterval,
     enabled: !authenticationRequired,
   });
   const channelsResponse = channelsQuery.data;
