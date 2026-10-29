@@ -12,6 +12,7 @@ const state = (phase: "announce" | "open" | "reveal" | "results", overrides: Rec
   phase,
   questionIndex: 0,
   questionCount: 3,
+  setName: "General knowledge",
   question: "Which city sits on the Spree?",
   options: ["Berlin", "Bonn", "Bremen"],
   phaseEndsAt: new Date(serverNow + 20_000).toISOString(),
@@ -92,6 +93,7 @@ describe("quiz session overlay", () => {
     const { container } = render(<QuizOverlay config={{}} state={state("results", { ranking })} now={serverNow} language="en" />);
 
     expect(container.querySelector(".quiz-session-overlay__question")?.textContent).toBe("Quiz results");
+    expect(container.querySelector(".quiz-session-overlay__progress")?.textContent).toBe("General knowledge");
     expect(screen.getByText("viewer1")).not.toBeNull();
     expect(screen.getByText("12 correct")).not.toBeNull();
     expect(screen.queryByText("viewer11")).toBeNull();

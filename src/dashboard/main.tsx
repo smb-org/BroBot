@@ -83,13 +83,16 @@ const statusLabel = (status: PanelBotStatus["status"]): string => {
   return texts.status.error;
 };
 
+const isNeutralEventSubReason = (reason: string | null | undefined): boolean =>
+  reason === "pending_adoption" || reason === "moderator_required" || reason === "verification_pending";
+
 const subscriptionTone = (status: PanelEventSubSubscription["status"], reason: string | null): StateTone =>
-  reason === "pending_adoption" || reason === "moderator_required" ? "neutral"
+  isNeutralEventSubReason(reason) ? "neutral"
     : status === "enabled" ? "healthy" : status === "missing" || status === "pending" ? "warning" : "error";
 
 const subscriptionStatusLabel = (status: PanelEventSubSubscription["status"], reason: string | null): string => {
   const reasonText = maintenanceReasonText(reason);
-  if ((reason === "pending_adoption" || reason === "moderator_required") && reasonText !== null) return reasonText;
+  if (isNeutralEventSubReason(reason) && reasonText !== null) return reasonText;
   const texts = dashboardTexts();
   if (status === "enabled") return texts.status.active;
   if (status === "missing") return texts.status.missing;
@@ -115,7 +118,7 @@ const channelStatus = (channel: PanelChannelState, loadedAt?: number, now = Date
   if (channelBotConsentMissing(channel)) return "warning";
   if (channel.chatSubscriptionNeeded === true && channel.chatSubscription == null) return "warning";
   if (channel.chatSubscriptionNeeded === true && channel.chatSubscription?.status === "missing" &&
-      channel.chatSubscription.reason !== "pending_adoption" && channel.chatSubscription.reason !== "moderator_required") return "warning";
+      !isNeutralEventSubReason(channel.chatSubscription.reason)) return "warning";
   if (tokenStatus.tone === "neutral") return "neutral";
   if (tokenStatus.tone !== "healthy") return "warning";
   if (channel.bot?.status !== "connected" || channel.moderator?.isModerator !== true ||
@@ -138,7 +141,7 @@ const statusText = (channel: PanelChannelState, loadedAt?: number, now = Date.no
   if (channelBotConsentMissing(channel) && tokenStatus.tone === "healthy") return texts.status.broadcasterConsentMissing;
   if (channel.chatSubscriptionNeeded === true && channel.chatSubscription == null) return texts.status.chatSubscriptionMissing;
   if (channel.chatSubscriptionNeeded === true && channel.chatSubscription?.status === "missing" &&
-      channel.chatSubscription.reason !== "pending_adoption" && channel.chatSubscription.reason !== "moderator_required") return texts.status.chatSubscriptionMissing;
+      !isNeutralEventSubReason(channel.chatSubscription.reason)) return texts.status.chatSubscriptionMissing;
   if (tokenStatus.tone !== "healthy") return tokenStatus.label;
   if (channelStatus(channel, loadedAt, now) === "healthy") return texts.status.healthy;
   return texts.status.stateIncomplete;
@@ -756,7 +759,7 @@ const chatRow = (status: PanelChannelState["chatSubscription"] | undefined, need
     return { key: "chat-subscription", tone: "neutral", node: <StateRow label={texts.statusCard.chatSubscription} tone="neutral" word={texts.status.chatSubscriptionNotNeeded} /> };
   }
   const reasonText = maintenanceReasonText(current?.reason);
-  const neutralReason = current?.reason === "pending_adoption" || current?.reason === "moderator_required";
+  const neutralReason = isNeutralEventSubReason(current?.reason);
   const tone: StateTone = current === null || current.status === "missing"
     ? neutralReason ? "neutral" : "warning"
     : current.status === "enabled" ? "healthy" : "error";

@@ -13,6 +13,11 @@ describe("external catalogue keys", () => {
     expect(apiErrorText("realtime_protocol_unsupported", "fallback", "en")).toContain("realtime protocol");
   });
 
+  it("localizes pending EventSub verification in both languages", () => {
+    expect(maintenanceReasonText("verification_pending", "de")).toBe("Verifizierung ausstehend");
+    expect(maintenanceReasonText("verification_pending", "en")).toBe("Verification pending");
+  });
+
   it.each(["__proto__", "constructor", "toString"])("does not treat %s as a catalogue entry", (key) => {
     expect(apiErrorText(key, "fallback", "en")).toBe("fallback");
     expect(maintenanceReasonText(key, "en")).toBe(key);
