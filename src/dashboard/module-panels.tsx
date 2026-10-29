@@ -20,7 +20,6 @@ import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, u
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { moduleDependencyLockReason, moduleParticipatesInDependency } from "./module-dependencies";
-import { ModuleHowToPlay } from "./ModuleHowToPlay";
 import { deriveModuleHowToPlay, moduleChatCommandsForSettings, moduleSettingsForHelp } from "./module-how-to-play-model";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
@@ -93,7 +92,7 @@ const iconFor = (moduleId: string, className = "module-glyph"): ReactElement => 
 
 export const ModuleIcon = ({ moduleId, className }: { moduleId: string; className?: string }): ReactElement => iconFor(moduleId, className);
 
-const TextCommandChatCommandHelp = ({ channelId }: { channelId: string }): ReactElement | null => {
+const TextCommandChatCommandHelp = ({ channelId }: { channelId: string }): ReactElement => {
   const language = dashboardLanguage();
   const commandsQuery = useModuleQuery<TextCommandPanelData>(
     channelId,
@@ -109,7 +108,7 @@ const TextCommandChatCommandHelp = ({ channelId }: { channelId: string }): React
         language={language}
         loadingLabel={dashboardTexts(language).module.chatCommandsButtonLabel(formatNumber(1, language))}
       />
-      : null;
+      : <ChatCommandsHelp commands={[]} language={language} />;
   }
   return <ChatCommandsHelp commands={[textCommandListChatCommand(listCommand.name)]} language={language} />;
 };
@@ -237,7 +236,6 @@ interface ModuleSettingsPageOptions {
   title: string;
   subtitle: string;
   meta?: ReactNode;
-  topContent?: ReactNode;
   icon: ReactNode;
   active: boolean;
   onToggle: (active: boolean) => void;
@@ -249,7 +247,7 @@ interface ModuleSettingsPageOptions {
   pageActions?: ReactNode;
 }
 
-const ModuleSettingsEditor =({ module, channelId, canManageContent, language, viewerIsBot = false, settingsSaveTarget, page }: {
+const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, viewerIsBot = false, settingsSaveTarget, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
@@ -347,7 +345,6 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       title={page.title}
       subtitle={page.subtitle}
       {...(page.meta === undefined ? {} : { meta: page.meta })}
-      {...(page.topContent === undefined ? {} : { topContent: page.topContent })}
       icon={page.icon}
       {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
       active={page.active}
@@ -908,7 +905,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     title={page.title}
     subtitle={page.subtitle}
     {...(page.meta === undefined ? {} : { meta: page.meta })}
-    {...(module.id === "belabox" ? { topContent: <>{page.topContent}<BelaboxSettingsPanelMount key="belabox-panel" module={module} channelId={channelId}
+    {...(module.id === "belabox" ? { topContent: <BelaboxSettingsPanelMount key="belabox-panel" module={module} channelId={channelId}
       language={language} canManageContent={canManageContent}
       lowBitrateKbps={typeof currentValue.lowBitrateKbps === "number" ? currentValue.lowBitrateKbps : 1_000}
       recoverBitrateKbps={typeof currentValue.recoverBitrateKbps === "number" ? currentValue.recoverBitrateKbps : 2_000}
@@ -920,7 +917,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       settingsRevision={settingsRevision}
       onSettingsRevisionChange={setLatestSettingsRevision}
       onRemovePendingChange={setUrlRemovalPending}
-      savingSettings={pending || urlRemovalPending} /></> } : page.topContent === undefined ? {} : { topContent: page.topContent })}
+      savingSettings={pending || urlRemovalPending} /> } : {})}
     icon={page.icon}
     {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
     active={page.active}
@@ -1352,10 +1349,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
   const helpSettings = moduleSettingsForHelp(registered, moduleState?.settings);
   const chatCommands = registered === undefined ? [] : moduleChatCommandsForSettings(registered, helpSettings, dashboardLanguage());
-  const howToPlay = registered !== undefined && (registered.navigationCategory === "games" || registered.howToPlay !== undefined)
-    && deriveModuleHowToPlay(registered, helpSettings, dashboardLanguage()).length > 0
-    ? <ModuleHowToPlay module={registered} settings={helpSettings} language={dashboardLanguage()} loading={loading || moduleState === undefined} />
-    : null;
+  const howToPlayRows = registered === undefined ? [] : deriveModuleHowToPlay(registered, helpSettings, dashboardLanguage());
   const mandatory = moduleState?.mandatory === true || registered?.mandatory === true;
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
@@ -1402,7 +1396,6 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
           subtitle: details.description,
           ...(moduleId === "emote_slots" ? { meta: <SlotJackpotMeta channelId={channelId} language={dashboardLanguage()} /> } : {}),
           icon: iconFor(moduleId, "module-heading-glyph"),
-          ...(howToPlay === null ? {} : { topContent: howToPlay }),
           active: enabled,
           onToggle: (nextEnabled) => { if (nextEnabled !== enabled) onToggle(); },
           switchDisabled: !manageable || switchDisabled || busy,
@@ -1410,7 +1403,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
           ...(disabledReason === null ? {} : { lockHint: disabledReason }),
           ...(reserveDependencyHint ? { reserveLockHint: true } : {}),
           onNavigate,
-          ...(chatCommands.length === 0 ? {} : { pageActions: <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} /> }),
+          pageActions: <ChatCommandsHelp commands={chatCommands} howToPlayRows={howToPlayRows} loading={loading || moduleState === undefined} language={dashboardLanguage()} />,
         }}
       />
     </section>;
@@ -1427,7 +1420,6 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
           title={moduleId === "statistics" && !statisticsInfoOpen ? statisticsPageLabel : details.name}
           subtitle={moduleId === "statistics" && !statisticsInfoOpen ? statisticsEntry?.description?.[dashboardLanguage()] ?? details.description : details.description}
           saveTargetRef={setSettingsSaveTarget}
-          {...(registered?.settingsEditorSavesInPageHeader === true ? { reserveSave: true } : {})}
           {...(navigationPage?.showMainSwitch === false ? {} : {
             active: effectiveEnabled,
             onToggle: (nextEnabled: boolean) => {
@@ -1443,13 +1435,16 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
             ...(reserveDependencyHint ? { reserveLockHint: true } : {}),
           })}
           {...(moduleId === "statistics" ? {
-            pageActions: <Button
-              variant="neutral"
-              icon="info"
-              ariaLabel={texts.module.infoTitle}
-              ariaExpanded={statisticsInfoOpen}
-              onClick={() => setStatisticsInfoOpen((open) => !open)}
-            >{statisticsInfoOpen ? statisticsPageLabel : texts.events.info}</Button>,
+            pageActions: <>
+              <Button
+                variant="neutral"
+                icon="info"
+                ariaLabel={texts.module.infoTitle}
+                ariaExpanded={statisticsInfoOpen}
+                onClick={() => setStatisticsInfoOpen((open) => !open)}
+              >{statisticsInfoOpen ? statisticsPageLabel : texts.events.info}</Button>
+              <ChatCommandsHelp commands={chatCommands} howToPlayRows={howToPlayRows} loading={loading || moduleState === undefined} language={dashboardLanguage()} />
+            </>,
           } : moduleId === "chat_voting" ? {
             pageActions: <>
               <Tabs className="chat-voting-page-tabs" value={chatVotingTab} keepMounted={false} onChange={(value) => {
@@ -1461,15 +1456,14 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
                   <Tabs.Tab className="chat-voting-page-tabs__tab" value="settings">{dashboardLanguage() === "de" ? "Einstellungen" : "Settings"}</Tabs.Tab>
                 </Tabs.List>
               </Tabs>
-              {chatCommands.length === 0 ? null : <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} />}
+              <ChatCommandsHelp commands={chatCommands} howToPlayRows={howToPlayRows} loading={loading || moduleState === undefined} language={dashboardLanguage()} />
             </>,
           } : moduleId === "text_commands" ? {
             pageActions: <TextCommandChatCommandHelp channelId={channelId} />,
-          } : chatCommands.length === 0 ? {} : {
-            pageActions: <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} />,
+          } : {
+            pageActions: <ChatCommandsHelp commands={chatCommands} howToPlayRows={howToPlayRows} loading={loading || moduleState === undefined} language={dashboardLanguage()} />,
           })}
         />
-        {howToPlay}
         {!permissionsMissing ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeList}>
           <div className="section-heading"><h2>{texts.module.scopeList}</h2></div>
           <div className="state-list module-scope-list">

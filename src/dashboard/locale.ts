@@ -1366,6 +1366,7 @@ export interface DashboardTexts {
     scopeMissing: string;
     scopeGranted: string;
     chatCommands: string;
+    chatCommandsEmpty: string;
     chatCommandsButtonLabel: (count: string) => string;
     chatCommandArguments: string;
     chatCommandAvailableTo: string;
@@ -1375,7 +1376,6 @@ export interface DashboardTexts {
     chatCommandThresholds: Record<ModuleChatCommandThreshold, string>;
     chatCommandThresholdShort: Record<ModuleChatCommandThreshold, string>;
     howToPlay: {
-      title: string;
       start: string;
       participate: string;
       startAndJoin: string;
@@ -2022,6 +2022,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeMissing: "Fehlt",
       scopeGranted: "Erteilt",
       chatCommands: "Chatbefehle",
+      chatCommandsEmpty: "Für dieses Modul sind keine Chatbefehle verfügbar.",
       chatCommandsButtonLabel: (count) => `Chatbefehle · ${count}`,
       chatCommandArguments: "Argumente",
       chatCommandAvailableTo: "Im Chat ausführbar für",
@@ -2045,7 +2046,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         configurable: "je nach Einstellung",
       },
       howToPlay: {
-        title: "So startest du",
         start: "Start",
         participate: "Mitspielen",
         startAndJoin: "Starten & beitreten",
@@ -2687,6 +2687,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeMissing: "Missing",
       scopeGranted: "Granted",
       chatCommands: "Chat commands",
+      chatCommandsEmpty: "No chat commands are available for this module.",
       chatCommandsButtonLabel: (count) => `Chat commands · ${count}`,
       chatCommandArguments: "Arguments",
       chatCommandAvailableTo: "Available in chat to",
@@ -2710,7 +2711,6 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         configurable: "set in the settings",
       },
       howToPlay: {
-        title: "How to start",
         start: "Start",
         participate: "Play",
         startAndJoin: "Start & join",
