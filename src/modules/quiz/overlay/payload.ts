@@ -4,6 +4,7 @@ export const quizPhasePayload = (data: QuizSessionRoundData): Record<string, unk
   const question = data.questions[data.questionIndex];
   return {
     sessionId: data.sessionId,
+    setName: data.setName,
     phaseSequence: data.phaseSequence ?? 0,
     sessionStartedAt: data.sessionStartedAt ?? new Date().toISOString(),
     questionIndex: data.questionIndex,

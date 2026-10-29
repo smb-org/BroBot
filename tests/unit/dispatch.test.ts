@@ -10,6 +10,11 @@ import { DEFAULT_CHAT_VOTING_SETTINGS } from "../../src/modules/chat_voting/cont
 import { pointsModule } from "../../src/modules/points";
 import { DEFAULT_POINTS_SETTINGS } from "../../src/modules/points/contracts";
 import { pointsCatalog } from "../../src/modules/points/locale";
+import { DEFAULT_EMOTE_SLOT_SETTINGS } from "../../src/modules/emote_slots/contracts";
+import { parseSlotStake } from "../../src/modules/emote_slots/domain/chat";
+import { commandFromMessage } from "../../src/modules/text_commands/domain";
+import { textCommandModule } from "../../src/modules/text_commands";
+import { createTextCommandRepository } from "../../src/modules/text_commands/adapters/d1";
 import { statisticsModule } from "../../src/modules/statistics";
 import { dispatchEventSubNotification, needsActiveChatterTracking, selectModulesForEvent } from "../../src/worker/dispatch";
 import {
@@ -639,6 +644,116 @@ describe("channel default chat target dispatch", () => {
   });
 });
 
+describe("chat message text normalization", () => {
+  it("matches a configured text command with an invisible suffix", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await activate(database, "kanal-a", textCommandModule.id);
+      const repository = createTextCommandRepository(
+        database as unknown as D1Database,
+        () => ({ sql: "AND 1 = 1", values: [] }),
+      );
+      await repository.create({
+        channelId: "kanal-a",
+        name: "hello",
+        text: "Hello from the command",
+        kind: "text",
+        cooldownSeconds: 0,
+        now: NOW,
+      }, { userId: "member-1" });
+      const fetcher = sent();
+
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "text-command-invisible-suffix",
+        payload: {
+          broadcaster_user_id: "kanal-a",
+          broadcaster_user_login: "kanal-a",
+          chatter_user_id: "viewer-1",
+          chatter_user_login: "viewer",
+          message_id: "text-command-message",
+          message: { text: "!hello\u{E0000}", fragments: [{ type: "text", text: "!hello\u{E0000}" }] },
+        },
+        receivedAt: NOW,
+        eventSubTimestamp: NOW,
+      }, fetcher, [textCommandModule]);
+
+      expect(bodyOf(fetcher)).toMatchObject({ message: "Hello from the command" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("cleans invisible suffixes before modules match commands and answers", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      const observations: {
+        text: string;
+        slotStake: ReturnType<typeof parseSlotStake>;
+        textCommand: ReturnType<typeof commandFromMessage>;
+        pointsCommand: boolean;
+        quizAnswer: boolean;
+        fragments?: unknown;
+      }[] = [];
+      const module = fakeModule("chat-text-normalization", (event) => {
+        const message = event.payload.message;
+        const text = typeof message === "object" && message !== null && !Array.isArray(message) &&
+          typeof Reflect.get(message, "text") === "string" ? Reflect.get(message, "text") as string : "";
+        observations.push({
+          text,
+          slotStake: parseSlotStake(text, DEFAULT_EMOTE_SLOT_SETTINGS),
+          textCommand: commandFromMessage(text),
+          pointsCommand: text.toLowerCase().split(/\s+/u, 1)[0] === "!punkte",
+          quizAnswer: /^[1-4]$/u.test(text),
+          ...(typeof message === "object" && message !== null && !Array.isArray(message) &&
+            Array.isArray(Reflect.get(message, "fragments")) ? { fragments: Reflect.get(message, "fragments") } : {}),
+        });
+        return { actions: [], diagnostics: [] };
+      });
+      await activate(database, "kanal-a", module.id);
+
+      for (const [index, text] of [
+        "!slot \u{E0000}",
+        "!hello\u{E0000}",
+        "!punkte\u{E0000}",
+        "2\u{E0000}",
+        "👨‍👩‍👧‍👦",
+        "\u{E0000}A\u034fB\u200bC\u200cD\u200dE\u2060F\ufeff",
+      ]
+        .entries()) {
+        await dispatchEventSubNotification(environment(database), {
+          channelId: "kanal-a",
+          subscriptionType: CHAT_TYPE,
+          triggerId: `invisible-suffix-${String(index)}`,
+          payload: {
+            chatter_user_id: "viewer-1",
+            chatter_user_login: "viewer",
+            message: {
+              text,
+              ...(index === 0 ? { fragments: [{ type: "text", text }] } : {}),
+            },
+          },
+          receivedAt: NOW,
+        }, vi.fn<typeof fetch>(), [module]);
+      }
+
+      expect(observations).toMatchObject([
+        { text: "!slot", slotStake: { ok: true, stake: 50 }, fragments: [{ type: "text", text: "!slot" }] },
+        { text: "!hello", textCommand: { kind: "command", name: "hello" } },
+        { text: "!punkte", pointsCommand: true },
+        { text: "2", quizAnswer: true },
+        { text: "👨‍👩‍👧‍👦" },
+        { text: "ABCDEF" },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+});
+
 describe("module selection", () => {
   it("skips disabled modules", () => {
     const { matches } = selectModulesForEvent(
@@ -826,7 +941,7 @@ describe("dispatch and execution", () => {
           chatter_user_id: "viewer-1",
           chatter_user_login: "nachtfalke",
           message_id: "twitch-message-486",
-          message: { text: "!spiele", fragments: [{ type: "text", text: "!spiele" }] },
+          message: { text: "!spiele\u{E0000}", fragments: [{ type: "text", text: "!spiele\u{E0000}" }] },
         },
         receivedAt: NOW,
         eventSubTimestamp: NOW,

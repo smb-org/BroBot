@@ -67,7 +67,7 @@ const QuizOverlay = ({ config: rawConfig, state: rawState, language = "en" }: Mo
 
   return <section className="quiz-session-overlay" style={style} data-phase={current.phase} data-paused={current.paused}>
     <header className="quiz-session-overlay__header">
-      <span className="quiz-session-overlay__progress">{current.phase === "results" ? "\u00a0" : progress || "\u00a0"}</span>
+      <span className="quiz-session-overlay__progress">{current.phase === "results" ? current.setName ?? "\u00a0" : progress || "\u00a0"}</span>
       <span className="quiz-session-overlay__phase-status" aria-live={current.paused ? "polite" : "off"}>
         {current.paused ? labels.paused(remainingSeconds === null ? null : formatClock(remainingSeconds))
           : remainingSeconds === null ? "\u00a0"

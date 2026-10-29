@@ -208,7 +208,7 @@ export const EVENTSUB_SUBSCRIPTION_TYPES = [
 ] as const;
 export type EventSubSubscriptionType = (typeof EVENTSUB_SUBSCRIPTION_TYPES)[number];
 
-export const EVENTSUB_NEUTRAL_REASON_CODES = ["moderator_required", "pending_adoption"] as const;
+export const EVENTSUB_NEUTRAL_REASON_CODES = ["moderator_required", "pending_adoption", "verification_pending"] as const;
 export type EventSubNeutralReasonCode = (typeof EVENTSUB_NEUTRAL_REASON_CODES)[number];
 
 export const isEventSubSubscriptionType = (value: string): value is EventSubSubscriptionType =>

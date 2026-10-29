@@ -27,7 +27,7 @@ describe("Panel document language", () => {
       broadcasterConnection: "connected", channelBotConsent: "granted",
       bot: { status: "connected", reason: null, updatedAt: "2026-09-18T04:00:00.000Z" },
       botPermissions: { missingScopes: [] }, moderator: { isModerator: true, checkedAt: "2026-09-18T04:00:00.000Z", reason: null },
-      chatSubscription: { status: "enabled", subscriptionId: "chat-1", reason: null, updatedAt: "2026-09-18T04:00:00.000Z" },
+      chatSubscription: { status: "missing", subscriptionId: "chat-1", reason: "verification_pending", updatedAt: "2026-09-18T04:00:00.000Z" },
       tokens: { botExpiresAt: "2099-09-19T00:00:00.000Z", loginStatus: "connected", loginReason: null, loginExpiresAt: "2099-09-19T00:00:00.000Z" },
       lastError: null,
     };
@@ -35,8 +35,11 @@ describe("Panel document language", () => {
       const url = input instanceof Request ? new URL(input.url) : new URL(String(input), window.location.origin);
       if (url.pathname === "/api/channels") return Promise.resolve(new Response(JSON.stringify({ channels: [channel], bot: channel.bot }), { status: 200 }));
       if (url.pathname.endsWith("/system")) return Promise.resolve(new Response(JSON.stringify({
-        broadcasterConnection: "connected", bot: channel.bot, botPermissions: { missingScopes: [] }, chatSubscription: channel.chatSubscription,
-        subscriptions: [{ subscriptionType: "channel.raid", variant: "incoming", version: "1", subscriptionId: "raid-1", status: "enabled", reason: null, message: null, statusCode: null, updatedAt: "2026-09-18T04:00:00.000Z" }], tokens: channel.tokens,
+        broadcasterConnection: "connected", bot: channel.bot, botPermissions: { missingScopes: [] }, chatSubscription: channel.chatSubscription, chatSubscriptionNeeded: true,
+        subscriptions: [
+          { subscriptionType: "channel.raid", variant: "incoming", version: "1", subscriptionId: "raid-1", status: "enabled", reason: null, message: null, statusCode: null, updatedAt: "2026-09-18T04:00:00.000Z" },
+          { subscriptionType: "channel.future-verification", variant: "", version: "1", subscriptionId: "verification-1", status: "missing", reason: "verification_pending", message: null, statusCode: null, updatedAt: "2026-09-18T03:00:00.000Z" },
+        ], tokens: channel.tokens,
       }), { status: 200 }));
       if (url.pathname.endsWith("/audit-log")) return Promise.resolve(new Response(JSON.stringify({ entries: [], nextCursor: null }), { status: 200 }));
       return Promise.resolve(new Response("{}", { status: 404 }));
@@ -48,5 +51,12 @@ describe("Panel document language", () => {
     expect(await screen.findByRole("columnheader", { name: "Subscription" })).toBeInTheDocument();
     expect(screen.getByText("Incoming raids")).toBeInTheDocument();
     expect(screen.getByRole("article", { name: "Bot permissions" })).toHaveAttribute("data-status", "healthy");
+    expect(screen.getByRole("article", { name: "Chat subscription" })).toHaveAttribute("data-status", "neutral");
+    expect(screen.getByRole("article", { name: "Chat subscription" }).querySelector(".status-led")).toHaveAttribute("aria-label", "Verification pending");
+    const verificationPending = screen.getByText("channel.future-verification").closest("tr");
+    expect(verificationPending?.querySelector(".status-led")).toHaveAttribute("data-status", "off");
+    expect(verificationPending?.querySelector(".status-led")).toHaveAttribute("aria-label", "Verification pending");
+    expect(verificationPending).toHaveTextContent("Verification pending");
+    expect(verificationPending).not.toHaveTextContent("verification_pending");
   });
 });

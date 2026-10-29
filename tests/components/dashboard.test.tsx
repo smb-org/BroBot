@@ -1675,6 +1675,7 @@ describe("Dashboard skeleton", () => {
       { subscriptionType: "channel.raid", variant: "incoming", version: "1", subscriptionId: "raid-in", status: "missing", reason: "subscription_replaced", message: null, statusCode: null, updatedAt: "2026-09-18T03:00:00.000Z" },
       { subscriptionType: "channel.raid", variant: "outgoing", version: "1", subscriptionId: "raid-out", status: "error", reason: "missing_scope", message: "Scope fehlt", statusCode: 403, updatedAt: "2026-09-18T02:00:00.000Z" },
       { subscriptionType: "channel.future", variant: "", version: "9", subscriptionId: null, status: "pending", reason: "wartet", message: null, statusCode: null, updatedAt: "2026-09-18T01:00:00.000Z" },
+      { subscriptionType: "channel.future-verification", variant: "", version: "1", subscriptionId: "verification-1", status: "missing", reason: "verification_pending", message: null, statusCode: null, updatedAt: "2026-09-18T00:00:00.000Z" },
     ];
     const systemResponse = { ...system, botPermissions: { missingScopes: [] }, subscriptions };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1699,6 +1700,11 @@ describe("Dashboard skeleton", () => {
     expect(unknown).toHaveClass("mono");
     expect(screen.getByText("Ausstehend")).toBeInTheDocument();
     expect(screen.getByText("missing_scope")).toBeInTheDocument();
+    const verificationPending = screen.getByText("channel.future-verification").closest("tr");
+    expect(verificationPending?.querySelector(".status-led")).toHaveAttribute("data-status", "off");
+    expect(verificationPending?.querySelector(".status-led")).toHaveAttribute("aria-label", "Verifizierung ausstehend");
+    expect(verificationPending).toHaveTextContent("Verifizierung ausstehend");
+    expect(within(verificationPending as HTMLElement).queryByText("verification_pending")).toBeNull();
 
     const outgoing = screen.getByText("Ausgehende Raids").closest("tr");
     expect(outgoing).not.toBeNull();

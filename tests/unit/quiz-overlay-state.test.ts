@@ -6,11 +6,38 @@ import {
   parseQuizOverlayConfig,
   parseQuizOverlayState,
 } from "../../src/modules/quiz/overlay/state";
+import { quizPhasePayload } from "../../src/modules/quiz/overlay/payload";
+import type { QuizSessionRoundData } from "../../src/modules/quiz/contracts";
 
 const now = Date.parse("2030-01-01T00:00:00.000Z");
 const sessionStartedAt = "2029-12-31T23:59:00.000Z";
 
 describe("quiz overlay state", () => {
+  it("includes the quiz set name in every overlay phase payload", () => {
+    const data: QuizSessionRoundData = {
+      sessionId: "quiz-session",
+      phaseSequence: 1,
+      sessionStartedAt,
+      setId: "set-one",
+      setName: "General knowledge",
+      language: "en",
+      chatQuestions: false,
+      pot: 10,
+      answerSeconds: 30,
+      revealSeconds: 8,
+      questions: [{ text: "Question", options: ["One", "Two"], correctIndex: 0 }],
+      phase: "results",
+      questionIndex: 0,
+      phaseEndsAt: null,
+      paused: false,
+      remainingMs: null,
+      phaseOpenedAt: null,
+      offlineSince: null,
+    };
+
+    expect(quizPhasePayload(data)).toMatchObject({ setName: "General knowledge" });
+  });
+
   it("applies defaults and rejects unknown or unsafe style values", () => {
     expect(parseQuizOverlayConfig({ showPercent: false })).toMatchObject({
       showQuestionProgress: true,
