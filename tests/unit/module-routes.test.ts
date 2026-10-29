@@ -1839,6 +1839,10 @@ describe("Module management in the panel", () => {
         data: [remoteSubscription("kanal-a", "subscription-a")],
         pagination: {},
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [remoteSubscription("kanal-a", "subscription-a")],
+        pagination: {},
+      }), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetcher);
 
@@ -1848,7 +1852,7 @@ describe("Module management in the panel", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(fetcher).toHaveBeenNthCalledWith(2, "https://api.twitch.tv/helix/eventsub/subscriptions?id=subscription-a", expect.objectContaining({ method: "DELETE" }));
+    expect(fetcher).toHaveBeenNthCalledWith(3, "https://api.twitch.tv/helix/eventsub/subscriptions?id=subscription-a", expect.objectContaining({ method: "DELETE" }));
     await expect(database.prepare(
       "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a'",
     ).first()).resolves.toEqual({ status: "missing", subscription_id: null });
@@ -1891,6 +1895,10 @@ describe("Module management in the panel", () => {
         data: [remoteSubscription("kanal-a", "subscription-a")],
         pagination: {},
       }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [remoteSubscription("kanal-a", "subscription-a")],
+        pagination: {},
+      }), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetcher);
 
@@ -1900,8 +1908,8 @@ describe("Module management in the panel", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(String(fetcher.mock.calls[1]?.[0])).toContain("?id=subscription-a");
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(String(fetcher.mock.calls[2]?.[0])).toContain("?id=subscription-a");
     await expect(database.prepare(
       "SELECT status, subscription_id, reason FROM eventsub_subscriptions WHERE channel_id = 'kanal-a'",
     ).first()).resolves.toEqual({ status: "missing", subscription_id: null, reason: "channel_or_consent_missing" });

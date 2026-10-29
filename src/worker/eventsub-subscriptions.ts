@@ -12,6 +12,7 @@ import {
 import {
   listEventSubSubscriptions,
   type EventSubSubscriptionStatus,
+  type EventSubSubscriptionRecord,
   upsertEventSubSubscription,
 } from "./db/eventsub-state";
 import {
@@ -359,6 +360,48 @@ export const fetchEventSubSubscriptions = async (
   });
 };
 
+interface EventSubInventoryCache {
+  get: (appAccessToken: string, refresh?: boolean) => Promise<EventSubRemoteSubscription[]>;
+  add: (subscription: EventSubRemoteSubscription) => void;
+  remove: (subscriptionId: string) => void;
+}
+
+const createEventSubInventoryCache = (
+  fetcher: typeof fetch,
+  clientId: string,
+): EventSubInventoryCache => {
+  let subscriptions: EventSubRemoteSubscription[] | null = null;
+  let pending: Promise<EventSubRemoteSubscription[]> | null = null;
+  return {
+    get: (appAccessToken, refresh = false) => {
+      if (!refresh && subscriptions !== null) return Promise.resolve(subscriptions);
+      if (!refresh && pending !== null) return pending;
+      const request = fetchEventSubSubscriptions(fetcher, clientId, appAccessToken).then((loaded) => {
+        if (subscriptions === null) subscriptions = loaded;
+        else subscriptions.splice(0, subscriptions.length, ...loaded);
+        return subscriptions;
+      });
+      pending = request;
+      void request.then(
+        () => { if (pending === request) pending = null; },
+        () => { if (pending === request) pending = null; },
+      );
+      return request;
+    },
+    add: (subscription) => {
+      if (subscriptions === null) return;
+      const index = subscriptions.findIndex(({ id }) => id === subscription.id);
+      if (index === -1) subscriptions.push(subscription);
+      else subscriptions[index] = subscription;
+    },
+    remove: (subscriptionId) => {
+      if (subscriptions === null) return;
+      const index = subscriptions.findIndex(({ id }) => id === subscriptionId);
+      if (index !== -1) subscriptions.splice(index, 1);
+    },
+  };
+};
+
 const callbackUrl = (publicOrigin: string): string => `${publicOrigin}${EVENTSUB_CALLBACK_PATH}`;
 
 const isOwnedByTarget = (
@@ -464,21 +507,25 @@ const adoptRemoteSubscription = async (
   botUserId: string,
   now: string,
   appAccessToken: string,
-  activeSecretId: string,
-  fetcher: typeof fetch,
+  inventory: EventSubInventoryCache,
 ): Promise<boolean> => {
-  const remote = await fetchEventSubSubscriptions(fetcher, env.TWITCH_CLIENT_ID, appAccessToken);
-  const adopted = remote.find((subscription) => subscription.status === "enabled" &&
+  const remote = await inventory.get(appAccessToken, true);
+  const adopted = remote.find((subscription) =>
     isOwnedByTarget(subscription, target, botUserId, callbackUrl(env.PUBLIC_ORIGIN)));
   if (adopted === undefined) {
     await mark(env.DB, target, "missing", "pending_adoption", null, now);
     return false;
   }
-  // Twitch does not disclose which webhook secret a remote subscription uses.
-  // An untracked subscription therefore cannot be assigned the active key id.
-  await deleteSubscription(fetcher, env.TWITCH_CLIENT_ID, appAccessToken, adopted.id);
-  const replacement = await createSubscription(env, target, botUserId, appAccessToken, fetcher);
-  await mark(env.DB, target, "enabled", null, replacement.id, now, activeSecretId);
+  const targetKey = eventSubTargetKey(target);
+  const tracked = (await listEventSubSubscriptions(env.DB, target.channelId))
+    .find((state) => eventSubTargetKey(state) === targetKey);
+  const secretId = tracked?.subscriptionId === adopted.id ? tracked.secretId : null;
+  if (adopted.status !== "enabled") {
+    await mark(env.DB, target, "missing", "verification_pending", adopted.id, now, secretId);
+    return false;
+  }
+  inventory.add(adopted);
+  await mark(env.DB, target, "enabled", null, adopted.id, now, secretId);
   return true;
 };
 
@@ -508,7 +555,9 @@ export const reconcileEventSubSubscriptions = async (
   botUserId: string,
   fetcher: typeof fetch = fetch,
   channelId?: string,
+  inventoryCache?: EventSubInventoryCache,
 ): Promise<void> => {
+  const inventory = inventoryCache ?? createEventSubInventoryCache(fetcher, env.TWITCH_CLIENT_ID);
   const allTargets = await listDesiredEventSubTargets(env.DB, channelId);
   const deferredTargets = allTargets.filter((target) => target.deferredReason !== undefined);
   const targets = allTargets.filter((target) => target.deferredReason === undefined);
@@ -522,7 +571,20 @@ export const reconcileEventSubSubscriptions = async (
   const markError = async (target: EventSubTarget, error: unknown, subscriptionId: string | null = null): Promise<void> => {
     const details = maintenanceErrorDetails(error, reasonFor(error));
     logTargetError(target, error, details.code);
-    await mark(env.DB, target, "error", details.code, subscriptionId, now, null, details.message, details.status);
+    const state = currentStates.get(eventSubTargetKey(target));
+    const failedSubscriptionId = state?.subscriptionId ?? subscriptionId ?? null;
+    const secretId = state?.subscriptionId === failedSubscriptionId ? state.secretId : null;
+    await mark(
+      env.DB,
+      target,
+      "error",
+      details.code,
+      failedSubscriptionId,
+      now,
+      secretId,
+      details.message,
+      details.status,
+    );
   };
 
   await Promise.all(deferredTargets.map((target) =>
@@ -530,7 +592,7 @@ export const reconcileEventSubSubscriptions = async (
 
   let remote: EventSubRemoteSubscription[];
   try {
-    remote = await fetchEventSubSubscriptions(fetcher, env.TWITCH_CLIENT_ID, appAccessToken);
+    remote = await inventory.get(appAccessToken);
   } catch (error: unknown) {
     const desiredKeys = allDesiredKeys;
     if (targets.length === 0 && currentStates.size === 0) {
@@ -550,7 +612,6 @@ export const reconcileEventSubSubscriptions = async (
           return upsertEventSubSubscription(env.DB, {
             ...state,
             status: "error",
-            secretId: null,
             reason: details.code,
             errorMessage: details.message,
             errorStatus: details.status,
@@ -567,7 +628,126 @@ export const reconcileEventSubSubscriptions = async (
   const matched = new Set<string>();
   const blocked = new Set<string>();
   const failedStaleCleanup = new Set<string>();
-  for (const subscription of remote) {
+  const refreshChannelState = async (
+    subscriptionId: string,
+    remoteChannelId: string,
+  ): Promise<{
+    subscription: EventSubRemoteSubscription | undefined;
+    states: EventSubSubscriptionRecord[];
+    targets: EventSubTarget[];
+  }> => {
+    const [freshInventory, states, targets] = await Promise.all([
+      inventory.get(appAccessToken, true),
+      listEventSubSubscriptions(env.DB, remoteChannelId),
+      listDesiredEventSubTargets(env.DB, remoteChannelId),
+    ]);
+    return {
+      subscription: freshInventory.find(({ id }) => id === subscriptionId),
+      states,
+      targets,
+    };
+  };
+  const preserveFreshSubscription = async (
+    key: string,
+    fresh: Awaited<ReturnType<typeof refreshChannelState>>,
+  ): Promise<boolean> => {
+    const subscription = fresh.subscription;
+    if (subscription === undefined) return true;
+    const deferred = fresh.targets.find((candidate) =>
+      eventSubTargetKey(candidate) === key && candidate.deferredReason !== undefined);
+    if (deferred !== undefined) return true;
+    const desired = fresh.targets.find((candidate) =>
+      eventSubTargetKey(candidate) === key && candidate.deferredReason === undefined);
+    const state = fresh.states.find((candidate) => eventSubTargetKey(candidate) === key);
+    if (subscription.status.includes("pending")) {
+      if (desired !== undefined) {
+        blocked.add(key);
+        await mark(
+          env.DB,
+          desired,
+          "missing",
+          "verification_pending",
+          subscription.id,
+          now,
+          state?.subscriptionId === subscription.id ? state.secretId : null,
+        );
+      }
+      return true;
+    }
+    const previousState = currentStates.get(key);
+    const unknownKeyAdoptedDuringRefresh = state?.subscriptionId === subscription.id &&
+      state.secretId === null && (
+        previousState === undefined ||
+        previousState.subscriptionId !== state.subscriptionId ||
+        previousState.secretId !== state.secretId ||
+        previousState.status !== state.status ||
+        previousState.reason !== state.reason ||
+        previousState.updatedAt !== state.updatedAt
+      );
+    const needsSecretRotation = state?.subscriptionId !== subscription.id || state.secretId !== activeSecretId;
+    if (desired === undefined || subscription.status !== "enabled" ||
+        !isOwnedByTarget(subscription, desired, botUserId, expectedCallback) ||
+        kept.has(key) || (needsSecretRotation && !unknownKeyAdoptedDuringRefresh)) return false;
+    kept.add(key);
+    matched.add(key);
+    await mark(
+      env.DB,
+      desired,
+      "enabled",
+      null,
+      subscription.id,
+      now,
+      state.secretId,
+    );
+    return true;
+  };
+  for (const listedSubscription of [...remote]) {
+    let subscription = listedSubscription;
+    if (subscription.status !== "enabled") {
+      const definition = eventSubDefinitionForCondition(subscription.type, subscription.condition);
+      const remoteChannelId = definition?.channelIdFromCondition(subscription.condition) ?? null;
+      if (remoteChannelId === null || (channelId !== undefined && remoteChannelId !== channelId)) continue;
+      let fresh: Awaited<ReturnType<typeof refreshChannelState>>;
+      try {
+        fresh = await refreshChannelState(subscription.id, remoteChannelId);
+      } catch (error: unknown) {
+        const pendingTarget = targets.find((candidate) => isOwnedByTarget(
+          subscription,
+          candidate,
+          botUserId,
+          callbackUrl(env.PUBLIC_ORIGIN),
+        ));
+        if (pendingTarget !== undefined) {
+          blocked.add(eventSubTargetKey(pendingTarget));
+          await markError(pendingTarget, error, subscription.id);
+        }
+        continue;
+      }
+      if (fresh.subscription === undefined) {
+        inventory.remove(subscription.id);
+        continue;
+      }
+      subscription = fresh.subscription;
+      if (subscription.status.includes("pending")) {
+        const pendingTarget = fresh.targets.find((candidate) => candidate.deferredReason === undefined &&
+          isOwnedByTarget(subscription, candidate, botUserId, callbackUrl(env.PUBLIC_ORIGIN)));
+        if (pendingTarget !== undefined) {
+          const key = eventSubTargetKey(pendingTarget);
+          blocked.add(key);
+          const state = fresh.states.find((candidate) => eventSubTargetKey(candidate) === key);
+          await mark(
+            env.DB,
+            pendingTarget,
+            "missing",
+            "verification_pending",
+            subscription.id,
+            now,
+            state?.subscriptionId === subscription.id ? state.secretId : null,
+          );
+        }
+        continue;
+      }
+    }
     const definition = eventSubDefinitionForCondition(subscription.type, subscription.condition);
     const remoteChannelId = definition?.channelIdFromCondition(subscription.condition) ?? null;
     if (channelId !== undefined && remoteChannelId !== channelId) continue;
@@ -588,26 +768,42 @@ export const reconcileEventSubSubscriptions = async (
     const valid = desired !== undefined && subscription.status === "enabled" &&
       isOwnedByTarget(subscription, desired, botUserId, expectedCallback) && !kept.has(targetKey);
     if (valid) {
-      kept.add(targetKey);
       const state = currentStates.get(targetKey);
-      if (state === undefined || state.status !== "enabled" || state.secretId !== activeSecretId ||
-          state.subscriptionId !== subscription.id) {
-        try {
-          await deleteSubscription(fetcher, env.TWITCH_CLIENT_ID, appAccessToken, subscription.id);
-        } catch (error: unknown) {
-          blocked.add(targetKey);
-          await markError(desired, error, subscription.id);
-          continue;
-        }
+      const needsSecretRotation = state?.subscriptionId !== subscription.id || state.secretId !== activeSecretId;
+      if (!needsSecretRotation) {
+        kept.add(targetKey);
+        matched.add(targetKey);
+        await mark(
+          env.DB,
+          desired,
+          "enabled",
+          null,
+          subscription.id,
+          now,
+          state.secretId,
+        );
         continue;
       }
-      matched.add(targetKey);
-      await mark(env.DB, desired, "enabled", null, subscription.id, now, activeSecretId);
+      try {
+        const fresh = await refreshChannelState(subscription.id, remoteChannelId);
+        if (await preserveFreshSubscription(targetKey, fresh)) continue;
+        if (fresh.subscription === undefined) continue;
+        await deleteSubscription(fetcher, env.TWITCH_CLIENT_ID, appAccessToken, fresh.subscription.id);
+        inventory.remove(fresh.subscription.id);
+      } catch (error: unknown) {
+        blocked.add(targetKey);
+        await markError(desired, error, subscription.id);
+        continue;
+      }
       continue;
     }
     const duplicate = desired !== undefined && kept.has(targetKey);
     try {
-      await deleteSubscription(fetcher, env.TWITCH_CLIENT_ID, appAccessToken, subscription.id);
+      const fresh = await refreshChannelState(subscription.id, remoteChannelId);
+      if (await preserveFreshSubscription(targetKey, fresh)) continue;
+      if (fresh.subscription === undefined) continue;
+      await deleteSubscription(fetcher, env.TWITCH_CLIENT_ID, appAccessToken, fresh.subscription.id);
+      inventory.remove(fresh.subscription.id);
       if (desired !== undefined && !duplicate) {
         await mark(env.DB, desired, "missing", "subscription_replaced", null, now, activeSecretId);
       }
@@ -630,7 +826,7 @@ export const reconcileEventSubSubscriptions = async (
             ...state,
             status: "error",
             subscriptionId: subscription.id,
-            secretId: null,
+            secretId: state.subscriptionId === subscription.id ? state.secretId : null,
             reason: details.code,
             errorMessage: details.message,
             errorStatus: details.status,
@@ -646,11 +842,16 @@ export const reconcileEventSubSubscriptions = async (
     if (matched.has(targetKey) || blocked.has(targetKey)) continue;
     try {
       const subscription = await createSubscription(env, target, botUserId, appAccessToken, fetcher);
-      await mark(env.DB, target, "enabled", null, subscription.id, now, activeSecretId);
+      inventory.add(subscription);
+      if (subscription.status === "enabled") {
+        await mark(env.DB, target, "enabled", null, subscription.id, now, activeSecretId);
+      } else {
+        await mark(env.DB, target, "missing", "verification_pending", subscription.id, now, activeSecretId);
+      }
     } catch (error: unknown) {
       if (isAlreadyExistsConflict(error)) {
         try {
-          await adoptRemoteSubscription(env, target, botUserId, now, appAccessToken, activeSecretId, fetcher);
+          await adoptRemoteSubscription(env, target, botUserId, now, appAccessToken, inventory);
         } catch (adoptionError: unknown) {
           await markError(target, adoptionError);
         }
@@ -683,6 +884,7 @@ const maintainEventSubSubscriptionsPass = async (
   now: string,
   fetcher: typeof fetch = fetch,
   channelId: string,
+  inventory: EventSubInventoryCache,
 ): Promise<void> => {
   let targets: EventSubTarget[];
   try {
@@ -726,7 +928,7 @@ const maintainEventSubSubscriptionsPass = async (
     return;
   }
   try {
-    await reconcileEventSubSubscriptions(env, now, appAccessToken, botIdentity.userId, fetcher, channelId);
+    await reconcileEventSubSubscriptions(env, now, appAccessToken, botIdentity.userId, fetcher, channelId, inventory);
   } catch (error: unknown) {
     const details = maintenanceErrorDetails(error, reasonFor(error));
     if (actionableTargets.length === 0) {
@@ -751,6 +953,7 @@ const maintainChannelWithLease = async (
   now: string,
   fetcher: typeof fetch,
   channelId: string,
+  inventory: EventSubInventoryCache,
 ): Promise<void> => {
   const ownerId = crypto.randomUUID();
   const wallClock = new Date().toISOString();
@@ -770,7 +973,7 @@ const maintainChannelWithLease = async (
   if (lease?.owner_id !== ownerId) return;
 
   for (;;) {
-    await maintainEventSubSubscriptionsPass(env, now, fetcher, channelId);
+    await maintainEventSubSubscriptionsPass(env, now, fetcher, channelId, inventory);
     const released = await env.DB.prepare(
       `DELETE FROM eventsub_maintenance_locks
         WHERE channel_id = ? AND owner_id = ? AND rerun_needed = 0`,
@@ -812,5 +1015,6 @@ export const maintainEventSubSubscriptions = async (
       return;
     }
   }
-  for (const id of channelIds) await maintainChannelWithLease(env, now, fetcher, id);
+  const inventory = createEventSubInventoryCache(fetcher, env.TWITCH_CLIENT_ID);
+  for (const id of channelIds) await maintainChannelWithLease(env, now, fetcher, id, inventory);
 };

@@ -13,6 +13,7 @@ const SOCKET_REVOKED_CODE = 4003;
 const SOCKET_POLICY_VIOLATION_CODE = 1008;
 const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 30_000;
+const STABLE_CONNECTION_PERIOD_MS = 30_000;
 const ABNORMAL_CLOSE_REVALIDATION_THRESHOLD = 3;
 const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 
@@ -20,11 +21,16 @@ type OverlayRealtimeState = "connecting" | "connected" | "reconnecting" | "offli
 
 export interface OverlayRealtimeCallbacks {
   onStateChange?: (state: OverlayRealtimeState) => void;
-  onOpen?: (reconnected: boolean) => void;
+  onOpen?: (reconnected: boolean, bootstrapReused?: boolean) => void;
+  onBootstrap?: (payload: unknown) => boolean;
   onMessage?: (message: RealtimeEnvelope<"variables.changed">) => void;
   onOverlayChanged?: (message: RealtimeEnvelope<"overlay.changed">) => void;
   onModuleMessage?: (message: ModuleOverlayRealtimeEnvelope<`modul.${string}.${string}`>) => void;
   onTokenBound?: () => void;
+}
+
+export interface OverlayRealtimeOptions {
+  bootstrapUrl?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -47,26 +53,32 @@ const realtimeUrl = (): string => {
   return url.toString();
 };
 
-const reconnectDelay = (attempt: number): number => Math.min(
-  MAX_RECONNECT_DELAY_MS,
-  INITIAL_RECONNECT_DELAY_MS * (2 ** Math.min(attempt, 7)),
-);
+const reconnectDelay = (attempt: number): number => {
+  const exponentialDelay = Math.min(
+    MAX_RECONNECT_DELAY_MS,
+    INITIAL_RECONNECT_DELAY_MS * (2 ** Math.min(attempt, 7)),
+  );
+  return Math.min(MAX_RECONNECT_DELAY_MS, Math.round(exponentialDelay * (0.5 + Math.random())));
+};
 
 /** Opens the token-authenticated, one-way overlay socket and retries transient failures. */
 export const connectOverlayRealtime = (
   token: string,
   onTerminalClose?: () => void,
   callbacks: OverlayRealtimeCallbacks = {},
+  options: OverlayRealtimeOptions = {},
 ): (() => void) => {
   let disposed = false;
   let fatalProtocolError = false;
   let socket: WebSocket | null = null;
   let reconnectTimer: number | null = null;
+  let stableTimer: number | null = null;
   let reconnectAttempt = 0;
   let channelId: string | null = null;
   let hasConnected = false;
   let consecutiveAbnormalCloses = 0;
   let authorizationCheck: Promise<boolean> | null = null;
+  let bootstrapReusedBeforeOpen = false;
   let state: OverlayRealtimeState = "offline";
   const seenMessageIds = new RealtimeMessageIdCache();
 
@@ -88,6 +100,12 @@ export const connectOverlayRealtime = (
     reconnectTimer = null;
   };
 
+  const stopStableTimer = (): void => {
+    if (stableTimer === null) return;
+    window.clearTimeout(stableTimer);
+    stableTimer = null;
+  };
+
   const scheduleReconnect = (): void => {
     if (disposed || fatalProtocolError || reconnectTimer !== null) return;
     setState("reconnecting");
@@ -101,10 +119,22 @@ export const connectOverlayRealtime = (
 
   const checkAuthorization = (): Promise<boolean> => {
     if (authorizationCheck !== null) return authorizationCheck;
-    authorizationCheck = fetch("/api/overlay/bootstrap", {
+    bootstrapReusedBeforeOpen = false;
+    authorizationCheck = fetch(options.bootstrapUrl ?? "/api/overlay/bootstrap", {
       headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
-    }).then((response) => response.status !== 401 && response.status !== 403)
+    }).then(async (response) => {
+      if (response.status === 401 || response.status === 403) return false;
+      if (response.ok && callbacks.onBootstrap !== undefined) {
+        try {
+          const payload: unknown = await response.json();
+          bootstrapReusedBeforeOpen = callbacks.onBootstrap(payload);
+        } catch {
+          bootstrapReusedBeforeOpen = false;
+        }
+      }
+      return true;
+    })
       // A failed check caused by a network/server problem is transient. Keep
       // the current frame and allow the socket retry to run.
       .catch(() => true)
@@ -170,10 +200,16 @@ export const connectOverlayRealtime = (
       }
       const reconnected = hasConnected;
       hasConnected = true;
-      reconnectAttempt = 0;
+      stopStableTimer();
+      stableTimer = window.setTimeout(() => {
+        stableTimer = null;
+        reconnectAttempt = 0;
+      }, STABLE_CONNECTION_PERIOD_MS);
       consecutiveAbnormalCloses = 0;
       setState("connected");
-      callbacks.onOpen?.(reconnected);
+      const bootstrapReused = reconnected && bootstrapReusedBeforeOpen;
+      bootstrapReusedBeforeOpen = false;
+      callbacks.onOpen?.(reconnected, bootstrapReused);
     });
 
     activeSocket.addEventListener("message", (event: MessageEvent<unknown>) => {
@@ -211,6 +247,7 @@ export const connectOverlayRealtime = (
 
     activeSocket.addEventListener("close", (event: CloseEvent) => {
       if (socket === activeSocket) socket = null;
+      stopStableTimer();
       if (disposed || fatalProtocolError) return;
       if (event.code === OVERLAY_ACCESS_BOUND_CLOSE_CODE) {
         fatalProtocolError = true;
@@ -242,6 +279,7 @@ export const connectOverlayRealtime = (
   return () => {
     disposed = true;
     stopReconnectTimer();
+    stopStableTimer();
     setState("offline");
     const activeSocket = socket;
     socket = null;

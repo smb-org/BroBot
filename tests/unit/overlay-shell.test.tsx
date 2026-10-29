@@ -346,7 +346,12 @@ describe("OverlayShell and OverlayCanvas", () => {
       cache: "no-store",
     }));
     expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledTimes(1);
-    expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledWith("fictional-token", expect.any(Function), expect.any(Object));
+    expect(realtimeMocks.connectOverlayRealtime).toHaveBeenCalledWith(
+      "fictional-token",
+      expect.any(Function),
+      expect.any(Object),
+      { bootstrapUrl: "/api/overlay/bootstrap" },
+    );
     expect(container.querySelector(".brobot-overlay")).toHaveStyle({ width: "1920px", height: "1080px" });
     expect(container.querySelector('[data-element="element-first"]')).toHaveStyle({ left: "20px", top: "30px", zIndex: "4", width: "max-content" });
     expect(container.querySelector('[data-element="element-first"]')).toHaveClass("brobot-overlay-composition-element");
@@ -357,6 +362,19 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(container.querySelectorAll(".brobot-variable__value")).toHaveLength(3);
     await waitFor(() => expect(document.head.querySelector("style[data-brobot-overlay-css]")?.textContent)
       .toBe(".brobot-overlay { color: white; }"));
+  });
+
+  it("requests an element-scoped bootstrap for an isolated element URL", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(overlayPayload());
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId="element-first" />);
+
+    await waitFor(() => expect(container.querySelector('[data-element="element-first"]')).not.toBeNull());
+    expect(fetcher).toHaveBeenCalledWith("/api/overlay/bootstrap?elementId=element-first", expect.objectContaining({
+      headers: { Authorization: "Bearer fictional-token" },
+      cache: "no-store",
+    }));
   });
 
   it("keeps a visible slot spin through a poll-triggered bootstrap reload and its original expiry (protects=a transient spin on an unchanged enabled element remains visible through the original presentation window after bootstrap hydration; fails_when=the poll reload clears the spin early or restarts its expiry; no_claim=spin delivery before the reload or a disabled element's presentation)", async () => {
@@ -1003,14 +1021,33 @@ describe("OverlayShell and OverlayCanvas", () => {
     await waitFor(() => expect(container.querySelector('[data-element="element-first"] .brobot-variable__value')).toHaveTextContent("3,400"));
   });
 
-  it("reconciles the bootstrap after the first successful socket open", async () => {
+  it("reconciles the initial bootstrap after the first successful socket open", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(overlayPayload());
     vi.stubGlobal("fetch", fetcher);
 
     render(<OverlayShell token="fictional-token" elementId={null} />);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     act(() => realtimeCallbacks?.onOpen?.(false));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
 
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("installs a pre-connect bootstrap and reconciles after reconnect", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(overlayPayload(1200));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await waitFor(() => expect(container.querySelector('[data-element="element-first"]')).not.toBeNull());
+    const preconnectPayload: unknown = JSON.parse(await overlayPayload(3400).text());
+    let bootstrapReused = false;
+    act(() => {
+      bootstrapReused = realtimeCallbacks?.onBootstrap?.(preconnectPayload) ?? false;
+    });
+
+    expect(bootstrapReused).toBe(true);
+    expect(container.querySelector('[data-element="element-first"] .brobot-variable__value')?.textContent).toContain("3,400");
+    act(() => realtimeCallbacks?.onOpen?.(true, true));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
   });
 

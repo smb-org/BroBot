@@ -2675,4 +2675,104 @@ describe("dispatch and execution", () => {
       database.close();
     }
   });
+
+  it("shares short-lived Twitch lookups across events and invalidates channel and stream values", async () => {
+    const database = new TestD1Database();
+    try {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(NOW));
+      await insertChannel(database, "cache-channel");
+      await insertAppAccessToken(
+        database,
+        await encryptJson({ token: "app-token" }, parseKeyRing(keyRing)),
+        "2099-09-21T00:00:00.000Z",
+        NOW,
+        NOW,
+      );
+      const seen: Array<{ title: string | null; viewers: number | null; createdAt: string | null }> = [];
+      const module: BotModule = {
+        id: "twitch-cache",
+        navigationCategory: "chat",
+        settingsSchema: z.object({ prefix: z.string() }),
+        defaultSettings: { prefix: "!" },
+        eventSubTypes: [CHAT_TYPE, "channel.update", "stream.online"],
+        handleEvent: async (_event, context) => {
+          const info = await context.channelInfo();
+          seen.push({
+            title: info?.title ?? null,
+            viewers: info?.viewerCount ?? null,
+            createdAt: await context.userCreatedAt("user-a"),
+          });
+          return { actions: [], diagnostics: [] };
+        },
+      };
+      await activate(database, "cache-channel", module.id);
+      let channelLookups = 0;
+      let streamLookups = 0;
+      let userLookups = 0;
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (url.pathname.endsWith("/channels")) {
+          channelLookups += 1;
+          return Promise.resolve(new Response(JSON.stringify({ data: [{
+            title: `Title ${String(channelLookups)}`,
+            game_name: "Game",
+            game_id: "77",
+          }] }), { status: 200 }));
+        }
+        if (url.pathname.endsWith("/streams")) {
+          streamLookups += 1;
+          return Promise.resolve(new Response(JSON.stringify({ data: [{
+            started_at: "2026-09-19T11:00:00.000Z",
+            viewer_count: 20 + streamLookups,
+          }] }), { status: 200 }));
+        }
+        if (url.pathname.endsWith("/users")) {
+          userLookups += 1;
+          return Promise.resolve(new Response(JSON.stringify({ data: [{ created_at: "2020-01-01T00:00:00.000Z" }] }), { status: 200 }));
+        }
+        return Promise.reject(new Error(`Unexpected Helix request: ${url.pathname}.`));
+      });
+      const send = async (subscriptionType: string, triggerId: string, payload: Record<string, unknown> = {}): Promise<void> => {
+        await dispatchEventSubNotification(environment(database), {
+          channelId: "cache-channel",
+          subscriptionType,
+          triggerId,
+          payload,
+          receivedAt: NOW,
+          eventSubTimestamp: NOW,
+        }, fetcher, [module]);
+      };
+
+      await send(CHAT_TYPE, "chat-1");
+      await send(CHAT_TYPE, "chat-2");
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect(seen.slice(0, 2)).toEqual([
+        { title: "Title 1", viewers: 21, createdAt: "2020-01-01T00:00:00.000Z" },
+        { title: "Title 1", viewers: 21, createdAt: "2020-01-01T00:00:00.000Z" },
+      ]);
+
+      await vi.advanceTimersByTimeAsync(15_001);
+      await send(CHAT_TYPE, "chat-after-cache-expiry");
+      expect(channelLookups).toBe(2);
+      expect(streamLookups).toBe(2);
+
+      await send("channel.update", "channel-update", { title: "New title", category_id: "77", category_name: "Game" });
+      expect(channelLookups).toBe(3);
+      expect(streamLookups).toBe(2);
+      await send("stream.online", "stream-online", { id: "stream-1", started_at: "2026-09-19T11:00:00.000Z" });
+
+      expect(channelLookups).toBe(3);
+      expect(streamLookups).toBe(3);
+      expect(userLookups).toBe(1);
+      expect(seen.slice(2)).toEqual([
+        { title: "Title 2", viewers: 22, createdAt: "2020-01-01T00:00:00.000Z" },
+        { title: "Title 3", viewers: 22, createdAt: "2020-01-01T00:00:00.000Z" },
+        { title: "Title 3", viewers: 23, createdAt: "2020-01-01T00:00:00.000Z" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+      database.close();
+    }
+  });
 });

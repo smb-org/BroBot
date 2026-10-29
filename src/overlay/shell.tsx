@@ -28,6 +28,10 @@ const LOAD_RETRY_BASE_DELAY_MS = 1_000;
 const MAX_LOAD_RETRY_DELAY_MS = 60_000;
 const MAX_LOAD_RETRY_ATTEMPT = 6;
 
+const bootstrapUrlFor = (elementId: string | null): string => elementId === null
+  ? "/api/overlay/bootstrap"
+  : `/api/overlay/bootstrap?elementId=${encodeURIComponent(elementId)}`;
+
 interface OverlayShellProperties {
   token: string;
   elementId: string | null;
@@ -298,6 +302,24 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
       }, delay);
     };
 
+    const installBootstrapPayload = (payload: unknown): OverlayBootstrapData | null => {
+      const parsedBootstrap = parseBootstrap(payload);
+      if (parsedBootstrap === null) return null;
+      const retained = preserveElementStateAcrossBootstrap(bootstrapRef.current, parsedBootstrap, elementId);
+      const next = pendingModuleMessages.reduce(
+        (current, received) => applyModuleMessage(current, received),
+        applyPendingVariableChanges(retained, pendingVariableChanges),
+      );
+      pendingModuleMessages.length = 0;
+      pendingVariableChanges.clear();
+      document.documentElement.lang = next.language;
+      install(next, next.overlay === null ? "unbound" : "ready");
+      scheduleTimelineRefresh(next);
+      retryAttempt = 0;
+      stopRetryTimer();
+      return next;
+    };
+
     const load = async (): Promise<void> => {
       if (lifecycle.disposed || lifecycle.revoked) return;
       if (loadInFlight) {
@@ -309,7 +331,7 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
       activeController = controller;
       loadInFlight = true;
       try {
-        const response = await fetch("/api/overlay/bootstrap", {
+        const response = await fetch(bootstrapUrlFor(elementId), {
           headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
           signal: controller.signal,
@@ -329,21 +351,9 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
         } catch {
           throw new Error("Overlay bootstrap response was not valid JSON.");
         }
-        const parsedBootstrap = parseBootstrap(payload);
-        if (parsedBootstrap === null) throw new Error("Overlay bootstrap response had an invalid shape.");
-        const retained = preserveElementStateAcrossBootstrap(bootstrapRef.current, parsedBootstrap, elementId);
-        const next = pendingModuleMessages.reduce(
-          (current, received) => applyModuleMessage(current, received),
-          applyPendingVariableChanges(retained, pendingVariableChanges),
-        );
-        pendingModuleMessages.length = 0;
-        pendingVariableChanges.clear();
-        document.documentElement.lang = next.language;
-        install(next, next.overlay === null ? "unbound" : "ready");
-        scheduleTimelineRefresh(next);
+        const next = installBootstrapPayload(payload);
+        if (next === null) throw new Error("Overlay bootstrap response had an invalid shape.");
         if (next.overlay !== null) startRealtime();
-        retryAttempt = 0;
-        stopRetryTimer();
       } catch {
         if (!isCurrentRequest(lifecycle, currentRequest) || controller.signal.aborted) return;
         // Once a source has rendered successfully, transient bootstrap failures
@@ -393,11 +403,25 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
         pendingVariableChanges.clear();
         install(null, "revoked");
       }, {
+        onBootstrap: (payload) => {
+            if (lifecycle.disposed || lifecycle.revoked) return false;
+          stopReloadTimer();
+          stopMaximumReloadTimer();
+          stopRetryTimer();
+          lifecycle.reloadPending = false;
+          if (loadInFlight) {
+            lifecycle.requestNumber++;
+            activeController?.abort();
+          }
+          const next = installBootstrapPayload(payload);
+          if (next === null) return false;
+          if (next.overlay !== null) startRealtime();
+          return true;
+        },
         onOpen: () => {
           stopReloadTimer();
           stopMaximumReloadTimer();
           stopRetryTimer();
-          retryAttempt = 0;
           void load();
         },
         onMessage: (message) => {
@@ -433,7 +457,7 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
           bootstrapRef.current = next;
           setBootstrap(next);
         },
-      });
+      }, { bootstrapUrl: bootstrapUrlFor(elementId) });
     };
 
     void load();

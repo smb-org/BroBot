@@ -142,6 +142,7 @@ export const getOverlayForChannel = async (
   db: D1Database,
   channelId: string,
   overlayId: string,
+  elementId?: string,
 ): Promise<OverlayRecord | null> => {
   const row = await db.prepare(
     `SELECT overlay_id, channel_id, name, width, height, css, revision, created_at, updated_at
@@ -150,13 +151,22 @@ export const getOverlayForChannel = async (
   )
     .bind(channelId, overlayId).first<OverlayRow>();
   if (row === null) return null;
-  const elements = await db.prepare(
-    `SELECT element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json,
-            x, y, scale_percent, z, in_composition, missing_variable_name
-       FROM overlay_elements
-      WHERE channel_id = ? AND overlay_id = ?
-      ORDER BY z, element_id`,
-  ).bind(channelId, overlayId).all<OverlayElementRow>();
+  const elementsQuery = elementId === undefined
+    ? db.prepare(
+      `SELECT element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json,
+              x, y, scale_percent, z, in_composition, missing_variable_name
+         FROM overlay_elements
+        WHERE channel_id = ? AND overlay_id = ?
+        ORDER BY z, element_id`,
+    ).bind(channelId, overlayId)
+    : db.prepare(
+      `SELECT element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json,
+              x, y, scale_percent, z, in_composition, missing_variable_name
+         FROM overlay_elements
+        WHERE channel_id = ? AND overlay_id = ? AND element_id = ?
+        ORDER BY z, element_id`,
+    ).bind(channelId, overlayId, elementId);
+  const elements = await elementsQuery.all<OverlayElementRow>();
   return {
     id: row.overlay_id,
     channelId: row.channel_id,
@@ -192,17 +202,23 @@ export const getOverlayVariableValues = async (
   db: D1Database,
   channelId: string,
   overlayId: string,
+  elementId?: string,
 ): Promise<Record<string, number>> => {
-  const rows = await db.prepare(
+  const elementScope = elementId === undefined ? "" : " AND element.element_id = ?";
+  const statement = db.prepare(
     `SELECT DISTINCT variable.name, variable.value
        FROM channel_variables AS variable
        JOIN overlay_elements AS element
          ON element.channel_id = variable.channel_id
         AND element.overlay_id = ?
+        ${elementScope}
         AND (element.variable_name = variable.name OR instr(element.text, '{var.' || variable.name || '}') > 0)
       WHERE variable.channel_id = ?
       ORDER BY variable.name`,
-  ).bind(overlayId, channelId).all<{ name: string; value: number }>();
+  );
+  const rows = elementId === undefined
+    ? await statement.bind(overlayId, channelId).all<{ name: string; value: number }>()
+    : await statement.bind(overlayId, elementId, channelId).all<{ name: string; value: number }>();
   return Object.fromEntries(rows.results.map(({ name, value }) => [name, value]));
 };
 
