@@ -426,6 +426,94 @@ describe("EventSub reconciliation", () => {
     ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-b" });
   });
 
+  it("rotates an old-key subscription after inventory recovers from a transient failure", async () => {
+    await prepareChatMaintenance(database, ["kanal-a"]);
+    await database.prepare(
+      `INSERT INTO eventsub_subscriptions
+        (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
+       VALUES ('kanal-a', 'channel.chat.message', 'subscription-old', 'eventsub-v0', 'enabled', NULL, ?)`,
+    ).bind("2026-09-19T00:00:00.000Z").run();
+    const oldSubscription = {
+      id: "subscription-old",
+      type: "channel.chat.message",
+      version: "1",
+      status: "enabled",
+      condition: { broadcaster_user_id: "kanal-a", user_id: "bot-user" },
+      transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+    };
+    const failedInventoryFetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ message: "temporary unavailable" }, { status: 503 }));
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", failedInventoryFetcher);
+
+    await expect(database.prepare(
+      "SELECT status, reason, subscription_id, secret_id, error_message, error_status FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toEqual({
+      status: "error",
+      reason: "http_503",
+      subscription_id: "subscription-old",
+      secret_id: "eventsub-v0",
+      error_message: "temporary unavailable",
+      error_status: 503,
+    });
+
+    const replacementFetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ data: [oldSubscription], pagination: {} }, { status: 200 }))
+      .mockResolvedValueOnce(Response.json({ data: [oldSubscription], pagination: {} }, { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(Response.json({ data: [{ ...oldSubscription, id: "subscription-new" }] }, { status: 202 }));
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T02:00:00.000Z", replacementFetcher);
+
+    expect(replacementFetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? "GET"))
+      .toEqual(["GET", "GET", "DELETE", "POST"]);
+    const createBody = (replacementFetcher.mock.calls[3]?.[1] as RequestInit).body;
+    expect(typeof createBody).toBe("string");
+    expect(JSON.parse(typeof createBody === "string" ? createBody : "{}")).toMatchObject({
+      transport: { secret: key(3) },
+    });
+    await expect(database.prepare(
+      "SELECT status, subscription_id, secret_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toEqual({
+      status: "enabled",
+      subscription_id: "subscription-new",
+      secret_id: "eventsub-v1",
+    });
+  });
+
+  it("rotates a legacy subscription when its webhook secret key is unknown", async () => {
+    await prepareChatMaintenance(database, ["kanal-a"]);
+    await database.prepare(
+      `INSERT INTO eventsub_subscriptions
+        (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
+       VALUES ('kanal-a', 'channel.chat.message', 'subscription-legacy', NULL, 'enabled', NULL, ?)`,
+    ).bind("2026-09-19T00:00:00.000Z").run();
+    const legacySubscription = {
+      id: "subscription-legacy",
+      type: "channel.chat.message",
+      version: "1",
+      status: "enabled",
+      condition: { broadcaster_user_id: "kanal-a", user_id: "bot-user" },
+      transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ data: [legacySubscription], pagination: {} }, { status: 200 }))
+      .mockResolvedValueOnce(Response.json({ data: [legacySubscription], pagination: {} }, { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(Response.json({ data: [{ ...legacySubscription, id: "subscription-new" }] }, { status: 202 }));
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", fetcher);
+
+    expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? "GET"))
+      .toEqual(["GET", "GET", "DELETE", "POST"]);
+    await expect(database.prepare(
+      "SELECT status, subscription_id, secret_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toEqual({
+      status: "enabled",
+      subscription_id: "subscription-new",
+      secret_id: "eventsub-v1",
+    });
+  });
+
   it("adopts an untracked owned subscription after create returns the already-exists conflict", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);

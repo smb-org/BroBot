@@ -571,7 +571,20 @@ export const reconcileEventSubSubscriptions = async (
   const markError = async (target: EventSubTarget, error: unknown, subscriptionId: string | null = null): Promise<void> => {
     const details = maintenanceErrorDetails(error, reasonFor(error));
     logTargetError(target, error, details.code);
-    await mark(env.DB, target, "error", details.code, subscriptionId, now, null, details.message, details.status);
+    const state = currentStates.get(eventSubTargetKey(target));
+    const failedSubscriptionId = state?.subscriptionId ?? subscriptionId ?? null;
+    const secretId = state?.subscriptionId === failedSubscriptionId ? state.secretId : null;
+    await mark(
+      env.DB,
+      target,
+      "error",
+      details.code,
+      failedSubscriptionId,
+      now,
+      secretId,
+      details.message,
+      details.status,
+    );
   };
 
   await Promise.all(deferredTargets.map((target) =>
@@ -599,7 +612,6 @@ export const reconcileEventSubSubscriptions = async (
           return upsertEventSubSubscription(env.DB, {
             ...state,
             status: "error",
-            secretId: null,
             reason: details.code,
             errorMessage: details.message,
             errorStatus: details.status,
@@ -662,11 +674,20 @@ export const reconcileEventSubSubscriptions = async (
       }
       return true;
     }
-    const needsSecretRotation = state?.subscriptionId === subscription.id &&
-      state.secretId !== null && state.secretId !== activeSecretId;
+    const previousState = currentStates.get(key);
+    const unknownKeyAdoptedDuringRefresh = state?.subscriptionId === subscription.id &&
+      state.secretId === null && (
+        previousState === undefined ||
+        previousState.subscriptionId !== state.subscriptionId ||
+        previousState.secretId !== state.secretId ||
+        previousState.status !== state.status ||
+        previousState.reason !== state.reason ||
+        previousState.updatedAt !== state.updatedAt
+      );
+    const needsSecretRotation = state?.subscriptionId !== subscription.id || state.secretId !== activeSecretId;
     if (desired === undefined || subscription.status !== "enabled" ||
         !isOwnedByTarget(subscription, desired, botUserId, expectedCallback) ||
-        kept.has(key) || needsSecretRotation) return false;
+        kept.has(key) || (needsSecretRotation && !unknownKeyAdoptedDuringRefresh)) return false;
     kept.add(key);
     matched.add(key);
     await mark(
@@ -676,7 +697,7 @@ export const reconcileEventSubSubscriptions = async (
       null,
       subscription.id,
       now,
-      state?.subscriptionId === subscription.id ? state.secretId : null,
+      state.secretId,
     );
     return true;
   };
@@ -748,8 +769,7 @@ export const reconcileEventSubSubscriptions = async (
       isOwnedByTarget(subscription, desired, botUserId, expectedCallback) && !kept.has(targetKey);
     if (valid) {
       const state = currentStates.get(targetKey);
-      const needsSecretRotation = state?.subscriptionId === subscription.id &&
-        state.secretId !== null && state.secretId !== activeSecretId;
+      const needsSecretRotation = state?.subscriptionId !== subscription.id || state.secretId !== activeSecretId;
       if (!needsSecretRotation) {
         kept.add(targetKey);
         matched.add(targetKey);
@@ -760,7 +780,7 @@ export const reconcileEventSubSubscriptions = async (
           null,
           subscription.id,
           now,
-          state?.subscriptionId === subscription.id ? state.secretId : null,
+          state.secretId,
         );
         continue;
       }
@@ -806,7 +826,7 @@ export const reconcileEventSubSubscriptions = async (
             ...state,
             status: "error",
             subscriptionId: subscription.id,
-            secretId: null,
+            secretId: state.subscriptionId === subscription.id ? state.secretId : null,
             reason: details.code,
             errorMessage: details.message,
             errorStatus: details.status,
