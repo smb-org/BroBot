@@ -4328,10 +4328,12 @@ const eventSubNeutralReasonTexts: LocaleCatalog<Record<EventSubNeutralReasonCode
   de: {
     moderator_required: "Wartet auf Moderatorstatus des Bots",
     pending_adoption: "Wird übernommen",
+    verification_pending: "Verifizierung ausstehend",
   },
   en: {
     moderator_required: "Waiting for the bot's moderator status",
     pending_adoption: "Being adopted",
+    verification_pending: "Verification pending",
   },
 };
 

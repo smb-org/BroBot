@@ -47,7 +47,7 @@ import "./overlay-editor.css";
 
 const installPreviewStylesheet = (
   frameDocument: Document,
-  attribute: "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css" | "data-brobot-overlay-quiz-css",
+  attribute: "data-brobot-overlay-fonts-css" | "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css" | "data-brobot-overlay-quiz-css",
   css: string,
 ): void => {
   let style = frameDocument.head.querySelector<HTMLStyleElement>(`style[${attribute}]`);
@@ -703,11 +703,13 @@ function OverlayEditorWorkspace({
     root.setAttribute("aria-label", labels.editorPreviewCanvas);
     root.tabIndex = 0;
     void Promise.all([
+      import("../fonts.css?inline"),
       import("../overlay/tally/overlay-tally.css?inline"),
       import("../modules/emote_slots/overlay/slot.css?inline"),
       import("../modules/quiz/overlay/view.css?inline"),
-    ]).then(([{ default: overlayTallyCss }, { default: slotCss }, { default: quizCss }]) => {
+    ]).then(([{ default: fontsCss }, { default: overlayTallyCss }, { default: slotCss }, { default: quizCss }]) => {
       if (!frame.isConnected || frame.contentDocument !== frameDocument) return;
+      installPreviewStylesheet(frameDocument, "data-brobot-overlay-fonts-css", fontsCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-tally-css", overlayTallyCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-slot-css", slotCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-quiz-css", quizCss);

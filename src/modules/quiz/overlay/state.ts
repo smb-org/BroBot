@@ -14,6 +14,7 @@ export interface QuizOverlayState {
   sessionId: string;
   phaseSequence: number;
   sessionStartedAt: string;
+  setName?: string;
   phase: QuizOverlayPhase;
   questionIndex: number;
   questionCount: number;
@@ -118,6 +119,7 @@ export const parseQuizOverlayState = (value: unknown): QuizOverlayState | null =
     sessionId: state.sessionId,
     phaseSequence: state.phaseSequence,
     sessionStartedAt: state.sessionStartedAt,
+    ...(typeof state.setName === "string" && state.setName.trim().length > 0 ? { setName: state.setName } : {}),
     phase: state.phase,
     questionIndex: state.questionIndex,
     questionCount: state.questionCount,
