@@ -19,9 +19,10 @@ const configuredThreshold = (command: ModuleChatCommandDeclaration, settings: un
     : command.minimumChatStatus;
 };
 
-/** Settings-configurable command names cannot be derived when the settings fail validation: defaults would be shown as fact. */
-const moduleChatCommandNamesUnavailable = (module: BotModule, settings: unknown): boolean =>
-  module.chatCommandNames !== undefined && module.chatCommandNames(settings).length < (module.chatCommands?.length ?? 0);
+/** Invalid stored settings (null) or unresolvable command names: defaults must not be shown as configured facts. */
+const settingsUnavailable = (module: BotModule, settings: unknown): boolean =>
+  settings === null
+  || (module.chatCommandNames !== undefined && module.chatCommandNames(settings).length < (module.chatCommands?.length ?? 0));
 
 export const moduleChatCommandsForSettings = (
   module: BotModule,
@@ -29,7 +30,7 @@ export const moduleChatCommandsForSettings = (
   language: DashboardLanguage,
 ): ModuleChatCommandDeclaration[] => {
   const declarations = module.chatCommands ?? [];
-  if (moduleChatCommandNamesUnavailable(module, settings)) return [];
+  if (settingsUnavailable(module, settings)) return [];
   const configuredNames = module.chatCommandNames?.(settings) ?? [];
   return declarations.map((command, index) => {
     const name = configuredNames[index] ?? command.name;
@@ -44,19 +45,19 @@ export const moduleChatCommandsForSettings = (
   });
 };
 
+/**
+ * Stored settings validated with the schema the worker applies at runtime; null when they are malformed or invalid,
+ * so help never advertises defaults the worker would not use. Nothing stored yet means the defaults apply.
+ */
 export const moduleSettingsForHelp = (module: BotModule | undefined, serializedSettings: string | undefined): unknown => {
-  const defaults = objectValue(module?.defaultSettings) ?? {};
-  // Malformed stored settings: modules with configurable command names must not present their defaults as configured.
-  const malformed = module?.chatCommandNames === undefined ? defaults : null;
-  if (serializedSettings !== undefined) {
-    try {
-      const parsed = objectValue(JSON.parse(serializedSettings) as unknown);
-      return parsed === null ? malformed : { ...defaults, ...parsed };
-    } catch {
-      return malformed;
-    }
+  if (module === undefined) return null;
+  if (serializedSettings === undefined) return module.defaultSettings;
+  try {
+    const parsed = (module.settingsReadSchema ?? module.settingsSchema).safeParse(JSON.parse(serializedSettings));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
   }
-  return defaults;
 };
 
 export const deriveModuleHowToPlay = (
@@ -84,7 +85,11 @@ export const deriveModuleHowToPlay = (
   }
 
   const commands = moduleChatCommandsForSettings(module, settings, language);
-  if (moduleChatCommandNamesUnavailable(module, settings)) rows.push({ kind: "command", label: "note", text: copy.commandsUnavailable });
+  const unavailable = settingsUnavailable(module, settings);
+  const settingsDependent = (module.chatCommands?.length ?? 0) > 0
+    || definition?.autoStartSetting !== undefined
+    || definition?.participationSetting !== undefined;
+  if (unavailable && settingsDependent) rows.push({ kind: "command", label: "note", text: copy.commandsUnavailable });
   for (const command of commands) {
     if (command.howToPlayUsage !== "start" && command.howToPlayUsage !== "start_and_participate") continue;
     const startsAndJoins = command.howToPlayUsage === "start_and_participate";
@@ -95,7 +100,7 @@ export const deriveModuleHowToPlay = (
     });
   }
 
-  if (definition?.autoStartSetting !== undefined) {
+  if (!unavailable && definition?.autoStartSetting !== undefined) {
     const intervalValue = definition.autoStartIntervalSetting === undefined ? undefined : settingsRecord?.[definition.autoStartIntervalSetting];
     rows.push({
       kind: "auto_start",
@@ -122,7 +127,7 @@ export const deriveModuleHowToPlay = (
     rows.push({ kind: "participation", label: joinKnown ? "note" : "participate", text: definition.participation[language] });
   }
 
-  if (definition?.participationSetting !== undefined && settingsRecord !== null) {
+  if (!unavailable && definition?.participationSetting !== undefined && settingsRecord !== null) {
     const { setting, enabled, disabled } = definition.participationSetting;
     rows.push({
       kind: "participation_setting",
@@ -132,7 +137,7 @@ export const deriveModuleHowToPlay = (
   }
 
   // A games-category module without any start or join information (Points) is not a game to start: no block at all.
-  if (rows.length > 0 && module.navigationCategory === "games" && !rows.some((row) => row.label === "participate" || row.label === "startAndJoin")) {
+  if (!unavailable && rows.length > 0 && module.navigationCategory === "games" && !rows.some((row) => row.label === "participate" || row.label === "startAndJoin")) {
     rows.push({ kind: "participation", label: "participate", text: copy.missingInstructions });
   }
   return rows;

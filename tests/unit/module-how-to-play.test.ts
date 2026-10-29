@@ -97,7 +97,44 @@ describe("module how-to-play derivation", () => {
         expect(texts.join(" ")).not.toMatch(/!duell|!ja|Chat →/u);
       }
     }
-    expect(moduleSettingsForHelp(moduleById("blitz_round"), "{not json")).toEqual(moduleById("blitz_round").defaultSettings);
+  });
+
+  it("validates stored settings with the worker schema and suppresses every settings-dependent claim when they fail", () => {
+    const withoutChallenge = settingsWith("duel", { challengeCommand: undefined });
+    const cases: Array<{ moduleId: string; serialized: string; forbidden: RegExp }> = [
+      { moduleId: "duel", serialized: JSON.stringify(withoutChallenge), forbidden: /!duell|!ja|Chat →|alle|everyone/u },
+      { moduleId: "clips", serialized: "{not json", forbidden: /alle|everyone|Chat →|Chat ->/u },
+      { moduleId: "votekick", serialized: "{not json", forbidden: /VIP|Moderator|Chat →|Chat ->|Teilnahme/u },
+      { moduleId: "blitz_round", serialized: "{not json", forbidden: /Automatischer Start|Automatic start/u },
+    ];
+
+    for (const { moduleId, serialized, forbidden } of cases) {
+      const module = moduleById(moduleId);
+      const settings = moduleSettingsForHelp(module, serialized);
+      expect(settings, moduleId).toBeNull();
+      expect(moduleChatCommandsForSettings(module, settings, "de"), moduleId).toEqual([]);
+      for (const language of ["de", "en"] as const) {
+        const rows = deriveModuleHowToPlay(module, settings, language);
+        const note = rows.filter((row) => row.label === "note" && /nicht verfügbar|unavailable/u.test(row.text));
+        expect(note, `${moduleId} ${language}`).toHaveLength(1);
+        expect(rows.filter((row) => row.kind === "command" && row !== note[0]), `${moduleId} ${language}`).toEqual([]);
+        expect(rows.filter((row) => row !== note[0] && row.kind !== "cockpit" && row.kind !== "participation").map((row) => row.text).join(" "), `${moduleId} ${language}`)
+          .not.toMatch(forbidden);
+      }
+    }
+    // Settings-independent facts stay: the Blitz cockpit start is still listed next to the note.
+    const blitz = moduleById("blitz_round");
+    expect(deriveModuleHowToPlay(blitz, null, "de").map((row) => row.kind)).toEqual(["cockpit", "command", "participation"]);
+  });
+
+  it("keeps configured values for valid stored settings and defaults when nothing is stored", () => {
+    const votekick = moduleById("votekick");
+    const stored = moduleSettingsForHelp(votekick, JSON.stringify(settingsWith("votekick", { starterMinRole: "moderator" })));
+    expect(deriveModuleHowToPlay(votekick, stored, "de")[0]?.text).toContain("(ab Moderator)");
+    const duel = moduleById("duel");
+    const storedDuel = moduleSettingsForHelp(duel, JSON.stringify(settingsWith("duel", { challengeCommand: "!challenge" })));
+    expect(deriveModuleHowToPlay(duel, storedDuel, "de")[0]?.text).toContain("!challenge");
+    expect(moduleSettingsForHelp(votekick, undefined)).toEqual(votekick.defaultSettings);
   });
 
   it("labels rule notes separately from the ways to join", () => {

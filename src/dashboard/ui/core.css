@@ -865,6 +865,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .module-detail-heading .page-header__save .ui-save-bar__actions { flex: none; }
 .page-header__page-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .page-header__page-actions > * { min-width: 0; max-width: 100%; }
+/* The chat commands button always leads the page actions, whichever other actions (Info, tabs) a page adds. */
+.page-header__page-actions > .chat-commands-help__trigger { order: -1; }
 .page-header__overflow-trigger { flex: none; }
 .page-header__overflow { display: grid; width: min(280px, calc(100vw - 24px)); max-height: min(70vh, 480px); gap: 8px; overflow: auto; }
 .page-header__overflow > * { max-width: 100%; }

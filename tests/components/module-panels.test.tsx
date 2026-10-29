@@ -119,7 +119,7 @@ vi.mock("../../src/modules/registry", () => ({
     {
       id: "aktiv",
       navigationCategory: "chat",
-      settingsSchema: {},
+      settingsSchema: { safeParse: (value: unknown) => ({ success: true, data: value }) },
       defaultSettings: {},
       chatCommands: [{
         name: "!sample",

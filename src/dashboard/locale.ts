@@ -2057,7 +2057,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
           ? `Automatischer Start: an${intervalMinutes === null ? "" : ` · alle ${String(intervalMinutes)} Min.`} (die Zeit läuft nur, solange der Stream live ist; nach einer Runde erst wieder, wenn sie aufgelöst ist)`
           : "Automatischer Start: aus",
         missingInstructions: "Start- und Teilnahmehinweise stehen in den Moduleinstellungen.",
-        commandsUnavailable: "Einstellungen ungültig – Befehle nicht verfügbar.",
+        commandsUnavailable: "Einstellungen ungültig – Angaben zu Befehlen und Start nicht verfügbar.",
       },
     },
     streamManager: {
@@ -2723,7 +2723,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
           ? `Automatic start: on${intervalMinutes === null ? "" : ` · every ${String(intervalMinutes)} min`} (the timer only runs while the stream is live; after a round it restarts once the round is resolved)`
           : "Automatic start: off",
         missingInstructions: "Start and participation instructions are in the module settings.",
-        commandsUnavailable: "Settings invalid – commands unavailable.",
+        commandsUnavailable: "Settings invalid – command and start details unavailable.",
       },
     },
     streamManager: {
