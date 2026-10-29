@@ -143,6 +143,7 @@ export const votekickModule: BotModule<typeof votekickSettingsSchema> = {
     keywords: ["votekick", "voting", "abstimmung", "timeout"],
   }],
   settingsEditor: () => import("./panel/settings-editor"),
+  settingsEditorSavesInPageHeader: true,
   panel: () => import("./panel/lock-card"),
   settingsEditorRelatedParts: ["panel"],
   actions: [liftTimeoutAction],

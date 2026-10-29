@@ -874,6 +874,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .page-header__save { flex: 0 1 430px; width: min(430px, 100%); min-width: 0; }
 .page-header__save .ui-save-bar { width: 100%; }
 .page-header__save-target:empty { display: none; }
+.page-header__save-target--reserved:empty { display: block; min-height: var(--control-height); }
 .module-detail-heading .page-header__save .ui-save-bar--persistent { min-height: var(--control-height); margin: 0; padding: 0; border-top: 0; background: transparent; }
 .module-detail-heading .page-header__save .ui-save-bar__status { flex: 1 1 auto; min-width: 0; }
 .module-detail-heading .page-header__save .ui-save-bar__actions { flex: none; }
@@ -909,10 +910,10 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .module-detail--settings-page > .ui-load-state--retry { display: grid; grid-template-rows: minmax(var(--ui-load-state-content-min-height), 1fr) var(--s10); }
 .module-detail--settings-page .settings-page { display: flex; width: 100%; max-width: none; min-height: 0; flex: 1 1 auto; flex-direction: column; }
 .module-detail--settings-page .settings-page > .page-header { width: 100%; max-width: none; flex: none; margin: 0; padding-bottom: 16px; }
-.module-detail--settings-page .page-header__right { flex-wrap: nowrap; }
-.module-detail--settings-page .page-header__save { flex: 0 0 min(430px, 100%); width: min(430px, 100%); max-width: min(430px, 100%); }
-/* Page actions (chat commands) sit before the save cluster and never shrink into it. */
-.module-detail--settings-page .page-header__page-actions { flex: none; order: -1; }
+/* One actions row for every module page header (settings pages and PageHeader pages): page actions such as the chat commands button, then the save cluster, then the overflow menu. */
+:is(.module-detail:not(:has(.collection-page)) > .module-detail-heading, .module-detail--settings-page .settings-page > .page-header) .page-header__right { flex-wrap: nowrap; }
+:is(.module-detail:not(:has(.collection-page)) > .module-detail-heading, .module-detail--settings-page .settings-page > .page-header) .page-header__save { flex: 0 0 min(430px, 100%); width: min(430px, 100%); max-width: min(430px, 100%); }
+:is(.module-detail:not(:has(.collection-page)) > .module-detail-heading, .module-detail--settings-page .settings-page > .page-header) .page-header__page-actions { flex: none; order: -1; }
 .module-detail--settings-page .page-header__save .ui-save-bar--persistent { min-height: var(--control-height); margin: 0; padding: 0; border-top: 0; background: transparent; }
 .module-detail--settings-page .page-header__save .ui-save-bar__buttons { flex-wrap: nowrap; gap: 4px; }
 .module-detail--settings-page .settings-page__columns { padding-top: 0; }
@@ -1577,11 +1578,10 @@ p.lock-reason { margin-bottom: 1em; }
   .module-detail--settings-page .settings-page > .page-header { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 8px; margin-bottom: 8px; padding-bottom: 8px; }
   .module-detail--settings-page .settings-page > .page-header .page-header__icon { width: 40px; height: 40px; }
   .module-detail--settings-page .settings-page > .page-header .page-header__title-row :is(h1, h2, h3) { font-size: 16px; }
-  .module-detail--settings-page .settings-page > .page-header .page-header__right { grid-column: 1 / -1; justify-self: stretch; justify-content: flex-end; width: 100%; }
-  .module-detail--settings-page .page-header__save { flex: none; width: auto; }
   /* Narrow: the page actions take their own line above the save cluster. */
-  .module-detail--settings-page .page-header__right { flex-wrap: wrap; }
-  .module-detail--settings-page .page-header__page-actions { flex: 1 1 100%; justify-content: flex-start; }
+  :is(.module-detail:not(:has(.collection-page)) > .module-detail-heading, .module-detail--settings-page .settings-page > .page-header) .page-header__right { grid-column: 1 / -1; justify-self: stretch; justify-content: flex-end; flex-wrap: wrap; width: 100%; }
+  :is(.module-detail:not(:has(.collection-page)) > .module-detail-heading, .module-detail--settings-page .settings-page > .page-header) .page-header__save { flex: none; width: auto; }
+  :is(.module-detail:not(:has(.collection-page)) > .module-detail-heading, .module-detail--settings-page .settings-page > .page-header) .page-header__page-actions { flex: 1 1 100%; justify-content: flex-start; }
   .module-detail--settings-page .page-header__save .ui-save-bar { min-height: var(--control-height); gap: 2px; }
   .module-detail--settings-page .page-header__save .ui-save-bar__status { display: none; }
   .module-detail--settings-page .page-header__save .ui-save-bar--error.ui-save-bar--persistent { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: var(--control-height); height: var(--control-height); min-height: var(--control-height); padding: 0; }
@@ -1599,7 +1599,7 @@ p.lock-reason { margin-bottom: 1em; }
 
 @media (min-width: 769px) and (max-width: 1099px) {
   /* Mid widths: the actions get their own row under the title instead of squeezing it. */
-  .module-detail--settings-page .settings-page > .page-header .page-header__right { grid-column: 1 / -1; justify-self: stretch; flex-wrap: wrap; width: 100%; }
+  :is(.module-detail:not(:has(.collection-page)) > .module-detail-heading, .module-detail--settings-page .settings-page > .page-header) .page-header__right { grid-column: 1 / -1; justify-self: stretch; flex-wrap: wrap; width: 100%; }
   .module-detail--settings-page .settings-page__columns { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; padding: 8px 0; }
   .module-detail--settings-page .settings-page__column { flex: none; width: 100%; min-height: 0; overflow: visible; }
 }

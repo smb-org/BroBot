@@ -50,6 +50,7 @@ export interface PageHeaderProps {
   saveStatus?: ReactNode;
   save?: SaveStatusProps;
   saveTargetRef?: RefCallback<HTMLDivElement>;
+  reserveSave?: boolean;
   actions?: ReactNode;
   pageActions?: ReactNode;
   actionHint?: ReactNode;
@@ -81,6 +82,7 @@ export function PageHeader({
   saveStatus,
   save,
   saveTargetRef,
+  reserveSave = false,
   actions,
   pageActions,
   actionHint,
@@ -134,6 +136,7 @@ export function PageHeader({
         saveStatus={saveStatus}
         {...(save === undefined ? {} : { save })}
         {...(saveTargetRef === undefined ? {} : { saveTargetRef })}
+        {...(reserveSave ? { reserveSave } : {})}
         {...(headerActions === undefined ? {} : { pageActions: headerActions })}
         {...(overflow === undefined ? {} : { overflow })}
         moreActionsLabel={common.moreActions}

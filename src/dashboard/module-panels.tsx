@@ -1427,6 +1427,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
           title={moduleId === "statistics" && !statisticsInfoOpen ? statisticsPageLabel : details.name}
           subtitle={moduleId === "statistics" && !statisticsInfoOpen ? statisticsEntry?.description?.[dashboardLanguage()] ?? details.description : details.description}
           saveTargetRef={setSettingsSaveTarget}
+          {...(registered?.settingsEditorSavesInPageHeader === true ? { reserveSave: true } : {})}
           {...(navigationPage?.showMainSwitch === false ? {} : {
             active: effectiveEnabled,
             onToggle: (nextEnabled: boolean) => {
