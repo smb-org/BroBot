@@ -275,7 +275,7 @@ rechts: Speicher-Cluster | Seitenaktionen | „…“ (Weitere Aktionen)
 - **Geplanter Speicher-Cluster** im Seiten- bzw. Detailkopf, **nie** als Fußleiste. Reihenfolge: Statustext, „Verwerfen“ (ghost), „Speichern“ (gold, Strg/Cmd+S). Zielbreite 430px; Überlauf- und Größenprüfungen sind geplant.
 - **Seitenaktionen** nach dem Cluster; höchstens ein Goldbutton.
 - Collection modules show an Einstellungen page action that opens their settings in the detail area with its own explicit save cluster.
-- Bei Abstimmung, Votekick, Clips und Spiele-Seiten einschließlich Punkte steht zusätzlich „Chatbefehle · n“ rechts neben dem Speicher-Cluster.
+- Auf jeder Modulseite steht „Chatbefehle · n“ an derselben Stelle: erste Kopfzeile, ganz rechts, auf Höhe von Titel und Schalter. Der Speicher-Cluster (samt „…“) sitzt eine Zeile darunter, rechtsbündig, nie neben dem Button. Unter 769px folgt der Button wie bei Clips auf Titel und Beschreibung, darunter der Cluster.
 - **„…“-Menü** ganz rechts: seltene und zerstörerische Aktionen (Löschen, Zurücksetzen), jede mit Bestätigung.
 - Titel < Cluster < Aktionen von links nach rechts.
 - Der Kopf soll beim Zustandswechsel (lädt, Fehler, bereit) an derselben Stelle bleiben; ein Layouttest ist geplant.

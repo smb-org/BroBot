@@ -353,6 +353,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       switchBusy={page.switchBusy}
       {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
       {...(page.reserveLockHint === true ? { reserveLockHint: true } : {})}
+      reserveSaveRow={canManageContent}
       overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
       {...(page.pageActions === undefined ? {} : { pageActions: page.pageActions })}
       columns={[state]}
@@ -1420,6 +1421,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
           title={moduleId === "statistics" && !statisticsInfoOpen ? statisticsPageLabel : details.name}
           subtitle={moduleId === "statistics" && !statisticsInfoOpen ? statisticsEntry?.description?.[dashboardLanguage()] ?? details.description : details.description}
           saveTargetRef={setSettingsSaveTarget}
+          reserveSaveRow={moduleId === "votekick"}
           {...(navigationPage?.showMainSwitch === false ? {} : {
             active: effectiveEnabled,
             onToggle: (nextEnabled: boolean) => {
