@@ -890,6 +890,8 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
               const name = subscriptionDisplayName(subscription);
               const unknown = name === subscription.subscriptionType;
               const tone = subscriptionTone(subscription.status, subscription.reason);
+              const stateLabel = subscriptionStatusLabel(subscription.status, subscription.reason);
+              const reasonText = maintenanceReasonText(subscription.reason);
               return <tr
                 key={key}
                 ref={rowRef(key)}
@@ -899,8 +901,9 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
                 onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(key); } }}
               >
                 <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
-                <td><StatusLed state={channelToneToStatusState(tone)} label={subscriptionStatusLabel(subscription.status, subscription.reason)} /></td>
-                <td>{maintenanceReasonText(subscription.reason) ?? <EmptyCellValue />}</td>
+                <td><StatusLed state={channelToneToStatusState(tone)} label={stateLabel} /></td>
+                {/* Neutral states already render the reason as the state label; repeating it adds nothing. */}
+                <td>{reasonText === null || reasonText === stateLabel ? <EmptyCellValue /> : reasonText}</td>
               </tr>;
             })}</tbody>
           </table>
