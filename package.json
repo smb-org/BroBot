@@ -45,7 +45,7 @@
     "hono": "^4.13.1",
     "jsonata": "2.2.2",
     "lucide-react": "1.55.0",
-    "re2js": "2.2.0",
+    "re2js": "2.8.7",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "rich-textarea": "^0.27.1",
