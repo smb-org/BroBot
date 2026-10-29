@@ -36,24 +36,33 @@ describe("ModuleHowToPlay", () => {
 
     const guide = screen.getByRole("region", { name: "So startest du" });
     expect(guide.textContent).toContain("!heist <Einsatz>");
-    expect(guide.textContent).toContain("alle");
+    expect(guide.textContent).toContain("(für alle)");
   });
 
-  it("renders the actions slot inside the guide so a full page header stays untouched", () => {
+  it("keeps the rows in place while loading and hides them from assistive technology", () => {
     const heist = moduleById("heist");
-    render(<ModuleHowToPlay module={heist} settings={heist.defaultSettings} language="de" actions={<button type="button">Aktion</button>} />);
+    const { rerender } = render(<ModuleHowToPlay module={heist} settings={heist.defaultSettings} language="de" loading />);
 
     const guide = screen.getByRole("region", { name: "So startest du" });
-    expect(guide).toContainElement(screen.getByRole("button", { name: "Aktion" }));
+    expect(guide).toHaveAttribute("aria-busy", "true");
+    const loadingRows = guide.querySelectorAll("p");
+    expect(loadingRows).toHaveLength(1);
+    expect(loadingRows[0]).toHaveAttribute("aria-hidden", "true");
+
+    rerender(<ModuleHowToPlay module={heist} settings={heist.defaultSettings} language="de" />);
+    expect(guide.querySelectorAll("p")).toHaveLength(1);
+    expect(guide.querySelector("p")).not.toHaveAttribute("aria-hidden");
   });
 
-  it("renders configured Duel commands", () => {
+  it("renders configured Duel commands and labels the rule row as a note", () => {
     const duel = moduleById("duel");
     render(<ModuleHowToPlay module={duel} settings={settingsWith("duel", { challengeCommand: "!challenge", acceptCommand: "!accept" })} language="de" />);
 
     const guide = screen.getByRole("region", { name: "So startest du" });
     expect(guide.textContent).toContain("!challenge");
     expect(guide.textContent).toContain("!accept");
+    expect(guide.textContent).toContain("Hinweis:");
+    expect(guide.textContent.match(/Mitspielen:/gu)).toHaveLength(1);
   });
 
   it("renders the configured minimum Votekick role", () => {
@@ -61,8 +70,8 @@ describe("ModuleHowToPlay", () => {
     render(<ModuleHowToPlay module={votekick} settings={settingsWith("votekick", { starterMinRole: "moderator" })} language="de" />);
 
     const guide = screen.getByRole("region", { name: "So startest du" });
-    expect(guide.textContent).toContain("Moderatoren+");
-    expect(guide.textContent).not.toContain("VIP+");
+    expect(guide.textContent).toContain("(ab Moderator)");
+    expect(guide.textContent).not.toContain("VIP");
   });
 
   it("lists Heist and configured Duel commands in chat command help", () => {

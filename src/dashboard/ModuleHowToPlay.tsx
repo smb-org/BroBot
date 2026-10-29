@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from "react";
+import type { ReactElement } from "react";
 
 import type { BotModule } from "../modules/contract";
 import type { DashboardLanguage } from "./locale";
@@ -11,25 +11,19 @@ export interface ModuleHowToPlayProperties {
   settings: unknown;
   language: DashboardLanguage;
   loading?: boolean;
-  /** Rendered at the end of the title row, e.g. the chat commands popover on pages whose header is full. */
-  actions?: ReactNode;
 }
 
-export function ModuleHowToPlay({ module, settings, language, loading = false, actions }: ModuleHowToPlayProperties): ReactElement {
+export function ModuleHowToPlay({ module, settings, language, loading = false }: ModuleHowToPlayProperties): ReactElement {
   const copy = dashboardTexts(language).module.howToPlay;
   const rows = deriveModuleHowToPlay(module, settings, language);
 
   return <section className="module-how-to-play" aria-labelledby={`module-how-to-play-${module.id}`} aria-busy={loading}>
-    <div className="module-how-to-play__title">
-      <h2 id={`module-how-to-play-${module.id}`}>{copy.title}</h2>
-      {actions}
-    </div>
+    <h2 id={`module-how-to-play-${module.id}`}>{copy.title}</h2>
     <div className="module-how-to-play__rows">
-      {rows.map((row, index) => <div className="module-how-to-play__row" key={`${row.kind}-${String(index)}`}>
-        {loading
-          ? <span className="module-how-to-play__skeleton" aria-hidden="true" />
-          : <p><strong>{copy[row.label]}:</strong> {row.text}</p>}
-      </div>)}
+      {/* While loading, the rows keep their real text invisible so the block has exactly its final height. */}
+      {rows.map((row, index) => <p key={`${row.kind}-${String(index)}`} aria-hidden={loading ? "true" : undefined}>
+        <strong>{copy[row.label]}:</strong> {row.text}
+      </p>)}
     </div>
   </section>;
 }

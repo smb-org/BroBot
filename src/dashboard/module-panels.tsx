@@ -21,7 +21,7 @@ import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, 
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { moduleDependencyLockReason, moduleParticipatesInDependency } from "./module-dependencies";
 import { ModuleHowToPlay } from "./ModuleHowToPlay";
-import { moduleChatCommandsForSettings, moduleSettingsForHelp } from "./module-how-to-play-model";
+import { deriveModuleHowToPlay, moduleChatCommandsForSettings, moduleSettingsForHelp } from "./module-how-to-play-model";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { isMessageEnabled } from "../contracts/message-enabled";
@@ -246,9 +246,10 @@ interface ModuleSettingsPageOptions {
   lockHint?: string;
   reserveLockHint?: boolean;
   onNavigate: (route: DashboardRoute) => void;
+  pageActions?: ReactNode;
 }
 
-const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, viewerIsBot = false, settingsSaveTarget, page }: {
+const ModuleSettingsEditor =({ module, channelId, canManageContent, language, viewerIsBot = false, settingsSaveTarget, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
@@ -356,6 +357,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
       {...(page.reserveLockHint === true ? { reserveLockHint: true } : {})}
       overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
+      {...(page.pageActions === undefined ? {} : { pageActions: page.pageActions })}
       columns={[state]}
     />;
   }
@@ -929,6 +931,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     {...(page.reserveLockHint === true ? { reserveLockHint: true } : {})}
     {...(pageSave === undefined ? {} : { save: pageSave })}
     overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
+    {...(page.pageActions === undefined ? {} : { pageActions: page.pageActions })}
     columns={module.id === "raid"
       ? [
         <div className="settings-page__column-stack" key="raid-state">
@@ -1349,11 +1352,10 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
   const helpSettings = moduleSettingsForHelp(registered, moduleState?.settings);
   const chatCommands = registered === undefined ? [] : moduleChatCommandsForSettings(registered, helpSettings, dashboardLanguage());
-  const howToPlayFor = (actions?: ReactNode): ReactElement | null => registered !== undefined && (registered.navigationCategory === "games" || registered.howToPlay !== undefined)
-    ? <ModuleHowToPlay module={registered} settings={helpSettings} language={dashboardLanguage()} loading={loading || moduleState === undefined} {...(actions === undefined ? {} : { actions })} />
+  const howToPlay = registered !== undefined && (registered.navigationCategory === "games" || registered.howToPlay !== undefined)
+    && deriveModuleHowToPlay(registered, helpSettings, dashboardLanguage()).length > 0
+    ? <ModuleHowToPlay module={registered} settings={helpSettings} language={dashboardLanguage()} loading={loading || moduleState === undefined} />
     : null;
-  const howToPlay = howToPlayFor();
-  const pageHowToPlay = howToPlayFor(chatCommands.length === 0 ? undefined : <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} />);
   const mandatory = moduleState?.mandatory === true || registered?.mandatory === true;
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
@@ -1400,8 +1402,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
           subtitle: details.description,
           ...(moduleId === "emote_slots" ? { meta: <SlotJackpotMeta channelId={channelId} language={dashboardLanguage()} /> } : {}),
           icon: iconFor(moduleId, "module-heading-glyph"),
-          // The settings-page header is full (save cluster), so the commands popover sits in the how-to-play title row.
-          ...(pageHowToPlay === null ? {} : { topContent: pageHowToPlay }),
+          ...(howToPlay === null ? {} : { topContent: howToPlay }),
           active: enabled,
           onToggle: (nextEnabled) => { if (nextEnabled !== enabled) onToggle(); },
           switchDisabled: !manageable || switchDisabled || busy,
@@ -1409,6 +1410,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
           ...(disabledReason === null ? {} : { lockHint: disabledReason }),
           ...(reserveDependencyHint ? { reserveLockHint: true } : {}),
           onNavigate,
+          ...(chatCommands.length === 0 ? {} : { pageActions: <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} /> }),
         }}
       />
     </section>;

@@ -3,7 +3,7 @@ import { dashboardTexts, type DashboardLanguage } from "./locale";
 
 export interface ModuleHowToPlayRow {
   kind: "cockpit" | "auto_start" | "command" | "participation" | "participation_setting";
-  label: "start" | "participate" | "startAndJoin";
+  label: "start" | "participate" | "startAndJoin" | "note";
   text: string;
 }
 
@@ -108,20 +108,23 @@ export const deriveModuleHowToPlay = (
     });
   }
 
+  // Free-text participation is a note once a chat command already explains how to join.
   if (definition?.participation !== undefined) {
-    rows.push({ kind: "participation", label: "participate", text: definition.participation[language] });
+    const joinKnown = rows.some((row) => row.label === "participate" || row.label === "startAndJoin");
+    rows.push({ kind: "participation", label: joinKnown ? "note" : "participate", text: definition.participation[language] });
   }
 
   if (definition?.participationSetting !== undefined) {
     const { setting, enabled, disabled } = definition.participationSetting;
     rows.push({
       kind: "participation_setting",
-      label: "participate",
+      label: "note",
       text: settingsRecord?.[setting] === true ? enabled[language] : disabled[language],
     });
   }
 
-  if (module.navigationCategory === "games" && !rows.some((row) => row.label === "participate" || row.label === "startAndJoin")) {
+  // A games-category module without any start or join information (Points) is not a game to start: no block at all.
+  if (rows.length > 0 && module.navigationCategory === "games" && !rows.some((row) => row.label === "participate" || row.label === "startAndJoin")) {
     rows.push({ kind: "participation", label: "participate", text: copy.missingInstructions });
   }
   return rows;

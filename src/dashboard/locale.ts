@@ -1379,8 +1379,9 @@ export interface DashboardTexts {
       start: string;
       participate: string;
       startAndJoin: string;
+      note: string;
       liveCockpitAction: (name: string, streamMustBeLive: boolean) => string;
-      chatCommand: (syntax: string, threshold: string) => string;
+      chatCommand: (syntax: string, requirement: string) => string;
       automaticStart: (enabled: boolean, intervalMinutes: number | null) => string;
       missingInstructions: string;
     };
@@ -2036,20 +2037,21 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         configurable: "in den Votekick-Einstellungen (Standard: VIP)",
       },
       chatCommandThresholdShort: {
-        everyone: "alle",
-        subscriber: "Abonnenten+",
-        vip: "VIP+",
-        moderator: "Moderatoren+",
-        broadcaster: "Broadcaster",
-        configurable: "Einstellungen",
+        everyone: "für alle",
+        subscriber: "ab Abonnent",
+        vip: "ab VIP",
+        moderator: "ab Moderator",
+        broadcaster: "nur Broadcaster",
+        configurable: "je nach Einstellung",
       },
       howToPlay: {
         title: "So startest du",
         start: "Start",
         participate: "Mitspielen",
         startAndJoin: "Starten & beitreten",
+        note: "Hinweis",
         liveCockpitAction: (name, streamMustBeLive) => `Live-Cockpit → ${name}${streamMustBeLive ? " (nur wenn der Stream läuft)" : ""}`,
-        chatCommand: (syntax, threshold) => `Chat → ${syntax} · ${threshold}`,
+        chatCommand: (syntax, requirement) => `Chat → ${syntax} (${requirement})`,
         automaticStart: (enabled, intervalMinutes) => enabled
           ? `Automatischer Start: an${intervalMinutes === null ? "" : ` · alle ${String(intervalMinutes)} Min.`}`
           : "Automatischer Start: aus",
@@ -2701,19 +2703,20 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       },
       chatCommandThresholdShort: {
         everyone: "everyone",
-        subscriber: "subscriber+",
-        vip: "VIP+",
-        moderator: "moderator+",
-        broadcaster: "broadcaster",
-        configurable: "settings",
+        subscriber: "subscriber and up",
+        vip: "VIP and up",
+        moderator: "moderator and up",
+        broadcaster: "broadcaster only",
+        configurable: "set in the settings",
       },
       howToPlay: {
         title: "How to start",
         start: "Start",
         participate: "Play",
         startAndJoin: "Start & join",
+        note: "Note",
         liveCockpitAction: (name, streamMustBeLive) => `Live cockpit → ${name}${streamMustBeLive ? " (when the stream is live)" : ""}`,
-        chatCommand: (syntax, threshold) => `Chat → ${syntax} · ${threshold}`,
+        chatCommand: (syntax, requirement) => `Chat → ${syntax} (${requirement})`,
         automaticStart: (enabled, intervalMinutes) => enabled
           ? `Automatic start: on${intervalMinutes === null ? "" : ` · every ${String(intervalMinutes)} min`}`
           : "Automatic start: off",

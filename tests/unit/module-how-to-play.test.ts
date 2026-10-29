@@ -75,11 +75,29 @@ describe("module how-to-play derivation", () => {
     const votekickRows = deriveModuleHowToPlay(votekick, settingsWith("votekick", { starterMinRole: "moderator" }), "de");
 
     expect(duelRows.map((row) => row.text)).toEqual([
-      "Chat → !challenge [@login] [Einsatz] · alle",
-      "Chat → !accept · alle",
+      "Chat → !challenge [@login] [Einsatz] (für alle)",
+      "Chat → !accept (für alle)",
       "Broadcaster und Moderatoren dürfen mitspielen.",
     ]);
-    expect(votekickRows[0]?.text).toContain("Moderatoren+");
-    expect(votekickRows[0]?.text).not.toContain("VIP+");
+    expect(votekickRows[0]?.text).toContain("(ab Moderator)");
+    expect(votekickRows[0]?.text).not.toContain("VIP");
+    expect(deriveModuleHowToPlay(votekick, settingsWith("votekick", { starterMinRole: "vip" }), "en")[0]?.text).toContain("(VIP and up)");
+  });
+
+  it("labels rule notes separately from the ways to join", () => {
+    const labelsOf = (moduleId: string) => {
+      const module = moduleById(moduleId);
+      return deriveModuleHowToPlay(module, module.defaultSettings, "de").map((row) => row.label);
+    };
+
+    expect(labelsOf("duel")).toEqual(["start", "participate", "note"]);
+    expect(labelsOf("emote_slots")).toEqual(["startAndJoin", "note"]);
+    expect(labelsOf("quiz")).toEqual(["start", "participate"]);
+    expect(labelsOf("votekick")).toEqual(["start", "participate"]);
+  });
+
+  it("shows nothing for Points, which sits in the games category but is not a game", () => {
+    const points = moduleById("points");
+    expect(deriveModuleHowToPlay(points, points.defaultSettings, "de")).toEqual([]);
   });
 });
