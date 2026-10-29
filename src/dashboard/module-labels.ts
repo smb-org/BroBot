@@ -78,6 +78,7 @@ interface EventSubscriptionNames {
   suspiciousMessages: string;
   suspiciousClassifications: string;
   adBreaks: string;
+  channelUpdates: string;
   streamStarted: string;
   streamEnded: string;
 }
@@ -96,6 +97,7 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     suspiciousMessages: "Nachrichten auffälliger Nutzer",
     suspiciousClassifications: "Einstufungen auffälliger Nutzer",
     adBreaks: "Werbepausen",
+    channelUpdates: "Kanaländerungen",
     streamStarted: "Streamstarts",
     streamEnded: "Streamenden",
   },
@@ -112,6 +114,7 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     suspiciousMessages: "Suspicious user messages",
     suspiciousClassifications: "Suspicious user classifications",
     adBreaks: "Ad breaks",
+    channelUpdates: "Channel updates",
     streamStarted: "Stream starts",
     streamEnded: "Stream ends",
   },
@@ -137,6 +140,7 @@ export const eventSubName = (
   if (subscriptionType === "channel.suspicious_user.message") return texts.suspiciousMessages;
   if (subscriptionType === "channel.suspicious_user.update") return texts.suspiciousClassifications;
   if (subscriptionType === "channel.ad_break.begin") return texts.adBreaks;
+  if (subscriptionType === "channel.update") return texts.channelUpdates;
   if (subscriptionType === "stream.online") return texts.streamStarted;
   if (subscriptionType === "stream.offline") return texts.streamEnded;
   return subscriptionType;

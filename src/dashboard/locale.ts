@@ -4310,6 +4310,25 @@ const maintenanceReasonTexts: LocaleCatalog<Record<string, string>> = {
     moderator_status_failed: "Moderatorstatus-Prüfung fehlgeschlagen",
     channel_or_consent_missing: "Kanal oder Zustimmung fehlt",
     token_ciphertext_unreadable: "Token nicht lesbar",
+    refresh_failed: "Token-Erneuerung fehlgeschlagen",
+    invalid_grant: "Autorisierung ungültig",
+    rate_limited: "Twitch-Abklingzeit aktiv",
+    subscription_replaced: "Wird durch ein neues Abonnement ersetzt",
+    missing_scope: "Berechtigung fehlt",
+    authorization_revoked: "Autorisierung widerrufen",
+    user_removed: "Konto nicht mehr vorhanden",
+    moderator_removed: "Moderatorrechte entzogen",
+    chat_user_banned: "Konto im Chat gesperrt",
+    notification_failures_exceeded: "Zu viele fehlgeschlagene Zustellungen",
+    version_removed: "Abonnementversion nicht mehr verfügbar",
+    beta_maintenance: "Twitch-Wartung",
+    webhook_callback_verification_pending: "Verifizierung ausstehend",
+    webhook_callback_verification_failed: "Verifizierung fehlgeschlagen",
+    Unauthorized: "Nicht autorisiert",
+    Forbidden: "Zugriff verweigert",
+    "Bad Request": "Ungültige Anfrage",
+    Conflict: "Konflikt",
+    "Too Many Requests": "Zu viele Anfragen",
   },
   en: {
     timeout: "Timeout",
@@ -4321,6 +4340,25 @@ const maintenanceReasonTexts: LocaleCatalog<Record<string, string>> = {
     moderator_status_failed: "Moderator status check failed",
     channel_or_consent_missing: "Channel or consent missing",
     token_ciphertext_unreadable: "Token unreadable",
+    refresh_failed: "Token refresh failed",
+    invalid_grant: "Authorization invalid",
+    rate_limited: "Twitch cooldown active",
+    subscription_replaced: "Being replaced by a new subscription",
+    missing_scope: "Permission missing",
+    authorization_revoked: "Authorization revoked",
+    user_removed: "Account no longer exists",
+    moderator_removed: "Moderator status removed",
+    chat_user_banned: "Account banned from chat",
+    notification_failures_exceeded: "Too many failed deliveries",
+    version_removed: "Subscription version no longer available",
+    beta_maintenance: "Twitch maintenance",
+    webhook_callback_verification_pending: "Verification pending",
+    webhook_callback_verification_failed: "Verification failed",
+    Unauthorized: "Not authorized",
+    Forbidden: "Access denied",
+    "Bad Request": "Invalid request",
+    Conflict: "Request conflict",
+    "Too Many Requests": "Too many requests",
   },
 };
 
@@ -4349,7 +4387,8 @@ export const maintenanceReasonText = (
     return catalogString(eventSubNeutralReasonTexts[language], code) ?? code;
   }
   const catalog: Record<string, string> = maintenanceReasonTexts[language];
-  return catalogString(catalog, code) ?? code;
+  const status = /^http_(\d{3})$/.exec(code)?.[1];
+  return catalogString(catalog, code) ?? (status === undefined ? code : `HTTP ${status}`);
 };
 
 export const dashboardTexts = (language: DashboardLanguage = dashboardLanguage()): DashboardTexts => dashboardTextsCatalog[language];
