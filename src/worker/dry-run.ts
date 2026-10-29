@@ -1,4 +1,5 @@
 import type { DryRunEntryReport, DryRunModuleReport, DryRunRequest, DryRunResponse } from "../contracts/dry-run";
+import { normalizeChatMessagePayload } from "../contracts/chat-message-text";
 import type { BotModule, ModuleDryRunContext, ModuleEvent, ModuleStreamState } from "../modules/contract";
 import { MODULES } from "../modules/registry";
 import { getBotIdentity } from "./db/bot-identity";
@@ -93,7 +94,7 @@ export const dryRunChatMessage = async (
   const channelNamespace = Reflect.get(env, "CHANNEL") as Env["CHANNEL"] | undefined;
   const channelObject = channelNamespace?.get(channelNamespace.idFromName(channelId));
   const trackIncomingMessage = sourceBroadcasterUserId === channelId && syntheticUserId !== (botIdentity?.userId ?? null);
-  const payload: Record<string, unknown> = {
+  const payload = normalizeChatMessagePayload({
     message: { text: request.text },
     message_id: "dry-run",
     chatter_user_id: syntheticUserId,
@@ -102,7 +103,7 @@ export const dryRunChatMessage = async (
     broadcaster_user_login: channel.login,
     source_broadcaster_user_id: sourceBroadcasterUserId,
     badges: request.sender.statuses.map((status) => badgeForStatus[status]),
-  };
+  });
   const lookedUpActor = await actorForEvent(db, channelId, payload);
   const actor = lookedUpActor === null ? null : { ...lookedUpActor, role: null };
   const chatStatus = chatStatusFor(CHAT_EVENT, payload);

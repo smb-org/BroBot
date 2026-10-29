@@ -1635,7 +1635,7 @@ describe("quiz answers in the shared point round", () => {
           chatter_user_id: accountId,
           chatter_user_login: "moonmoss",
           message_id: messageId,
-          message: { text: "2", fragments: [{ type: "text", text: "2" }] },
+          message: { text: "2\u{E0000}", fragments: [{ type: "text", text: "2\u{E0000}" }] },
           badges: [],
         },
         receivedAt: timestamp,
