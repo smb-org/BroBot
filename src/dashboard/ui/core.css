@@ -897,6 +897,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .module-detail--settings-page .settings-page > .page-header { width: 100%; max-width: none; flex: none; margin: 0; padding-bottom: 16px; }
 .module-detail--settings-page .page-header__right { flex-wrap: nowrap; }
 .module-detail--settings-page .page-header__save { flex: 0 0 min(430px, 100%); width: min(430px, 100%); max-width: min(430px, 100%); }
+/* Page actions (chat commands) sit before the save cluster and never shrink into it. */
+.module-detail--settings-page .page-header__page-actions { flex: none; order: -1; }
 .module-detail--settings-page .page-header__save .ui-save-bar--persistent { min-height: var(--control-height); margin: 0; padding: 0; border-top: 0; background: transparent; }
 .module-detail--settings-page .page-header__save .ui-save-bar__buttons { flex-wrap: nowrap; gap: 4px; }
 .module-detail--settings-page .settings-page__columns { padding-top: 0; }
@@ -1567,6 +1569,9 @@ p.lock-reason { margin-bottom: 1em; }
   .module-detail--settings-page .settings-page > .page-header .page-header__title-row :is(h1, h2, h3) { font-size: 16px; }
   .module-detail--settings-page .settings-page > .page-header .page-header__right { grid-column: 1 / -1; justify-self: stretch; justify-content: flex-end; width: 100%; }
   .module-detail--settings-page .page-header__save { flex: none; width: auto; }
+  /* Narrow: the page actions take their own line above the save cluster. */
+  .module-detail--settings-page .page-header__right { flex-wrap: wrap; }
+  .module-detail--settings-page .page-header__page-actions { flex: 1 1 100%; justify-content: flex-start; }
   .module-detail--settings-page .page-header__save .ui-save-bar { min-height: var(--control-height); gap: 2px; }
   .module-detail--settings-page .page-header__save .ui-save-bar__status { display: none; }
   .module-detail--settings-page .page-header__save .ui-save-bar--error.ui-save-bar--persistent { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: var(--control-height); height: var(--control-height); min-height: var(--control-height); padding: 0; }
@@ -1583,6 +1588,8 @@ p.lock-reason { margin-bottom: 1em; }
 }
 
 @media (min-width: 769px) and (max-width: 1099px) {
+  /* Mid widths: the actions get their own row under the title instead of squeezing it. */
+  .module-detail--settings-page .settings-page > .page-header .page-header__right { grid-column: 1 / -1; justify-self: stretch; flex-wrap: wrap; width: 100%; }
   .module-detail--settings-page .settings-page__columns { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; padding: 8px 0; }
   .module-detail--settings-page .settings-page__column { flex: none; width: 100%; min-height: 0; overflow: visible; }
 }
