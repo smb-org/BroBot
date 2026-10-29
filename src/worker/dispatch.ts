@@ -1,4 +1,5 @@
 import type { EventCode } from "../contracts/values";
+import { normalizeChatMessagePayload } from "../contracts/chat-message-text";
 import type { BotModule, ChatOutputTarget, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatDelivery, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState, ModuleTextBlockConditionDefinition, StoredPointWelcome } from "../modules/contract";
 import type { RealtimeMessage } from "../realtime-contract";
 import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../modules/registry";
@@ -808,6 +809,9 @@ export const dispatchEventSubNotification = async (
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
+  if (event.subscriptionType === "channel.chat.message") {
+    event = { ...event, payload: normalizeChatMessagePayload(event.payload) };
+  }
   const externalFetchBudget = createModuleExternalFetchBudget();
   const sharedLookups = sharedLookupsFor(fetcher);
   if (event.subscriptionType === "channel.update") {
