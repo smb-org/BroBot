@@ -555,6 +555,55 @@ describe("EventSub reconciliation", () => {
     });
   });
 
+  it("keeps the recorded key when adopting a pending subscription, so verification does not trigger a rotation", async () => {
+    await prepareChatMaintenance(database, ["kanal-a"]);
+    await database.prepare(
+      `INSERT INTO eventsub_subscriptions
+        (channel_id, subscription_type, subscription_id, secret_id, status, reason, updated_at)
+       VALUES ('kanal-a', 'channel.chat.message', 'subscription-pending', 'eventsub-v1', 'missing', 'verification_pending', ?)`,
+    ).bind("2026-09-19T00:00:00.000Z").run();
+    const remote = (status: string) => ({
+      id: "subscription-pending",
+      type: "channel.chat.message",
+      version: "1",
+      status,
+      condition: { broadcaster_user_id: "kanal-a", user_id: "bot-user" },
+      transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+    });
+    const methods = (fetcher: ReturnType<typeof vi.fn>): string[] =>
+      fetcher.mock.calls.map(([, init]) => (init as RequestInit | undefined)?.method ?? "GET");
+    const adoptingFetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ data: [], pagination: {} }))
+      .mockResolvedValueOnce(Response.json({ error: "Conflict", message: "subscription already exists" }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ data: [remote("webhook_callback_verification_pending")], pagination: {} }));
+
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T01:00:00.000Z", adoptingFetcher, "kanal-a");
+
+    expect(methods(adoptingFetcher)).toEqual(["GET", "POST", "GET"]);
+    await expect(database.prepare(
+      "SELECT status, reason, subscription_id, secret_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toEqual({
+      status: "missing",
+      reason: "verification_pending",
+      subscription_id: "subscription-pending",
+      secret_id: "eventsub-v1",
+    });
+
+    const verifiedFetcher = vi.fn()
+      .mockResolvedValue(Response.json({ data: [remote("enabled")], pagination: {} }));
+    await maintainEventSubSubscriptions(environment(database), "2026-09-19T02:00:00.000Z", verifiedFetcher, "kanal-a");
+
+    expect(methods(verifiedFetcher)).not.toContain("DELETE");
+    expect(methods(verifiedFetcher)).not.toContain("POST");
+    await expect(database.prepare(
+      "SELECT status, subscription_id, secret_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
+    ).first()).resolves.toEqual({
+      status: "enabled",
+      subscription_id: "subscription-pending",
+      secret_id: "eventsub-v1",
+    });
+  });
+
   it("keeps a not-yet-listed 409 subscription neutral until a later adoption pass", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);

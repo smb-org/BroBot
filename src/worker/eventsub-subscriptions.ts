@@ -516,14 +516,14 @@ const adoptRemoteSubscription = async (
     await mark(env.DB, target, "missing", "pending_adoption", null, now);
     return false;
   }
-  if (adopted.status !== "enabled") {
-    await mark(env.DB, target, "missing", "verification_pending", adopted.id, now);
-    return false;
-  }
   const targetKey = eventSubTargetKey(target);
   const tracked = (await listEventSubSubscriptions(env.DB, target.channelId))
     .find((state) => eventSubTargetKey(state) === targetKey);
   const secretId = tracked?.subscriptionId === adopted.id ? tracked.secretId : null;
+  if (adopted.status !== "enabled") {
+    await mark(env.DB, target, "missing", "verification_pending", adopted.id, now, secretId);
+    return false;
+  }
   inventory.add(adopted);
   await mark(env.DB, target, "enabled", null, adopted.id, now, secretId);
   return true;
