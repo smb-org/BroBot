@@ -1676,6 +1676,7 @@ describe("Dashboard skeleton", () => {
       { subscriptionType: "channel.raid", variant: "outgoing", version: "1", subscriptionId: "raid-out", status: "error", reason: "missing_scope", message: "Scope fehlt", statusCode: 403, updatedAt: "2026-09-18T02:00:00.000Z" },
       { subscriptionType: "channel.future", variant: "", version: "9", subscriptionId: null, status: "pending", reason: "wartet", message: null, statusCode: null, updatedAt: "2026-09-18T01:00:00.000Z" },
       { subscriptionType: "channel.future-verification", variant: "", version: "1", subscriptionId: "verification-1", status: "missing", reason: "verification_pending", message: null, statusCode: null, updatedAt: "2026-09-18T00:00:00.000Z" },
+      { subscriptionType: "channel.future-adoption", variant: "", version: "1", subscriptionId: "adoption-1", status: "missing", reason: "pending_adoption", message: null, statusCode: null, updatedAt: "2026-09-17T23:00:00.000Z" },
     ];
     const systemResponse = { ...system, botPermissions: { missingScopes: [] }, subscriptions };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -1705,6 +1706,15 @@ describe("Dashboard skeleton", () => {
     expect(verificationPending?.querySelector(".status-led")).toHaveAttribute("aria-label", "Verifizierung ausstehend");
     expect(verificationPending).toHaveTextContent("Verifizierung ausstehend");
     expect(within(verificationPending as HTMLElement).queryByText("verification_pending")).toBeNull();
+    // Neutral states show their label once; the reason cell stays empty instead of repeating it.
+    const reasonCell = (row: Element | null | undefined) => row?.querySelectorAll("td")[1];
+    const adoptionPending = screen.getByText("channel.future-adoption").closest("tr");
+    expect(adoptionPending?.querySelector(".status-led")).toHaveAttribute("aria-label", "Wird übernommen");
+    for (const row of [verificationPending, adoptionPending]) {
+      expect(reasonCell(row)?.querySelector(".table-empty-value")).not.toBeNull();
+      expect(reasonCell(row)).not.toHaveTextContent(/Verifizierung ausstehend|Wird übernommen/);
+    }
+    expect(reasonCell(screen.getByText("Ausgehende Raids").closest("tr"))).toHaveTextContent("missing_scope");
 
     const outgoing = screen.getByText("Ausgehende Raids").closest("tr");
     expect(outgoing).not.toBeNull();
