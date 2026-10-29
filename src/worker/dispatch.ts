@@ -433,7 +433,9 @@ const commandRouteMatchesModule = (
   if (commandName === undefined || !commandName.startsWith("!")) return false;
   if (module.id === "text_commands") return true;
   const configured = module.chatCommandNames?.(settings) ?? [];
-  return module.chatCommands?.some((command) => command.name.toLowerCase() === commandName) === true ||
+  const staticMatch = module.chatCommandSettingsFields === undefined &&
+    module.chatCommands?.some((command) => command.name.toLowerCase() === commandName) === true;
+  return staticMatch ||
     configured.some((name) => name.toLowerCase() === commandName);
 };
 

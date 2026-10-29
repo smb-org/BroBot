@@ -47,7 +47,7 @@ export function ChatCommandsHelp({ commands, language = dashboardLanguage(), min
             <p>{command.description[language]}</p>
             <small>{texts.chatCommandAvailableTo}: {minimumRole ?? texts.chatCommandThresholds[command.minimumChatStatus]}</small>
             {command.arguments === undefined || command.arguments.length === 0 ? null : <dl className="chat-command-help__arguments">
-              {command.arguments.map((argument) => <div key={argument.name}><dt><code>{argument.name}</code></dt><dd>{argument.hint[language]}</dd></div>)}
+              {command.arguments.map((argument) => <div key={argument.name}><dt><code>{argument.nameByLanguage?.[language] ?? argument.name}</code></dt><dd>{argument.hint[language]}</dd></div>)}
             </dl>}
           </article>
         ))}

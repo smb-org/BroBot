@@ -1373,6 +1373,17 @@ export interface DashboardTexts {
     chatCommandCopied: string;
     chatCommandCopyFailed: string;
     chatCommandThresholds: Record<ModuleChatCommandThreshold, string>;
+    chatCommandThresholdShort: Record<ModuleChatCommandThreshold, string>;
+    howToPlay: {
+      title: string;
+      start: string;
+      participate: string;
+      startAndJoin: string;
+      liveCockpitAction: (name: string, streamMustBeLive: boolean) => string;
+      chatCommand: (syntax: string, threshold: string) => string;
+      automaticStart: (enabled: boolean, intervalMinutes: number | null) => string;
+      missingInstructions: string;
+    };
   };
   /** Shared live-cockpit action frames and reserved tile copy. */
   streamManager: {
@@ -2024,6 +2035,26 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         broadcaster: "Broadcaster",
         configurable: "in den Votekick-Einstellungen (Standard: VIP)",
       },
+      chatCommandThresholdShort: {
+        everyone: "alle",
+        subscriber: "Abonnenten+",
+        vip: "VIP+",
+        moderator: "Moderatoren+",
+        broadcaster: "Broadcaster",
+        configurable: "Einstellungen",
+      },
+      howToPlay: {
+        title: "So startest du",
+        start: "Start",
+        participate: "Mitspielen",
+        startAndJoin: "Starten & beitreten",
+        liveCockpitAction: (name, streamMustBeLive) => `Live-Cockpit → ${name}${streamMustBeLive ? " (nur wenn der Stream läuft)" : ""}`,
+        chatCommand: (syntax, threshold) => `Chat → ${syntax} · ${threshold}`,
+        automaticStart: (enabled, intervalMinutes) => enabled
+          ? `Automatischer Start: an${intervalMinutes === null ? "" : ` · alle ${String(intervalMinutes)} Min.`}`
+          : "Automatischer Start: aus",
+        missingInstructions: "Start- und Teilnahmehinweise stehen in den Moduleinstellungen.",
+      },
     },
     streamManager: {
       immediateActions: "Sofortaktionen",
@@ -2667,6 +2698,26 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         moderator: "moderators and broadcasters",
         broadcaster: "broadcaster",
         configurable: "in Votekick settings (default: VIP)",
+      },
+      chatCommandThresholdShort: {
+        everyone: "everyone",
+        subscriber: "subscriber+",
+        vip: "VIP+",
+        moderator: "moderator+",
+        broadcaster: "broadcaster",
+        configurable: "settings",
+      },
+      howToPlay: {
+        title: "How to start",
+        start: "Start",
+        participate: "Play",
+        startAndJoin: "Start & join",
+        liveCockpitAction: (name, streamMustBeLive) => `Live cockpit → ${name}${streamMustBeLive ? " (when the stream is live)" : ""}`,
+        chatCommand: (syntax, threshold) => `Chat → ${syntax} · ${threshold}`,
+        automaticStart: (enabled, intervalMinutes) => enabled
+          ? `Automatic start: on${intervalMinutes === null ? "" : ` · every ${String(intervalMinutes)} min`}`
+          : "Automatic start: off",
+        missingInstructions: "Start and participation instructions are in the module settings.",
       },
     },
     streamManager: {

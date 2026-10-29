@@ -20,6 +20,8 @@ import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, u
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
 import { moduleDependencyLockReason, moduleParticipatesInDependency } from "./module-dependencies";
+import { ModuleHowToPlay } from "./ModuleHowToPlay";
+import { moduleChatCommandsForSettings, moduleSettingsForHelp } from "./module-how-to-play-model";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
 import { isMessageEnabled } from "../contracts/message-enabled";
@@ -235,6 +237,7 @@ interface ModuleSettingsPageOptions {
   title: string;
   subtitle: string;
   meta?: ReactNode;
+  topContent?: ReactNode;
   icon: ReactNode;
   active: boolean;
   onToggle: (active: boolean) => void;
@@ -243,7 +246,6 @@ interface ModuleSettingsPageOptions {
   lockHint?: string;
   reserveLockHint?: boolean;
   onNavigate: (route: DashboardRoute) => void;
-  pageActions?: ReactNode;
 }
 
 const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, viewerIsBot = false, settingsSaveTarget, page }: {
@@ -344,6 +346,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       title={page.title}
       subtitle={page.subtitle}
       {...(page.meta === undefined ? {} : { meta: page.meta })}
+      {...(page.topContent === undefined ? {} : { topContent: page.topContent })}
       icon={page.icon}
       {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
       active={page.active}
@@ -353,7 +356,6 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
       {...(page.reserveLockHint === true ? { reserveLockHint: true } : {})}
       overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
-      {...(page.pageActions === undefined ? {} : { pageActions: page.pageActions })}
       columns={[state]}
     />;
   }
@@ -904,18 +906,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     title={page.title}
     subtitle={page.subtitle}
     {...(page.meta === undefined ? {} : { meta: page.meta })}
-    icon={page.icon}
-    {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
-    active={page.active}
-    onToggle={page.onToggle}
-    switchDisabled={page.switchDisabled || pending || urlRemovalPending}
-    switchBusy={page.switchBusy}
-    {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
-    {...(page.reserveLockHint === true ? { reserveLockHint: true } : {})}
-    {...(pageSave === undefined ? {} : { save: pageSave })}
-    overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
-    {...(page.pageActions === undefined ? {} : { pageActions: page.pageActions })}
-    {...(module.id === "belabox" ? { topContent: <BelaboxSettingsPanelMount key="belabox-panel" module={module} channelId={channelId}
+    {...(module.id === "belabox" ? { topContent: <>{page.topContent}<BelaboxSettingsPanelMount key="belabox-panel" module={module} channelId={channelId}
       language={language} canManageContent={canManageContent}
       lowBitrateKbps={typeof currentValue.lowBitrateKbps === "number" ? currentValue.lowBitrateKbps : 1_000}
       recoverBitrateKbps={typeof currentValue.recoverBitrateKbps === "number" ? currentValue.recoverBitrateKbps : 2_000}
@@ -927,7 +918,17 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       settingsRevision={settingsRevision}
       onSettingsRevisionChange={setLatestSettingsRevision}
       onRemovePendingChange={setUrlRemovalPending}
-      savingSettings={pending || urlRemovalPending} /> } : {})}
+      savingSettings={pending || urlRemovalPending} /></> } : page.topContent === undefined ? {} : { topContent: page.topContent })}
+    icon={page.icon}
+    {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
+    active={page.active}
+    onToggle={page.onToggle}
+    switchDisabled={page.switchDisabled || pending || urlRemovalPending}
+    switchBusy={page.switchBusy}
+    {...(page.lockHint === undefined ? {} : { lockHint: page.lockHint })}
+    {...(page.reserveLockHint === true ? { reserveLockHint: true } : {})}
+    {...(pageSave === undefined ? {} : { save: pageSave })}
+    overflow={<ModuleListLink channelId={channelId} onNavigate={page.onNavigate} />}
     columns={module.id === "raid"
       ? [
         <div className="settings-page__column-stack" key="raid-state">
@@ -1346,7 +1347,13 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
   const navigationPage = registered?.navigationEntries?.find((entry) => entry.showMainSwitch === false);
   const moduleState = modules.find((candidate) => candidate.id === moduleId);
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
-  const chatCommands = registered?.chatCommands ?? [];
+  const helpSettings = moduleSettingsForHelp(registered, moduleState?.settings);
+  const chatCommands = registered === undefined ? [] : moduleChatCommandsForSettings(registered, helpSettings, dashboardLanguage());
+  const howToPlayFor = (actions?: ReactNode): ReactElement | null => registered !== undefined && (registered.navigationCategory === "games" || registered.howToPlay !== undefined)
+    ? <ModuleHowToPlay module={registered} settings={helpSettings} language={dashboardLanguage()} loading={loading || moduleState === undefined} {...(actions === undefined ? {} : { actions })} />
+    : null;
+  const howToPlay = howToPlayFor();
+  const pageHowToPlay = howToPlayFor(chatCommands.length === 0 ? undefined : <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} />);
   const mandatory = moduleState?.mandatory === true || registered?.mandatory === true;
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
@@ -1393,6 +1400,8 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
           subtitle: details.description,
           ...(moduleId === "emote_slots" ? { meta: <SlotJackpotMeta channelId={channelId} language={dashboardLanguage()} /> } : {}),
           icon: iconFor(moduleId, "module-heading-glyph"),
+          // The settings-page header is full (save cluster), so the commands popover sits in the how-to-play title row.
+          ...(pageHowToPlay === null ? {} : { topContent: pageHowToPlay }),
           active: enabled,
           onToggle: (nextEnabled) => { if (nextEnabled !== enabled) onToggle(); },
           switchDisabled: !manageable || switchDisabled || busy,
@@ -1400,7 +1409,6 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
           ...(disabledReason === null ? {} : { lockHint: disabledReason }),
           ...(reserveDependencyHint ? { reserveLockHint: true } : {}),
           onNavigate,
-          ...(moduleId === "emote_slots" && registered.chatCommands?.length ? { pageActions: <ChatCommandsHelp commands={registered.chatCommands} language={dashboardLanguage()} /> } : {}),
         }}
       />
     </section>;
@@ -1458,6 +1466,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
             pageActions: <ChatCommandsHelp commands={chatCommands} language={dashboardLanguage()} />,
           })}
         />
+        {howToPlay}
         {!permissionsMissing ? null : <section className="module-detail__authorization" aria-label={texts.module.scopeList}>
           <div className="section-heading"><h2>{texts.module.scopeList}</h2></div>
           <div className="state-list module-scope-list">

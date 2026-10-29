@@ -118,6 +118,27 @@ describe("points module", () => {
     expect(points.rankOf).toHaveBeenCalledWith("viewer_demo", currentMonth);
   });
 
+  it("lists navigation names for every enabled game instead of exposing module ids (protects=!spiele gives chatters readable names for all games; fails_when=a game without a navigation label falls back to its technical id; no_claim=the module registry provides display names)", async () => {
+    const gameIds = ["quiz", "blitz_round", "boss_fight", "heist", "duel", "emote_slots"];
+    const DB = {
+      prepare: () => ({
+        bind: () => ({ all: () => Promise.resolve({ results: gameIds.map((module_id) => ({ module_id })) }) }),
+      }),
+    } as unknown as D1Database;
+    const { context } = makeContext({ DB });
+
+    const result = await processPointsMessage(messageEvent("!spiele"), context);
+    const reply = result.actions[0]?.kind === "chat" ? result.actions[0].text : "";
+
+    expect(reply).toContain("Quiz");
+    expect(reply).toContain("Blitzrunde");
+    expect(reply).toContain("Bosskampf");
+    expect(reply).toContain("Überfall");
+    expect(reply).toContain("Duelle");
+    expect(reply).toContain("Slot !slot");
+    for (const moduleId of gameIds) expect(reply).not.toContain(moduleId);
+  });
+
   it("keeps the start-bonus hint visible while a safety-net note is pending (protects=a generic pending point note does not hide the !spiele start-bonus hint; fails_when=the panel suppresses that hint for a safety-net claim; no_claim=the account note kind is supplied by the points access contract)", async () => {
     const { context, points } = makeContext();
     points.touchAccount.mockResolvedValue({ welcomePending: true, startBonus: 100 });

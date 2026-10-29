@@ -24,6 +24,16 @@ export const quizModule: BotModule<typeof quizSettingsSchema> = {
   navigationCategory: "games",
   requiresModules: ["points"],
   panelIcon: { paths: ["M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01"] },
+  navigationEntries: [{
+    id: QUIZ_MODULE_ID,
+    label: { de: quizCatalog.de.title, en: quizCatalog.en.title },
+    description: { de: quizCatalog.de.description, en: quizCatalog.en.description },
+    iconKind: "quiz",
+    keywords: ["quiz", "fragen", "questions", "game"],
+  }],
+  howToPlay: {
+    participation: { de: quizCatalog.de.participation, en: quizCatalog.en.participation },
+  },
   settingsSchema: quizSettingsSchema,
   settingsReadSchema: quizSettingsSchema,
   defaultSettings: quizSettingsSchema.parse({}),

@@ -1,4 +1,4 @@
-import type { BotModule, ModuleAlarmContext, ModulePointRoundAnnouncement, ModulePointRoundResult } from "../contract";
+import type { BotModule, ModuleAlarmContext, ModuleChatCommandDeclaration, ModulePointRoundAnnouncement, ModulePointRoundResult } from "../contract";
 import { isMessageEnabled } from "../../contracts/message-enabled";
 import { HEIST_TEMPLATE_FIELDS, HEIST_TEMPLATE_VARIABLES, heistTemplateVariableGroup } from "./contracts/template-variables";
 import { HEIST_COMMAND, HEIST_MODULE_ID, heistSettingsForLanguage, heistSettingsReadSchema, heistSettingsSchema } from "./contracts";
@@ -48,6 +48,20 @@ const formatResult = async (context: ModuleAlarmContext, round: ModulePointRound
   };
 };
 
+const heistChatCommands = [{
+  name: HEIST_COMMAND,
+  syntax: heistCatalog.en.commandSyntax,
+  syntaxByLanguage: { de: heistCatalog.de.commandSyntax, en: heistCatalog.en.commandSyntax },
+  description: { de: heistCatalog.de.commandDescription, en: heistCatalog.en.commandDescription },
+  arguments: [{
+    name: heistCatalog.en.stakeArgument,
+    nameByLanguage: { de: heistCatalog.de.stakeArgument, en: heistCatalog.en.stakeArgument },
+    hint: { de: heistCatalog.de.stakeHint, en: heistCatalog.en.stakeHint },
+  }],
+  minimumChatStatus: "everyone",
+  howToPlayUsage: "start_and_participate",
+}] as const satisfies readonly ModuleChatCommandDeclaration[];
+
 export const heistModule: BotModule<typeof heistSettingsSchema> = {
   id: HEIST_MODULE_ID,
   navigationCategory: "games",
@@ -71,6 +85,7 @@ export const heistModule: BotModule<typeof heistSettingsSchema> = {
   templateContext: "event",
   templateVariableCatalog: HEIST_TEMPLATE_VARIABLES,
   templateVariableGroup: heistTemplateVariableGroup,
+  chatCommands: heistChatCommands,
   alarms: [heistConfirmAlarm],
   eventSubTypes: ["channel.chat.message"],
   dryRunSilentReason: "round_answers",
