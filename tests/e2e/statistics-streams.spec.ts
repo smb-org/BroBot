@@ -39,6 +39,14 @@ test("shows seeded stream history, changes metrics, and links a chart marker to 
   await expect(page.getByText("335", { exact: true })).toBeVisible();
   await expect(page.getByText("Game One", { exact: true })).toBeVisible();
 
+  // The chat commands button keeps its spot from the other module pages: rightmost in the header, Info to its left.
+  const headerBox = await page.locator(".module-detail > .page-header").boundingBox();
+  const chatBox = await page.getByRole("button", { name: /^Chat commands/u }).boundingBox();
+  const infoBox = await page.getByRole("button", { name: "Module information", exact: true }).boundingBox();
+  if (headerBox === null || chatBox === null || infoBox === null) throw new Error("The statistics header actions are missing.");
+  expect(chatBox.x + chatBox.width).toBeCloseTo(headerBox.x + headerBox.width, 0);
+  expect(infoBox.x + infoBox.width).toBeLessThanOrEqual(chatBox.x);
+
   const chatter = page.getByRole("button", { name: "Chatter" });
   await chatter.click();
   await expect(chatter).toHaveAttribute("aria-pressed", "true");

@@ -865,8 +865,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .module-detail-heading .page-header__save .ui-save-bar__actions { flex: none; }
 .page-header__page-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .page-header__page-actions > * { min-width: 0; max-width: 100%; }
-/* The chat commands button always leads the page actions, whichever other actions (Info, tabs) a page adds. */
-.page-header__page-actions > .chat-commands-help__trigger { order: -1; }
+/* The chat commands button is the rightmost page action on desktop, so it sits at the same spot on every page; other actions (Info, tabs) stay to its left. */
+.page-header__page-actions > .chat-commands-help__trigger { order: 99; }
 .page-header__overflow-trigger { flex: none; }
 .page-header__overflow { display: grid; width: min(280px, calc(100vw - 24px)); max-height: min(70vh, 480px); gap: 8px; overflow: auto; }
 .page-header__overflow > * { max-width: 100%; }
@@ -1568,6 +1568,8 @@ p.lock-reason { margin-bottom: 1em; }
   .module-detail:has(.collection-page) > .module-detail-heading { grid-template-columns: 56px minmax(0, 1fr) minmax(0, auto); gap: var(--s2); min-height: 0; margin-bottom: 8px; padding-bottom: 8px; }
   .page-header__right { grid-column: 1 / -1; justify-content: flex-start; width: 100%; }
   .page-header__page-actions { justify-content: flex-start; }
+  /* Narrow: the chat commands button leads the page actions, directly after the description. */
+  .page-header__page-actions > .chat-commands-help__trigger { order: -1; }
   .module-detail--settings-page { height: 100%; min-height: 0; }
   .module-detail--settings-page .settings-page > .page-header { margin-bottom: 8px; padding-bottom: 8px; }
   /* Module page headers, narrow: icon with title and description, then the page actions (chat commands), then the save cluster

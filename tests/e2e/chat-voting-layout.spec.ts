@@ -176,6 +176,14 @@ for (const viewport of viewports) {
       if (chatButtonBox === null || headerBox === null || tabListBox === null) throw new Error("The chat commands button, header, or tabs are missing.");
       expect(chatButtonBox.x).toBeCloseTo(headerBox.x, 0);
       expect(tabListBox.y).toBeGreaterThanOrEqual(chatButtonBox.y + chatButtonBox.height);
+    } else {
+      // Same spot as on the clips page: rightmost in the header, with the tabs to its left.
+      const chatButtonBox = await page.getByRole("button", { name: /^Chatbefehle/u }).boundingBox();
+      const headerBox = await pageHeader.boundingBox();
+      const tabListBox = await page.locator(".chat-voting-page-tabs__list").boundingBox();
+      if (chatButtonBox === null || headerBox === null || tabListBox === null) throw new Error("The chat commands button, header, or tabs are missing.");
+      expect(chatButtonBox.x + chatButtonBox.width).toBeCloseTo(headerBox.x + headerBox.width, 0);
+      expect(tabListBox.x + tabListBox.width).toBeLessThanOrEqual(chatButtonBox.x);
     }
 
     const moduleHeaderBox = await pageHeader.boundingBox();
