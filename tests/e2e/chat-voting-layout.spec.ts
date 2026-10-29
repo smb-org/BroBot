@@ -55,6 +55,7 @@ const viewports = [
   { width: 1920, height: 1080 },
   { width: 1280, height: 800 },
   { width: 390, height: 844 },
+  { width: 360, height: 740 },
   { width: 2560, height: 1440 },
 ] as const;
 
@@ -152,6 +153,7 @@ for (const viewport of viewports) {
         mainScrollHeight: main.scrollHeight,
         mainClientHeight: main.clientHeight,
         documentHeight: document.documentElement.scrollHeight,
+        documentWidth: document.documentElement.scrollWidth,
         viewportHeight: window.innerHeight,
       };
     });
@@ -164,6 +166,17 @@ for (const viewport of viewports) {
     expect(collectionLayout.mainOverflow).toBe("auto");
     expect(collectionLayout.mainScrollHeight).toBeLessThanOrEqual(collectionLayout.mainClientHeight + 1);
     expect(collectionLayout.documentHeight).toBeLessThanOrEqual(collectionLayout.viewportHeight + 1);
+    // The tabs and the chat commands button wrap instead of overflowing sideways on narrow phones.
+    expect(collectionLayout.documentWidth).toBeLessThanOrEqual(viewport.width);
+    if (viewport.width <= 768) {
+      // Same spot as on every other module page: left aligned right after the description, above the tabs.
+      const chatButtonBox = await page.getByRole("button", { name: /^Chatbefehle/u }).boundingBox();
+      const headerBox = await pageHeader.boundingBox();
+      const tabListBox = await page.locator(".chat-voting-page-tabs__list").boundingBox();
+      if (chatButtonBox === null || headerBox === null || tabListBox === null) throw new Error("The chat commands button, header, or tabs are missing.");
+      expect(chatButtonBox.x).toBeCloseTo(headerBox.x, 0);
+      expect(tabListBox.y).toBeGreaterThanOrEqual(chatButtonBox.y + chatButtonBox.height);
+    }
 
     const moduleHeaderBox = await pageHeader.boundingBox();
     const tabBox = await page.locator(".chat-voting-page-tabs__list").boundingBox();

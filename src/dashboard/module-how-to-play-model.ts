@@ -19,12 +19,17 @@ const configuredThreshold = (command: ModuleChatCommandDeclaration, settings: un
     : command.minimumChatStatus;
 };
 
+/** Settings-configurable command names cannot be derived when the settings fail validation: defaults would be shown as fact. */
+const moduleChatCommandNamesUnavailable = (module: BotModule, settings: unknown): boolean =>
+  module.chatCommandNames !== undefined && module.chatCommandNames(settings).length < (module.chatCommands?.length ?? 0);
+
 export const moduleChatCommandsForSettings = (
   module: BotModule,
   settings: unknown,
   language: DashboardLanguage,
 ): ModuleChatCommandDeclaration[] => {
   const declarations = module.chatCommands ?? [];
+  if (moduleChatCommandNamesUnavailable(module, settings)) return [];
   const configuredNames = module.chatCommandNames?.(settings) ?? [];
   return declarations.map((command, index) => {
     const name = configuredNames[index] ?? command.name;
@@ -41,12 +46,14 @@ export const moduleChatCommandsForSettings = (
 
 export const moduleSettingsForHelp = (module: BotModule | undefined, serializedSettings: string | undefined): unknown => {
   const defaults = objectValue(module?.defaultSettings) ?? {};
+  // Malformed stored settings: modules with configurable command names must not present their defaults as configured.
+  const malformed = module?.chatCommandNames === undefined ? defaults : null;
   if (serializedSettings !== undefined) {
     try {
       const parsed = objectValue(JSON.parse(serializedSettings) as unknown);
-      return parsed === null ? defaults : { ...defaults, ...parsed };
+      return parsed === null ? malformed : { ...defaults, ...parsed };
     } catch {
-      return defaults;
+      return malformed;
     }
   }
   return defaults;
@@ -77,6 +84,7 @@ export const deriveModuleHowToPlay = (
   }
 
   const commands = moduleChatCommandsForSettings(module, settings, language);
+  if (moduleChatCommandNamesUnavailable(module, settings)) rows.push({ kind: "command", label: "note", text: copy.commandsUnavailable });
   for (const command of commands) {
     if (command.howToPlayUsage !== "start" && command.howToPlayUsage !== "start_and_participate") continue;
     const startsAndJoins = command.howToPlayUsage === "start_and_participate";
@@ -114,12 +122,12 @@ export const deriveModuleHowToPlay = (
     rows.push({ kind: "participation", label: joinKnown ? "note" : "participate", text: definition.participation[language] });
   }
 
-  if (definition?.participationSetting !== undefined) {
+  if (definition?.participationSetting !== undefined && settingsRecord !== null) {
     const { setting, enabled, disabled } = definition.participationSetting;
     rows.push({
       kind: "participation_setting",
       label: "note",
-      text: settingsRecord?.[setting] === true ? enabled[language] : disabled[language],
+      text: settingsRecord[setting] === true ? enabled[language] : disabled[language],
     });
   }
 

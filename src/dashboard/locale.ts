@@ -1384,6 +1384,7 @@ export interface DashboardTexts {
       chatCommand: (syntax: string, requirement: string) => string;
       automaticStart: (enabled: boolean, intervalMinutes: number | null) => string;
       missingInstructions: string;
+      commandsUnavailable: string;
     };
   };
   /** Shared live-cockpit action frames and reserved tile copy. */
@@ -2053,9 +2054,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         liveCockpitAction: (name, streamMustBeLive) => `Live-Cockpit → ${name}${streamMustBeLive ? " (nur wenn der Stream läuft)" : ""}`,
         chatCommand: (syntax, requirement) => `Chat → ${syntax} (${requirement})`,
         automaticStart: (enabled, intervalMinutes) => enabled
-          ? `Automatischer Start: an${intervalMinutes === null ? "" : ` · alle ${String(intervalMinutes)} Min.`}`
+          ? `Automatischer Start: an${intervalMinutes === null ? "" : ` · alle ${String(intervalMinutes)} Min.`} (die Zeit läuft nur, solange der Stream live ist; nach einer Runde erst wieder, wenn sie aufgelöst ist)`
           : "Automatischer Start: aus",
         missingInstructions: "Start- und Teilnahmehinweise stehen in den Moduleinstellungen.",
+        commandsUnavailable: "Einstellungen ungültig – Befehle nicht verfügbar.",
       },
     },
     streamManager: {
@@ -2718,9 +2720,10 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         liveCockpitAction: (name, streamMustBeLive) => `Live cockpit → ${name}${streamMustBeLive ? " (when the stream is live)" : ""}`,
         chatCommand: (syntax, requirement) => `Chat → ${syntax} (${requirement})`,
         automaticStart: (enabled, intervalMinutes) => enabled
-          ? `Automatic start: on${intervalMinutes === null ? "" : ` · every ${String(intervalMinutes)} min`}`
+          ? `Automatic start: on${intervalMinutes === null ? "" : ` · every ${String(intervalMinutes)} min`} (the timer only runs while the stream is live; after a round it restarts once the round is resolved)`
           : "Automatic start: off",
         missingInstructions: "Start and participation instructions are in the module settings.",
+        commandsUnavailable: "Settings invalid – commands unavailable.",
       },
     },
     streamManager: {

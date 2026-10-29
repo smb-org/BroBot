@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MODULES } from "../../src/modules/registry";
-import { deriveModuleHowToPlay } from "../../src/dashboard/module-how-to-play-model";
+import { deriveModuleHowToPlay, moduleChatCommandsForSettings, moduleSettingsForHelp } from "../../src/dashboard/module-how-to-play-model";
 
 const moduleById = (moduleId: string) => {
   const module = MODULES.find((candidate) => candidate.id === moduleId);
@@ -82,6 +82,22 @@ describe("module how-to-play derivation", () => {
     expect(votekickRows[0]?.text).toContain("(ab Moderator)");
     expect(votekickRows[0]?.text).not.toContain("VIP");
     expect(deriveModuleHowToPlay(votekick, settingsWith("votekick", { starterMinRole: "vip" }), "en")[0]?.text).toContain("(VIP and up)");
+  });
+
+  it("does not present default command names as configured when the Duel settings are invalid or malformed", () => {
+    const duel = moduleById("duel");
+    const invalid = settingsWith("duel", { challengeCommand: "!same", acceptCommand: "!same" });
+    const malformed = moduleSettingsForHelp(duel, "{not json");
+
+    for (const settings of [invalid, malformed]) {
+      expect(moduleChatCommandsForSettings(duel, settings, "de")).toEqual([]);
+      for (const language of ["de", "en"] as const) {
+        const texts = deriveModuleHowToPlay(duel, settings, language).map((row) => row.text);
+        expect(texts[0]).toMatch(language === "de" ? /nicht verfügbar/u : /unavailable/u);
+        expect(texts.join(" ")).not.toMatch(/!duell|!ja|Chat →/u);
+      }
+    }
+    expect(moduleSettingsForHelp(moduleById("blitz_round"), "{not json")).toEqual(moduleById("blitz_round").defaultSettings);
   });
 
   it("labels rule notes separately from the ways to join", () => {

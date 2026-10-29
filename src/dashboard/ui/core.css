@@ -1577,7 +1577,7 @@ p.lock-reason { margin-bottom: 1em; }
   :is(.module-detail, .settings-page) > .page-header > .page-header__main > p { grid-column: 2; grid-row: 2; min-height: 2.8em; line-height: 1.4; }
   :is(.module-detail, .settings-page) > .page-header > .page-header__main > .page-header__meta { grid-column: 1 / -1; grid-row: 4; }
   :is(.module-detail, .settings-page) > .page-header > .page-header__right { grid-column: 1 / -1; grid-row: 3; grid-template-columns: minmax(0, 1fr) auto; justify-content: stretch; justify-self: stretch; row-gap: 8px; margin-top: 12px; }
-  :is(.module-detail, .settings-page) > .page-header > .page-header__right > .page-header__page-actions { justify-self: start; min-height: 0; }
+  :is(.module-detail, .settings-page) > .page-header > .page-header__right > .page-header__page-actions { justify-self: start; flex-wrap: wrap; min-height: 0; }
   :is(.module-detail, .settings-page) > .page-header > .page-header__right > :is(.page-header__save, .page-header__save-reserve) { width: auto; }
   .module-detail--settings-page .page-header__save .ui-save-bar { min-height: var(--control-height); gap: 2px; }
   .module-detail--settings-page .page-header__save .ui-save-bar__status { display: none; }
