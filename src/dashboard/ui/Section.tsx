@@ -17,7 +17,9 @@ export function Section({ title, children, className, headingAction, headingLeve
   return <section data-ui="" className={classes} aria-labelledby={headingId}>
     <div className="ui-section__heading">
       <Heading id={headingId}>{title}</Heading>
-      {headingAction ?? <span className="ui-section__rule" aria-hidden="true" />}
+      {variant === "inspector"
+        ? <>{headingAction}<span className="ui-section__rule" aria-hidden="true" /></>
+        : headingAction ?? <span className="ui-section__rule" aria-hidden="true" />}
     </div>
     <div className="ui-section__content">{children}</div>
   </section>;

@@ -316,7 +316,7 @@ Die Namen in der Tabelle bezeichnen gewünschte UI-Rollen, keine vorhandenen Dat
 | **CollectionPage** | Liste + Detail | Liste 360px, Werkzeugleiste oben; Detail scrollt intern; Leerzustand integriert | Seiten mit nur einem Objekt |
 | **SettingsPage** | Spaltenseite mit Kopf | 1–4 Spalten, jede scrollt intern | Liste/Detail |
 | **ToolPage** | Werkzeug mit voller Fläche | Kopf wie 9.5, `tool-page__body` füllt den Rest | Formularseiten |
-| **Section** | Abschnitt mit Titel (13px/600) und Haarlinie | `h2`; keine Section in Section | Gruppierung einzelner Felder |
+| **Section** | Abschnitt mit Titel (13px/600) und Haarlinie rechts neben dem Titel | `h2`; keine Section in Section; genau eine Trennlinie je Abschnitt (die Linie im Titel), kein Rahmen darüber, darunter oder unter dem Titel; Abstand zwischen Abschnitten über `--s4`-Innenabstand | Gruppierung einzelner Felder |
 | **TemplateTextField** | Mehrzeiliges Textfeld mit Variablen | Variablen als Token (Brand, Tooltip beim Überfahren, Textfarbe bleibt); `{` öffnet Picker; unbekannte Variable erhält Fehlerzeile und Korrekturaktion; **kein RE2 hier** | Regex-Eingaben, einzeilige Namen |
 | **Field** | Einheitlicher Feldrahmen für Eingaben | Label, Feldinhalt, feste Hinweis-/Fehlerzeile; 32px Controls; keine Sonderrahmen um Feldgruppen | Abschnittsgruppierung |
 | **SwitchRow** | Einheitliche einfache Zeilenschalter | Gleiche Schalterdarstellung für gleichrangige Optionen | Felder, die beim Einschalten Inhalt zeigen |

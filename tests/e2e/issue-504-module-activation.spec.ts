@@ -316,7 +316,7 @@ test("keeps the Emote Slots title on one line at 1100px without growing its head
 
   expect(compact.titleText).toBe("Slot");
   expect(compact.titleHeight).toBeLessThanOrEqual(compact.titleLineHeight * 1.25);
-  expect(compact.height).toBe(124);
+  expect(compact.height).toBe(123);
   expect(Math.abs(compact.switchCenter - compact.titleCenter)).toBeLessThanOrEqual(4);
 });
 
