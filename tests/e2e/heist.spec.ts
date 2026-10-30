@@ -30,6 +30,46 @@ const installSettingsApi = async (page: Page, initial: HeistSettings) => {
 
 test.use({ locale: "en-US", timezoneId: "Europe/Berlin" });
 
+test("chat commands button keeps its header spot with the save cluster one row below", async ({ page }) => {
+  const settings = heistSettingsForLanguage("en");
+  await installLiveCockpitMocks(page, {
+    channelId,
+    modules: [
+      { id: "points", enabled: true, settings: "{}" },
+      { id: "heist", enabled: true, settings: JSON.stringify(settings) },
+    ],
+  });
+  await installSettingsApi(page, settings);
+  const box = async (locator: ReturnType<Page["locator"]>) => {
+    const bounds = await locator.boundingBox();
+    if (bounds === null) throw new Error("expected a visible element");
+    return bounds;
+  };
+
+  for (const width of [390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`/channels/${channelId}/modules/heist?lang=en`);
+    const header = page.locator(".settings-page > .page-header");
+    const button = page.getByRole("button", { name: /^Chat commands/u });
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeVisible();
+    const headerBounds = await box(header);
+    const buttonBounds = await box(button);
+    const saveBounds = await box(page.locator(".page-header__save"));
+    expect(saveBounds.y).toBeGreaterThanOrEqual(buttonBounds.y + buttonBounds.height);
+    if (width > 768) {
+      expect(buttonBounds.x + buttonBounds.width).toBeCloseTo(headerBounds.x + headerBounds.width, 0);
+      expect(buttonBounds.y - headerBounds.y).toBeCloseTo(12, 0);
+    } else {
+      expect(buttonBounds.x).toBeCloseTo(headerBounds.x, 0);
+      const titleBounds = await box(header.locator(".page-header__title-row"));
+      expect(buttonBounds.y).toBeGreaterThanOrEqual(titleBounds.y + titleBounds.height);
+    }
+    await page.getByLabel("Minimum stake").fill("26");
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+    expect(await box(button)).toEqual(buttonBounds);
+  }
+});
+
 test("heist settings save explicitly and persist without horizontal overflow", async ({ page }) => {
   const settings = heistSettingsForLanguage("en");
   await installLiveCockpitMocks(page, {

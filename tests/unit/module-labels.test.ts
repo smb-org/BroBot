@@ -49,6 +49,13 @@ describe("Module labels", () => {
     expect(moduleName("host", "en")).toBe("System");
   });
 
+  it("has a localized navigation description for the quiz game", () => {
+    const quiz = MODULES.find((module) => module.id === "quiz");
+    const entry = quiz?.navigationEntries?.[0];
+    expect(entry?.description?.de.trim().length).toBeGreaterThan(0);
+    expect(entry?.description?.en.trim().length).toBeGreaterThan(0);
+  });
+
   it("uses the raid announcements and shoutout name for the existing raid module id in both catalogues", () => {
     expect(moduleName("raid", "de")).toBe("Raid-Ankündigungen & Shoutout");
     expect(moduleName("raid", "en")).toBe("Raid announcements & shoutout");

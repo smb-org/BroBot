@@ -265,6 +265,8 @@ Seven groups, each with a badge hue (section 6): Chat, Mitmachen, Spiele, Twitch
 
 ### 9.5 Kopf-Reihenfolge (fest)
 
+Chat commands: every module page shows them only via the small 'Chatbefehle · N' button with popover, placed like on the clips page. Additional module help (e.g. how a game starts) goes into that popover, never into an extra block on the page.
+
 ```
 links:  Titel (h1) | An/Aus-Schalter | aussagekräftige Badges   /   Metazeile darunter
 rechts: Speicher-Cluster | Seitenaktionen | „…“ (Weitere Aktionen)
@@ -273,7 +275,7 @@ rechts: Speicher-Cluster | Seitenaktionen | „…“ (Weitere Aktionen)
 - **Geplanter Speicher-Cluster** im Seiten- bzw. Detailkopf, **nie** als Fußleiste. Reihenfolge: Statustext, „Verwerfen“ (ghost), „Speichern“ (gold, Strg/Cmd+S). Zielbreite 430px; Überlauf- und Größenprüfungen sind geplant.
 - **Seitenaktionen** nach dem Cluster; höchstens ein Goldbutton.
 - Collection modules show an Einstellungen page action that opens their settings in the detail area with its own explicit save cluster.
-- Bei Abstimmung, Votekick, Clips und Spiele-Seiten einschließlich Punkte steht zusätzlich „Chatbefehle · n“ rechts neben dem Speicher-Cluster.
+- Auf jeder Modulseite steht „Chatbefehle · n“ an derselben Stelle: erste Kopfzeile, ganz rechts, auf Höhe von Titel und Schalter. Der Speicher-Cluster (samt „…“) sitzt eine Zeile darunter, rechtsbündig, nie neben dem Button. Unter 769px folgt der Button wie bei Clips auf Titel und Beschreibung, darunter der Cluster.
 - **„…“-Menü** ganz rechts: seltene und zerstörerische Aktionen (Löschen, Zurücksetzen), jede mit Bestätigung.
 - Titel < Cluster < Aktionen von links nach rechts.
 - Der Kopf soll beim Zustandswechsel (lädt, Fehler, bereit) an derselben Stelle bleiben; ein Layouttest ist geplant.
@@ -325,7 +327,7 @@ Die Namen in der Tabelle bezeichnen gewünschte UI-Rollen, keine vorhandenen Dat
 | **ChatPreview** | „Vorschau“ mit Beispieldaten | zwei reservierte Zeilen, nur Anzeige | echte Nachrichten |
 | **ChatTargetField** | Ein gemeinsames „Chat-Ziel“-Feld | Portal-Popover mit Auswahl und Erklärung je Ziel | andere Auswahlen |
 | **DataTable** | Protokoll, Kanalereignisse und Live-Ereignisse | eine Filterzeile; Zeit, Modul, Wer/Was, Art; relative Zeit bleibt sichtbar | Formulare |
-| **ChatCommandsHelp** | Syntaxhilfe für eingebaute Chatbefehle | „Chatbefehle · n“ im Seitenkopf, Beschreibung, Mindestrolle, Argumente und Kopieraktion | Module ohne Chatbefehle |
+| **ChatCommandsHelp** | Chatbefehle und Start-/Mitspielhinweise für jede Modulseite | „Chatbefehle · n“ im Seitenkopf; Start-Hinweise oben im Popover, danach Befehlsbeschreibung, Mindestrolle, Argumente und Kopieraktion | zusätzliche Hilfe-Blöcke auf Modulseiten |
 | **TokenChip** | Sichtbarer Vorlagen-Token | kompakte Chipdarstellung, z. B. `{api.sonnenuntergang}` | Fließtext |
 | **UnitInput** | Zahl + Einheit mit Schnellchips | Einheit fest im Feld, Chips als Vorschläge, reservierte Ladezeile | Freitext |
 | **SegmentChoice** | 2–4 gleichwertige Optionen, eine aktiv | `aria-pressed`; aktive Option Brand | Aktionen, > 4 Optionen |

@@ -54,6 +54,8 @@ export interface PageHeaderProps {
   pageActions?: ReactNode;
   actionHint?: ReactNode;
   overflow?: ReactNode;
+  /** Reserve the save cluster's row for pages whose save cluster mounts after the header (settings still loading). */
+  reserveSaveRow?: boolean;
   lockHint?: string;
   reserveLockHint?: boolean;
   headingLevel?: "h1" | "h2" | "h3";
@@ -85,6 +87,7 @@ export function PageHeader({
   pageActions,
   actionHint,
   overflow,
+  reserveSaveRow = false,
   lockHint,
   reserveLockHint = false,
   headingLevel = "h1",
@@ -136,6 +139,7 @@ export function PageHeader({
         {...(saveTargetRef === undefined ? {} : { saveTargetRef })}
         {...(headerActions === undefined ? {} : { pageActions: headerActions })}
         {...(overflow === undefined ? {} : { overflow })}
+        reserveSaveRow={reserveSaveRow}
         moreActionsLabel={common.moreActions}
       />
       {actionHint === undefined || actionHint === null ? null : <div className="page-header__action-hint">{actionHint}</div>}

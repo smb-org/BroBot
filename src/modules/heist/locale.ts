@@ -3,6 +3,10 @@ import type { ModuleLanguage } from "../contract";
 export interface HeistCatalog {
   title: string;
   description: string;
+  commandDescription: string;
+  commandSyntax: string;
+  stakeArgument: string;
+  stakeHint: string;
   startText: string;
   confirmText: string;
   resultText: string;
@@ -35,6 +39,10 @@ export const heistCatalog: Readonly<Record<ModuleLanguage, HeistCatalog>> = {
   de: {
     title: "Überfall",
     description: "Gemeinsamer Punkteüberfall mit individueller Erfolgschance.",
+    commandDescription: "Startet einen Überfall oder tritt mit demselben Befehl einer laufenden Runde bei.",
+    commandSyntax: "!heist <Einsatz>",
+    stakeArgument: "Einsatz",
+    stakeHint: "Punkteinsatz für den Überfall.",
     startText: "💰 Überfall offen für {heist.seconds} s: Mit !heist <Einsatz> mitmachen.",
     confirmText: "{heist.count} dabei: {heist.names} · Pott {heist.pot}",
     resultText: "Überfall: Gewinner ×2: {heist.winners} · verloren: {heist.losers} · Chance {heist.chance}%.",
@@ -65,6 +73,10 @@ export const heistCatalog: Readonly<Record<ModuleLanguage, HeistCatalog>> = {
   en: {
     title: "Heist",
     description: "A shared points heist with an individual chance to succeed.",
+    commandDescription: "Starts a heist or joins an open round with the same command.",
+    commandSyntax: "!heist <stake>",
+    stakeArgument: "stake",
+    stakeHint: "Point stake for the heist.",
     startText: "💰 Heist open for {heist.seconds} s: join with !heist <stake>.",
     confirmText: "{heist.count} in: {heist.names} · pot {heist.pot}",
     resultText: "Heist: winners ×2: {heist.winners} · lost: {heist.losers} · {heist.chance}% chance.",

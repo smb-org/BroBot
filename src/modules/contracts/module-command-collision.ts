@@ -37,7 +37,9 @@ export const moduleCommandCollisionWriteGuard = (
     if (module.id === options.excludeModuleId) continue;
     const predicates: string[] = [];
     const predicateValues: unknown[] = [];
-    const staticTokens = normalizedTokens((module.chatCommands ?? []).map(({ name }) => name));
+    const staticTokens = module.chatCommandSettingsFields === undefined
+      ? normalizedTokens((module.chatCommands ?? []).map(({ name }) => name))
+      : [];
     if (staticTokens.length > 0) {
       predicates.push(`EXISTS (
         SELECT 1 FROM json_each(?) AS candidate
@@ -102,7 +104,10 @@ export const textCommandCollisionWriteGuard = (
 
 export const effectiveModuleCommandTokens = (module: BotModule, settings: unknown): string[] => {
   const configured = module.chatCommandNames?.(settings) ?? [];
-  return normalizedTokens([...(module.chatCommands ?? []).map((command) => command.name), ...configured]);
+  const staticTokens = module.chatCommandSettingsFields === undefined
+    ? (module.chatCommands ?? []).map((command) => command.name)
+    : [];
+  return normalizedTokens([...staticTokens, ...configured]);
 };
 
 export const findModuleCommandCollision = async (

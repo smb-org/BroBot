@@ -3,8 +3,6 @@
 .settings-page--slot .settings-page__column { overflow: visible; }
 .settings-page--slot .settings-page__column:first-child { grid-column: 1 / -1; }
 .settings-page--slot .settings-page__column-stack { display: flex; min-width: 0; flex-direction: column; gap: 24px; }
-.settings-page--slot .page-header__icon, .settings-page--slot .page-header__copy > p { display: none; }
-.settings-page--slot > .page-header { grid-template-columns: minmax(0, 1fr) auto; }
 .slot-reel-field { min-width: 0; }
 .slot-reel-scroll { min-width: 0; overflow-x: auto; }
 .slot-reel-table { width: 100%; min-width: 640px; border-collapse: collapse; table-layout: fixed; }

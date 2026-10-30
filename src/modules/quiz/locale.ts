@@ -241,6 +241,9 @@ export const quizPanelTexts = (language: DashboardLanguage): QuizPanelTexts => t
 
 export const quizCatalog = {
   de: {
+    title: "Quiz",
+    description: "Starte ein Live-Quiz mit deinen eigenen Fragensets.",
+    participation: "Im Chat mit 1–4 antworten.",
     startLine: (setName: string, count: number) => `Quiz „${setName}“ startet · ${String(count)} ${count === 1 ? "Frage" : "Fragen"}.`,
     questionLine: (position: number, total: number, question: string, options: readonly string[]) =>
       `Frage ${String(position)}/${String(total)}: ${question} · ${options.map((option, index) => `${String(index + 1)}: ${option}`).join(" · ")}`,
@@ -276,6 +279,9 @@ export const quizCatalog = {
     timeLeft: (time: string) => `Noch ${time}`,
   },
   en: {
+    title: "Quiz",
+    description: "Run a live quiz with your own question sets.",
+    participation: "Answer with 1–4 in chat.",
     startLine: (setName: string, count: number) => `Quiz “${setName}” starts · ${String(count)} ${count === 1 ? "question" : "questions"}.`,
     questionLine: (position: number, total: number, question: string, options: readonly string[]) =>
       `Question ${String(position)}/${String(total)}: ${question} · ${options.map((option, index) => `${String(index + 1)}: ${option}`).join(" · ")}`,

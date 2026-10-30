@@ -20,11 +20,16 @@ export const emoteSlotsModule: BotModule<typeof emoteSlotSettingsSchema> = {
   panelIcon: { paths: ["M3 5h18v14H3z", "M7 9h2", "M11 9h2", "M15 9h2", "M7 14h2", "M11 14h2", "M15 14h2"] },
   chatCommands: [{
     name: "!slot",
-    syntax: "!slot [stake]",
+    syntax: emoteSlotsCatalog.en.commands.slotSyntax,
+    syntaxByLanguage: { de: emoteSlotsCatalog.de.commands.slotSyntax, en: emoteSlotsCatalog.en.commands.slotSyntax },
     description: { de: emoteSlotsCatalog.de.commands.slot, en: emoteSlotsCatalog.en.commands.slot },
     minimumChatStatus: "everyone",
-    arguments: [{ name: "stake", hint: { de: emoteSlotsCatalog.de.commands.stakeHint, en: emoteSlotsCatalog.en.commands.stakeHint } }],
+    arguments: [{ name: emoteSlotsCatalog.en.commands.stakeArgument, nameByLanguage: { de: emoteSlotsCatalog.de.commands.stakeArgument, en: emoteSlotsCatalog.en.commands.stakeArgument }, hint: { de: emoteSlotsCatalog.de.commands.stakeHint, en: emoteSlotsCatalog.en.commands.stakeHint } }],
+    howToPlayUsage: "start_and_participate",
   }],
+  howToPlay: {
+    participation: { de: emoteSlotsCatalog.de.howToPlayParticipation, en: emoteSlotsCatalog.en.howToPlayParticipation },
+  },
   settingsSchema: emoteSlotSettingsSchema,
   settingsReadSchema: emoteSlotSettingsReadSchema,
   defaultSettings: DEFAULT_EMOTE_SLOT_SETTINGS,

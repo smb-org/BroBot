@@ -1,4 +1,4 @@
-import type { BotModule, ModuleAlarmContext, ModulePointRoundAnnouncement, ModulePointRoundResult } from "../contract";
+import type { BotModule, ModuleAlarmContext, ModuleChatCommandDeclaration, ModulePointRoundAnnouncement, ModulePointRoundResult } from "../contract";
 import { DUEL_MODULE_ID, duelSettingsForLanguage, duelSettingsReadSchema, duelSettingsSchema, type DuelRoundData } from "./contracts";
 import { duelCatalog } from "./locale";
 import { duelAnnouncementTemplate, duelFightLine, duelResultTemplate, duelTextVariables, processDuelMessage } from "./service";
@@ -62,6 +62,29 @@ const formatResult = async (context: ModuleAlarmContext, round: ModulePointRound
   };
 };
 
+const duelChatCommands = [
+  {
+    name: duelCatalog.de.challengeCommandName,
+    syntax: duelCatalog.de.challengeCommandSyntax,
+    syntaxByLanguage: { de: duelCatalog.de.challengeCommandSyntax, en: duelCatalog.en.challengeCommandSyntax },
+    description: { de: duelCatalog.de.challengeCommandDescription, en: duelCatalog.en.challengeCommandDescription },
+    arguments: [
+      { name: duelCatalog.de.targetArgument, nameByLanguage: { de: duelCatalog.de.targetArgument, en: duelCatalog.en.targetArgument }, hint: { de: duelCatalog.de.targetHint, en: duelCatalog.en.targetHint } },
+      { name: duelCatalog.en.stakeArgument, nameByLanguage: { de: duelCatalog.de.stakeArgument, en: duelCatalog.en.stakeArgument }, hint: { de: duelCatalog.de.stakeHint, en: duelCatalog.en.stakeHint } },
+    ],
+    minimumChatStatus: "everyone",
+    howToPlayUsage: "start",
+  },
+  {
+    name: duelCatalog.de.acceptCommandName,
+    syntax: duelCatalog.de.acceptCommandSyntax,
+    syntaxByLanguage: { de: duelCatalog.de.acceptCommandSyntax, en: duelCatalog.en.acceptCommandSyntax },
+    description: { de: duelCatalog.de.acceptCommandDescription, en: duelCatalog.en.acceptCommandDescription },
+    minimumChatStatus: "everyone",
+    howToPlayUsage: "participate",
+  },
+] as const satisfies readonly ModuleChatCommandDeclaration[];
+
 export const duelModule: BotModule<typeof duelSettingsSchema> = {
   id: DUEL_MODULE_ID,
   navigationCategory: "games",
@@ -74,6 +97,14 @@ export const duelModule: BotModule<typeof duelSettingsSchema> = {
     iconKind: "duel",
     keywords: ["duel", "duell", "fight", "game", "points"],
   }],
+  chatCommands: duelChatCommands,
+  howToPlay: {
+    participationSetting: {
+      setting: "broadcasterModsMayPlay",
+      enabled: { de: duelCatalog.de.broadcasterModsMayPlayEnabled, en: duelCatalog.en.broadcasterModsMayPlayEnabled },
+      disabled: { de: duelCatalog.de.broadcasterModsMayPlayDisabled, en: duelCatalog.en.broadcasterModsMayPlayDisabled },
+    },
+  },
   defaultEnabled: false,
   settingsSchema: duelSettingsSchema,
   settingsReadSchema: duelSettingsReadSchema,

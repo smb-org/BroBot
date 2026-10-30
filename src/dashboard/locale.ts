@@ -1366,6 +1366,7 @@ export interface DashboardTexts {
     scopeMissing: string;
     scopeGranted: string;
     chatCommands: string;
+    chatCommandsEmpty: string;
     chatCommandsButtonLabel: (count: string) => string;
     chatCommandArguments: string;
     chatCommandAvailableTo: string;
@@ -1373,6 +1374,18 @@ export interface DashboardTexts {
     chatCommandCopied: string;
     chatCommandCopyFailed: string;
     chatCommandThresholds: Record<ModuleChatCommandThreshold, string>;
+    chatCommandThresholdShort: Record<ModuleChatCommandThreshold, string>;
+    howToPlay: {
+      start: string;
+      participate: string;
+      startAndJoin: string;
+      note: string;
+      liveCockpitAction: (name: string, streamMustBeLive: boolean) => string;
+      chatCommand: (syntax: string, requirement: string) => string;
+      automaticStart: (enabled: boolean, intervalMinutes: number | null) => string;
+      missingInstructions: string;
+      commandsUnavailable: string;
+    };
   };
   /** Shared live-cockpit action frames and reserved tile copy. */
   streamManager: {
@@ -2010,6 +2023,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeMissing: "Fehlt",
       scopeGranted: "Erteilt",
       chatCommands: "Chatbefehle",
+      chatCommandsEmpty: "Für dieses Modul sind keine Chatbefehle verfügbar.",
       chatCommandsButtonLabel: (count) => `Chatbefehle · ${count}`,
       chatCommandArguments: "Argumente",
       chatCommandAvailableTo: "Im Chat ausführbar für",
@@ -2023,6 +2037,27 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         moderator: "Moderatoren und Broadcaster",
         broadcaster: "Broadcaster",
         configurable: "in den Votekick-Einstellungen (Standard: VIP)",
+      },
+      chatCommandThresholdShort: {
+        everyone: "für alle",
+        subscriber: "ab Abonnent",
+        vip: "ab VIP",
+        moderator: "ab Moderator",
+        broadcaster: "nur Broadcaster",
+        configurable: "je nach Einstellung",
+      },
+      howToPlay: {
+        start: "Start",
+        participate: "Mitspielen",
+        startAndJoin: "Starten & beitreten",
+        note: "Hinweis",
+        liveCockpitAction: (name, streamMustBeLive) => `Live-Cockpit → ${name}${streamMustBeLive ? " (nur wenn der Stream läuft)" : ""}`,
+        chatCommand: (syntax, requirement) => `Chat → ${syntax} (${requirement})`,
+        automaticStart: (enabled, intervalMinutes) => enabled
+          ? `Automatischer Start: an${intervalMinutes === null ? "" : ` · alle ${String(intervalMinutes)} Min.`} (die Zeit läuft nur, solange der Stream live ist; nach einer Runde erst wieder, wenn sie aufgelöst ist)`
+          : "Automatischer Start: aus",
+        missingInstructions: "Start- und Teilnahmehinweise stehen in den Moduleinstellungen.",
+        commandsUnavailable: "Einstellungen ungültig – Angaben zu Befehlen und Start nicht verfügbar.",
       },
     },
     streamManager: {
@@ -2654,6 +2689,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       scopeMissing: "Missing",
       scopeGranted: "Granted",
       chatCommands: "Chat commands",
+      chatCommandsEmpty: "No chat commands are available for this module.",
       chatCommandsButtonLabel: (count) => `Chat commands · ${count}`,
       chatCommandArguments: "Arguments",
       chatCommandAvailableTo: "Available in chat to",
@@ -2667,6 +2703,27 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
         moderator: "moderators and broadcasters",
         broadcaster: "broadcaster",
         configurable: "in Votekick settings (default: VIP)",
+      },
+      chatCommandThresholdShort: {
+        everyone: "everyone",
+        subscriber: "subscriber and up",
+        vip: "VIP and up",
+        moderator: "moderator and up",
+        broadcaster: "broadcaster only",
+        configurable: "set in the settings",
+      },
+      howToPlay: {
+        start: "Start",
+        participate: "Play",
+        startAndJoin: "Start & join",
+        note: "Note",
+        liveCockpitAction: (name, streamMustBeLive) => `Live cockpit → ${name}${streamMustBeLive ? " (when the stream is live)" : ""}`,
+        chatCommand: (syntax, requirement) => `Chat → ${syntax} (${requirement})`,
+        automaticStart: (enabled, intervalMinutes) => enabled
+          ? `Automatic start: on${intervalMinutes === null ? "" : ` · every ${String(intervalMinutes)} min`} (the timer only runs while the stream is live; after a round it restarts once the round is resolved)`
+          : "Automatic start: off",
+        missingInstructions: "Start and participation instructions are in the module settings.",
+        commandsUnavailable: "Settings invalid – command and start details unavailable.",
       },
     },
     streamManager: {

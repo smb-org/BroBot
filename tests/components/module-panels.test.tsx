@@ -119,7 +119,7 @@ vi.mock("../../src/modules/registry", () => ({
     {
       id: "aktiv",
       navigationCategory: "chat",
-      settingsSchema: {},
+      settingsSchema: { safeParse: (value: unknown) => ({ success: true, data: value }) },
       defaultSettings: {},
       chatCommands: [{
         name: "!sample",
@@ -181,6 +181,14 @@ vi.mock("../../src/modules/registry", () => ({
       defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4, extraMessage: "Extra value" },
       templateFields: { message: [{ name: "viewer", sample: "Ada", maxLength: 40 }] },
       settingsEditor: editorFixture.loader,
+    },
+    {
+      id: "editor-page-command-fixture",
+      navigationCategory: "games",
+      settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {}, extraMessage: {} } },
+      defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4, extraMessage: "Extra value" },
+      settingsEditor: editorFixture.loader,
+      settingsEditorPlacement: "page",
     },
     {
       id: "editor-before-fixture",
@@ -335,6 +343,26 @@ describe("Module panel loader", () => {
     expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Chatbefehle · 1|Chat commands · 1/ })).toBe(commandButton);
     expect(screen.getByRole("dialog", { name: /Chatbefehle|Chat commands/ })).toBe(commands);
+  });
+
+  it.each([
+    { moduleId: "aktiv", buttonName: "Chatbefehle · 1" },
+    { moduleId: "editor-page-command-fixture", buttonName: "Chatbefehle · 0" },
+  ])("places $moduleId chat help in header page actions", ({ moduleId, buttonName }) => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ settings: editorFixtureSettings, revision: 1, variables: [] }))));
+    renderWithUiProvider(<ModulePage
+      channelId="kanal-a"
+      moduleId={moduleId}
+      ownRole="manager"
+      modules={[{ id: moduleId, enabled: true, settings: "{}" }]}
+      activeModules={[]}
+      onNavigate={vi.fn()}
+      onToggle={vi.fn()}
+    />);
+
+    const commandButton = screen.getByRole("button", { name: buttonName });
+    expect(commandButton.closest(".page-header__page-actions")).not.toBeNull();
+    expect(commandButton.closest(".page-header__save")).toBeNull();
   });
 
   it("places a long module panel after its settings editor", async () => {

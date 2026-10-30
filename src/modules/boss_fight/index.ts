@@ -91,6 +91,7 @@ export const bossFightModule: BotModule<typeof bossFightSettingsSchema> = {
     syntax: BOSS_FIGHT_COMMAND,
     description: { de: bossFightCatalog.de.commandDescription, en: bossFightCatalog.en.commandDescription },
     minimumChatStatus: "everyone",
+    howToPlayUsage: "participate",
   }],
   defaultEnabled: false,
   settingsSchema: bossFightSettingsSchema,
