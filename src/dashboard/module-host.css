@@ -12,8 +12,10 @@
   .chat-voting-page-tabs__tab:hover { background: var(--surface-hover); color: var(--text); }
   .chat-voting-page-tabs__tab[data-active] { border-color: transparent transparent var(--brand-text); color: var(--brand-text); }
   @media (max-width: 768px) {
+    /* The chat commands button keeps its spot right after the description, as on every module page; the tabs wrap onto their own row below it. */
+    .chat-voting-page-tabs { order: 1; flex: 0 0 100%; }
     .module-detail--chat_voting { height: calc(100dvh - var(--app-shell-header-height) - 32px); }
-    .module-detail--chat_voting > .module-detail-heading { grid-template-columns: 56px minmax(0, 1fr) minmax(0, auto); gap: var(--s2); min-height: 0; margin-bottom: 8px; padding-bottom: 8px; }
+    .module-detail--chat_voting > .module-detail-heading { grid-template-columns: 56px minmax(0, 1fr) minmax(0, auto); gap: 0 var(--s2); min-height: 0; margin-bottom: 8px; padding-bottom: 8px; }
     .module-detail--chat_voting > .module-detail-heading .page-header__title-row :is(h1, h2, h3) { font-size: 18px; }
   }
   @media (max-width: 639px) {

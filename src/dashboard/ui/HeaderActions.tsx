@@ -11,18 +11,21 @@ interface HeaderActionsProps {
   saveTargetRef?: RefCallback<HTMLDivElement>;
   pageActions?: ReactNode;
   overflow?: ReactNode;
+  /** Keeps the save row's height while the save cluster is not mounted yet, so the header never jumps. */
+  reserveSaveRow?: boolean;
   moreActionsLabel: string;
 }
 
-export function HeaderActions({ saveStatus, save, saveTargetRef, pageActions, overflow, moreActionsLabel }: HeaderActionsProps): ReactElement {
+export function HeaderActions({ saveStatus, save, saveTargetRef, pageActions, overflow, reserveSaveRow = false, moreActionsLabel }: HeaderActionsProps): ReactElement {
   const [overflowOpen, setOverflowOpen] = useState(false);
   const hasOverflow = overflow !== undefined && overflow !== null && overflow !== false;
+  const saveCluster = saveStatus === undefined || saveStatus === null
+    ? save === undefined || (!save.persistent && !save.dirty && !save.saved) ? null : <SaveStatus {...save} />
+    : saveStatus;
 
   return (
     <div className="page-header__right">
-      {saveStatus === undefined || saveStatus === null
-        ? save === undefined || (!save.persistent && !save.dirty && !save.saved) ? null : <div className="page-header__save"><SaveStatus {...save} /></div>
-        : <div className="page-header__save">{saveStatus}</div>}
+      {saveCluster === null ? reserveSaveRow ? <div className="page-header__save-reserve" aria-hidden="true" /> : null : <div className="page-header__save">{saveCluster}</div>}
       {pageActions === undefined || pageActions === null ? null : <div className="page-header__page-actions page-header__actions">{pageActions}</div>}
       {saveTargetRef === undefined ? null : <div ref={saveTargetRef} className="page-header__save page-header__save-target" />}
       {!hasOverflow ? null : (

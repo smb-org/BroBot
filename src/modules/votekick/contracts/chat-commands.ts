@@ -16,5 +16,7 @@ export const VOTEKICK_CHAT_COMMANDS = [
       },
     }],
     minimumChatStatus: "configurable",
+    minimumChatStatusSetting: "starterMinRole",
+    howToPlayUsage: "start",
   },
 ] as const satisfies readonly ModuleChatCommandDeclaration[];

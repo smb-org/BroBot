@@ -4,7 +4,8 @@ export const emoteSlotsCatalog = {
   de: {
     name: "Slot",
     description: "Drehe an den Walzen und knacke den Jackpot.",
-    commands: { slot: "Dreht die Slot-Walzen für Punkte.", stakeHint: "Punkteinsatz; ohne Angabe gilt der Standardeinsatz." },
+    howToPlayParticipation: "Jeder Dreh wird sofort abgerechnet.",
+    commands: { slot: "Dreht die Slot-Walzen für Punkte.", slotSyntax: "!slot [Einsatz]", stakeArgument: "Einsatz", stakeHint: "Punkteinsatz; ohne Angabe gilt der Standardeinsatz." },
     symbols: {
       cherry: "Kirsche",
       lemon: "Zitrone",
@@ -129,7 +130,8 @@ export const emoteSlotsCatalog = {
   en: {
     name: "Slot",
     description: "Spin the reels and hit the jackpot.",
-    commands: { slot: "Spins the slot reels for points.", stakeHint: "Point stake; uses the default stake when omitted." },
+    howToPlayParticipation: "Each spin settles immediately.",
+    commands: { slot: "Spins the slot reels for points.", slotSyntax: "!slot [stake]", stakeArgument: "stake", stakeHint: "Point stake; uses the default stake when omitted." },
     symbols: {
       cherry: "Cherry",
       lemon: "Lemon",

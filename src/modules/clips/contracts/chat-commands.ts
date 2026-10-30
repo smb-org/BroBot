@@ -8,4 +8,5 @@ export const CLIPS_CHAT_COMMANDS: readonly ModuleChatCommandDeclaration[] = [{
     en: "Creates a clip from the current stream.",
   },
   minimumChatStatus: "configurable",
+  minimumChatStatusSetting: "commandMinimumRole",
 }];

@@ -865,9 +865,19 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .module-detail-heading .page-header__save .ui-save-bar__actions { flex: none; }
 .page-header__page-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .page-header__page-actions > * { min-width: 0; max-width: 100%; }
+/* The chat commands button is the rightmost page action on desktop, so it sits at the same spot on every page; other actions (Info, tabs) stay to its left. */
+.page-header__page-actions > .chat-commands-help__trigger { order: 99; }
 .page-header__overflow-trigger { flex: none; }
 .page-header__overflow { display: grid; width: min(280px, calc(100vw - 24px)); max-height: min(70vh, 480px); gap: 8px; overflow: auto; }
 .page-header__overflow > * { max-width: 100%; }
+.page-header__save-reserve { min-height: var(--control-height); }
+/* Module page headers share one layout: the page actions (chat commands) sit top right on the first row, as high as the icon;
+   the save cluster and the more-menu sit one row lower, right-aligned, below them. Narrow screens: see the 768px block. */
+:is(.module-detail, .settings-page) > .page-header { align-items: start; }
+:is(.module-detail, .settings-page) > .page-header > .page-header__right { display: grid; grid-template-columns: minmax(0, max-content) auto; justify-content: end; align-items: center; align-self: start; gap: 0; width: auto; }
+:is(.module-detail, .settings-page) > .page-header > .page-header__right > .page-header__page-actions { grid-column: 1 / -1; grid-row: 1; justify-self: end; flex-wrap: nowrap; min-height: 56px; }
+:is(.module-detail, .settings-page) > .page-header > .page-header__right > :is(.page-header__save, .page-header__save-reserve) { grid-column: 1; grid-row: 2; justify-self: end; width: 430px; max-width: 100%; }
+:is(.module-detail, .settings-page) > .page-header > .page-header__right > .page-header__overflow-trigger { grid-column: 2; grid-row: 2; margin-left: 12px; }
 .module-heading__subtitle-placeholder { visibility: hidden; }
 .header-action { display: grid; justify-items: end; gap: 2px; min-width: 0; }
 .header-action__reason-slot { display: grid; align-content: start; min-height: 18px; width: 100%; overflow: hidden; }
@@ -921,6 +931,10 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 
 .chat-command-popover { display: grid; width: min(440px, calc(100vw - 24px)); max-height: min(75vh, 640px); gap: 10px; overflow: auto; padding: 14px; }
 .chat-command-popover > strong { font-size: 13px; }
+.chat-command-help__instructions { display: grid; gap: var(--spacing-s1); padding-block-end: var(--spacing-s3); border-bottom: 1px solid var(--color-border); }
+.chat-command-help__instructions p { margin: 0; color: var(--color-text-2); overflow-wrap: anywhere; }
+.chat-command-help__instructions strong { color: var(--color-text); font-weight: var(--font-weight-semibold); }
+.chat-command-popover__empty { margin: 0; color: var(--color-text-2); overflow-wrap: anywhere; }
 .chat-command-help { display: grid; min-width: 0; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .chat-command-help__top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
 .chat-command-help__top code { min-width: 0; overflow-wrap: anywhere; color: var(--brand-text); font-family: "IBM Plex Mono", ui-monospace, monospace; }
@@ -1552,17 +1566,23 @@ p.lock-reason { margin-bottom: 1em; }
 @media (max-width: 768px) {
   .module-detail:has(.collection-page) { height: calc(100dvh - var(--app-shell-header-height) - 32px); }
   .module-detail:has(.collection-page) > .module-detail-heading { grid-template-columns: 56px minmax(0, 1fr) minmax(0, auto); gap: var(--s2); min-height: 0; margin-bottom: 8px; padding-bottom: 8px; }
-  .module-detail:has(.collection-page) > .module-detail-heading .page-header__title-row :is(h1, h2, h3) { font-size: 18px; }
-  .module-detail:has(.collection-page) > .module-detail-heading .page-header__right { grid-column: 2; width: auto; }
-  .module-detail:has(.collection-page) > .module-detail-heading .page-header__page-actions { justify-content: flex-end; }
   .page-header__right { grid-column: 1 / -1; justify-content: flex-start; width: 100%; }
   .page-header__page-actions { justify-content: flex-start; }
+  /* Narrow: the chat commands button leads the page actions, directly after the description. */
+  .page-header__page-actions > .chat-commands-help__trigger { order: -1; }
   .module-detail--settings-page { height: 100%; min-height: 0; }
-  .module-detail--settings-page .settings-page > .page-header { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 8px; margin-bottom: 8px; padding-bottom: 8px; }
-  .module-detail--settings-page .settings-page > .page-header .page-header__icon { width: 40px; height: 40px; }
-  .module-detail--settings-page .settings-page > .page-header .page-header__title-row :is(h1, h2, h3) { font-size: 16px; }
-  .module-detail--settings-page .settings-page > .page-header .page-header__right { grid-column: 1 / -1; justify-self: stretch; justify-content: flex-end; width: 100%; }
-  .module-detail--settings-page .page-header__save { flex: none; width: auto; }
+  .module-detail--settings-page .settings-page > .page-header { margin-bottom: 8px; padding-bottom: 8px; }
+  /* Module page headers, narrow: icon with title and description, then the page actions (chat commands), then the save cluster
+     right-aligned below them, then the reserved lock hint. The description reserves two lines so the button sits at the same height on every page. */
+  :is(.module-detail, .settings-page) > .page-header.module-detail-heading { grid-template-columns: 56px minmax(0, 1fr); grid-template-rows: auto auto auto auto; gap: 0 var(--s2); }
+  :is(.module-detail, .settings-page) > .page-header > .page-header__main { display: contents; }
+  :is(.module-detail, .settings-page) > .page-header > .page-header__icon { grid-column: 1; grid-row: 1 / span 2; align-self: center; }
+  :is(.module-detail, .settings-page) > .page-header > .page-header__main > .page-header__title-row { grid-column: 2; grid-row: 1; }
+  :is(.module-detail, .settings-page) > .page-header > .page-header__main > p { grid-column: 2; grid-row: 2; min-height: 2.8em; line-height: 1.4; }
+  :is(.module-detail, .settings-page) > .page-header > .page-header__main > .page-header__meta { grid-column: 1 / -1; grid-row: 4; }
+  :is(.module-detail, .settings-page) > .page-header > .page-header__right { grid-column: 1 / -1; grid-row: 3; grid-template-columns: minmax(0, 1fr) auto; justify-content: stretch; justify-self: stretch; row-gap: 8px; margin-top: 12px; }
+  :is(.module-detail, .settings-page) > .page-header > .page-header__right > .page-header__page-actions { justify-self: start; flex-wrap: wrap; min-height: 0; }
+  :is(.module-detail, .settings-page) > .page-header > .page-header__right > :is(.page-header__save, .page-header__save-reserve) { width: auto; }
   .module-detail--settings-page .page-header__save .ui-save-bar { min-height: var(--control-height); gap: 2px; }
   .module-detail--settings-page .page-header__save .ui-save-bar__status { display: none; }
   .module-detail--settings-page .page-header__save .ui-save-bar--error.ui-save-bar--persistent { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: var(--control-height); height: var(--control-height); min-height: var(--control-height); padding: 0; }
@@ -1579,14 +1599,11 @@ p.lock-reason { margin-bottom: 1em; }
 }
 
 @media (min-width: 769px) and (max-width: 1099px) {
+  /* Mid widths: the save cluster shrinks to its buttons (a fixed width, so loading and loaded headers wrap alike) and the title keeps its room. */
+  :is(.module-detail, .settings-page) > .page-header > .page-header__right > :is(.page-header__save, .page-header__save-reserve) { width: 224px; }
+  :is(.module-detail, .settings-page) > .page-header .page-header__save .ui-save-bar__status { display: none; }
   .module-detail--settings-page .settings-page__columns { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; padding: 8px 0; }
   .module-detail--settings-page .settings-page__column { flex: none; width: 100%; min-height: 0; overflow: visible; }
-}
-
-@media (min-width: 1100px) {
-  .module-detail--settings-page:has(.settings-page--duel) .settings-page > .page-header { grid-template-columns: 56px minmax(0, 1fr) 600px; }
-  .module-detail--settings-page:has(.settings-page--duel) .page-header__right { width: 600px; }
-  .module-detail--settings-page:has(.settings-page--duel) .page-header__save { flex: 0 0 430px; width: 430px; max-width: 100%; }
 }
 
 @media (min-width: 1360px) {

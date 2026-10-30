@@ -95,6 +95,11 @@ export const blitzRoundModule: BotModule<typeof blitzRoundSettingsSchema> = {
     iconKind: "blitz",
     keywords: ["blitz", blitzTexts("de").title.toLocaleLowerCase("de-DE"), "round", "game", "word scramble", "quiz"],
   }],
+  howToPlay: {
+    autoStartSetting: "autoStart",
+    autoStartIntervalSetting: "autoStartIntervalMinutes",
+    participation: { de: blitzTexts("de").howToPlayParticipation, en: blitzTexts("en").howToPlayParticipation },
+  },
   defaultEnabled: false,
   dryRunSilentReason: "round_answers",
   settingsSchema: blitzRoundSettingsSchema,

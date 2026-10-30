@@ -6,6 +6,7 @@ export interface BlitzTexts {
   title: string;
   subtitle: string;
   description: string;
+  howToPlayParticipation: string;
   actionName: string;
   roundRunning: string;
   questionPoolEmpty: string;
@@ -114,6 +115,7 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     title: "Blitzrunde",
     subtitle: "Fragenpool und Rundeneinstellungen",
     description: "Kurze Chat-Rätsel für Punktegewinne",
+    howToPlayParticipation: "Im Chat die gesuchte Lösung eingeben.",
     actionName: "Blitzrunde starten",
     roundRunning: "Runde läuft",
     questionPoolEmpty: "Keine Fragen im Pool",
@@ -234,6 +236,7 @@ const catalog: LocaleCatalog<BlitzTexts> = {
     title: "Blitz Round",
     subtitle: "Question pool and round settings",
     description: "Short chat puzzles for point rewards",
+    howToPlayParticipation: "Enter the answer in chat.",
     actionName: "Start Blitz Round",
     roundRunning: "Round is running",
     questionPoolEmpty: "No questions in the pool",

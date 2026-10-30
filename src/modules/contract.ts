@@ -1393,6 +1393,23 @@ export type ModuleStreamState = "online" | "offline" | "unknown";
 export const MODULE_NAVIGATION_CATEGORIES = ["chat", "participation", "games", "twitch", "data", "stream", "admin"] as const;
 export type ModuleNavigationCategory = (typeof MODULE_NAVIGATION_CATEGORIES)[number];
 
+interface ModuleHowToPlayDefinition {
+  /** Immediate cockpit actions that start a game; labels and live conditions come from the action declarations. */
+  cockpitActionIds?: readonly string[];
+  /** Boolean setting that enables automatic game starts. */
+  autoStartSetting?: string;
+  /** Optional interval setting used with automatic starts. */
+  autoStartIntervalSetting?: string;
+  /** Localized participation instructions not represented by a chat command. */
+  participation?: Readonly<Record<ModuleLanguage, string>>;
+  /** A fixed participation detail whose wording depends on a setting, such as moderator eligibility. */
+  participationSetting?: {
+    setting: string;
+    enabled: Readonly<Record<ModuleLanguage, string>>;
+    disabled: Readonly<Record<ModuleLanguage, string>>;
+  };
+}
+
 export interface ModuleChannelInfo {
   title: string;
   gameName: string;
@@ -2424,6 +2441,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   settingsChangedAlarm?: { handlerKey: string; alarmKey: string };
   /** Individual dashboard actions; only their optional content is loaded on demand. */
   actions?: readonly ModuleImmediateActionDefinition[];
+  /** Read-only start and participation guidance for game pages. */
+  howToPlay?: ModuleHowToPlayDefinition;
   /** Optional live state read by the host; the host owns its fixed-size tile presentation. */
   liveTile?: ModuleLiveTileDefinition;
 };
@@ -2435,6 +2454,7 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
  */
 interface ModuleChatCommandArgument {
   name: string;
+  nameByLanguage?: Readonly<Record<ModuleLanguage, string>>;
   hint: Readonly<Record<ModuleLanguage, string>>;
 }
 
@@ -2450,8 +2470,14 @@ export interface ModuleChatCommandDeclaration {
   name: string;
   /** A representative form users can type, such as `!votekick @user`. */
   syntax: string;
+  /** Localized forms for commands whose argument names are shown in the dashboard. */
+  syntaxByLanguage?: Readonly<Record<ModuleLanguage, string>>;
   description: Readonly<Record<ModuleLanguage, string>>;
   arguments?: readonly ModuleChatCommandArgument[];
   /** Minimum Twitch chat badge/status required; configurable means module settings determine it. */
   minimumChatStatus: ModuleChatCommandThreshold;
+  /** Settings field that selects the effective minimum status when the threshold is configurable. */
+  minimumChatStatusSetting?: string;
+  /** How this command relates to starting and joining the game. */
+  howToPlayUsage?: "start" | "participate" | "start_and_participate";
 }
