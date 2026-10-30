@@ -1,4 +1,4 @@
-import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type ModerationFailureReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
+import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type MaintenanceReasonCode, type ModerationFailureReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
 import { browserModuleLanguage, type ModuleChatCommandThreshold, type ModuleChatStatus, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
 import type { ApiSourceFailureReason } from "../modules/api_source/contracts";
 import type { SystemVariableName } from "../template-variables";
@@ -4299,8 +4299,11 @@ export const apiErrorText = (
  * code falls back to showing itself -- it's already an English identifier,
  * never German prose, so that's safe.
  */
-const maintenanceReasonTexts: LocaleCatalog<Record<string, string>> = {
+const maintenanceReasonTexts: LocaleCatalog<Record<MaintenanceReasonCode, string>> = {
   de: {
+    validate_failed: "Token-Prüfung fehlgeschlagen",
+    bot_identity_missing: "Bot-Konto nicht verbunden",
+    bot_identity_revoked: "Bot-Autorisierung widerrufen",
     timeout: "Zeitüberschreitung",
     network_error: "Netzwerkfehler",
     invalid_response: "Ungültige Antwort",
@@ -4331,6 +4334,9 @@ const maintenanceReasonTexts: LocaleCatalog<Record<string, string>> = {
     "Too Many Requests": "Zu viele Anfragen",
   },
   en: {
+    validate_failed: "Token validation failed",
+    bot_identity_missing: "Bot account not connected",
+    bot_identity_revoked: "Bot authorization revoked",
     timeout: "Timeout",
     network_error: "Network error",
     invalid_response: "Invalid response",

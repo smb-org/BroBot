@@ -211,6 +211,22 @@ export type EventSubSubscriptionType = (typeof EVENTSUB_SUBSCRIPTION_TYPES)[numb
 export const EVENTSUB_NEUTRAL_REASON_CODES = ["moderator_required", "pending_adoption", "verification_pending"] as const;
 export type EventSubNeutralReasonCode = (typeof EVENTSUB_NEUTRAL_REASON_CODES)[number];
 
+/**
+ * Reason and error codes the worker writes to EventSub, bot and login maintenance rows (its own codes, Twitch
+ * revocation statuses and Twitch error strings passed through). The dashboard catalogue is typed over this list,
+ * and a unit test reads it, so a code added here without a de and en text fails the build.
+ */
+export const MAINTENANCE_REASON_CODES = [
+  "timeout", "network_error", "invalid_response", "invalid_target", "pagination_loop", "maintenance_failed",
+  "moderator_status_failed", "channel_or_consent_missing", "token_ciphertext_unreadable", "validate_failed",
+  "refresh_failed", "invalid_grant", "rate_limited", "subscription_replaced", "missing_scope",
+  "bot_identity_missing", "bot_identity_revoked",
+  "authorization_revoked", "user_removed", "moderator_removed", "chat_user_banned", "notification_failures_exceeded",
+  "version_removed", "beta_maintenance", "webhook_callback_verification_pending", "webhook_callback_verification_failed",
+  "Unauthorized", "Forbidden", "Bad Request", "Conflict", "Too Many Requests",
+] as const;
+export type MaintenanceReasonCode = (typeof MAINTENANCE_REASON_CODES)[number];
+
 export const isEventSubSubscriptionType = (value: string): value is EventSubSubscriptionType =>
   (EVENTSUB_SUBSCRIPTION_TYPES as readonly string[]).includes(value);
 
