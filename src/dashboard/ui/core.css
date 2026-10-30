@@ -904,7 +904,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .module-detail--settings-page > .ui-load-state > .ui-load-state__content { display: flex; width: 100%; min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; }
 .module-detail--settings-page > .ui-load-state--retry { display: grid; grid-template-rows: minmax(var(--ui-load-state-content-min-height), 1fr) var(--s10); }
 .module-detail--settings-page .settings-page { display: flex; width: 100%; max-width: none; min-height: 0; flex: 1 1 auto; flex-direction: column; }
-.module-detail--settings-page .settings-page > .page-header { width: 100%; max-width: none; flex: none; margin: 0; padding-bottom: 16px; }
+.module-detail--settings-page .settings-page > .page-header { width: 100%; max-width: none; flex: none; margin: 0; padding-bottom: 16px; border-bottom: 0; }
 .module-detail--settings-page .page-header__right { flex-wrap: nowrap; }
 .module-detail--settings-page .page-header__save { flex: 0 0 min(430px, 100%); width: min(430px, 100%); max-width: min(430px, 100%); }
 .module-detail--settings-page .page-header__save .ui-save-bar--persistent { min-height: var(--control-height); margin: 0; padding: 0; border-top: 0; background: transparent; }
@@ -1057,8 +1057,9 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-section__heading h2, .ui-section__heading h3 { flex: 0 0 auto; min-width: 0; margin: 0; color: var(--color-text-2); font-size: 13px; font-weight: 600; }
 .ui-section__rule { height: 1px; flex: 1 1 auto; background: var(--color-border); }
 .ui-section__content { display: grid; gap: 12px; min-width: 0; }
-.ui-section--inspector { margin-top: 0; padding: var(--s4) 0; border-bottom: 1px solid var(--line); }
-.ui-section--inspector .ui-section__heading { gap: var(--s2); margin: 0 0 var(--s3); padding-bottom: var(--s2); border-bottom: 1px solid var(--line); }
+/* One divider per section: the heading's inline rule. No border above, below or under the heading. */
+.ui-section--inspector { margin-top: 0; padding: var(--s4) 0; }
+.ui-section--inspector .ui-section__heading { gap: var(--s2); margin: 0 0 var(--s3); }
 .ui-section--inspector .ui-section__heading h2, .ui-section--inspector .ui-section__heading h3 { color: var(--text); }
 .ui-section--inspector .ui-section__content { gap: var(--s3); }
 

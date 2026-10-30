@@ -1,4 +1,4 @@
-import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type ModerationFailureReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
+import { ADS_SKIPPED_REASONS, COMMERCIAL_FAILURE_REASONS, EVENTSUB_NEUTRAL_REASON_CODES, RAID_INVALID_REASONS, SHOUTOUT_FAILURE_REASONS, type AdsSkippedReason, type ApiErrorCode, type AuditAction, type AuditArea, type ChannelRole, type CommercialFailureReason, type EventCode, type EventSubNeutralReasonCode, type EventTone, type ImmediateActionUnavailableReason, type MaintenanceReasonCode, type ModerationFailureReason, type RaidInvalidReason, type ShoutoutFailureReason, type ShoutoutSuppressedReason } from "../contracts/values";
 import { browserModuleLanguage, type ModuleChatCommandThreshold, type ModuleChatStatus, type ModuleLanguage, type ModuleNavigationCategory } from "../modules/contract";
 import type { ApiSourceFailureReason } from "../modules/api_source/contracts";
 import type { SystemVariableName } from "../template-variables";
@@ -4356,8 +4356,11 @@ export const apiErrorText = (
  * code falls back to showing itself -- it's already an English identifier,
  * never German prose, so that's safe.
  */
-const maintenanceReasonTexts: LocaleCatalog<Record<string, string>> = {
+const maintenanceReasonTexts: LocaleCatalog<Record<MaintenanceReasonCode, string>> = {
   de: {
+    validate_failed: "Token-Prüfung fehlgeschlagen",
+    bot_identity_missing: "Bot-Konto nicht verbunden",
+    bot_identity_revoked: "Bot-Autorisierung widerrufen",
     timeout: "Zeitüberschreitung",
     network_error: "Netzwerkfehler",
     invalid_response: "Ungültige Antwort",
@@ -4367,8 +4370,30 @@ const maintenanceReasonTexts: LocaleCatalog<Record<string, string>> = {
     moderator_status_failed: "Moderatorstatus-Prüfung fehlgeschlagen",
     channel_or_consent_missing: "Kanal oder Zustimmung fehlt",
     token_ciphertext_unreadable: "Token nicht lesbar",
+    refresh_failed: "Token-Erneuerung fehlgeschlagen",
+    invalid_grant: "Autorisierung ungültig",
+    rate_limited: "Twitch-Abklingzeit aktiv",
+    subscription_replaced: "Wird durch ein neues Abonnement ersetzt",
+    missing_scope: "Berechtigung fehlt",
+    authorization_revoked: "Autorisierung widerrufen",
+    user_removed: "Konto nicht mehr vorhanden",
+    moderator_removed: "Moderatorrechte entzogen",
+    chat_user_banned: "Konto im Chat gesperrt",
+    notification_failures_exceeded: "Zu viele fehlgeschlagene Zustellungen",
+    version_removed: "Abonnementversion nicht mehr verfügbar",
+    beta_maintenance: "Twitch-Wartung",
+    webhook_callback_verification_pending: "Verifizierung ausstehend",
+    webhook_callback_verification_failed: "Verifizierung fehlgeschlagen",
+    Unauthorized: "Nicht autorisiert",
+    Forbidden: "Zugriff verweigert",
+    "Bad Request": "Ungültige Anfrage",
+    Conflict: "Konflikt",
+    "Too Many Requests": "Zu viele Anfragen",
   },
   en: {
+    validate_failed: "Token validation failed",
+    bot_identity_missing: "Bot account not connected",
+    bot_identity_revoked: "Bot authorization revoked",
     timeout: "Timeout",
     network_error: "Network error",
     invalid_response: "Invalid response",
@@ -4378,6 +4403,25 @@ const maintenanceReasonTexts: LocaleCatalog<Record<string, string>> = {
     moderator_status_failed: "Moderator status check failed",
     channel_or_consent_missing: "Channel or consent missing",
     token_ciphertext_unreadable: "Token unreadable",
+    refresh_failed: "Token refresh failed",
+    invalid_grant: "Authorization invalid",
+    rate_limited: "Twitch cooldown active",
+    subscription_replaced: "Being replaced by a new subscription",
+    missing_scope: "Permission missing",
+    authorization_revoked: "Authorization revoked",
+    user_removed: "Account no longer exists",
+    moderator_removed: "Moderator status removed",
+    chat_user_banned: "Account banned from chat",
+    notification_failures_exceeded: "Too many failed deliveries",
+    version_removed: "Subscription version no longer available",
+    beta_maintenance: "Twitch maintenance",
+    webhook_callback_verification_pending: "Verification pending",
+    webhook_callback_verification_failed: "Verification failed",
+    Unauthorized: "Not authorized",
+    Forbidden: "Access denied",
+    "Bad Request": "Invalid request",
+    Conflict: "Request conflict",
+    "Too Many Requests": "Too many requests",
   },
 };
 
@@ -4406,7 +4450,8 @@ export const maintenanceReasonText = (
     return catalogString(eventSubNeutralReasonTexts[language], code) ?? code;
   }
   const catalog: Record<string, string> = maintenanceReasonTexts[language];
-  return catalogString(catalog, code) ?? code;
+  const status = /^http_(\d{3})$/.exec(code)?.[1];
+  return catalogString(catalog, code) ?? (status === undefined ? code : `HTTP ${status}`);
 };
 
 export const dashboardTexts = (language: DashboardLanguage = dashboardLanguage()): DashboardTexts => dashboardTextsCatalog[language];

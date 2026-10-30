@@ -317,7 +317,7 @@ test("keeps the Emote Slots title on one line at 1100px without growing its head
   expect(compact.titleText).toBe("Slot");
   expect(compact.titleHeight).toBeLessThanOrEqual(compact.titleLineHeight * 1.25);
   // Slot shares the module page header: title, description, chat commands row, and the save row.
-  expect(compact.height).toBe(167);
+  expect(compact.height).toBe(166);
   expect(Math.abs(compact.switchCenter - compact.titleCenter)).toBeLessThanOrEqual(4);
 });
 

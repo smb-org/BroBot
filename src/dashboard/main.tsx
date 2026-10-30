@@ -903,7 +903,8 @@ const SubscriptionsSection = ({ subscriptions }: { subscriptions: PanelEventSubS
                 <th scope="row"><span className={unknown ? "mono" : undefined}>{name}</span></th>
                 <td><StatusLed state={channelToneToStatusState(tone)} label={stateLabel} /></td>
                 {/* Neutral states already render the reason as the state label; repeating it adds nothing. */}
-                <td>{reasonText === null || reasonText === stateLabel ? <EmptyCellValue /> : reasonText}</td>
+                {/* The raw code stays reachable as a tooltip. */}
+                <td title={subscription.reason ?? undefined}>{reasonText === null || reasonText === stateLabel ? <EmptyCellValue /> : reasonText}</td>
               </tr>;
             })}</tbody>
           </table>

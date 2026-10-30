@@ -90,6 +90,33 @@ const box = async (locator: ReturnType<Page["locator"]>): Promise<{ x: number; y
   };
 };
 
+test("slot header uses the shared save cluster width at tablet widths without overlap", async ({ page }) => {
+  await installSlotPage(page);
+  for (const width of [390, 900, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`/channels/${CHANNEL_ID}/modules/emote_slots`);
+    const header = page.locator(".settings-page--slot > .page-header");
+    await expect(page.getByRole("button", { name: EDITOR_COPY.saveLabel })).toBeVisible();
+    const headerBox = await box(header);
+    const titleBox = await box(header.locator(".page-header__title-row"));
+    const commandsBox = await box(page.getByRole("button", { name: /^Chatbefehle/u }));
+    const saveBox = await box(page.locator(".page-header__save"));
+    expect(saveBox.y).toBeGreaterThanOrEqual(commandsBox.y + commandsBox.height);
+    if (width > 768) {
+      expect(commandsBox.x + commandsBox.width).toBeCloseTo(headerBox.x + headerBox.width, 0);
+      expect(commandsBox.y - headerBox.y).toBeCloseTo(12, 0);
+      // The title keeps a readable line instead of being squeezed beside a fixed-width save cluster.
+      expect(titleBox.width).toBeGreaterThan(150);
+      expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(Math.min(commandsBox.x, saveBox.x) + 0.5);
+      expect(headerBox.height).toBeLessThan(200);
+    }
+    if (width > 768 && width < 1100) expect(saveBox.width).toBeCloseTo(224, 0);
+    const saveButton = await box(page.getByRole("button", { name: EDITOR_COPY.saveLabel }));
+    const moreButton = await box(header.getByRole("button", { name: "Weitere Aktionen" }));
+    expect(saveButton.x + saveButton.width).toBeLessThanOrEqual(moreButton.x + 0.5);
+  }
+});
+
 test("slot quote states stay fixed, lock unsafe saves, and persist explicit edits (protects=the live rate, locked save state, grouped picker, fixed layout, and reload persistence; fails_when=weight edits do not recalculate, a rate at or above 100% can save, status changes move the page, or reload loses the saved value; no_claim=chat settlement and real Helix delivery are covered by worker tests)", async ({ page }, testInfo: TestInfo) => {
   const fixture = await installSlotPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });

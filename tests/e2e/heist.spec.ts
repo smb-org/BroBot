@@ -46,7 +46,7 @@ test("chat commands button keeps its header spot with the save cluster one row b
     return bounds;
   };
 
-  for (const width of [390, 1024, 1440]) {
+  for (const width of [390, 900, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`/channels/${channelId}/modules/heist?lang=en`);
     const header = page.locator(".settings-page > .page-header");
@@ -81,7 +81,7 @@ test("heist settings save explicitly and persist without horizontal overflow", a
   });
   const api = await installSettingsApi(page, settings);
 
-  for (const [index, width] of [390, 1440, 2560].entries()) {
+  for (const [index, width] of [390, 1440, 1920, 2560].entries()) {
     const minStake = 25 + index;
     const joinWindow = 90 + index;
     await page.setViewportSize({ width, height: 900 });
@@ -95,6 +95,14 @@ test("heist settings save explicitly and persist without horizontal overflow", a
     expect(api.savedSettings()).toMatchObject({ minStake, joinWindowSeconds: joinWindow });
     const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(scrollWidth).toBeLessThanOrEqual(width);
+    // Each column scrolls on its own, so an overhang (e.g. a switch hit area) shows as a column scrollbar, not a page one.
+    const overflowingColumns = await page.locator(".settings-page__column").evaluateAll((columns) =>
+      columns.filter((column) => column.scrollWidth > column.clientWidth).length);
+    expect(overflowingColumns).toBe(0);
+    // One divider per section: only the heading's inline rule, no section or heading borders.
+    const borderedParts = await page.locator(".ui-section, .ui-section__heading").evaluateAll((parts) =>
+      parts.filter((part) => getComputedStyle(part).borderTopWidth !== "0px" || getComputedStyle(part).borderBottomWidth !== "0px").length);
+    expect(borderedParts).toBe(0);
     await page.reload();
     await expect(page.getByLabel("Minimum stake")).toHaveValue(String(minStake));
     await expect(page.getByLabel("Join window")).toHaveValue(String(joinWindow));

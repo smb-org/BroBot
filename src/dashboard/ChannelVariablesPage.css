@@ -78,7 +78,6 @@
   .channel-variable-module-detail .channel-variable-editor__scroll { display: grid; align-content: start; gap: var(--s4); }
   .channel-variable-module-detail .properties { margin-bottom: var(--s3); }
   .channel-variable-module-detail .properties { border-top: 0; }
-  .channel-variable-module-detail .ui-section--inspector .ui-section__heading { padding-bottom: 0; border-bottom: 0; }
   .channel-variable-module-detail .properties dd { overflow-wrap: anywhere; }
   .channel-variable-module-detail .muted { margin-bottom: var(--s2); }
   .channel-variable-catalog-provider { color: var(--brand-text); font-size: 13px; }

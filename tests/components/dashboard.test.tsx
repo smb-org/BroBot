@@ -1700,7 +1700,7 @@ describe("Dashboard skeleton", () => {
     const unknown = screen.getByText("channel.future");
     expect(unknown).toHaveClass("mono");
     expect(screen.getByText("Ausstehend")).toBeInTheDocument();
-    expect(screen.getByText("missing_scope")).toBeInTheDocument();
+    expect(screen.getByText("Berechtigung fehlt")).toBeInTheDocument();
     const verificationPending = screen.getByText("channel.future-verification").closest("tr");
     expect(verificationPending?.querySelector(".status-led")).toHaveAttribute("data-status", "off");
     expect(verificationPending?.querySelector(".status-led")).toHaveAttribute("aria-label", "Verifizierung ausstehend");
@@ -1714,7 +1714,10 @@ describe("Dashboard skeleton", () => {
       expect(reasonCell(row)?.querySelector(".table-empty-value")).not.toBeNull();
       expect(reasonCell(row)).not.toHaveTextContent(/Verifizierung ausstehend|Wird übernommen/);
     }
-    expect(reasonCell(screen.getByText("Ausgehende Raids").closest("tr"))).toHaveTextContent("missing_scope");
+    // The reason is localized; the raw code stays reachable as a tooltip.
+    const failedReason = reasonCell(screen.getByText("Ausgehende Raids").closest("tr"));
+    expect(failedReason).toHaveTextContent("Berechtigung fehlt");
+    expect(failedReason).toHaveAttribute("title", "missing_scope");
 
     const outgoing = screen.getByText("Ausgehende Raids").closest("tr");
     expect(outgoing).not.toBeNull();
