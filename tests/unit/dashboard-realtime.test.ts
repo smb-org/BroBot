@@ -86,7 +86,7 @@ describe("dashboard realtime messages", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const reads = { events: 0, panel: 0, settings: 0 };
     const queryKeysByPart = {
-      events: dashboardDataKeys.events(channelId, { origin: null, module: null, tone: null, person: null }),
+      events: dashboardDataKeys.eventHead(channelId, { origin: null, module: null, tone: null, person: null }),
       panel: moduleQueryKey(channelId, "chat_voting", "panel"),
       settings: moduleQueryKey(channelId, "chat_voting", "settings"),
     } as const;
@@ -220,8 +220,8 @@ describe("dashboard realtime messages", () => {
     const overview = queryKeys.channel(channelId, "overview");
     const system = queryKeys.channel(channelId, "system");
     const channels = queryKeys.channels();
-    const eventHistory = dashboardDataKeys.events(channelId, { origin: null, module: null, tone: null, person: null });
-    [overview, system, channels, eventHistory].forEach((key) => { addQuery(queryClient, key); });
+    const eventHead = dashboardDataKeys.eventHead(channelId, { origin: null, module: null, tone: null, person: null });
+    [overview, system, channels, eventHead].forEach((key) => { addQuery(queryClient, key); });
 
     let revisions: Readonly<Record<string, number>> = { "channel.overview": 0, "channel.system": 0, channels: 0 };
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ revisions }), {
@@ -242,7 +242,7 @@ describe("dashboard realtime messages", () => {
     expect(queryClient.getQueryState(overview)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(system)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(channels)?.isInvalidated).toBe(false);
-    expect(queryClient.getQueryState(eventHistory)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(eventHead)?.isInvalidated).toBe(true);
   });
 
   it("tracks connection state per channel for conditional fallback queries", () => {
@@ -315,10 +315,10 @@ describe("dashboard realtime messages", () => {
     const sharedChannel = "revision-two-client";
     const writer = new QueryClient();
     const reader = new QueryClient();
-    const writerEvents = queryKeys.channel(sharedChannel, "events", { origin: "twitch" });
-    const readerEvents = queryKeys.channel(sharedChannel, "events", { origin: "twitch" });
+    const writerEvents = dashboardDataKeys.eventHead(sharedChannel, { origin: "channel", module: null, tone: null, person: null });
+    const readerEvents = dashboardDataKeys.eventHead(sharedChannel, { origin: "channel", module: null, tone: null, person: null });
     const readerAudit = queryKeys.channel(sharedChannel, "audit-log", { person: "user-1" });
-    const otherChannelEvents = queryKeys.channel("revision-other-channel", "events");
+    const otherChannelEvents = dashboardDataKeys.eventHead("revision-other-channel", { origin: null, module: null, tone: null, person: null });
     [writerEvents].forEach((key) => { addQuery(writer, key); });
     [readerEvents, readerAudit, otherChannelEvents].forEach((key) => { addQuery(reader, key); });
     const vectors = new Map<string, Readonly<Record<string, number>>>([[sharedChannel, {}]]);
@@ -410,7 +410,7 @@ describe("dashboard realtime messages", () => {
     vi.useFakeTimers();
     const revisionChannel = "revision-read-retry";
     const reader = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const events = queryKeys.channel(revisionChannel, "events");
+    const events = dashboardDataKeys.eventHead(revisionChannel, { origin: null, module: null, tone: null, person: null });
     let eventReads = 0;
     reader.setQueryData(events, { revision: 0 });
     const unsubscribe = new QueryObserver(reader, {
@@ -477,7 +477,7 @@ describe("dashboard realtime messages", () => {
     vi.useFakeTimers();
     const revisionChannel = "revision-resource-retry";
     const reader = new QueryClient({ defaultOptions: { queries: { retry: 1, retryDelay: () => 0 } } });
-    const events = queryKeys.channel(revisionChannel, "events");
+    const events = dashboardDataKeys.eventHead(revisionChannel, { origin: null, module: null, tone: null, person: null });
     let eventReads = 0;
     reader.setQueryData(events, { revision: 0 });
     const unsubscribe = new QueryObserver(reader, {
@@ -520,7 +520,7 @@ describe("dashboard realtime messages", () => {
     vi.useFakeTimers();
     const revisionChannel = "revision-sustained-hints";
     const reader = new QueryClient();
-    const events = queryKeys.channel(revisionChannel, "events");
+    const events = dashboardDataKeys.eventHead(revisionChannel, { origin: null, module: null, tone: null, person: null });
     addQuery(reader, events);
     let committedRevision = 0;
     const observedRevisions: number[] = [];
@@ -680,7 +680,7 @@ describe("dashboard realtime messages", () => {
       settings: [queryKeys.channel(revisionChannel, "settings")],
       members: [dashboardDataKeys.members(revisionChannel)],
       modules: [queryKeys.channel(revisionChannel, "modules"), queryKeys.channel(revisionChannel, "overview")],
-      events: [queryKeys.channel(revisionChannel, "events", { module: "chat_voting" })],
+      events: [dashboardDataKeys.eventHead(revisionChannel, { origin: null, module: "chat_voting", tone: null, person: null })],
       "audit-log": [dashboardDataKeys.audit(revisionChannel, { person: "user-1", area: null })],
       variables: [
         dashboardDataKeys.variables(revisionChannel),

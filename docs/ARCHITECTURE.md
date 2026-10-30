@@ -26,6 +26,13 @@ Durable Object wird deterministisch aus dem `channelId`-Namen angesprochen und
 bleibt für die spätere Echtzeitstrecke zuständig. Der Worker bleibt das Gateway
 für HTTP und die Module.
 
+Das Ereignisprotokoll (`event_log`) führt mit `seq` eine automatische
+Einfügesequenz als High-Water-Mark für Kopf-Aktualisierungen. Neue Ereignisse
+werden über `seq > H` nachgeladen, während ältere Seiten weiter über den
+Zeitstempel-Schlüsselcursor gelesen werden. Die Sequenz erkennt auch spät
+geschriebene Zeilen mit älterem `created_at`; der Zeitstempel bestimmt weiterhin
+die sichtbare Reihenfolge.
+
 Wiederholte `channel.chat.message`-Notifications werden vor dem Dispatch mit
 einem zeitbasierten ID-Satz im Channel Durable Object dedupliziert. IDs bleiben
 bis zu elf Minuten erhalten, passend zum akzeptierten Ingress-Replayfenster

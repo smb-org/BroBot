@@ -1,4 +1,4 @@
-import type { PanelEventEntry, PanelEventFilters } from "../../panel-contract";
+import type { PanelEventChangesResponse, PanelEventEntry, PanelEventFilters, PanelEventsResponse } from "../../panel-contract";
 import { EVENT_TONES, type EventTone } from "../../contracts/values";
 import { eventCauseAlreadyShown, eventCauseText, eventToneEntries, formatNumber, type dashboardTexts, type EventCode, type EventDetail, type EventNumberKey } from "../locale";
 import { LEGACY_REASON_CODES, LEGACY_REASON_VALUES } from "./legacy-reasons";
@@ -87,6 +87,127 @@ export const eventGroupKey = (entry: PanelEventEntry): string =>
 /** Chronological ordering, oldest first; ties break on `eventId` for a stable sort. */
 export const chronological = (left: PanelEventEntry, right: PanelEventEntry): number =>
   left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId);
+
+export interface EventHead {
+  entries: PanelEventEntry[];
+  headCursor: number | null;
+  nextCursor: string | null;
+  frontier: { createdAt: string; eventId: string } | null;
+  epoch: number;
+}
+
+const MAX_EVENT_CHANGE_PAGES = 5;
+export const MAX_EVENT_HEAD_ENTRIES = 1000;
+
+let nextEventHeadEpoch = 0;
+
+const newEventHeadEpoch = (): number => {
+  nextEventHeadEpoch += 1;
+  return nextEventHeadEpoch;
+};
+
+export const initialHead = (page: PanelEventsResponse): EventHead => {
+  const frontier = page.entries.at(-1);
+  return {
+    entries: page.entries,
+    headCursor: Number.isSafeInteger(page.headCursor) ? page.headCursor as number : null,
+    nextCursor: page.nextCursor,
+    frontier: frontier === undefined ? null : { createdAt: frontier.createdAt, eventId: frontier.eventId },
+    epoch: newEventHeadEpoch(),
+  };
+};
+
+export const applyEventChanges = (head: EventHead, changes: PanelEventChangesResponse): EventHead => {
+  const entriesById = new Map(head.entries.map((entry) => [entry.eventId, entry]));
+  // ponytail: revisit this reset path if retained head memory or rendering cost becomes measurable.
+  for (const entry of changes.entries) entriesById.set(entry.eventId, entry);
+  return {
+    ...head,
+    entries: Array.from(entriesById.values()).sort((left, right) => chronological(right, left)),
+    headCursor: changes.headCursor,
+  };
+};
+
+export const eventFeedContinuation = (
+  head: EventHead | undefined,
+  historyPages: readonly PanelEventsResponse[],
+): string | null => historyPages.length > 0
+  ? historyPages.at(-1)?.nextCursor ?? null
+  : head?.nextCursor ?? null;
+
+export const eventFeedEntries = (
+  head: EventHead | undefined,
+  historyPages: readonly PanelEventsResponse[],
+): PanelEventEntry[] => {
+  if (head === undefined) return [];
+  const entriesById = new Map<string, PanelEventEntry>();
+  for (const entry of head.entries) entriesById.set(entry.eventId, entry);
+  for (const page of historyPages) {
+    for (const entry of page.entries) entriesById.set(entry.eventId, entry);
+  }
+  const frontierEntry = historyPages.at(-1)?.entries.at(-1);
+  const frontier = frontierEntry === undefined
+    ? head.frontier
+    : { createdAt: frontierEntry.createdAt, eventId: frontierEntry.eventId };
+  const continuation = eventFeedContinuation(head, historyPages);
+  return Array.from(entriesById.values())
+    .filter((entry) => {
+      if (continuation === null || frontier === null) return true;
+      const position = entry.createdAt.localeCompare(frontier.createdAt) || entry.eventId.localeCompare(frontier.eventId);
+      return position >= 0;
+    })
+    .sort((left, right) => chronological(right, left));
+};
+
+export const isEventChangesResponse = (value: unknown, after: number): value is PanelEventChangesResponse => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const response = value as Partial<PanelEventChangesResponse>;
+  return Array.isArray(response.entries) && Number.isSafeInteger(response.headCursor) &&
+    (response.headCursor as number) >= after && typeof response.hasMore === "boolean";
+};
+
+export interface EventHeadRefreshIo {
+  fetchHead: () => Promise<PanelEventsResponse>;
+  fetchChanges: (after: number, limit: number) => Promise<unknown>;
+  historyHasPages: (epoch: number) => boolean;
+  isFollowing: () => boolean;
+}
+
+export const refreshEventHead = async (
+  current: EventHead | undefined,
+  io: EventHeadRefreshIo,
+): Promise<EventHead> => {
+  if (current === undefined) return initialHead(await io.fetchHead());
+  if (current.headCursor === null) {
+    const page = await io.fetchHead();
+    const refreshed = initialHead(page);
+    // A moved keyset boundary needs a new history key even before a first page commits;
+    // an in-flight request against the old cursor must not leave a gap in this epoch.
+    const boundaryChanged = refreshed.nextCursor !== current.nextCursor ||
+      refreshed.frontier?.createdAt !== current.frontier?.createdAt ||
+      refreshed.frontier?.eventId !== current.frontier?.eventId;
+    if (refreshed.headCursor !== null || io.historyHasPages(current.epoch) || boundaryChanged) return refreshed;
+    return { ...refreshed, epoch: current.epoch };
+  }
+
+  if (current.entries.length > MAX_EVENT_HEAD_ENTRIES && io.isFollowing()) {
+    return initialHead(await io.fetchHead());
+  }
+
+  let head = current;
+  for (let pageIndex = 0; pageIndex < MAX_EVENT_CHANGE_PAGES; pageIndex += 1) {
+    const response: unknown = await io.fetchChanges(head.headCursor as number, 100);
+    if (!isEventChangesResponse(response, head.headCursor as number)) {
+      return initialHead(await io.fetchHead());
+    }
+    head = applyEventChanges(head, response);
+    if (head.entries.length > MAX_EVENT_HEAD_ENTRIES && io.isFollowing()) {
+      return initialHead(await io.fetchHead());
+    }
+    if (!response.hasMore) return head;
+  }
+  return initialHead(await io.fetchHead());
+};
 
 export const eventGroups = (entries: readonly PanelEventEntry[]): EventGroup[] => {
   const grouped = new Map<string, [PanelEventEntry, ...PanelEventEntry[]]>();

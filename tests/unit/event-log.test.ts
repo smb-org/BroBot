@@ -434,6 +434,191 @@ describe("event log", () => {
     expect(third.nextCursor).toBeNull();
  });
 
+  it("returns a channel-scoped sequence high-water mark in head mode", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertChannel(database, "kanal-b");
+    await insertChannel(database, "kanal-c");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertMember(database, "kanal-b", "user-1", "operator");
+    await insertMember(database, "kanal-c", "user-1", "operator");
+    await insertEvent(database, "a-1", "kanal-a", "2026-09-18T04:00:00.000Z");
+    const channelASequence = await database.prepare("SELECT MAX(seq) AS seq FROM event_log WHERE channel_id = 'kanal-a'").first<{ seq: number }>();
+    await insertEvent(database, "b-1", "kanal-b", "2026-09-18T04:00:00.000Z");
+
+    const responseA = await panelRouter.fetch(await makeRequest("user-1", "/api/channels/kanal-a/events"), makeEnvironment(database));
+    const responseEmpty = await panelRouter.fetch(await makeRequest("user-1", "/api/channels/kanal-c/events"), makeEnvironment(database));
+    const headA = await responseA.json<{ headCursor: number }>();
+    const empty = await responseEmpty.json<{ headCursor: number; entries: unknown[] }>();
+    const channelBMaximum = await database.prepare("SELECT MAX(seq) AS seq FROM event_log WHERE channel_id = 'kanal-b'").first<{ seq: number }>();
+
+    expect(responseA.status).toBe(200);
+    expect(headA.headCursor).toBe(channelASequence?.seq);
+    expect(channelBMaximum?.seq).toBeGreaterThan(headA.headCursor);
+    expect(responseEmpty.status).toBe(200);
+    expect(empty).toMatchObject({ entries: [], headCursor: 0 });
+  });
+
+  it("returns channel max for an empty head and includes late inserts in sequence deltas", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    const emptyResponse = await panelRouter.fetch(await makeRequest("user-1", "/api/channels/kanal-a/events"), makeEnvironment(database));
+    const emptyHead = await emptyResponse.json<{ entries: unknown[]; headCursor: number }>();
+    await insertEvent(database, "recent", "kanal-a", "2026-09-18T04:00:00.000Z");
+    const firstHeadResponse = await panelRouter.fetch(await makeRequest("user-1", "/api/channels/kanal-a/events"), makeEnvironment(database));
+    const firstHead = await firstHeadResponse.json<{ headCursor: number }>();
+    await insertEvent(database, "late", "kanal-a", "2020-01-01T00:00:00.000Z");
+
+    const deltaResponse = await panelRouter.fetch(
+      await makeRequest("user-1", `/api/channels/kanal-a/events?after=${String(firstHead.headCursor)}&limit=100`),
+      makeEnvironment(database),
+    );
+    const delta = await deltaResponse.json<{ entries: Array<{ eventId: string }>; headCursor: number; hasMore: boolean }>();
+
+    expect(emptyHead).toMatchObject({ entries: [], headCursor: 0 });
+    expect(deltaResponse.status).toBe(200);
+    expect(delta.entries.map((entry) => entry.eventId)).toEqual(["late"]);
+    expect(delta.headCursor).toBeGreaterThan(firstHead.headCursor);
+    expect(delta.hasMore).toBe(false);
+  });
+
+  it("applies every event filter to sequence changes and still advances for no matches", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertCustomEvent(database, "channel-info", "kanal-a", "channel_events", "channel_events.stream.online");
+    await insertCustomEvent(database, "module-info", "kanal-a", "ads", "ads.announcement", "person-a");
+    await insertCustomEvent(database, "module-error", "kanal-a", "text_commands", "host.chat.failed", "person-b");
+    const before = await database.prepare("SELECT MAX(seq) AS seq FROM event_log WHERE channel_id = 'kanal-a'").first<{ seq: number }>();
+
+    const requests = [
+      ["origin=channel", ["channel-info"]],
+      ["origin=module", ["module-info", "module-error"]],
+      ["module=ads", ["module-info"]],
+      ["tone=error", ["module-error"]],
+      ["tone=info&tone=error", ["channel-info", "module-info", "module-error"]],
+      ["actor=person-b", ["module-error"]],
+      ["actor=nobody", []],
+    ] as const;
+    const results = await Promise.all(requests.map(async ([filters, expected]) => {
+      const response = await panelRouter.fetch(
+        await makeRequest("user-1", `/api/channels/kanal-a/events?after=0&limit=100&${filters}`),
+        makeEnvironment(database),
+      );
+      const body = await response.json<{ entries: Array<{ eventId: string }>; headCursor: number }>();
+      return {
+        status: response.status,
+        ids: body.entries.map((entry) => entry.eventId).sort((left, right) => left.localeCompare(right)),
+        expected: [...expected].sort((left, right) => left.localeCompare(right)),
+        cursor: body.headCursor,
+      };
+    }));
+
+    for (const result of results) {
+      expect(result.status).toBe(200);
+      expect(result.ids).toEqual(result.expected);
+      expect(result.cursor).toBe(before?.seq);
+    }
+  });
+
+  it("pages sequence changes in order without gaps or duplicates", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertEvent(database, "one", "kanal-a", "2026-09-18T04:00:00.000Z");
+    await insertEvent(database, "two", "kanal-a", "2026-09-18T04:00:00.000Z");
+    await insertEvent(database, "three", "kanal-a", "2026-09-18T04:00:00.000Z");
+
+    const firstResponse = await panelRouter.fetch(await makeRequest("user-1", "/api/channels/kanal-a/events?after=0&limit=2"), makeEnvironment(database));
+    const first = await firstResponse.json<{ entries: Array<{ eventId: string }>; headCursor: number; hasMore: boolean }>();
+    const secondResponse = await panelRouter.fetch(
+      await makeRequest("user-1", `/api/channels/kanal-a/events?after=${String(first.headCursor)}&limit=2`),
+      makeEnvironment(database),
+    );
+    const second = await secondResponse.json<{ entries: Array<{ eventId: string }>; headCursor: number; hasMore: boolean }>();
+
+    expect(first.entries.map((entry) => entry.eventId)).toEqual(["one", "two"]);
+    expect(first.hasMore).toBe(true);
+    expect(first.headCursor).toBeLessThan(second.headCursor);
+    expect(second.entries.map((entry) => entry.eventId)).toEqual(["three"]);
+    expect(second.hasMore).toBe(false);
+    expect([...first.entries, ...second.entries].map((entry) => entry.eventId)).toEqual(["one", "two", "three"]);
+  });
+
+  it("keeps the delta cursor monotonic after highest-row and all-row deletion", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertEvent(database, "one", "kanal-a", "2026-09-18T04:00:00.000Z");
+    await insertEvent(database, "two", "kanal-a", "2026-09-18T04:00:00.000Z");
+    const previousMaximum = await database.prepare("SELECT MAX(seq) AS seq FROM event_log WHERE channel_id = 'kanal-a'").first<{ seq: number }>();
+    await database.prepare("DELETE FROM event_log WHERE event_id = 'two'").run();
+    await database.prepare("DELETE FROM event_log WHERE event_id = 'one'").run();
+    const emptyDeltaResponse = await panelRouter.fetch(
+      await makeRequest("user-1", `/api/channels/kanal-a/events?after=${String(previousMaximum?.seq)}`),
+      makeEnvironment(database),
+    );
+    const emptyDelta = await emptyDeltaResponse.json<{ headCursor: number; entries: unknown[] }>();
+    await insertEvent(database, "three", "kanal-a", "2020-01-01T00:00:00.000Z");
+    const nextResponse = await panelRouter.fetch(
+      await makeRequest("user-1", `/api/channels/kanal-a/events?after=${String(emptyDelta.headCursor)}`),
+      makeEnvironment(database),
+    );
+    const next = await nextResponse.json<{ headCursor: number; entries: Array<{ eventId: string }> }>();
+
+    expect(emptyDelta.headCursor).toBe(previousMaximum?.seq);
+    expect(emptyDelta.entries).toEqual([]);
+    expect(next.entries.map((entry) => entry.eventId)).toEqual(["three"]);
+    expect(next.headCursor).toBeGreaterThan(emptyDelta.headCursor);
+  });
+
+  it("continues keyset history after retention deletes a row between pages", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertEvent(database, "first", "kanal-a", "2026-09-18T04:00:00.000Z");
+    await insertEvent(database, "second", "kanal-a", "2026-09-18T03:00:00.000Z");
+    await insertEvent(database, "third", "kanal-a", "2026-09-18T02:00:00.000Z");
+    const firstResponse = await panelRouter.fetch(await makeRequest("user-1", "/api/channels/kanal-a/events?limit=1"), makeEnvironment(database));
+    const first = await firstResponse.json<{ entries: Array<{ eventId: string }>; nextCursor: string }>();
+    await database.prepare("DELETE FROM event_log WHERE event_id = 'second'").run();
+    const secondResponse = await panelRouter.fetch(
+      await makeRequest("user-1", `/api/channels/kanal-a/events?limit=1&cursor=${encodeURIComponent(first.nextCursor)}`),
+      makeEnvironment(database),
+    );
+    const second = await secondResponse.json<{ entries: Array<{ eventId: string }> }>();
+
+    expect(first.entries.map((entry) => entry.eventId)).toEqual(["first"]);
+    expect(secondResponse.status).toBe(200);
+    expect(second.entries.map((entry) => entry.eventId)).toEqual(["third"]);
+  });
+
+  it("rejects invalid after cursors and cursor-after combinations with the usual authorization guard", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "operator");
+    await insertLoginIdentityAndSession(database, "user-2");
+    const invalidQueries = [
+      "cursor=abc&after=1",
+      "after=abc",
+      "after=-1",
+      "after=9007199254740992",
+    ];
+    const statuses = await Promise.all(invalidQueries.map(async (query) => (await panelRouter.fetch(
+      await makeRequest("user-1", `/api/channels/kanal-a/events?${query}`),
+      makeEnvironment(database),
+    )).status));
+    const nonMember = await panelRouter.fetch(
+      await makeRequest("user-2", "/api/channels/kanal-a/events?after=abc"),
+      makeEnvironment(database),
+    );
+    const ordinaryHead = await panelRouter.fetch(await makeRequest("user-2", "/api/channels/kanal-a/events"), makeEnvironment(database));
+
+    expect(statuses).toEqual([400, 400, 400, 400]);
+    expect(nonMember.status).toBe(ordinaryHead.status);
+  });
+
   it("resolves a stored actor via Twitch and keeps the ID", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "viewer-1");

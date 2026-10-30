@@ -9,6 +9,7 @@ import type {
   PanelChannelControls,
   PanelChannelsResponse,
   PanelEventsResponse,
+  PanelEventChangesResponse,
   PanelEventFilters,
   PanelMember,
   PanelMembersResponse,
@@ -485,14 +486,8 @@ export const fetchAuditLog = (
   );
 };
 
-export const fetchEvents = (
-  channelId: string,
-  cursor: string | null = null,
-  signal?: AbortSignal,
-  filters?: PanelEventFilters,
-): Promise<PanelEventsResponse> => {
+const eventFilterParams = (filters?: PanelEventFilters): URLSearchParams => {
   const params = new URLSearchParams();
-  if (cursor !== null) params.set("cursor", cursor);
   if (filters?.origin !== null && filters?.origin !== undefined) {
     params.set("origin", filters.origin);
   }
@@ -501,9 +496,35 @@ export const fetchEvents = (
     for (const tone of filters.tones) params.append("tone", tone);
   } else if (filters?.tone !== null && filters?.tone !== undefined) params.set("tone", filters.tone);
   if (filters?.person !== null && filters?.person !== undefined) params.set("actor", filters.person);
+  return params;
+};
+
+export const fetchEvents = (
+  channelId: string,
+  cursor: string | null = null,
+  signal?: AbortSignal,
+  filters?: PanelEventFilters,
+): Promise<PanelEventsResponse> => {
+  const params = eventFilterParams(filters);
+  if (cursor !== null) params.set("cursor", cursor);
   const query = params.toString();
   return requestJson<PanelEventsResponse>(
     `${channelPath(channelId, "events")}${query.length > 0 ? `?${query}` : ""}`,
+    requestOptions(signal),
+  );
+};
+
+export const fetchEventChanges = (
+  channelId: string,
+  after: number,
+  signal?: AbortSignal,
+  filters?: PanelEventFilters,
+): Promise<PanelEventChangesResponse> => {
+  const params = eventFilterParams(filters);
+  params.set("after", String(after));
+  params.set("limit", "100");
+  return requestJson<PanelEventChangesResponse>(
+    `${channelPath(channelId, "events")}?${params.toString()}`,
     requestOptions(signal),
   );
 };

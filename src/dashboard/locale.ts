@@ -1291,6 +1291,7 @@ export interface DashboardTexts {
     detail: string;
     loadOlder: string;
     loadingOlder: string;
+    jumpToLatest: string;
     filter: string;
     type: string;
     moduleFilter: string;
@@ -1984,7 +1985,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       title: "Kanalereignisse", count: (count) => `${count} ${count === "1" ? "Eintrag" : "Einträge"}`, log: "Ereignisprotokoll", time: "Zeit", event: "Ereignis",
       module: "Modul", who: "Wer", automatic: "Automatisch", info: "Info", error: "Fehler", notice: "Hinweis", unknown: "Unbekannt", timestamp: "Zeitstempel", operation: "Vorgang", history: "Verlauf",
       load: "Ereignisse werden geladen …",
-      none: "Noch keine Ereignisse protokolliert.", detail: "Detail", loadOlder: "Ältere Ereignisse laden", loadingOlder: "Ältere Ereignisse werden geladen …",
+      none: "Noch keine Ereignisse protokolliert.", detail: "Detail", loadOlder: "Ältere Ereignisse laden", loadingOlder: "Ältere Ereignisse werden geladen …", jumpToLatest: "Zu den neuesten Ereignissen",
       filter: "Filter", type: "Art", moduleFilter: "Modul", allModules: "Alle Module", severity: "Stufe", person: "Person", all: "Alle",
       channelEvents: "Kanalereignisse", moduleDiagnostics: "Moduldiagnosen", activeFilters: "Aktive Filter:", resetFilters: "Filter zurücksetzen",
       noMatches: "Keine Ereignisse passen zu den Filtern.",
@@ -2652,7 +2653,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     events: {
       title: "Channel events", count: (count) => `${count} ${count === "1" ? "entry" : "entries"}`, log: "Event log", time: "Time", event: "Event", module: "Module",
       who: "Who", automatic: "Automatic", info: "Info", error: "Error", notice: "Notice", unknown: "Unknown", timestamp: "Timestamp", operation: "Operation", history: "History", load: "Loading events …", none: "No events logged yet.", detail: "Detail",
-      loadOlder: "Load older events", loadingOlder: "Loading older events …",
+      loadOlder: "Load older events", loadingOlder: "Loading older events …", jumpToLatest: "Jump to latest events",
       filter: "Filters", type: "Type", moduleFilter: "Module", allModules: "All modules", severity: "Severity", person: "Person", all: "All",
       channelEvents: "Channel events", moduleDiagnostics: "Module diagnostics", activeFilters: "Active filters:", resetFilters: "Reset filters",
       noMatches: "No events match the filters.",

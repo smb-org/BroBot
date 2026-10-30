@@ -139,7 +139,7 @@ describe("dashboard API request boundary", () => {
 
     expect(fetcher).toHaveBeenCalledWith(
       new URL(
-        "/api/channels/kanal-a/events?cursor=cursor+%2F%3F%23%26&origin=module&module=text_commands&tone=error&actor=person+%2F%3F%23%26",
+        "/api/channels/kanal-a/events?origin=module&module=text_commands&tone=error&actor=person+%2F%3F%23%26&cursor=cursor+%2F%3F%23%26",
         window.location.origin,
       ),
       { credentials: "same-origin", signal: controller.signal },

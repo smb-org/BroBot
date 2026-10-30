@@ -27,6 +27,7 @@ import {
   decodeLogCursor,
   getAuditLogForChannel,
   getChannelOverviewForUser,
+  getEventLogChangesForChannel,
   getEventLogForChannel,
   getSystemOverviewForUser,
   listChannelsForUser,
@@ -687,11 +688,21 @@ panelRouter.get(
   requireChannelAuthorization(),
   async (context) => {
     const channelId = context.req.param("channelId");
+    const serializedCursor = context.req.query("cursor");
+    const serializedAfter = context.req.query("after");
+    const after = serializedAfter === undefined ? null : /^\d+$/u.test(serializedAfter) && Number.isSafeInteger(Number(serializedAfter))
+      ? Number(serializedAfter)
+      : null;
+    if (serializedAfter !== undefined && (serializedCursor !== undefined || after === null)) {
+      return context.json({ error: "pagination_cursor_invalid" }, 400);
+    }
     const parsed = parseLogQuery(context);
     if (parsed instanceof Response) return parsed;
     const filters = parseEventFilters(context);
     if (filters instanceof Response) return filters;
-    const events = await getEventLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor, filters);
+    const events = serializedAfter === undefined
+      ? await getEventLogForChannel(context.env.DB, channelId, parsed.limit, parsed.cursor, filters)
+      : await getEventLogChangesForChannel(context.env.DB, channelId, after as number, parsed.limit, filters);
     const actorIds = events.entries.flatMap((entry) => entry.actorUserId === null ? [] : [entry.actorUserId]);
     const actors = await fetchTwitchUsersById(fetch, context.env, actorIds);
     return context.json({

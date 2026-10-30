@@ -1,8 +1,10 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { hashKey, useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 
-import { fetchAuditLog, fetchChannelVariables, fetchEvents, fetchMembers, fetchOverlay, fetchOverlayAccesses, fetchOverlayTokens, fetchOverlays, fetchSystemOverview } from "../api";
-import type { PanelAuditFilters, PanelEventFilters } from "../../panel-contract";
+import { fetchAuditLog, fetchChannelVariables, fetchEventChanges, fetchEvents, fetchMembers, fetchOverlay, fetchOverlayAccesses, fetchOverlayTokens, fetchOverlays, fetchSystemOverview } from "../api";
+import type { PanelAuditFilters, PanelEventFilters, PanelEventsResponse } from "../../panel-contract";
 import { dashboardDataKeys } from "./keys";
+import { refreshEventHead, type EventHead } from "../events/model";
 
 export const useMembersQuery = (channelId: string) => useInfiniteQuery({
   queryKey: dashboardDataKeys.members(channelId),
@@ -23,21 +25,70 @@ export const useAuditQuery = (channelId: string, filters: PanelAuditFilters) => 
   refetchOnWindowFocus: false,
 });
 
-export const useEventsQuery = (channelId: string, filters: PanelEventFilters, refetchInterval: number | false = false) => {
-  const queryKey = dashboardDataKeys.events(channelId, filters);
-  return useInfiniteQuery({
+const cockpitFollowingHeadCounts = new WeakMap<QueryClient, Map<string, number>>();
+
+const hasFollowingCockpit = (queryClient: QueryClient, queryId: string): boolean =>
+  (cockpitFollowingHeadCounts.get(queryClient)?.get(queryId) ?? 0) > 0;
+
+const trackCockpitFollowingHead = (queryClient: QueryClient, queryId: string): (() => void) => {
+  let heads = cockpitFollowingHeadCounts.get(queryClient);
+  if (heads === undefined) {
+    heads = new Map();
+    cockpitFollowingHeadCounts.set(queryClient, heads);
+  }
+  const id = queryId;
+  heads.set(id, (heads.get(id) ?? 0) + 1);
+  return () => {
+    const nextCount = (heads.get(id) ?? 1) - 1;
+    if (nextCount <= 0) heads.delete(id);
+    else heads.set(id, nextCount);
+  };
+};
+
+export const useEventHeadQuery = (
+  channelId: string,
+  filters: PanelEventFilters,
+  refetchInterval: number | false = false,
+  isFollowing: () => boolean = () => true,
+  cockpitAlwaysFollowing = false,
+) => {
+  const queryClient = useQueryClient();
+  const queryKey = dashboardDataKeys.eventHead(channelId, filters);
+  const queryId = hashKey(queryKey);
+  useEffect(() => {
+    if (!cockpitAlwaysFollowing) return;
+    return trackCockpitFollowingHead(queryClient, queryId);
+  }, [cockpitAlwaysFollowing, queryClient, queryId]);
+
+  return useQuery({
     queryKey,
-    // A cached filter becomes stale immediately so switching back revalidates it in the background.
     staleTime: 0,
-    initialPageParam: null as string | null,
-    queryFn: ({ pageParam, signal }) => fetchEvents(channelId, pageParam, signal, filters),
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    // Filters own separate displayed snapshots; do not borrow another filter's cached rows while loading.
+    queryFn: ({ signal }) => refreshEventHead(queryClient.getQueryData<EventHead>(queryKey), {
+      fetchHead: () => fetchEvents(channelId, null, signal, filters),
+      fetchChanges: (after) => fetchEventChanges(channelId, after, signal, filters),
+      historyHasPages: (epoch) => (queryClient.getQueryData<InfiniteData<PanelEventsResponse, string | null>>(
+        dashboardDataKeys.eventHistory(channelId, filters, epoch),
+      )?.pages.length ?? 0) > 0,
+      isFollowing: () => cockpitAlwaysFollowing || isFollowing() || hasFollowingCockpit(queryClient, queryId),
+    }),
     placeholderData: () => undefined,
     refetchInterval,
     refetchOnWindowFocus: false,
   });
 };
+
+export const useEventHistoryQuery = (
+  channelId: string,
+  filters: PanelEventFilters,
+  head: EventHead | undefined,
+) => useInfiniteQuery({
+  queryKey: dashboardDataKeys.eventHistory(channelId, filters, head?.epoch ?? 0),
+  enabled: false,
+  initialPageParam: head?.nextCursor ?? null as string | null,
+  queryFn: ({ pageParam, signal }) => fetchEvents(channelId, pageParam, signal, filters),
+  getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  placeholderData: () => undefined,
+});
 
 export const useSystemQuery = (channelId: string, enabled: boolean, offlineRefetchInterval: number | false) => useQuery({
   queryKey: dashboardDataKeys.system(channelId),

@@ -15,7 +15,7 @@ import { ChipGroup, DataTable, EmptyState, InspectorSection, ListDetail, ListToo
 import { PanelApiError } from "../api";
 import { refreshQuery } from "../data/refresh";
 import { dashboardDataKeys } from "../data/keys";
-import { useEventsQuery } from "../data/lists";
+import { useEventHeadQuery, useEventHistoryQuery } from "../data/lists";
 import {
   actorLabel,
   affectedPersonLabel,
@@ -27,6 +27,8 @@ import {
   type EventDayGroup,
   eventDetail,
   eventFilterIsActive,
+  eventFeedContinuation,
+  eventFeedEntries,
   eventGroupKey,
   eventGroups,
   eventMetadata,
@@ -34,6 +36,7 @@ import {
   formatEventDetail,
   moderatorLabel,
   moduleLabel,
+  MAX_EVENT_HEAD_ENTRIES,
   PERSON_FILTER_DEBOUNCE_MS,
 } from "./model";
 
@@ -77,12 +80,14 @@ const appendOlderDayGroups = (
   return days;
 };
 
-const EMPTY_EVENT_PAGES: readonly PanelEventsResponse[] = [];
+const eventPageIdentity = (pageParam: string | null): string => JSON.stringify(pageParam);
+const EMPTY_EVENT_HISTORY_PAGES: readonly PanelEventsResponse[] = [];
 
 interface EventDisplaySnapshot {
   entries: readonly PanelEventEntry[];
   days: readonly EventDayGroup[];
-  pageCount: number;
+  epoch: number;
+  processedPages: ReadonlySet<string>;
   paginationIds: ReadonlySet<string>;
   timeZone: string;
 }
@@ -299,29 +304,47 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
   moduleOptions: readonly PanelModuleState[];
   onFiltersChange: (filters: PanelEventFilters) => void;
 }): ReactElement => {
-  const query = useEventsQuery(channelId, filters);
+  const followingRef = useRef(true);
+  const head = useEventHeadQuery(channelId, filters, false, () => followingRef.current);
+  const history = useEventHistoryQuery(channelId, filters, head.data);
   const settingsQuery = useChannelSettings(channelId);
   const timeZoneFallback = settingsQuery.isError;
   const channelTimeZone = timeZoneFallback ? browserTimeZone() : settingsQuery.data?.timeZone ?? null;
   const queryClient = useQueryClient();
-  const queryKey = useMemo(() => dashboardDataKeys.events(channelId, filters), [channelId, filters]);
+  const queryKey = useMemo(() => dashboardDataKeys.eventHead(channelId, filters), [channelId, filters]);
   const identityKey = JSON.stringify(queryKey);
-  const pages = query.data?.pages ?? EMPTY_EVENT_PAGES;
-  const entries = useMemo(() => mergeEventEntries([], pages.flatMap((page) => page.entries)), [pages]);
-  const invalidateEvents = useCallback((): void => {
+  const pages = history.data?.pages ?? EMPTY_EVENT_HISTORY_PAGES;
+  const pageParams = (history.data?.pageParams ?? []) as (string | null)[];
+  const entries = useMemo(() => eventFeedEntries(head.data, pages), [head.data, pages]);
+  const continuation = eventFeedContinuation(head.data, pages);
+  const queuedRefreshEpoch = useRef<number | null>(null);
+  const requestHeadRefresh = useCallback((force = false): void => {
+    if (queryClient.getQueryState(queryKey)?.fetchStatus === "fetching") {
+      queuedRefreshEpoch.current = head.data?.epoch ?? 0;
+      return;
+    }
+    if (!force && !head.isStale && (head.data?.entries.length ?? 0) <= MAX_EVENT_HEAD_ENTRIES) return;
     void refreshQuery(queryClient, queryKey);
-  }, [queryClient, queryKey]);
-  const refreshOnReturn = useCallback((): void => {
-    if (query.isStale && !query.isFetching) invalidateEvents();
-  }, [invalidateEvents, query.isFetching, query.isStale]);
+  }, [head.data, head.isStale, queryClient, queryKey]);
+  useEffect(() => {
+    const queuedEpoch = queuedRefreshEpoch.current;
+    if (queuedEpoch === null || head.isFetching) return;
+    queuedRefreshEpoch.current = null;
+    if (head.data?.epoch !== queuedEpoch) return;
+    void refreshQuery(queryClient, queryKey);
+  }, [head.data?.epoch, head.isFetching, queryClient, queryKey]);
+  const refreshOnReturn = useCallback((): void => { requestHeadRefresh(true); }, [requestHeadRefresh]);
+  const onBecameFollowing = useCallback((): void => {
+    if ((head.data?.entries.length ?? 0) > MAX_EVENT_HEAD_ENTRIES) requestHeadRefresh(true);
+  }, [head.data?.entries.length, requestHeadRefresh]);
   const loadNextPage = useCallback((): void => {
-    if (query.isFetching || query.isPlaceholderData || !query.hasNextPage) return;
-    void query.fetchNextPage({ cancelRefetch: false });
-  }, [query]);
-  const nextCursor = pages.at(-1)?.nextCursor ?? null;
-  const error = query.error instanceof PanelApiError
-    ? apiErrorText(query.error.code, dashboardTexts().errors.dataLoadFailed)
-    : query.isError ? dashboardTexts().errors.dataLoadFailed : null;
+    if (history.isFetching || continuation === null || head.data === undefined) return;
+    void history.fetchNextPage({ cancelRefetch: false });
+  }, [continuation, head.data, history]);
+  const errorValue = head.error ?? history.error;
+  const error = errorValue instanceof PanelApiError
+    ? apiErrorText(errorValue.code, dashboardTexts().errors.dataLoadFailed)
+    : head.isError || history.isError ? dashboardTexts().errors.dataLoadFailed : null;
   return <EventsPageContent
     identityKey={identityKey}
     channelId={channelId}
@@ -331,16 +354,20 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     moduleOptions={moduleOptions}
     onFiltersChange={onFiltersChange}
     entries={entries}
-    nextCursor={query.isPlaceholderData ? null : nextCursor}
-    loading={query.isPending}
-    fetching={query.isFetching && !query.isFetchingNextPage}
-    queryStale={query.isStale}
+    epoch={head.data?.epoch ?? 0}
+    nextCursor={continuation}
+    loading={head.isPending}
+    fetching={head.isFetching}
+    queryStale={head.isStale}
     error={error}
-    loadingNextPage={query.isFetchingNextPage}
+    loadingNextPage={history.isFetching}
     pages={pages}
-    onRefresh={invalidateEvents}
+    pageParams={pageParams}
+    onRefresh={() => { requestHeadRefresh(true); }}
     onRefreshOnReturn={refreshOnReturn}
+    onBecameFollowing={onBecameFollowing}
     onNextPage={loadNextPage}
+    followingRef={followingRef}
   />;
 };
 
@@ -351,6 +378,8 @@ interface EventsPageContentProperties {
   timeZoneFallback: boolean;
   entries: readonly PanelEventEntry[];
   pages: readonly PanelEventsResponse[];
+  pageParams: readonly (string | null)[];
+  epoch: number;
   nextCursor: string | null;
   loading: boolean;
   fetching: boolean;
@@ -361,12 +390,14 @@ interface EventsPageContentProperties {
   onFiltersChange: (filters: PanelEventFilters) => void;
   onRefresh: () => void;
   onRefreshOnReturn: () => void;
+  onBecameFollowing: () => void;
   onNextPage: () => void;
   loadingNextPage: boolean;
+  followingRef: { current: boolean };
 }
 
 const EventsPageContent = (properties: EventsPageContentProperties): ReactElement => {
-  const { identityKey, channelId, filters, onRefresh, onRefreshOnReturn, ...contentProperties } = properties;
+  const { identityKey, channelId, filters, onRefresh, onRefreshOnReturn, onBecameFollowing, followingRef, ...contentProperties } = properties;
   const feedRef = useRef<HTMLDivElement | null>(null);
   const setFeedRef = useCallback<RefCallback<HTMLDivElement>>((feed) => { feedRef.current = feed; }, []);
   const [readerAtTop, setReaderAtTop] = useState(true);
@@ -379,14 +410,20 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
     return scrollRoot.scrollTop <= feedStart + 8;
   }, []);
   useEffect(() => {
-    const updateReaderPosition = (): void => { setReaderAtTop(atBeginning()); };
+    const updateReaderPosition = (): void => {
+      const isFollowing = atBeginning();
+      const becameFollowing = isFollowing && !followingRef.current;
+      followingRef.current = isFollowing;
+      setReaderAtTop(isFollowing);
+      if (becameFollowing) onBecameFollowing();
+    };
     updateReaderPosition();
     const scrollRoot = document.querySelector<HTMLElement>(".dashboard-shell__main") ??
       feedRef.current?.closest<HTMLElement>(".dashboard-shell__main") ?? null;
     const scrollTarget: HTMLElement | Window = scrollRoot ?? window;
     scrollTarget.addEventListener("scroll", updateReaderPosition, { passive: true });
     return () => { scrollTarget.removeEventListener("scroll", updateReaderPosition); };
-  }, [atBeginning]);
+  }, [atBeginning, followingRef, onBecameFollowing]);
   const scrollToBeginning = useCallback((): void => {
     const feed = feedRef.current;
     if (feed === null) return;
@@ -398,8 +435,9 @@ const EventsPageContent = (properties: EventsPageContentProperties): ReactElemen
       const feedStart = feed.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top + scrollRoot.scrollTop;
       scrollRoot.scrollTo({ top: Math.max(0, feedStart), behavior: "auto" });
     }
+    followingRef.current = true;
     setReaderAtTop(true);
-  }, []);
+  }, [followingRef]);
   const realtime = useRealtimeEventFeed({
     channelId,
     refreshOnReturn: onRefreshOnReturn,
@@ -422,6 +460,8 @@ const EventsPageFilterState = ({
   timeZoneFallback,
   entries,
   pages,
+  pageParams,
+  epoch,
   readerAtTop,
   nextCursor,
   loading,
@@ -436,7 +476,7 @@ const EventsPageFilterState = ({
   loadingNextPage,
   feedRef,
   realtime,
-}: Omit<EventsPageContentProperties, "channelId" | "onRefreshOnReturn"> & {
+}: Omit<EventsPageContentProperties, "channelId" | "onRefreshOnReturn" | "onBecameFollowing" | "followingRef"> & {
   readerAtTop: boolean;
   feedRef: RefCallback<HTMLDivElement>;
   realtime: RealtimeFeedState;
@@ -447,7 +487,8 @@ const EventsPageFilterState = ({
   const [snapshot, setSnapshot] = useState<EventDisplaySnapshot>(() => ({
     entries,
     days: eventDayGroups(eventGroups(entries), groupingTimeZone),
-    pageCount: pages.length,
+    epoch,
+    processedPages: new Set(pageParams.map(eventPageIdentity)),
     paginationIds: new Set(),
     timeZone: groupingTimeZone,
   }));
@@ -459,7 +500,8 @@ const EventsPageFilterState = ({
     setSnapshot({
       entries,
       days: eventDayGroups(eventGroups(entries), groupingTimeZone),
-      pageCount: pages.length,
+      epoch,
+      processedPages: new Set(pageParams.map(eventPageIdentity)),
       paginationIds: new Set(),
       timeZone: groupingTimeZone,
     });
@@ -475,30 +517,49 @@ const EventsPageFilterState = ({
   }
   const followsQuery = identityChanged || readerAtTop || followsIdentityQuery;
   if (followsQuery) {
-    if (snapshot.entries !== entries || snapshot.pageCount !== pages.length || snapshot.timeZone !== groupingTimeZone) {
-      setSnapshot({ entries, days: eventDayGroups(eventGroups(entries), groupingTimeZone), pageCount: pages.length, paginationIds: new Set(), timeZone: groupingTimeZone });
+    const allPagesProcessed = pageParams.every((pageParam) => snapshot.processedPages.has(eventPageIdentity(pageParam))) &&
+      snapshot.processedPages.size === pageParams.length;
+    if (snapshot.entries !== entries || snapshot.epoch !== epoch || !allPagesProcessed || snapshot.timeZone !== groupingTimeZone) {
+      setSnapshot({
+        entries,
+        days: eventDayGroups(eventGroups(entries), groupingTimeZone),
+        epoch,
+        processedPages: new Set(pageParams.map(eventPageIdentity)),
+        paginationIds: new Set(),
+        timeZone: groupingTimeZone,
+      });
     }
     if (followIdentityQuery && !fetching) setFollowIdentityQuery(false);
+  } else if (snapshot.epoch !== epoch) {
+    // A frozen reader adopts the pending epoch by clicking jump or manually scrolling back to the top.
   } else if (snapshot.timeZone !== groupingTimeZone) {
     setSnapshot({ ...snapshot, days: eventDayGroups(eventGroups(snapshot.entries), groupingTimeZone), timeZone: groupingTimeZone });
-  } else if (pages.length < snapshot.pageCount) {
-    setSnapshot({ ...snapshot, pageCount: pages.length });
-  } else if (pages.length > snapshot.pageCount) {
-    const appendedPages = pages.slice(snapshot.pageCount);
-    const loadedOlderEntries = appendedPages.flatMap((page) => page.entries);
-    const entriesWithOlderPage = appendOlderEntries(snapshot.entries, loadedOlderEntries);
-    const existingIds = new Set(snapshot.entries.map((entry) => entry.eventId));
-    const newlyAddedEntries = entriesWithOlderPage.filter((entry) => !existingIds.has(entry.eventId));
-    const olderDays = eventDayGroups(eventGroups(newlyAddedEntries), groupingTimeZone);
-    const paginationIds = new Set(snapshot.paginationIds);
-    for (const entry of loadedOlderEntries) paginationIds.add(entry.eventId);
-    setSnapshot({
-      entries: entriesWithOlderPage,
-      days: appendOlderDayGroups(snapshot.days, olderDays),
-      pageCount: pages.length,
-      paginationIds,
-      timeZone: groupingTimeZone,
-    });
+  } else {
+    const newPageIndexes = pageParams.flatMap((pageParam, index) =>
+      snapshot.processedPages.has(eventPageIdentity(pageParam)) ? [] : [index],
+    );
+    if (newPageIndexes.length > 0) {
+      const loadedOlderEntries = newPageIndexes.flatMap((index) => pages[index]?.entries ?? []);
+      const entriesWithOlderPage = appendOlderEntries(snapshot.entries, loadedOlderEntries);
+      const existingIds = new Set(snapshot.entries.map((entry) => entry.eventId));
+      const newlyAddedEntries = entriesWithOlderPage.filter((entry) => !existingIds.has(entry.eventId));
+      const olderDays = eventDayGroups(eventGroups(newlyAddedEntries), groupingTimeZone);
+      const processedPages = new Set(snapshot.processedPages);
+      for (const index of newPageIndexes) {
+        const pageParam = pageParams[index];
+        if (pageParam !== undefined) processedPages.add(eventPageIdentity(pageParam));
+      }
+      const paginationIds = new Set(snapshot.paginationIds);
+      for (const entry of loadedOlderEntries) paginationIds.add(entry.eventId);
+      setSnapshot({
+        entries: entriesWithOlderPage,
+        days: appendOlderDayGroups(snapshot.days, olderDays),
+        epoch,
+        processedPages,
+        paginationIds,
+        timeZone: groupingTimeZone,
+      });
+    }
   }
   const displayedEntries = followsQuery ? entries : snapshot.entries;
   const displayedIds = new Set(displayedEntries.map((entry) => entry.eventId));
@@ -518,6 +579,8 @@ const EventsPageFilterState = ({
     selectedHistory.map((entry) => affectedPersonLabel(eventDetail(entry.detail, entry.code))).filter((name): name is string => name !== null),
   ));
   const eventEntries = displayedEntries;
+  const pendingEpoch = !readerAtTop && snapshot.epoch !== epoch;
+  const eventFeedEndCursor = pendingEpoch ? null : nextCursor;
   const filterActive = eventFilterIsActive(filters);
   const selectedTones = filters.tones !== undefined && filters.tones.length > 0
     ? filters.tones
@@ -643,12 +706,14 @@ const EventsPageFilterState = ({
                     ]}
                   />
                 </div>
-                <EventFeedEnd nextCursor={nextCursor} loadingNextPage={loadingNextPage || fetching} onNextPage={onNextPage} />
+                <EventFeedEnd nextCursor={eventFeedEndCursor} loadingNextPage={loadingNextPage} onNextPage={onNextPage} />
               </div>
               <div className="events-page__pagination-slot">
-                {loading || eventEntries.length === 0 ? null : nextCursor === null
+                {loading || eventEntries.length === 0 ? null : pendingEpoch
+                  ? <button className="button button--secondary" type="button" onClick={realtime.jumpToBeginning}>{texts.events.jumpToLatest}</button>
+                  : nextCursor === null
                   ? <p className="events-page__feed-end">{texts.events.feedEnd}</p>
-                  : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage || fetching}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
+                  : <button className="button button--secondary" type="button" onClick={onNextPage} disabled={loadingNextPage}>{loadingNextPage ? texts.events.loadingOlder : texts.events.loadOlder}</button>}
               </div>
               </>
             </UiLoadState>

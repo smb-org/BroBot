@@ -29,6 +29,14 @@ export const isChannelQueryKey = (queryKey: readonly unknown[]): queryKey is Cha
     : typeof queryKey[2] === "string" &&
       queryKey.slice(3).every((value) => typeof value === "object" && value !== null && !Array.isArray(value)));
 
+const eventFilterParts = (filters: PanelEventFilters) => ({
+  origin: filters.origin,
+  module: filters.module,
+  tone: filters.tone,
+  tones: filters.tones === undefined ? null : [...filters.tones].sort((a, b) => a.localeCompare(b)).join(","),
+  person: filters.person,
+});
+
 export const dashboardDataKeys = {
   module: (channelId: string, moduleId: string) => ["channel", channelId, "module", moduleId] as const,
   system: (channelId: string) => queryKeys.channel(channelId, "system"),
@@ -44,11 +52,9 @@ export const dashboardDataKeys = {
     person: filters.person,
     area: filters.area,
   }),
-  events: (channelId: string, filters: PanelEventFilters) => queryKeys.channel(channelId, "events", {
-    origin: filters.origin,
-    module: filters.module,
-    tone: filters.tone,
-    tones: filters.tones === undefined ? null : [...filters.tones].sort((a, b) => a.localeCompare(b)).join(","),
-    person: filters.person,
+  eventHead: (channelId: string, filters: PanelEventFilters) => queryKeys.channel(channelId, "event-head", eventFilterParts(filters)),
+  eventHistory: (channelId: string, filters: PanelEventFilters, epoch: number) => queryKeys.channel(channelId, "event-history", {
+    ...eventFilterParts(filters),
+    epoch,
   }),
 };

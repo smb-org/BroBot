@@ -62,6 +62,11 @@ interface SettingsGate {
 
 interface MockApiOptions {
   eventEntries?: readonly Record<string, unknown>[];
+  eventHeadCursor?: number;
+  eventHeadNextCursor?: string | null;
+  eventHistoryPages?: Readonly<Record<string, { entries: readonly Record<string, unknown>[]; nextCursor: string | null }>>;
+  eventChanges?: { entries: readonly Record<string, unknown>[]; headCursor: number; hasMore: boolean } | (() => { entries: readonly Record<string, unknown>[]; headCursor: number; hasMore: boolean });
+  onEventRequest?: (params: URLSearchParams) => void;
   auditEntries?: readonly Record<string, unknown>[];
   variableEntries?: readonly Record<string, unknown>[] | (() => readonly Record<string, unknown>[]);
   legacyTokens?: readonly Record<string, unknown>[];
@@ -87,7 +92,24 @@ const mockApi = async (page: Page, options: MockApiOptions = {}): Promise<{ revi
       return route.fulfill(json({ timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1, defaultChatTarget: "source_only", defaultChatTargetRevision: 1 }, options.settingsStatus));
     }
     if (pathname === `/api/channels/${channelId}/modules`) return route.fulfill(json({ modules: [{ id: "votekick", enabled: true, settings: "{}" }] }));
-    if (pathname === `/api/channels/${channelId}/events`) return route.fulfill(json({ entries: options.eventEntries ?? events, nextCursor: null }, options.eventStatus));
+    if (pathname === `/api/channels/${channelId}/events`) {
+      const params = new URL(route.request().url()).searchParams;
+      options.onEventRequest?.(params);
+      const after = params.get("after");
+      if (after !== null) {
+        const changes = typeof options.eventChanges === "function" ? options.eventChanges() : options.eventChanges;
+        return route.fulfill(json(changes ?? { entries: [], headCursor: Number(after), hasMore: false }, options.eventStatus));
+      }
+      const cursor = params.get("cursor");
+      if (cursor !== null) {
+        return route.fulfill(json(options.eventHistoryPages?.[cursor] ?? { entries: [], nextCursor: null }, options.eventStatus));
+      }
+      return route.fulfill(json({
+        entries: options.eventEntries ?? events,
+        nextCursor: options.eventHeadNextCursor ?? null,
+        ...(options.eventHeadCursor === undefined ? {} : { headCursor: options.eventHeadCursor }),
+      }, options.eventStatus));
+    }
     if (pathname === `/api/channels/${channelId}/audit-log` || pathname === `/api/channels/${channelId}/audit`) {
       const cursor = new URL(route.request().url()).searchParams.get("cursor");
       const pageEntries = cursor === "cursor-older"
@@ -631,6 +653,101 @@ test("new realtime audit entries do not move the row being read", async ({ page 
 
   await latestEntriesButton.click();
   await expect(table.locator("tbody tr:not(.data-table__day-row)").first()).toContainText("Mira Fox");
+});
+
+test("event head hints refresh without refetching history or moving the frozen reader", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const eventRows = Array.from({ length: 250 }, (_, index) => ({
+    eventId: `feed-${String(index)}`,
+    createdAt: new Date(Date.UTC(2026, 0, 2) - index * 60_000).toISOString(),
+    moduleId: "host",
+    triggerId: `feed-trigger-${String(index)}`,
+    code: "host.chat.failed",
+    detail: "{}",
+    actorUserId: null,
+    actorLogin: null,
+    actorDisplayName: null,
+  }));
+  const historyPages = Object.fromEntries(Array.from({ length: 4 }, (_, pageIndex) => {
+    const start = (pageIndex + 1) * 50;
+    return [`history-${String(pageIndex + 1)}`, {
+      entries: eventRows.slice(start, start + 50),
+      nextCursor: pageIndex === 3 ? null : `history-${String(pageIndex + 2)}`,
+    }];
+  }));
+  const newEntry = {
+    eventId: "after-event",
+    createdAt: "2026-01-03T00:00:00.000Z",
+    moduleId: "host",
+    triggerId: "after-trigger",
+    code: "host.chat.failed",
+    detail: "{}",
+    actorUserId: null,
+    actorLogin: null,
+    actorDisplayName: null,
+  };
+  let revision = 1;
+  const eventRequests: URLSearchParams[] = [];
+  const revisions = await mockApi(page, {
+    eventEntries: eventRows.slice(0, 50),
+    eventHeadCursor: 1000,
+    eventHeadNextCursor: "history-1",
+    eventHistoryPages: historyPages,
+    eventChanges: () => ({ entries: revision === 1 ? [] : [newEntry], headCursor: revision === 1 ? 1000 : 1001, hasMore: false }),
+    onEventRequest: (params) => { eventRequests.push(params); },
+    revisionVector: () => ({ "channel.events": revision }),
+  });
+  let announceSocketReady: (() => void) | undefined;
+  let socketSender: ((message: string) => void) | undefined;
+  const socketReady = new Promise<void>((resolve) => { announceSocketReady = resolve; });
+  await page.routeWebSocket(`**/ws/channels/${channelId}`, (socket) => {
+    socketSender = (message) => { socket.send(message); };
+    announceSocketReady?.();
+    socket.onMessage(() => undefined);
+  });
+
+  await page.goto(`/channels/${channelId}/events`);
+  const table = page.locator(".event-table");
+  await expect(table.locator("tbody tr:not(.data-table__day-row)")).toHaveCount(50);
+  await socketReady;
+  await expect.poll(() => revisions.revisionReads()).toBeGreaterThan(0);
+  const main = page.locator(".dashboard-shell__main");
+  const renderedRows = table.locator("tbody tr:not(.data-table__day-row)");
+  // The feed loads older pages itself while its end is in view, so scroll down until at least
+  // three history pages are in and the loading has settled.
+  await expect.poll(async () => {
+    await main.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    return renderedRows.count();
+  }).toBeGreaterThanOrEqual(200);
+  await expect.poll(async () => {
+    const first = await renderedRows.count();
+    await page.waitForTimeout(300);
+    return (await renderedRows.count()) === first;
+  }).toBe(true);
+  const loadedRows = await renderedRows.count();
+  const readingRow = table.locator("tbody tr:not(.data-table__day-row)").nth(74);
+  await readingRow.scrollIntoViewIfNeeded();
+  const readingRowBefore = await box(readingRow);
+  const scrollTopBefore = await main.evaluate((element) => element.scrollTop);
+  expect(scrollTopBefore).toBeGreaterThan(0);
+  eventRequests.length = 0;
+
+  revision = 2;
+  socketSender?.(JSON.stringify({
+    version: 1,
+    id: "event-head-delta-hint",
+    createdAt: newEntry.createdAt,
+    channelId,
+    type: "event_log.new",
+    payload: { entries: [{ eventId: newEntry.eventId, createdAt: newEntry.createdAt, moduleId: newEntry.moduleId, code: newEntry.code, actorUserId: null }] },
+  }));
+
+  await expect(page.getByRole("button", { name: "1 neue Ereignisse" })).toBeVisible();
+  await expect.poll(() => eventRequests.filter((params) => params.has("after")).length).toBe(1);
+  expect(eventRequests.filter((params) => params.has("cursor"))).toHaveLength(0);
+  await expect(renderedRows).toHaveCount(loadedRows);
+  expect(await box(readingRow)).toEqual(readingRowBefore);
+  expect(await main.evaluate((element) => element.scrollTop)).toBe(scrollTopBefore);
 });
 
 test("event rows switch to the two-line layout when the inspector leaves a narrow list", async ({ page }) => {

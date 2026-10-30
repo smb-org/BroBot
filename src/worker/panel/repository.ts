@@ -13,6 +13,7 @@ import type {
   PanelEventSubSubscription,
   PanelTokenStatus,
   PanelEventEntry,
+  PanelEventChangesResponse,
   PanelEventFilters,
   PanelEventsResponse,
 } from "../../panel-contract";
@@ -115,6 +116,10 @@ interface EventLogRow {
   code: string;
   detail_json: string;
   actor_user_id: string | null;
+}
+
+interface SequencedEventLogRow extends EventLogRow {
+  seq: number;
 }
 
 export interface LogCursor {
@@ -611,13 +616,15 @@ export const getAuditLogForChannel = async (
   };
 };
 
-export const getEventLogForChannel = async (
-  db: D1Database,
+interface EventLogWhere {
+  clause: string;
+  values: (string | number)[];
+}
+
+const eventLogWhere = (
   channelId: string,
-  limit: number,
-  cursor: LogCursor | null,
-  filters: PanelEventFilters = { origin: null, module: null, tone: null, person: null },
-): Promise<PanelEventsResponse> => {
+  filters: PanelEventFilters,
+): EventLogWhere => {
   const where = ["channel_id = ?"];
   const filterValues: (string | number)[] = [channelId];
   if (filters.origin !== null) {
@@ -645,7 +652,29 @@ export const getEventLogForChannel = async (
     where.push("actor_user_id = ?");
     filterValues.push(filters.person);
   }
-  const whereClause = where.join("\n          AND ");
+  return { clause: where.join("\n          AND "), values: filterValues };
+};
+
+const mapEventLogRows = (rows: readonly EventLogRow[]): PanelEventEntry[] => rows.map((row) => ({
+  eventId: row.event_id,
+  createdAt: row.created_at,
+  moduleId: row.module_id,
+  triggerId: row.trigger_id,
+  code: row.code,
+  detail: row.detail_json,
+  actorUserId: row.actor_user_id,
+  actorLogin: null,
+  actorDisplayName: null,
+}));
+
+export const getEventLogForChannel = async (
+  db: D1Database,
+  channelId: string,
+  limit: number,
+  cursor: LogCursor | null,
+  filters: PanelEventFilters = { origin: null, module: null, tone: null, person: null },
+): Promise<PanelEventsResponse> => {
+  const { clause: whereClause, values: filterValues } = eventLogWhere(channelId, filters);
   const query = cursor === null
     ? `SELECT event_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id
          FROM event_log
@@ -661,25 +690,65 @@ export const getEventLogForChannel = async (
   const values = cursor === null
     ? [...filterValues, limit + 1]
     : [...filterValues, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1];
-  const result = await db.prepare(query).bind(...values).all<EventLogRow>();
-  const hasNextPage = result.results.length > limit;
-  const rows = result.results.slice(0, limit);
-  const entries: PanelEventEntry[] = rows.map((row) => ({
-    eventId: row.event_id,
-    createdAt: row.created_at,
-    moduleId: row.module_id,
-    triggerId: row.trigger_id,
-    code: row.code,
-    detail: row.detail_json,
-    actorUserId: row.actor_user_id,
-    actorLogin: null,
-    actorDisplayName: null,
-  }));
+  const pageStatement = db.prepare(query).bind(...values);
+  let resultRows: EventLogRow[];
+  let headCursor: number | undefined;
+  if (cursor === null) {
+    const [maximumResult, pageResult] = await db.batch([
+      db.prepare("SELECT COALESCE(MAX(seq), 0) AS head_cursor FROM event_log WHERE channel_id = ?").bind(channelId),
+      pageStatement,
+    ]);
+    const maximum = maximumResult?.results[0] as { head_cursor?: number } | undefined;
+    headCursor = maximum?.head_cursor ?? 0;
+    resultRows = (pageResult?.results ?? []) as EventLogRow[];
+  } else {
+    const result = await pageStatement.all<EventLogRow>();
+    resultRows = result.results;
+  }
+  const hasNextPage = resultRows.length > limit;
+  const rows = resultRows.slice(0, limit);
   const last = rows.at(-1);
   return {
-    entries,
+    entries: mapEventLogRows(rows),
     nextCursor: hasNextPage && last !== undefined
       ? encodeCursor({ createdAt: last.created_at, id: last.event_id })
       : null,
+    ...(headCursor === undefined ? {} : { headCursor }),
+  };
+};
+
+/** Event rows are immutable: an UPDATE would not be visible to sequence-based client deltas. */
+export const getEventLogChangesForChannel = async (
+  db: D1Database,
+  channelId: string,
+  after: number,
+  limit: number,
+  filters: PanelEventFilters = { origin: null, module: null, tone: null, person: null },
+): Promise<PanelEventChangesResponse> => {
+  const { clause: whereClause, values: filterValues } = eventLogWhere(channelId, filters);
+  const [maximumResult, changesResult] = await db.batch([
+    db.prepare("SELECT COALESCE(MAX(seq), 0) AS head_cursor FROM event_log WHERE channel_id = ?").bind(channelId),
+    db.prepare(
+      `SELECT seq, event_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id
+         FROM event_log
+        WHERE ${whereClause}
+          AND seq > ?
+        ORDER BY seq ASC
+        LIMIT ?`,
+    ).bind(...filterValues, after, limit + 1),
+  ]);
+  const maximumRow = maximumResult?.results[0] as { head_cursor?: number } | undefined;
+  const channelMaximum = maximumRow?.head_cursor ?? 0;
+  const rows = ((changesResult?.results ?? []) as SequencedEventLogRow[]);
+  const hasMore = rows.length > limit;
+  const returnedRows = rows.slice(0, limit);
+  const last = returnedRows.at(-1);
+  const headCursor = hasMore && last !== undefined
+    ? last.seq
+    : Math.max(channelMaximum, after, last?.seq ?? 0);
+  return {
+    entries: mapEventLogRows(returnedRows),
+    headCursor,
+    hasMore,
   };
 };
