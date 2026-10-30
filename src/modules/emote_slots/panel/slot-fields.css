@@ -50,12 +50,9 @@
 .slot-picker-status a, .slot-picker-status .ui-button { flex: none; color: var(--accent); }
 .slot-reconnect-dialog__actions { display: flex; justify-content: flex-end; margin-top: 20px; }
 .slot-picker-emoji { font-size: 18px; }
-.settings-page--slot .page-header__save { width: 430px; min-width: 430px; }
-.settings-page--slot .ui-save-bar__status { box-sizing: border-box; width: 174px; min-width: 174px; height: 32px; overflow: hidden; }
 .settings-page--slot .ui-save-bar__message { min-width: 0; overflow: hidden; line-height: 1.3; }
 .settings-page--slot .ui-save-bar__message-copy.ui-truncated-text { overflow: hidden; }
 .settings-page--slot .ui-save-bar__message-copy.ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.3; text-overflow: ellipsis; white-space: normal; overflow-wrap: normal; word-break: normal; }
-.settings-page--slot .ui-save-bar__save { width: 164px; }
 .settings-page--slot .slot-jackpot-meta { display: inline-block; width: 220px; min-height: 18px; overflow: hidden; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .settings-page--slot .ui-section--inspector { padding: 0; }
 .settings-page--slot .ui-section--inspector .ui-section__heading { margin-bottom: 12px; }

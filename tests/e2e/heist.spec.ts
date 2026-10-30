@@ -46,7 +46,7 @@ test("chat commands button keeps its header spot with the save cluster one row b
     return bounds;
   };
 
-  for (const width of [390, 1024, 1440]) {
+  for (const width of [390, 900, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`/channels/${channelId}/modules/heist?lang=en`);
     const header = page.locator(".settings-page > .page-header");
