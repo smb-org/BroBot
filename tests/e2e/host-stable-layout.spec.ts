@@ -829,7 +829,12 @@ const verifyFrozenEventDaySections = async (
     createdAt: timestamps.filler,
     detail: JSON.stringify({ person: `filler-${String(index).padStart(2, "0")}`, tier: "1000" }),
   }));
-  const firstPage = { entries: [crossMidnightInfo, crossMidnightError, todayEntry, ...fillers], nextCursor: "older-midnight" };
+  // The API returns pages in keyset order (newest first); the feed derives its history frontier from the last entry.
+  const firstPage = {
+    entries: [crossMidnightInfo, crossMidnightError, todayEntry, ...fillers]
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.eventId.localeCompare(left.eventId)),
+    nextCursor: "older-midnight",
+  };
   const olderPage = {
     entries: [{
       eventId: "older-day-entry",

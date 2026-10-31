@@ -12,7 +12,8 @@ import { snoozeAds } from "../modules/ads/panel/service";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, eventText, formatNumber, immediateActionUnavailableReasonText } from "./locale";
 import { moduleName } from "./module-labels";
 import { eventDetail } from "./events/model";
-import type { useEventsQuery } from "./data/lists";
+import type { useEventHeadQuery } from "./data/lists";
+import { eventFeedEntries } from "./events/model";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
 import { immediateActionErrorFeedback } from "./immediate-action-errors";
 import { adSnoozeRetryMessage } from "./ad-snooze-retry";
@@ -326,7 +327,7 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, timeZone, eventQuer
   role: ChannelRole;
   now: number;
   timeZone: string;
-  eventQuery: ReturnType<typeof useEventsQuery>;
+  eventQuery: ReturnType<typeof useEventHeadQuery>;
   streamState: ChannelStreamState | null | undefined;
   raidEnabled: boolean;
   onMessage: (message: string) => void;
@@ -337,7 +338,7 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, timeZone, eventQuer
   const [search, setSearch] = useState("");
   const [busyEntry, setBusyEntry] = useState<string | null>(null);
   const language = dashboardLanguage();
-  const entries = useMemo(() => eventQuery.data?.pages.flatMap((page) => page.entries) ?? [], [eventQuery.data]);
+  const entries = useMemo(() => eventFeedEntries(eventQuery.data, []), [eventQuery.data]);
   const query = search.trim().toLocaleLowerCase(language);
   const filtered = useMemo(() => entries.filter((entry) => {
     const category = eventCategory(entry);

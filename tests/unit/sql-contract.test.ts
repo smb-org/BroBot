@@ -143,6 +143,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["clearLeaseGuard", " OR refresh_lease_owner IS NOT NULL OR refresh_lease_until IS NOT NULL"],
   ["leaseGuard", ""],
   ["candidateRowsQuery", "SELECT channel_id, module_id FROM event_log WHERE created_at < '2026-01-01T00:00:00.000Z'"],
+  ["whereClause", "channel_id = ? AND module_id = ?"],
   ["sessionGuard.sql", belaboxStreamSessionGuard("channel-id", {
     state: "online",
     changedAt: now,
@@ -360,12 +361,12 @@ describe("SQL contract", () => {
     const database = prepareBaseline();
     try {
       const objects = database.prepare(
-        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY tbl_name, type DESC, name",
+        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
       expect(objects.filter((object) => object.type === "table")).toHaveLength(73);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(61);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(62);
       expect(objects.filter((object) => object.type === "trigger")).toHaveLength(147);
-      expect(objects).toHaveLength(281);
+      expect(objects).toHaveLength(282);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

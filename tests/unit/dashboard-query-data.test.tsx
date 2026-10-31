@@ -41,11 +41,14 @@ describe("dashboard query data layer", () => {
     expect(dashboardDataKeys.audit(channelId, emptyAuditFilter)).not.toEqual(
       dashboardDataKeys.audit(channelId, { person: "alice", area: "member" }),
     );
-    expect(dashboardDataKeys.events(channelId, { ...emptyEventFilter, origin: "channel" })).toEqual([
-      "channel", channelId, "events", { origin: "channel", module: null, tone: null, tones: null, person: null },
+    expect(dashboardDataKeys.eventHead(channelId, { ...emptyEventFilter, origin: "channel" })).toEqual([
+      "channel", channelId, "event-head", { origin: "channel", module: null, tone: null, tones: null, person: null },
     ]);
-    expect(dashboardDataKeys.events(channelId, emptyEventFilter)).not.toEqual(
-      dashboardDataKeys.events(channelId, { ...emptyEventFilter, origin: "channel" }),
+    expect(dashboardDataKeys.eventHead(channelId, emptyEventFilter)).not.toEqual(
+      dashboardDataKeys.eventHead(channelId, { ...emptyEventFilter, origin: "channel" }),
+    );
+    expect(dashboardDataKeys.eventHistory(channelId, emptyEventFilter, 1)).not.toEqual(
+      dashboardDataKeys.eventHistory(channelId, emptyEventFilter, 2),
     );
   });
 

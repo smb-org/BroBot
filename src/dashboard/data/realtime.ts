@@ -296,7 +296,7 @@ const invalidatePanelResource = (
       invalidate(queryClient, queryKeys.channel(channelId, "overview"), scheduledQueryRefreshes, resourceRefreshes, channelId);
       return;
     case "channel.events":
-      invalidate(queryClient, queryKeys.channel(channelId, "events"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+      invalidate(queryClient, queryKeys.channel(channelId, "event-head"), scheduledQueryRefreshes, resourceRefreshes, channelId);
       return;
     case "channel.audit":
       invalidate(queryClient, queryKeys.channel(channelId, "audit-log"), scheduledQueryRefreshes, resourceRefreshes, channelId);

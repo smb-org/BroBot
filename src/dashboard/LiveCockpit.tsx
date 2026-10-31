@@ -14,7 +14,7 @@ import type { Timer } from "../modules/timers/contracts";
 import type { VotekickPanelData } from "../modules/votekick/panel/service";
 import type { DashboardRoute } from "./router";
 import { dashboardTexts, formatNumber } from "./locale";
-import { useEventsQuery, useOverlaysQuery } from "./data/lists";
+import { useEventHeadQuery, useOverlaysQuery } from "./data/lists";
 import { connectedRefetchInterval, useModuleQuery } from "./data/module-query";
 import { useDashboardRealtimeStatus } from "./data/realtime";
 import { queryKeys } from "./data/keys";
@@ -118,7 +118,7 @@ export const LiveCockpit = ({ overview, modules, modulesLoaded, viewerUserId, on
   // Votes, votekick, timers/markers, BELABOX, and counter availability use mapped revisions, with the old 4–5 s fallback only while disconnected.
   // Remaining composite tiles include clock-driven ads schedules, so their old 5 s cadence stays active while connected and offline.
   // Header bot/stream state follows overview revisions; Helix viewer counts keep the overview's old 30 s connected refresh.
-  const eventsQuery = useEventsQuery(overview.channelId, emptyEventFilter, 30_000);
+  const eventsQuery = useEventHeadQuery(overview.channelId, emptyEventFilter, 30_000, () => true, true);
   const channelSettings = useChannelSettings(overview.channelId);
   const timeZone = channelSettings.data?.timeZone ?? browserTimeZone();
   const chatVotingQuery = useModuleQuery<ChatVotingPanelState>(overview.channelId, "chat_voting", "live", async (signal) =>

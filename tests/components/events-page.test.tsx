@@ -5,12 +5,15 @@ import type { RenderOptions } from "@testing-library/react";
 
 import { UiProvider } from "../../src/dashboard/ui";
 import { EventsPage } from "../../src/dashboard/events/EventsPage";
-import { emptyEventFilter } from "../../src/dashboard/events/model";
+import { emptyEventFilter, initialHead } from "../../src/dashboard/events/model";
 import type { PanelEventEntry, PanelEventsResponse } from "../../src/panel-contract";
-import { dashboardDataKeys, queryKeys } from "../../src/dashboard/data/keys";
+import { dashboardDataKeys as queryDataKeys, queryKeys } from "../../src/dashboard/data/keys";
 import { dashboardAuthenticationRequiredEvent } from "../../src/dashboard/data/events";
+import { invalidateDashboardChannelQueries } from "../../src/dashboard/data/realtime";
 import { renderWithQuery as renderWithQueryBase, type DashboardQueryTestOptions } from "../query-test-utils";
 import { useRealtimePanelMessages } from "../../src/dashboard/realtime";
+
+const dashboardDataKeys = queryDataKeys;
 
 let activePanelRevisions: Record<string, number> = {};
 
@@ -25,10 +28,26 @@ const renderWithQuery = (
   queryOptions: DashboardQueryTestOptions = {},
 ): ReturnType<typeof renderWithQueryBase> => {
   activePanelRevisions = { ...(queryOptions.panelRevisions ?? {}) };
+  const initialData = (queryOptions.initialData ?? []).flatMap((seed) => {
+    const data = seed.data as { pages?: PanelEventsResponse[]; pageParams?: Array<string | null> };
+    if (seed.queryKey[2] !== "event-head" || !Array.isArray(data.pages)) return [seed];
+    const headPage = data.pages[0] ?? { entries: [], nextCursor: null };
+    // No headCursor: legacy seeds refresh through a full head fetch, which these mocks answer.
+    const head = initialHead(headPage);
+    const historyPages = data.pages.slice(1);
+    const headSeed = { queryKey: seed.queryKey, data: head };
+    if (historyPages.length === 0) return [headSeed];
+    const filterParts = seed.queryKey[3] as Record<string, unknown>;
+    const historyKey = ["channel", seed.queryKey[1], "event-history", { ...filterParts, epoch: head.epoch }] as const;
+    return [headSeed, {
+      queryKey: historyKey,
+      data: { pages: historyPages, pageParams: data.pageParams?.slice(1) ?? [] },
+    }];
+  });
   const rendered = renderWithQueryBase(<RealtimeShell>{ui}</RealtimeShell>, options, {
     ...queryOptions,
     initialData: [
-      ...(queryOptions.initialData ?? []),
+      ...initialData,
       { queryKey: queryKeys.channel("kanal-a", "settings"), data: { timeZone: "Europe/Berlin", revision: 1 } },
     ],
     panelRevisions: activePanelRevisions,
@@ -79,9 +98,30 @@ const renderPage = (entries: readonly PanelEventEntry[], filters = emptyEventFil
       />
     </UiProvider>,
     undefined,
-    { initialData: [{ queryKey: dashboardDataKeys.events("kanal-a", filters), data: { pages: [response], pageParams: [null] } }] },
+    { initialData: [{ queryKey: dashboardDataKeys.eventHead("kanal-a", filters), data: { pages: [response], pageParams: [null] } }] },
   );
 };
+
+const eventHeadData = (entries: readonly PanelEventEntry[], nextCursor: string | null, headCursor?: number) => initialHead({
+  entries: [...entries],
+  nextCursor,
+  ...(headCursor === undefined ? {} : { headCursor }),
+});
+
+const eventHeadSeed = (filters: typeof emptyEventFilter, head: ReturnType<typeof eventHeadData>) => ({
+  queryKey: dashboardDataKeys.eventHead("kanal-a", filters),
+  data: head,
+});
+
+const eventHistorySeed = (
+  filters: typeof emptyEventFilter,
+  head: ReturnType<typeof eventHeadData>,
+  pages: readonly PanelEventsResponse[],
+  pageParams: readonly (string | null)[],
+) => ({
+  queryKey: dashboardDataKeys.eventHistory("kanal-a", filters, head.epoch),
+  data: { pages: [...pages], pageParams: [...pageParams] },
+});
 
 /** The trigger's accessible name is "Ursache anzeigen: <row label>" (DE) or
  *  "Show cause: <row label>" (EN) -- tests that don't care about the exact
@@ -144,23 +184,38 @@ const positionSpies = new Set<() => void>();
 const positionEventReader = (container: HTMLElement) => {
   const feed = container.querySelector<HTMLElement>(".event-feed");
   if (feed === null) throw new Error("Event feed is missing.");
+  const scrollRoot = feed.closest<HTMLElement>(".dashboard-shell__main");
   let scrollY = 700;
-  Object.defineProperty(window, "scrollY", { configurable: true, get: () => scrollY });
+  if (scrollRoot === null) Object.defineProperty(window, "scrollY", { configurable: true, get: () => scrollY });
+  else scrollRoot.scrollTop = scrollY;
   Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, get: () => 5_000 });
   const feedRectSpy = vi.spyOn(feed, "getBoundingClientRect").mockImplementation(() => ({ top: scrollY === 500 ? 0 : -200 }) as DOMRect);
   const scrollToSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {
     scrollY = 500;
-    window.dispatchEvent(new Event("scroll"));
+    if (scrollRoot === null) window.dispatchEvent(new Event("scroll"));
+    else {
+      scrollRoot.scrollTop = scrollY;
+      scrollRoot.dispatchEvent(new Event("scroll"));
+    }
   });
   positionSpies.add(() => { feedRectSpy.mockRestore(); scrollToSpy.mockRestore(); });
   return {
+    scrollToSpy,
     away: (): void => {
       scrollY = 700;
-      window.dispatchEvent(new Event("scroll"));
+      if (scrollRoot === null) window.dispatchEvent(new Event("scroll"));
+      else {
+        scrollRoot.scrollTop = scrollY;
+        scrollRoot.dispatchEvent(new Event("scroll"));
+      }
     },
     top: (): void => {
       scrollY = 500;
-      window.dispatchEvent(new Event("scroll"));
+      if (scrollRoot === null) window.dispatchEvent(new Event("scroll"));
+      else {
+        scrollRoot.scrollTop = scrollY;
+        scrollRoot.dispatchEvent(new Event("scroll"));
+      }
     },
   };
 };
@@ -209,7 +264,7 @@ describe("EventsPage failure cause icon", () => {
     }
 
     const view = renderWithQuery(<UiProvider><Harness /></UiProvider>);
-    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeTruthy();
     expect(FakeWebSocket.instances).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Change filter" }));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
@@ -239,7 +294,7 @@ describe("EventsPage failure cause icon", () => {
         staleTime: 0,
         panelRevisions: { "channel.events": 1 },
         initialData: [{
-          queryKey: dashboardDataKeys.events("kanal-a", filters),
+          queryKey: dashboardDataKeys.eventHead("kanal-a", filters),
           data: { pages: [{ entries: [cachedEntry], nextCursor: null }], pageParams: [null] },
         }],
       },
@@ -252,8 +307,8 @@ describe("EventsPage failure cause icon", () => {
     socket.open();
 
     await waitFor(() => {
-      expect(view.queryClient.getQueryData(dashboardDataKeys.events("kanal-a", filters))).toMatchObject({
-        pages: [{ entries: [expect.objectContaining({ eventId: "changed-before-connect" })] }],
+      expect(view.queryClient.getQueryData(dashboardDataKeys.eventHead("kanal-a", filters))).toMatchObject({
+        entries: [expect.objectContaining({ eventId: "changed-before-connect" })],
       });
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -344,8 +399,8 @@ describe("EventsPage failure cause icon", () => {
       gcTime: 600_000,
       staleTime: 30_000,
       initialData: [
-        { queryKey: dashboardDataKeys.events("kanal-a", filtersA), data: { pages: [{ entries: [oldRaid], nextCursor: null }], pageParams: [null] } },
-        { queryKey: dashboardDataKeys.events("kanal-a", filtersB), data: { pages: [{ entries: [hostEntry], nextCursor: null }], pageParams: [null] } },
+        { queryKey: dashboardDataKeys.eventHead("kanal-a", filtersA), data: { pages: [{ entries: [oldRaid], nextCursor: null }], pageParams: [null] } },
+        { queryKey: dashboardDataKeys.eventHead("kanal-a", filtersB), data: { pages: [{ entries: [hostEntry], nextCursor: null }], pageParams: [null] } },
       ],
     });
     await waitFor(() => expect(channelRequests).toBe(1));
@@ -421,7 +476,7 @@ describe("EventsPage failure cause icon", () => {
         gcTime: 600_000,
         staleTime: 30_000,
         initialData: [{
-          queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter),
+          queryKey: dashboardDataKeys.eventHead("kanal-a", emptyEventFilter),
           data: { pages: [{ entries: [cachedEntry], nextCursor: null }], pageParams: [null] },
         }],
       },
@@ -475,7 +530,7 @@ describe("EventsPage failure cause icon", () => {
         gcTime: 600_000,
         staleTime: 30_000,
         initialData: [{
-          queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter),
+          queryKey: dashboardDataKeys.eventHead("kanal-a", emptyEventFilter),
           data: { pages: [{ entries: [cachedEntry], nextCursor: null }], pageParams: [null] },
         }],
       },
@@ -490,6 +545,54 @@ describe("EventsPage failure cause icon", () => {
     expect(await screen.findByText("Raid von recoveredraid mit 2 Zuschauern")).toBeVisible();
     expect(rendered.container.querySelector(".list-toolbar__status .ui-load-state__inline-message")).toBeNull();
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a failed older-events page on Retry and keeps the loaded rows", async () => {
+    const firstEntry = entry({ eventId: "first-page" });
+    const olderEntry = entry({
+      eventId: "older-page",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"olderraid","viewers":3}',
+      createdAt: "2026-09-21T10:00:00.000Z",
+    });
+    let headRequests = 0;
+    let historyRequests = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      if (url.searchParams.has("cursor")) {
+        historyRequests += 1;
+        return Promise.resolve(historyRequests === 1
+          ? new Response(JSON.stringify({ error: "internal_error" }), { status: 500, headers: { "Content-Type": "application/json" } })
+          : new Response(JSON.stringify({ entries: [olderEntry], nextCursor: null }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      headRequests += 1;
+      return Promise.resolve(new Response(JSON.stringify({ entries: [firstEntry], nextCursor: "cursor-1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const view = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      { gcTime: 600_000 },
+    );
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+    fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
+    await waitFor(() => { expect(view.container.querySelector(".list-toolbar__status .ui-load-state__inline-message")).not.toBeNull(); });
+    const headRequestsBeforeRetry = headRequests;
+
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+
+    expect(await screen.findByText("Raid von olderraid mit 3 Zuschauern")).toBeVisible();
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(view.container.querySelector(".list-toolbar__status .ui-load-state__inline-message")).toBeNull();
+    expect(historyRequests).toBe(2);
+    expect(headRequests).toBe(headRequestsBeforeRetry);
+    view.unmount();
   });
 
   it("refetches when a realtime hint arrives during an uncached first load", async () => {
@@ -567,7 +670,7 @@ describe("EventsPage failure cause icon", () => {
         staleTime: 30_000,
         panelRevisions: { "channel.events": 1 },
         initialData: [{
-          queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter),
+          queryKey: dashboardDataKeys.eventHead("kanal-a", emptyEventFilter),
           data: { pages: [{ entries: [initialEntry], nextCursor: null }], pageParams: [null] },
         }],
       },
@@ -651,7 +754,7 @@ describe("EventsPage failure cause icon", () => {
       });
       vi.stubGlobal("fetch", fetcher);
       vi.stubGlobal("WebSocket", TestEventsWebSocket);
-      const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+      const queryKey = dashboardDataKeys.eventHead("kanal-a", emptyEventFilter);
       const rendered = renderWithQuery(
         <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
         undefined,
@@ -720,7 +823,7 @@ describe("EventsPage failure cause icon", () => {
     })));
     vi.stubGlobal("fetch", fetcher);
     vi.stubGlobal("WebSocket", TestEventsWebSocket);
-    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const queryKey = dashboardDataKeys.eventHead("kanal-a", emptyEventFilter);
     const rendered = renderWithQuery(
       <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
       undefined,
@@ -743,8 +846,8 @@ describe("EventsPage failure cause icon", () => {
     emitEventHint(socket, `top-hint-${action}`, newEntry);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
-    const refreshedEvents = rendered.queryClient.getQueryData<{ pages: { entries: PanelEventEntry[] }[] }>(queryKey);
-    expect(refreshedEvents?.pages.flatMap((page) => page.entries).map((event) => event.eventId)).toEqual([
+    const refreshedEvents = rendered.queryClient.getQueryData<{ entries: PanelEventEntry[] }>(queryKey);
+    expect(refreshedEvents?.entries.map((event) => event.eventId)).toEqual([
       "top-new",
       "top-added",
       "top-old",
@@ -784,7 +887,7 @@ describe("EventsPage failure cause icon", () => {
     })));
     vi.stubGlobal("fetch", fetcher);
     vi.stubGlobal("WebSocket", TestEventsWebSocket);
-    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const queryKey = dashboardDataKeys.eventHead("kanal-a", emptyEventFilter);
     const rendered = renderWithQuery(
       <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
       undefined,
@@ -805,8 +908,8 @@ describe("EventsPage failure cause icon", () => {
     emitEventHint(socket, `hint-${lateEventId}`, late);
 
     await waitFor(() => {
-      const data = rendered.queryClient.getQueryData<{ pages: Array<{ entries: PanelEventEntry[] }> }>(queryKey);
-      expect(data?.pages.flatMap((page) => page.entries).some((candidate) => candidate.eventId === late.eventId)).toBe(true);
+      const data = rendered.queryClient.getQueryData<{ entries: PanelEventEntry[] }>(queryKey);
+      expect(data?.entries.some((candidate) => candidate.eventId === late.eventId)).toBe(true);
     });
 
     expect(Array.from(rendered.container.querySelectorAll(".event-table tbody tr:not(.data-table__day-row)"), (row) => row.textContent)).toEqual(rowsBefore);
@@ -841,27 +944,26 @@ describe("EventsPage failure cause icon", () => {
       headers: { "Content-Type": "application/json" },
     });
     const fetcher = vi.fn((input: RequestInfo | URL) => Promise.resolve(
-      requestUrl(input).searchParams.get("cursor") === "cursor-2"
-        ? response([oldest, olderDuplicate], null)
-        : requestUrl(input).searchParams.get("cursor") === "cursor-1"
-          ? response([older], "cursor-2")
-          : response([newest], "cursor-1"),
+      requestUrl(input).searchParams.has("after")
+        ? new Response(JSON.stringify({ entries: [], headCursor: 5, hasMore: false }), { status: 200 })
+        : requestUrl(input).searchParams.get("cursor") === "cursor-2"
+          ? response([oldest, olderDuplicate], null)
+          : requestUrl(input).searchParams.get("cursor") === "cursor-1"
+            ? response([older], "cursor-2")
+            : response([newest], "cursor-1"),
     ));
     vi.stubGlobal("fetch", fetcher);
-    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
+    const head = eventHeadData([newest], "cursor-1", 5);
     const rendered = renderWithQuery(
       <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
       undefined,
       {
         gcTime: 600_000,
         staleTime: 30_000,
-        initialData: [{
-          queryKey,
-          data: {
-            pages: [{ entries: [newest], nextCursor: "cursor-1" }, { entries: [older], nextCursor: "cursor-2" }],
-            pageParams: [null, "cursor-1"],
-          },
-        }],
+        initialData: [
+          eventHeadSeed(emptyEventFilter, head),
+          eventHistorySeed(emptyEventFilter, head, [{ entries: [older], nextCursor: "cursor-2" }], ["cursor-1"]),
+        ],
       },
     );
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
@@ -916,22 +1018,20 @@ describe("EventsPage failure cause icon", () => {
       headers: { "Content-Type": "application/json" },
     });
     const fetcher = vi.fn((input: RequestInfo | URL) => Promise.resolve(
-      requestUrl(input).searchParams.get("cursor") === "older-cursor"
-        ? response([olderEntry], null)
-        : response([crossMidnightInfo, crossMidnightError, todayEntry], "older-cursor"),
+      requestUrl(input).searchParams.has("after")
+        ? new Response(JSON.stringify({ entries: [], headCursor: 5, hasMore: false }), { status: 200 })
+        : requestUrl(input).searchParams.get("cursor") === "older-cursor"
+          ? response([olderEntry], null)
+          : response([crossMidnightInfo, todayEntry, crossMidnightError], "older-cursor"),
     ));
     vi.stubGlobal("fetch", fetcher);
-    const queryKey = dashboardDataKeys.events("kanal-a", emptyEventFilter);
     const rendered = renderWithQuery(
       <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
       undefined,
       {
         gcTime: 600_000,
         staleTime: 30_000,
-        initialData: [{
-          queryKey,
-          data: { pages: [{ entries: [crossMidnightInfo, crossMidnightError, todayEntry], nextCursor: "older-cursor" }], pageParams: [null] },
-        }],
+        initialData: [eventHeadSeed(emptyEventFilter, eventHeadData([crossMidnightInfo, todayEntry, crossMidnightError], "older-cursor", 5))],
       },
     );
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
@@ -981,8 +1081,8 @@ describe("EventsPage failure cause icon", () => {
       gcTime: 600_000,
       staleTime: 30_000,
       initialData: [
-        { queryKey: dashboardDataKeys.events("kanal-a", filtersA), data: { pages: [{ entries: [oldRaid], nextCursor: null }], pageParams: [null] } },
-        { queryKey: dashboardDataKeys.events("kanal-a", filtersB), data: { pages: [{ entries: [hostEntry], nextCursor: null }], pageParams: [null] } },
+        { queryKey: dashboardDataKeys.eventHead("kanal-a", filtersA), data: { pages: [{ entries: [oldRaid], nextCursor: null }], pageParams: [null] } },
+        { queryKey: dashboardDataKeys.eventHead("kanal-a", filtersB), data: { pages: [{ entries: [hostEntry], nextCursor: null }], pageParams: [null] } },
       ],
     });
     await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
@@ -1000,8 +1100,8 @@ describe("EventsPage failure cause icon", () => {
     fireEvent.click(screen.getByRole("button", { name: "Toggle filter" }));
 
     await waitFor(() => {
-      const data = rendered.queryClient.getQueryData<{ pages: Array<{ entries: PanelEventEntry[] }> }>(dashboardDataKeys.events("kanal-a", filtersA));
-      expect(data?.pages[0]?.entries[0]?.eventId).toBe("roundtrip-new");
+      const data = rendered.queryClient.getQueryData<{ entries: PanelEventEntry[] }>(dashboardDataKeys.eventHead("kanal-a", filtersA));
+      expect(data?.entries[0]?.eventId).toBe("roundtrip-new");
     });
     expect(await screen.findByText(/Raid von newroundtrip/u)).toBeVisible();
     expect(screen.queryByText("Chat-Nachricht fehlgeschlagen")).not.toBeInTheDocument();
@@ -1050,7 +1150,7 @@ describe("EventsPage failure cause icon", () => {
           gcTime: 600_000,
           staleTime: 30_000,
           initialData: [{
-            queryKey: dashboardDataKeys.events("kanal-a", emptyEventFilter),
+            queryKey: dashboardDataKeys.eventHead("kanal-a", emptyEventFilter),
             data: {
               pages: pageEntries.map((page, index) => ({ entries: [page], nextCursor: nextCursors[index] ?? null })),
               pageParams: [null, "c1", "c2"],
@@ -1072,8 +1172,8 @@ describe("EventsPage failure cause icon", () => {
       serverHasLive = true;
       emitEventHint(socket, "storm-message", live);
       await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
-      const cached = rendered.queryClient.getQueryData<{ pages: Array<{ entries: PanelEventEntry[] }> }>(dashboardDataKeys.events("kanal-a", emptyEventFilter));
-      expect(cached?.pages[0]?.entries[0]?.eventId).toBe("live");
+      const cached = rendered.queryClient.getQueryData<{ entries: PanelEventEntry[] }>(dashboardDataKeys.eventHead("kanal-a", emptyEventFilter));
+      expect(cached?.entries[0]?.eventId).toBe("live");
       expect(screen.queryByText(/Raid von stormraid/u)).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: /1 neue Ereignisse/u })).toBeVisible();
       expect(maxInFlight).toBeLessThanOrEqual(1);
@@ -1108,8 +1208,8 @@ describe("EventsPage failure cause icon", () => {
       gcTime: 600_000,
       staleTime: 30_000,
       initialData: [
-        { queryKey: dashboardDataKeys.events("kanal-a", filtersA), data: { pages: [{ entries: [oldRaid], nextCursor: null }], pageParams: [null] } },
-        { queryKey: dashboardDataKeys.events("kanal-a", filtersB), data: { pages: [{ entries: [hostEntry], nextCursor: null }], pageParams: [null] } },
+        { queryKey: dashboardDataKeys.eventHead("kanal-a", filtersA), data: { pages: [{ entries: [oldRaid], nextCursor: null }], pageParams: [null] } },
+        { queryKey: dashboardDataKeys.eventHead("kanal-a", filtersB), data: { pages: [{ entries: [hostEntry], nextCursor: null }], pageParams: [null] } },
       ],
     });
     await waitFor(() => { expect(fetcher).toHaveBeenCalled(); });
@@ -1143,7 +1243,7 @@ describe("EventsPage failure cause icon", () => {
     rendered.unmount();
   });
 
-  it("serializes realtime refreshes with pagination and keeps refreshed events", async () => {
+  it("allows head refresh and pagination to finish independently", async () => {
     const firstEntry = entry({ eventId: "first-page", code: "host.chat.failed" });
     const liveEntry = entry({
       eventId: "live-event",
@@ -1177,7 +1277,7 @@ describe("EventsPage failure cause icon", () => {
       undefined,
       { gcTime: 600_000, panelRevisions: { "channel.events": 1 } },
     );
-    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeTruthy();
     const socket = TestEventsWebSocket.instances[0];
     if (socket === undefined) throw new Error("Realtime socket was not created.");
     socket.open();
@@ -1196,10 +1296,11 @@ describe("EventsPage failure cause icon", () => {
 
     // The fetch starts before React renders the busy state (query notifications are deferred), so wait for it.
     await waitFor(() => {
-      expect(view.container.querySelector(".event-feed [aria-busy]")).toHaveAttribute("aria-busy", "true");
+      expect(view.container.querySelector(".event-feed [aria-busy]")?.getAttribute("aria-busy")).toBe("true");
     });
     fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
     const paginationStarted = releaseNextPage !== undefined;
+    expect(paginationStarted).toBe(true);
     releaseRefresh?.(new Response(JSON.stringify({ entries: [liveEntry, firstEntry], nextCursor: "cursor-1" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -1211,7 +1312,10 @@ describe("EventsPage failure cause icon", () => {
       }));
     }
 
-    await waitFor(() => expect(screen.getByText("Raid von freshraid mit 2 Zuschauern")).toBeVisible());
+    expect(await screen.findByText("Raid von freshraid mit 2 Zuschauern")).toBeTruthy();
+    const head = view.queryClient.getQueryData<{ epoch: number }>(dashboardDataKeys.eventHead("kanal-a", emptyEventFilter));
+    expect(head).toBeDefined();
+    expect(view.queryClient.getQueryData<{ pages: PanelEventsResponse[] }>(dashboardDataKeys.eventHistory("kanal-a", emptyEventFilter, head?.epoch ?? 0))?.pages.flatMap((page) => page.entries).map((event) => event.eventId)).toContain("older-page");
     view.unmount();
   });
 
@@ -1658,5 +1762,304 @@ describe("EventsPage failure cause icon", () => {
 
     expect(row).toHaveAttribute("aria-selected", "true");
     expect(screen.getAllByText("Vorgang").length).toBeGreaterThan(0);
+  });
+
+  it("refreshes a head with three history pages using one delta request while frozen", async () => {
+    const newest = entry({ eventId: "seed-newest", createdAt: "2026-09-22T10:03:00.000Z" });
+    const oldest = entry({ eventId: "seed-oldest", createdAt: "2026-09-22T10:02:00.000Z" });
+    const olderPages = [
+      { entries: [entry({ eventId: "history-one", createdAt: "2026-09-22T10:01:00.000Z" })], nextCursor: "cursor-2" },
+      { entries: [entry({ eventId: "history-two", createdAt: "2026-09-22T10:00:00.000Z" })], nextCursor: "cursor-3" },
+      { entries: [entry({ eventId: "history-three", createdAt: "2026-09-22T09:59:00.000Z" })], nextCursor: null },
+    ];
+    const head = eventHeadData([newest, oldest], "cursor-1", 10);
+    const incoming = entry({ eventId: "delta-incoming", createdAt: "2026-09-22T10:04:00.000Z", code: "host.chat.sent" });
+    let includeIncoming = false;
+    const eventRequests: URLSearchParams[] = [];
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      if (!url.pathname.endsWith("/events")) return Promise.resolve(new Response("{}", { status: 200 }));
+      const params = url.searchParams;
+      eventRequests.push(params);
+      const after = params.get("after");
+      if (after !== null) return Promise.resolve(new Response(JSON.stringify({
+        entries: includeIncoming ? [incoming] : [],
+        headCursor: includeIncoming ? 11 : Number(after),
+        hasMore: false,
+      }), { status: 200 }));
+      const cursor = params.get("cursor");
+      if (cursor !== null) return Promise.resolve(new Response(JSON.stringify({ entries: [], nextCursor: null }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({ entries: [newest, oldest], nextCursor: "cursor-1", headCursor: 10 }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        initialData: [
+          eventHeadSeed(emptyEventFilter, head),
+          eventHistorySeed(emptyEventFilter, head, olderPages, ["cursor-1", "cursor-2", "cursor-3"]),
+        ],
+      },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    eventRequests.length = 0;
+    includeIncoming = true;
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.eventHead("kanal-a", emptyEventFilter), exact: true });
+    });
+
+    expect(eventRequests.filter((params) => params.has("after"))).toHaveLength(1);
+    expect(eventRequests.filter((params) => params.has("cursor"))).toHaveLength(0);
+    expect(rendered.queryClient.getQueryData<{ entries: PanelEventEntry[] }>(dashboardDataKeys.eventHead("kanal-a", emptyEventFilter))?.entries.map((candidate) => candidate.eventId)).toContain("delta-incoming");
+    await waitFor(() => expect(rendered.container.querySelector(".realtime-feed__notice-slot")?.getAttribute("data-pending")).toBe("true"));
+    expect(screen.queryByText("Chat-Nachricht gesendet")).toBeNull();
+    expect(await screen.findByRole("button", { name: /1 neue Ereignisse/u })).toBeTruthy();
+
+    eventRequests.length = 0;
+    act(() => { invalidateDashboardChannelQueries(rendered.queryClient, "kanal-a"); });
+    await waitFor(() => expect(eventRequests.filter((params) => params.has("after"))).toHaveLength(1));
+    expect(eventRequests.filter((params) => params.has("cursor"))).toHaveLength(0);
+  });
+
+  it("adopts a legacy head boundary change while the first history page is in flight", async () => {
+    const row = (id: number): PanelEventEntry => entry({
+      eventId: `boundary-${String(id)}`,
+      createdAt: new Date(Date.UTC(2026, 0, 1) + id * 1000).toISOString(),
+      code: "host.chat.sent",
+    });
+    const oldHeadEntries = Array.from({ length: 50 }, (_, index) => row(100 - index));
+    const newHeadEntries = Array.from({ length: 50 }, (_, index) => row(101 - index));
+    const head = eventHeadData(oldHeadEntries, "cursor-51");
+    let headReads = 0;
+    let releaseOldHistory: ((response: Response) => void) | undefined;
+    const oldHistoryResponse = new Promise<Response>((resolve) => { releaseOldHistory = resolve; });
+    const eventRequests: URLSearchParams[] = [];
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      if (!url.pathname.endsWith("/events")) return Promise.resolve(new Response("{}", { status: 200 }));
+      const params = url.searchParams;
+      eventRequests.push(params);
+      const cursor = params.get("cursor");
+      if (cursor === "cursor-51") return oldHistoryResponse;
+      if (cursor === "cursor-52") return Promise.resolve(new Response(JSON.stringify({ entries: Array.from({ length: 50 }, (_, index) => row(51 - index)), nextCursor: null }), { status: 200 }));
+      headReads += 1;
+      const entries = headReads === 1 ? oldHeadEntries : newHeadEntries;
+      return Promise.resolve(new Response(JSON.stringify({ entries, nextCursor: headReads === 1 ? "cursor-51" : "cursor-52" }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      { gcTime: 600_000, initialData: [eventHeadSeed(emptyEventFilter, head)] },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
+    await waitFor(() => expect(eventRequests.some((params) => params.get("cursor") === "cursor-51")).toBe(true));
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.eventHead("kanal-a", emptyEventFilter), exact: true });
+    });
+    const refreshedHead = rendered.queryClient.getQueryData<{ epoch: number; nextCursor: string | null }>(dashboardDataKeys.eventHead("kanal-a", emptyEventFilter));
+    expect(refreshedHead?.nextCursor).toBe("cursor-52");
+    expect(refreshedHead?.epoch).not.toBe(head.epoch);
+
+    await act(async () => {
+      releaseOldHistory?.(new Response(JSON.stringify({ entries: Array.from({ length: 50 }, (_, index) => row(50 - index)), nextCursor: null }), { status: 200 }));
+      await Promise.resolve();
+    });
+    const newEpoch = refreshedHead?.epoch;
+    if (newEpoch === undefined) throw new Error("The updated head epoch is missing.");
+    expect(rendered.queryClient.getQueryData(dashboardDataKeys.eventHistory("kanal-a", emptyEventFilter, newEpoch))).toBeUndefined();
+    fireEvent.click(await screen.findByRole("button", { name: "Zu den neuesten Ereignissen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ältere Ereignisse laden" }));
+    await waitFor(() => expect(eventRequests.some((params) => params.get("cursor") === "cursor-52")).toBe(true));
+    const newHistory = rendered.queryClient.getQueryData<{ pages: PanelEventsResponse[] }>(dashboardDataKeys.eventHistory("kanal-a", emptyEventFilter, newEpoch));
+    expect(newHistory?.pages.flatMap((page) => page.entries).some((candidate) => candidate.eventId === "boundary-51")).toBe(true);
+  });
+
+  it("resets an oversized frozen head when manual scrolling returns to the top", async () => {
+    const oversizedEntries = Array.from({ length: 1000 }, (_, index) => entry({
+      eventId: `cap-${String(index)}`,
+      createdAt: new Date(Date.UTC(2026, 0, 1) + index * 1000).toISOString(),
+    }));
+    const head = eventHeadData(oversizedEntries, null, 10);
+    const overflow = entry({ eventId: "cap-overflow", createdAt: "2026-01-02T00:00:00.000Z" });
+    let changeReads = 0;
+    let headReads = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      if (!url.pathname.endsWith("/events")) return Promise.resolve(new Response("{}", { status: 200 }));
+      const after = url.searchParams.get("after");
+      if (after !== null) {
+        changeReads += 1;
+        return Promise.resolve(new Response(JSON.stringify(changeReads === 2
+          ? { entries: [overflow], headCursor: 11, hasMore: false }
+          : { entries: [], headCursor: Number(after), hasMore: false }), { status: 200 }));
+      }
+      headReads += 1;
+      return Promise.resolve(new Response(JSON.stringify({ entries: [entry({ eventId: "cap-reset", code: "host.chat.sent" })], nextCursor: null, headCursor: 20 }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      { gcTime: 600_000, initialData: [eventHeadSeed(emptyEventFilter, head)] },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.eventHead("kanal-a", emptyEventFilter), exact: true });
+    });
+    expect(rendered.queryClient.getQueryData<{ entries: PanelEventEntry[] }>(dashboardDataKeys.eventHead("kanal-a", emptyEventFilter))?.entries).toHaveLength(1001);
+    expect(await screen.findByRole("button", { name: /1 neue Ereignisse/u })).toBeTruthy();
+
+    act(() => { position.top(); });
+    await waitFor(() => expect(headReads).toBe(1));
+    const reset = rendered.queryClient.getQueryData<{ entries: PanelEventEntry[]; epoch: number }>(dashboardDataKeys.eventHead("kanal-a", emptyEventFilter));
+    expect(reset?.epoch).not.toBe(head.epoch);
+    expect(reset?.entries.map((candidate) => candidate.eventId)).toEqual(["cap-reset"]);
+  });
+
+  it("keeps a frozen snapshot through a burst reset until jump to latest is clicked", async () => {
+    const newest = entry({ eventId: "burst-old-newest", createdAt: "2026-09-22T10:03:00.000Z" });
+    const oldest = entry({ eventId: "burst-old-oldest", createdAt: "2026-09-22T10:02:00.000Z" });
+    const historyEntry = entry({ eventId: "burst-old-history", createdAt: "2026-09-22T10:01:00.000Z" });
+    const resetEntry = entry({ eventId: "burst-reset", createdAt: "2026-09-22T10:04:00.000Z", code: "host.chat.sent" });
+    const head = eventHeadData([newest, oldest], "cursor-1", 10);
+    const requests: URLSearchParams[] = [];
+    let consumeBurst = false;
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      if (!url.pathname.endsWith("/events")) return Promise.resolve(new Response("{}", { status: 200 }));
+      const params = url.searchParams;
+      requests.push(params);
+      const after = params.get("after");
+      if (after !== null) return Promise.resolve(new Response(JSON.stringify(consumeBurst
+        ? { entries: [], headCursor: Number(after) + 1, hasMore: true }
+        : { entries: [], headCursor: Number(after), hasMore: false }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({ entries: [resetEntry], nextCursor: "fresh-cursor", headCursor: 20 }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      {
+        gcTime: 600_000,
+        initialData: [
+          eventHeadSeed(emptyEventFilter, head),
+          eventHistorySeed(emptyEventFilter, head, [{ entries: [historyEntry], nextCursor: "cursor-2" }], ["cursor-1"]),
+        ],
+      },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    requests.length = 0;
+    consumeBurst = true;
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.eventHead("kanal-a", emptyEventFilter), exact: true });
+    });
+    const latestButton = await screen.findByRole("button", { name: "Zu den neuesten Ereignissen" });
+    const resetHead = rendered.queryClient.getQueryData<{ epoch: number }>(dashboardDataKeys.eventHead("kanal-a", emptyEventFilter));
+    expect(resetHead?.epoch).not.toBe(head.epoch);
+    expect(screen.getAllByText("Chat-Nachricht fehlgeschlagen").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Chat-Nachricht gesendet")).toBeNull();
+    expect(requests.filter((params) => params.has("after"))).toHaveLength(5);
+    expect(requests.filter((params) => params.has("cursor"))).toHaveLength(0);
+    expect(position.scrollToSpy).not.toHaveBeenCalled();
+
+    consumeBurst = false;
+    fireEvent.click(latestButton);
+    expect(position.scrollToSpy).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Chat-Nachricht gesendet")).toBeTruthy();
+    expect(screen.queryAllByText("Chat-Nachricht fehlgeschlagen")).toHaveLength(0);
+  });
+
+  it("adopts a pending reset epoch when the reader manually scrolls to the top", async () => {
+    const oldEntry = entry({ eventId: "manual-adopt-old", createdAt: "2026-09-22T10:00:00.000Z" });
+    const latestEntry = entry({ eventId: "manual-adopt-latest", createdAt: "2026-09-22T10:01:00.000Z", code: "host.chat.sent" });
+    const head = eventHeadData([oldEntry], "cursor-1", 10);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      { gcTime: 600_000, initialData: [eventHeadSeed(emptyEventFilter, head)] },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    const nextEpochHead = eventHeadData([latestEntry], "fresh-cursor", 20);
+    rendered.queryClient.setQueryData(dashboardDataKeys.eventHead("kanal-a", emptyEventFilter), nextEpochHead);
+    expect(await screen.findByRole("button", { name: "Zu den neuesten Ereignissen" })).toBeTruthy();
+    act(() => { position.top(); });
+    expect(await screen.findByText("Chat-Nachricht gesendet")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Zu den neuesten Ereignissen" })).toBeNull();
+    expect(position.scrollToSpy).not.toHaveBeenCalled();
+  });
+
+  it("queues a jump-triggered head refresh while another refresh is in flight", async () => {
+    const entries = Array.from({ length: 1000 }, (_, index) => entry({
+      eventId: `queue-cap-${String(index)}`,
+      createdAt: new Date(Date.UTC(2026, 0, 1) + index * 1000).toISOString(),
+    }));
+    const pendingEntry = entry({ eventId: "queue-pending", createdAt: "2026-01-02T00:00:00.000Z", code: "host.chat.sent" });
+    const resetEntry = entry({ eventId: "queue-reset", createdAt: "2026-01-03T00:00:00.000Z", code: "host.chat.failed" });
+    const head = eventHeadData(entries, null, 10);
+    let includePending = false;
+    let afterReads = 0;
+    let headReads = 0;
+    let releaseRunningRefresh: ((response: Response) => void) | undefined;
+    const runningRefresh = new Promise<Response>((resolve) => { releaseRunningRefresh = resolve; });
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      if (!url.pathname.endsWith("/events")) return Promise.resolve(new Response("{}", { status: 200 }));
+      const after = url.searchParams.get("after");
+      if (after !== null) {
+        afterReads += 1;
+        if (afterReads === 3) return runningRefresh;
+        return Promise.resolve(new Response(JSON.stringify({ entries: includePending && afterReads === 2 ? [pendingEntry] : [], headCursor: includePending && afterReads === 2 ? 11 : Number(after), hasMore: false }), { status: 200 }));
+      }
+      headReads += 1;
+      return Promise.resolve(new Response(JSON.stringify({ entries: [resetEntry], nextCursor: null, headCursor: 20 }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("WebSocket", TestEventsWebSocket);
+    const rendered = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      { gcTime: 600_000, initialData: [eventHeadSeed(emptyEventFilter, head)] },
+    );
+    await waitFor(() => expect(rendered.queryClient.isFetching()).toBe(0));
+    const position = positionEventReader(rendered.container);
+    act(() => { position.away(); });
+    includePending = true;
+    await act(async () => {
+      await rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.eventHead("kanal-a", emptyEventFilter), exact: true });
+    });
+    await waitFor(() => expect(rendered.queryClient.getQueryData<{ entries: PanelEventEntry[] }>(dashboardDataKeys.eventHead("kanal-a", emptyEventFilter))?.entries).toHaveLength(1001));
+    const notice = await screen.findByRole("button", { name: /1 neue Ereignisse/u });
+    let inFlightRefresh: Promise<void> | undefined;
+    act(() => {
+      inFlightRefresh = rendered.queryClient.invalidateQueries({ queryKey: dashboardDataKeys.eventHead("kanal-a", emptyEventFilter), exact: true });
+    });
+    await waitFor(() => expect(afterReads).toBe(3));
+    fireEvent.click(notice);
+    await act(async () => {
+      releaseRunningRefresh?.(new Response(JSON.stringify({ error: "temporary_failure" }), { status: 500 }));
+      await inFlightRefresh;
+    });
+    await waitFor(() => expect(headReads).toBe(1));
+    const reset = rendered.queryClient.getQueryData<{ entries: PanelEventEntry[]; epoch: number }>(dashboardDataKeys.eventHead("kanal-a", emptyEventFilter));
+    expect(reset?.epoch).not.toBe(head.epoch);
+    expect(reset?.entries.map((candidate) => candidate.eventId)).toEqual(["queue-reset"]);
+    expect(rendered.queryClient.getQueryState(dashboardDataKeys.eventHead("kanal-a", emptyEventFilter))?.fetchStatus).toBe("idle");
   });
 });

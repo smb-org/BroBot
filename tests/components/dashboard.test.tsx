@@ -713,7 +713,7 @@ describe("Dashboard skeleton", () => {
 
     expect(await screen.findByText("alt")).toBeInTheDocument();
     const eventsQuery = rendered.queryClient.getQueryCache().getAll().find(({ queryKey }) =>
-      queryKey[1] === "kanal-a" && queryKey[2] === "events");
+      queryKey[1] === "kanal-a" && queryKey[2] === "event-head");
     if (eventsQuery === undefined) throw new Error("The event query is missing.");
     const previousEventData = eventsQuery.state.data;
     const feed = document.querySelector(".event-feed");
@@ -885,10 +885,9 @@ describe("Dashboard skeleton", () => {
     expect(eventRequests).toBe(3);
   });
 
-  it("refreshes the infinite event query after loading older events", async () => {
+  it("refreshes only the event head after loading older events", async () => {
     const channel = healthyChannel("kanal-a", "Alpha");
     let releaseSecondPage: ((response: Response) => void) | undefined;
-    let firstPageRequests = 0;
     const firstPage = {
       entries: [{ eventId: "event-neu", createdAt: "2026-09-18T04:00:00.000Z", moduleId: "raid", code: "neu", detail: "{}", actorUserId: null }],
       nextCursor: "cursor-1",
@@ -920,10 +919,8 @@ describe("Dashboard skeleton", () => {
             ? new Promise<Response>((resolve) => { releaseSecondPage = resolve; })
             : Promise.resolve(jsonResponse(secondPage));
         }
-        return Promise.resolve(jsonResponse({
-            ...firstPage,
-            entries: firstPageRequests++ === 0 ? firstPage.entries : [liveEntry, ...firstPage.entries],
-          }));
+        if (url.searchParams.has("after")) return Promise.resolve(jsonResponse({ entries: [liveEntry], headCursor: 11, hasMore: false }));
+        return Promise.resolve(jsonResponse({ ...firstPage, headCursor: 10 }));
       }
       return Promise.resolve(jsonResponse({}, 404));
     });
@@ -958,9 +955,10 @@ describe("Dashboard skeleton", () => {
     expect(screen.getByText("alt")).toBeInTheDocument();
     await waitFor(() => {
       const requests = fetcher.mock.calls.map(([input]) => requestUrl(input)).filter((url) => url.pathname.endsWith("/events"));
-      expect(requests).toHaveLength(4);
+      // One delta request for the head; the loaded history page is not requested again.
+      expect(requests).toHaveLength(3);
+      expect(requests[2]?.searchParams.get("after")).toBe("10");
       expect(requests[2]?.searchParams.has("cursor")).toBe(false);
-      expect(requests[3]?.searchParams.get("cursor")).toBe("cursor-1");
     });
   });
 

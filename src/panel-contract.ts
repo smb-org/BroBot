@@ -320,4 +320,11 @@ export interface PanelEventFilters {
 export interface PanelEventsResponse {
   entries: PanelEventEntry[];
   nextCursor: string | null;
+  headCursor?: number;
+}
+
+export interface PanelEventChangesResponse {
+  entries: PanelEventEntry[];
+  headCursor: number;
+  hasMore: boolean;
 }
