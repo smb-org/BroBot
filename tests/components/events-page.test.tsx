@@ -547,6 +547,54 @@ describe("EventsPage failure cause icon", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("retries a failed older-events page on Retry and keeps the loaded rows", async () => {
+    const firstEntry = entry({ eventId: "first-page" });
+    const olderEntry = entry({
+      eventId: "older-page",
+      moduleId: "channel_events",
+      code: "channel_events.raid.incoming",
+      detail: '{"source":"olderraid","viewers":3}',
+      createdAt: "2026-09-21T10:00:00.000Z",
+    });
+    let headRequests = 0;
+    let historyRequests = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      if (url.searchParams.has("cursor")) {
+        historyRequests += 1;
+        return Promise.resolve(historyRequests === 1
+          ? new Response(JSON.stringify({ error: "internal_error" }), { status: 500, headers: { "Content-Type": "application/json" } })
+          : new Response(JSON.stringify({ entries: [olderEntry], nextCursor: null }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      headRequests += 1;
+      return Promise.resolve(new Response(JSON.stringify({ entries: [firstEntry], nextCursor: "cursor-1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const view = renderWithQuery(
+      <UiProvider><EventsPage channelId="kanal-a" filters={emptyEventFilter} moduleOptions={[]} onFiltersChange={() => undefined} /></UiProvider>,
+      undefined,
+      { gcTime: 600_000 },
+    );
+    expect(await screen.findByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));
+    fireEvent.click(screen.getByRole("button", { name: "Ältere Ereignisse laden" }));
+    await waitFor(() => { expect(view.container.querySelector(".list-toolbar__status .ui-load-state__inline-message")).not.toBeNull(); });
+    const headRequestsBeforeRetry = headRequests;
+
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+
+    expect(await screen.findByText("Raid von olderraid mit 3 Zuschauern")).toBeVisible();
+    expect(screen.getByText("Chat-Nachricht fehlgeschlagen")).toBeVisible();
+    expect(view.container.querySelector(".list-toolbar__status .ui-load-state__inline-message")).toBeNull();
+    expect(historyRequests).toBe(2);
+    expect(headRequests).toBe(headRequestsBeforeRetry);
+    view.unmount();
+  });
+
   it("refetches when a realtime hint arrives during an uncached first load", async () => {
     const initialEntry = entry({ eventId: "initial-event" });
     const hinted = entry({

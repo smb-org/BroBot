@@ -341,6 +341,11 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     if (history.isFetching || continuation === null || head.data === undefined) return;
     void history.fetchNextPage({ cancelRefetch: false });
   }, [continuation, head.data, history]);
+  // History is a disabled query, so only fetchNextPage retries the failed page; loaded pages stay.
+  const retry = useCallback((): void => {
+    if (history.isError) void history.fetchNextPage({ cancelRefetch: false });
+    if (head.isError || !history.isError) requestHeadRefresh(true);
+  }, [head.isError, history, requestHeadRefresh]);
   const errorValue = head.error ?? history.error;
   const error = errorValue instanceof PanelApiError
     ? apiErrorText(errorValue.code, dashboardTexts().errors.dataLoadFailed)
@@ -363,7 +368,7 @@ export const EventsPage = ({ channelId, filters, moduleOptions, onFiltersChange 
     loadingNextPage={history.isFetching}
     pages={pages}
     pageParams={pageParams}
-    onRefresh={() => { requestHeadRefresh(true); }}
+    onRefresh={retry}
     onRefreshOnReturn={refreshOnReturn}
     onBecameFollowing={onBecameFollowing}
     onNextPage={loadNextPage}
