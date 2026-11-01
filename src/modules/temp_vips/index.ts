@@ -45,5 +45,5 @@ export const tempVipsModule: BotModule<typeof tempVipsSettingsSchema> = {
       return { tone: "success", message: { de: tempVipsCockpitActionTexts.de.success, en: tempVipsCockpitActionTexts.en.success } };
     },
   }],
-  panelIcon: { paths: ["M12 6v6l4 2", "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0"] },
+  panelIcon: { paths: ["M2 7l5 5 5-8 5 8 5-5-2 13H4z", "M5 16h14"] },
 };

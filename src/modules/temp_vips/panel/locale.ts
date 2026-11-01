@@ -19,6 +19,11 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
   releaseHint: string;
   retryRemoval: string;
   removalWarning: string;
+  removalReasons: Readonly<Record<string, string>>;
+  removalReasonUnknown: string;
+  tabsLabel: string;
+  tabVips: string;
+  tabSettings: string;
   duration: string;
   days: string;
   durationHint: string;
@@ -77,6 +82,25 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
     releaseHint: "Der Eintrag wird entfernt. Das VIP bleibt bestehen.",
     retryRemoval: "Entzug erneut versuchen",
     removalWarning: "Der VIP-Entzug ist fehlgeschlagen.",
+    removalReasons: {
+      network: "Netzwerkfehler",
+      unknown_status: "Twitch hat die Anfrage abgelehnt",
+      rate_limited: "Zu viele Anfragen",
+      invalid_response: "Ungültige Antwort von Twitch",
+      not_connected: "Broadcaster-Verbindung fehlt",
+      token_unavailable: "Broadcaster-Zugang nicht verfügbar",
+      scope_missing: "Berechtigung des Broadcasters fehlt",
+      revoked: "Broadcaster-Zugang wurde widerrufen",
+      refresh_failed: "Broadcaster-Zugang konnte nicht erneuert werden",
+      precondition_failed: "Voraussetzung nicht erfüllt",
+      no_slots: "Keine VIP-Plätze frei",
+      moderator: "Konto ist Moderator",
+      community_gate: "Twitch lässt das aktuell nicht zu",
+    },
+    removalReasonUnknown: "Unbekannter Fehler",
+    tabsLabel: "Bereich",
+    tabVips: "VIPs",
+    tabSettings: "Einstellungen",
     duration: "Dauer",
     days: "Tage",
     durationHint: "Die Höchstdauer begrenzt die gesamte verbleibende VIP-Zeit.",
@@ -135,6 +159,25 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
     releaseHint: "The entry is removed. The VIP stays in place.",
     retryRemoval: "Retry removal",
     removalWarning: "The VIP removal failed.",
+    removalReasons: {
+      network: "Network error",
+      unknown_status: "Twitch rejected the request",
+      rate_limited: "Too many requests",
+      invalid_response: "Invalid response from Twitch",
+      not_connected: "Broadcaster connection missing",
+      token_unavailable: "Broadcaster access unavailable",
+      scope_missing: "Broadcaster permission missing",
+      revoked: "Broadcaster access was revoked",
+      refresh_failed: "Broadcaster access could not be renewed",
+      precondition_failed: "Precondition not met",
+      no_slots: "No VIP slots free",
+      moderator: "Account is a moderator",
+      community_gate: "Twitch does not allow this right now",
+    },
+    removalReasonUnknown: "Unknown error",
+    tabsLabel: "Section",
+    tabVips: "VIPs",
+    tabSettings: "Settings",
     duration: "Duration",
     days: "days",
     durationHint: "The maximum limits the total remaining VIP time.",

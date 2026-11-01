@@ -257,14 +257,19 @@ test("renders the sorted VIP list and dialogs at the requested widths with revie
     await expect(rows.nth(1)).toContainText("Dashboard");
     await expect(rows.nth(1).locator("time")).toHaveAttribute("title", /\d{4}/u);
     await expect(page.getByRole("button", { name: "Chatbefehle", exact: false })).toBeVisible();
+    await expect(rows.nth(0)).toContainText("Netzwerkfehler");
+    await expect(rows.nth(0)).not.toContainText("network");
     const defaultDuration = page.getByRole("spinbutton", { name: "Standarddauer" });
-    await expect(defaultDuration).toBeVisible();
-    const listBox = await page.locator(".temp-vips-page").boundingBox();
-    const settingsBox = await defaultDuration.boundingBox();
-    expect(listBox).not.toBeNull();
-    expect(settingsBox).not.toBeNull();
-    if (width === 390) expect(settingsBox?.y).toBeLessThan(listBox?.y ?? Number.POSITIVE_INFINITY);
-    else expect(settingsBox?.x).toBeGreaterThan((listBox?.x ?? 0) + (listBox?.width ?? 0));
+    if (width === 390) {
+      await expect(defaultDuration).toBeHidden();
+    } else {
+      await expect(defaultDuration).toBeVisible();
+      const listBox = await page.locator(".temp-vips-page").boundingBox();
+      const settingsBox = await defaultDuration.boundingBox();
+      expect(listBox).not.toBeNull();
+      expect(settingsBox).not.toBeNull();
+      expect(settingsBox?.x).toBeGreaterThan((listBox?.x ?? 0) + (listBox?.width ?? 0));
+    }
     await waitForWebFonts(page);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
@@ -345,6 +350,36 @@ test("renders the sorted VIP list and dialogs at the requested widths with revie
   const releasableRow = page.locator(".temp-vips-row").filter({ hasText: "@sternchenwerk" });
   await releasableRow.getByRole("button", { name: "Verwaltung abgeben · VIP behalten" }).click();
   await expect(page.locator(".temp-vips-row").filter({ hasText: "@sternchenwerk" })).toHaveCount(0);
+});
+
+test("shows VIPs and Settings tabs only below 769px and keeps the settings draft", async ({ page }) => {
+  await mockDashboard(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/channels/${channelId}/modules/temp_vips?lang=de`);
+  const vipsTab = page.getByRole("tab", { name: "VIPs", exact: true });
+  const settingsTab = page.getByRole("tab", { name: "Einstellungen", exact: true });
+  await expect(vipsTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".temp-vips-row")).toHaveCount(2);
+  const defaultDuration = page.getByRole("spinbutton", { name: "Standarddauer" });
+  await expect(defaultDuration).toBeHidden();
+
+  await settingsTab.click();
+  await expect(defaultDuration).toBeVisible();
+  await expect(page.locator(".temp-vips-row").first()).toBeHidden();
+  await defaultDuration.fill("12");
+  await vipsTab.click();
+  await expect(defaultDuration).toBeHidden();
+  await expect(page.locator(".temp-vips-row")).toHaveCount(2);
+  await settingsTab.click();
+  await expect(defaultDuration).toHaveValue("12");
+  await expect(page.getByRole("button", { name: "Speichern", exact: true })).toBeEnabled();
+
+  for (const width of [1280, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.getByRole("tab")).toHaveCount(0);
+    await expect(defaultDuration).toBeVisible();
+    await expect(page.locator(".temp-vips-row")).toHaveCount(2);
+  }
 });
 
 test("keeps a fixed error area when Twitch no longer lists a selected VIP", async ({ page }) => {

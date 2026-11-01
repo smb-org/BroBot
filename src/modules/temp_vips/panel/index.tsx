@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type ReactElement, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement, type SyntheticEvent } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { formatNumber } from "../../../dashboard/locale";
-import { Button, ConfirmDialog, Dialog, Field, SegmentChoice, UnitInput, notify } from "../../../dashboard/ui";
+import { Button, ConfirmDialog, Dialog, Field, SegmentChoice, Tabs, UnitInput, notify } from "../../../dashboard/ui";
 import { useModuleQuery } from "../../../dashboard/data";
 import type { ModulePanelProperties, ModuleTempVipPerson, ModuleTempVipResult, ModuleTempVipRow } from "../../contract";
 import type { TempVipsSettings } from "../contracts";
@@ -91,6 +91,16 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [pageFeedback, setPageFeedback] = useState<string | null>(null);
   const [localNow, setLocalNow] = useState(() => Date.now());
+  const [tab, setTab] = useState<"vips" | "settings">("vips");
+  const pageRef = useRef<HTMLElement | null>(null);
+
+  // Below 769px the settings editor (a sibling in the module view) is shown or hidden by this attribute;
+  // it stays mounted so unsaved drafts survive tab switches.
+  useEffect(() => {
+    const view = pageRef.current?.closest(".module-view");
+    view?.setAttribute("data-temp-vips-tab", tab);
+    return () => { view?.removeAttribute("data-temp-vips-tab"); };
+  }, [tab]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setLocalNow(Date.now()), 30_000);
@@ -252,13 +262,21 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
   const now = Number.isFinite(serverNow) ? serverNow : localNow;
   const expiryZone = query.data?.timeZone ?? "UTC";
 
-  return <section className="temp-vips-page" aria-label={labels.listTitle}>
+  return <section className="temp-vips-page" aria-label={labels.listTitle} data-tab={tab} ref={pageRef}>
+    <Tabs className="temp-vips-page__tabs" value={tab} keepMounted={false} onChange={(value) => {
+      if (value === "vips" || value === "settings") setTab(value);
+    }}>
+      <Tabs.List className="temp-vips-page__tabs-list" aria-label={labels.tabsLabel}>
+        <Tabs.Tab className="temp-vips-page__tab" value="vips">{labels.tabVips}</Tabs.Tab>
+        <Tabs.Tab className="temp-vips-page__tab" value="settings">{labels.tabSettings}</Tabs.Tab>
+      </Tabs.List>
+    </Tabs>
     <header className="temp-vips-page__actions">
       <div className="temp-vips-page__action-buttons">
         <Button variant="primary" onClick={() => openDialog({ kind: "grant" })} disabled={!canOperate}>{labels.grant}</Button>
         <Button variant="neutral" onClick={() => openDialog({ kind: "takeover" })} disabled={!canOperate}>{labels.takeOver}</Button>
       </div>
-      <div className="temp-vips-page__feedback" role="status" aria-live="polite">{pageFeedback ?? "\u00a0"}</div>
+      <div className="temp-vips-page__feedback" role="status" aria-live="polite" title={pageFeedback ?? undefined}>{pageFeedback}</div>
     </header>
 
     <section className="temp-vips-list" aria-label={labels.listTitle}>
@@ -281,7 +299,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
                 <strong>{row.displayName}</strong>
                 <span>@{row.login}</span>
                 {row.removalFailedAt === null ? null : <span className="temp-vips-row__warning" role="status">
-                  {labels.removalWarning}{row.removalError === null ? "" : ` · ${row.removalError}`}
+                  {labels.removalWarning}{row.removalError === null ? "" : ` · ${labels.removalReasons[row.removalError] ?? labels.removalReasonUnknown}`}
                 </span>}
               </div>
               <div className="temp-vips-row__expiry">
