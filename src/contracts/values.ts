@@ -203,6 +203,7 @@ export const EVENTSUB_SUBSCRIPTION_TYPES = [
   "channel.suspicious_user.message",
   "channel.suspicious_user.update",
   "channel.update",
+  "channel.vip.remove",
   "stream.offline",
   "stream.online",
 ] as const;
@@ -329,6 +330,12 @@ export const EVENT_CODES = [
   "text_commands.argument_invalid",
   "text_commands.changed_concurrently",
   "text_commands.variable_update_failed",
+  "temp_vips.granted",
+  "temp_vips.extended",
+  "temp_vips.imported",
+  "temp_vips.ended",
+  "temp_vips.released",
+  "temp_vips.removal_failed",
   "votekick.rejected",
   "template_parameters_invalid",
 ] as const;

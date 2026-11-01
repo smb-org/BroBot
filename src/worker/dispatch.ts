@@ -38,6 +38,7 @@ import { countStatisticsEmotes, statisticsTextFragments, statisticsWindowStart }
 import { botAccessTokenFor } from "./twitch/bot-access";
 import { moduleBallots } from "./module-ballots";
 import { modulePoints } from "./module-points";
+import { moduleTempVips } from "./module-temp-vips";
 import { createModuleSecretReadAccess } from "./module-secrets";
 import { recordChannelGameHistory } from "./db/game-search-cache";
 import { broadcasterHasScope } from "./broadcaster-scope";
@@ -811,6 +812,19 @@ export const dispatchEventSubNotification = async (
   fetcher: typeof fetch = fetch,
   registry: readonly BotModule[] = MODULES,
 ): Promise<void> => {
+  if (event.subscriptionType === "channel.vip.remove") {
+    const userId = textValue(event.payload.user_id);
+    if (userId === null) throw new Error("Temporary VIP removal event has no user id.");
+    const channel = environment.CHANNEL?.get(environment.CHANNEL.idFromName(event.channelId));
+    if (channel === undefined) throw new Error("The channel Durable Object is unavailable.");
+    const result = await channel.handleTempVipRemoved({
+      triggerId: event.triggerId,
+      userId,
+      eventSubTimestamp: event.eventSubTimestamp ?? event.receivedAt,
+    });
+    if (result.status === "busy") throw new Error("Temporary VIP state is busy; the EventSub event can be retried.");
+    return;
+  }
   if (event.subscriptionType === "channel.chat.message") {
     event = { ...event, payload: normalizeChatMessagePayload(event.payload) };
   }
@@ -1415,6 +1429,7 @@ export const dispatchEventSubNotification = async (
             authorizeMutation: authorizeModuleMutation,
             ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),
             points,
+            tempVips: moduleTempVips(environment.CHANNEL, event.channelId),
             readChannelBlockedTerms: channelBlockedTerms,
             botUserId,
             lookupUserByLogin: async (login) => {

@@ -225,6 +225,7 @@ describe("dashboard locale", () => {
       "text_commands.not_authorized", "text_commands.unknown", "text_commands.invalid",
       "text_commands.lookup_unavailable", "text_commands.argument_missing",
       "text_commands.argument_invalid", "text_commands.changed_concurrently", "text_commands.variable_update_failed", "template.lookup_unavailable", "template.chat_reference_dropped", "template.deferred_live", "template_parameters_invalid", "votekick.rejected",
+      "temp_vips.granted", "temp_vips.extended", "temp_vips.imported", "temp_vips.ended", "temp_vips.released", "temp_vips.removal_failed",
     ];
 
     expect(Object.keys(eventToneEntries).sort((a, b) => a.localeCompare(b))).toEqual([...codes].sort((a, b) => a.localeCompare(b)));

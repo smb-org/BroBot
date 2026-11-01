@@ -13,7 +13,7 @@ import {
   isModuleOverlayRealtimeEnvelope,
   realtimeRecipients,
 } from "../../realtime-contract";
-import { CHANNEL_ROLES, type ChannelRole } from "../../contracts/values";
+import { CHANNEL_ROLES, type ChannelRole, type EventCode } from "../../contracts/values";
 import { processAdPrewarning } from "../ad-prewarning";
 import {
   claimTestMessageSend as claimTestMessageSendInStorage,
@@ -82,6 +82,13 @@ import type {
   ModuleDryRunBallotSnapshot,
   ModuleExternalFetchBudget,
   ModulePointsAccess,
+  ModuleTempVipExtendRequest,
+  ModuleTempVipGrantRequest,
+  ModuleTempVipImportRequest,
+  ModuleTempVipOperationRequest,
+  ModuleTempVipRemovedEvent,
+  ModuleTempVipResult,
+  ModuleTempVipRow,
   ModuleQuizOverlaySnapshot,
   ModulePointRoundAnnouncement,
   ModulePointRoundResult,
@@ -128,7 +135,9 @@ import {
   SECURITY_ROUND_HANDLER,
   missingAlarmHandlerKeys,
   moduleAlarmHandlerEntries,
+  TEMP_VIP_EXPIRY_ALARM_HANDLER,
 } from "./module-alarm-registry";
+import { TempVipStore, type TempVipOutboxEvent } from "./temp-vips";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
 import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
 import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../../modules/ads/overlay/countdown-action";
@@ -137,6 +146,7 @@ import type { AdPrewarningScheduler } from "../../modules/ads/adapters/prewarnin
 import { getAppAccessToken } from "../app-token";
 import { broadcasterHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
+import { getChannelVip, addChannelVip, removeChannelVip } from "../twitch/vips";
 import { fetchLiveChattersTotal, fetchLiveViewerCount } from "../twitch/aggregate-counts";
 import { fetchStreamClips as fetchTwitchStreamClips } from "../twitch/stream-clips";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
@@ -313,6 +323,7 @@ const FIXED_D1_PARAMETER_COUNT = 2;
 const D1_IDS_PER_QUERY = D1_IN_PARAMETER_LIMIT - FIXED_D1_PARAMETER_COUNT;
 const ALARM_TABLE_KEY = "channel:alarm_schedule";
 const CLIP_JOB_ALARM_KEY = "clip_jobs";
+const TEMP_VIP_EXPIRY_ALARM_KEY = "temp-vips:expiry";
 const CLIP_JOB_STORAGE_PREFIX = "clip:job:";
 const CLIP_JOB_LAST_PRUNED_KEY = "clip:jobs_pruned_at";
 const CLIP_JOB_MAX_ATTEMPTS = 3;
@@ -4984,6 +4995,109 @@ export class ChannelObject extends DurableObject<Env> {
     });
   }
 
+  private tempVipStore(): TempVipStore {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Temporary VIP storage requires a named channel Durable Object.");
+    return new TempVipStore(this.ctx.storage, {
+      channelId,
+      twitch: {
+        get: (userId) => getChannelVip(this.env, channelId, userId),
+        add: (userId) => addChannelVip(this.env, channelId, userId),
+        remove: (userId) => removeChannelVip(this.env, channelId, userId),
+      },
+      scheduleAlarm: async (deadline) => {
+        if (deadline === null) {
+          await this.clearAlarmEntry(TEMP_VIP_EXPIRY_ALARM_KEY, undefined, null);
+          return;
+        }
+        await this.scheduleAlarmEntry(
+          TEMP_VIP_EXPIRY_ALARM_KEY,
+          TEMP_VIP_EXPIRY_ALARM_HANDLER,
+          deadline,
+          undefined,
+          undefined,
+          null,
+        );
+      },
+    });
+  }
+
+  private async flushTempVipOutbox(store: TempVipStore): Promise<void> {
+    const events: TempVipOutboxEvent[] = store.pendingOutbox();
+    if (events.length === 0) return;
+    try {
+      await this.env.DB.batch(events.map((event) => this.env.DB.prepare(
+        `INSERT OR IGNORE INTO event_log
+          (event_id, channel_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id)
+         VALUES (?, ?, ?, 'temp_vips', ?, ?, ?, ?)`,
+      ).bind(
+        event.eventId,
+        this.ownChannelId(),
+        event.createdAt,
+        event.operationId,
+        event.code as EventCode,
+        JSON.stringify(event.detail),
+        event.actorUserId,
+      )));
+      await store.acknowledgeOutbox(events.map((event) => event.eventId));
+    } catch (error: unknown) {
+      console.error("Temporary VIP event-log outbox remains pending.", this.ownChannelId(), error);
+    }
+  }
+
+  public async grantTempVip(request: ModuleTempVipGrantRequest): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.grant(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async extendTempVip(request: ModuleTempVipExtendRequest): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.extend(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async importExistingTempVip(request: ModuleTempVipImportRequest): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.importExisting(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async endTempVip(request: ModuleTempVipOperationRequest): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.end(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async releaseTempVip(request: ModuleTempVipOperationRequest): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.release(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async listTempVips(): Promise<ModuleTempVipRow[]> {
+    return this.tempVipStore().list();
+  }
+
+  public async runTempVipExpiry(now = new Date().toISOString()): Promise<{ removed: number; recoveredGrants: number }> {
+    const store = this.tempVipStore();
+    const result = await store.runExpiry(now);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async handleTempVipRemoved(event: ModuleTempVipRemovedEvent): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.handleRemoved(event);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
   private pointAccess(moduleId: string): ModulePointsAccess {
     return {
       apply: (operationId, kind, movements, result, payloadIdentity) =>
@@ -7470,6 +7584,12 @@ export class ChannelObject extends DurableObject<Env> {
       [CLIP_JOB_ALARM_HANDLER, {
         handle: async (_key, _entry, now) => {
           await this.runClipJobAlarm(now);
+          return undefined;
+        },
+      }],
+      [TEMP_VIP_EXPIRY_ALARM_HANDLER, {
+        handle: async (_key, _entry, _now, nowIso) => {
+          await this.runTempVipExpiry(nowIso);
           return undefined;
         },
       }],

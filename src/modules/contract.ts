@@ -646,6 +646,8 @@ export interface ModuleExecutionContext {
   ballots: ModuleBallotAccess;
   /** Point ledger access bound to the event channel and executing module. */
   points: ModulePointsAccess;
+  /** Temporary VIP access bound to the event channel and executing module. */
+  tempVips: ModuleTempVipAccess;
   /** Lazily reads the current channel's public blocked terms with the bot moderator token. */
   readChannelBlockedTerms?: () => Promise<readonly string[] | null>;
   /** Lazily resolves the connected bot identity so modules can ignore its own chat messages. */
@@ -1386,6 +1388,83 @@ export interface ModulePointsAccess {
     cancelOpenRounds: (revision: number, quizOverlaySnapshot?: Readonly<Record<string, unknown>>) => Promise<number>;
     setGate: (closed: boolean, revision: number, lastDisabledRevision?: number | null) => Promise<{ applied: boolean }>;
   };
+}
+
+export type TempVipSource = "command" | "dashboard" | "import" | "channel_points";
+export type TempVipEndReason = "expired" | "ended_early" | "removed_on_twitch";
+
+export interface ModuleTempVipPerson {
+  userId: string;
+  login: string;
+  displayName: string;
+}
+
+export interface ModuleTempVipRow extends ModuleTempVipPerson {
+  expiresAt: string;
+  grantedAt: string;
+  grantedByUserId: string | null;
+  grantedByLogin: string | null;
+  source: TempVipSource;
+  status: "active" | "grant_pending" | "grant_unknown";
+  grantGeneration: number;
+  removalFailedAt: string | null;
+  removalAttempts: number;
+  removalError: string | null;
+  endReason: "ended_early" | null;
+  revision: number;
+}
+
+export interface ModuleTempVipResult {
+  status: string;
+  reason?: string;
+  allowedDurationMs?: number;
+  retryAt?: string;
+  row?: ModuleTempVipRow;
+}
+
+export interface ModuleTempVipGrantRequest {
+  operationId: string;
+  person: ModuleTempVipPerson;
+  grantedBy: { userId: string; login: string } | null;
+  durationMs: number;
+  maximumRemainingMs: number;
+  source: TempVipSource;
+}
+
+export interface ModuleTempVipExtendRequest {
+  operationId: string;
+  person: ModuleTempVipPerson;
+  grantedBy?: { userId: string; login: string } | null;
+  durationMs: number;
+  maximumRemainingMs: number;
+  source?: TempVipSource;
+}
+
+export interface ModuleTempVipImportRequest extends ModuleTempVipGrantRequest {
+  source: "import";
+}
+
+export interface ModuleTempVipOperationRequest {
+  operationId: string;
+  userId: string;
+}
+
+export interface ModuleTempVipRemovedEvent {
+  triggerId: string;
+  userId: string;
+  eventSubTimestamp: string;
+}
+
+/** Channel-bound temporary VIP storage and Twitch operations owned by the host. */
+export interface ModuleTempVipAccess {
+  grant: (request: ModuleTempVipGrantRequest) => Promise<ModuleTempVipResult>;
+  extend: (request: ModuleTempVipExtendRequest) => Promise<ModuleTempVipResult>;
+  importExisting: (request: ModuleTempVipImportRequest) => Promise<ModuleTempVipResult>;
+  end: (request: ModuleTempVipOperationRequest) => Promise<ModuleTempVipResult>;
+  release: (request: ModuleTempVipOperationRequest) => Promise<ModuleTempVipResult>;
+  list: () => Promise<ModuleTempVipRow[]>;
+  runExpiry: (now?: string) => Promise<{ removed: number; recoveredGrants: number }>;
+  handleRemoved: (event: ModuleTempVipRemovedEvent) => Promise<ModuleTempVipResult>;
 }
 
 export type ModuleStreamState = "online" | "offline" | "unknown";
