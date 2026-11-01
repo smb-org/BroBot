@@ -759,6 +759,40 @@ describe("temporary VIP operation queue", () => {
     }, { twitch: { remove } });
   });
 
+  it("counts token-refresh retry DELETEs against the ten-removal drain cap", async () => {
+    let deletes = 0;
+    const remove = vi.fn(async (userId: string, beforeAttempt: () => Promise<boolean>) => {
+      // Simulates withBroadcasterToken: a 401 triggers a refresh and a second DELETE.
+      const attempts = Number(userId.slice("refresh-".length)) < 4 ? 2 : 1;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        if (!await beforeAttempt()) return { ok: false as const, reason: "precondition_failed" };
+        deletes += 1;
+        await new Promise<void>((resolve) => setTimeout(resolve, 1_200));
+      }
+      return { ok: false as const, reason: "network" };
+    });
+
+    await inStore(async (store, state) => {
+      for (let index = 0; index < 10; index += 1) {
+        insertRow(state.storage, {
+          userId: `refresh-${String(index)}`,
+          login: `refresh-${String(index)}`,
+          displayName: `Refresh ${String(index)}`,
+          expiresAt: "2026-11-01T11:59:00.000Z",
+        });
+      }
+
+      const run = store.runExpiry();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await run;
+
+      expect(deletes).toBeLessThanOrEqual(10);
+      expect(state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM temp_vip_ops WHERE kind = 'expire' AND status = 'queued'",
+      ).one().count).toBeGreaterThan(0);
+    }, { twitch: { remove } });
+  });
+
   it("does not admit an eleventh immediate failed expiry before the ten-second window clears", async () => {
     const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) =>
       await beforeAttempt()
@@ -1155,53 +1189,6 @@ describe("temporary VIP operation queue", () => {
       twitch: { add },
       isModuleEnabled: () => Promise.resolve(moduleEnabled),
       commitModuleDisable,
-    });
-  });
-
-  it("migrates stored admission state into the simplified disable queue schema", async () => {
-    await inStore((_store, state) => {
-      state.storage.transactionSync(() => {
-        state.storage.sql.exec("DROP TABLE temp_vip_ops");
-        state.storage.sql.exec(`CREATE TABLE temp_vip_ops (
-          operation_id TEXT PRIMARY KEY,
-          kind TEXT NOT NULL CHECK (kind IN ('grant', 'extend', 'import', 'end', 'release', 'expire', 'verify_removed', 'disable_check')),
-          user_id TEXT NOT NULL,
-          user_login TEXT NOT NULL,
-          payload_json TEXT NOT NULL,
-          status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'done')),
-          attempts INTEGER NOT NULL DEFAULT 0,
-          next_attempt_at TEXT NOT NULL,
-          result_json TEXT,
-          created_at TEXT NOT NULL,
-          finished_at TEXT,
-          enqueue_sequence INTEGER NOT NULL DEFAULT 0,
-          needs_reconcile INTEGER NOT NULL DEFAULT 0
-        )`);
-        state.storage.sql.exec("CREATE INDEX temp_vip_ops_due ON temp_vip_ops (status, next_attempt_at, enqueue_sequence)");
-        state.storage.sql.exec("CREATE INDEX temp_vip_ops_user_order ON temp_vip_ops (user_id, enqueue_sequence, status)");
-        state.storage.sql.exec("CREATE UNIQUE INDEX temp_vip_ops_sequence_unique ON temp_vip_ops (enqueue_sequence)");
-        state.storage.sql.exec(`INSERT INTO temp_vip_ops
-          (operation_id, kind, user_id, user_login, payload_json, status, next_attempt_at, created_at, enqueue_sequence)
-          VALUES ('legacy-disable', 'disable_check', '__channel__', '__channel__', '{"request":{}}', 'queued', ?, ?, 1)`,
-        BASE_NOW, BASE_NOW);
-        state.storage.sql.exec("CREATE TABLE temp_vip_control (singleton INTEGER PRIMARY KEY, disable_operation_id TEXT, disable_deadline TEXT)");
-        state.storage.sql.exec("INSERT INTO temp_vip_control VALUES (1, 'legacy-disable', '2026-11-01T12:01:00.000Z')");
-      });
-
-      createStore(state);
-
-      const operations = state.storage.sql.exec<{ kind: string; status: string; result_json: string | null }>(
-        "SELECT kind, status, result_json FROM temp_vip_ops WHERE operation_id = 'legacy-disable'",
-      ).one();
-      expect(operations).toMatchObject({ kind: "disable_module", status: "done" });
-      expect(JSON.parse(operations.result_json ?? "{}")).toEqual({ status: "superseded" });
-      expect(state.storage.sql.exec<{ present: number }>(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'temp_vip_control') AS present",
-      ).one().present).toBe(0);
-      expect(state.storage.sql.exec<{ present: number }>(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'temp_vip_ops_sequence_unique' AND tbl_name = 'temp_vip_ops') AS present",
-      ).one().present).toBe(1);
-      return Promise.resolve();
     });
   });
 

@@ -98,10 +98,6 @@ interface TempVipOperationSql extends Record<string, string | number | null> {
   needs_reconcile: number;
 }
 
-interface PreviousTempVipOperationSql extends Omit<TempVipOperationSql, "kind"> {
-  kind: string;
-}
-
 interface OperationPayload {
   request: Record<string, unknown>;
   stage?: string;
@@ -176,13 +172,6 @@ const canonicalJson = (value: unknown): string => {
 const requestJson = (payload: OperationPayload): string => canonicalJson(payload.request);
 
 const ensureTempVipsSchema = (sql: SqlStorage): void => {
-  const existingColumns = sql.exec<{ name: string }>("PRAGMA table_info(temp_vips)").toArray();
-  const legacyTable = existingColumns.some(({ name }) => name === "pending_op" || name === "grant_generation");
-  if (legacyTable) {
-    sql.exec("DROP INDEX IF EXISTS temp_vips_expiry");
-    sql.exec("ALTER TABLE temp_vips RENAME TO temp_vips_legacy");
-  }
-
   sql.exec(`CREATE TABLE IF NOT EXISTS temp_vips (
     user_id TEXT PRIMARY KEY,
     user_login TEXT NOT NULL,
@@ -198,35 +187,7 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
     end_reason TEXT CHECK (end_reason IN ('ended_early'))
   )`);
 
-  if (legacyTable) {
-    sql.exec(`INSERT OR REPLACE INTO temp_vips
-      (user_id, user_login, user_display_name, expires_at, granted_at, granted_by_user_id,
-       granted_by_login, source, removal_failed_at, removal_attempts, removal_error, end_reason)
-      SELECT user_id, user_login, user_display_name, expires_at, granted_at, granted_by_user_id,
-       granted_by_login, source, removal_failed_at, removal_attempts, removal_error, end_reason
-      FROM temp_vips_legacy`);
-    sql.exec("DROP TABLE temp_vips_legacy");
-  }
-
   sql.exec("CREATE INDEX IF NOT EXISTS temp_vips_expiry ON temp_vips (expires_at, user_id)");
-  const previousOperationTable = sql.exec<{ present: number }>(
-    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'temp_vip_ops') AS present",
-  ).one().present === 1;
-  const previousOperationColumns = previousOperationTable
-    ? sql.exec<{ name: string }>("PRAGMA table_info(temp_vip_ops)").toArray()
-    : [];
-  const previousOperationSql = previousOperationTable
-    ? sql.exec<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'temp_vip_ops'").one().sql
-    : "";
-  const rebuildOperations = previousOperationTable &&
-    (!previousOperationColumns.some(({ name }) => name === "enqueue_sequence") ||
-      previousOperationSql.includes("disable_check") || !previousOperationSql.includes("disable_module"));
-  if (rebuildOperations) {
-    sql.exec("DROP INDEX IF EXISTS temp_vip_ops_due");
-    sql.exec("DROP INDEX IF EXISTS temp_vip_ops_user_order");
-    sql.exec("DROP INDEX IF EXISTS temp_vip_ops_sequence_unique");
-    sql.exec("ALTER TABLE temp_vip_ops RENAME TO temp_vip_ops_previous");
-  }
   sql.exec(`CREATE TABLE IF NOT EXISTS temp_vip_ops (
     operation_id TEXT PRIMARY KEY,
     kind TEXT NOT NULL CHECK (kind IN ('grant', 'extend', 'import', 'end', 'release', 'expire', 'verify_removed', 'disable_module')),
@@ -242,37 +203,6 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
     enqueue_sequence INTEGER NOT NULL DEFAULT 0,
     needs_reconcile INTEGER NOT NULL DEFAULT 0
   )`);
-  const operationColumns = sql.exec<{ name: string }>("PRAGMA table_info(temp_vip_ops)").toArray();
-  if (!operationColumns.some(({ name }) => name === "needs_reconcile")) {
-    sql.exec("ALTER TABLE temp_vip_ops ADD COLUMN needs_reconcile INTEGER NOT NULL DEFAULT 0");
-  }
-  if (rebuildOperations) {
-    const operations = sql.exec<PreviousTempVipOperationSql>(
-      "SELECT * FROM temp_vip_ops_previous ORDER BY created_at, operation_id",
-    ).toArray();
-    let nextSequence = 0;
-    operations.forEach((previous) => {
-      nextSequence += 1;
-      if (previous.kind === "disable_check") {
-        sql.exec(`INSERT INTO temp_vip_ops
-          (operation_id, kind, user_id, user_login, payload_json, status, attempts, next_attempt_at,
-           result_json, created_at, finished_at, enqueue_sequence, needs_reconcile)
-         VALUES (?, 'disable_module', ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, 0)`,
-        previous.operation_id, previous.user_id, previous.user_login, previous.payload_json,
-        previous.attempts, previous.next_attempt_at, JSON.stringify({ status: "superseded" }),
-        previous.created_at, previous.finished_at ?? previous.created_at, nextSequence);
-        return;
-      }
-      sql.exec(`INSERT INTO temp_vip_ops
-        (operation_id, kind, user_id, user_login, payload_json, status, attempts, next_attempt_at,
-         result_json, created_at, finished_at, enqueue_sequence, needs_reconcile)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      previous.operation_id, previous.kind, previous.user_id, previous.user_login, previous.payload_json,
-      previous.status, previous.attempts, previous.next_attempt_at, previous.result_json,
-      previous.created_at, previous.finished_at, nextSequence, previous.needs_reconcile ?? 0);
-    });
-    sql.exec("DROP TABLE temp_vip_ops_previous");
-  }
   sql.exec("CREATE INDEX IF NOT EXISTS temp_vip_ops_due ON temp_vip_ops (status, next_attempt_at, enqueue_sequence)");
   sql.exec("CREATE INDEX IF NOT EXISTS temp_vip_ops_user_order ON temp_vip_ops (user_id, enqueue_sequence, status)");
   sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS temp_vip_ops_sequence_unique ON temp_vip_ops (enqueue_sequence)");
@@ -282,7 +212,6 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
   )`);
   sql.exec(`INSERT OR IGNORE INTO temp_vip_sequence (singleton, last_sequence)
     SELECT 1, COALESCE(MAX(enqueue_sequence), 0) FROM temp_vip_ops`);
-  sql.exec("DROP TABLE IF EXISTS temp_vip_control");
   sql.exec(`CREATE TABLE IF NOT EXISTS temp_vip_mutation_attempts (
     attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
     attempted_at INTEGER NOT NULL
@@ -295,12 +224,6 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
     code TEXT NOT NULL,
     detail_json TEXT NOT NULL
   )`);
-
-  sql.exec("DROP TABLE IF EXISTS temp_vip_generations");
-  sql.exec("DROP TABLE IF EXISTS temp_vip_tombstones");
-  sql.exec("DROP TABLE IF EXISTS temp_vip_removal_slots");
-  sql.exec("DROP TABLE IF EXISTS temp_vip_requests");
-  sql.exec("DROP TABLE IF EXISTS temp_vip_operations");
 };
 
 const enqueueEventSync = (
@@ -637,7 +560,7 @@ export class TempVipStore {
       if (claimed === null) break;
       await this.rearm();
       try {
-        await this.process(claimed, () => { removalAttempts += 1; });
+        await this.process(claimed, () => removalAttempts < TEMP_VIP_MAX_REMOVALS_PER_DRAIN, () => { removalAttempts += 1; });
       } catch (error: unknown) {
         const now = this.now();
         this.transaction(() => {
@@ -668,7 +591,11 @@ export class TempVipStore {
     return false;
   }
 
-  private async process(claimed: ClaimedOperation, onRemovalAttempt: () => void): Promise<void> {
+  private async process(
+    claimed: ClaimedOperation,
+    hasRemovalBudget: () => boolean,
+    spendRemoval: () => void,
+  ): Promise<void> {
     const operation = claimed.operation;
     const payload = claimed.payload;
     const now = this.now();
@@ -764,8 +691,7 @@ export class TempVipStore {
       });
       return;
     }
-    onRemovalAttempt();
-    const removed = await this.safeRemove(operation.user_id, operation, payload);
+    const removed = await this.safeRemove(operation.user_id, operation, payload, hasRemovalBudget, spendRemoval);
     if (!removed.ok && removed.reason === "precondition_failed") return;
     const completedAt = this.now();
     this.transaction(() => {
@@ -1424,8 +1350,21 @@ export class TempVipStore {
     userId: string,
     operation: TempVipOperationSql,
     payload: OperationPayload,
+    hasRemovalBudget: () => boolean,
+    spendRemoval: () => void,
   ): Promise<Awaited<ReturnType<TempVipTwitch["remove"]>>> {
-    try { return await this.options.twitch.remove(userId, () => this.beforeMutationAttempt(operation, payload)); }
+    try {
+      return await this.options.twitch.remove(userId, async () => {
+        // Every actual DELETE (including a retry after a token refresh) spends the per-drain budget.
+        if (!hasRemovalBudget()) {
+          this.requeueOperation(operation, payload, this.now(), 0, operation.attempts);
+          return false;
+        }
+        const allowed = await this.beforeMutationAttempt(operation, payload);
+        if (allowed) spendRemoval();
+        return allowed;
+      });
+    }
     catch { return { ok: false, reason: "network", ambiguous: true }; }
   }
 
