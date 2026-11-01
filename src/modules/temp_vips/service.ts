@@ -171,7 +171,8 @@ export const processTempVipsChatMessage = async (
     try {
       result = await context.tempVips.end({ operationId: event.triggerId, userId: resolution.person.userId });
     } catch {
-      return directChat(event, tempVipChatText(language, "genericFailure"));
+      // The operation may already be queued; never advise a blind retry.
+      return directChat(event, tempVipChatText(language, "uncertainOutcome", resolution.person.login));
     }
     if (result.status === "ended") return directChat(event, tempVipChatText(language, "ended", resolution.person.login));
     if (result.status === "not_managed") return directChat(event, tempVipChatText(language, "notManaged", resolution.person.login));
@@ -202,6 +203,6 @@ export const processTempVipsChatMessage = async (
     });
     return grantReply(event, resolution.person.login, result, language, timeZone, event.settings);
   } catch {
-    return directChat(event, tempVipChatText(language, "genericFailure"));
+    return directChat(event, tempVipChatText(language, "uncertainOutcome", resolution.person.login));
   }
 };

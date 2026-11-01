@@ -233,4 +233,82 @@ describe("temporary VIP chat commands", () => {
     await processTempVipsChatMessage(makeEvent("!viptime", null), context);
     expect(context.tempVips.list).toHaveBeenCalledTimes(1);
   });
+
+  const roles = [
+    ["viewer", [], false],
+    ["subscriber", ["subscriber"], false],
+    ["VIP", ["vip"], false],
+    ["moderator", ["moderator"], true],
+    ["broadcaster", ["broadcaster"], true],
+  ] as const;
+
+  describe.each(["!vip @gamer 30m", "!unvip @gamer"])("live authorization for %s", (text) => {
+    it.each(roles)("%s", async (_name, status, allowed) => {
+      const context = makeContext();
+      const result = await processTempVipsChatMessage(makeEvent(text, status), context);
+      const mutation = text.startsWith("!vip") ? context.tempVips.grant : context.tempVips.end;
+      if (allowed) {
+        expect(context.lookupUserByLogin).toHaveBeenCalledOnce();
+        expect(mutation).toHaveBeenCalledOnce();
+      } else {
+        expect(context.lookupUserByLogin).not.toHaveBeenCalled();
+        expect(context.tempVips.grant).not.toHaveBeenCalled();
+        expect(context.tempVips.end).not.toHaveBeenCalled();
+        expect(result.actions).toEqual([]);
+      }
+    });
+  });
+
+  const grantMatrix = [
+    ["extended", { status: "extended", row: vipRow() }, "de", "verlängert", "02.11.2026, 12:30"],
+    ["extended", { status: "extended", row: vipRow() }, "en", "extended", "2 Nov 2026, 12:30"],
+    ["maximum_exceeded", { status: "maximum_exceeded", allowedDurationMs: 2 * 3_600_000 }, "de", "höchstens 2 Std.", null],
+    ["maximum_exceeded", { status: "maximum_exceeded", allowedDurationMs: 2 * 3_600_000 }, "en", "at most 2h", null],
+    ["queued", { status: "queued" }, "de", "Warteschlange", null],
+    ["queued", { status: "queued" }, "en", "is queued", null],
+    ["already_vip", { status: "already_vip" }, "de", "bereits VIP", null],
+    ["already_vip", { status: "already_vip" }, "en", "already a VIP", null],
+    ["rejected", { status: "rejected", reason: "no_slots" }, "de", "keine VIP-Plätze frei", null],
+    ["rejected", { status: "rejected", reason: "no_slots" }, "en", "no VIP slots are available", null],
+  ] as const;
+
+  it.each(grantMatrix)("replies to a %s grant result (%s %s)", async (_status, result, language, essential, absolute) => {
+    const context = makeContext({ language, grant: () => Promise.resolve(result as { status: string }) });
+
+    const out = await processTempVipsChatMessage(makeEvent("!vip @gamer 30m"), context);
+
+    expect(out.actions[0]).toMatchObject({ kind: "chat", automated: false });
+    const text = (out.actions[0] as { text: string }).text;
+    expect(text).toContain(essential);
+    if (absolute !== null) expect(text).toContain(`${absolute} (Europe/Berlin)`);
+  });
+
+  it.each([
+    ["de", "kein zeitlich begrenztes VIP"],
+    ["en", "has no temporary VIP"],
+  ] as const)("replies to a not_managed !unvip result in %s", async (language, essential) => {
+    const context = makeContext({ language, end: () => Promise.resolve({ status: "not_managed" }) });
+
+    const out = await processTempVipsChatMessage(makeEvent("!unvip @gamer"), context);
+
+    expect(out.actions[0]).toMatchObject({ kind: "chat", automated: false });
+    expect((out.actions[0] as { text: string }).text).toContain(essential);
+  });
+
+  it.each([
+    ["de", "!viptime @gamer"],
+    ["en", "!viptime @gamer"],
+  ] as const)("reports an uncertain outcome without retry advice when the RPC throws (%s)", async (language, advice) => {
+    for (const text of ["!vip @gamer 30m", "!unvip @gamer"]) {
+      const boom = () => Promise.reject(new Error("alarm failed after enqueue"));
+      const context = makeContext({ language, grant: boom, end: boom });
+
+      const out = await processTempVipsChatMessage(makeEvent(text), context);
+
+      const reply = (out.actions[0] as { text: string }).text;
+      expect(reply).toContain(advice);
+      expect(reply).not.toMatch(/try again shortly|erneut\.|gleich erneut/);
+      expect(context.tempVips.grant).toHaveBeenCalledTimes(text.startsWith("!vip") ? 1 : 0);
+    }
+  });
 });
