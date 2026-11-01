@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
@@ -177,6 +178,45 @@ describe("module activation schedule RPCs", () => {
       response_text: "Custom command response",
       kind: "text",
     }]);
+  });
+
+  it("refuses to disable Temporary VIPs while a VIP is active and allows it once none is (protects=the disable guard asks the real ChannelObject and answers 409 temp_vips_active; fails_when=the module is disabled while a temporary VIP row exists; no_claim=unfinished grant counting, covered by the store tests)", async () => {
+    const channelId = `temp-vips-disable-${crypto.randomUUID()}`;
+    await insertChannel(channelId);
+    const request = await authenticatedRequestFactory(channelId);
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'temp_vips', 1, '{}', 1)",
+    ).bind(channelId).run();
+    const stub = workerEnvironment.CHANNEL.get(workerEnvironment.CHANNEL.idFromName(channelId));
+    await stub.completeTempVipDisableCheck("warmup");
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO temp_vips
+          (user_id, user_login, user_display_name, expires_at, granted_at, granted_by_user_id, granted_by_login,
+           source, removal_failed_at, removal_attempts, removal_error, end_reason)
+         VALUES ('vip-1', 'vip1', 'Vip1', '2099-01-01T00:00:00.000Z', '2026-11-01T12:00:00.000Z', NULL, NULL,
+           'command', NULL, 0, NULL, NULL)`,
+      );
+    });
+
+    const blocked = await panelRouter.fetch(
+      request(`/api/channels/${channelId}/modules/temp_vips`, "PATCH", { enabled: false }),
+      testEnvironment,
+    );
+    expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toMatchObject({ error: "temp_vips_active" });
+    await expect(database.prepare(
+      "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'temp_vips'",
+    ).bind(channelId).first()).resolves.toEqual({ enabled: 1 });
+
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("DELETE FROM temp_vips");
+    });
+    const allowed = await panelRouter.fetch(
+      request(`/api/channels/${channelId}/modules/temp_vips`, "PATCH", { enabled: false }),
+      testEnvironment,
+    );
+    expect(allowed.status).toBe(200);
   });
 
   it("notifies schedules through a real ChannelObject stub (protects=the schedule-input helper invokes the ChannelObject RPC without a remote call method; fails_when=the helper rejects with the Durable Object call TypeError; no_claim=how a schedule is rendered after its inputs change)", async () => {

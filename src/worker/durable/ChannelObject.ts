@@ -5002,8 +5002,8 @@ export class ChannelObject extends DurableObject<Env> {
       channelId,
       twitch: {
         get: (userId) => getChannelVip(this.env, channelId, userId),
-        add: (userId) => addChannelVip(this.env, channelId, userId),
-        remove: (userId) => removeChannelVip(this.env, channelId, userId),
+        add: (userId, beforeAttempt) => addChannelVip(this.env, channelId, userId, fetch, beforeAttempt),
+        remove: (userId, beforeAttempt) => removeChannelVip(this.env, channelId, userId, fetch, beforeAttempt),
       },
       scheduleAlarm: async (deadline) => {
         if (deadline === null) {
@@ -5088,6 +5088,14 @@ export class ChannelObject extends DurableObject<Env> {
 
   public hasTempVips(): boolean {
     return this.tempVipStore().hasRows();
+  }
+
+  public beginTempVipDisableCheck(operationId: string): Promise<ModuleTempVipResult> {
+    return this.tempVipStore().beginDisableCheck(operationId);
+  }
+
+  public completeTempVipDisableCheck(operationId: string): Promise<void> {
+    return this.tempVipStore().completeDisableCheck(operationId);
   }
 
   public async runTempVipExpiry(now = new Date().toISOString()): Promise<{ removed: number; queued: number }> {

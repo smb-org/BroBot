@@ -6,6 +6,7 @@ import { refreshLoginIdentityTokens } from "../../src/worker/auth/login-token-re
 import { maintainLoginIdentities } from "../../src/worker/login-maintenance";
 import { getLoginIdentity, setLoginIdentityTokenScopes, upsertLoginIdentity } from "../../src/worker/db/login-identity";
 import { withBroadcasterToken } from "../../src/worker/auth/broadcaster-token";
+import { addChannelVip } from "../../src/worker/twitch/vips";
 import { createReadInterleavingDatabase, TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const CHANNEL_ID = "1000001";
@@ -764,6 +765,37 @@ describe("withBroadcasterToken", () => {
       expect(fetcher).toHaveBeenCalledOnce();
     } finally {
       database.close();
+    }
+  });
+
+  it("reserves a VIP mutation again after refreshing a token for a 401", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, { scopes: ["channel:manage:vips"] });
+      let helixAttempts = 0;
+      const fetcher = vi.fn<typeof fetch>((input) => {
+        const url = requestUrl(input);
+        if (url.startsWith("https://id.twitch.tv/oauth2/token")) {
+          return Promise.resolve(refreshedTokenResponse(["channel:manage:vips"]));
+        }
+        helixAttempts += 1;
+        return Promise.resolve(helixAttempts === 1
+          ? new Response(JSON.stringify({ message: "Invalid OAuth token" }), { status: 401 })
+          : new Response(null, { status: 204 }));
+      });
+      const beforeAttempt = vi.fn(() => Promise.resolve(true));
+
+      await expect(addChannelVip(
+        environmentFor(database), CHANNEL_ID, "target-user", fetcher, beforeAttempt,
+      )).resolves.toEqual({ ok: true });
+
+      expect(helixAttempts).toBe(2);
+      expect(beforeAttempt).toHaveBeenCalledTimes(2);
+    } finally {
+      database.close();
+      vi.useRealTimers();
     }
   });
 

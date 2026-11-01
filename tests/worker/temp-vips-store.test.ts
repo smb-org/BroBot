@@ -112,7 +112,7 @@ const insertRow = (
 const insertInterruptedGrant = (
   storage: DurableObjectState["storage"],
   input: ModuleTempVipGrantRequest,
-  options: { status?: "running" | "queued"; attempts?: number; at?: string } = {},
+  options: { status?: "running" | "queued"; attempts?: number; at?: string; precondition?: "not_vip" } = {},
 ): void => {
   const at = options.at ?? BASE_NOW;
   const payload = JSON.stringify({
@@ -125,6 +125,7 @@ const insertInterruptedGrant = (
     },
     stage: "post",
     intentAt: at,
+    ...(options.precondition === undefined ? {} : { precondition: options.precondition }),
   });
   storage.transactionSync(() => {
     storage.sql.exec(
@@ -140,6 +141,43 @@ const insertInterruptedGrant = (
       options.attempts ?? 0,
       at,
       at,
+    );
+  });
+};
+
+const insertQueuedOperation = (
+  storage: DurableObjectState["storage"],
+  operation: {
+    operationId: string;
+    kind: "grant" | "end" | "expire";
+    userId: string;
+    userLogin: string;
+    request: Record<string, unknown>;
+    sequence: number;
+    status?: "queued" | "running";
+  },
+): void => {
+  const columns = new Set(storage.sql.exec<{ name: string }>("PRAGMA table_info(temp_vip_ops)").toArray().map(({ name }) => name));
+  const sequenceColumn = columns.has("enqueue_sequence") ? ", enqueue_sequence" : "";
+  const sequenceValue = columns.has("enqueue_sequence") ? ", ?" : "";
+  const values: Array<string | number> = [
+    operation.operationId,
+    operation.kind,
+    operation.userId,
+    operation.userLogin,
+    JSON.stringify({ request: operation.request, stage: "initial", intentAt: null }),
+    operation.status ?? "queued",
+    BASE_NOW,
+    BASE_NOW,
+  ];
+  if (columns.has("enqueue_sequence")) values.push(operation.sequence);
+  storage.transactionSync(() => {
+    storage.sql.exec(
+      `INSERT INTO temp_vip_ops
+        (operation_id, kind, user_id, user_login, payload_json, status, attempts, next_attempt_at,
+         result_json, created_at, finished_at${sequenceColumn})
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, NULL, ?, NULL${sequenceValue})`,
+      ...values,
     );
   });
 };
@@ -241,7 +279,23 @@ describe("temporary VIP operation queue", () => {
       expect(await store.list()).toMatchObject([{ expiresAt: "2026-11-02T12:00:00.000Z" }]);
       expect(state.storage.sql.exec<{ status: string; attempts: number }>(
         "SELECT status, attempts FROM temp_vip_ops WHERE operation_id = ?", input.operationId,
-      ).one()).toMatchObject({ status: "done", attempts: 3 });
+      ).one()).toMatchObject({ status: "done", attempts: 2 });
+    }, { twitch: { get, add } });
+  });
+
+  it("does not adopt a permanent VIP when an interrupted grant has no confirmed precondition", async () => {
+    const input = grantInput({ operationId: "crash-before-post-permanent-vip" });
+    const get = vi.fn().mockResolvedValue({ ok: true, isVip: true });
+    const add = vi.fn().mockResolvedValue({ ok: true });
+
+    await inStore(async (store, state) => {
+      insertInterruptedGrant(state.storage, input);
+      await store.runExpiry();
+
+      expect(operationResult(state.storage, input.operationId)).toMatchObject({ status: "already_vip" });
+      expect(await store.list()).toEqual([]);
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(add).not.toHaveBeenCalled();
     }, { twitch: { get, add } });
   });
 
@@ -251,7 +305,7 @@ describe("temporary VIP operation queue", () => {
     const add = vi.fn().mockResolvedValue({ ok: true });
 
     await inStore(async (store, state) => {
-      insertInterruptedGrant(state.storage, input);
+      insertInterruptedGrant(state.storage, input, { precondition: "not_vip" });
       await store.runExpiry();
 
       const recovered = await store.grant(input);
@@ -290,6 +344,7 @@ describe("temporary VIP operation queue", () => {
         },
         stage: "post",
         intentAt: BASE_NOW,
+        precondition: "not_vip",
       });
       state.storage.transactionSync(() => {
         state.storage.sql.exec(
@@ -327,6 +382,143 @@ describe("temporary VIP operation queue", () => {
       expect(remove).toHaveBeenCalledTimes(1);
       expect(pendingEvents(store).some((event) => event.code === "temp_vips.ended" && event.detail.reason === "ended_early")).toBe(true);
     }, { twitch: { remove } });
+  });
+
+  it("supersedes a failed removal when an extension is enqueued", async () => {
+    const remove = vi.fn().mockResolvedValueOnce({ ok: false, reason: "network" }).mockResolvedValue({ ok: true });
+    const get = vi.fn().mockResolvedValueOnce({ ok: true, isVip: false }).mockResolvedValue({ ok: true, isVip: true });
+
+    await inStore(async (store, state) => {
+      await store.grant(grantInput({ operationId: "supersede-seed" }));
+      const ending = store.end({ operationId: "superseded-end", userId: person.userId });
+      expect((await ending).status).toBe("queued");
+
+      const extended = await store.extend({
+        operationId: "superseding-extension",
+        person,
+        durationMs: DAY,
+        maximumRemainingMs: MAXIMUM,
+      });
+      expect(extended.status).toBe("extended");
+      expect(operationResult(state.storage, "superseded-end")).toEqual({ status: "superseded" });
+
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await store.runExpiry();
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect(await store.list()).toMatchObject([{ removalFailedAt: null, expiresAt: "2026-11-03T12:00:00.000Z" }]);
+    }, { twitch: { get, remove } });
+  });
+
+  it("keeps later same-user commands behind an ambiguous grant while other users proceed", async () => {
+    const get = vi.fn()
+      .mockResolvedValueOnce({ ok: true, isVip: false })
+      .mockResolvedValueOnce({ ok: true, isVip: false })
+      .mockResolvedValueOnce({ ok: true, isVip: true });
+    const add = vi.fn()
+      .mockResolvedValueOnce({ ok: false, reason: "network", ambiguous: true })
+      .mockResolvedValue({ ok: true });
+    const remove = vi.fn().mockResolvedValue({ ok: true });
+
+    await inStore(async (store) => {
+      expect((await store.grant(grantInput({ operationId: "unresolved-grant" }))).status).toBe("queued");
+      expect((await store.end({ operationId: "waits-for-grant", userId: person.userId })).status).toBe("queued");
+      expect((await store.grant(grantInput({
+        operationId: "other-user-proceeds",
+        person: { userId: "user-2", login: "viewer-two", displayName: "Viewer Two" },
+      }))).status).toBe("granted");
+      expect(remove).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await store.runExpiry();
+      expect(await store.grant(grantInput({ operationId: "unresolved-grant" }))).toMatchObject({ status: "granted" });
+      expect(await store.end({ operationId: "waits-for-grant", userId: person.userId })).toMatchObject({
+        status: "ended", reason: "ended_early",
+      });
+      expect(remove).toHaveBeenCalledTimes(1);
+    }, { twitch: { get, add, remove } });
+  });
+
+  it("uses enqueue sequence to preserve order when operation timestamps tie", async () => {
+    const remove = vi.fn().mockResolvedValue({ ok: true });
+
+    await inStore(async (store, state) => {
+      const input = grantInput({ operationId: "z-first-grant" });
+      const grantPayload = {
+        person: input.person,
+        grantedBy: input.grantedBy,
+        durationMs: input.durationMs,
+        maximumRemainingMs: input.maximumRemainingMs,
+        source: input.source,
+      };
+      insertQueuedOperation(state.storage, {
+        operationId: "z-first-grant",
+        kind: "grant",
+        userId: person.userId,
+        userLogin: person.login,
+        request: grantPayload,
+        sequence: 1,
+      });
+      insertQueuedOperation(state.storage, {
+        operationId: "a-second-end",
+        kind: "end",
+        userId: person.userId,
+        userLogin: person.login,
+        request: { userId: person.userId },
+        sequence: 2,
+      });
+
+      await store.runExpiry();
+
+      expect(operationResult(state.storage, "z-first-grant").status).toBe("granted");
+      expect(operationResult(state.storage, "a-second-end")).toMatchObject({ status: "ended", reason: "ended_early" });
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect(await store.list()).toEqual([]);
+    }, { twitch: { remove } });
+  });
+
+  it("reconciles interrupted removals before issuing another DELETE", async () => {
+    const get = vi.fn()
+      .mockResolvedValueOnce({ ok: true, isVip: false })
+      .mockResolvedValueOnce({ ok: false, reason: "network" });
+    const remove = vi.fn().mockResolvedValue({ ok: true });
+
+    await inStore(async (store, state) => {
+      insertRow(state.storage);
+      insertQueuedOperation(state.storage, {
+        operationId: "interrupted-removal",
+        kind: "end",
+        userId: person.userId,
+        userLogin: person.login,
+        request: { userId: person.userId },
+        sequence: 1,
+        status: "running",
+      });
+
+      await store.runExpiry();
+
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(remove).not.toHaveBeenCalled();
+      expect(operationResult(state.storage, "interrupted-removal")).toMatchObject({ status: "ended", reason: "ended_early" });
+      expect(await store.list()).toEqual([]);
+
+      insertRow(state.storage, { userId: "user-2", login: "viewer-two", displayName: "Viewer Two" });
+      insertQueuedOperation(state.storage, {
+        operationId: "interrupted-removal-check-fails",
+        kind: "end",
+        userId: "user-2",
+        userLogin: "viewer-two",
+        request: { userId: "user-2" },
+        sequence: 2,
+        status: "running",
+      });
+      await store.runExpiry();
+
+      expect(remove).not.toHaveBeenCalled();
+      expect(state.storage.sql.exec<{ status: string; next_attempt_at: string }>(
+        "SELECT status, next_attempt_at FROM temp_vip_ops WHERE operation_id = 'interrupted-removal-check-fails'",
+      ).one()).toMatchObject({ status: "queued", next_attempt_at: "2026-11-01T12:01:00.000Z" });
+      expect(await store.list()).toHaveLength(1);
+    }, { twitch: { get, remove } });
   });
 
   it("backs failed removals off by five, fifteen, then sixty minutes", async () => {
@@ -370,7 +562,8 @@ describe("temporary VIP operation queue", () => {
 
   it("keeps slow failed expiries within the rolling mutation limit", async () => {
     const starts: number[] = [];
-    const remove = vi.fn(async () => {
+    const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) => {
+      if (!await beforeAttempt()) return { ok: false as const, reason: "precondition_failed" };
       starts.push(Date.now());
       await new Promise<void>((resolve) => setTimeout(resolve, 1_200));
       return { ok: false as const, reason: "network" };
@@ -404,7 +597,10 @@ describe("temporary VIP operation queue", () => {
   });
 
   it("does not admit an eleventh immediate failed expiry before the ten-second window clears", async () => {
-    const remove = vi.fn().mockResolvedValue({ ok: false, reason: "network" });
+    const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) =>
+      await beforeAttempt()
+        ? { ok: false as const, reason: "network" }
+        : { ok: false as const, reason: "precondition_failed" });
     await inStore(async (store, state) => {
       for (let index = 0; index < 11; index += 1) {
         insertRow(state.storage, {
@@ -416,19 +612,135 @@ describe("temporary VIP operation queue", () => {
       }
 
       await store.runExpiry();
-      expect(remove).toHaveBeenCalledTimes(10);
+      expect(remove).toHaveBeenCalledTimes(11);
       expect(state.storage.sql.exec<{ count: number }>(
         "SELECT COUNT(*) AS count FROM temp_vip_ops WHERE kind = 'expire' AND status = 'queued' AND next_attempt_at = '2026-11-01T12:00:10.000Z'",
       ).one().count).toBe(1);
 
       await vi.advanceTimersByTimeAsync(10_000);
       await store.runExpiry();
-      expect(remove).toHaveBeenCalledTimes(11);
+      expect(remove).toHaveBeenCalledTimes(12);
     }, { twitch: { remove } });
+  });
+
+  it("keeps a durable alarm deadline for due queued work while the runner is active", async () => {
+    let finishAdd: ((result: { ok: true }) => void) | undefined;
+    let markAddStarted: (() => void) | undefined;
+    const addStarted = new Promise<void>((resolve) => { markAddStarted = resolve; });
+    const deadlines: Array<number | null> = [];
+    const add = vi.fn((userId: string) => {
+      if (userId === person.userId) {
+        markAddStarted?.();
+        return new Promise<{ ok: true }>((resolve) => { finishAdd = resolve; });
+      }
+      return Promise.resolve({ ok: true as const });
+    });
+
+    await inStore(async (store) => {
+      const first = store.grant(grantInput({ operationId: "alarm-runner-first" }));
+      await addStarted;
+      const queued = store.grant(grantInput({
+        operationId: "alarm-runner-queued",
+        person: { userId: "user-2", login: "viewer-two", displayName: "Viewer Two" },
+      }));
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect((await queued).status).toBe("queued");
+      expect(deadlines.at(-1)).not.toBeNull();
+      expect(deadlines.at(-1) as number).toBeLessThanOrEqual(BASE_MS + 30_000);
+
+      finishAdd?.({ ok: true });
+      // The caller wait (10s) elapsed while the Helix call was still pending.
+      expect((await first).status).toBe("queued");
+      expect((await store.grant(grantInput({
+        operationId: "alarm-runner-queued",
+        person: { userId: "user-2", login: "viewer-two", displayName: "Viewer Two" },
+      }))).status).toBe("granted");
+    }, {
+      twitch: { add },
+      scheduleAlarm: (deadline) => {
+        deadlines.push(deadline);
+        return Promise.resolve();
+      },
+    });
+  });
+
+  it("schedules the pending removal retry instead of the row's overdue expiry", async () => {
+    const deadlines: Array<number | null> = [];
+    const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) =>
+      await beforeAttempt()
+        ? { ok: false as const, reason: "network" }
+        : { ok: false as const, reason: "precondition_failed" });
+
+    await inStore(async (store, state) => {
+      for (let index = 0; index < 11; index += 1) {
+        insertRow(state.storage, {
+          userId: `alarm-paced-${String(index)}`,
+          login: `alarm-paced-${String(index)}`,
+          displayName: `Alarm Paced ${String(index)}`,
+          expiresAt: "2026-11-01T11:59:00.000Z",
+        });
+      }
+
+      await store.runExpiry();
+
+      expect(remove).toHaveBeenCalledTimes(11);
+      expect(state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM temp_vip_mutation_attempts",
+      ).one().count).toBe(10);
+      expect(deadlines.at(-1)).toBe(Date.parse("2026-11-01T12:00:10.000Z"));
+    }, {
+      twitch: { remove },
+      scheduleAlarm: (deadline) => {
+        deadlines.push(deadline);
+        return Promise.resolve();
+      },
+    });
+  });
+
+  it("reserves pacing for each issued Helix mutation attempt, including a 401 retry", async () => {
+    let actualAttemptsForRetryingGrant = 0;
+    const add = vi.fn(async (userId: string, beforeAttempt: () => Promise<boolean>) => {
+      if (userId !== "retrying-user") {
+        expect(await beforeAttempt()).toBe(true);
+        return { ok: true as const };
+      }
+      if (!await beforeAttempt()) return { ok: false as const, reason: "precondition_failed" };
+      actualAttemptsForRetryingGrant += 1;
+      // The first issued request gets a 401. Token refresh happens before this second reservation.
+      if (!await beforeAttempt()) return { ok: false as const, reason: "precondition_failed" };
+      actualAttemptsForRetryingGrant += 1;
+      return { ok: true as const };
+    });
+    const get = vi.fn().mockResolvedValue({ ok: true, isVip: false });
+
+    await inStore(async (store, state) => {
+      for (let index = 0; index < 9; index += 1) {
+        const input = grantInput({
+          operationId: `paced-grant-${String(index)}`,
+          person: { userId: `paced-user-${String(index)}`, login: `paced-${String(index)}`, displayName: `Paced ${String(index)}` },
+        });
+        expect((await store.grant(input)).status).toBe("granted");
+      }
+
+      expect((await store.grant(grantInput({
+        operationId: "401-retry-pacing",
+        person: { userId: "retrying-user", login: "retrying", displayName: "Retrying" },
+      }))).status).toBe("queued");
+      expect(actualAttemptsForRetryingGrant).toBe(1);
+      expect(state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM temp_vip_mutation_attempts",
+      ).one().count).toBe(10);
+      expect(state.storage.sql.exec<{ next_attempt_at: string }>(
+        "SELECT next_attempt_at FROM temp_vip_ops WHERE operation_id = '401-retry-pacing'",
+      ).one().next_attempt_at).toBe("2026-11-01T12:00:10.000Z");
+    }, { twitch: { get, add } });
   });
 
   it("ignores stale EventSub echoes, removes manual departures, and keeps VIPs still present", async () => {
     const get = vi.fn()
+      .mockResolvedValueOnce({ ok: true, isVip: false })
+      .mockResolvedValueOnce({ ok: true, isVip: false })
+      .mockResolvedValueOnce({ ok: true, isVip: false })
       .mockResolvedValueOnce({ ok: true, isVip: false })
       .mockResolvedValueOnce({ ok: true, isVip: true });
 
@@ -449,7 +761,7 @@ describe("temporary VIP operation queue", () => {
       ).one()).toMatchObject({ kind: "verify_removed" });
       await store.runExpiry();
       expect(operationResult(state.storage, "verify_removed:stale-removal-echo").status).toBe("ignored_stale_echo");
-      expect(get).not.toHaveBeenCalled();
+      expect(get).toHaveBeenCalledTimes(2);
       expect(await store.list()).toHaveLength(1);
 
       const manual = await store.handleRemoved({
@@ -473,7 +785,7 @@ describe("temporary VIP operation queue", () => {
       await store.runExpiry();
       expect(operationResult(state.storage, "verify_removed:manual-removal-still-vip").status).toBe("ignored_stale_event");
       expect(await store.list()).toHaveLength(1);
-      expect(get).toHaveBeenCalledTimes(2);
+      expect(get).toHaveBeenCalledTimes(5);
     }, { twitch: { get } });
   });
 
@@ -556,6 +868,46 @@ describe("temporary VIP operation queue", () => {
         "SELECT COUNT(*) AS count FROM temp_vip_ops WHERE operation_id = 'retained-result'",
       ).one().count).toBe(1);
     });
+  });
+
+  it("counts pending grants as occupied and serializes disable admission with later grants", async () => {
+    let finishAdd: ((result: { ok: true } | { ok: false; reason: string; ambiguous?: boolean }) => void) | undefined;
+    let markAddStarted: (() => void) | undefined;
+    const addStarted = new Promise<void>((resolve) => { markAddStarted = resolve; });
+    let addCount = 0;
+    const add = vi.fn(() => {
+      addCount += 1;
+      if (addCount > 1) return Promise.resolve({ ok: true as const });
+      markAddStarted?.();
+      return new Promise<{ ok: true } | { ok: false; reason: string; ambiguous?: boolean }>((resolve) => { finishAdd = resolve; });
+    });
+
+    await inStore(async (store, state) => {
+      const pendingGrant = store.grant(grantInput({ operationId: "disable-pending-post" }));
+      await addStarted;
+      expect(store.hasRows()).toBe(true);
+      expect(state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM temp_vip_ops WHERE kind = 'grant' AND status != 'done'",
+      ).one().count).toBe(1);
+      expect(JSON.parse(state.storage.sql.exec<{ payload_json: string }>(
+        "SELECT payload_json FROM temp_vip_ops WHERE operation_id = 'disable-pending-post'",
+      ).one().payload_json)).toMatchObject({ precondition: "not_vip" });
+
+      finishAdd?.({ ok: false, reason: "network", ambiguous: true });
+      expect((await pendingGrant).status).toBe("queued");
+      expect(store.hasRows()).toBe(true);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await store.runExpiry();
+      expect(operationResult(state.storage, "disable-pending-post").status).toBe("granted");
+      state.storage.transactionSync(() => state.storage.sql.exec("DELETE FROM temp_vips WHERE user_id = ?", person.userId));
+      expect(store.hasRows()).toBe(false);
+
+      const admission = await store.beginDisableCheck("disable-temp-vips");
+      expect(admission).toMatchObject({ status: "ready" });
+      expect((await store.grant(grantInput({ operationId: "grant-during-disable" }))).status).toBe("module_disabled");
+      expect(add).toHaveBeenCalledTimes(2);
+      await store.completeDisableCheck("disable-temp-vips");
+    }, { twitch: { add } });
   });
 
   it("returns a bounded queued result while a Twitch request is still running", async () => {

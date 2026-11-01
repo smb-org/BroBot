@@ -151,6 +151,7 @@ const runVipAction = async (
   broadcasterId: string,
   userId: string,
   fetcher: typeof fetch,
+  beforeAttempt: () => Promise<boolean>,
 ): Promise<VipActionResult> => {
   const method = operation === "add" ? "POST" : "DELETE";
   const result = await withBroadcasterToken<null>(environment, broadcasterId, [TEMP_VIP_BROADCASTER_SCOPE], async (accessToken) => {
@@ -163,7 +164,7 @@ const runVipAction = async (
       fetcher,
     });
     return expectedSuccessStatus(response, 204);
-  }, { fetcher });
+  }, { fetcher, beforeCall: beforeAttempt });
   if (result.kind !== "ok") return callFailure(result, operation);
   return { ok: true };
 };
@@ -173,11 +174,13 @@ export const addChannelVip = (
   broadcasterId: string,
   userId: string,
   fetcher: typeof fetch = fetch,
-): Promise<VipActionResult> => runVipAction("add", environment, broadcasterId, userId, fetcher);
+  beforeAttempt: () => Promise<boolean> = () => Promise.resolve(true),
+): Promise<VipActionResult> => runVipAction("add", environment, broadcasterId, userId, fetcher, beforeAttempt);
 
 export const removeChannelVip = (
   environment: Env,
   broadcasterId: string,
   userId: string,
   fetcher: typeof fetch = fetch,
-): Promise<VipActionResult> => runVipAction("remove", environment, broadcasterId, userId, fetcher);
+  beforeAttempt: () => Promise<boolean> = () => Promise.resolve(true),
+): Promise<VipActionResult> => runVipAction("remove", environment, broadcasterId, userId, fetcher, beforeAttempt);
