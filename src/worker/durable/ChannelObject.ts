@@ -1,4 +1,5 @@
 import { writeModuleAudit } from "../module-audit";
+import { getChannelModuleForChannel, updateChannelModuleEnabledStateWithAudit } from "../db/channel-modules";
 import { DurableObject } from "cloudflare:workers";
 
 import type {
@@ -137,7 +138,12 @@ import {
   moduleAlarmHandlerEntries,
   TEMP_VIP_EXPIRY_ALARM_HANDLER,
 } from "./module-alarm-registry";
-import { TempVipStore, type TempVipOutboxEvent } from "./temp-vips";
+import {
+  TempVipStore,
+  type TempVipModuleDisableRequest,
+  type TempVipModuleDisableResult,
+  type TempVipOutboxEvent,
+} from "./temp-vips";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
 import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
 import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../../modules/ads/overlay/countdown-action";
@@ -5011,6 +5017,25 @@ export class ChannelObject extends DurableObject<Env> {
         ).bind(channelId).first<{ enabled: number }>();
         return module?.enabled === 1;
       },
+      commitModuleDisable: async ({ actor, expectedRevision, changedAt }) => {
+        const existing = await getChannelModuleForChannel(this.env.DB, channelId, "temp_vips");
+        if (existing === null) return null;
+        if (!existing.enabled && existing.revision === expectedRevision + 1 &&
+            existing.lastDisabledRevision === expectedRevision + 1) {
+          return { revision: existing.revision, lastDisabledRevision: existing.lastDisabledRevision };
+        }
+        return updateChannelModuleEnabledStateWithAudit(
+          this.env.DB,
+          actor,
+          channelId,
+          "temp_vips",
+          false,
+          "module.disabled",
+          changedAt,
+          [],
+          expectedRevision,
+        );
+      },
       scheduleAlarm: async (deadline) => {
         if (deadline === null) {
           await this.clearAlarmEntry(TEMP_VIP_EXPIRY_ALARM_KEY, undefined, null);
@@ -5092,16 +5117,8 @@ export class ChannelObject extends DurableObject<Env> {
     return this.tempVipStore().list();
   }
 
-  public hasTempVips(): boolean {
-    return this.tempVipStore().hasRows();
-  }
-
-  public beginTempVipDisableCheck(operationId: string): Promise<ModuleTempVipResult> {
-    return this.tempVipStore().beginDisableCheck(operationId);
-  }
-
-  public completeTempVipDisableCheck(operationId: string): Promise<void> {
-    return this.tempVipStore().completeDisableCheck(operationId);
+  public disableTempVipModule(request: TempVipModuleDisableRequest): Promise<TempVipModuleDisableResult> {
+    return this.tempVipStore().disableModule(request);
   }
 
   public async runTempVipExpiry(now = new Date().toISOString()): Promise<{ removed: number; queued: number }> {

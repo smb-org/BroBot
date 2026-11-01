@@ -188,7 +188,7 @@ describe("module activation schedule RPCs", () => {
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'temp_vips', 1, '{}', 1)",
     ).bind(channelId).run();
     const stub = workerEnvironment.CHANNEL.get(workerEnvironment.CHANNEL.idFromName(channelId));
-    await stub.completeTempVipDisableCheck("warmup");
+    await stub.listTempVips();
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(
         `INSERT INTO temp_vips
@@ -216,7 +216,15 @@ describe("module activation schedule RPCs", () => {
       request(`/api/channels/${channelId}/modules/temp_vips`, "PATCH", { enabled: false }),
       testEnvironment,
     );
+    const allowedBody = await allowed.json<{ revision: number }>();
     expect(allowed.status).toBe(200);
+    expect(allowedBody.revision).toBe(2);
+    await expect(database.prepare(
+      "SELECT enabled, revision, last_disabled_revision FROM channel_modules WHERE channel_id = ? AND module_id = 'temp_vips'",
+    ).bind(channelId).first()).resolves.toEqual({ enabled: 0, revision: 2, last_disabled_revision: 2 });
+    await expect(database.prepare(
+      "SELECT action FROM audit_log WHERE channel_id = ? AND module_id = 'temp_vips' ORDER BY created_at DESC LIMIT 1",
+    ).bind(channelId).first()).resolves.toEqual({ action: "module.disabled" });
   });
 
   it("notifies schedules through a real ChannelObject stub (protects=the schedule-input helper invokes the ChannelObject RPC without a remote call method; fails_when=the helper rejects with the Durable Object call TypeError; no_claim=how a schedule is rendered after its inputs change)", async () => {

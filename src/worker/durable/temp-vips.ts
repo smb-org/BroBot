@@ -16,8 +16,8 @@ const TEMP_VIP_MUTATION_WINDOW_MS = 10_000;
 const TEMP_VIP_OPERATION_RETENTION_MS = 24 * 60 * 60_000;
 const TEMP_VIP_CALLER_WAIT_MS = 10_000;
 const TEMP_VIP_RECOVERY_MS = 60_000;
-const TEMP_VIP_DISABLE_ADMISSION_MS = 60_000;
 const TEMP_VIP_QUEUED_RECOVERY_MS = 30_000;
+const TEMP_VIP_MAX_REMOVALS_PER_DRAIN = 10;
 const TEMP_VIP_RETRY_MS = 60_000;
 const TEMP_VIP_OUTBOX_RETRY_MS = 60_000;
 const REMOVAL_RETRY_DELAYS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000] as const;
@@ -44,10 +44,27 @@ export interface TempVipStoreOptions {
   twitch: TempVipTwitch;
   scheduleAlarm: (deadline: number | null) => Promise<void>;
   isModuleEnabled?: () => Promise<boolean>;
+  commitModuleDisable?: (request: {
+    actor: { userId: string; sessionId: string };
+    expectedRevision: number;
+    changedAt: string;
+  }) => Promise<{ revision: number; lastDisabledRevision: number | null } | null>;
+}
+
+export interface TempVipModuleDisableRequest {
+  operationId: string;
+  actor: { userId: string; sessionId: string };
+  expectedRevision: number;
+}
+
+export interface TempVipModuleDisableResult {
+  status: string;
+  revision?: number;
+  lastDisabledRevision?: number | null;
 }
 
 type TempVipStorage = Pick<DurableObjectStorage, "sql" | "transactionSync">;
-type TempVipOperationKind = "grant" | "extend" | "import" | "end" | "release" | "expire" | "verify_removed" | "disable_check";
+type TempVipOperationKind = "grant" | "extend" | "import" | "end" | "release" | "expire" | "verify_removed" | "disable_module";
 type QueueStatus = "queued" | "running" | "done";
 
 interface TempVipRowSql extends Record<string, string | number | null> {
@@ -81,12 +98,21 @@ interface TempVipOperationSql extends Record<string, string | number | null> {
   needs_reconcile: number;
 }
 
+interface PreviousTempVipOperationSql extends Omit<TempVipOperationSql, "kind"> {
+  kind: string;
+}
+
 interface OperationPayload {
   request: Record<string, unknown>;
   stage?: string;
   intentAt?: string | null;
   precondition?: "not_vip";
 }
+
+type TempVipStoredResult = ModuleTempVipResult & {
+  revision?: number;
+  lastDisabledRevision?: number | null;
+};
 
 interface ClaimedOperation {
   operation: TempVipOperationSql;
@@ -189,16 +215,21 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
   const previousOperationColumns = previousOperationTable
     ? sql.exec<{ name: string }>("PRAGMA table_info(temp_vip_ops)").toArray()
     : [];
+  const previousOperationSql = previousOperationTable
+    ? sql.exec<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'temp_vip_ops'").one().sql
+    : "";
   const rebuildOperations = previousOperationTable &&
-    !previousOperationColumns.some(({ name }) => name === "enqueue_sequence");
+    (!previousOperationColumns.some(({ name }) => name === "enqueue_sequence") ||
+      previousOperationSql.includes("disable_check") || !previousOperationSql.includes("disable_module"));
   if (rebuildOperations) {
     sql.exec("DROP INDEX IF EXISTS temp_vip_ops_due");
     sql.exec("DROP INDEX IF EXISTS temp_vip_ops_user_order");
+    sql.exec("DROP INDEX IF EXISTS temp_vip_ops_sequence_unique");
     sql.exec("ALTER TABLE temp_vip_ops RENAME TO temp_vip_ops_previous");
   }
   sql.exec(`CREATE TABLE IF NOT EXISTS temp_vip_ops (
     operation_id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('grant', 'extend', 'import', 'end', 'release', 'expire', 'verify_removed', 'disable_check')),
+    kind TEXT NOT NULL CHECK (kind IN ('grant', 'extend', 'import', 'end', 'release', 'expire', 'verify_removed', 'disable_module')),
     user_id TEXT NOT NULL,
     user_login TEXT NOT NULL,
     payload_json TEXT NOT NULL,
@@ -216,17 +247,29 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
     sql.exec("ALTER TABLE temp_vip_ops ADD COLUMN needs_reconcile INTEGER NOT NULL DEFAULT 0");
   }
   if (rebuildOperations) {
-    const operations = sql.exec<TempVipOperationSql>(
+    const operations = sql.exec<PreviousTempVipOperationSql>(
       "SELECT * FROM temp_vip_ops_previous ORDER BY created_at, operation_id",
     ).toArray();
-    operations.forEach((previous, index) => {
+    let nextSequence = 0;
+    operations.forEach((previous) => {
+      nextSequence += 1;
+      if (previous.kind === "disable_check") {
+        sql.exec(`INSERT INTO temp_vip_ops
+          (operation_id, kind, user_id, user_login, payload_json, status, attempts, next_attempt_at,
+           result_json, created_at, finished_at, enqueue_sequence, needs_reconcile)
+         VALUES (?, 'disable_module', ?, ?, ?, 'done', ?, ?, ?, ?, ?, ?, 0)`,
+        previous.operation_id, previous.user_id, previous.user_login, previous.payload_json,
+        previous.attempts, previous.next_attempt_at, JSON.stringify({ status: "superseded" }),
+        previous.created_at, previous.finished_at ?? previous.created_at, nextSequence);
+        return;
+      }
       sql.exec(`INSERT INTO temp_vip_ops
         (operation_id, kind, user_id, user_login, payload_json, status, attempts, next_attempt_at,
-         result_json, created_at, finished_at, enqueue_sequence)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         result_json, created_at, finished_at, enqueue_sequence, needs_reconcile)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       previous.operation_id, previous.kind, previous.user_id, previous.user_login, previous.payload_json,
       previous.status, previous.attempts, previous.next_attempt_at, previous.result_json,
-      previous.created_at, previous.finished_at, index + 1);
+      previous.created_at, previous.finished_at, nextSequence, previous.needs_reconcile ?? 0);
     });
     sql.exec("DROP TABLE temp_vip_ops_previous");
   }
@@ -239,16 +282,7 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
   )`);
   sql.exec(`INSERT OR IGNORE INTO temp_vip_sequence (singleton, last_sequence)
     SELECT 1, COALESCE(MAX(enqueue_sequence), 0) FROM temp_vip_ops`);
-  sql.exec(`CREATE TABLE IF NOT EXISTS temp_vip_control (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    disable_operation_id TEXT,
-    disable_deadline TEXT
-  )`);
-  const controlColumns = sql.exec<{ name: string }>("PRAGMA table_info(temp_vip_control)").toArray();
-  if (!controlColumns.some(({ name }) => name === "disable_deadline")) {
-    sql.exec("ALTER TABLE temp_vip_control ADD COLUMN disable_deadline TEXT");
-  }
-  sql.exec("INSERT OR IGNORE INTO temp_vip_control (singleton, disable_operation_id, disable_deadline) VALUES (1, NULL, NULL)");
+  sql.exec("DROP TABLE IF EXISTS temp_vip_control");
   sql.exec(`CREATE TABLE IF NOT EXISTS temp_vip_mutation_attempts (
     attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
     attempted_at INTEGER NOT NULL
@@ -308,7 +342,7 @@ const userOrderAvailable = `NOT EXISTS (
    WHERE earlier.user_id = candidate.user_id AND earlier.status != 'done'
      AND earlier.enqueue_sequence < candidate.enqueue_sequence
      AND NOT (
-       candidate.kind IN ('grant', 'extend')
+       candidate.kind IN ('grant', 'extend', 'verify_removed')
        AND earlier.kind IN ('end', 'expire')
        AND earlier.status = 'queued'
        AND earlier.next_attempt_at > ?
@@ -349,62 +383,6 @@ export class TempVipStore {
     return next;
   }
 
-  private disableGateSync(): string | null {
-    return this.sql.exec<{ disable_operation_id: string | null }>(
-      "SELECT disable_operation_id FROM temp_vip_control WHERE singleton = 1",
-    ).one().disable_operation_id;
-  }
-
-  private async reconcileDisableAdmission(force = false): Promise<void> {
-    const control = this.sql.exec<{ disable_operation_id: string | null; disable_deadline: string | null }>(
-      "SELECT disable_operation_id, disable_deadline FROM temp_vip_control WHERE singleton = 1",
-    ).one();
-    if (control.disable_operation_id === null) return;
-    const now = this.now();
-    if (!force && control.disable_deadline !== null && parseTime(control.disable_deadline) > parseTime(now)) return;
-
-    if (this.options.isModuleEnabled === undefined) {
-      if (force) {
-        this.transaction(() => {
-          this.sql.exec(
-            "UPDATE temp_vip_control SET disable_operation_id = NULL, disable_deadline = NULL WHERE singleton = 1 AND disable_operation_id = ?",
-            control.disable_operation_id,
-          );
-        });
-      }
-      return;
-    }
-
-    let enabled: boolean;
-    try {
-      enabled = await this.options.isModuleEnabled();
-    } catch {
-      const retryAt = utc(parseTime(now) + TEMP_VIP_DISABLE_ADMISSION_MS);
-      this.transaction(() => {
-        this.sql.exec(
-          "UPDATE temp_vip_control SET disable_deadline = ? WHERE singleton = 1 AND disable_operation_id = ?",
-          retryAt,
-          control.disable_operation_id,
-        );
-      });
-      return;
-    }
-
-    this.transaction(() => {
-      const current = this.sql.exec<{ disable_operation_id: string | null }>(
-        "SELECT disable_operation_id FROM temp_vip_control WHERE singleton = 1",
-      ).one().disable_operation_id;
-      if (current !== control.disable_operation_id) return;
-      if (enabled) {
-        this.sql.exec(
-          "UPDATE temp_vip_control SET disable_operation_id = NULL, disable_deadline = NULL WHERE singleton = 1",
-        );
-      } else {
-        this.sql.exec("UPDATE temp_vip_control SET disable_deadline = NULL WHERE singleton = 1");
-      }
-    });
-  }
-
   private enqueue(
     operationId: string,
     kind: TempVipOperationKind,
@@ -437,10 +415,7 @@ export class TempVipStore {
          VALUES (?, ?, ?, ?, ?, 'queued', 0, ?, NULL, ?, NULL, ?)`,
         operationId, kind, userId, userLogin, payloadJson, now, now, sequence,
       );
-      const disableGate = this.disableGateSync();
-      if (isCreationOperation(kind) && disableGate !== null) {
-        this.finishSync(operationId, { status: "module_disabled" }, now);
-      } else if (kind === "release") {
+      if (kind === "release") {
         const queuedRemovals = this.sql.exec<TempVipOperationSql>(
           `SELECT * FROM temp_vip_ops WHERE user_id = ? AND status = 'queued'
              AND kind IN ('end', 'expire') AND enqueue_sequence < ? ORDER BY enqueue_sequence`,
@@ -473,7 +448,7 @@ export class TempVipStore {
     );
   }
 
-  private finishSync(operationId: string, result: ModuleTempVipResult, now: string, attempts?: number): void {
+  private finishSync(operationId: string, result: TempVipStoredResult, now: string, attempts?: number): void {
     this.sql.exec(
       `UPDATE temp_vip_ops SET status = 'done', attempts = COALESCE(?, attempts), next_attempt_at = ?,
          result_json = ?, finished_at = ? WHERE operation_id = ?`,
@@ -577,10 +552,15 @@ export class TempVipStore {
       .then(() => this.drainQueue())
       .catch((error: unknown) => {
         console.error("Temporary VIP queue runner stopped; its durable alarm will retry it.", error);
+        return false;
       })
-      .finally(() => {
+      .then(async (removalLimitReached) => {
         if (runnerByStorage.get(this.storage) !== runner) return;
         runnerByStorage.delete(this.storage);
+        if (removalLimitReached) {
+          await this.rearm();
+          return;
+        }
         if (this.hasDueQueueWork()) void this.startRunner();
       });
     runnerByStorage.set(this.storage, runner);
@@ -594,12 +574,6 @@ export class TempVipStore {
         SELECT 1 FROM temp_vip_ops AS candidate
          WHERE (candidate.status = 'running' OR (candidate.status = 'queued' AND candidate.next_attempt_at <= ?))
            AND ${userOrderAvailable}
-           AND NOT EXISTS (
-             SELECT 1 FROM temp_vip_ops AS earlier
-              WHERE earlier.status != 'done' AND earlier.enqueue_sequence < candidate.enqueue_sequence
-                AND ((candidate.kind = 'disable_check' AND earlier.kind IN ('grant', 'extend', 'import'))
-                  OR (candidate.kind IN ('grant', 'extend', 'import') AND earlier.kind = 'disable_check'))
-           )
       ) AS present`,
       now,
       now,
@@ -614,12 +588,6 @@ export class TempVipStore {
         `SELECT candidate.* FROM temp_vip_ops AS candidate
           WHERE (candidate.status = 'running' OR (candidate.status = 'queued' AND candidate.next_attempt_at <= ?))
             AND ${userOrderAvailable}
-            AND NOT EXISTS (
-              SELECT 1 FROM temp_vip_ops AS earlier
-               WHERE earlier.status != 'done' AND earlier.enqueue_sequence < candidate.enqueue_sequence
-                 AND ((candidate.kind = 'disable_check' AND earlier.kind IN ('grant', 'extend', 'import'))
-                   OR (candidate.kind IN ('grant', 'extend', 'import') AND earlier.kind = 'disable_check'))
-            )
           ORDER BY CASE candidate.status WHEN 'running' THEN 0 ELSE 1 END, candidate.enqueue_sequence
           LIMIT 1`,
         now,
@@ -662,14 +630,14 @@ export class TempVipStore {
     });
   }
 
-  private async drainQueue(): Promise<void> {
-    await this.reconcileDisableAdmission();
+  private async drainQueue(): Promise<boolean> {
+    let removalAttempts = 0;
     for (;;) {
       const claimed = this.claimNext();
       if (claimed === null) break;
       await this.rearm();
       try {
-        await this.process(claimed);
+        await this.process(claimed, () => { removalAttempts += 1; });
       } catch (error: unknown) {
         const now = this.now();
         this.transaction(() => {
@@ -691,18 +659,31 @@ export class TempVipStore {
         console.warn("Temporary VIP operation will retry after an unexpected failure.", claimed.operation.operation_id, error);
       }
       await this.rearm();
+      if (removalAttempts >= TEMP_VIP_MAX_REMOVALS_PER_DRAIN) {
+        await this.rearm();
+        return true;
+      }
     }
     await this.rearm();
+    return false;
   }
 
-  private async process(claimed: ClaimedOperation): Promise<void> {
+  private async process(claimed: ClaimedOperation, onRemovalAttempt: () => void): Promise<void> {
     const operation = claimed.operation;
     const payload = claimed.payload;
     const now = this.now();
     const row = rowFor(this.sql, operation.user_id);
 
-    if (operation.kind === "disable_check") {
-      this.processDisableCheck(operation);
+    if (operation.kind === "disable_module") {
+      await this.processDisableModule(operation, payload);
+      return;
+    }
+
+    if (isCreationOperation(operation.kind) && this.options.isModuleEnabled !== undefined &&
+        !await this.options.isModuleEnabled()) {
+      this.transaction(() => {
+        this.finishSync(operation.operation_id, { status: "module_disabled" }, this.now(), operation.attempts);
+      });
       return;
     }
 
@@ -783,6 +764,7 @@ export class TempVipStore {
       });
       return;
     }
+    onRemovalAttempt();
     const removed = await this.safeRemove(operation.user_id, operation, payload);
     if (!removed.ok && removed.reason === "precondition_failed") return;
     const completedAt = this.now();
@@ -840,39 +822,49 @@ export class TempVipStore {
     });
   }
 
-  private processDisableCheck(operation: TempVipOperationSql): void {
+  private async processDisableModule(
+    operation: TempVipOperationSql,
+    payload: OperationPayload,
+  ): Promise<void> {
     const now = this.now();
-    this.transaction(() => {
-      if (this.disableGateSync() !== null) {
-        this.finishSync(operation.operation_id, { status: "busy" }, now, operation.attempts);
-        return;
-      }
-      const occupied = this.sql.exec<{ present: number }>(
-        `SELECT EXISTS(SELECT 1 FROM temp_vips)
-           OR EXISTS(SELECT 1 FROM temp_vip_ops
-             WHERE status != 'done' AND kind IN ('grant', 'extend', 'import') AND enqueue_sequence < ?)
-           AS present`,
-        operation.enqueue_sequence,
-      ).one().present === 1;
-      if (occupied) {
-        this.finishSync(operation.operation_id, { status: "occupied" }, now, operation.attempts);
-        return;
-      }
+    const occupied = this.sql.exec<{ present: number }>(
+      `SELECT EXISTS(SELECT 1 FROM temp_vips)
+         OR EXISTS(SELECT 1 FROM temp_vip_ops
+           WHERE status != 'done' AND kind IN ('grant', 'extend', 'import')
+             AND operation_id != ?) AS present`,
+      operation.operation_id,
+    ).one().present === 1;
+    if (occupied) {
+      this.transaction(() => {
+        this.finishSync(operation.operation_id, { status: "temp_vips_active" }, now, operation.attempts);
+      });
+      return;
+    }
 
-      this.sql.exec(
-        "UPDATE temp_vip_control SET disable_operation_id = ?, disable_deadline = ? WHERE singleton = 1",
+    const commitModuleDisable = this.options.commitModuleDisable;
+    if (commitModuleDisable === undefined) {
+      this.transaction(() => {
+        this.finishSync(operation.operation_id, { status: "module_changed_concurrently" }, now, operation.attempts);
+      });
+      return;
+    }
+
+    const request = payload.request as unknown as Omit<TempVipModuleDisableRequest, "operationId">;
+    const committed = await commitModuleDisable({ ...request, changedAt: this.now() });
+    const completedAt = this.now();
+    this.transaction(() => {
+      const current = this.sql.exec<TempVipOperationSql>(
+        "SELECT status FROM temp_vip_ops WHERE operation_id = ?",
         operation.operation_id,
-        utc(parseTime(now) + TEMP_VIP_DISABLE_ADMISSION_MS),
-      );
-      const laterCreations = this.sql.exec<TempVipOperationSql>(
-        `SELECT * FROM temp_vip_ops WHERE status = 'queued'
-           AND kind IN ('grant', 'extend', 'import') AND enqueue_sequence > ?`,
-        operation.enqueue_sequence,
-      ).toArray();
-      for (const later of laterCreations) {
-        this.finishSync(later.operation_id, { status: "module_disabled" }, now);
-      }
-      this.finishSync(operation.operation_id, { status: "ready" }, now, operation.attempts);
+      ).toArray()[0];
+      if (current?.status !== "running") return;
+      this.finishSync(operation.operation_id, committed === null
+        ? { status: "module_changed_concurrently" }
+        : {
+          status: "disabled",
+          revision: committed.revision,
+          lastDisabledRevision: committed.lastDisabledRevision,
+        }, completedAt, operation.attempts);
     });
   }
 
@@ -1443,12 +1435,8 @@ export class TempVipStore {
     const deadlines: number[] = [];
     const operations = this.sql.exec<Pick<TempVipOperationSql, "status" | "next_attempt_at" | "finished_at">>(
       `SELECT candidate.status, candidate.next_attempt_at, candidate.finished_at FROM temp_vip_ops AS candidate
-        WHERE (candidate.status != 'done' AND ${userOrderAvailable} AND NOT EXISTS (
-          SELECT 1 FROM temp_vip_ops AS earlier
-           WHERE earlier.status != 'done' AND earlier.enqueue_sequence < candidate.enqueue_sequence
-             AND ((candidate.kind = 'disable_check' AND earlier.kind IN ('grant', 'extend', 'import'))
-               OR (candidate.kind IN ('grant', 'extend', 'import') AND earlier.kind = 'disable_check'))
-        )) OR (candidate.status = 'done' AND candidate.finished_at IS NOT NULL)`,
+        WHERE (candidate.status != 'done' AND ${userOrderAvailable})
+           OR (candidate.status = 'done' AND candidate.finished_at IS NOT NULL)`,
       now,
     ).toArray();
     const runnerActive = runnerByStorage.has(this.storage);
@@ -1474,10 +1462,6 @@ export class TempVipStore {
         : parseTime(row.removal_failed_at) + backoffDelay(row.removal_attempts);
       deadlines.push(dueAt);
     }
-    const disableDeadline = this.sql.exec<{ disable_deadline: string | null }>(
-      "SELECT disable_deadline FROM temp_vip_control WHERE singleton = 1",
-    ).one().disable_deadline;
-    if (disableDeadline !== null) deadlines.push(parseTime(disableDeadline));
     if (this.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM temp_vip_outbox").one().count > 0) {
       deadlines.push(parseTime(now) + TEMP_VIP_OUTBOX_RETRY_MS);
     }
@@ -1494,7 +1478,6 @@ export class TempVipStore {
     userLogin: string,
     request: Record<string, unknown>,
   ): Promise<ModuleTempVipResult> {
-    await this.reconcileDisableAdmission();
     this.enqueue(operationId, kind, userId, userLogin, request);
     await this.rearm();
     return this.waitForOperation(operationId);
@@ -1556,55 +1539,20 @@ export class TempVipStore {
     return this.enqueueAndWait(operationId, "release", request.userId, request.userId, { userId: request.userId });
   }
 
+  public async disableModule(request: TempVipModuleDisableRequest): Promise<TempVipModuleDisableResult> {
+    const operationId = operationKey(request.operationId);
+    const result = await this.enqueueAndWait(operationId, "disable_module", "__channel__", "__channel__", {
+      actor: request.actor,
+      expectedRevision: request.expectedRevision,
+    });
+    return result;
+  }
+
   public list(): Promise<ModuleTempVipRow[]> {
     return Promise.resolve(this.sql.exec<TempVipRowSql>("SELECT * FROM temp_vips ORDER BY expires_at, user_id").toArray().map(publicRow));
   }
 
-  public hasRows(): boolean {
-    return this.sql.exec<{ present: number }>(
-      `SELECT EXISTS(SELECT 1 FROM temp_vips)
-         OR EXISTS(SELECT 1 FROM temp_vip_ops
-           WHERE status != 'done' AND kind IN ('grant', 'extend', 'import')) AS present`,
-    ).one().present === 1;
-  }
-
-  public async beginDisableCheck(operationId: string): Promise<ModuleTempVipResult> {
-    const result = await this.enqueueAndWait(operationKey(operationId), "disable_check", "__channel__", "__channel__", {});
-    if (result.status === "queued") {
-      this.transaction(() => {
-        const current = this.sql.exec<TempVipOperationSql>(
-          "SELECT * FROM temp_vip_ops WHERE operation_id = ?",
-          operationId,
-        ).toArray()[0];
-        if (current?.status === "queued") {
-          this.finishSync(operationId, { status: "deferred" }, this.now(), current.attempts);
-        }
-      });
-      await this.rearm();
-      return { status: "deferred" };
-    }
-    return result;
-  }
-
-  public async completeDisableCheck(operationId: string): Promise<void> {
-    const current = this.disableGateSync();
-    if (current === operationId) {
-      await this.reconcileDisableAdmission(true);
-      if (this.options.isModuleEnabled === undefined) {
-        this.transaction(() => {
-          this.sql.exec(
-            "UPDATE temp_vip_control SET disable_operation_id = NULL, disable_deadline = NULL WHERE singleton = 1 AND disable_operation_id = ?",
-            operationId,
-          );
-        });
-      }
-    }
-    await this.rearm();
-    void this.startRunner();
-  }
-
   public async runExpiry(now = this.now()): Promise<{ removed: number; queued: number }> {
-    await this.reconcileDisableAdmission();
     const before = this.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM temp_vips").one().count;
     const dueRows = this.sql.exec<TempVipRowSql>("SELECT * FROM temp_vips ORDER BY expires_at, user_id").toArray()
       .filter((row) => this.isDue(row, now));

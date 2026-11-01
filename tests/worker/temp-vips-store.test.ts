@@ -9,7 +9,7 @@ import type {
   ModuleTempVipPerson,
   ModuleTempVipResult,
 } from "../../src/modules/contract";
-import { TempVipStore, type TempVipTwitch } from "../../src/worker/durable/temp-vips";
+import { TempVipStore, type TempVipStoreOptions, type TempVipTwitch } from "../../src/worker/durable/temp-vips";
 
 const namespace = (env as unknown as { CHANNEL: Env["CHANNEL"] }).CHANNEL;
 const BASE_NOW = "2026-11-01T12:00:00.000Z";
@@ -36,6 +36,7 @@ const createStore = (state: DurableObjectState, options: {
   twitch?: Partial<TempVipTwitch>;
   scheduleAlarm?: (deadline: number | null) => Promise<void>;
   isModuleEnabled?: () => Promise<boolean>;
+  commitModuleDisable?: TempVipStoreOptions["commitModuleDisable"];
 } = {}): TempVipStore => new TempVipStore(state.storage, {
   channelId: options.channelId ?? "temp-vips-test",
   now: () => new Date().toISOString(),
@@ -46,6 +47,7 @@ const createStore = (state: DurableObjectState, options: {
   },
   scheduleAlarm: options.scheduleAlarm ?? vi.fn().mockResolvedValue(undefined),
   ...(options.isModuleEnabled === undefined ? {} : { isModuleEnabled: options.isModuleEnabled }),
+  ...(options.commitModuleDisable === undefined ? {} : { commitModuleDisable: options.commitModuleDisable }),
 });
 
 const inStore = <T>(
@@ -411,6 +413,38 @@ describe("temporary VIP operation queue", () => {
     }, { twitch: { get, remove } });
   });
 
+  it("settles stale removal verification during backoff before an extension", async () => {
+    const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) =>
+      await beforeAttempt()
+        ? { ok: false as const, reason: "network" }
+        : { ok: false as const, reason: "precondition_failed" });
+    const get = vi.fn().mockResolvedValueOnce({ ok: true, isVip: false }).mockResolvedValue({ ok: true, isVip: true });
+
+    await inStore(async (store, state) => {
+      await store.grant(grantInput({ operationId: "verify-backoff-seed" }));
+      expect((await store.end({ operationId: "verify-backoff-end", userId: person.userId })).status).toBe("queued");
+      expect((await store.handleRemoved({
+        triggerId: "verify-backoff-stale",
+        userId: person.userId,
+        eventSubTimestamp: "2026-11-01T11:59:00.000Z",
+      })).status).toBe("queued");
+
+      const extended = await store.extend({
+        operationId: "verify-backoff-extend",
+        person,
+        durationMs: DAY,
+        maximumRemainingMs: MAXIMUM,
+      });
+
+      expect(extended.status).toBe("extended");
+      expect(operationResult(state.storage, "verify_removed:verify-backoff-stale").status).toBe("ignored_stale_echo");
+      expect(operationResult(state.storage, "verify-backoff-end").status).toBe("superseded");
+      expect(await store.list()).toMatchObject([{ removalFailedAt: null, expiresAt: "2026-11-03T12:00:00.000Z" }]);
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledTimes(2); // grant precondition + the extension's own lookup
+    }, { twitch: { get, remove } });
+  });
+
   it("keeps rejected extensions from superseding backoff removals and gives expiry attempts fresh ids", async () => {
     const deadlines: Array<number | null> = [];
     const get = vi.fn()
@@ -657,7 +691,7 @@ describe("temporary VIP operation queue", () => {
     }, { twitch: { remove } });
   });
 
-  it("keeps slow failed expiries within the rolling mutation limit", async () => {
+  it("caps slow failed expiries at ten removals per queue drain", async () => {
     const starts: number[] = [];
     const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) => {
       if (!await beforeAttempt()) return { ok: false as const, reason: "precondition_failed" };
@@ -679,7 +713,7 @@ describe("temporary VIP operation queue", () => {
       await vi.advanceTimersByTimeAsync(30_000);
       await run;
 
-      expect(remove).toHaveBeenCalledTimes(12);
+      expect(remove).toHaveBeenCalledTimes(10);
       for (let start = 0; start < starts.length; start += 1) {
         const windowStart = starts[start];
         if (windowStart === undefined) continue;
@@ -690,6 +724,38 @@ describe("temporary VIP operation queue", () => {
         "SELECT COUNT(*) AS count FROM temp_vip_mutation_attempts",
       ).one().count;
       expect(recorded).toBeLessThanOrEqual(10);
+    }, { twitch: { remove } });
+  });
+
+  it("stops the first slow expiry invocation after ten of twenty removals", async () => {
+    const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) => {
+      if (!await beforeAttempt()) return { ok: false as const, reason: "precondition_failed" };
+      await new Promise<void>((resolve) => setTimeout(resolve, 1_200));
+      return { ok: false as const, reason: "network" };
+    });
+
+    await inStore(async (store, state) => {
+      for (let index = 0; index < 20; index += 1) {
+        insertRow(state.storage, {
+          userId: `slow-expiry-${String(index)}`,
+          login: `slow-expiry-${String(index)}`,
+          displayName: `Slow Expiry ${String(index)}`,
+          expiresAt: "2026-11-01T11:59:00.000Z",
+        });
+      }
+
+      const run = store.runExpiry();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await run;
+
+      expect(remove).toHaveBeenCalledTimes(10);
+      expect(state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM temp_vip_ops WHERE kind = 'expire' AND status = 'queued'",
+      ).one().count).toBe(20);
+      expect(state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM temp_vip_ops WHERE kind = 'expire' AND status = 'queued' AND next_attempt_at > ?",
+        BASE_NOW,
+      ).one().count).toBe(10);
     }, { twitch: { remove } });
   });
 
@@ -707,6 +773,13 @@ describe("temporary VIP operation queue", () => {
           expiresAt: "2026-11-01T11:59:00.000Z",
         });
       }
+
+      await store.runExpiry();
+      expect(remove).toHaveBeenCalledTimes(10);
+      expect(state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM temp_vip_ops WHERE kind = 'expire' AND status = 'queued' AND next_attempt_at = ?",
+        BASE_NOW,
+      ).one().count).toBe(1);
 
       await store.runExpiry();
       expect(remove).toHaveBeenCalledTimes(11);
@@ -761,7 +834,7 @@ describe("temporary VIP operation queue", () => {
     });
   });
 
-  it("schedules the pending removal retry instead of the row's overdue expiry", async () => {
+  it("rearms remaining expiry work after the ten-removal batch limit", async () => {
     const deadlines: Array<number | null> = [];
     const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) =>
       await beforeAttempt()
@@ -780,11 +853,11 @@ describe("temporary VIP operation queue", () => {
 
       await store.runExpiry();
 
-      expect(remove).toHaveBeenCalledTimes(11);
+      expect(remove).toHaveBeenCalledTimes(10);
       expect(state.storage.sql.exec<{ count: number }>(
         "SELECT COUNT(*) AS count FROM temp_vip_mutation_attempts",
       ).one().count).toBe(10);
-      expect(deadlines.at(-1)).toBe(Date.parse("2026-11-01T12:00:10.000Z"));
+      expect(deadlines.at(-1)).toBe(BASE_MS + 1);
     }, {
       twitch: { remove },
       scheduleAlarm: (deadline) => {
@@ -991,7 +1064,7 @@ describe("temporary VIP operation queue", () => {
     });
   });
 
-  it("counts pending grants as occupied and serializes disable admission with later grants", async () => {
+  it("serializes a disable after an in-flight grant and reports the active row", async () => {
     let finishAdd: ((result: { ok: true } | { ok: false; reason: string; ambiguous?: boolean }) => void) | undefined;
     let markAddStarted: (() => void) | undefined;
     const addStarted = new Promise<void>((resolve) => { markAddStarted = resolve; });
@@ -1002,11 +1075,16 @@ describe("temporary VIP operation queue", () => {
       markAddStarted?.();
       return new Promise<{ ok: true } | { ok: false; reason: string; ambiguous?: boolean }>((resolve) => { finishAdd = resolve; });
     });
+    let moduleEnabled = true;
+    const commitModuleDisable = vi.fn(({ expectedRevision }: { expectedRevision: number }) => {
+      moduleEnabled = false;
+      return Promise.resolve({ revision: expectedRevision + 1, lastDisabledRevision: expectedRevision + 1 });
+    });
 
     await inStore(async (store, state) => {
       const pendingGrant = store.grant(grantInput({ operationId: "disable-pending-post" }));
       await addStarted;
-      expect(store.hasRows()).toBe(true);
+      expect(state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM temp_vips").one().count).toBe(0);
       expect(state.storage.sql.exec<{ count: number }>(
         "SELECT COUNT(*) AS count FROM temp_vip_ops WHERE kind = 'grant' AND status != 'done'",
       ).one().count).toBe(1);
@@ -1014,63 +1092,117 @@ describe("temporary VIP operation queue", () => {
         "SELECT payload_json FROM temp_vip_ops WHERE operation_id = 'disable-pending-post'",
       ).one().payload_json)).toMatchObject({ precondition: "not_vip" });
 
+      const disabling = store.disableModule({
+        operationId: "disable-after-in-flight-grant",
+        actor: { userId: actor.userId, sessionId: "session-1" },
+        expectedRevision: 1,
+      });
       finishAdd?.({ ok: false, reason: "network", ambiguous: true });
       expect((await pendingGrant).status).toBe("queued");
-      expect(store.hasRows()).toBe(true);
+      expect((await disabling).status).toBe("temp_vips_active");
+      expect(moduleEnabled).toBe(true);
+      expect(await store.list()).toHaveLength(0);
+
       await vi.advanceTimersByTimeAsync(60_000);
       await store.runExpiry();
       expect(operationResult(state.storage, "disable-pending-post").status).toBe("granted");
-      state.storage.transactionSync(() => state.storage.sql.exec("DELETE FROM temp_vips WHERE user_id = ?", person.userId));
-      expect(store.hasRows()).toBe(false);
 
-      const admission = await store.beginDisableCheck("disable-temp-vips");
-      expect(admission).toMatchObject({ status: "ready" });
-      expect((await store.grant(grantInput({ operationId: "grant-during-disable" }))).status).toBe("module_disabled");
-      expect(add).toHaveBeenCalledTimes(2);
-      await store.completeDisableCheck("disable-temp-vips");
-    }, { twitch: { add } });
+      const blocked = await store.disableModule({
+        operationId: "disable-with-active-row",
+        actor: { userId: actor.userId, sessionId: "session-1" },
+        expectedRevision: 1,
+      });
+      expect(blocked.status).toBe("temp_vips_active");
+      expect(moduleEnabled).toBe(true);
+      expect(await store.list()).toHaveLength(1);
+      expect(commitModuleDisable).not.toHaveBeenCalled();
+    }, { twitch: { add }, isModuleEnabled: () => Promise.resolve(moduleEnabled), commitModuleDisable });
   });
 
-  it("recovers an abandoned disable admission from D1 after its deadline and restart", async () => {
-    const add = vi.fn().mockResolvedValue({ ok: true });
-    const deadlines: Array<number | null> = [];
+  it("commits disable before a racing grant and makes that grant re-read module state", async () => {
+    let finishDisable: (() => void) | undefined;
+    let markDisableStarted: (() => void) | undefined;
+    const disableStarted = new Promise<void>((resolve) => { markDisableStarted = resolve; });
     let moduleEnabled = true;
-    const options = {
-      twitch: { add },
-      isModuleEnabled: () => Promise.resolve(moduleEnabled),
-      scheduleAlarm: (deadline: number | null) => {
-        deadlines.push(deadline);
-        return Promise.resolve();
-      },
-    };
+    const commitModuleDisable = vi.fn(async ({ expectedRevision }: { expectedRevision: number }) => {
+      markDisableStarted?.();
+      await new Promise<void>((resolve) => { finishDisable = resolve; });
+      moduleEnabled = false;
+      return { revision: expectedRevision + 1, lastDisabledRevision: expectedRevision + 1 };
+    });
+    const add = vi.fn().mockResolvedValue({ ok: true });
 
     await inStore(async (store, state) => {
-      expect(await store.beginDisableCheck("abandoned-disable")).toMatchObject({ status: "ready" });
-      expect(state.storage.sql.exec<{ disable_deadline: string | null }>(
-        "SELECT disable_deadline FROM temp_vip_control WHERE singleton = 1",
-      ).one().disable_deadline).toBe("2026-11-01T12:01:00.000Z");
-      expect(deadlines.at(-1)).toBe(Date.parse("2026-11-01T12:01:00.000Z"));
+      const disabling = store.disableModule({
+        operationId: "disable-before-racing-grant",
+        actor: { userId: actor.userId, sessionId: "session-1" },
+        expectedRevision: 1,
+      });
+      await disableStarted;
+      const grant = store.grant(grantInput({ operationId: "grant-after-disable-enqueue" }));
+      await Promise.resolve();
+      finishDisable?.();
 
-      await vi.advanceTimersByTimeAsync(60_000);
-      const restartedStore = createStore(state, { channelId: "temp-vips-test", ...options });
-      expect((await restartedStore.grant(grantInput({ operationId: "grant-after-abandoned-disable" }))).status).toBe("granted");
-      expect(state.storage.sql.exec<{ disable_operation_id: string | null }>(
-        "SELECT disable_operation_id FROM temp_vip_control WHERE singleton = 1",
-      ).one().disable_operation_id).toBeNull();
+      expect(await disabling).toMatchObject({ status: "disabled", revision: 2, lastDisabledRevision: 2 });
+      expect((await grant).status).toBe("module_disabled");
+      expect(moduleEnabled).toBe(false);
+      expect(await store.list()).toEqual([]);
+      expect(add).not.toHaveBeenCalled();
+      expect(state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM temp_vip_ops WHERE kind = 'disable_module' AND status = 'done'",
+      ).one().count).toBe(1);
+    }, {
+      twitch: { add },
+      isModuleEnabled: () => Promise.resolve(moduleEnabled),
+      commitModuleDisable,
+    });
+  });
 
-      expect(await restartedStore.release({ operationId: "release-before-disable-check", userId: person.userId })).toMatchObject({ status: "released" });
-      moduleEnabled = false;
-      expect(await restartedStore.beginDisableCheck("abandoned-disabled-module")).toMatchObject({ status: "ready" });
-      await vi.advanceTimersByTimeAsync(60_000);
-      const disabledRestart = createStore(state, { channelId: "temp-vips-test", ...options });
-      expect((await disabledRestart.grant(grantInput({ operationId: "grant-while-module-disabled" }))).status).toBe("module_disabled");
-      expect(state.storage.sql.exec<{ disable_operation_id: string | null }>(
-        "SELECT disable_operation_id FROM temp_vip_control WHERE singleton = 1",
-      ).one().disable_operation_id).toBe("abandoned-disabled-module");
+  it("migrates stored admission state into the simplified disable queue schema", async () => {
+    await inStore((_store, state) => {
+      state.storage.transactionSync(() => {
+        state.storage.sql.exec("DROP TABLE temp_vip_ops");
+        state.storage.sql.exec(`CREATE TABLE temp_vip_ops (
+          operation_id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL CHECK (kind IN ('grant', 'extend', 'import', 'end', 'release', 'expire', 'verify_removed', 'disable_check')),
+          user_id TEXT NOT NULL,
+          user_login TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'done')),
+          attempts INTEGER NOT NULL DEFAULT 0,
+          next_attempt_at TEXT NOT NULL,
+          result_json TEXT,
+          created_at TEXT NOT NULL,
+          finished_at TEXT,
+          enqueue_sequence INTEGER NOT NULL DEFAULT 0,
+          needs_reconcile INTEGER NOT NULL DEFAULT 0
+        )`);
+        state.storage.sql.exec("CREATE INDEX temp_vip_ops_due ON temp_vip_ops (status, next_attempt_at, enqueue_sequence)");
+        state.storage.sql.exec("CREATE INDEX temp_vip_ops_user_order ON temp_vip_ops (user_id, enqueue_sequence, status)");
+        state.storage.sql.exec("CREATE UNIQUE INDEX temp_vip_ops_sequence_unique ON temp_vip_ops (enqueue_sequence)");
+        state.storage.sql.exec(`INSERT INTO temp_vip_ops
+          (operation_id, kind, user_id, user_login, payload_json, status, next_attempt_at, created_at, enqueue_sequence)
+          VALUES ('legacy-disable', 'disable_check', '__channel__', '__channel__', '{"request":{}}', 'queued', ?, ?, 1)`,
+        BASE_NOW, BASE_NOW);
+        state.storage.sql.exec("CREATE TABLE temp_vip_control (singleton INTEGER PRIMARY KEY, disable_operation_id TEXT, disable_deadline TEXT)");
+        state.storage.sql.exec("INSERT INTO temp_vip_control VALUES (1, 'legacy-disable', '2026-11-01T12:01:00.000Z')");
+      });
 
-      moduleEnabled = true;
-      expect((await disabledRestart.grant(grantInput({ operationId: "grant-after-module-reenabled" }))).status).toBe("granted");
-    }, options);
+      createStore(state);
+
+      const operations = state.storage.sql.exec<{ kind: string; status: string; result_json: string | null }>(
+        "SELECT kind, status, result_json FROM temp_vip_ops WHERE operation_id = 'legacy-disable'",
+      ).one();
+      expect(operations).toMatchObject({ kind: "disable_module", status: "done" });
+      expect(JSON.parse(operations.result_json ?? "{}")).toEqual({ status: "superseded" });
+      expect(state.storage.sql.exec<{ present: number }>(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'temp_vip_control') AS present",
+      ).one().present).toBe(0);
+      expect(state.storage.sql.exec<{ present: number }>(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'temp_vip_ops_sequence_unique' AND tbl_name = 'temp_vip_ops') AS present",
+      ).one().present).toBe(1);
+      return Promise.resolve();
+    });
   });
 
   it("returns a bounded queued result while a Twitch request is still running", async () => {
