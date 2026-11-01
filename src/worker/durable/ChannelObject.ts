@@ -5005,6 +5005,12 @@ export class ChannelObject extends DurableObject<Env> {
         add: (userId, beforeAttempt) => addChannelVip(this.env, channelId, userId, fetch, beforeAttempt),
         remove: (userId, beforeAttempt) => removeChannelVip(this.env, channelId, userId, fetch, beforeAttempt),
       },
+      isModuleEnabled: async () => {
+        const module = await this.env.DB.prepare(
+          "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'temp_vips'",
+        ).bind(channelId).first<{ enabled: number }>();
+        return module?.enabled === 1;
+      },
       scheduleAlarm: async (deadline) => {
         if (deadline === null) {
           await this.clearAlarmEntry(TEMP_VIP_EXPIRY_ALARM_KEY, undefined, null);
