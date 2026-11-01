@@ -73,15 +73,10 @@
     .module-detail__content:has(.temp-vips-page) > .module-stack { display: block; }
     .module-view:has(.temp-vips-page) { display: flex; flex-direction: column; gap: var(--s4); }
     .module-view:has(.temp-vips-page) > .ui-load-state { width: 100%; }
-    .module-view:has(.temp-vips-page) > .ui-load-state:last-child { order: -1; }
     .temp-vips-list__rows { overflow: visible; }
-  }
-  @media (max-width: 768px) {
-    .module-view:has(.temp-vips-page) > .ui-load-state:last-child { order: 0; }
     .module-view[data-temp-vips-tab="vips"] > .ui-load-state:has(.temp-vips-settings-editor) { display: none; }
     .temp-vips-page__tabs { display: block; }
     .temp-vips-page[data-tab="settings"] > :not(.temp-vips-page__tabs) { display: none; }
-    .temp-vips-list__rows { overflow: visible; }
   }
   @media (max-width: 599px) {
     .module-detail:has(.temp-vips-page) > .module-detail-heading { margin-bottom: var(--s3); padding-bottom: var(--s3); }

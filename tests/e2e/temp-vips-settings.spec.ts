@@ -70,7 +70,7 @@ for (const viewport of viewports) {
     await installApi(page);
     await page.goto(`/channels/${channelId}/modules/temp_vips`, { waitUntil: "domcontentloaded" });
 
-    if (viewport.width < 769) await page.getByRole("tab", { name: "Einstellungen", exact: true }).click();
+    if (viewport.width < 900) await page.getByRole("tab", { name: "Einstellungen", exact: true }).click();
     const editor = page.locator(".ui-editor-shell").first();
     await expect(editor).toBeVisible();
     const header = page.locator(".module-detail-heading");

@@ -352,9 +352,9 @@ test("renders the sorted VIP list and dialogs at the requested widths with revie
   await expect(page.locator(".temp-vips-row").filter({ hasText: "@sternchenwerk" })).toHaveCount(0);
 });
 
-test("shows VIPs and Settings tabs only below 769px and keeps the settings draft", async ({ page }) => {
+for (const tabWidth of [390, 800]) test(`shows VIPs and Settings tabs below 900px (${String(tabWidth)}) and keeps the settings draft`, async ({ page }) => {
   await mockDashboard(page);
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: tabWidth, height: 844 });
   await page.goto(`/channels/${channelId}/modules/temp_vips?lang=de`);
   const vipsTab = page.getByRole("tab", { name: "VIPs", exact: true });
   const settingsTab = page.getByRole("tab", { name: "Einstellungen", exact: true });
