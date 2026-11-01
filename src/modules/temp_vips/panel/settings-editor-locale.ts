@@ -52,7 +52,7 @@ export const tempVipsSettingsEditorCatalog = (language: DashboardLanguage): Sett
     disabledLabel: de ? "Deaktiviert" : "Disabled",
     templateMessages: templateMessages[language],
     warningLabel: () => de ? "Prüfe den Hinweis." : "Check the notice.",
-    sections: { settings: de ? "Ablauf" : "Timing" },
+    sections: { settings: de ? "Ablauf" : "Timing", messages: de ? "Nachrichten im Chat" : "Chat messages" },
     notes: {
       ownershipCaveat: de
         ? "Hinweis: Verliert Twitch eine Meldung über ein von Hand entzogenes VIP, kann der Bot ein später dauerhaft vergebenes VIP beim Ablauf entfernen. Dafür gibt es „Verwaltung abgeben“."

@@ -86,7 +86,11 @@ for (const viewport of viewports) {
     });
     expect(layout.titleTop).toBeLessThan(layout.iconBottom);
 
-    const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const columns = await editor.locator(".ui-editor-shell__column").evaluateAll((nodes) =>
+      new Set(nodes.map((node) => Math.round(node.getBoundingClientRect().left))).size);
+    expect(columns).toBe(viewport.width >= 900 ? 2 : 1);
+
+    const documentWidth =await page.evaluate(() => document.documentElement.scrollWidth);
     expect(documentWidth).toBeLessThanOrEqual(viewport.width + 1);
   });
 }
