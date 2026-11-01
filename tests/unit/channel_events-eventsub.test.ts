@@ -33,6 +33,7 @@ describe("channel events EventSub targets", () => {
         ["channel.suspicious_user.message", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["channel.suspicious_user.update", { broadcaster_user_id: "kanal-a", moderator_user_id: "bot-1" }],
         ["channel.update", { broadcaster_user_id: "kanal-a" }],
+        ["channel.vip.remove", { broadcaster_user_id: "kanal-a" }],
         ["stream.online", { broadcaster_user_id: "kanal-a" }],
         ["stream.offline", { broadcaster_user_id: "kanal-a" }],
         ["channel.ad_break.begin", { broadcaster_user_id: "kanal-a" }],

@@ -3596,6 +3596,16 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "text_commands.argument_invalid": (detail) => eventTextWithName(detail, "Ungültiges Argument", (name) => `Befehl !${name}: Argument muss eine Ganzzahl im erlaubten Bereich sein`),
     "text_commands.changed_concurrently": (detail) => eventTextWithName(detail, "Befehl während Ausführung geändert", (name) => `Befehl !${name} wurde während der Ausführung mehrfach geändert`),
     "text_commands.variable_update_failed": (detail) => eventTextWithName(detail, "Kanalvariable nicht geändert", (name) => `Befehl !${name} konnte die Kanalvariable nicht ändern`),
+    "temp_vips.granted": (detail) => `Zeit-VIP für ${detailText(detail, "login", "Nutzer")} vergeben`,
+    "temp_vips.extended": (detail) => `Zeit-VIP für ${detailText(detail, "login", "Nutzer")} verlängert`,
+    "temp_vips.imported": (detail) => `Vorhandenes VIP für ${detailText(detail, "login", "Nutzer")} übernommen`,
+    "temp_vips.ended": (detail) => {
+      const reason = detail.reason === "ended_early" ? "vorzeitig beendet"
+        : detail.reason === "removed_on_twitch" ? "auf Twitch entfernt" : "abgelaufen";
+      return `Zeit-VIP für ${detailText(detail, "login", "Nutzer")} ${reason}`;
+    },
+    "temp_vips.released": (detail) => `VIP-Verwaltung für ${detailText(detail, "login", "Nutzer")} abgegeben`,
+    "temp_vips.removal_failed": (detail) => `VIP für ${detailText(detail, "login", "Nutzer")} konnte nicht entfernt werden (${detailText(detail, "reason", "unbekannter Grund")})`,
   },
   en: {
     "host.action.failed": "Action failed",
@@ -3716,6 +3726,16 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     "text_commands.argument_invalid": (detail) => eventTextWithName(detail, "Invalid argument", (name) => `Command !${name}: argument must be an integer in the allowed range`),
     "text_commands.changed_concurrently": (detail) => eventTextWithName(detail, "Command changed during execution", (name) => `Command !${name} changed repeatedly during execution`),
     "text_commands.variable_update_failed": (detail) => eventTextWithName(detail, "Channel variable not changed", (name) => `Command !${name} could not change the channel variable`),
+    "temp_vips.granted": (detail) => `Temporary VIP granted to ${detailText(detail, "login", "user")}`,
+    "temp_vips.extended": (detail) => `Temporary VIP extended for ${detailText(detail, "login", "user")}`,
+    "temp_vips.imported": (detail) => `Existing VIP adopted for ${detailText(detail, "login", "user")}`,
+    "temp_vips.ended": (detail) => {
+      const reason = detail.reason === "ended_early" ? "ended early"
+        : detail.reason === "removed_on_twitch" ? "removed on Twitch" : "expired";
+      return `Temporary VIP for ${detailText(detail, "login", "user")} ${reason}`;
+    },
+    "temp_vips.released": (detail) => `VIP management released for ${detailText(detail, "login", "user")}`,
+    "temp_vips.removal_failed": (detail) => `VIP for ${detailText(detail, "login", "user")} could not be removed (${detailText(detail, "reason", "unknown reason")})`,
   },
 };
 
@@ -3816,6 +3836,12 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "text_commands.argument_invalid": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "text_commands.changed_concurrently": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
   "text_commands.variable_update_failed": { family: "operations", tier: "outlined", word: { de: "Hinweis", en: "Notice" }, numberKey: null, tone: "warning" },
+  "temp_vips.granted": { family: "moderation", tier: "outlined", word: { de: "VIP", en: "VIP" }, numberKey: null, tone: "info" },
+  "temp_vips.extended": { family: "moderation", tier: "outlined", word: { de: "VIP", en: "VIP" }, numberKey: null, tone: "info" },
+  "temp_vips.imported": { family: "moderation", tier: "outlined", word: { de: "VIP", en: "VIP" }, numberKey: null, tone: "info" },
+  "temp_vips.ended": { family: "moderation", tier: "outlined", word: { de: "VIP", en: "VIP" }, numberKey: null, tone: "info" },
+  "temp_vips.released": { family: "moderation", tier: "outlined", word: { de: "VIP", en: "VIP" }, numberKey: null, tone: "warning" },
+  "temp_vips.removal_failed": { family: "moderation", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
 };
 
 export function eventText(code: string, language?: DashboardLanguage): string;

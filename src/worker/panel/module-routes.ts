@@ -1107,7 +1107,20 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const settings = existing === null ? defaultSettingsJson : existing.settings;
   let revision: number | null;
   let lastDisabledRevision = existing?.lastDisabledRevision ?? null;
-  if (existing === null && enabled) {
+  if (module.id === "temp_vips" && existing?.enabled === true && !enabled) {
+    const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+    const result = await channelObject.disableTempVipModule({
+      operationId: `disable:${crypto.randomUUID()}`,
+      actor,
+      expectedRevision: expectedRevision === undefined ? existing.revision : Number(expectedRevision),
+    });
+    if (result.status === "temp_vips_active") return context.json({ error: "temp_vips_active" }, 409);
+    if (result.status !== "disabled" || result.revision === undefined) {
+      return context.json({ error: result.status === "queued" ? "temp_vips_disable_pending" : "module_changed_concurrently" }, 409);
+    }
+    revision = result.revision;
+    lastDisabledRevision = result.lastDisabledRevision ?? null;
+  } else if (existing === null && enabled) {
     if (expectedRevision !== undefined) return context.json({ error: "module_changed_concurrently" }, 409);
     revision = await createChannelModuleWithAudit(
       context.env.DB,

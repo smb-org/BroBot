@@ -398,6 +398,7 @@ const expectedModuleSettings = {
     timeoutTextEnabled: true,
   },
   channel_events: {},
+  temp_vips: { defaultDurationDays: 7, maximumDurationDays: 90, announceExpiry: false },
   quiz: { answerSeconds: 30, chatQuestions: true, pot: 500, revealSeconds: 8 },
   emote_slots: {
     symbols: [
@@ -702,7 +703,7 @@ describe("serialized contract shapes", () => {
         "utf8",
       );
       const durableObjectKeys = [
-        ...durableObjectSource.matchAll(/const (?:SECURITY_DEADLINE_KEY|AD_PREWARNING_DEADLINE_KEY) = "([^"]+)"/g),
+        ...durableObjectSource.matchAll(/const (?:SECURITY_DEADLINE_KEY|AD_PREWARNING_DEADLINE_KEY|TEMP_VIP_EXPIRY_ALARM_KEY) = "([^"]+)"/g),
       ].map((match) => match[1] ?? "").sort((a, b) => a.localeCompare(b));
 
       // The signed OAuth state travels out to Twitch and back. It sat
@@ -886,7 +887,7 @@ describe("serialized contract shapes", () => {
         "$.realtime.systemHello.payload: ",
         "$.textCommand: aliases,channelId,chatTarget,cooldownSeconds,createdAt,enabled,kind,lastUsedAt,minimumTier,name,responseType,revision,streamCondition,text,timeoutAction,updatedAt,useCount,userCooldownSeconds,variableAction",
       ]);
-      expect(durableObjectKeys).toEqual(["ad_prewarning", "security_round"]);
+      expect(durableObjectKeys).toEqual(["ad_prewarning", "security_round", "temp-vips:expiry"]);
       expect(MODULES.map((module) => module.id).sort((a, b) => a.localeCompare(b))).toEqual([
         "ads",
         "api_source",
@@ -907,6 +908,7 @@ describe("serialized contract shapes", () => {
         "raid",
         "statistics",
         "sun",
+        "temp_vips",
         "text_commands",
         "text_library",
         "timers",

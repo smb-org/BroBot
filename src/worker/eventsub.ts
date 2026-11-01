@@ -324,6 +324,7 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   }
 
   const target = notificationTarget(body);
+  const acknowledgeAfterDispatch = target?.subscriptionType === "channel.vip.remove";
   if (target?.subscriptionType === "channel.chat.message") {
     if (notifierChannelId === null || target.channelId !== notifierChannelId) {
       return response("Invalid EventSub notification.", 400);
@@ -331,6 +332,8 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     const channel = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(target.channelId));
     const claim = await channel.claimEventSubMessage(messageId, Date.parse(now));
     if (claim === "duplicate") return response(null, 204);
+  } else if (acknowledgeAfterDispatch) {
+    if (await hasEventSubMessage(context.env.DB, messageId)) return response(null, 204);
   } else {
     const isNew = await rememberEventSubMessage(context.env.DB, messageId, now);
     if (!isNew) return response(null, 204);
@@ -352,6 +355,7 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
 
   try {
     await dispatchNotification();
+    if (acknowledgeAfterDispatch) await rememberEventSubMessage(context.env.DB, messageId, now);
     if (isAdPrewarningTrigger(target.subscriptionType)) {
       try {
         await refreshAdPrewarning(context.env, target.channelId, messageId, now);

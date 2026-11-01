@@ -49,6 +49,30 @@ const signedChatNotification = (messageId: string): Request => {
   });
 };
 
+const signedVipRemovalNotification = (messageId: string): Request => {
+  const timestamp = new Date().toISOString();
+  const body = JSON.stringify({
+    subscription: {
+      type: "channel.vip.remove",
+      condition: { broadcaster_user_id: "channel-a" },
+    },
+    event: { broadcaster_user_id: "channel-a", user_id: "user-1", user_login: "viewer", user_name: "Viewer" },
+  });
+  const signature = createHmac("sha256", Buffer.from(secretKey, "ascii"))
+    .update(`${messageId}${timestamp}${body}`, "utf8")
+    .digest("hex");
+  return new Request("https://brobot.example/api/twitch/eventsub", {
+    method: "POST",
+    body,
+    headers: {
+      "Twitch-Eventsub-Message-Id": messageId,
+      "Twitch-Eventsub-Message-Timestamp": timestamp,
+      "Twitch-Eventsub-Message-Signature": `sha256=${signature}`,
+      "Twitch-Eventsub-Message-Type": "notification",
+    },
+  });
+};
+
 describe("EventSub awaited dispatch", () => {
   afterEach(() => vi.restoreAllMocks());
 
@@ -102,6 +126,37 @@ describe("EventSub awaited dispatch", () => {
     expect(claimed).toEqual(new Set(["clip-confirmation-pending"]));
     expect(recorded).toBeNull();
     expect(vi.mocked(dispatchEventSubNotification)).toHaveBeenCalledTimes(1);
+    expect(waitUntil).not.toHaveBeenCalled();
+    database.close();
+  });
+
+  it("records VIP removal delivery only after the Durable Object dispatch succeeds", async () => {
+    const database = new TestD1Database();
+    const confirmation = deferred<undefined>();
+    vi.mocked(dispatchEventSubNotification).mockReturnValue(confirmation.promise);
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_EVENTSUB_SECRET: secret,
+    } as unknown as Env;
+    const waitUntil = vi.fn();
+    const executionContext = { waitUntil } as unknown as ExecutionContext;
+    const request = signedVipRemovalNotification("vip-removal-pending");
+    const responsePromise = Promise.resolve(eventSubRouter.fetch(request, environment, executionContext));
+    await vi.waitFor(() => {
+      expect(dispatchEventSubNotification).toHaveBeenCalledTimes(1);
+    });
+    const before = await database.prepare(
+      "SELECT message_id FROM eventsub_messages WHERE message_id = ?",
+    ).bind("vip-removal-pending").first<{ message_id: string }>();
+    confirmation.resolve(undefined);
+    const response = await responsePromise;
+    const after = await database.prepare(
+      "SELECT message_id FROM eventsub_messages WHERE message_id = ?",
+    ).bind("vip-removal-pending").first<{ message_id: string }>();
+
+    expect(before).toBeNull();
+    expect(response.status).toBe(204);
+    expect(after).toEqual({ message_id: "vip-removal-pending" });
     expect(waitUntil).not.toHaveBeenCalled();
     database.close();
   });

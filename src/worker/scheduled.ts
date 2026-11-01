@@ -14,6 +14,7 @@ import { purgeRevokedOverlayAccesses } from "./auth/overlay-access-repository";
 import { MODULES } from "../modules/registry";
 import { schedulePanelResourceBackgroundWork } from "./panel-resources";
 import { maintainTimerSchedules } from "./timer-schedule-maintenance";
+import { maintainTempVipExpiries } from "./temp-vip-maintenance";
 
 export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
   _controller,
@@ -34,6 +35,7 @@ export const scheduled: NonNullable<ExportedHandler<Env>["scheduled"]> = async (
     maintainEventSubSubscriptions(env, now),
     maintainStreamStates(env, now),
     maintainTimerSchedules(env),
+    maintainTempVipExpiries(env, now),
     ...MODULES.flatMap((module) => module.scheduledMaintenance === undefined
       ? []
       : [module.scheduledMaintenance(env.DB, now)]),

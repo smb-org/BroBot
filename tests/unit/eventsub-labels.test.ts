@@ -23,6 +23,8 @@ describe("EventSub labels", () => {
     expect(eventSubName("channel.raid", "incoming", "en")).toBe("Incoming raids");
     expect(eventSubName("channel.raid", "incoming", "de")).toBe("Eingehende Raids");
     expect(eventSubName("channel.update", "", "en")).toBe("Channel updates");
+    expect(eventSubName("channel.vip.remove", "", "en")).toBe("VIP removals");
+    expect(eventSubName("channel.vip.remove", "", "de")).toBe("VIP-Entzüge");
     expect(eventSubName("channel.future_event", "", "en")).toBe("channel.future_event");
   });
 

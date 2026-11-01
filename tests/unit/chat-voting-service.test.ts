@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleEvent, ModuleExecutionContext, ModulePointsAccess } from "../../src/modules/contract";
+import type { ModuleEvent, ModuleExecutionContext, ModulePointsAccess, ModuleTempVipAccess } from "../../src/modules/contract";
 import {
   DEFAULT_CHAT_VOTING_SETTINGS,
   type ChatVote,
@@ -109,6 +109,7 @@ const executionContext = (overrides: Partial<ModuleExecutionContext> = {}): Modu
     acknowledgeClosed: vi.fn(() => Promise.resolve()),
   },
   points: {} as ModulePointsAccess,
+  tempVips: {} as ModuleTempVipAccess,
   streamState: vi.fn(() => Promise.resolve("unknown" as const)),
   chatActivityCount: vi.fn(() => Promise.resolve(0)),
   activeChatters: { count: vi.fn(() => Promise.resolve(0)), seen: vi.fn(() => Promise.resolve(null)) },
