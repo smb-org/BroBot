@@ -9,6 +9,11 @@ export const moduleTempVips = (
 ): ModuleTempVipAccess => {
   if (namespace === undefined) {
     return {
+      mode: () => unavailable(),
+      recordIntent: () => unavailable(),
+      addObserved: () => unavailable(),
+      classify: () => unavailable(),
+      handleModeration: () => unavailable(),
       grant: () => unavailable(),
       extend: () => unavailable(),
       importExisting: () => unavailable(),
@@ -23,6 +28,11 @@ export const moduleTempVips = (
   }
   const object = namespace.get(namespace.idFromName(channelId));
   return {
+    mode: () => object.tempVipMode(),
+    recordIntent: (request) => object.recordTempVipIntent(request),
+    addObserved: (request) => object.addObservedTempVip(request),
+    classify: (request) => object.classifyTempVip(request),
+    handleModeration: (event) => object.handleTempVipModeration(event),
     grant: (request) => object.grantTempVip(request),
     extend: (request) => object.extendTempVip(request),
     importExisting: (request) => object.importExistingTempVip(request),

@@ -53,7 +53,7 @@ export const formatTempVipResult = (
 ): string => {
   const expiry = result.expiresAt ?? result.row?.expiresAt;
   if (result.status === "granted" || result.status === "imported" || result.status === "extended") {
-    const date = expiry === undefined ? null : expiryText(expiry, language, timeZone);
+    const date = typeof expiry === "string" ? expiryText(expiry, language, timeZone) : null;
     if (result.status === "extended") return date === null
       ? language === "de" ? "VIP-Zeit wurde verlängert." : "VIP time was extended."
       : language === "de" ? `VIP-Zeit wurde verlängert · neues Ende ${date}.` : `VIP time extended · new end ${date}.`;

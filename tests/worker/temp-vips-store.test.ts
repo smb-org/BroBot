@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { runMigrations } from "./points-test-helpers";
 
 import type {
   ModuleTempVipExtendRequest,
@@ -36,6 +38,7 @@ const createStore = (state: DurableObjectState, options: {
   twitch?: Partial<TempVipTwitch>;
   scheduleAlarm?: (deadline: number | null) => Promise<void>;
   isModuleEnabled?: () => Promise<boolean>;
+  isManaged?: () => Promise<boolean>;
   commitModuleDisable?: TempVipStoreOptions["commitModuleDisable"];
 } = {}): TempVipStore => new TempVipStore(state.storage, {
   channelId: options.channelId ?? "temp-vips-test",
@@ -47,6 +50,7 @@ const createStore = (state: DurableObjectState, options: {
   },
   scheduleAlarm: options.scheduleAlarm ?? vi.fn().mockResolvedValue(undefined),
   ...(options.isModuleEnabled === undefined ? {} : { isModuleEnabled: options.isModuleEnabled }),
+  ...(options.isManaged === undefined ? {} : { isManaged: options.isManaged }),
   ...(options.commitModuleDisable === undefined ? {} : { commitModuleDisable: options.commitModuleDisable }),
 });
 
@@ -197,6 +201,8 @@ const operationResult = (storage: DurableObjectState["storage"], operationId: st
   if (resultJson === null || resultJson === undefined) throw new Error(`Operation ${operationId} has no result.`);
   return JSON.parse(resultJson) as ModuleTempVipResult;
 };
+
+beforeAll(runMigrations);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -1430,6 +1436,18 @@ describe("temporary VIP operation queue", () => {
   it("rearms a consumed ChannelObject temp-VIP alarm to the next future expiry", async () => {
     const id = channelId();
     const stub = namespace.get(namespace.idFromName(id));
+    const db = (env as unknown as { DB: Env["DB"] }).DB;
+    await db.prepare(
+      "INSERT INTO channels (channel_id, login, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    ).bind(id, id, id, BASE_NOW, BASE_NOW).run();
+    await db.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'temp_vips', 1, '{}', 1)",
+    ).bind(id).run();
+    // A broadcaster connection with the VIP scope makes the channel managed, so expiries arm the alarm.
+    await db.prepare(
+      `INSERT INTO twitch_login_identity (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+        expires_at, status, created_at, updated_at) VALUES (?, ?, '["channel:manage:vips"]', 'fictional_access', 'fictional_refresh', ?, 'connected', ?, ?)`,
+    ).bind(id, id, "2100-01-02T00:00:00.000Z", BASE_NOW, BASE_NOW).run();
 
     await runInDurableObject(stub, async (instance, state) => {
       createStore(state, { channelId: id });
@@ -1451,5 +1469,131 @@ describe("temporary VIP operation queue", () => {
       const table = await state.storage.get<Record<string, { deadline: number }>>("channel:alarm_schedule");
       expect(table?.["temp-vips:expiry"]?.deadline).toBe(Date.parse(nextExpiry));
     });
+  });
+
+  it("confirms an observe-mode chat intent and tracks moderator VIP and unVIP events", async () => {
+    await inStore(async (store) => {
+      const intent = await store.recordIntent({
+        operationId: "chat-intent-1",
+        person,
+        grantedBy: actor,
+        expiresAt: "2026-11-08T12:00:00.000Z",
+      });
+      expect(intent.status).toBe("intent_recorded");
+      expect(await store.list()).toMatchObject([{
+        userId: person.userId,
+        classification: "temporary",
+        confirmation: "awaiting_vip",
+        expiresAt: "2026-11-08T12:00:00.000Z",
+      }]);
+
+      await store.handleModeration({
+        triggerId: "moderation-vip-1",
+        action: "vip",
+        person,
+        moderatorUserId: "mod-2",
+        eventSubTimestamp: BASE_NOW,
+      });
+      expect(await store.list()).toMatchObject([{
+        userId: person.userId,
+        classification: "temporary",
+        confirmation: "confirmed",
+      }]);
+
+      await store.handleModeration({
+        triggerId: "moderation-vip-2",
+        action: "vip",
+        person: { userId: "user-2", login: "viewer-two", displayName: "Viewer Two" },
+        moderatorUserId: "mod-2",
+        eventSubTimestamp: BASE_NOW,
+      });
+      expect(await store.list()).toMatchObject([
+        { userId: "user-2", classification: "unclassified", confirmation: "confirmed" },
+        { userId: person.userId, classification: "temporary", confirmation: "confirmed" },
+      ]);
+
+      await store.handleModeration({
+        triggerId: "moderation-unvip-1",
+        action: "unvip",
+        person,
+        moderatorUserId: "mod-2",
+        eventSubTimestamp: BASE_NOW,
+      });
+      expect(await store.list()).toMatchObject([{ userId: "user-2" }]);
+      expect(pendingEvents(store).some(({ code, detail }) => code === "temp_vips.ended" &&
+        detail.userId === person.userId && detail.reason === "removed_on_twitch")).toBe(true);
+    }, { isManaged: () => Promise.resolve(false) });
+  });
+
+  it("keeps a disabled module out of observe mode and expiry reminders", async () => {
+    await inStore(async (store, state) => {
+      insertRow(state.storage, { expiresAt: "2026-11-01T11:59:00.000Z" });
+      await expect(store.mode()).resolves.toBe("inactive");
+      await store.runExpiry(BASE_NOW);
+      await expect(store.list()).resolves.toMatchObject([{ expiryReminderAt: null }]);
+    }, { isModuleEnabled: () => Promise.resolve(false), isManaged: () => Promise.resolve(false) });
+  });
+
+  it("classifies observed VIPs and records a single expiry reminder without Twitch calls", async () => {
+    const add = vi.fn().mockResolvedValue({ ok: true });
+    const remove = vi.fn().mockResolvedValue({ ok: true });
+    const get = vi.fn().mockResolvedValue({ ok: true, isVip: true });
+
+    await inStore(async (store) => {
+      await store.handleModeration({
+        triggerId: "moderation-vip-unclassified",
+        action: "vip",
+        person,
+        moderatorUserId: "mod-2",
+        eventSubTimestamp: BASE_NOW,
+      });
+      await store.classify({
+        operationId: "classify-temporary",
+        userId: person.userId,
+        classification: "temporary",
+        expiresAt: BASE_NOW,
+        actor,
+      });
+      expect(await store.list()).toMatchObject([{ classification: "temporary", expiresAt: BASE_NOW }]);
+
+      const first = await store.list();
+      const second = await store.list();
+      expect(first).toMatchObject([{ classification: "temporary" }]);
+      expect(second).toHaveLength(1);
+      expect(pendingEvents(store).filter(({ code }) => code === "temp_vips.expire_reminder")).toHaveLength(1);
+      expect(pendingEvents(store)).toContainEqual(expect.objectContaining({ code: "temp_vips.classified" }));
+    }, { isManaged: () => Promise.resolve(false), twitch: { get, add, remove } });
+
+    expect(get).not.toHaveBeenCalled();
+    expect(add).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("starts removing expired temporary entries after switching from observe to managed mode", async () => {
+    let managed = false;
+    const remove = vi.fn().mockResolvedValue({ ok: true });
+    await inStore(async (store) => {
+      await store.handleModeration({
+        triggerId: "moderation-vip-mode-switch",
+        action: "vip",
+        person,
+        moderatorUserId: "mod-2",
+        eventSubTimestamp: BASE_NOW,
+      });
+      await store.classify({
+        operationId: "classify-mode-switch",
+        userId: person.userId,
+        classification: "temporary",
+        expiresAt: "2026-11-01T11:59:00.000Z",
+        actor,
+      });
+      expect(await store.runExpiry(BASE_NOW)).toMatchObject({ removed: 0 });
+      expect(remove).not.toHaveBeenCalled();
+
+      managed = true;
+      expect(await store.mode()).toBe("managed");
+      expect(await store.runExpiry(BASE_NOW)).toMatchObject({ removed: 1 });
+      expect(await store.list()).toEqual([]);
+    }, { isManaged: () => Promise.resolve(managed), twitch: { remove } });
   });
 });

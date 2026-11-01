@@ -203,6 +203,20 @@ describe("dashboard locale", () => {
     expect(eventText("channel_events.moderation.unknown", { action: "shared_chat_ban" })).toBe("Unknown moderation action: shared_chat_ban");
   });
 
+  it("renders temporary VIP classification and expiry reminders in both languages", () => {
+    setBrowserLanguage("de-DE");
+    expect(eventText("temp_vips.classified", { login: "pixelpilz", classification: "permanent" }))
+      .toBe("VIP für pixelpilz als dauerhaft eingestuft");
+    expect(eventText("temp_vips.expire_reminder", { login: "pixelpilz" }))
+      .toBe("Zeit-VIP für pixelpilz ist abgelaufen; bitte auf Twitch entfernen");
+
+    setBrowserLanguage("en-US");
+    expect(eventText("temp_vips.classified", { login: "pixelpilz", classification: "temporary" }))
+      .toBe("VIP for pixelpilz classified as temporary");
+    expect(eventText("temp_vips.expire_reminder", { login: "pixelpilz" }))
+      .toBe("Temporary VIP for pixelpilz expired; remove it on Twitch");
+  });
+
   it("carries family, tier, word, and number key for every known event code", () => {
     const codes: EventCode[] = [
       "host.action.failed", "host.action.suppressed", "host.chat.failed", "host.chat.sent", "host.chat.skipped", "host.announcement.failed", "host.announcement.sent",
@@ -226,6 +240,7 @@ describe("dashboard locale", () => {
       "text_commands.lookup_unavailable", "text_commands.argument_missing",
       "text_commands.argument_invalid", "text_commands.changed_concurrently", "text_commands.variable_update_failed", "template.lookup_unavailable", "template.chat_reference_dropped", "template.deferred_live", "template_parameters_invalid", "votekick.rejected",
       "temp_vips.granted", "temp_vips.extended", "temp_vips.imported", "temp_vips.ended", "temp_vips.released", "temp_vips.removal_failed",
+      "temp_vips.classified", "temp_vips.expire_reminder",
     ];
 
     expect(Object.keys(eventToneEntries).sort((a, b) => a.localeCompare(b))).toEqual([...codes].sort((a, b) => a.localeCompare(b)));

@@ -15,6 +15,7 @@ vi.mock("../../src/modules/registry", () => ({
     { id: "timers", eventSubTypes: ["channel.chat.message", "stream.online", "stream.offline"] },
     { id: "channel_events", mandatory: true, eventSubTypes: ["channel.shoutout.create"] },
     { id: "moderation", eventSubTypes: ["channel.moderate"] },
+    { id: "temp_vips", broadcasterScopes: ["channel:manage:vips"], eventSubTypes: ["channel.chat.message", "channel.moderate", "channel.vip.remove"], scopeIndependentEventSubTypes: ["channel.chat.message", "channel.moderate"] },
     { id: "aus", eventSubTypes: ["channel.follow"] },
   ],
 }));
@@ -166,6 +167,26 @@ describe("EventSub reconciliation", () => {
       variant: "",
       version: "2",
     });
+  });
+
+  it("keeps temporary VIP chat and moderation subscriptions available without broadcaster VIP scope", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'temp_vips', 1, '{}')`,
+    ).run();
+    await confirmBotModerator(database, "kanal-a");
+
+    const targets = await listDesiredEventSubTargets(asD1(database), "kanal-a");
+
+    expect(targets).toContainEqual({
+      channelId: "kanal-a", subscriptionType: "channel.chat.message", variant: "", version: "1",
+    });
+    expect(targets).toContainEqual({
+      channelId: "kanal-a", subscriptionType: "channel.moderate", variant: "", version: "2",
+    });
+    expect(targets).not.toContainEqual(expect.objectContaining({ subscriptionType: "channel.vip.remove" }));
   });
 
   it("reads the Twitch subscription list through pagination and stops on a cursor loop", async () => {

@@ -2,7 +2,12 @@ import type { ModuleLanguage } from "../../contract";
 
 export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
   grant: string;
+  addObserved: string;
   takeOver: string;
+  modeObserve: string;
+  modeManaged: string;
+  modeInactive: string;
+  modeLoading: string;
   loading: string;
   loadError: string;
   retry: string;
@@ -12,7 +17,7 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
   expires: string;
   grantedBy: string;
   source: string;
-  sourceLabels: Readonly<Record<"command" | "dashboard" | "import" | "channel_points", string>>;
+  sourceLabels: Readonly<Record<"command" | "dashboard" | "import" | "channel_points" | "observed", string>>;
   extend: string;
   endNow: string;
   release: string;
@@ -21,6 +26,14 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
   removalWarning: string;
   removalReasons: Readonly<Record<string, string>>;
   removalReasonUnknown: string;
+  unclassified: string;
+  permanent: string;
+  temporary: string;
+  awaitingVip: string;
+  expiredReminder: (login: string) => string;
+  copyCommand: string;
+  copiedCommand: string;
+  copyFailed: string;
   tabsLabel: string;
   tabVips: string;
   tabSettings: string;
@@ -37,6 +50,12 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
   expiryDateHint: (timeZone: string) => string;
   selectedTarget: string;
   grantTitle: string;
+  addObservedTitle: string;
+  classifyTemporaryTitle: (name: string) => string;
+  manualAddSuccess: string;
+  alreadyTracked: string;
+  classifiedSuccess: string;
+  permanentSuccess: string;
   takeOverTitle: string;
   extendTitle: (name: string) => string;
   endTitle: (name: string) => string;
@@ -60,7 +79,12 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
 }>> = {
   de: {
     grant: "VIP vergeben",
+    addObserved: "VIP per Login ergänzen",
     takeOver: "Vorhandenes VIP übernehmen",
+    modeObserve: "Beobachtungsmodus: VIPs werden auf Twitch nicht verändert. Nach !vip muss eine Moderation /vip ausführen; nach Ablauf bitte /unvip ausführen.",
+    modeManaged: "Verwaltungsmodus: Der Bot entfernt abgelaufene temporäre VIPs automatisch.",
+    modeInactive: "VIP-Beobachtung ist deaktiviert. Aktiviere das Modul, um VIPs zu verfolgen.",
+    modeLoading: "VIP-Modus wird geladen …",
     loading: "Temporäre VIPs werden geladen …",
     loadError: "Die VIP-Liste konnte nicht geladen werden.",
     retry: "Erneut versuchen",
@@ -70,7 +94,7 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
     expires: "Läuft ab",
     grantedBy: "Vergeben von",
     source: "Quelle",
-    sourceLabels: { command: "Chatbefehl", dashboard: "Dashboard", import: "Übernommen", channel_points: "Kanalpunkte" },
+    sourceLabels: { command: "Chatbefehl", dashboard: "Dashboard", import: "Übernommen", channel_points: "Kanalpunkte", observed: "Beobachtet" },
     extend: "Verlängern",
     endNow: "Jetzt beenden",
     release: "Verwaltung abgeben · VIP behalten",
@@ -93,6 +117,14 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
       community_gate: "Twitch lässt das aktuell nicht zu",
     },
     removalReasonUnknown: "Unbekannter Fehler",
+    unclassified: "Neu · nicht eingestuft",
+    permanent: "Dauerhaft",
+    temporary: "Temporär",
+    awaitingVip: "Wartet auf /vip auf Twitch",
+    expiredReminder: (login) => `Abgelaufen – bitte /unvip @${login}`,
+    copyCommand: "Befehl kopieren",
+    copiedCommand: "Befehl kopiert",
+    copyFailed: "Der Befehl konnte nicht kopiert werden.",
     tabsLabel: "Bereich",
     tabVips: "VIPs",
     tabSettings: "Einstellungen",
@@ -109,6 +141,12 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
     expiryDateHint: (zone) => `Datum und Uhrzeit in der Kanalzeitzone ${zone}.`,
     selectedTarget: "Ausgewähltes VIP",
     grantTitle: "VIP vergeben",
+    addObservedTitle: "VIP per Login ergänzen",
+    classifyTemporaryTitle: (name) => `VIP für ${name} als temporär einstufen`,
+    manualAddSuccess: "VIP wurde zur Beobachtungsliste hinzugefügt.",
+    alreadyTracked: "Dieses VIP steht bereits in der Liste.",
+    classifiedSuccess: "VIP wurde als temporär eingestuft.",
+    permanentSuccess: "VIP wurde als dauerhaft eingestuft.",
     takeOverTitle: "Vorhandenes VIP übernehmen",
     extendTitle: (name) => `VIP für ${name} verlängern`,
     endTitle: (name) => `VIP für ${name} jetzt beenden?`,
@@ -132,7 +170,12 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
   },
   en: {
     grant: "Grant VIP",
+    addObserved: "Add VIP by login",
     takeOver: "Take over existing VIP",
+    modeObserve: "Observe mode: VIPs are not changed on Twitch. After !vip, a moderator must run /vip; after expiry, please run /unvip.",
+    modeManaged: "Managed mode: the bot automatically removes temporary VIPs when they expire.",
+    modeInactive: "VIP tracking is disabled. Enable the module to track VIPs.",
+    modeLoading: "Loading VIP mode …",
     loading: "Loading temporary VIPs …",
     loadError: "The VIP list could not be loaded.",
     retry: "Try again",
@@ -142,7 +185,7 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
     expires: "Expires",
     grantedBy: "Granted by",
     source: "Source",
-    sourceLabels: { command: "Chat command", dashboard: "Dashboard", import: "Taken over", channel_points: "Channel points" },
+    sourceLabels: { command: "Chat command", dashboard: "Dashboard", import: "Taken over", channel_points: "Channel points", observed: "Observed" },
     extend: "Extend",
     endNow: "End now",
     release: "Release management · keep VIP",
@@ -165,6 +208,14 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
       community_gate: "Twitch does not allow this right now",
     },
     removalReasonUnknown: "Unknown error",
+    unclassified: "New · not classified",
+    permanent: "Permanent",
+    temporary: "Temporary",
+    awaitingVip: "Waiting for /vip on Twitch",
+    expiredReminder: (login) => `Expired – please run /unvip @${login}`,
+    copyCommand: "Copy command",
+    copiedCommand: "Command copied",
+    copyFailed: "The command could not be copied.",
     tabsLabel: "Section",
     tabVips: "VIPs",
     tabSettings: "Settings",
@@ -181,6 +232,12 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
     expiryDateHint: (zone) => `Date and time in the channel time zone ${zone}.`,
     selectedTarget: "Selected VIP",
     grantTitle: "Grant VIP",
+    addObservedTitle: "Add VIP by login",
+    classifyTemporaryTitle: (name) => `Classify VIP for ${name} as temporary`,
+    manualAddSuccess: "VIP added to the observation list.",
+    alreadyTracked: "This VIP is already on the list.",
+    classifiedSuccess: "VIP classified as temporary.",
+    permanentSuccess: "VIP classified as permanent.",
     takeOverTitle: "Take over existing VIP",
     extendTitle: (name) => `Extend VIP for ${name}`,
     endTitle: (name) => `End VIP for ${name} now?`,

@@ -18,6 +18,9 @@ const vipRow = (overrides: Partial<ModuleTempVipRow> = {}): ModuleTempVipRow => 
   grantedByUserId: "mod-user",
   grantedByLogin: "moderator",
   source: "command",
+  classification: "temporary",
+  confirmation: "confirmed",
+  expiryReminderAt: null,
   removalFailedAt: null,
   removalAttempts: 0,
   removalError: null,
@@ -46,8 +49,25 @@ const makeEvent = (
   chatStatus,
 });
 
+const makeModerationEvent = (action: "vip" | "unvip", moderatorUserId = "other-mod"): ModuleEvent<TempVipsSettings> => ({
+  channelId: "channel-1",
+  subscriptionType: "channel.moderate",
+  triggerId: `moderation-${action}-1`,
+  payload: {
+    action,
+    [action]: { user: { user_id: target.userId, user_login: target.login, user_name: target.displayName } },
+    moderator_user_id: moderatorUserId,
+  },
+  settings: DEFAULT_TEMP_VIPS_SETTINGS,
+  receivedAt: "2026-11-01T10:00:00.000Z",
+  eventSubTimestamp: "2026-11-01T10:00:01.000Z",
+  actor: null,
+  chatStatus: null,
+});
+
 const makeContext = (options: {
   language?: "de" | "en";
+  mode?: "observe" | "managed";
   lookup?: (login: string) => Promise<typeof target | null>;
   list?: () => Promise<ModuleTempVipRow[]>;
   grant?: (request: unknown) => Promise<{ status: string; row?: ModuleTempVipRow; allowedDurationMs?: number; reason?: string }>;
@@ -58,6 +78,8 @@ const makeContext = (options: {
   botUserId: vi.fn(() => Promise.resolve("bot-user")),
   lookupUserByLogin: vi.fn(options.lookup ?? ((login) => Promise.resolve({ ...target, login }))),
   tempVips: {
+    mode: vi.fn(() => Promise.resolve(options.mode ?? "managed")),
+    recordIntent: vi.fn(() => Promise.resolve({ status: "intent_recorded" })),
     grant: vi.fn(options.grant ?? (() => Promise.resolve({ status: "granted", row: vipRow() }))),
     extend: vi.fn(() => Promise.resolve({ status: "extended", row: vipRow() })),
     importExisting: vi.fn(() => Promise.resolve({ status: "imported", row: vipRow() })),
@@ -66,6 +88,7 @@ const makeContext = (options: {
     list: vi.fn(options.list ?? (() => Promise.resolve([]))),
     runExpiry: vi.fn(() => Promise.resolve({ removed: 0, queued: 0 })),
     handleRemoved: vi.fn(() => Promise.resolve({ status: "ignored" })),
+    handleModeration: vi.fn(() => Promise.resolve({ status: "observed" })),
   },
 } as unknown as ModuleExecutionContext);
 
@@ -142,6 +165,56 @@ describe("temporary VIP chat commands", () => {
 
     expect(context.tempVips.end).toHaveBeenCalledWith({ operationId: "message-1", userId: "target-user" });
     expect(result.actions[0]).toMatchObject({ kind: "chat", automated: false });
+  });
+
+  it("records an observe-mode VIP intent and asks a moderator to run the Twitch command", async () => {
+    const context = makeContext({ mode: "observe", language: "de" });
+
+    const result = await processTempVipsChatMessage(makeEvent("!vip @gamer 30m"), context);
+
+    expect(context.tempVips.recordIntent).toHaveBeenCalledWith(expect.objectContaining({
+      operationId: "message-1",
+      person: target,
+      grantedBy: { userId: "mod-user", login: "moderator" },
+      expiresAt: "2026-11-01T10:30:00.000Z",
+    }));
+    expect(context.tempVips.grant).not.toHaveBeenCalled();
+    const reply = result.actions[0];
+    if (reply?.kind !== "chat") throw new Error("Expected the observe-mode instruction reply.");
+    expect(reply.text).toContain("/vip @gamer");
+  });
+
+  it("tells moderators to run Twitch unVIP directly in observe mode", async () => {
+    const context = makeContext({ mode: "observe", language: "en" });
+
+    const result = await processTempVipsChatMessage(makeEvent("!unvip @gamer"), context);
+
+    expect(context.tempVips.end).not.toHaveBeenCalled();
+    const reply = result.actions[0];
+    if (reply?.kind !== "chat") throw new Error("Expected the observe-mode instruction reply.");
+    expect(reply.text).toContain("/unvip @gamer");
+  });
+
+  it.each(["vip", "unvip"] as const)("passes a channel.moderate %s action to the queue", async (action) => {
+    const context = makeContext();
+
+    await processTempVipsChatMessage(makeModerationEvent(action), context);
+
+    expect(context.tempVips.handleModeration).toHaveBeenCalledWith({
+      triggerId: `moderation-${action}-1`,
+      action,
+      person: target,
+      moderatorUserId: "other-mod",
+      eventSubTimestamp: "2026-11-01T10:00:01.000Z",
+    });
+  });
+
+  it("ignores the bot's own managed unVIP moderation event", async () => {
+    const context = makeContext();
+
+    await processTempVipsChatMessage(makeModerationEvent("unvip", "bot-user"), context);
+
+    expect(context.tempVips.handleModeration).not.toHaveBeenCalled();
   });
 
   it("replies with a duration example when the duration is invalid", async () => {

@@ -2,10 +2,15 @@ import type {
   ModuleTempVipExtendRequest,
   ModuleTempVipGrantRequest,
   ModuleTempVipImportRequest,
+  ModuleTempVipIntentRequest,
+  ModuleTempVipObservedAddRequest,
+  ModuleTempVipClassifyRequest,
+  ModuleTempVipModerationEvent,
   ModuleTempVipPerson,
   ModuleTempVipRemovedEvent,
   ModuleTempVipResult,
   ModuleTempVipRow,
+  ModuleTempVipMode,
   ModuleTempVipOperationRequest,
   TempVipEndReason,
   TempVipSource,
@@ -45,6 +50,7 @@ export interface TempVipStoreOptions {
   twitch: TempVipTwitch;
   scheduleAlarm: (deadline: number | null) => Promise<void>;
   isModuleEnabled?: () => Promise<boolean>;
+  isManaged?: () => Promise<boolean>;
   commitModuleDisable?: (request: {
     actor: { userId: string; sessionId: string };
     expectedRevision: number;
@@ -65,14 +71,15 @@ export interface TempVipModuleDisableResult {
 }
 
 type TempVipStorage = Pick<DurableObjectStorage, "sql" | "transactionSync">;
-type TempVipOperationKind = "grant" | "extend" | "import" | "end" | "release" | "expire" | "verify_removed" | "disable_module";
+type TempVipOperationKind = "grant" | "extend" | "import" | "end" | "release" | "expire" | "verify_removed" | "disable_module"
+  | "record_intent" | "add_observed" | "classify" | "moderation";
 type QueueStatus = "queued" | "running" | "done";
 
 interface TempVipRowSql extends Record<string, string | number | null> {
   user_id: string;
   user_login: string;
   user_display_name: string;
-  expires_at: string;
+  expires_at: string | null;
   granted_at: string;
   granted_by_user_id: string | null;
   granted_by_login: string | null;
@@ -81,6 +88,9 @@ interface TempVipRowSql extends Record<string, string | number | null> {
   removal_attempts: number;
   removal_error: string | null;
   end_reason: "ended_early" | null;
+  classification: ModuleTempVipRow["classification"];
+  confirmation: ModuleTempVipRow["confirmation"];
+  expiry_reminder_at: string | null;
 }
 
 interface TempVipOperationSql extends Record<string, string | number | null> {
@@ -146,6 +156,9 @@ const publicRow = (row: TempVipRowSql): ModuleTempVipRow => ({
   removalAttempts: row.removal_attempts,
   removalError: row.removal_error,
   endReason: row.end_reason,
+  classification: row.classification,
+  confirmation: row.confirmation,
+  expiryReminderAt: row.expiry_reminder_at,
 });
 
 const decodePayload = (payloadJson: string): OperationPayload => {
@@ -174,37 +187,105 @@ const canonicalJson = (value: unknown): string => {
 const requestJson = (payload: OperationPayload): string => canonicalJson(payload.request);
 
 const ensureTempVipsSchema = (sql: SqlStorage): void => {
-  sql.exec(`CREATE TABLE IF NOT EXISTS temp_vips (
-    user_id TEXT PRIMARY KEY,
-    user_login TEXT NOT NULL,
-    user_display_name TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    granted_at TEXT NOT NULL,
-    granted_by_user_id TEXT,
-    granted_by_login TEXT,
-    source TEXT NOT NULL CHECK (source IN ('command', 'dashboard', 'import', 'channel_points')),
-    removal_failed_at TEXT,
-    removal_attempts INTEGER NOT NULL DEFAULT 0,
-    removal_error TEXT,
-    end_reason TEXT CHECK (end_reason IN ('ended_early'))
-  )`);
-
+  const createRows = (tableName: string): void => {
+    sql.exec(`CREATE TABLE ${tableName} (
+      user_id TEXT PRIMARY KEY,
+      user_login TEXT NOT NULL,
+      user_display_name TEXT NOT NULL,
+      expires_at TEXT,
+      granted_at TEXT NOT NULL,
+      granted_by_user_id TEXT,
+      granted_by_login TEXT,
+      source TEXT NOT NULL CHECK (source IN ('command', 'dashboard', 'import', 'channel_points', 'observed')),
+      removal_failed_at TEXT,
+      removal_attempts INTEGER NOT NULL DEFAULT 0,
+      removal_error TEXT,
+      end_reason TEXT CHECK (end_reason IN ('ended_early')),
+      classification TEXT NOT NULL DEFAULT 'temporary' CHECK (classification IN ('unclassified', 'permanent', 'temporary')),
+      confirmation TEXT NOT NULL DEFAULT 'confirmed' CHECK (confirmation IN ('confirmed', 'awaiting_vip')),
+      expiry_reminder_at TEXT
+    )`);
+  };
+  const existingRowsSql = sql.exec<{ sql: string | null }>(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'temp_vips'",
+  ).toArray()[0]?.sql;
+  if (existingRowsSql === undefined || existingRowsSql === null) {
+    createRows("temp_vips");
+  } else {
+    const columns = new Set(sql.exec<{ name: string }>("PRAGMA table_info(temp_vips)").toArray().map(({ name }) => name));
+    const expiryColumn = sql.exec<{ name: string; notnull: number }>("PRAGMA table_info(temp_vips)").toArray()
+      .find(({ name }) => name === "expires_at");
+    const rebuildRows = !columns.has("classification") || !columns.has("confirmation") ||
+      !columns.has("expiry_reminder_at") || !existingRowsSql.includes("observed") || expiryColumn?.notnull === 1;
+    if (rebuildRows) {
+      sql.exec("DROP INDEX IF EXISTS temp_vips_expiry");
+      sql.exec("ALTER TABLE temp_vips RENAME TO temp_vips_legacy");
+      createRows("temp_vips");
+      const values = [
+        "user_id", "user_login", "user_display_name", "expires_at", "granted_at", "granted_by_user_id",
+        "granted_by_login", "source", "removal_failed_at", "removal_attempts", "removal_error", "end_reason",
+        "classification", "confirmation", "expiry_reminder_at",
+      ];
+      const select = [
+        "user_id", "user_login", "user_display_name", "expires_at", "granted_at", "granted_by_user_id",
+        "granted_by_login", "source", "removal_failed_at", "removal_attempts", "removal_error", "end_reason",
+        columns.has("classification") ? "classification" : "'temporary'",
+        columns.has("confirmation") ? "confirmation" : "'confirmed'",
+        columns.has("expiry_reminder_at") ? "expiry_reminder_at" : "NULL",
+      ];
+      sql.exec(`INSERT INTO temp_vips (${values.join(", ")}) SELECT ${select.join(", ")} FROM temp_vips_legacy`);
+      sql.exec("DROP TABLE temp_vips_legacy");
+    }
+  }
   sql.exec("CREATE INDEX IF NOT EXISTS temp_vips_expiry ON temp_vips (expires_at, user_id)");
-  sql.exec(`CREATE TABLE IF NOT EXISTS temp_vip_ops (
-    operation_id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('grant', 'extend', 'import', 'end', 'release', 'expire', 'verify_removed', 'disable_module')),
-    user_id TEXT NOT NULL,
-    user_login TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'done')),
-    attempts INTEGER NOT NULL DEFAULT 0,
-    next_attempt_at TEXT NOT NULL,
-    result_json TEXT,
-    created_at TEXT NOT NULL,
-    finished_at TEXT,
-    enqueue_sequence INTEGER NOT NULL DEFAULT 0,
-    needs_reconcile INTEGER NOT NULL DEFAULT 0
-  )`);
+
+  const existingOperationsSql = sql.exec<{ sql: string | null }>(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'temp_vip_ops'",
+  ).toArray()[0]?.sql;
+  const operationKinds = "'moderation'";
+  if (existingOperationsSql === undefined || existingOperationsSql === null) {
+    sql.exec(`CREATE TABLE temp_vip_ops (
+      operation_id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('grant', 'extend', 'import', 'end', 'release', 'expire', 'verify_removed', 'disable_module', 'record_intent', 'add_observed', 'classify', 'moderation')),
+      user_id TEXT NOT NULL,
+      user_login TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'done')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT NOT NULL,
+      result_json TEXT,
+      created_at TEXT NOT NULL,
+      finished_at TEXT,
+      enqueue_sequence INTEGER NOT NULL DEFAULT 0,
+      needs_reconcile INTEGER NOT NULL DEFAULT 0
+    )`);
+  } else if (!existingOperationsSql.includes(operationKinds)) {
+    sql.exec("DROP INDEX IF EXISTS temp_vip_ops_due");
+    sql.exec("DROP INDEX IF EXISTS temp_vip_ops_user_order");
+    sql.exec("DROP INDEX IF EXISTS temp_vip_ops_sequence_unique");
+    sql.exec("ALTER TABLE temp_vip_ops RENAME TO temp_vip_ops_legacy");
+    sql.exec(`CREATE TABLE temp_vip_ops (
+      operation_id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('grant', 'extend', 'import', 'end', 'release', 'expire', 'verify_removed', 'disable_module', 'record_intent', 'add_observed', 'classify', 'moderation')),
+      user_id TEXT NOT NULL,
+      user_login TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'done')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT NOT NULL,
+      result_json TEXT,
+      created_at TEXT NOT NULL,
+      finished_at TEXT,
+      enqueue_sequence INTEGER NOT NULL DEFAULT 0,
+      needs_reconcile INTEGER NOT NULL DEFAULT 0
+    )`);
+    sql.exec(`INSERT INTO temp_vip_ops
+      (operation_id, kind, user_id, user_login, payload_json, status, attempts, next_attempt_at,
+       result_json, created_at, finished_at, enqueue_sequence, needs_reconcile)
+      SELECT operation_id, kind, user_id, user_login, payload_json, status, attempts, next_attempt_at,
+       result_json, created_at, finished_at, enqueue_sequence, needs_reconcile FROM temp_vip_ops_legacy`);
+    sql.exec("DROP TABLE temp_vip_ops_legacy");
+  }
   sql.exec("CREATE INDEX IF NOT EXISTS temp_vip_ops_due ON temp_vip_ops (status, next_attempt_at, enqueue_sequence)");
   sql.exec("CREATE INDEX IF NOT EXISTS temp_vip_ops_user_order ON temp_vip_ops (user_id, enqueue_sequence, status)");
   sql.exec("CREATE UNIQUE INDEX IF NOT EXISTS temp_vip_ops_sequence_unique ON temp_vip_ops (enqueue_sequence)");
@@ -259,7 +340,8 @@ const makePayload = (request: Record<string, unknown>, stage = "initial", intent
   JSON.stringify({ request, stage, intentAt } satisfies OperationPayload);
 
 const isCreationOperation = (kind: TempVipOperationKind): boolean =>
-  kind === "grant" || kind === "extend" || kind === "import";
+  kind === "grant" || kind === "extend" || kind === "import" || kind === "record_intent" ||
+  kind === "add_observed" || kind === "classify" || kind === "moderation";
 
 const runnerByStorage = new WeakMap<object, Promise<void>>();
 const userOrderAvailable = `NOT EXISTS (
@@ -296,6 +378,15 @@ export class TempVipStore {
 
   private transaction<Result>(run: () => Result): Result {
     return this.storage.transactionSync(run);
+  }
+
+  private async isManaged(): Promise<boolean> {
+    return this.options.isManaged === undefined ? true : await this.options.isManaged();
+  }
+
+  public async mode(): Promise<ModuleTempVipMode> {
+    if (this.options.isModuleEnabled !== undefined && !await this.options.isModuleEnabled()) return "inactive";
+    return await this.isManaged() ? "managed" : "observe";
   }
 
   private nextSequenceSync(): number {
@@ -617,6 +708,15 @@ export class TempVipStore {
       return;
     }
 
+    if (!await this.isManaged() &&
+        (operation.kind === "grant" || operation.kind === "extend" || operation.kind === "import" ||
+          operation.kind === "end" || operation.kind === "expire")) {
+      this.transaction(() => {
+        this.finishSync(operation.operation_id, { status: "observe_mode" }, this.now(), operation.attempts);
+      });
+      return;
+    }
+
     if (operation.kind === "grant") {
       await this.processGrant(operation, payload, row, claimed.needsReconcile);
       return;
@@ -631,6 +731,11 @@ export class TempVipStore {
     }
     if (operation.kind === "verify_removed") {
       await this.processVerification(operation, payload, row);
+      return;
+    }
+    if (operation.kind === "record_intent" || operation.kind === "add_observed" ||
+        operation.kind === "classify" || operation.kind === "moderation") {
+      this.processObserverOperation(operation, payload);
       return;
     }
     if (operation.kind === "release") {
@@ -750,6 +855,116 @@ export class TempVipStore {
       this.requeueSync(latestOperation, decodePayload(latestOperation.payload_json), completedAt,
         parseTime(retryAt) - parseTime(completedAt), operation.attempts + 1);
     });
+  }
+
+  private processObserverOperation(operation: TempVipOperationSql, payload: OperationPayload): void {
+    const now = this.now();
+    this.transaction(() => {
+      if (operation.kind === "record_intent") {
+        const request = payload.request as unknown as ModuleTempVipIntentRequest;
+        this.sql.exec(
+          `INSERT INTO temp_vips
+            (user_id, user_login, user_display_name, expires_at, granted_at, granted_by_user_id,
+             granted_by_login, source, removal_failed_at, removal_attempts, removal_error, end_reason,
+             classification, confirmation, expiry_reminder_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'command', NULL, 0, NULL, NULL, 'temporary', 'awaiting_vip', NULL)
+           ON CONFLICT(user_id) DO UPDATE SET user_login = excluded.user_login,
+             user_display_name = excluded.user_display_name, expires_at = excluded.expires_at,
+             granted_at = excluded.granted_at, granted_by_user_id = excluded.granted_by_user_id,
+             granted_by_login = excluded.granted_by_login, source = 'command', removal_failed_at = NULL,
+             removal_attempts = 0, removal_error = NULL, end_reason = NULL,
+             classification = 'temporary', confirmation = 'awaiting_vip', expiry_reminder_at = NULL`,
+          request.person.userId, request.person.login, request.person.displayName, request.expiresAt, now,
+          request.grantedBy?.userId ?? null, request.grantedBy?.login ?? null,
+        );
+        const row = rowFor(this.sql, request.person.userId);
+        this.finishSync(operation.operation_id, { status: "intent_recorded", ...(row === null ? {} : { row: publicRow(row) }) }, now, operation.attempts);
+        return;
+      }
+
+      if (operation.kind === "add_observed") {
+        const request = payload.request as unknown as ModuleTempVipObservedAddRequest;
+        const existing = rowFor(this.sql, request.person.userId);
+        if (existing !== null) {
+          this.finishSync(operation.operation_id, { status: "already_tracked", row: publicRow(existing) }, now, operation.attempts);
+          return;
+        }
+        this.insertObservedPersonSync(request.person, now, request.actor.userId);
+        const row = rowFor(this.sql, request.person.userId);
+        this.finishSync(operation.operation_id, { status: "observed_added", ...(row === null ? {} : { row: publicRow(row) }) }, now, operation.attempts);
+        return;
+      }
+
+      if (operation.kind === "classify") {
+        const request = payload.request as unknown as ModuleTempVipClassifyRequest;
+        const existing = rowFor(this.sql, request.userId);
+        if (existing === null) {
+          this.finishSync(operation.operation_id, { status: "not_tracked" }, now, operation.attempts);
+          return;
+        }
+        this.sql.exec(
+          `UPDATE temp_vips SET classification = ?, confirmation = 'confirmed', expires_at = ?,
+             source = 'dashboard', removal_failed_at = NULL, removal_attempts = 0, removal_error = NULL,
+             end_reason = NULL, expiry_reminder_at = NULL WHERE user_id = ?`,
+          request.classification,
+          request.classification === "permanent" ? null : request.expiresAt,
+          request.userId,
+        );
+        const row = rowFor(this.sql, request.userId);
+        if (row !== null) enqueueEventSync(this.sql, this.options.channelId, operation.operation_id, 0, now,
+          request.actor.userId, "temp_vips.classified", {
+            userId: row.user_id,
+            login: row.user_login,
+            classification: request.classification,
+            expiresAt: request.classification === "temporary" ? request.expiresAt : null,
+          });
+        this.finishSync(operation.operation_id, { status: "classified", ...(row === null ? {} : { row: publicRow(row) }) }, now, operation.attempts);
+        return;
+      }
+
+      const request = payload.request as unknown as ModuleTempVipModerationEvent;
+      if (request.action === "vip") {
+        const existing = rowFor(this.sql, request.person.userId);
+        if (existing === null) this.insertObservedPersonSync(request.person, request.eventSubTimestamp, null);
+        else this.sql.exec(
+          `UPDATE temp_vips SET user_login = ?, user_display_name = ?,
+             confirmation = CASE WHEN confirmation = 'awaiting_vip' THEN 'confirmed' ELSE confirmation END,
+             expiry_reminder_at = NULL WHERE user_id = ?`,
+          request.person.login, request.person.displayName, request.person.userId,
+        );
+        const row = rowFor(this.sql, request.person.userId);
+        this.finishSync(operation.operation_id, {
+          status: existing?.confirmation === "awaiting_vip" ? "intent_confirmed" : existing === null ? "observed" : "already_tracked",
+          ...(row === null ? {} : { row: publicRow(row) }),
+        }, now, operation.attempts);
+        return;
+      }
+
+      const existing = rowFor(this.sql, request.person.userId);
+      if (existing === null) {
+        this.finishSync(operation.operation_id, { status: "ignored" }, now, operation.attempts);
+        return;
+      }
+      this.sql.exec("DELETE FROM temp_vips WHERE user_id = ?", request.person.userId);
+      enqueueEventSync(this.sql, this.options.channelId, operation.operation_id, 0, now, null,
+        "temp_vips.ended", { userId: existing.user_id, login: existing.user_login, reason: "removed_on_twitch" });
+      this.finishSync(operation.operation_id, { status: "removed_on_twitch" }, now, operation.attempts);
+    });
+  }
+
+  private insertObservedPersonSync(
+    person: ModuleTempVipPerson,
+    createdAt: string,
+    actorUserId: string | null,
+  ): void {
+    this.sql.exec(
+      `INSERT INTO temp_vips
+        (user_id, user_login, user_display_name, expires_at, granted_at, granted_by_user_id,
+         granted_by_login, source, removal_failed_at, removal_attempts, removal_error, end_reason,
+         classification, confirmation, expiry_reminder_at)
+       VALUES (?, ?, ?, NULL, ?, ?, NULL, 'observed', NULL, 0, NULL, NULL, 'unclassified', 'confirmed', NULL)`,
+      person.userId, person.login, person.displayName, createdAt, actorUserId,
+    );
   }
 
   private async processDisableModule(
@@ -1162,6 +1377,19 @@ export class TempVipStore {
       });
       return;
     }
+    if (!await this.isManaged()) {
+      const removedAt = this.now();
+      this.transaction(() => {
+        const current = rowFor(this.sql, operation.user_id);
+        if (current !== null) {
+          this.sql.exec("DELETE FROM temp_vips WHERE user_id = ?", operation.user_id);
+          enqueueEventSync(this.sql, this.options.channelId, operation.operation_id, 0, removedAt, null,
+            "temp_vips.ended", { userId: current.user_id, login: current.user_login, reason: "removed_on_twitch" });
+        }
+        this.finishSync(operation.operation_id, { status: current === null ? "ignored" : "removed_on_twitch" }, removedAt, operation.attempts);
+      });
+      return;
+    }
     const lookup = await this.safeGet(request.userId);
     const completedAt = this.now();
     if (!lookup.ok) {
@@ -1233,14 +1461,16 @@ export class TempVipStore {
     this.sql.exec(
       `INSERT INTO temp_vips
         (user_id, user_login, user_display_name, expires_at, granted_at, granted_by_user_id,
-         granted_by_login, source, removal_failed_at, removal_attempts, removal_error, end_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL)
+         granted_by_login, source, removal_failed_at, removal_attempts, removal_error, end_reason,
+         classification, confirmation, expiry_reminder_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, 'temporary', 'confirmed', NULL)
        ON CONFLICT(user_id) DO UPDATE SET
          user_login = excluded.user_login, user_display_name = excluded.user_display_name,
          expires_at = excluded.expires_at, granted_at = excluded.granted_at,
          granted_by_user_id = excluded.granted_by_user_id, granted_by_login = excluded.granted_by_login,
          source = excluded.source, removal_failed_at = NULL, removal_attempts = 0,
-         removal_error = NULL, end_reason = NULL`,
+         removal_error = NULL, end_reason = NULL, classification = 'temporary',
+         confirmation = 'confirmed', expiry_reminder_at = NULL`,
       person.userId,
       person.login,
       person.displayName,
@@ -1264,8 +1494,9 @@ export class TempVipStore {
     clearFailedRemoval = false,
   ): ModuleTempVipResult {
     const nowMs = parseTime(now);
-    const existingExpiry = parseTime(row.expires_at);
-    const expiresAtMs = Math.max(nowMs, existingExpiry) + durationMs;
+    const existingExpiry = row.expires_at === null ? nowMs : parseTime(row.expires_at);
+    const wasTemporary = row.classification === "temporary" && row.expires_at !== null;
+    const expiresAtMs = (wasTemporary ? Math.max(nowMs, existingExpiry) : nowMs) + durationMs;
     const remaining = Math.max(0, expiresAtMs - nowMs);
     if (remaining > maximumRemainingMs) {
       const currentRemaining = Math.max(0, existingExpiry - nowMs);
@@ -1277,7 +1508,8 @@ export class TempVipStore {
     this.sql.exec(
       `UPDATE temp_vips SET expires_at = ?, user_login = ?, user_display_name = ?,
          source = ?, removal_failed_at = NULL, removal_attempts = 0, removal_error = NULL,
-         end_reason = NULL WHERE user_id = ?`,
+         end_reason = NULL, classification = 'temporary', confirmation = 'confirmed',
+         expiry_reminder_at = NULL WHERE user_id = ?`,
       utc(expiresAtMs),
       person.login,
       person.displayName,
@@ -1285,9 +1517,10 @@ export class TempVipStore {
       row.user_id,
     );
     const updated = rowFor(this.sql, row.user_id);
-    const result: ModuleTempVipResult = { status: "extended", expiresAt: utc(expiresAtMs), ...(updated === null ? {} : { row: publicRow(updated) }) };
+    const status = wasTemporary ? "extended" : "granted";
+    const result: ModuleTempVipResult = { status, expiresAt: utc(expiresAtMs), ...(updated === null ? {} : { row: publicRow(updated) }) };
     enqueueEventSync(this.sql, this.options.channelId, operationId, 0, now, grantedBy?.userId ?? null,
-      "temp_vips.extended", {
+      wasTemporary ? "temp_vips.extended" : "temp_vips.granted", {
         userId: row.user_id,
         login: person.login,
         expiresAt: utc(expiresAtMs),
@@ -1336,10 +1569,26 @@ export class TempVipStore {
   }
 
   private isDue(row: TempVipRowSql, now: string): boolean {
+    if (row.classification !== "temporary" || row.expires_at === null) return false;
     const dueAt = row.removal_failed_at === null
       ? parseTime(row.expires_at)
       : parseTime(row.removal_failed_at) + backoffDelay(row.removal_attempts);
     return dueAt <= parseTime(now);
+  }
+
+  private recordExpiryRemindersSync(now: string): void {
+    const dueRows = this.sql.exec<TempVipRowSql>(
+      `SELECT * FROM temp_vips
+        WHERE classification = 'temporary' AND expires_at IS NOT NULL
+          AND expires_at <= ? AND expiry_reminder_at IS NULL`,
+      now,
+    ).toArray();
+    for (const row of dueRows) {
+      const operationId = `expire-reminder:${encodeURIComponent(row.user_id)}:${encodeURIComponent(row.expires_at ?? "")}`;
+      this.sql.exec("UPDATE temp_vips SET expiry_reminder_at = ? WHERE user_id = ? AND expiry_reminder_at IS NULL", now, row.user_id);
+      enqueueEventSync(this.sql, this.options.channelId, operationId, 0, now, null,
+        "temp_vips.expire_reminder", { userId: row.user_id, login: row.user_login, expiresAt: row.expires_at });
+    }
   }
 
   private async safeGet(userId: string): Promise<Awaited<ReturnType<TempVipTwitch["get"]>>> {
@@ -1381,6 +1630,7 @@ export class TempVipStore {
   private async rearm(): Promise<void> {
     const now = this.now();
     const nowMs = parseTime(now);
+    const managed = await this.mode() === "managed";
     const deadlines: number[] = [];
     const operations = this.sql.exec<Pick<TempVipOperationSql, "status" | "next_attempt_at" | "finished_at">>(
       `SELECT candidate.status, candidate.next_attempt_at, candidate.finished_at FROM temp_vip_ops AS candidate
@@ -1398,8 +1648,12 @@ export class TempVipStore {
       );
       else if (operation.finished_at !== null) deadlines.push(parseTime(operation.finished_at) + TEMP_VIP_OPERATION_RETENTION_MS);
     }
-    const rows = this.sql.exec<TempVipRowSql>("SELECT * FROM temp_vips").toArray();
+    const rows = managed ? this.sql.exec<TempVipRowSql>(
+      "SELECT * FROM temp_vips WHERE classification = 'temporary' AND expires_at IS NOT NULL",
+    ).toArray() : [];
     for (const row of rows) {
+      const expiresAt = row.expires_at;
+      if (expiresAt === null) continue;
       const removalPending = this.sql.exec<{ present: number }>(
         `SELECT EXISTS(SELECT 1 FROM temp_vip_ops
           WHERE user_id = ? AND status != 'done' AND kind IN ('end', 'expire')) AS present`,
@@ -1407,7 +1661,7 @@ export class TempVipStore {
       ).one().present === 1;
       if (removalPending) continue;
       const dueAt = row.removal_failed_at === null
-        ? parseTime(row.expires_at)
+        ? parseTime(expiresAt)
         : parseTime(row.removal_failed_at) + backoffDelay(row.removal_attempts);
       deadlines.push(dueAt);
     }
@@ -1437,6 +1691,35 @@ export class TempVipStore {
         !Number.isSafeInteger(maximumRemainingMs) || maximumRemainingMs <= 0) {
       throw new Error("invalid_temp_vip_duration");
     }
+  }
+
+  public async recordIntent(request: ModuleTempVipIntentRequest): Promise<ModuleTempVipResult> {
+    if (parseTime(request.expiresAt) <= parseTime(this.now())) throw new Error("invalid_temp_vip_expiry");
+    return this.enqueueAndWait(request.operationId, "record_intent", request.person.userId, request.person.login, { ...request });
+  }
+
+  public async addObserved(request: ModuleTempVipObservedAddRequest): Promise<ModuleTempVipResult> {
+    return this.enqueueAndWait(request.operationId, "add_observed", request.person.userId, request.person.login, { ...request });
+  }
+
+  public async classify(request: ModuleTempVipClassifyRequest): Promise<ModuleTempVipResult> {
+    if (request.classification === "temporary" && request.expiresAt === null ||
+        request.classification === "permanent" && request.expiresAt !== null) {
+      throw new Error("invalid_temp_vip_classification");
+    }
+    if (request.expiresAt !== null) parseTime(request.expiresAt);
+    return this.enqueueAndWait(request.operationId, "classify", request.userId, request.userId, { ...request });
+  }
+
+  public async handleModeration(event: ModuleTempVipModerationEvent): Promise<ModuleTempVipResult> {
+    parseTime(event.eventSubTimestamp);
+    return this.enqueueAndWait(
+      `moderation:${event.triggerId}`,
+      "moderation",
+      event.person.userId,
+      event.person.login,
+      { ...event },
+    );
   }
 
   public async grant(request: ModuleTempVipGrantRequest): Promise<ModuleTempVipResult> {
@@ -1562,12 +1845,41 @@ export class TempVipStore {
   }
 
   public list(): Promise<ModuleTempVipRow[]> {
-    return Promise.resolve(this.sql.exec<TempVipRowSql>("SELECT * FROM temp_vips ORDER BY expires_at, user_id").toArray().map(publicRow));
+    return this.listRows();
+  }
+
+  private async listRows(): Promise<ModuleTempVipRow[]> {
+    const now = this.now();
+    if (await this.mode() === "observe") this.transaction(() => { this.recordExpiryRemindersSync(now); });
+    await this.rearm();
+    const rows = this.sql.exec<TempVipRowSql>("SELECT * FROM temp_vips").toArray().map(publicRow);
+    const rank = (row: ModuleTempVipRow): number => {
+      if (row.classification === "temporary" && row.expiresAt !== null && Date.parse(row.expiresAt) <= parseTime(now)) return 0;
+      if (row.classification === "unclassified" || row.confirmation === "awaiting_vip") return 1;
+      if (row.classification === "temporary") return 2;
+      return 3;
+    };
+    return rows.sort((left, right) => rank(left) - rank(right) ||
+      (left.expiresAt === null ? Number.POSITIVE_INFINITY : Date.parse(left.expiresAt)) -
+      (right.expiresAt === null ? Number.POSITIVE_INFINITY : Date.parse(right.expiresAt)) ||
+      left.login.localeCompare(right.login));
   }
 
   public async runExpiry(now = this.now()): Promise<{ removed: number; queued: number }> {
+    const mode = await this.mode();
+    if (mode === "observe") {
+      this.transaction(() => { this.recordExpiryRemindersSync(now); });
+      await this.rearm();
+      return { removed: 0, queued: 0 };
+    }
+    if (mode === "inactive") {
+      await this.rearm();
+      return { removed: 0, queued: 0 };
+    }
     const before = this.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM temp_vips").one().count;
-    const dueRows = this.sql.exec<TempVipRowSql>("SELECT * FROM temp_vips ORDER BY expires_at, user_id").toArray()
+    const dueRows = this.sql.exec<TempVipRowSql>(
+      "SELECT * FROM temp_vips WHERE classification = 'temporary' AND expires_at IS NOT NULL ORDER BY expires_at, user_id",
+    ).toArray()
       .filter((row) => this.isDue(row, now));
     this.transaction(() => {
       for (const row of dueRows) {
@@ -1577,9 +1889,11 @@ export class TempVipStore {
           row.user_id,
         ).one().count;
         if (pending > 0) continue;
+        const expiresAt = row.expires_at;
+        if (expiresAt === null) continue;
         const sequence = this.nextSequenceSync();
-        const operationId = `expire:${encodeURIComponent(row.user_id)}:${encodeURIComponent(row.expires_at)}:${String(sequence)}`;
-        const request = { expectedExpiry: row.expires_at };
+        const operationId = `expire:${encodeURIComponent(row.user_id)}:${encodeURIComponent(expiresAt)}:${String(sequence)}`;
+        const request = { expectedExpiry: expiresAt };
         const payloadJson = makePayload(request);
         this.sql.exec(
           `INSERT OR IGNORE INTO temp_vip_ops

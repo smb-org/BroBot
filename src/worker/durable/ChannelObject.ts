@@ -86,7 +86,12 @@ import type {
   ModuleTempVipExtendRequest,
   ModuleTempVipGrantRequest,
   ModuleTempVipImportRequest,
+  ModuleTempVipIntentRequest,
+  ModuleTempVipObservedAddRequest,
+  ModuleTempVipClassifyRequest,
+  ModuleTempVipModerationEvent,
   ModuleTempVipOperationRequest,
+  ModuleTempVipMode,
   ModuleTempVipRemovedEvent,
   ModuleTempVipResult,
   ModuleTempVipRow,
@@ -5006,6 +5011,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (channelId === null) throw new Error("Temporary VIP storage requires a named channel Durable Object.");
     return new TempVipStore(this.ctx.storage, {
       channelId,
+      isManaged: () => broadcasterHasScope(this.env.DB, channelId, "channel:manage:vips"),
       twitch: {
         get: (userId) => getChannelVip(this.env, channelId, userId),
         add: (userId, beforeAttempt) => addChannelVip(this.env, channelId, userId, fetch, beforeAttempt),
@@ -5124,8 +5130,43 @@ export class ChannelObject extends DurableObject<Env> {
     return result;
   }
 
-  public listTempVips(): Promise<ModuleTempVipRow[]> {
-    return this.tempVipStore().list();
+  public async tempVipMode(): Promise<ModuleTempVipMode> {
+    return this.tempVipStore().mode();
+  }
+
+  public async recordTempVipIntent(request: ModuleTempVipIntentRequest): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.recordIntent(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async addObservedTempVip(request: ModuleTempVipObservedAddRequest): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.addObserved(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async classifyTempVip(request: ModuleTempVipClassifyRequest): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.classify(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async handleTempVipModeration(event: ModuleTempVipModerationEvent): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.handleModeration(event);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async listTempVips(): Promise<ModuleTempVipRow[]> {
+    const store = this.tempVipStore();
+    const rows = await store.list();
+    await this.flushTempVipOutbox(store);
+    return rows;
   }
 
   public disableTempVipModule(request: TempVipModuleDisableRequest): Promise<TempVipModuleDisableResult> {

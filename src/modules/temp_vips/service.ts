@@ -2,6 +2,7 @@ import type {
   ModuleEvent,
   ModuleExecutionContext,
   ModuleTempVipPerson,
+  ModuleTempVipMode,
   ModuleTempVipResult,
   ModuleTempVipRow,
   ModuleResult,
@@ -88,7 +89,7 @@ const grantReply = (
   timeZone: string,
   settings: TempVipsSettings,
 ): ModuleResult => {
-  if ((result.status === "granted" || result.status === "extended") && result.row !== undefined) {
+  if ((result.status === "granted" || result.status === "extended") && result.row !== undefined && result.row.expiresAt !== null) {
     const expiresAt = formatTempVipExpiry(result.row.expiresAt, language, timeZone);
     return directChat(event, tempVipChatText(language, result.status, login, expiresAt));
   }
@@ -124,6 +125,11 @@ const formatListReply = async (
   }
   const row = rows.find((candidate) => candidate.userId === person.userId);
   if (row === undefined) return directChat(event, tempVipChatText(language, "noActiveVip", person.login));
+  if (row.confirmation === "awaiting_vip") return directChat(event, tempVipChatText(language, "awaitingVip", person.login));
+  if (row.classification === "unclassified") return directChat(event, tempVipChatText(language, "unclassifiedVip", person.login));
+  if (row.classification === "permanent" || row.expiresAt === null) {
+    return directChat(event, tempVipChatText(language, "permanentVip", person.login));
+  }
 
   const timeZone = await context.channelTimeZone();
   const expiresAt = formatTempVipExpiry(row.expiresAt, language, timeZone);
@@ -139,6 +145,29 @@ export const processTempVipsChatMessage = async (
   event: ModuleEvent<TempVipsSettings>,
   context: ModuleExecutionContext,
 ): Promise<ModuleResult> => {
+  if (event.subscriptionType === "channel.moderate") {
+    const action = stringValue(event.payload.action);
+    if (action !== "vip" && action !== "unvip") return emptyResult();
+    const actionData = record(event.payload[action]);
+    const eventUser = record(actionData?.user) ?? actionData;
+    const userId = stringValue(eventUser?.user_id) ?? stringValue(event.payload.target_user_id);
+    const login = stringValue(eventUser?.user_login) ?? stringValue(event.payload.target_user_login);
+    const moderatorUserId = stringValue(event.payload.moderator_user_id);
+    if (userId === null || login === null || moderatorUserId === null) return emptyResult();
+    if (action === "unvip" && moderatorUserId === await context.botUserId?.()) return emptyResult();
+    await context.tempVips.handleModeration({
+      triggerId: event.triggerId,
+      action,
+      person: {
+        userId,
+        login: login.toLowerCase(),
+        displayName: stringValue(eventUser?.user_name) ?? stringValue(event.payload.target_user_name) ?? login,
+      },
+      moderatorUserId,
+      eventSubTimestamp: event.eventSubTimestamp ?? event.receivedAt,
+    });
+    return emptyResult();
+  }
   if (event.subscriptionType !== "channel.chat.message") return emptyResult();
   const text = messageText(event);
   if (text === null) return emptyResult();
@@ -166,7 +195,16 @@ export const processTempVipsChatMessage = async (
   if (resolution.kind !== "ok") return targetReply(event, command.login ?? "", resolution, language)
     ?? directChat(event, tempVipChatText(language, "lookupUnavailable"));
 
+  let mode: ModuleTempVipMode;
+  try {
+    mode = await context.tempVips.mode();
+  } catch {
+    return directChat(event, tempVipChatText(language, "genericFailure"));
+  }
+  if (mode === "inactive") return directChat(event, tempVipChatText(language, "moduleInactive"));
+
   if (command.kind === "unvip") {
+    if (mode === "observe") return directChat(event, tempVipChatText(language, "observeUnvipRequired", resolution.person.login));
     let result: ModuleTempVipResult;
     try {
       result = await context.tempVips.end({ operationId: event.triggerId, userId: resolution.person.userId });
@@ -192,6 +230,25 @@ export const processTempVipsChatMessage = async (
     ? null
     : { userId: chatterId, login: grantedByLogin.toLowerCase() };
   const timeZone = await context.channelTimeZone();
+  if (mode === "observe") {
+    if (durationMs > event.settings.maximumDurationDays * DAY_MS) {
+      const allowed = formatTempVipAllowedDuration(event.settings.maximumDurationDays * DAY_MS, language);
+      return directChat(event, tempVipChatText(language, "maximumExceeded", allowed));
+    }
+    try {
+      const result = await context.tempVips.recordIntent({
+        operationId: event.triggerId,
+        person: resolution.person,
+        grantedBy,
+        expiresAt: new Date(Date.parse(event.receivedAt) + durationMs).toISOString(),
+      });
+      return result.status === "intent_recorded"
+        ? directChat(event, tempVipChatText(language, "observeVipRequired", resolution.person.login))
+        : directChat(event, tempVipChatText(language, "genericFailure"));
+    } catch {
+      return directChat(event, tempVipChatText(language, "uncertainOutcome", resolution.person.login));
+    }
+  }
   try {
     const result = await context.tempVips.grant({
       operationId: event.triggerId,

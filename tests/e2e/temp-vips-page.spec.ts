@@ -26,6 +26,9 @@ const initialRows: ModuleTempVipRow[] = [
     grantedByUserId: "user_helper",
     grantedByLogin: "helferhase",
     source: "dashboard" as const,
+    classification: "temporary" as const,
+    confirmation: "confirmed" as const,
+    expiryReminderAt: null,
     removalFailedAt: null,
     removalAttempts: 0,
     removalError: null,
@@ -40,6 +43,9 @@ const initialRows: ModuleTempVipRow[] = [
     grantedByUserId: "user_helper",
     grantedByLogin: "helferhase",
     source: "import" as const,
+    classification: "temporary" as const,
+    confirmation: "confirmed" as const,
+    expiryReminderAt: null,
     removalFailedAt: addTime(-60 * 60 * 1_000),
     removalAttempts: 1,
     removalError: "network",
@@ -163,7 +169,7 @@ const mockDashboard = async (page: Page, options: { missingBroadcasterScopes?: s
     }
     if (url.pathname === `/api/channels/${channelId}/modules/temp_vips/vips`) {
       vipsLoads += 1;
-      return route.fulfill(json({ rows, settings: savedSettings, timeZone: "Europe/Berlin", now }));
+      return route.fulfill(json({ rows, settings: savedSettings, timeZone: "Europe/Berlin", mode: "managed", now }));
     }
     if (url.pathname === `/api/channels/${channelId}/modules/temp_vips/existing-vips`) {
       return route.fulfill(json({ people: existingVips }));

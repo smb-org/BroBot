@@ -17,16 +17,22 @@ const row = {
   grantedByUserId: "operator_demo",
   grantedByLogin: "helper_demo",
   source: "dashboard" as const,
+  classification: "temporary" as const,
+  confirmation: "confirmed" as const,
+  expiryReminderAt: null,
   removalFailedAt: null,
   removalAttempts: 0,
   removalError: null,
   endReason: null,
 };
 
-const createHarness = (role: string = "operator") => {
+const createHarness = (role: string = "operator", mode: "observe" | "managed" | "inactive" = "managed") => {
   const access: ModuleTempVipRouteAccess = {
+    mode: vi.fn(() => Promise.resolve(mode)),
     list: vi.fn(() => Promise.resolve([row])),
     listExisting: vi.fn(() => Promise.resolve({ ok: true as const, people: [{ userId: "user_demo", login: "pixelpilz", displayName: "Pixelpilz" }] })),
+    addObserved: vi.fn(() => Promise.resolve({ status: "observed_added", row })),
+    classify: vi.fn(() => Promise.resolve({ status: "classified", row })),
     grant: vi.fn(() => Promise.resolve({ status: "granted", row })),
     extend: vi.fn(() => Promise.resolve({ status: "extended", row })),
     importExisting: vi.fn(() => Promise.resolve({ status: "imported", row })),
@@ -76,6 +82,8 @@ afterEach(() => {
 describe("temporary VIP routes", () => {
   it.each([
     "/existing-vips",
+    "/vips/observed",
+    "/vips/user_demo/classify",
     "/vips/grant",
     "/vips/import",
     "/vips/user_demo/extend",
@@ -89,6 +97,8 @@ describe("temporary VIP routes", () => {
 
     expect(response.status).toBe(403);
     expect(harness.access.listExisting).not.toHaveBeenCalled();
+    expect(harness.access.addObserved).not.toHaveBeenCalled();
+    expect(harness.access.classify).not.toHaveBeenCalled();
     expect(harness.access.grant).not.toHaveBeenCalled();
     expect(harness.access.importExisting).not.toHaveBeenCalled();
     expect(harness.access.extend).not.toHaveBeenCalled();
@@ -105,6 +115,76 @@ describe("temporary VIP routes", () => {
     expect(response.status).toBe(200);
     expect(harness.access.end).toHaveBeenCalledWith({ operationId, userId: "user_demo" });
     await expect(response.json()).resolves.toMatchObject({ status: "ended" });
+  });
+
+  it("lets an operator add an observed VIP by login without reading the VIP list", async () => {
+    const harness = createHarness("operator", "observe");
+
+    const response = await harness.request("/vips/observed", { operationId, login: "@pixelpilz" });
+
+    expect(response.status).toBe(200);
+    expect(harness.access.addObserved).toHaveBeenCalledWith(expect.objectContaining({
+      operationId,
+      person: { userId: "user_demo", login: "pixelpilz", displayName: "Pixelpilz" },
+    }));
+    expect(harness.access.listExisting).not.toHaveBeenCalled();
+  });
+
+  it("classifies an observed VIP using a channel-local expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNow));
+    const harness = createHarness("operator", "observe");
+
+    const response = await harness.request("/vips/user_demo/classify", {
+      operationId,
+      classification: "temporary",
+      expiresAtLocal: "2026-11-01T13:10",
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.access.classify).toHaveBeenCalledWith(expect.objectContaining({
+      operationId,
+      userId: "user_demo",
+      classification: "temporary",
+      expiresAt: "2026-11-01T12:10:00.000Z",
+    }));
+  });
+
+  it("keeps classification available after switching to managed mode", async () => {
+    const harness = createHarness("operator", "managed");
+
+    const response = await harness.request("/vips/user_demo/classify", {
+      operationId,
+      classification: "permanent",
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.access.classify).toHaveBeenCalledWith(expect.objectContaining({
+      operationId,
+      userId: "user_demo",
+      classification: "permanent",
+      expiresAt: null,
+    }));
+    expect(harness.access.listExisting).not.toHaveBeenCalled();
+  });
+
+  it("does not read the Twitch VIP list in observe mode", async () => {
+    const harness = createHarness("operator", "observe");
+
+    const response = await harness.request("/existing-vips");
+
+    expect(response.status).toBe(409);
+    expect(harness.access.listExisting).not.toHaveBeenCalled();
+  });
+
+  it("blocks observed VIP actions when the module is disabled", async () => {
+    const harness = createHarness("operator", "inactive");
+
+    const response = await harness.request("/vips/observed", { operationId, login: "pixelpilz" });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "temp_vips_module_disabled" });
+    expect(harness.access.addObserved).not.toHaveBeenCalled();
   });
 
   it.each(["grant", "import", "extend"] as const)("enforces the 10-minute minimum at the %s route boundary", async (action) => {

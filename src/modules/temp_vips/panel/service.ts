@@ -1,5 +1,5 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { ModuleTempVipPerson, ModuleTempVipResult, ModuleTempVipRow } from "../../contract";
+import type { ModuleTempVipMode, ModuleTempVipPerson, ModuleTempVipResult, ModuleTempVipRow } from "../../contract";
 import type { TempVipsSettings } from "../contracts";
 import { createTempVipSubmissionTracker } from "./submission";
 
@@ -11,6 +11,7 @@ export interface TempVipsPanelData {
   rows: ModuleTempVipRow[];
   settings: TempVipsSettings;
   timeZone: string;
+  mode: ModuleTempVipMode;
   now: string;
 }
 
@@ -75,6 +76,16 @@ const mutate = async (channelId: string, path: string, body: Record<string, unkn
 
 export const grantTempVip = (channelId: string, login: string, durationMs: number): Promise<ModuleTempVipResult> =>
   mutate(channelId, "/vips/grant", { login, durationMs });
+
+export const addObservedTempVip = (channelId: string, login: string): Promise<ModuleTempVipResult> =>
+  mutate(channelId, "/vips/observed", { login });
+
+export const classifyTempVip = (
+  channelId: string,
+  userId: string,
+  input: { classification: "permanent" } | { classification: "temporary"; durationMs: number } | { classification: "temporary"; expiresAtLocal: string },
+): Promise<ModuleTempVipResult> =>
+  mutate(channelId, `/vips/${encodeURIComponent(userId)}/classify`, input);
 
 export const importTempVip = (channelId: string, userId: string, duration: number | { expiresAtLocal: string }): Promise<ModuleTempVipResult> =>
   mutate(channelId, "/vips/import", { userId, ...(typeof duration === "number" ? { durationMs: duration } : duration) });

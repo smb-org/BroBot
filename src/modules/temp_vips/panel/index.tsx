@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement, type SyntheticEvent } from "react";
-
 import { PanelApiError } from "../../../contracts/panel-error";
 import { formatNumber } from "../../../dashboard/locale";
-import { Button, ConfirmDialog, Dialog, Field, SegmentChoice, Tabs, UnitInput, notify } from "../../../dashboard/ui";
+import { Button, ConfirmDialog, Dialog, Field, Icon, SegmentChoice, Tabs, UnitInput, notify } from "../../../dashboard/ui";
 import { useModuleQuery } from "../../../dashboard/data";
 import type { ModulePanelProperties, ModuleTempVipPerson, ModuleTempVipResult, ModuleTempVipRow } from "../../contract";
 import type { TempVipsSettings } from "../contracts";
 import {
   endTempVip,
+  addObservedTempVip,
+  classifyTempVip,
   extendTempVip,
   grantTempVip,
   importTempVip,
@@ -20,13 +21,14 @@ import { tempVipsPanelTexts } from "./locale";
 import { formatTempVipResult } from "./result-message";
 import "./panel.css";
 
-type DialogState = { kind: "grant" } | { kind: "takeover" } | { kind: "extend"; row: ModuleTempVipRow };
+type DialogState = { kind: "grant" } | { kind: "manualAdd" } | { kind: "takeover" } |
+  { kind: "extend"; row: ModuleTempVipRow } | { kind: "classifyTemporary"; row: ModuleTempVipRow };
 type TimeEntryMode = "duration" | "expiry";
 type PanelLabels = typeof tempVipsPanelTexts["en"];
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
 const isSuccess = (result: ModuleTempVipResult): boolean =>
-  ["granted", "extended", "imported", "ended", "released"].includes(result.status);
+  ["granted", "extended", "imported", "ended", "released", "classified", "observed_added", "already_tracked"].includes(result.status);
 
 const formatExpiry = (value: string, now: number, timeZone: string, language: "de" | "en") => {
   const expiry = Date.parse(value);
@@ -114,8 +116,15 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
   const serverNow = query.data === undefined
     ? localNow
     : Date.parse(query.data.now) + Math.max(0, localNow - query.dataUpdatedAt);
-  const rows = useMemo(() => [...(query.data?.rows ?? [])].sort((left, right) =>
-    Date.parse(left.expiresAt) - Date.parse(right.expiresAt) || left.login.localeCompare(right.login)), [query.data?.rows]);
+  const mode = query.data?.mode ?? "loading";
+  const rows = useMemo(() => [...(query.data?.rows ?? [])].sort((left, right) => {
+    const rank = (row: ModuleTempVipRow): number => row.classification === "temporary" && row.expiresAt !== null &&
+        Date.parse(row.expiresAt) <= serverNow ? 0
+      : row.classification === "unclassified" || row.confirmation === "awaiting_vip" ? 1
+        : row.classification === "temporary" ? 2 : 3;
+    const expiry = (row: ModuleTempVipRow): number => row.expiresAt === null ? Number.POSITIVE_INFINITY : Date.parse(row.expiresAt);
+    return rank(left) - rank(right) || expiry(left) - expiry(right) || left.login.localeCompare(right.login);
+  }), [query.data?.rows, serverNow]);
   const visibleVips = useMemo(() => {
     const search = vipFilter.trim().replace(/^@/u, "").toLocaleLowerCase();
     return (existingVips ?? []).filter((person) => search.length === 0 || person.login.toLocaleLowerCase().includes(search) ||
@@ -127,7 +136,8 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
     setDialogError(null);
     setPageFeedback(null);
     setLogin("");
-    setDurationDays(next.kind === "extend" ? settings.defaultDurationDays : Math.min(settings.defaultDurationDays, settings.maximumDurationDays));
+    setDurationDays(next.kind === "extend" || next.kind === "classifyTemporary"
+      ? settings.defaultDurationDays : Math.min(settings.defaultDurationDays, settings.maximumDurationDays));
     setTimeEntryMode("duration");
     setExpiryInput("");
     setVipFilter("");
@@ -146,7 +156,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
     event.preventDefault();
     if (dialog === null || pending) return;
     setDialogError(null);
-    const dateEntry = dialog.kind === "takeover" && timeEntryMode === "expiry";
+    const dateEntry = (dialog.kind === "takeover" || dialog.kind === "classifyTemporary") && timeEntryMode === "expiry";
     const expiryInputValue = dateEntry ? expiryInput.trim() : "";
     const durationMs: number | null = typeof durationDays === "number" && Number.isInteger(durationDays) && durationDays > 0
       ? durationDays * DAY_MS
@@ -155,15 +165,15 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
       setDialogError(labels.expiryRequired);
       return;
     }
-    if (!dateEntry && durationMs === null) {
+    if (dialog.kind !== "manualAdd" && !dateEntry && durationMs === null) {
       setDialogError(labels.durationRequired);
       return;
     }
-    if (!dateEntry && durationMs !== null && durationMs > settings.maximumDurationDays * DAY_MS) {
+    if (dialog.kind !== "manualAdd" && !dateEntry && durationMs !== null && durationMs > settings.maximumDurationDays * DAY_MS) {
       setDialogError(labels.maximumExceeded);
       return;
     }
-    if (dialog.kind === "grant" && login.trim().length === 0) {
+    if ((dialog.kind === "grant" || dialog.kind === "manualAdd") && login.trim().length === 0) {
       setDialogError(labels.userNotFound);
       return;
     }
@@ -176,10 +186,16 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
     try {
       const result = dialog.kind === "grant"
         ? await grantTempVip(channelId, login.trim(), durationMs as number)
+        : dialog.kind === "manualAdd"
+          ? await addObservedTempVip(channelId, login.trim())
         : dialog.kind === "takeover" && selectedVip !== null
           ? await importTempVip(channelId, selectedVip.userId, dateEntry ? { expiresAtLocal: expiryInputValue } : durationMs as number)
           : dialog.kind === "extend"
             ? await extendTempVip(channelId, dialog.row.userId, durationMs as number)
+            : dialog.kind === "classifyTemporary"
+              ? await classifyTempVip(channelId, dialog.row.userId, dateEntry
+                ? { classification: "temporary", expiresAtLocal: expiryInputValue }
+                : { classification: "temporary", durationMs: durationMs as number })
             : null;
       if (result === null) return;
       if (!isSuccess(result) && result.status !== "queued") {
@@ -187,7 +203,10 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
         if (result.status === "not_vip") void query.refetch();
         return;
       }
-      const success = formatTempVipResult(result, language, query.data?.timeZone ?? "UTC");
+      const success = result.status === "observed_added" || result.status === "already_tracked"
+        ? result.status === "already_tracked" ? labels.alreadyTracked : labels.manualAddSuccess
+        : result.status === "classified" ? labels.classifiedSuccess
+          : formatTempVipResult(result, language, query.data?.timeZone ?? "UTC");
       setPageFeedback(success);
       notify({ tone: result.status === "queued" ? "info" : "success", message: success });
       setDialog(null);
@@ -244,8 +263,42 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
     }
   };
 
+  const classifyPermanent = async (row: ModuleTempVipRow): Promise<void> => {
+    if (busyUserId !== null) return;
+    setBusyUserId(row.userId);
+    setPageFeedback(null);
+    try {
+      const result = await classifyTempVip(channelId, row.userId, { classification: "permanent" });
+      if (result.status !== "classified") {
+        setPageFeedback(formatTempVipResult(result, language, query.data?.timeZone ?? "UTC"));
+        return;
+      }
+      setPageFeedback(labels.permanentSuccess);
+      notify({ tone: "success", message: labels.permanentSuccess });
+      await query.refetch();
+    } catch (error) {
+      setPageFeedback(errorMessage(error, labels));
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
+  const copyUnvipCommand = async (loginToRemove: string): Promise<void> => {
+    const command = `/unvip @${loginToRemove}`;
+    try {
+      await navigator.clipboard.writeText(command);
+      setPageFeedback(labels.copiedCommand);
+      notify({ tone: "success", message: labels.copiedCommand });
+    } catch {
+      setPageFeedback(labels.copyFailed);
+    }
+  };
+
   const dialogTitle = dialog === null ? "" : dialog.kind === "grant" ? labels.grantTitle
-    : dialog.kind === "takeover" ? labels.takeOverTitle : labels.extendTitle(dialog.row.displayName);
+    : dialog.kind === "manualAdd" ? labels.addObservedTitle
+      : dialog.kind === "takeover" ? labels.takeOverTitle
+        : dialog.kind === "classifyTemporary" ? labels.classifyTemporaryTitle(dialog.row.displayName)
+          : labels.extendTitle(dialog.row.displayName);
   const now = Number.isFinite(serverNow) ? serverNow : localNow;
   const expiryZone = query.data?.timeZone ?? "UTC";
 
@@ -258,10 +311,18 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
         <Tabs.Tab className="temp-vips-page__tab" value="settings">{labels.tabSettings}</Tabs.Tab>
       </Tabs.List>
     </Tabs>
+    <div className={`temp-vips-mode temp-vips-mode--${mode}`} role="status" aria-live="polite">
+      {mode === "observe" ? labels.modeObserve : mode === "managed" ? labels.modeManaged
+        : mode === "inactive" ? labels.modeInactive : labels.modeLoading}
+    </div>
     <header className="temp-vips-page__actions">
       <div className="temp-vips-page__action-buttons">
-        <Button variant="primary" onClick={() => openDialog({ kind: "grant" })} disabled={!canOperate}>{labels.grant}</Button>
-        <Button variant="neutral" onClick={() => openDialog({ kind: "takeover" })} disabled={!canOperate}>{labels.takeOver}</Button>
+        {mode === "observe" ? <Button variant="primary" onClick={() => openDialog({ kind: "manualAdd" })} disabled={!canOperate}>
+          {labels.addObserved}
+        </Button> : mode === "managed" ? <>
+          <Button variant="primary" onClick={() => openDialog({ kind: "grant" })} disabled={!canOperate}>{labels.grant}</Button>
+          <Button variant="neutral" onClick={() => openDialog({ kind: "takeover" })} disabled={!canOperate}>{labels.takeOver}</Button>
+        </> : null}
       </div>
       <div className="temp-vips-page__feedback" role="status" aria-live="polite" title={pageFeedback ?? undefined}>{pageFeedback}</div>
     </header>
@@ -278,31 +339,49 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
         ? <div className="temp-vips-list__state">{labels.empty}</div>
         : <div className="temp-vips-list__rows" role="list">
           {rows.map((row) => {
-            const expiry = formatExpiry(row.expiresAt, now, expiryZone, language);
+            const expiry = row.expiresAt === null ? null : formatExpiry(row.expiresAt, now, expiryZone, language);
             const source = labels.sourceLabels[row.source];
             const busy = busyUserId === row.userId || confirmPending && confirmRow?.userId === row.userId;
-            return <article className="temp-vips-row" data-warning={row.removalFailedAt === null ? "false" : "true"} key={row.userId} role="listitem">
+            const expiredObserve = mode === "observe" && row.classification === "temporary" && row.expiresAt !== null && Date.parse(row.expiresAt) <= now;
+            const unclassified = row.classification === "unclassified" && row.confirmation === "confirmed";
+            return <article className="temp-vips-row" data-warning={row.removalFailedAt !== null || expiredObserve ? "true" : "false"} key={row.userId} role="listitem">
               <div className="temp-vips-row__identity">
                 <strong>{row.displayName}</strong>
                 <span>@{row.login}</span>
+                {unclassified ? <span className="temp-vips-row__status">{labels.unclassified}</span>
+                  : row.confirmation === "awaiting_vip" ? <span className="temp-vips-row__status">{labels.awaitingVip}</span>
+                    : row.classification === "permanent" ? <span className="temp-vips-row__status">{labels.permanent}</span>
+                      : null}
                 {row.removalFailedAt === null ? null : <span className="temp-vips-row__warning" role="status">
                   {labels.removalWarning}{row.removalError === null ? "" : ` · ${labels.removalReasons[row.removalError] ?? labels.removalReasonUnknown}`}
                 </span>}
               </div>
               <div className="temp-vips-row__expiry">
-                <span className="temp-vips-row__label">{labels.expires}</span>
-                <time dateTime={row.expiresAt} title={expiry.absolute}>{expiry.absolute}</time>
-                <small>{expiry.relative}</small>
+                {expiredObserve ? <span className="temp-vips-row__warning" role="status">{labels.expiredReminder(row.login)}</span>
+                  : row.classification === "permanent" ? <span className="temp-vips-row__label">{labels.permanent}</span>
+                    : expiry === null ? null
+                      : <>
+                        <span className="temp-vips-row__label">{labels.expires}</span>
+                        <time dateTime={row.expiresAt ?? undefined} title={expiry.absolute}>{expiry.absolute}</time>
+                        <small>{expiry.relative}</small>
+                      </>}
               </div>
               <div className="temp-vips-row__meta">
                 <span><b>{labels.grantedBy}:</b> {row.grantedByLogin === null ? "—" : `@${row.grantedByLogin}`}</span>
                 <span><b>{labels.source}:</b> {source}</span>
               </div>
               <div className="temp-vips-row__actions">
-                <Button variant="subtle" size="compact" onClick={() => openDialog({ kind: "extend", row })} disabled={!canOperate || busy}>{labels.extend}</Button>
-                {row.removalFailedAt === null ? null : <Button variant="neutral" size="compact" onClick={() => { void runRowAction(row, "retry"); }} disabled={!canOperate || busy}>{labels.retryRemoval}</Button>}
-                <Button variant="neutral" danger size="compact" onClick={() => { setConfirmRow(row); setConfirmError(undefined); }} disabled={!canOperate || busy}>{labels.endNow}</Button>
-                <Button variant="subtle" size="compact" onClick={() => { void runRowAction(row, "release"); }} disabled={!canOperate || busy} title={labels.releaseHint}>{labels.release}</Button>
+                {unclassified && mode !== "inactive" && mode !== "loading" ? <>
+                  <Button variant="subtle" size="compact" onClick={() => { void classifyPermanent(row); }} disabled={!canOperate || busy}>{labels.permanent}</Button>
+                  <Button variant="neutral" size="compact" onClick={() => openDialog({ kind: "classifyTemporary", row })} disabled={!canOperate || busy}>{labels.temporary}</Button>
+                </> : expiredObserve ? <Button variant="subtle" size="compact" onClick={() => { void copyUnvipCommand(row.login); }}>
+                  <Icon name="copy" /> {labels.copyCommand}
+                </Button> : mode === "managed" && row.classification === "temporary" && row.expiresAt !== null ? <>
+                  <Button variant="subtle" size="compact" onClick={() => openDialog({ kind: "extend", row })} disabled={!canOperate || busy}>{labels.extend}</Button>
+                  {row.removalFailedAt === null ? null : <Button variant="neutral" size="compact" onClick={() => { void runRowAction(row, "retry"); }} disabled={!canOperate || busy}>{labels.retryRemoval}</Button>}
+                  <Button variant="neutral" danger size="compact" onClick={() => { setConfirmRow(row); setConfirmError(undefined); }} disabled={!canOperate || busy}>{labels.endNow}</Button>
+                  <Button variant="subtle" size="compact" onClick={() => { void runRowAction(row, "release"); }} disabled={!canOperate || busy} title={labels.releaseHint}>{labels.release}</Button>
+                </> : null}
               </div>
             </article>;
           })}
@@ -311,7 +390,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
 
     <Dialog opened={dialog !== null} title={dialogTitle} onClose={dismissDialog} pending={pending} className="temp-vips-dialog">
       <form className="temp-vips-dialog__form" onSubmit={(event) => { void submitDialog(event); }}>
-        {dialog?.kind === "grant" ? <>
+        {dialog?.kind === "grant" || dialog?.kind === "manualAdd" ? <>
           <Field
             label={labels.name}
             hint={labels.loginHint}
@@ -323,7 +402,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
             disabled={pending}
             required
           />
-          <UnitInput
+          {dialog.kind === "grant" ? <UnitInput
             name="durationDays"
             label={labels.duration}
             unit={labels.days}
@@ -334,7 +413,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
             hint={labels.durationHint}
             disabled={pending}
             required
-          />
+          /> : null}
         </> : dialog?.kind === "extend" ? <UnitInput
           name="durationDays"
           label={labels.duration}
@@ -346,7 +425,39 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
           hint={labels.durationHint}
           disabled={pending}
           required
-        /> : dialog?.kind === "takeover" ? <>
+        /> : dialog?.kind === "classifyTemporary" ? <>
+          <SegmentChoice<TimeEntryMode>
+            label={labels.remainingTime}
+            value={timeEntryMode}
+            onChange={setTimeEntryMode}
+            disabled={pending}
+            wrap
+            options={[
+              { value: "duration", label: labels.remainingDuration },
+              { value: "expiry", label: labels.expiryDate },
+            ]}
+          />
+          {timeEntryMode === "duration" ? <UnitInput
+            name="durationDays"
+            label={labels.duration}
+            unit={labels.days}
+            value={durationDays}
+            min={1}
+            max={settings.maximumDurationDays}
+            onChange={setDurationDays}
+            hint={labels.durationHint}
+            disabled={pending}
+            required
+          /> : <Field
+            label={`${labels.expiryDate} · ${expiryZone}`}
+            type="datetime-local"
+            value={expiryInput}
+            onChange={setExpiryInput}
+            hint={labels.expiryDateHint(expiryZone)}
+            disabled={pending}
+            required
+          />}
+        </> : dialog?.kind === "takeover" ? <>
           <Field
             label={labels.targetSearch}
             value={vipFilter}
@@ -416,7 +527,9 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
         <div className="temp-vips-dialog__actions">
           <Button variant="subtle" type="button" onClick={dismissDialog} disabled={pending}>{labels.cancel}</Button>
           <Button variant="primary" type="submit" disabled={pending || dialog?.kind === "takeover" && (existingVips === null || existingVipsFailed || existingVips.length === 0 || selectedVip === null)}>
-            {dialog?.kind === "takeover" ? labels.save : dialog?.kind === "extend" ? labels.extend : labels.grant}
+            {dialog?.kind === "takeover" || dialog?.kind === "classifyTemporary" ? labels.save
+              : dialog?.kind === "extend" ? labels.extend
+                : dialog?.kind === "manualAdd" ? labels.addObserved : labels.grant}
           </Button>
         </div>
       </form>

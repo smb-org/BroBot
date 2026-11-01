@@ -25,7 +25,7 @@ describe("temporary VIP result explanations", () => {
     const result: ModuleTempVipResult = {
       status: "extended",
       expiresAt: "2026-11-02T12:00:00.000Z",
-      row: { userId: "user_demo", login: "pixelpilz", displayName: "Pixelpilz", expiresAt: "2026-11-02T12:00:00.000Z", grantedAt: "2026-11-01T12:00:00.000Z", grantedByUserId: null, grantedByLogin: null, source: "dashboard", removalFailedAt: null, removalAttempts: 0, removalError: null, endReason: null },
+      row: { userId: "user_demo", login: "pixelpilz", displayName: "Pixelpilz", expiresAt: "2026-11-02T12:00:00.000Z", grantedAt: "2026-11-01T12:00:00.000Z", grantedByUserId: null, grantedByLogin: null, source: "dashboard", removalFailedAt: null, removalAttempts: 0, removalError: null, endReason: null, classification: "temporary", confirmation: "confirmed", expiryReminderAt: null },
     };
 
     expect(formatTempVipResult(result, "de", "UTC")).toContain("02.11.2026");

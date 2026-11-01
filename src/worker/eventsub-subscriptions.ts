@@ -287,10 +287,13 @@ export const listDesiredEventSubTargets = async (
       if (module === undefined) continue;
       const requiredScopes = moduleScopeRequirement(module);
       const grantedScopes = row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_scopes_json) : [];
-      if (requiredScopes.length === 0
-        ? row.channel_bot_consent !== 1
-        : !moduleHasRequiredBroadcasterScopes(module, grantedScopes)) continue;
+      const moduleScopeSatisfied = requiredScopes.length === 0
+        ? row.channel_bot_consent === 1
+        : moduleHasRequiredBroadcasterScopes(module, grantedScopes);
       for (const subscriptionType of module.eventSubTypes ?? []) {
+        const scopeIndependent = module.scopeIndependentEventSubTypes?.includes(subscriptionType) === true;
+        if (!moduleScopeSatisfied && !scopeIndependent) continue;
+        if (scopeIndependent && row.channel_bot_consent !== 1) continue;
         for (const definition of EVENTSUB_SUBSCRIPTION_DEFINITIONS) {
           if (definition.subscriptionType !== subscriptionType) continue;
           const baseTarget: EventSubTarget = {
