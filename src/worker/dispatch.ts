@@ -817,12 +817,11 @@ export const dispatchEventSubNotification = async (
     if (userId === null) throw new Error("Temporary VIP removal event has no user id.");
     const channel = environment.CHANNEL?.get(environment.CHANNEL.idFromName(event.channelId));
     if (channel === undefined) throw new Error("The channel Durable Object is unavailable.");
-    const result = await channel.handleTempVipRemoved({
+    await channel.handleTempVipRemoved({
       triggerId: event.triggerId,
       userId,
       eventSubTimestamp: event.eventSubTimestamp ?? event.receivedAt,
     });
-    if (result.status === "busy") throw new Error("Temporary VIP state is busy; the EventSub event can be retried.");
     return;
   }
   if (event.subscriptionType === "channel.chat.message") {

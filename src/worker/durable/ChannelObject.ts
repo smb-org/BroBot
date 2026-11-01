@@ -5010,12 +5010,12 @@ export class ChannelObject extends DurableObject<Env> {
           await this.clearAlarmEntry(TEMP_VIP_EXPIRY_ALARM_KEY, undefined, null);
           return;
         }
-        const existingDeadline = (await this.ensureAlarmScheduleTable())[TEMP_VIP_EXPIRY_ALARM_KEY]?.deadline;
-        const safeDeadline = existingDeadline === undefined ? deadline : Math.min(deadline, existingDeadline);
+        // The current entry may be the deadline whose handler is running now.
+        // Replace it atomically so this handler can move the next wake-up forward.
         await this.scheduleAlarmEntry(
           TEMP_VIP_EXPIRY_ALARM_KEY,
           TEMP_VIP_EXPIRY_ALARM_HANDLER,
-          safeDeadline,
+          deadline,
           undefined,
           undefined,
           null,
@@ -5082,11 +5082,15 @@ export class ChannelObject extends DurableObject<Env> {
     return result;
   }
 
-  public async listTempVips(): Promise<ModuleTempVipRow[]> {
+  public listTempVips(): Promise<ModuleTempVipRow[]> {
     return this.tempVipStore().list();
   }
 
-  public async runTempVipExpiry(now = new Date().toISOString()): Promise<{ removed: number; recoveredGrants: number }> {
+  public hasTempVips(): boolean {
+    return this.tempVipStore().hasRows();
+  }
+
+  public async runTempVipExpiry(now = new Date().toISOString()): Promise<{ removed: number; queued: number }> {
     const store = this.tempVipStore();
     const result = await store.runExpiry(now);
     await this.flushTempVipOutbox(store);

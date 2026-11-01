@@ -1405,13 +1405,10 @@ export interface ModuleTempVipRow extends ModuleTempVipPerson {
   grantedByUserId: string | null;
   grantedByLogin: string | null;
   source: TempVipSource;
-  status: "active" | "grant_pending" | "grant_unknown";
-  grantGeneration: number;
   removalFailedAt: string | null;
   removalAttempts: number;
   removalError: string | null;
   endReason: "ended_early" | null;
-  revision: number;
 }
 
 export interface ModuleTempVipResult {
@@ -1463,7 +1460,7 @@ export interface ModuleTempVipAccess {
   end: (request: ModuleTempVipOperationRequest) => Promise<ModuleTempVipResult>;
   release: (request: ModuleTempVipOperationRequest) => Promise<ModuleTempVipResult>;
   list: () => Promise<ModuleTempVipRow[]>;
-  runExpiry: (now?: string) => Promise<{ removed: number; recoveredGrants: number }>;
+  runExpiry: (now?: string) => Promise<{ removed: number; queued: number }>;
   handleRemoved: (event: ModuleTempVipRemovedEvent) => Promise<ModuleTempVipResult>;
 }
 
