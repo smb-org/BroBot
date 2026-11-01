@@ -28,6 +28,31 @@ describe("temporary VIP submission retries", () => {
     ]);
   });
 
+  it.each([
+    ["an unreadable body", () => new Response("not json", { status: 200 })],
+    ["an invalid 2xx body", () => new Response(JSON.stringify({ unexpected: true }), { status: 200 })],
+  ])("reuses the operation ID after %s", async (_name, badResponse) => {
+    const posted: string[] = [];
+    let first = true;
+    vi.stubGlobal("fetch", vi.fn((input: string, init?: { body?: string }): Promise<Response> => {
+      if (input === "/api/csrf") return Promise.resolve(new Response(JSON.stringify({ token: "csrf_demo" })));
+      posted.push((JSON.parse(init?.body ?? "{}") as { operationId: string }).operationId);
+      if (first) {
+        first = false;
+        return Promise.resolve(badResponse());
+      }
+      return Promise.resolve(new Response(JSON.stringify({ status: "granted" })));
+    }));
+    try {
+      await expect(grantTempVip("channel_body_demo", "pixelpilz", 600_000)).rejects.toThrow();
+      await expect(grantTempVip("channel_body_demo", "pixelpilz", 600_000)).resolves.toMatchObject({ status: "granted" });
+      expect(posted).toHaveLength(2);
+      expect(posted[0]).toBe(posted[1]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps the operation ID and grant payload through the panel service after a committed request loses its response", async () => {
     const posted: Array<{ operationId: string; login: string; durationMs: number }> = [];
     const committed = new Set<string>();

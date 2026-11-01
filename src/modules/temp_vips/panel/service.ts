@@ -15,7 +15,8 @@ export interface TempVipsPanelData {
 }
 
 const readJson = async <Value,>(response: Response): Promise<Value> => {
-  const body: unknown = await response.json().catch(() => null);
+  // A lost or unreadable 2xx body is ambiguous (the server may have committed): a non-PanelApiError keeps the operation id.
+  const body: unknown = response.ok ? await response.json() : await response.json().catch(() => null);
   if (!response.ok) {
     const code = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
       ? body.error
@@ -60,11 +61,15 @@ export const loadExistingVips = async (channelId: string, signal?: AbortSignal):
 const mutate = async (channelId: string, path: string, body: Record<string, unknown>): Promise<ModuleTempVipResult> => {
   return submissionTracker.submit(`${channelId}:${path}`, body, async (operationId) => {
     const csrf = await readJson<{ token: string }>(await fetch("/api/csrf"));
-    return readJson<ModuleTempVipResult>(await fetch(`${modulePath(channelId)}${path}`, {
+    const result = await readJson<ModuleTempVipResult | null>(await fetch(`${modulePath(channelId)}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.token },
       body: JSON.stringify({ ...body, operationId }),
     }));
+    if (result === null || typeof result.status !== "string") {
+      throw new TypeError("Invalid temporary VIP response body");
+    }
+    return result;
   });
 };
 
