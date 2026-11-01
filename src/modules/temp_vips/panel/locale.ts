@@ -42,19 +42,14 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
   endTitle: (name: string) => string;
   endDescription: string;
   releaseSuccess: string;
-  grantSuccess: string;
-  importSuccess: string;
-  extendSuccess: string;
   endSuccess: string;
   retrySuccess: string;
   operationPending: string;
-  notVip: string;
   maximumExceeded: string;
-  alreadyVip: string;
-  notManaged: string;
   userNotFound: string;
   twitchUnavailable: string;
   operationFailed: string;
+  ambiguousFailure: string;
   invalidDuration: string;
   durationRequired: string;
   expiryRequired: string;
@@ -119,20 +114,15 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
     endTitle: (name) => `VIP für ${name} jetzt beenden?`,
     endDescription: "Das VIP wird auf Twitch entzogen und der Eintrag aus der Liste entfernt.",
     releaseSuccess: "VIP-Verwaltung abgegeben. Das VIP bleibt bestehen.",
-    grantSuccess: "VIP wurde vergeben.",
-    importSuccess: "Vorhandenes VIP wurde übernommen.",
-    extendSuccess: "VIP-Zeit wurde verlängert.",
     endSuccess: "VIP wurde beendet.",
     retrySuccess: "VIP-Entzug wurde erneut eingereiht.",
     operationPending: "Die Aktion wartet in der Kanalwarteschlange.",
-    notVip: "Dieses Konto ist nicht mehr VIP. Es wurde nicht übernommen.",
-    maximumExceeded: "Die gewünschte Dauer überschreitet die Höchstdauer.",
-    alreadyVip: "Dieses Konto hat bereits ein VIP oder einen laufenden Eintrag.",
-    notManaged: "Für dieses Konto gibt es keinen verwalteten VIP-Eintrag.",
+    maximumExceeded: "Die gewünschte Dauer überschreitet die Höchstdauer. Wähle eine kürzere Dauer.",
     userNotFound: "Twitch-Konto nicht gefunden.",
     twitchUnavailable: "Twitch ist derzeit nicht erreichbar.",
     operationFailed: "Die Aktion konnte nicht abgeschlossen werden.",
-    invalidDuration: "Gib eine gültige Dauer ein.",
+    ambiguousFailure: "Das Ergebnis ist unklar. Wiederhole dieselbe Eingabe, damit kein doppelter Auftrag entsteht.",
+    invalidDuration: "Gib eine gültige Dauer von mindestens 10 Minuten ein.",
     durationRequired: "Wähle eine gültige Dauer.",
     expiryRequired: "Gib ein gültiges Datum und eine Uhrzeit ein.",
     confirmation: "Bestätigen",
@@ -196,20 +186,15 @@ export const tempVipsPanelTexts: Readonly<Record<ModuleLanguage, {
     endTitle: (name) => `End VIP for ${name} now?`,
     endDescription: "The VIP will be removed on Twitch and its entry will be deleted from this list.",
     releaseSuccess: "VIP management released. The VIP stays in place.",
-    grantSuccess: "VIP granted.",
-    importSuccess: "Existing VIP taken over.",
-    extendSuccess: "VIP time extended.",
     endSuccess: "VIP ended.",
     retrySuccess: "VIP removal was queued for another attempt.",
     operationPending: "The action is waiting in the channel queue.",
-    notVip: "This account is no longer a VIP. It was not taken over.",
-    maximumExceeded: "The requested duration exceeds the maximum.",
-    alreadyVip: "This account already has a VIP or an active entry.",
-    notManaged: "There is no managed VIP entry for this account.",
+    maximumExceeded: "The requested duration exceeds the maximum. Choose a shorter duration.",
     userNotFound: "Twitch account not found.",
     twitchUnavailable: "Twitch is unavailable right now.",
     operationFailed: "The action could not be completed.",
-    invalidDuration: "Enter a valid duration.",
+    ambiguousFailure: "The result is uncertain. Retry the same input so the operation is not duplicated.",
+    invalidDuration: "Enter a valid duration of at least 10 minutes.",
     durationRequired: "Choose a valid duration.",
     expiryRequired: "Enter a valid date and time.",
     confirmation: "Confirm",

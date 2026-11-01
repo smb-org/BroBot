@@ -18,7 +18,6 @@
   .temp-vips-page__actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); }
   .temp-vips-page__action-buttons { display: flex; flex-wrap: wrap; gap: var(--s2); }
   .temp-vips-page__feedback { flex: 1 1 200px; min-width: 0; min-height: 24px; overflow: hidden; color: var(--text-2); font-size: var(--text-field-label); line-height: 24px; text-overflow: ellipsis; white-space: nowrap; }
-  .temp-vips-page__feedback:empty { display: none; }
   .temp-vips-page__tabs { display: none; }
   .temp-vips-page__tabs-list { display: flex; gap: var(--s1); border-bottom: 1px solid var(--line); }
   .temp-vips-page__tab { min-height: 40px; padding-inline: var(--s3); border: 1px solid transparent; color: var(--text-2); background: transparent; font-size: 13px; cursor: pointer; }
@@ -71,8 +70,8 @@
     .module-detail:has(.temp-vips-page) { height: auto; min-height: 0; }
     .module-detail__content:has(.temp-vips-page) { display: block; }
     .module-detail__content:has(.temp-vips-page) > .module-stack { display: block; }
-    .module-view:has(.temp-vips-page) { display: flex; flex-direction: column; gap: var(--s4); }
-    .module-view:has(.temp-vips-page) > .ui-load-state { width: 100%; }
+    .module-view:has(.temp-vips-page) { display: flex; flex-direction: column; align-items: stretch; gap: var(--s4); }
+    .module-view:has(.temp-vips-page) > .ui-load-state, .module-view:has(.temp-vips-page) > .temp-vips-page { width: 100%; }
     .temp-vips-list__rows { overflow: visible; }
     .module-view[data-temp-vips-tab="vips"] > .ui-load-state:has(.temp-vips-settings-editor) { display: none; }
     .temp-vips-page__tabs { display: block; }

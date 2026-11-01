@@ -153,7 +153,7 @@ const insertQueuedOperation = (
   storage: DurableObjectState["storage"],
   operation: {
     operationId: string;
-    kind: "grant" | "end" | "expire";
+    kind: "grant" | "import" | "end" | "expire";
     userId: string;
     userLogin: string;
     request: Record<string, unknown>;
@@ -385,6 +385,120 @@ describe("temporary VIP operation queue", () => {
       expect(await store.list()).toEqual([]);
       expect(remove).toHaveBeenCalledTimes(1);
       expect(pendingEvents(store).some((event) => event.code === "temp_vips.ended" && event.detail.reason === "ended_early")).toBe(true);
+    }, { twitch: { remove } });
+  });
+
+  it("retries the existing removal immediately during backoff without losing history or pacing", async () => {
+    const add = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) => {
+      if (!await beforeAttempt()) return { ok: false as const, reason: "precondition_failed" };
+      return { ok: true as const };
+    });
+    let removeAttempts = 0;
+    const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) => {
+      if (!await beforeAttempt()) return { ok: false as const, reason: "precondition_failed" };
+      removeAttempts += 1;
+      return { ok: false as const, reason: "network" };
+    });
+
+    await inStore(async (store, state) => {
+      await store.grant(grantInput({ operationId: "retry-now-seed" }));
+      expect(await store.end({ operationId: "retry-now-existing-end", userId: person.userId })).toMatchObject({ status: "queued" });
+      expect(removeAttempts).toBe(1);
+      for (let index = 0; index < 8; index += 1) {
+        await store.grant(grantInput({
+          operationId: `retry-now-pacing-${String(index)}`,
+          person: { userId: `pacing-${String(index)}`, login: `pacing-${String(index)}`, displayName: `Pacing ${String(index)}` },
+        }));
+      }
+      const before = state.storage.sql.exec<{ kind: string; attempts: number; enqueue_sequence: number; payload_json: string }>(
+        "SELECT kind, attempts, enqueue_sequence, payload_json FROM temp_vip_ops WHERE user_id = ? AND kind = 'end'",
+        person.userId,
+      ).one();
+      const payloadBefore = JSON.parse(before.payload_json) as { request: Record<string, unknown> };
+
+      expect(await store.retryRemovalNow(person.userId)).toMatchObject({ status: "queued" });
+      expect(removeAttempts).toBe(1);
+      expect(state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM temp_vip_mutation_attempts").one().count).toBe(10);
+      expect((await store.list()).find(({ userId }) => userId === person.userId)).toMatchObject({ removalAttempts: 1, endReason: "ended_early" });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await store.runExpiry();
+
+      expect(removeAttempts).toBe(2);
+      expect(state.storage.sql.exec<{ kind: string; attempts: number; enqueue_sequence: number; status: string; payload_json: string }>(
+        "SELECT kind, attempts, enqueue_sequence, status, payload_json FROM temp_vip_ops WHERE user_id = ? AND kind IN ('end', 'expire')",
+        person.userId,
+      ).one()).toMatchObject({
+        kind: "end",
+        attempts: before.attempts + 1,
+        enqueue_sequence: before.enqueue_sequence,
+        status: "queued",
+      });
+      const after = JSON.parse(state.storage.sql.exec<{ payload_json: string }>(
+        "SELECT payload_json FROM temp_vip_ops WHERE user_id = ? AND kind = 'end'",
+        person.userId,
+      ).one().payload_json) as { request: Record<string, unknown> };
+      expect(after.request).toEqual(payloadBefore.request);
+      expect((await store.list()).find(({ userId }) => userId === person.userId)).toMatchObject({ removalAttempts: 2, endReason: "ended_early" });
+      expect(state.storage.sql.exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM temp_vip_ops WHERE user_id = ? AND kind IN ('end', 'expire')",
+        person.userId,
+      ).one().count).toBe(1);
+      expect(state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM temp_vip_mutation_attempts").one().count).toBe(1);
+    }, { twitch: { add, remove } });
+  });
+
+  it("allows an expiry retry through backoff while ignoring stale retry markers on future rows", async () => {
+    let removeCount = 0;
+    const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) => {
+      if (!await beforeAttempt()) return { ok: false as const, reason: "precondition_failed" };
+      removeCount += 1;
+      return removeCount === 1
+        ? { ok: false as const, reason: "network" }
+        : { ok: true as const };
+    });
+
+    await inStore(async (store, state) => {
+      const expiredUser = "failed-expiry-retry";
+      insertRow(state.storage, {
+        userId: expiredUser,
+        login: "failedexpiry",
+        displayName: "Failed Expiry",
+        expiresAt: new Date(BASE_MS - 1).toISOString(),
+      });
+      await store.runExpiry();
+      expect(removeCount).toBe(1);
+      expect((await store.list()).find(({ userId }) => userId === expiredUser)).toMatchObject({ removalAttempts: 1 });
+      expect(await store.retryRemovalNow(expiredUser)).toMatchObject({ status: "ended", reason: "expired" });
+      expect(removeCount).toBe(2);
+
+      const futureUser = "future-expiry-retry-marker";
+      const futureExpiry = new Date(BASE_MS + DAY).toISOString();
+      insertRow(state.storage, {
+        userId: futureUser,
+        login: "futureexpiry",
+        displayName: "Future Expiry",
+        expiresAt: futureExpiry,
+      });
+      insertQueuedOperation(state.storage, {
+        operationId: "stale-future-expiry",
+        kind: "expire",
+        userId: futureUser,
+        userLogin: "futureexpiry",
+        request: { expectedExpiry: new Date(BASE_MS - DAY).toISOString() },
+        sequence: 10,
+      });
+      state.storage.sql.exec(
+        "UPDATE temp_vip_ops SET payload_json = ? WHERE operation_id = ?",
+        JSON.stringify({ request: { expectedExpiry: new Date(BASE_MS - DAY).toISOString() }, retryNow: true }),
+        "stale-future-expiry",
+      );
+
+      await store.runExpiry();
+
+      expect(removeCount).toBe(2);
+      expect(operationResult(state.storage, "stale-future-expiry")).toEqual({ status: "ignored" });
+      expect((await store.list()).some(({ userId }) => userId === futureUser)).toBe(true);
     }, { twitch: { remove } });
   });
 
@@ -995,7 +1109,7 @@ describe("temporary VIP operation queue", () => {
 
   it("extends an overdue row from now and refuses a total above the maximum", async () => {
     await inStore(async (store) => {
-      await store.grant(grantInput({ operationId: "overdue-seed", durationMs: 60_000 }));
+      await store.grant(grantInput({ operationId: "overdue-seed", durationMs: 10 * 60_000 }));
       await vi.advanceTimersByTimeAsync(3 * DAY);
       const extended = await store.extend({
         operationId: "overdue-extend",
@@ -1034,6 +1148,104 @@ describe("temporary VIP operation queue", () => {
       expect(await store.list()).toMatchObject([{ source: "import", expiresAt: "2026-11-03T12:00:00.000Z" }]);
       expect(get).toHaveBeenCalledTimes(2);
       expect(pendingEvents(store)).toContainEqual(expect.objectContaining({ code: "temp_vips.imported" }));
+    }, { twitch: { get } });
+  });
+
+  it("keeps an imported absolute expiry unchanged after its queued execution is delayed", async () => {
+    const targetExpiry = "2026-11-01T14:00:00.000Z";
+    const importedPerson = { userId: "delayed-import", login: "delayed", displayName: "Delayed" };
+
+    await inStore(async (store, state) => {
+      insertQueuedOperation(state.storage, {
+        operationId: "delayed-absolute-import",
+        kind: "import",
+        userId: importedPerson.userId,
+        userLogin: importedPerson.login,
+        request: {
+          person: importedPerson,
+          grantedBy: actor,
+          expiresAt: targetExpiry,
+          maximumRemainingMs: MAXIMUM,
+          source: "import",
+        },
+        sequence: 1,
+      });
+      state.storage.sql.exec(
+        "UPDATE temp_vip_ops SET next_attempt_at = ? WHERE operation_id = ?",
+        "2026-11-01T13:00:00.000Z",
+        "delayed-absolute-import",
+      );
+      vi.setSystemTime(new Date("2026-11-01T13:00:00.000Z"));
+
+      await store.runExpiry("2026-11-01T13:00:00.000Z");
+
+      expect(await store.list()).toMatchObject([{ userId: importedPerson.userId, expiresAt: targetExpiry }]);
+      expect(operationResult(state.storage, "delayed-absolute-import")).toMatchObject({ status: "imported", expiresAt: targetExpiry });
+    }, { twitch: { get: vi.fn().mockResolvedValue({ ok: true, isVip: true }) } });
+  });
+
+  it("replays an exact-minimum absolute import after a lost response without revalidating elapsed time", async () => {
+    const expiry = new Date(BASE_MS + 10 * 60_000).toISOString();
+    const importedPerson = { userId: "minimum-replay", login: "minimumreplay", displayName: "Minimum Replay" };
+    const request: ModuleTempVipImportRequest = {
+      ...grantInput({
+        operationId: "minimum-absolute-replay",
+        person: importedPerson,
+        durationMs: 10 * 60_000,
+        source: "import",
+      }),
+      source: "import",
+      expiresAt: expiry,
+      expiresAtValidatedAt: BASE_NOW,
+    };
+
+    await inStore(async (store) => {
+      const first = await store.importExisting(request);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const replay = await store.replayImport(request.operationId, importedPerson.userId, expiry);
+
+      expect(first).toMatchObject({ status: "imported", expiresAt: expiry });
+      expect(replay).toEqual(first);
+      expect(await store.list()).toMatchObject([{ userId: importedPerson.userId, expiresAt: expiry }]);
+    }, { twitch: { get: vi.fn().mockResolvedValue({ ok: true, isVip: true }) } });
+  });
+
+  it("enforces the 10-minute minimum for durable grants, extensions, and imports", async () => {
+    const minimum = 10 * 60_000;
+    const get = vi.fn()
+      .mockResolvedValueOnce({ ok: true, isVip: false })
+      .mockResolvedValueOnce({ ok: true, isVip: false })
+      .mockResolvedValueOnce({ ok: true, isVip: true });
+    await inStore(async (store) => {
+      const seed = grantInput({ operationId: "minimum-validation-seed" });
+      await store.grant(seed);
+
+      for (const durationMs of [0, minimum - 1]) {
+        await expect(store.grant(grantInput({ operationId: `invalid-grant-${String(durationMs)}`, durationMs })))
+          .rejects.toThrow("invalid_temp_vip_duration");
+        await expect(store.extend({ operationId: `invalid-extend-${String(durationMs)}`, person, durationMs, maximumRemainingMs: MAXIMUM }))
+          .rejects.toThrow("invalid_temp_vip_duration");
+        await expect(store.importExisting({
+          ...grantInput({ operationId: `invalid-import-${String(durationMs)}`, durationMs, source: "import" }),
+          source: "import",
+        })).rejects.toThrow("invalid_temp_vip_duration");
+      }
+
+      expect((await store.grant(grantInput({
+        operationId: "minimum-grant",
+        person: { userId: "minimum-grant-user", login: "min-grant", displayName: "Min Grant" },
+        durationMs: minimum,
+      }))).status).toBe("granted");
+      expect((await store.extend({ operationId: "minimum-extend", person, durationMs: minimum, maximumRemainingMs: MAXIMUM })).status).toBe("extended");
+      expect((await store.importExisting({
+        ...grantInput({
+          operationId: "minimum-import",
+          person: { userId: "minimum-import-user", login: "min-import", displayName: "Min Import" },
+          durationMs: minimum,
+          source: "import",
+        }),
+        source: "import",
+      })).status).toBe("imported");
     }, { twitch: { get } });
   });
 

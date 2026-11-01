@@ -1,4 +1,4 @@
-const TEMP_VIP_MINIMUM_DURATION_MS = 10 * 60_000;
+export const TEMP_VIP_MINIMUM_DURATION_MS = 10 * 60_000;
 
 const DURATION_UNITS_MS: Readonly<Record<string, number>> = {
   m: 60_000,

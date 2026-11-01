@@ -1416,6 +1416,7 @@ export interface ModuleTempVipResult {
   reason?: string;
   allowedDurationMs?: number;
   retryAt?: string;
+  expiresAt?: string;
   row?: ModuleTempVipRow;
 }
 
@@ -1439,6 +1440,10 @@ export interface ModuleTempVipExtendRequest {
 
 export interface ModuleTempVipImportRequest extends ModuleTempVipGrantRequest {
   source: "import";
+  /** Absolute expiry for a channel-local date entry; the queue must preserve it as-is. */
+  expiresAt?: string;
+  /** Server validation instant for an exact-minimum date entry. The queue omits this from payload identity. */
+  expiresAtValidatedAt?: string;
 }
 
 export interface ModuleTempVipOperationRequest {
@@ -1457,7 +1462,9 @@ export interface ModuleTempVipAccess {
   grant: (request: ModuleTempVipGrantRequest) => Promise<ModuleTempVipResult>;
   extend: (request: ModuleTempVipExtendRequest) => Promise<ModuleTempVipResult>;
   importExisting: (request: ModuleTempVipImportRequest) => Promise<ModuleTempVipResult>;
+  replayImport: (operationId: string, userId: string, expiresAt: string) => Promise<ModuleTempVipResult | null>;
   end: (request: ModuleTempVipOperationRequest) => Promise<ModuleTempVipResult>;
+  retryRemovalNow: (userId: string) => Promise<ModuleTempVipResult>;
   release: (request: ModuleTempVipOperationRequest) => Promise<ModuleTempVipResult>;
   list: () => Promise<ModuleTempVipRow[]>;
   runExpiry: (now?: string) => Promise<{ removed: number; queued: number }>;
@@ -1467,7 +1474,7 @@ export interface ModuleTempVipAccess {
 /** Route access binds the durable VIP queue to one channel and adds read-only Twitch VIP discovery. */
 export type ModuleTempVipRouteAccess = Pick<
   ModuleTempVipAccess,
-  "grant" | "extend" | "importExisting" | "end" | "release" | "list"
+  "grant" | "extend" | "importExisting" | "replayImport" | "end" | "retryRemovalNow" | "release" | "list"
 > & {
   listExisting: () => Promise<
     | { ok: true; people: ModuleTempVipPerson[] }

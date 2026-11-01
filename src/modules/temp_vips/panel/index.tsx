@@ -17,7 +17,7 @@ import {
   retryTempVipRemoval,
 } from "./service";
 import { tempVipsPanelTexts } from "./locale";
-import { channelDateTimeToEpoch } from "./time-zone";
+import { formatTempVipResult } from "./result-message";
 import "./panel.css";
 
 type DialogState = { kind: "grant" } | { kind: "takeover" } | { kind: "extend"; row: ModuleTempVipRow };
@@ -45,21 +45,14 @@ const formatExpiry = (value: string, now: number, timeZone: string, language: "d
   return { absolute, relative };
 };
 
-const resultMessage = (status: string, labels: PanelLabels): string => {
-  if (status === "not_vip") return labels.notVip;
-  if (status === "maximum_exceeded") return labels.maximumExceeded;
-  if (status === "already_vip" || status === "already_managed") return labels.alreadyVip;
-  if (status === "not_managed") return labels.notManaged;
-  if (status === "queued") return labels.operationPending;
-  if (status === "twitch_unavailable") return labels.twitchUnavailable;
-  return labels.operationFailed;
-};
-
 const errorMessage = (error: unknown, labels: PanelLabels): string => {
-  if (!(error instanceof PanelApiError)) return labels.operationFailed;
+  if (!(error instanceof PanelApiError)) return labels.ambiguousFailure;
+  if (error.status === 408 || error.status === 429 || error.status >= 500) return labels.ambiguousFailure;
   if (error.code === "temp_vips_user_not_found") return labels.userNotFound;
   if (error.code === "temp_vips_twitch_unavailable") return labels.twitchUnavailable;
   if (error.code === "temp_vips_duration_invalid") return labels.invalidDuration;
+  if (error.code === "temp_vips_expiry_invalid") return labels.expiryRequired;
+  if (error.code === "temp_vips_maximum_exceeded") return labels.maximumExceeded;
   if (error.code === "temp_vips_operator_required") return labels.operationFailed;
   return labels.operationFailed;
 };
@@ -153,23 +146,20 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
     event.preventDefault();
     if (dialog === null || pending) return;
     setDialogError(null);
-    const currentTime = Date.now();
-    let durationMs: number | null = typeof durationDays === "number" && Number.isInteger(durationDays) && durationDays > 0
+    const dateEntry = dialog.kind === "takeover" && timeEntryMode === "expiry";
+    const expiryInputValue = dateEntry ? expiryInput.trim() : "";
+    const durationMs: number | null = typeof durationDays === "number" && Number.isInteger(durationDays) && durationDays > 0
       ? durationDays * DAY_MS
       : null;
-    if (dialog.kind === "takeover" && timeEntryMode === "expiry") {
-      const expiry = channelDateTimeToEpoch(expiryInput, query.data?.timeZone ?? "UTC");
-      durationMs = expiry === null ? null : expiry - currentTime;
-      if (durationMs === null || durationMs <= 0) {
-        setDialogError(labels.expiryRequired);
-        return;
-      }
+    if (dateEntry && expiryInputValue.length === 0) {
+      setDialogError(labels.expiryRequired);
+      return;
     }
-    if (durationMs === null) {
+    if (!dateEntry && durationMs === null) {
       setDialogError(labels.durationRequired);
       return;
     }
-    if (durationMs > settings.maximumDurationDays * DAY_MS) {
+    if (!dateEntry && durationMs !== null && durationMs > settings.maximumDurationDays * DAY_MS) {
       setDialogError(labels.maximumExceeded);
       return;
     }
@@ -185,22 +175,19 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
     setPending(true);
     try {
       const result = dialog.kind === "grant"
-        ? await grantTempVip(channelId, login.trim(), durationMs)
+        ? await grantTempVip(channelId, login.trim(), durationMs as number)
         : dialog.kind === "takeover" && selectedVip !== null
-          ? await importTempVip(channelId, selectedVip.userId, durationMs)
+          ? await importTempVip(channelId, selectedVip.userId, dateEntry ? { expiresAtLocal: expiryInputValue } : durationMs as number)
           : dialog.kind === "extend"
-            ? await extendTempVip(channelId, dialog.row.userId, durationMs)
+            ? await extendTempVip(channelId, dialog.row.userId, durationMs as number)
             : null;
       if (result === null) return;
       if (!isSuccess(result) && result.status !== "queued") {
-        setDialogError(resultMessage(result.status, labels));
+        setDialogError(formatTempVipResult(result, language, query.data?.timeZone ?? "UTC"));
         if (result.status === "not_vip") void query.refetch();
         return;
       }
-      const success = result.status === "queued"
-        ? labels.operationPending
-        : dialog.kind === "grant" ? labels.grantSuccess
-          : dialog.kind === "takeover" ? labels.importSuccess : labels.extendSuccess;
+      const success = formatTempVipResult(result, language, query.data?.timeZone ?? "UTC");
       setPageFeedback(success);
       notify({ tone: result.status === "queued" ? "info" : "success", message: success });
       setDialog(null);
@@ -221,10 +208,10 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
         ? await releaseTempVip(channelId, row.userId)
         : await retryTempVipRemoval(channelId, row.userId);
       if (result.status !== "released" && result.status !== "queued" && result.status !== "ended") {
-        setPageFeedback(resultMessage(result.status, labels));
+        setPageFeedback(formatTempVipResult(result, language, query.data?.timeZone ?? "UTC"));
         return;
       }
-      const message = result.status === "queued" ? labels.operationPending : action === "release" ? labels.releaseSuccess : labels.retrySuccess;
+      const message = result.status === "queued" ? formatTempVipResult(result, language, query.data?.timeZone ?? "UTC") : action === "release" ? labels.releaseSuccess : labels.retrySuccess;
       setPageFeedback(message);
       notify({ tone: result.status === "queued" ? "info" : "success", message });
       await query.refetch();
@@ -242,7 +229,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
     try {
       const result = await endTempVip(channelId, confirmRow.userId);
       if (result.status !== "ended" && result.status !== "queued") {
-        setConfirmError(resultMessage(result.status, labels));
+        setConfirmError(formatTempVipResult(result, language, query.data?.timeZone ?? "UTC"));
         return;
       }
       const message = result.status === "queued" ? labels.operationPending : labels.endSuccess;

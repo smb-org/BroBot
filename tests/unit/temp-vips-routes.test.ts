@@ -6,6 +6,8 @@ import { tempVipsRoutes } from "../../src/modules/temp_vips/routes";
 
 const channelId = "channel_demo";
 const operationId = "01234567-89ab-42cd-8abc-0123456789ab";
+const minimumDurationMs = 10 * 60_000;
+const fixedNow = "2026-11-01T12:00:00.000Z";
 const row = {
   userId: "user_demo",
   login: "pixelpilz",
@@ -24,11 +26,13 @@ const row = {
 const createHarness = (role: string = "operator") => {
   const access: ModuleTempVipRouteAccess = {
     list: vi.fn(() => Promise.resolve([row])),
-    listExisting: vi.fn(() => Promise.resolve({ ok: true as const, people: [] })),
+    listExisting: vi.fn(() => Promise.resolve({ ok: true as const, people: [{ userId: "user_demo", login: "pixelpilz", displayName: "Pixelpilz" }] })),
     grant: vi.fn(() => Promise.resolve({ status: "granted", row })),
     extend: vi.fn(() => Promise.resolve({ status: "extended", row })),
     importExisting: vi.fn(() => Promise.resolve({ status: "imported", row })),
+    replayImport: vi.fn(() => Promise.resolve(null)),
     end: vi.fn(() => Promise.resolve({ status: "ended" })),
+    retryRemovalNow: vi.fn(() => Promise.resolve({ status: "queued" })),
     release: vi.fn(() => Promise.resolve({ status: "released" })),
   };
   const app = new Hono<ModuleRouteEnvironment>();
@@ -57,14 +61,17 @@ const createHarness = (role: string = "operator") => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       },
-    { DB: { prepare: () => ({ bind: () => ({ first: () => Promise.resolve({ settings: JSON.stringify({
-      defaultDurationDays: 7, maximumDurationDays: 90, announceExpiry: false,
-    }) }) }) }) } as unknown as D1Database },
+    { DB: { prepare: (query: string) => ({ bind: () => ({ first: () => Promise.resolve(query.includes("time_zone")
+      ? { time_zone: "Europe/Berlin" }
+      : { settings: JSON.stringify({ defaultDurationDays: 7, maximumDurationDays: 90, announceExpiry: false }) }) }) }) } as unknown as D1Database },
   );
   return { app, access, request };
 };
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 describe("temporary VIP routes", () => {
   it.each([
@@ -86,6 +93,7 @@ describe("temporary VIP routes", () => {
     expect(harness.access.importExisting).not.toHaveBeenCalled();
     expect(harness.access.extend).not.toHaveBeenCalled();
     expect(harness.access.end).not.toHaveBeenCalled();
+    expect(harness.access.retryRemovalNow).not.toHaveBeenCalled();
     expect(harness.access.release).not.toHaveBeenCalled();
   });
 
@@ -97,5 +105,105 @@ describe("temporary VIP routes", () => {
     expect(response.status).toBe(200);
     expect(harness.access.end).toHaveBeenCalledWith({ operationId, userId: "user_demo" });
     await expect(response.json()).resolves.toMatchObject({ status: "ended" });
+  });
+
+  it.each(["grant", "import", "extend"] as const)("enforces the 10-minute minimum at the %s route boundary", async (action) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNow));
+    const harness = createHarness();
+    const path = action === "grant" ? "/vips/grant" : action === "import" ? "/vips/import" : "/vips/user_demo/extend";
+    const target = action === "grant" ? { login: "pixelpilz" } : action === "import" ? { userId: "user_demo" } : {};
+
+    for (const durationMs of [0, minimumDurationMs - 1]) {
+      const response = await harness.request(path, { operationId, ...target, durationMs });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "temp_vips_duration_invalid" });
+    }
+    expect(harness.access.grant).not.toHaveBeenCalled();
+    expect(harness.access.importExisting).not.toHaveBeenCalled();
+    expect(harness.access.extend).not.toHaveBeenCalled();
+  });
+
+  it.each(["grant", "import", "extend"] as const)("accepts exactly 10 minutes at the %s route boundary", async (action) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNow));
+    const harness = createHarness();
+    const path = action === "grant" ? "/vips/grant" : action === "import" ? "/vips/import" : "/vips/user_demo/extend";
+    const target = action === "grant" ? { login: "pixelpilz" } : action === "import" ? { userId: "user_demo" } : {};
+
+    const response = await harness.request(path, { operationId, ...target, durationMs: minimumDurationMs });
+
+    expect(response.status).toBe(200);
+    const method = action === "grant" ? harness.access.grant : action === "import" ? harness.access.importExisting : harness.access.extend;
+    expect(method).toHaveBeenCalledWith(expect.objectContaining({ durationMs: minimumDurationMs }));
+  });
+
+  it("converts a channel-local expiry on the server and passes the absolute instant to import", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNow));
+    const harness = createHarness();
+
+    const response = await harness.request("/vips/import", {
+      operationId,
+      userId: "user_demo",
+      expiresAtLocal: "2026-11-01T13:10",
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.access.importExisting).toHaveBeenCalledWith(expect.objectContaining({
+      expiresAt: "2026-11-01T12:10:00.000Z",
+      durationMs: minimumDurationMs,
+    }));
+  });
+
+  it("replays an accepted exact-minimum absolute import after the deadline enters the minimum window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNow));
+    const harness = createHarness();
+    const replayImport = vi.mocked(harness.access.replayImport);
+    replayImport
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ status: "imported", expiresAt: "2026-11-01T12:10:00.000Z" });
+    const body = { operationId, userId: "user_demo", expiresAtLocal: "2026-11-01T13:10" };
+
+    expect((await harness.request("/vips/import", body)).status).toBe(200);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const retry = await harness.request("/vips/import", body);
+
+    expect(retry.status).toBe(200);
+    await expect(retry.json()).resolves.toMatchObject({ status: "imported", expiresAt: "2026-11-01T12:10:00.000Z" });
+    expect(harness.access.importExisting).toHaveBeenCalledTimes(1);
+    expect(replayImport).toHaveBeenLastCalledWith(operationId, "user_demo", "2026-11-01T12:10:00.000Z");
+  });
+
+  it("rejects a skipped daylight-saving time and deadlines outside the allowed range", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    vi.setSystemTime(new Date("2026-03-29T00:00:00.000Z"));
+    const skipped = await harness.request("/vips/import", {
+      operationId, userId: "user_demo", expiresAtLocal: "2026-03-29T02:30",
+    });
+    expect(skipped.status).toBe(400);
+
+    vi.setSystemTime(new Date(fixedNow));
+    const tooSoon = await harness.request("/vips/import", {
+      operationId, userId: "user_demo", expiresAtLocal: "2026-11-01T13:09",
+    });
+    const tooLate = await harness.request("/vips/import", {
+      operationId, userId: "user_demo", expiresAtLocal: "2027-02-01T13:00",
+    });
+    expect(tooSoon.status).toBe(400);
+    expect(tooLate.status).toBe(400);
+    expect(harness.access.importExisting).not.toHaveBeenCalled();
+  });
+
+  it("routes retry removal to the existing queue operation instead of enqueueing end", async () => {
+    const harness = createHarness();
+
+    const response = await harness.request("/vips/user_demo/retry", { operationId });
+
+    expect(response.status).toBe(200);
+    expect(harness.access.retryRemovalNow).toHaveBeenCalledWith("user_demo");
+    expect(harness.access.end).not.toHaveBeenCalled();
   });
 });

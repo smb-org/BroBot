@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import type { PanelChannelState, PanelModuleState } from "../../src/panel-contract";
 import type { ModuleTempVipRow } from "../../src/modules/contract";
-import { channelDateTimeToEpoch } from "../../src/modules/temp_vips/panel/time-zone";
+import { channelDateTimeToEpoch } from "../../src/modules/temp_vips/domain/time-zone";
 import { waitForWebFonts } from "./web-fonts";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
@@ -100,7 +100,7 @@ interface DashboardMock {
   vipsLoadCount: () => number;
 }
 
-const mockDashboard = async (page: Page): Promise<DashboardMock> => {
+const mockDashboard = async (page: Page, options: { missingBroadcasterScopes?: string[] } = {}): Promise<DashboardMock> => {
   let rows: ModuleTempVipRow[] = [...initialRows];
   let importStatus = "imported";
   let grantStatus = "granted";
@@ -147,7 +147,7 @@ const mockDashboard = async (page: Page): Promise<DashboardMock> => {
       }));
     }
     if (url.pathname === `/api/channels/${channelId}/modules` && method === "GET") {
-      return route.fulfill(json({ modules: [{ ...modules[0] as PanelModuleState, settings: JSON.stringify(savedSettings) }] }));
+      return route.fulfill(json({ modules: [{ ...modules[0] as PanelModuleState, settings: JSON.stringify(savedSettings), requiredBroadcasterScopes: ["channel:manage:vips"], missingBroadcasterScopes: options.missingBroadcasterScopes ?? [] }] }));
     }
     if (url.pathname === `/api/channels/${channelId}/modules/temp_vips/settings` && method === "GET") {
       return route.fulfill(json({ settings: savedSettings, revision: settingsSaves + 1, variables: [] }));
@@ -174,7 +174,7 @@ const mockDashboard = async (page: Page): Promise<DashboardMock> => {
     if (url.pathname === grantPath && method === "POST") {
       const body = request.postDataJSON() as Record<string, unknown>;
       grants.push(body);
-      if (grantStatus !== "granted") return route.fulfill(json({ status: grantStatus }));
+      if (grantStatus !== "granted" && grantStatus !== "extended") return route.fulfill(json({ status: grantStatus }));
       const row = {
         ...(initialRows[0] as ModuleTempVipRow),
         userId: `user_${String(body.login)}`,
@@ -187,7 +187,8 @@ const mockDashboard = async (page: Page): Promise<DashboardMock> => {
         removalError: null,
       };
       rows = [...rows, row];
-      return route.fulfill(json({ status: "granted", row }));
+      if (grantStatus === "extended") row.expiresAt = "2026-11-02T12:00:00.000Z";
+      return route.fulfill(json({ status: grantStatus, expiresAt: row.expiresAt, row }));
     }
     const importPath = `/api/channels/${channelId}/modules/temp_vips/vips/import`;
     if (url.pathname === importPath && method === "POST") {
@@ -196,10 +197,13 @@ const mockDashboard = async (page: Page): Promise<DashboardMock> => {
       if (importStatus !== "imported") return route.fulfill(json({ status: importStatus }));
       const person = existingVips.find(({ userId }) => userId === body.userId);
       if (person === undefined) return route.fulfill(json({ status: "not_vip" }));
+      const importedExpiry = typeof body.expiresAtLocal === "string"
+        ? channelDateTimeToEpoch(body.expiresAtLocal, "Europe/Berlin")
+        : null;
       const row = {
         ...(initialRows[0] as ModuleTempVipRow),
         ...person,
-        expiresAt: new Date(Date.now() + Number(body.durationMs)).toISOString(),
+        expiresAt: importedExpiry === null ? new Date(Date.now() + Number(body.durationMs)).toISOString() : new Date(importedExpiry).toISOString(),
         source: "import" as const,
         removalFailedAt: null,
         removalAttempts: 0,
@@ -242,6 +246,7 @@ const mockDashboard = async (page: Page): Promise<DashboardMock> => {
 
 test("renders the sorted VIP list and dialogs at the requested widths with review screenshots", async ({ page }, testInfo) => {
   const api = await mockDashboard(page);
+  await page.clock.install({ time: new Date(now) });
   const screenshots = [1920, 1280, 390];
 
   for (const width of screenshots) {
@@ -318,34 +323,19 @@ test("renders the sorted VIP list and dialogs at the requested widths with revie
   await takeoverDialog.getByRole("option", { name: /Chipknusper/u }).click();
   await takeoverDialog.getByRole("button", { name: "Ablaufzeit festlegen" }).click();
   const expiry = takeoverDialog.locator('input[type="datetime-local"]');
-  const expiryInput = await page.evaluate(() => {
-    const target = new Date(Date.now() + 30 * 24 * 60 * 60 * 1_000);
-    const parts = new Map(new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Europe/Berlin",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(target).map(({ type, value }) => [type, value]));
-    const part = (type: keyof Intl.DateTimeFormatPartTypesRegistry): string => parts.get(type) ?? "";
-    return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
-  });
+  const expiryInput = "2026-12-01T13:00";
   const expiryEpoch = channelDateTimeToEpoch(expiryInput, "Europe/Berlin");
   if (expiryEpoch === null) throw new Error("The generated channel-local expiry time was invalid.");
   await expiry.fill(expiryInput);
   await expect(takeoverDialog.getByText("Datum und Uhrzeit in der Kanalzeitzone Europe/Berlin.", { exact: true })).toBeVisible();
   const takeoverScreenshot = testInfo.outputPath("temp-vips-takeover-dialog.png");
   await page.screenshot({ path: takeoverScreenshot, fullPage: true });
-  const submitTime = await page.evaluate(() => Date.now());
   await takeoverDialog.getByRole("button", { name: "Übernehmen", exact: true }).click();
   await expect(page.getByRole("listitem").filter({ hasText: "@chipknusper" })).toBeVisible();
   expect(api.imports).toHaveLength(1);
   expect(api.imports[0]?.userId).toBe("user_chipknusper");
-  const expectedDurationMs = expiryEpoch - submitTime;
-  expect(api.imports[0]?.durationMs).toBeGreaterThan(expectedDurationMs - 10_000);
-  expect(api.imports[0]?.durationMs).toBeLessThan(expectedDurationMs + 10_000);
+  expect(api.imports[0]).toMatchObject({ expiresAtLocal: expiryInput });
+  expect(api.imports[0]?.durationMs).toBeUndefined();
 
   const releasableRow = page.locator(".temp-vips-row").filter({ hasText: "@sternchenwerk" });
   await releasableRow.getByRole("button", { name: "Verwaltung abgeben · VIP behalten" }).click();
@@ -394,7 +384,7 @@ test("keeps a fixed error area when Twitch no longer lists a selected VIP", asyn
   const errorSlot = dialog.locator(".temp-vips-dialog__error");
   const initialErrorSlot = await errorSlot.boundingBox();
   await dialog.getByRole("button", { name: "Übernehmen", exact: true }).click();
-  await expect(errorSlot).toHaveText("Dieses Konto ist nicht mehr VIP. Es wurde nicht übernommen.");
+  await expect(errorSlot).toHaveText("Dieses Konto ist auf Twitch kein VIP mehr. Aktualisiere die Auswahl und wähle ein aktuelles VIP.");
   const populatedErrorSlot = await errorSlot.boundingBox();
   expect(initialErrorSlot?.height).toBe(populatedErrorSlot?.height);
   await expect(dialog).toBeVisible();
@@ -462,7 +452,7 @@ test("reports a queued cockpit grant as pending", async ({ page }) => {
   const action = page.locator(".live-cockpit-actions__grid .live-action").filter({
     has: page.getByRole("button", { name: "VIP vergeben" }),
   });
-  await expect(action.locator(".live-action__reason")).toHaveText("Die VIP-Vergabe wartet in der Kanalwarteschlange.");
+  await expect(action.locator(".live-action__reason")).toContainText("Die Aktion wartet in der Kanalwarteschlange.");
   expect(api.grants).toHaveLength(1);
 });
 
@@ -473,6 +463,65 @@ test("reports a queued release as pending and keeps the VIP entry visible", asyn
   await page.goto(`/channels/${channelId}/modules/temp_vips?lang=de`);
   const row = page.locator(".temp-vips-row").filter({ hasText: "@pixelpilz" });
   await row.getByRole("button", { name: "Verwaltung abgeben · VIP behalten" }).click();
-  await expect(page.locator(".temp-vips-page__feedback")).toHaveText("Die Aktion wartet in der Kanalwarteschlange.");
+  await expect(page.locator(".temp-vips-page__feedback")).toContainText("Die Aktion wartet in der Kanalwarteschlange.");
   await expect(row).toBeVisible();
+});
+
+test("keeps the mobile VIP list in place when a row action fails", async ({ page }) => {
+  const api = await mockDashboard(page);
+  api.setReleaseStatus("rejected");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/channels/${channelId}/modules/temp_vips?lang=de`);
+  const row = page.locator(".temp-vips-row").filter({ hasText: "@pixelpilz" });
+  await expect(row).toBeVisible();
+  await expect(page.getByRole("spinbutton", { name: "Standarddauer" })).toBeHidden();
+  await waitForWebFonts(page);
+  // Offsets relative to the page header: the click may scroll the container, but nothing may move inside it.
+  const offsets = async () => page.evaluate(() => {
+    const top = (selector: string) => document.querySelector(selector)?.getBoundingClientRect().top ?? 0;
+    const anchor = top(".temp-vips-page__actions");
+    const rowElement = [...document.querySelectorAll(".temp-vips-row")].find((element) => element.textContent.includes("@pixelpilz"));
+    return { list: top(".temp-vips-list__rows") - anchor, row: (rowElement?.getBoundingClientRect().top ?? 0) - anchor };
+  });
+  const before = await offsets();
+
+  await row.getByRole("button", { name: "Verwaltung abgeben · VIP behalten" }).click();
+  await expect(page.locator(".temp-vips-page__feedback")).toContainText("Twitch");
+
+  const after = await offsets();
+  const listBefore = before.list;
+  const rowBefore = before.row;
+  const listAfter = after.list;
+  const rowAfter = after.row;
+  expect(listAfter).toBe(listBefore);
+  expect(rowAfter).toBe(rowBefore);
+});
+
+test("reports an extended cockpit grant with the new expiry", async ({ page }) => {
+  const api = await mockDashboard(page);
+  api.setGrantStatus("extended");
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${channelId}?lang=de`);
+  await page.locator(".live-cockpit-actions__grid").getByRole("button", { name: "VIP vergeben" }).click();
+  const dialog = page.getByRole("dialog", { name: "VIP vergeben" });
+  await dialog.getByRole("textbox", { name: "Twitch-Name" }).fill("pixelpilz");
+  await dialog.getByRole("button", { name: "Ausführen", exact: true }).click();
+  const action = page.locator(".live-cockpit-actions__grid .live-action").filter({
+    has: page.getByRole("button", { name: "VIP vergeben" }),
+  });
+  await expect(dialog).toBeHidden();
+  await expect(action.locator(".live-action__reason")).toContainText("verlängert");
+  await expect(action.locator(".live-action__reason")).toContainText("02.11.2026");
+  expect(api.grants).toHaveLength(1);
+});
+
+test("disables the cockpit grant action when broadcaster VIP permission is missing", async ({ page }) => {
+  const api = await mockDashboard(page, { missingBroadcasterScopes: ["channel:manage:vips"] });
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${channelId}?lang=de`);
+  const action = page.locator(".live-cockpit-actions__grid").getByRole("button", { name: "VIP vergeben" });
+
+  await expect(action).toBeDisabled();
+  await expect(page.locator(".live-cockpit-actions__grid .live-action__reason")).toContainText("channel:manage:vips");
+  expect(api.grants).toHaveLength(0);
 });
