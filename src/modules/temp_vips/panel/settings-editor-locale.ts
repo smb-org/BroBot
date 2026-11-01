@@ -53,6 +53,11 @@ export const tempVipsSettingsEditorCatalog = (language: DashboardLanguage): Sett
     templateMessages: templateMessages[language],
     warningLabel: () => de ? "Prüfe den Hinweis." : "Check the notice.",
     sections: { settings: de ? "Ablauf" : "Timing" },
+    notes: {
+      ownershipCaveat: de
+        ? "Hinweis: Verliert Twitch eine Meldung über ein von Hand entzogenes VIP, kann der Bot ein später dauerhaft vergebenes VIP beim Ablauf entfernen. Dafür gibt es „Verwaltung abgeben“."
+        : "Note: If Twitch loses an event about a manually removed VIP, the bot may remove a VIP you later granted permanently when it expires. Use “Release management” for that.",
+    },
     fields: {
       defaultDurationDays: {
         label: de ? "Standarddauer" : "Default duration",
