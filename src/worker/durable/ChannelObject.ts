@@ -5099,9 +5099,20 @@ export class ChannelObject extends DurableObject<Env> {
     return result;
   }
 
+  public async replayTempVipImport(operationId: string, userId: string, expiresAt: string): Promise<ModuleTempVipResult | null> {
+    return this.tempVipStore().replayImport(operationId, userId, expiresAt);
+  }
+
   public async endTempVip(request: ModuleTempVipOperationRequest): Promise<ModuleTempVipResult> {
     const store = this.tempVipStore();
     const result = await store.end(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async retryTempVipRemovalNow(userId: string): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.retryRemovalNow(userId);
     await this.flushTempVipOutbox(store);
     return result;
   }

@@ -1,4 +1,5 @@
 import type { HelixResult } from "../../modules/contract";
+import type { ModuleTempVipPerson } from "../../modules/contract";
 import type { BroadcasterTokenResult } from "../auth/broadcaster-token";
 import { withBroadcasterToken } from "../auth/broadcaster-token";
 import { helixRequest } from "./helix";
@@ -109,9 +110,20 @@ interface VipResponse {
   data: readonly { user_id: string }[];
 }
 
+interface VipListResponse {
+  data: readonly { user_id: string; user_login: string; user_name: string }[];
+  pagination?: { cursor?: string };
+}
+
 const validVipResponse = (value: unknown): value is VipResponse =>
   isRecord(value) && Array.isArray(value.data) && value.data.every((item) =>
     isRecord(item) && typeof item.user_id === "string");
+
+const validVipListResponse = (value: unknown): value is VipListResponse =>
+  isRecord(value) && Array.isArray(value.data) && value.data.every((item) =>
+    isRecord(item) && typeof item.user_id === "string" && typeof item.user_login === "string" &&
+    typeof item.user_name === "string") && (value.pagination === undefined || isRecord(value.pagination) &&
+      (value.pagination.cursor === undefined || typeof value.pagination.cursor === "string"));
 
 const expectedSuccessStatus = <Data>(result: HelixResult<Data>, expected: number): HelixResult<Data> =>
   result.ok && result.status !== expected
@@ -143,6 +155,51 @@ export const getChannelVip = async (
     return failure.ok ? { ok: false, reason: "unknown_status" } : failure;
   }
   return { ok: true, isVip: result.value.data.some((vip) => vip.user_id === userId) };
+};
+
+/** Lists the broadcaster's existing VIPs for the dashboard takeover dialog. */
+export const listChannelVips = async (
+  environment: Env,
+  broadcasterId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<{ ok: true; people: ModuleTempVipPerson[] } | VipFailure> => {
+  const result = await withBroadcasterToken<ModuleTempVipPerson[]>(environment, broadcasterId, [TEMP_VIP_BROADCASTER_SCOPE], async (accessToken) => {
+    const people: ModuleTempVipPerson[] = [];
+    const seenCursors = new Set<string>();
+    let after: string | undefined;
+    for (;;) {
+      const response = await helixRequest({
+        url: TEMP_VIP_HELIX_URL,
+        clientId: environment.TWITCH_CLIENT_ID,
+        accessToken,
+        query: { broadcaster_id: broadcasterId, first: "100", after },
+        fetcher,
+      });
+      const expected = expectedSuccessStatus(response, 200);
+      if (!expected.ok) return expected;
+      if (!validVipListResponse(expected.data)) {
+        return { ok: false, status: expected.status, reason: "invalid_response", message: null, body: {} };
+      }
+      people.push(...expected.data.data.map((item) => ({
+        userId: item.user_id,
+        login: item.user_login,
+        displayName: item.user_name,
+      })));
+      const next = expected.data.pagination?.cursor;
+      if (next === undefined || next.length === 0) break;
+      if (seenCursors.has(next)) {
+        return { ok: false, status: 200, reason: "invalid_response", message: null, body: {} };
+      }
+      seenCursors.add(next);
+      after = next;
+    }
+    return { ok: true, status: 200, data: people };
+  }, { fetcher });
+  if (result.kind !== "ok") {
+    const failure = callFailure(result, "get");
+    return failure.ok ? { ok: false, reason: "unknown_status" } : failure;
+  }
+  return { ok: true, people: result.value };
 };
 
 const runVipAction = async (

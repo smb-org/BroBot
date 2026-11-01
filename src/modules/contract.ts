@@ -1416,6 +1416,7 @@ export interface ModuleTempVipResult {
   reason?: string;
   allowedDurationMs?: number;
   retryAt?: string;
+  expiresAt?: string;
   row?: ModuleTempVipRow;
 }
 
@@ -1439,6 +1440,10 @@ export interface ModuleTempVipExtendRequest {
 
 export interface ModuleTempVipImportRequest extends ModuleTempVipGrantRequest {
   source: "import";
+  /** Absolute expiry for a channel-local date entry; the queue must preserve it as-is. */
+  expiresAt?: string;
+  /** Server validation instant for an exact-minimum date entry. The queue omits this from payload identity. */
+  expiresAtValidatedAt?: string;
 }
 
 export interface ModuleTempVipOperationRequest {
@@ -1457,12 +1462,25 @@ export interface ModuleTempVipAccess {
   grant: (request: ModuleTempVipGrantRequest) => Promise<ModuleTempVipResult>;
   extend: (request: ModuleTempVipExtendRequest) => Promise<ModuleTempVipResult>;
   importExisting: (request: ModuleTempVipImportRequest) => Promise<ModuleTempVipResult>;
+  replayImport: (operationId: string, userId: string, expiresAt: string) => Promise<ModuleTempVipResult | null>;
   end: (request: ModuleTempVipOperationRequest) => Promise<ModuleTempVipResult>;
+  retryRemovalNow: (userId: string) => Promise<ModuleTempVipResult>;
   release: (request: ModuleTempVipOperationRequest) => Promise<ModuleTempVipResult>;
   list: () => Promise<ModuleTempVipRow[]>;
   runExpiry: (now?: string) => Promise<{ removed: number; queued: number }>;
   handleRemoved: (event: ModuleTempVipRemovedEvent) => Promise<ModuleTempVipResult>;
 }
+
+/** Route access binds the durable VIP queue to one channel and adds read-only Twitch VIP discovery. */
+export type ModuleTempVipRouteAccess = Pick<
+  ModuleTempVipAccess,
+  "grant" | "extend" | "importExisting" | "replayImport" | "end" | "retryRemovalNow" | "release" | "list"
+> & {
+  listExisting: () => Promise<
+    | { ok: true; people: ModuleTempVipPerson[] }
+    | { ok: false; reason: string }
+  >;
+};
 
 export type ModuleStreamState = "online" | "offline" | "unknown";
 
@@ -2204,6 +2222,8 @@ export interface ModuleRouteVariables {
   ballots: (channelId: string) => ModuleBallotAccess;
   /** Returns point ledger access bound to the authorized route channel and mounted module. */
   points: (channelId: string) => ModulePointsAccess;
+  /** Returns temporary VIP access bound to the authorized route channel and module. */
+  tempVips: (channelId: string) => ModuleTempVipRouteAccess;
   /** Returns the bot token and granted scopes for the authorized channel when available. */
   botCredentials?: (channelId: string) => Promise<{ userId: string; accessToken: string; scopes: readonly string[] } | null>;
   /** Reads blocked terms only for the authorized route channel. */

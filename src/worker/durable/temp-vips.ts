@@ -10,6 +10,7 @@ import type {
   TempVipEndReason,
   TempVipSource,
 } from "../../modules/contract";
+import { TEMP_VIP_MINIMUM_DURATION_MS } from "../../modules/temp_vips/domain";
 
 const TEMP_VIP_MUTATIONS_PER_WINDOW = 10;
 const TEMP_VIP_MUTATION_WINDOW_MS = 10_000;
@@ -103,6 +104,7 @@ interface OperationPayload {
   stage?: string;
   intentAt?: string | null;
   precondition?: "not_vip";
+  retryNow?: boolean;
 }
 
 type TempVipStoredResult = ModuleTempVipResult & {
@@ -535,6 +537,7 @@ export class TempVipStore {
         payload.stage = "check_existing";
       }
 
+      const storedPayload = payload.retryNow === true ? { ...payload, retryNow: false } : payload;
       this.sql.exec(
         `UPDATE temp_vip_ops SET status = 'running', attempts = ?, next_attempt_at = ?,
            payload_json = ?, result_json = NULL, finished_at = NULL,
@@ -542,7 +545,7 @@ export class TempVipStore {
          WHERE operation_id = ?`,
         attempts,
         utc(parseTime(now) + TEMP_VIP_RECOVERY_MS),
-        JSON.stringify(payload),
+        JSON.stringify(storedPayload),
         operation.operation_id,
       );
       return {
@@ -684,7 +687,8 @@ export class TempVipStore {
         this.setNeedsReconcileSync(operation.operation_id, false);
       });
     }
-    if (operation.kind === "expire" && !this.isDue(current, this.now())) {
+    const retryingFailedRemoval = payload.retryNow === true && current.removal_failed_at !== null;
+    if (operation.kind === "expire" && !retryingFailedRemoval && !this.isDue(current, this.now())) {
       const checkedAt = this.now();
       this.transaction(() => {
         this.finishSync(operation.operation_id, { status: "ignored" }, checkedAt, operation.attempts);
@@ -1097,11 +1101,17 @@ export class TempVipStore {
   ): Promise<void> {
     const request = payload.request as unknown as Omit<ModuleTempVipImportRequest, "operationId">;
     const now = this.now();
-    if (request.durationMs > request.maximumRemainingMs) {
+    if (request.expiresAt === undefined && request.durationMs > request.maximumRemainingMs) {
       this.transaction(() => {
         this.finishSync(operation.operation_id, {
           status: "maximum_exceeded", allowedDurationMs: request.maximumRemainingMs,
         }, now, operation.attempts);
+      });
+      return;
+    }
+    if (request.expiresAt !== undefined && parseTime(request.expiresAt) <= parseTime(now)) {
+      this.transaction(() => {
+        this.finishSync(operation.operation_id, { status: "rejected", reason: "expiry_elapsed" }, now, operation.attempts);
       });
       return;
     }
@@ -1184,7 +1194,7 @@ export class TempVipStore {
     const expiresAt = utc(parseTime(intendedAt) + request.durationMs);
     this.insertRowSync(request.person, request.grantedBy, request.source, intendedAt, expiresAt);
     const row = rowFor(this.sql, request.person.userId);
-    const result: ModuleTempVipResult = { status: "granted", ...(row === null ? {} : { row: publicRow(row) }) };
+    const result: ModuleTempVipResult = { status: "granted", expiresAt, ...(row === null ? {} : { row: publicRow(row) }) };
     enqueueEventSync(this.sql, this.options.channelId, operation.operation_id, 0, completedAt,
       request.grantedBy?.userId ?? null, "temp_vips.granted", {
         userId: request.person.userId,
@@ -1200,10 +1210,10 @@ export class TempVipStore {
     request: Omit<ModuleTempVipImportRequest, "operationId">,
     now: string,
   ): ModuleTempVipResult {
-    const expiresAt = utc(parseTime(now) + request.durationMs);
+    const expiresAt = request.expiresAt ?? utc(parseTime(now) + request.durationMs);
     this.insertRowSync(request.person, request.grantedBy, "import", now, expiresAt);
     const row = rowFor(this.sql, request.person.userId);
-    const result: ModuleTempVipResult = { status: "imported", ...(row === null ? {} : { row: publicRow(row) }) };
+    const result: ModuleTempVipResult = { status: "imported", expiresAt, ...(row === null ? {} : { row: publicRow(row) }) };
     enqueueEventSync(this.sql, this.options.channelId, operation.operation_id, 0, now,
       request.grantedBy?.userId ?? null, "temp_vips.imported", {
         userId: request.person.userId,
@@ -1275,7 +1285,7 @@ export class TempVipStore {
       row.user_id,
     );
     const updated = rowFor(this.sql, row.user_id);
-    const result: ModuleTempVipResult = { status: "extended", ...(updated === null ? {} : { row: publicRow(updated) }) };
+    const result: ModuleTempVipResult = { status: "extended", expiresAt: utc(expiresAtMs), ...(updated === null ? {} : { row: publicRow(updated) }) };
     enqueueEventSync(this.sql, this.options.channelId, operationId, 0, now, grantedBy?.userId ?? null,
       "temp_vips.extended", {
         userId: row.user_id,
@@ -1423,7 +1433,7 @@ export class TempVipStore {
   }
 
   private validateDuration(durationMs: number, maximumRemainingMs: number): void {
-    if (!Number.isSafeInteger(durationMs) || durationMs <= 0 ||
+    if (!Number.isSafeInteger(durationMs) || durationMs < TEMP_VIP_MINIMUM_DURATION_MS ||
         !Number.isSafeInteger(maximumRemainingMs) || maximumRemainingMs <= 0) {
       throw new Error("invalid_temp_vip_duration");
     }
@@ -1456,21 +1466,85 @@ export class TempVipStore {
   }
 
   public async importExisting(request: ModuleTempVipImportRequest): Promise<ModuleTempVipResult> {
-    this.validateDuration(request.durationMs, request.maximumRemainingMs);
     const operationId = operationKey(request.operationId);
     const payload = {
       person: request.person,
       grantedBy: request.grantedBy,
-      durationMs: request.durationMs,
+      ...(request.expiresAt === undefined ? { durationMs: request.durationMs } : { expiresAt: request.expiresAt }),
       maximumRemainingMs: request.maximumRemainingMs,
       source: "import" as const,
     };
+    const existing = this.sql.exec<TempVipOperationSql>(
+      "SELECT * FROM temp_vip_ops WHERE operation_id = ?",
+      operationId,
+    ).toArray()[0];
+    if (existing !== undefined) {
+      const priorPayload = decodePayload(existing.payload_json);
+      if (existing.kind !== "import" || existing.user_id !== request.person.userId || requestJson(priorPayload) !== canonicalJson(payload)) {
+        throw new Error("operation_conflict");
+      }
+      return this.waitForOperation(operationId);
+    }
+    this.validateDuration(request.durationMs, request.maximumRemainingMs);
+    if (request.expiresAt !== undefined) {
+      const acceptedAt = request.expiresAtValidatedAt ?? this.now();
+      const remaining = parseTime(request.expiresAt) - parseTime(acceptedAt);
+      if (remaining < TEMP_VIP_MINIMUM_DURATION_MS) throw new Error("invalid_temp_vip_duration");
+      if (remaining > request.maximumRemainingMs) {
+        return { status: "maximum_exceeded", allowedDurationMs: request.maximumRemainingMs };
+      }
+      if (parseTime(request.expiresAt) <= parseTime(this.now())) {
+        return { status: "rejected", reason: "expiry_elapsed" };
+      }
+    }
     return this.enqueueAndWait(operationId, "import", request.person.userId, request.person.login, payload);
+  }
+
+  public async replayImport(operationIdValue: string, userId: string, expiresAt: string): Promise<ModuleTempVipResult | null> {
+    const operationId = operationKey(operationIdValue);
+    const existing = this.sql.exec<TempVipOperationSql>(
+      "SELECT * FROM temp_vip_ops WHERE operation_id = ?",
+      operationId,
+    ).toArray()[0];
+    if (existing === undefined) return null;
+    const payload = decodePayload(existing.payload_json);
+    if (existing.kind !== "import" || existing.user_id !== userId || payload.request.expiresAt !== expiresAt) {
+      throw new Error("operation_conflict");
+    }
+    if (existing.status === "done") return this.pendingResult(operationId);
+    await this.rearm();
+    return existing.status === "running" ? this.pendingResult(operationId) : this.waitForOperation(operationId);
   }
 
   public async end(request: ModuleTempVipOperationRequest): Promise<ModuleTempVipResult> {
     const operationId = operationKey(request.operationId);
     return this.enqueueAndWait(operationId, "end", request.userId, request.userId, { userId: request.userId });
+  }
+
+  public async retryRemovalNow(userId: string): Promise<ModuleTempVipResult> {
+    const now = this.now();
+    const operation = this.transaction(() => {
+      const pending = this.sql.exec<TempVipOperationSql>(
+        `SELECT * FROM temp_vip_ops WHERE user_id = ? AND status != 'done'
+           AND kind IN ('end', 'expire') ORDER BY enqueue_sequence LIMIT 1`,
+        userId,
+      ).toArray()[0];
+      if (pending === undefined) return null;
+      if (pending.status === "queued") {
+        const payload = decodePayload(pending.payload_json);
+        this.sql.exec(
+          "UPDATE temp_vip_ops SET next_attempt_at = ?, payload_json = ? WHERE operation_id = ? AND status = 'queued'",
+          now,
+          JSON.stringify({ ...payload, retryNow: true }),
+          pending.operation_id,
+        );
+      }
+      return pending;
+    });
+    if (operation === null) return { status: "not_managed" };
+    await this.rearm();
+    if (operation.status === "running") return this.pendingResult(operation.operation_id);
+    return this.waitForOperation(operation.operation_id);
   }
 
   public async release(request: ModuleTempVipOperationRequest): Promise<ModuleTempVipResult> {

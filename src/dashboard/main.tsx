@@ -1234,9 +1234,14 @@ export const DashboardApp = (): ReactElement => {
         const errorText = error instanceof PanelApiError
           ? moduleDependencyErrorMessage(moduleId, error.code, error.details, channel.modules ?? modules.data?.modules ?? [])
           : null;
-        notify({ tone: "error", message: errorText ?? (error instanceof PanelApiError
+        const tempVipEntriesBlockDisable = moduleId === "temp_vips" && error instanceof PanelApiError && error.code === "temp_vips_active";
+        notify({ tone: "error", message: tempVipEntriesBlockDisable ? dashboardTexts().module.tempVipEntriesBlockDisable : errorText ?? (error instanceof PanelApiError
           ? apiErrorText(error.code, dashboardTexts().errors.changeFailed)
-          : dashboardTexts().errors.changeFailed), scope: moduleToggleToastScope(channelId) });
+          : dashboardTexts().errors.changeFailed), scope: moduleToggleToastScope(channelId),
+        ...(tempVipEntriesBlockDisable ? { action: {
+          label: dashboardTexts().module.openTempVipList,
+          onClick: () => navigate({ kind: "module", channelId, moduleId: "temp_vips" }),
+        } } : {}) });
       }
       if (error instanceof PanelApiError && error.status === 401) setAuthenticationRequired(true);
     } finally {

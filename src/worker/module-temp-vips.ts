@@ -1,15 +1,20 @@
-import type { ModuleTempVipAccess } from "../modules/contract";
+import type { ModuleTempVipAccess, ModuleTempVipRouteAccess } from "../modules/contract";
 
-const unavailable = <T>(): Promise<T> => Promise.reject(new Error("Temporary VIP storage is unavailable."));
+const unavailable = <Value>(): Promise<Value> => Promise.reject(new Error("Temporary VIP storage is unavailable."));
 
-/** Binds every temporary VIP RPC to the event's channel object. */
-export const moduleTempVips = (namespace: Env["CHANNEL"] | undefined, channelId: string): ModuleTempVipAccess => {
+/** Binds temporary VIP queue RPCs to one channel and keeps Twitch discovery read-only. */
+export const moduleTempVips = (
+  namespace: Env["CHANNEL"] | undefined,
+  channelId: string,
+): ModuleTempVipAccess => {
   if (namespace === undefined) {
     return {
       grant: () => unavailable(),
       extend: () => unavailable(),
       importExisting: () => unavailable(),
+      replayImport: () => unavailable(),
       end: () => unavailable(),
+      retryRemovalNow: () => unavailable(),
       release: () => unavailable(),
       list: () => unavailable(),
       runExpiry: () => unavailable(),
@@ -21,10 +26,21 @@ export const moduleTempVips = (namespace: Env["CHANNEL"] | undefined, channelId:
     grant: (request) => object.grantTempVip(request),
     extend: (request) => object.extendTempVip(request),
     importExisting: (request) => object.importExistingTempVip(request),
+    replayImport: (operationId, userId, expiresAt) => object.replayTempVipImport(operationId, userId, expiresAt),
     end: (request) => object.endTempVip(request),
+    retryRemovalNow: (userId) => object.retryTempVipRemovalNow(userId),
     release: (request) => object.releaseTempVip(request),
     list: () => object.listTempVips(),
-    runExpiry: (now) => now === undefined ? object.runTempVipExpiry() : object.runTempVipExpiry(now),
+    runExpiry: (now) => object.runTempVipExpiry(now),
     handleRemoved: (event) => object.handleTempVipRemoved(event),
   };
+};
+
+export const moduleTempVipRoutes = (
+  namespace: Env["CHANNEL"] | undefined,
+  channelId: string,
+  listExisting: ModuleTempVipRouteAccess["listExisting"],
+): ModuleTempVipRouteAccess => {
+  const access = moduleTempVips(namespace, channelId);
+  return { ...access, listExisting };
 };

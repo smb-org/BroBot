@@ -19,7 +19,7 @@ interface FieldBaseProps {
   disabled?: boolean;
   required?: boolean;
   readOnly?: boolean;
-  type?: "text" | "password";
+  type?: "text" | "password" | "datetime-local";
   autoComplete?: string;
   spellCheck?: boolean;
   mono?: boolean;
