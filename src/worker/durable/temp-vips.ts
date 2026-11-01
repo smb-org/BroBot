@@ -17,6 +17,7 @@ const TEMP_VIP_REMOVALS_PER_WINDOW = 10;
 const TEMP_VIP_REMOVAL_WINDOW_MS = 10_000;
 const TEMP_VIP_OPERATION_RETENTION_MS = 24 * 60 * 60_000;
 const TEMP_VIP_OUTBOX_RETRY_MS = 60_000;
+const TEMP_VIP_LEASE_MS = TEMP_VIP_PENDING_LOCK_MS;
 
 const REMOVAL_RETRY_DELAYS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000] as const;
 const GRANT_RECOVERY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000] as const;
@@ -56,6 +57,8 @@ interface TempVipRowSql extends Record<string, string | number | null> {
   granted_by_login: string | null;
   pending_op: "grant" | "remove" | null;
   pending_since: string | null;
+  lease_id: string | null;
+  lease_deadline: number | null;
   eventsub_verification: number;
   status: "active" | "grant_pending" | "grant_unknown";
   grant_phase: "checking" | "adding";
@@ -64,7 +67,6 @@ interface TempVipRowSql extends Record<string, string | number | null> {
   grant_generation: number;
   grant_recovery_at: string | null;
   grant_recovery_attempts: number;
-  recovery_claim: string | null;
   removal_failed_at: string | null;
   removal_retry_at: string | null;
   removal_attempts: number;
@@ -78,6 +80,36 @@ interface CachedOperationRow extends Record<string, string | number | null> {
   payload_json: string;
   result_json: string | null;
   expires_at: string;
+}
+
+type TempVipOperationKind =
+  | "grant_check" | "grant_add" | "import" | "remove_manual" | "remove_expiry"
+  | "eventsub_verification" | "recovery_grant" | "recovery_import"
+  | "recovery_removal" | "recovery_eventsub";
+
+interface TempVipLease {
+  operationId: string;
+  requestId: string;
+  kind: TempVipOperationKind;
+  userId: string;
+  generation: number;
+  leaseId: string;
+  leaseDeadline: number;
+  startedAt: string;
+  removalStartedAt?: string;
+}
+
+interface TempVipOperationSql extends Record<string, string | number | null> {
+  operation_id: string;
+  request_id: string;
+  kind: TempVipOperationKind;
+  user_id: string;
+  generation: number;
+  lease_id: string;
+  lease_deadline: number;
+  payload_json: string;
+  result_json: string | null;
+  created_at: string;
 }
 
 const utc = (milliseconds: number): string => new Date(milliseconds).toISOString();
@@ -122,6 +154,8 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
     granted_by_login TEXT,
     pending_op TEXT CHECK (pending_op IN ('grant', 'remove')),
     pending_since TEXT,
+    lease_id TEXT,
+    lease_deadline INTEGER,
     eventsub_verification INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL CHECK (status IN ('active', 'grant_pending', 'grant_unknown')),
     grant_phase TEXT NOT NULL DEFAULT 'checking' CHECK (grant_phase IN ('checking', 'adding')),
@@ -130,7 +164,6 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
     grant_generation INTEGER NOT NULL,
     grant_recovery_at TEXT,
     grant_recovery_attempts INTEGER NOT NULL DEFAULT 0,
-    recovery_claim TEXT,
     removal_failed_at TEXT,
     removal_retry_at TEXT,
     removal_attempts INTEGER NOT NULL DEFAULT 0,
@@ -156,12 +189,34 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
     slot_id INTEGER PRIMARY KEY AUTOINCREMENT,
     reserved_at INTEGER NOT NULL
   )`);
-  sql.exec(`CREATE TABLE IF NOT EXISTS temp_vip_operations (
+  sql.exec(`CREATE TABLE IF NOT EXISTS temp_vip_requests (
     operation_id TEXT PRIMARY KEY,
     payload_json TEXT NOT NULL,
     result_json TEXT,
     expires_at TEXT NOT NULL
   )`);
+  const operationColumns = sql.exec<{ name: string }>("PRAGMA table_info(temp_vip_operations)").toArray();
+  if (operationColumns.length > 0 && !operationColumns.some(({ name }) => name === "kind")) {
+    sql.exec(
+      `INSERT OR IGNORE INTO temp_vip_requests (operation_id, payload_json, result_json, expires_at)
+       SELECT operation_id, payload_json, result_json, expires_at FROM temp_vip_operations`,
+    );
+    sql.exec("DROP TABLE temp_vip_operations");
+  }
+  sql.exec(`CREATE TABLE IF NOT EXISTS temp_vip_operations (
+    operation_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    lease_id TEXT NOT NULL,
+    lease_deadline INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    result_json TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  )`);
+  sql.exec("CREATE INDEX IF NOT EXISTS temp_vip_pending_operations ON temp_vip_operations (user_id, generation, result_json, lease_deadline)");
   sql.exec(`CREATE TABLE IF NOT EXISTS temp_vip_outbox (
     event_id TEXT PRIMARY KEY,
     operation_id TEXT NOT NULL,
@@ -174,11 +229,14 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
   if (!tempVipColumns.some(({ name }) => name === "eventsub_verification")) {
     sql.exec("ALTER TABLE temp_vips ADD COLUMN eventsub_verification INTEGER NOT NULL DEFAULT 0");
   }
-  if (!tempVipColumns.some(({ name }) => name === "recovery_claim")) {
-    sql.exec("ALTER TABLE temp_vips ADD COLUMN recovery_claim TEXT");
-  }
   if (!tempVipColumns.some(({ name }) => name === "removal_retry_at")) {
     sql.exec("ALTER TABLE temp_vips ADD COLUMN removal_retry_at TEXT");
+  }
+  if (!tempVipColumns.some(({ name }) => name === "lease_id")) {
+    sql.exec("ALTER TABLE temp_vips ADD COLUMN lease_id TEXT");
+  }
+  if (!tempVipColumns.some(({ name }) => name === "lease_deadline")) {
+    sql.exec("ALTER TABLE temp_vips ADD COLUMN lease_deadline INTEGER");
   }
 };
 
@@ -221,9 +279,9 @@ const cachedOperationSync = (
   payloadJson: string,
   now: string,
 ): ModuleTempVipResult | null => {
-  sql.exec("DELETE FROM temp_vip_operations WHERE expires_at <= ?", now);
+  sql.exec("DELETE FROM temp_vip_requests WHERE expires_at <= ? AND result_json IS NOT NULL", now);
   const prior = sql.exec<CachedOperationRow>(
-    "SELECT payload_json, result_json, expires_at FROM temp_vip_operations WHERE operation_id = ?",
+    "SELECT payload_json, result_json, expires_at FROM temp_vip_requests WHERE operation_id = ?",
     operationId,
   ).toArray()[0];
   if (prior === undefined) return null;
@@ -239,12 +297,12 @@ const saveOperationSync = (
   now: string,
 ): void => {
   sql.exec(
-    `INSERT INTO temp_vip_operations (operation_id, payload_json, result_json, expires_at)
+    `INSERT INTO temp_vip_requests (operation_id, payload_json, result_json, expires_at)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(operation_id) DO UPDATE SET
        result_json = excluded.result_json, expires_at = excluded.expires_at
-     WHERE temp_vip_operations.payload_json = excluded.payload_json
-       AND temp_vip_operations.result_json IS NULL`,
+       WHERE temp_vip_requests.payload_json = excluded.payload_json
+       AND temp_vip_requests.result_json IS NULL`,
     operationId,
     payloadJson,
     JSON.stringify(result),
@@ -259,7 +317,7 @@ const reserveOperationSync = (
   now: string,
 ): void => {
   sql.exec(
-    `INSERT INTO temp_vip_operations (operation_id, payload_json, result_json, expires_at)
+    `INSERT INTO temp_vip_requests (operation_id, payload_json, result_json, expires_at)
      VALUES (?, ?, NULL, ?)
      ON CONFLICT(operation_id) DO NOTHING`,
     operationId,
@@ -268,36 +326,190 @@ const reserveOperationSync = (
   );
 };
 
-const settleReservedOperationSync = (
+const reserveTwitchOperationSync = (
   sql: SqlStorage,
-  operationId: string,
-  result: ModuleTempVipResult,
-  now: string,
-): void => {
-  const prior = sql.exec<{ result_json: string | null }>(
-    "SELECT result_json FROM temp_vip_operations WHERE operation_id = ?",
+  input: {
+    operationId?: string;
+    requestId: string;
+    kind: TempVipOperationKind;
+    userId: string;
+    generation: number;
+    now: string;
+    payloadJson: string;
+  },
+): TempVipLease => {
+  const operationId = input.operationId ?? crypto.randomUUID();
+  const leaseId = crypto.randomUUID();
+  const leaseDeadline = parseTime(input.now) + TEMP_VIP_LEASE_MS;
+  sql.exec(
+    `INSERT INTO temp_vip_operations
+      (operation_id, request_id, kind, user_id, generation, lease_id, lease_deadline,
+       payload_json, result_json, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+     ON CONFLICT(operation_id) DO NOTHING`,
     operationId,
-  ).toArray()[0];
-  if (prior === undefined) return;
-  if (prior.result_json !== null &&
-      (JSON.parse(prior.result_json) as ModuleTempVipResult).status !== "grant_unknown") return;
+    input.requestId,
+    input.kind,
+    input.userId,
+    input.generation,
+    leaseId,
+    leaseDeadline,
+    input.payloadJson,
+    input.now,
+    utc(parseTime(input.now) + TEMP_VIP_OPERATION_RETENTION_MS),
+  );
+  return {
+    operationId,
+    requestId: input.requestId,
+    kind: input.kind,
+    userId: input.userId,
+    generation: input.generation,
+    leaseId,
+    leaseDeadline,
+    startedAt: input.now,
+  };
+};
+
+const claimRowForOperationSync = (sql: SqlStorage, lease: TempVipLease, pendingOp: "grant" | "remove", eventsubVerification = false): void => {
+  sql.exec(
+    `UPDATE temp_vips SET pending_op = ?, pending_since = ?, lease_id = ?, lease_deadline = ?,
+       eventsub_verification = ?, revision = revision + 1
+     WHERE user_id = ? AND grant_generation = ?`,
+    pendingOp,
+    lease.startedAt,
+    lease.leaseId,
+    lease.leaseDeadline,
+    eventsubVerification ? 1 : 0,
+    lease.userId,
+    lease.generation,
+  );
+};
+
+const updateRootOperationLeaseSync = (sql: SqlStorage, operationId: string, lease: TempVipLease): void => {
+  sql.exec(
+    `UPDATE temp_vip_operations SET lease_id = ?, lease_deadline = ?
+     WHERE operation_id = ? AND result_json IS NULL`,
+    lease.leaseId,
+    lease.leaseDeadline,
+    operationId,
+  );
+};
+
+const currentLeaseRowSync = (sql: SqlStorage, lease: TempVipLease): TempVipRowSql | null => {
+  const row = rowFor(sql, lease.userId);
+  return row !== null && row.grant_generation === lease.generation && row.lease_id === lease.leaseId &&
+      row.lease_deadline === lease.leaseDeadline
+    ? row
+    : null;
+};
+
+const currentOperationForRowSync = (sql: SqlStorage, row: TempVipRowSql): TempVipOperationSql | null => {
+  if (row.lease_id === null) return null;
+  return sql.exec<TempVipOperationSql>(
+    `SELECT * FROM temp_vip_operations WHERE user_id = ? AND generation = ? AND lease_id = ?
+     ORDER BY created_at DESC, operation_id DESC LIMIT 1`,
+    row.user_id,
+    row.grant_generation,
+    row.lease_id,
+  ).toArray()[0] ?? null;
+};
+
+const originalOperationForRequestSync = (
+  sql: SqlStorage,
+  userId: string,
+  generation: number,
+  requestId: string,
+): TempVipOperationSql | null => sql.exec<TempVipOperationSql>(
+  `SELECT * FROM temp_vip_operations
+    WHERE user_id = ? AND generation = ? AND request_id = ?
+    ORDER BY CASE WHEN kind IN ('recovery_grant', 'recovery_import', 'recovery_removal', 'recovery_eventsub') THEN 1 ELSE 0 END,
+             created_at, operation_id
+    LIMIT 1`,
+  userId,
+  generation,
+  requestId,
+).toArray()[0] ?? null;
+
+const settleTwitchOperationSync = (sql: SqlStorage, operationId: string, result: unknown, now: string): void => {
   sql.exec(
     `UPDATE temp_vip_operations SET result_json = ?, expires_at = ?
-     WHERE operation_id = ? AND result_json IS ?`,
+     WHERE operation_id = ? AND result_json IS NULL`,
     JSON.stringify(result),
     utc(parseTime(now) + TEMP_VIP_OPERATION_RETENTION_MS),
     operationId,
-    prior.result_json,
   );
+};
+
+const settleUnfinishedRowOperationsSync = (
+  sql: SqlStorage,
+  userId: string,
+  generation: number,
+  result: ModuleTempVipResult,
+  now: string,
+  keepRequestPending?: string,
+): void => {
+  const resultJson = JSON.stringify(result);
+  const requests = sql.exec<{ request_id: string }>(
+    `SELECT request_id FROM temp_vip_operations
+      WHERE user_id = ? AND generation = ? AND result_json IS NULL`,
+    userId,
+    generation,
+  ).toArray();
+  const row = sql.exec<{ grant_operation_id: string }>(
+    "SELECT grant_operation_id FROM temp_vips WHERE user_id = ? AND grant_generation = ?",
+    userId,
+    generation,
+  ).toArray()[0];
+  const requestIds = new Set(requests.map(({ request_id: requestId }) => requestId));
+  if (row?.grant_operation_id) requestIds.add(row.grant_operation_id);
+  sql.exec(
+    `UPDATE temp_vip_operations SET result_json = ?, expires_at = ?
+     WHERE user_id = ? AND generation = ? AND result_json IS NULL`,
+    resultJson,
+    utc(parseTime(now) + TEMP_VIP_OPERATION_RETENTION_MS),
+    userId,
+    generation,
+  );
+  for (const requestId of requestIds) {
+    if (requestId === keepRequestPending) continue;
+    const prior = sql.exec<{ payload_json: string; result_json: string | null }>(
+      "SELECT payload_json, result_json FROM temp_vip_requests WHERE operation_id = ?",
+      requestId,
+    ).toArray()[0];
+    const priorStatus = prior?.result_json === null || prior?.result_json === undefined
+      ? null
+      : (JSON.parse(prior.result_json) as ModuleTempVipResult).status;
+    if (prior === undefined || (prior.result_json !== null && priorStatus !== "grant_unknown")) continue;
+    sql.exec(
+      `UPDATE temp_vip_requests SET result_json = ?, expires_at = ?
+       WHERE operation_id = ? AND payload_json = ? AND (result_json IS NULL OR result_json = ?)`,
+      resultJson,
+      utc(parseTime(now) + TEMP_VIP_OPERATION_RETENTION_MS),
+      requestId,
+      prior.payload_json,
+      prior.result_json,
+    );
+  }
 };
 
 const lockBusyOrClearSync = (sql: SqlStorage, row: TempVipRowSql, now: string): boolean => {
   if (row.pending_op === null || row.pending_since === null) return false;
-  if (row.status === "grant_unknown") return true;
-  if (parseTime(now) - parseTime(row.pending_since) < TEMP_VIP_PENDING_LOCK_MS) return true;
+  const leaseExpired = row.lease_deadline !== null
+    ? Date.parse(now) >= row.lease_deadline
+    : parseTime(now) - parseTime(row.pending_since) >= TEMP_VIP_PENDING_LOCK_MS;
+  if (!leaseExpired) return true;
+  if (row.status === "grant_unknown") {
+    sql.exec(
+      `UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
+       revision = revision + 1 WHERE user_id = ? AND grant_generation = ?`,
+      row.user_id,
+      row.grant_generation,
+    );
+    return false;
+  }
   sql.exec(
     `UPDATE temp_vips SET pending_op = NULL, pending_since = NULL,
-       eventsub_verification = 0, recovery_claim = NULL,
+       lease_id = NULL, lease_deadline = NULL, eventsub_verification = 0,
        status = CASE WHEN status = 'grant_pending' THEN 'grant_unknown' ELSE status END,
        grant_recovery_at = CASE WHEN status = 'grant_pending' THEN ? ELSE grant_recovery_at END,
        revision = revision + 1
@@ -409,13 +621,11 @@ export class TempVipStore {
       action: "grant", person: request.person, grantedBy: request.grantedBy,
       durationMs: request.durationMs, maximumRemainingMs: request.maximumRemainingMs, source: request.source,
     });
-    let replacingFailedRow = false;
     const initial = this.transaction(() => {
       const cached = cachedOperationSync(this.sql, request.operationId, payloadJson, now);
       if (cached !== null) return { kind: "done" as const, result: cached };
       let row = rowFor(this.sql, request.person.userId);
-      const orphanedRemove = row?.pending_op === "remove" && row.pending_since !== null &&
-        parseTime(now) - parseTime(row.pending_since) >= TEMP_VIP_PENDING_LOCK_MS;
+      const orphanedRemove = row?.pending_op === "remove" && row.lease_deadline !== null && Date.parse(now) >= row.lease_deadline;
       if (row !== null && lockBusyOrClearSync(this.sql, row, now)) return { kind: "done" as const, result: { status: "busy" } };
       row = rowFor(this.sql, request.person.userId);
       if (row?.status === "grant_unknown" || row?.status === "grant_pending") {
@@ -429,146 +639,178 @@ export class TempVipStore {
         return { kind: "done" as const, result };
       }
       if (row !== null) {
-        this.sql.exec("UPDATE temp_vips SET pending_op = 'grant', pending_since = ?, revision = revision + 1 WHERE user_id = ?", now, row.user_id);
-        return { kind: "check_existing" as const };
+        reserveOperationSync(this.sql, request.operationId, payloadJson, now);
+        const lease = reserveTwitchOperationSync(this.sql, {
+          requestId: request.operationId,
+          kind: "grant_check",
+          userId: row.user_id,
+          generation: row.grant_generation,
+          now,
+          payloadJson,
+        });
+        claimRowForOperationSync(this.sql, lease, "grant");
+        return { kind: "check_existing" as const, lease };
       }
       if (request.durationMs > request.maximumRemainingMs) {
         const result = { status: "maximum_exceeded", allowedDurationMs: request.maximumRemainingMs };
         saveOperationSync(this.sql, request.operationId, payloadJson, result, now);
         return { kind: "done" as const, result };
       }
-      insertGrantPendingSync(
+      const generation = insertGrantPendingSync(
         this.sql, request.operationId, 0, request.person, request.grantedBy, request.source, now,
         utc(parseTime(now) + request.durationMs),
       );
       reserveOperationSync(this.sql, request.operationId, payloadJson, now);
-      return { kind: "create" as const };
+      const lease = reserveTwitchOperationSync(this.sql, {
+        operationId: request.operationId,
+        requestId: request.operationId,
+        kind: "grant_check",
+        userId: request.person.userId,
+        generation,
+        now,
+        payloadJson,
+      });
+      claimRowForOperationSync(this.sql, lease, "grant");
+      return { kind: "create" as const, lease };
     });
     if (initial.kind === "done") {
       await this.rearm(now);
       return initial.result;
     }
 
-    if (initial.kind === "check_existing") {
-      await this.rearm(this.now());
-      const lookup = await this.safeGet(request.person.userId);
+    await this.rearm(initial.lease.startedAt);
+    const lookup = await this.safeGet(request.person.userId);
+    const lookupAt = this.now();
+    const afterLookup = this.transaction(() => {
+      const current = currentLeaseRowSync(this.sql, initial.lease);
+      settleTwitchOperationSync(this.sql, initial.lease.operationId, lookup, lookupAt);
+      if (current === null) {
+        settleTwitchOperationSync(this.sql, initial.lease.operationId, lookup, lookupAt);
+        return { result: { status: "busy" }, addLease: null as TempVipLease | null };
+      }
+      const row = rowFor(this.sql, request.person.userId);
+      if (row === null) return { result: { status: "not_managed" }, addLease: null };
       if (!lookup.ok) {
-        const result = this.transaction(() => {
-          this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, revision = revision + 1 WHERE user_id = ?", request.person.userId);
-          const unavailable = { status: "twitch_unavailable", reason: lookup.reason };
-          saveOperationSync(this.sql, request.operationId, payloadJson, unavailable, this.now());
-          return unavailable;
-        });
-        await this.rearm(this.now());
-        return result;
+        const unavailable: ModuleTempVipResult = { status: "twitch_unavailable", reason: lookup.reason };
+        if (initial.kind === "create") {
+          settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, unavailable, lookupAt);
+          this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ?", row.user_id, row.grant_generation);
+        } else {
+          this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL, revision = revision + 1 WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", row.user_id, row.grant_generation, initial.lease.leaseId);
+          saveOperationSync(this.sql, request.operationId, payloadJson, unavailable, lookupAt);
+        }
+        if (initial.kind === "create") saveOperationSync(this.sql, request.operationId, payloadJson, unavailable, lookupAt);
+        return { result: unavailable, addLease: null };
       }
       if (lookup.isVip) {
-        const result = this.transaction(() => {
-          const row = rowFor(this.sql, request.person.userId);
-          if (row === null) {
-            const missing = { status: "not_managed" };
-            saveOperationSync(this.sql, request.operationId, payloadJson, missing, this.now());
-            return missing;
-          }
-          const extended = this.extendRowSync(row, request.durationMs, request.maximumRemainingMs, this.now(), request.operationId, payloadJson, {
+        if (initial.kind === "check_existing") {
+          const extended = this.extendRowSync(row, request.durationMs, request.maximumRemainingMs, lookupAt, request.operationId, payloadJson, {
             person: request.person,
             actorUserId: request.grantedBy?.userId ?? null,
           }, true);
-          return extended;
-        });
-        await this.rearm(this.now());
-        return result;
+          return { result: extended, addLease: null };
+        }
+        const alreadyVip: ModuleTempVipResult = { status: "already_vip" };
+        settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, alreadyVip, lookupAt);
+        this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ?", row.user_id, row.grant_generation);
+        saveOperationSync(this.sql, request.operationId, payloadJson, alreadyVip, lookupAt);
+        return { result: alreadyVip, addLease: null };
       }
       if (request.durationMs > request.maximumRemainingMs) {
-        const result = this.transaction(() => {
-          this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, revision = revision + 1 WHERE user_id = ?", request.person.userId);
-          const rejected = { status: "maximum_exceeded", allowedDurationMs: request.maximumRemainingMs };
-          saveOperationSync(this.sql, request.operationId, payloadJson, rejected, this.now());
-          return rejected;
-        });
-        await this.rearm(this.now());
-        return result;
-      }
-      this.transaction(() => {
-        const old = rowFor(this.sql, request.person.userId);
-        if (old !== null) {
-          replacingFailedRow = true;
-          const reason: TempVipEndReason = old.end_reason ?? "expired";
-          this.sql.exec("DELETE FROM temp_vips WHERE user_id = ?", old.user_id);
-          enqueueEventSync(this.sql, this.options.channelId, request.operationId, 0, this.now(), old.granted_by_user_id,
-            "temp_vips.ended", { userId: old.user_id, login: old.user_login, reason });
+        const maximum: ModuleTempVipResult = { status: "maximum_exceeded", allowedDurationMs: request.maximumRemainingMs };
+        if (initial.kind === "create") {
+          settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, maximum, lookupAt);
+          this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ?", row.user_id, row.grant_generation);
+        } else {
+          this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL, revision = revision + 1 WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", row.user_id, row.grant_generation, initial.lease.leaseId);
         }
-        insertGrantPendingSync(
-          this.sql, request.operationId, replacingFailedRow ? 1 : 0, request.person, request.grantedBy, request.source, this.now(),
-          utc(parseTime(this.now()) + request.durationMs),
+        saveOperationSync(this.sql, request.operationId, payloadJson, maximum, lookupAt);
+        return { result: maximum, addLease: null };
+      }
+      let generation = row.grant_generation;
+      let eventIndex = 0;
+      if (initial.kind === "check_existing") {
+        const oldReason: TempVipEndReason = row.end_reason ?? "expired";
+        settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, { status: "removed" }, lookupAt, request.operationId);
+        this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ?", row.user_id, row.grant_generation);
+        enqueueEventSync(this.sql, this.options.channelId, request.operationId, 0, lookupAt, row.granted_by_user_id,
+          "temp_vips.ended", { userId: row.user_id, login: row.user_login, reason: oldReason });
+        generation = insertGrantPendingSync(
+          this.sql, request.operationId, 1, request.person, request.grantedBy, request.source, lookupAt,
+          utc(parseTime(lookupAt) + request.durationMs),
         );
-        reserveOperationSync(this.sql, request.operationId, payloadJson, this.now());
+        this.sql.exec("UPDATE temp_vips SET grant_phase = 'adding' WHERE user_id = ? AND grant_generation = ?", request.person.userId, generation);
+        eventIndex = 1;
+      } else {
+        this.sql.exec("UPDATE temp_vips SET grant_phase = 'adding', revision = revision + 1 WHERE user_id = ? AND grant_generation = ?", row.user_id, generation);
+      }
+      const addLease = reserveTwitchOperationSync(this.sql, {
+        requestId: request.operationId,
+        kind: "grant_add",
+        userId: request.person.userId,
+        generation,
+        now: lookupAt,
+        payloadJson,
       });
-    }
-
-    await this.rearm(this.now());
-    const lookup = await this.safeGet(request.person.userId);
-    if (!lookup.ok) {
-      const result = this.transaction(() => {
-        this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND status = 'grant_pending'", request.person.userId);
-        const unavailable = { status: "twitch_unavailable", reason: lookup.reason };
-        saveOperationSync(this.sql, request.operationId, payloadJson, unavailable, this.now());
-        return unavailable;
-      });
-      await this.rearm(this.now());
-      return result;
-    }
-    if (lookup.isVip) {
-      const result = this.transaction(() => {
-        this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND status = 'grant_pending'", request.person.userId);
-        const alreadyVip = { status: "already_vip" };
-        saveOperationSync(this.sql, request.operationId, payloadJson, alreadyVip, this.now());
-        return alreadyVip;
-      });
-      await this.rearm(this.now());
-      return result;
-    }
-
-    this.transaction(() => {
-      this.sql.exec("UPDATE temp_vips SET grant_phase = 'adding', revision = revision + 1 WHERE user_id = ? AND status = 'grant_pending'", request.person.userId);
+      claimRowForOperationSync(this.sql, addLease, "grant");
+      if (addLease.operationId !== request.operationId) updateRootOperationLeaseSync(this.sql, request.operationId, addLease);
+      return { result: null as unknown as ModuleTempVipResult, addLease, eventIndex };
     });
+    if (afterLookup.addLease === null) {
+      await this.rearm(this.now());
+      return afterLookup.result;
+    }
+    const addLease = afterLookup.addLease;
+
+    await this.rearm(addLease.startedAt);
     const add = await this.safeAdd(request.person.userId);
     const completedAt = this.now();
     const result = this.transaction(() => {
+      const current = currentLeaseRowSync(this.sql, addLease);
+      settleTwitchOperationSync(this.sql, addLease.operationId, add, completedAt);
+      if (current === null) return { status: "busy" };
+      const row = rowFor(this.sql, request.person.userId);
+      if (row === null) return { status: "not_managed" };
       if (add.ok) {
         this.sql.exec(
-          `UPDATE temp_vips SET status = 'active', pending_op = NULL, pending_since = NULL,
+          `UPDATE temp_vips SET status = 'active', pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
              grant_recovery_at = NULL, grant_recovery_attempts = 0,
              user_login = ?, user_display_name = ?, revision = revision + 1
-           WHERE user_id = ? AND status = 'grant_pending'`,
+           WHERE user_id = ? AND grant_generation = ? AND lease_id = ?`,
           request.person.login,
           request.person.displayName,
           request.person.userId,
+          row.grant_generation,
+          addLease.leaseId,
         );
-        const row = rowFor(this.sql, request.person.userId);
-        const granted: ModuleTempVipResult = { status: "granted", ...(row === null ? {} : { row: publicRow(row) }) };
-        enqueueEventSync(this.sql, this.options.channelId, request.operationId, replacingFailedRow ? 1 : 0, completedAt, request.grantedBy?.userId ?? null,
-          "temp_vips.granted", { userId: request.person.userId, login: request.person.login, expiresAt: row?.expires_at ?? null, source: request.source });
+        const updated = rowFor(this.sql, request.person.userId);
+        const granted: ModuleTempVipResult = { status: "granted", ...(updated === null ? {} : { row: publicRow(updated) }) };
+        enqueueEventSync(this.sql, this.options.channelId, request.operationId, "eventIndex" in afterLookup ? afterLookup.eventIndex : 0,
+          completedAt, request.grantedBy?.userId ?? null, "temp_vips.granted", {
+            userId: request.person.userId, login: request.person.login, expiresAt: updated?.expires_at ?? null, source: request.source,
+          });
+        settleTwitchOperationSync(this.sql, request.operationId, granted, completedAt);
         saveOperationSync(this.sql, request.operationId, payloadJson, granted, completedAt);
         return granted;
       }
       if (add.ambiguous === true) {
         this.sql.exec(
-          `UPDATE temp_vips SET status = 'grant_unknown', pending_op = 'grant', pending_since = ?,
+            `UPDATE temp_vips SET status = 'grant_unknown', pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
              grant_recovery_at = ?, grant_recovery_attempts = 0, revision = revision + 1
-           WHERE user_id = ? AND status = 'grant_pending'`,
-          completedAt,
+           WHERE user_id = ? AND grant_generation = ? AND lease_id = ?`,
           utc(parseTime(completedAt) + GRANT_RECOVERY_DELAYS_MS[0]),
           request.person.userId,
+          row.grant_generation,
+          addLease.leaseId,
         );
-        const unknown: ModuleTempVipResult = { status: "grant_unknown", reason: add.reason };
-        saveOperationSync(this.sql, request.operationId, payloadJson, unknown, completedAt);
-        return unknown;
+        return { status: "grant_unknown", reason: add.reason };
       }
-      this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND status = 'grant_pending'", request.person.userId);
-      const failure: ModuleTempVipResult = { status: "rejected", reason: add.reason };
-      saveOperationSync(this.sql, request.operationId, payloadJson, failure, completedAt);
-      return failure;
+      const rejected: ModuleTempVipResult = { status: "rejected", reason: add.reason };
+      settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, rejected, completedAt);
+      this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", row.user_id, row.grant_generation, addLease.leaseId);
+      settleTwitchOperationSync(this.sql, request.operationId, rejected, completedAt);
+      saveOperationSync(this.sql, request.operationId, payloadJson, rejected, completedAt);
+      return rejected;
     });
     await this.rearm(completedAt);
     return result;
@@ -585,53 +827,67 @@ export class TempVipStore {
     });
     const initial = this.transaction(() => {
       const cached = cachedOperationSync(this.sql, request.operationId, payloadJson, now);
-      if (cached !== null) return cached;
+      if (cached !== null) return { result: cached, lease: null as TempVipLease | null };
       let row = rowFor(this.sql, request.person.userId);
-      if (row === null) return { status: "not_managed" };
-      const orphanedRemove = row.pending_op === "remove" && row.pending_since !== null &&
-        parseTime(now) - parseTime(row.pending_since) >= TEMP_VIP_PENDING_LOCK_MS;
-      if (lockBusyOrClearSync(this.sql, row, now)) return { status: "busy" };
+      if (row === null) return { result: { status: "not_managed" }, lease: null };
+      const orphanedRemove = row.pending_op === "remove" && row.lease_deadline !== null && Date.parse(now) >= row.lease_deadline;
+      if (lockBusyOrClearSync(this.sql, row, now)) return { result: { status: "busy" }, lease: null };
       row = rowFor(this.sql, request.person.userId);
-      if (row === null) return { status: "not_managed" };
-      if (row.status !== "active") return { status: "busy" };
+      if (row === null) return { result: { status: "not_managed" }, lease: null };
+      if (row.status !== "active") return { result: { status: "busy" }, lease: null };
       if (row.removal_failed_at === null && !orphanedRemove) {
-        return this.extendRowSync(row, request.durationMs, request.maximumRemainingMs, now, request.operationId, payloadJson, { person: request.person, actorUserId: null });
+        return { result: this.extendRowSync(row, request.durationMs, request.maximumRemainingMs, now, request.operationId, payloadJson, { person: request.person, actorUserId: request.grantedBy?.userId ?? null }), lease: null };
       }
-      this.sql.exec("UPDATE temp_vips SET pending_op = 'grant', pending_since = ?, revision = revision + 1 WHERE user_id = ?", now, row.user_id);
-      return null;
+      reserveOperationSync(this.sql, request.operationId, payloadJson, now);
+      const lease = reserveTwitchOperationSync(this.sql, {
+        requestId: request.operationId,
+        kind: "grant_check",
+        userId: row.user_id,
+        generation: row.grant_generation,
+        now,
+        payloadJson,
+      });
+      claimRowForOperationSync(this.sql, lease, "grant");
+      return { result: null, lease };
     });
-    if (initial !== null) {
-      if (initial.status !== "busy") this.transaction(() => { saveOperationSync(this.sql, request.operationId, payloadJson, initial, now); });
+    if (initial.lease === null) {
+      if (initial.result !== null && initial.result.status !== "busy" && cachedOperationSync(this.sql, request.operationId, payloadJson, now) === null) {
+        this.transaction(() => { saveOperationSync(this.sql, request.operationId, payloadJson, initial.result, now); });
+      }
       await this.rearm(now);
-      return initial;
+      return initial.result ?? { status: "busy" };
     }
-    await this.rearm(this.now());
+    await this.rearm(initial.lease.startedAt);
     const lookup = await this.safeGet(request.person.userId);
     const completedAt = this.now();
-    const result = this.transaction(() => {
+    const check = this.transaction(() => {
+      const current = currentLeaseRowSync(this.sql, initial.lease as TempVipLease);
+      settleTwitchOperationSync(this.sql, (initial.lease as TempVipLease).operationId, lookup, completedAt);
+      if (current === null) return { result: { status: "busy" } as ModuleTempVipResult, addLease: null as TempVipLease | null };
       const row = rowFor(this.sql, request.person.userId);
-      if (row === null) return { status: "not_managed" };
+      if (row === null) return { result: { status: "not_managed" } as ModuleTempVipResult, addLease: null };
       if (!lookup.ok) {
-        this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, revision = revision + 1 WHERE user_id = ?", row.user_id);
+        this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL, revision = revision + 1 WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", row.user_id, row.grant_generation, (initial.lease as TempVipLease).leaseId);
         const unavailable = { status: "twitch_unavailable", reason: lookup.reason };
         saveOperationSync(this.sql, request.operationId, payloadJson, unavailable, completedAt);
-        return unavailable;
+        return { result: unavailable, addLease: null };
       }
       if (lookup.isVip) {
         const extended = this.extendRowSync(row, request.durationMs, request.maximumRemainingMs, completedAt, request.operationId, payloadJson, { person: request.person, actorUserId: request.grantedBy?.userId ?? null }, true);
-        return extended;
+        return { result: extended, addLease: null };
       }
       if (request.durationMs > request.maximumRemainingMs) {
-        this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, revision = revision + 1 WHERE user_id = ?", row.user_id);
+        this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL, revision = revision + 1 WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", row.user_id, row.grant_generation, (initial.lease as TempVipLease).leaseId);
         const maximumExceeded = { status: "maximum_exceeded", allowedDurationMs: request.maximumRemainingMs };
         saveOperationSync(this.sql, request.operationId, payloadJson, maximumExceeded, completedAt);
-        return maximumExceeded;
+        return { result: maximumExceeded, addLease: null };
       }
       const reason: TempVipEndReason = row.end_reason ?? "expired";
-      this.sql.exec("DELETE FROM temp_vips WHERE user_id = ?", row.user_id);
+      settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, { status: "removed" }, completedAt, request.operationId);
+      this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ?", row.user_id, row.grant_generation);
       enqueueEventSync(this.sql, this.options.channelId, request.operationId, 0, completedAt, null,
         "temp_vips.ended", { userId: row.user_id, login: row.user_login, reason });
-      insertGrantPendingSync(
+      const generation = insertGrantPendingSync(
         this.sql,
         request.operationId,
         1,
@@ -643,46 +899,56 @@ export class TempVipStore {
         completedAt,
         utc(parseTime(completedAt) + request.durationMs),
       );
-      reserveOperationSync(this.sql, request.operationId, payloadJson, completedAt);
-      return { status: "regrant_pending" };
-    });
-    if (result.status === "regrant_pending") {
-      this.transaction(() => {
-        this.sql.exec("UPDATE temp_vips SET grant_phase = 'adding', revision = revision + 1 WHERE user_id = ? AND status = 'grant_pending'", request.person.userId);
+      const addLease = reserveTwitchOperationSync(this.sql, {
+        requestId: request.operationId,
+        kind: "grant_add",
+        userId: request.person.userId,
+        generation,
+        now: completedAt,
+        payloadJson,
       });
-      await this.rearm(this.now());
+      claimRowForOperationSync(this.sql, addLease, "grant");
+      updateRootOperationLeaseSync(this.sql, request.operationId, addLease);
+      return { result: { status: "regrant_pending" }, addLease };
+    });
+    if (check.addLease !== null) {
+      const addLease = check.addLease;
+      await this.rearm(addLease.startedAt);
       const add = await this.safeAdd(request.person.userId);
       const settledAt = this.now();
       const settled = this.transaction(() => {
+        const current = currentLeaseRowSync(this.sql, addLease);
+        settleTwitchOperationSync(this.sql, addLease.operationId, add, settledAt);
+        if (current === null) return { status: "busy" };
+        const row = rowFor(this.sql, request.person.userId);
+        if (row === null) return { status: "not_managed" };
         if (add.ok) {
           this.sql.exec(
-            `UPDATE temp_vips SET status = 'active', pending_op = NULL, pending_since = NULL,
-               user_login = ?, user_display_name = ?, revision = revision + 1 WHERE user_id = ? AND status = 'grant_pending'`,
-            request.person.login,
-            request.person.displayName,
-            request.person.userId,
+            `UPDATE temp_vips SET status = 'active', pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
+               grant_recovery_at = NULL, grant_recovery_attempts = 0, user_login = ?, user_display_name = ?, revision = revision + 1
+             WHERE user_id = ? AND grant_generation = ? AND lease_id = ?`,
+            request.person.login, request.person.displayName, request.person.userId, row.grant_generation, addLease.leaseId,
           );
-          const row = rowFor(this.sql, request.person.userId);
-          const granted: ModuleTempVipResult = { status: "granted", ...(row === null ? {} : { row: publicRow(row) }) };
+          const active = rowFor(this.sql, request.person.userId);
+          const granted: ModuleTempVipResult = { status: "granted", ...(active === null ? {} : { row: publicRow(active) }) };
           enqueueEventSync(this.sql, this.options.channelId, request.operationId, 1, settledAt, request.grantedBy?.userId ?? null,
-            "temp_vips.granted", { userId: request.person.userId, login: request.person.login, expiresAt: row?.expires_at ?? null, source: request.source ?? "dashboard" });
+            "temp_vips.granted", { userId: request.person.userId, login: request.person.login, expiresAt: active?.expires_at ?? null, source: request.source ?? "dashboard" });
+          settleTwitchOperationSync(this.sql, request.operationId, granted, settledAt);
           saveOperationSync(this.sql, request.operationId, payloadJson, granted, settledAt);
           return granted;
         }
         if (add.ambiguous === true) {
           this.sql.exec(
-            `UPDATE temp_vips SET status = 'grant_unknown', pending_op = 'grant', pending_since = ?,
-               grant_recovery_at = ?, grant_recovery_attempts = 0, revision = revision + 1 WHERE user_id = ?`,
-            settledAt,
-            utc(parseTime(settledAt) + GRANT_RECOVERY_DELAYS_MS[0]),
-            request.person.userId,
+            `UPDATE temp_vips SET status = 'grant_unknown', pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
+               grant_recovery_at = ?, grant_recovery_attempts = 0, revision = revision + 1 WHERE user_id = ? AND grant_generation = ? AND lease_id = ?`,
+            utc(parseTime(settledAt) + GRANT_RECOVERY_DELAYS_MS[0]), request.person.userId, row.grant_generation, addLease.leaseId,
           );
-          const unknown = { status: "grant_unknown", reason: add.reason };
-          saveOperationSync(this.sql, request.operationId, payloadJson, unknown, settledAt);
-          return unknown;
+          return { status: "grant_unknown", reason: add.reason };
         }
-        this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND status = 'grant_pending'", request.person.userId);
         const rejected = { status: "rejected", reason: add.reason };
+        settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, rejected, settledAt);
+        this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", row.user_id, row.grant_generation, addLease.leaseId);
+        settleTwitchOperationSync(this.sql, request.operationId, rejected, settledAt);
         saveOperationSync(this.sql, request.operationId, payloadJson, rejected, settledAt);
         return rejected;
       });
@@ -690,7 +956,7 @@ export class TempVipStore {
       return settled;
     }
     await this.rearm(completedAt);
-    return result;
+    return check.result;
   }
 
   public async importExisting(request: ModuleTempVipImportRequest): Promise<ModuleTempVipResult> {
@@ -703,52 +969,77 @@ export class TempVipStore {
     });
     const initial = this.transaction(() => {
       const cached = cachedOperationSync(this.sql, request.operationId, payloadJson, now);
-      if (cached !== null) return { done: cached };
+      if (cached !== null) return { done: cached, lease: null as TempVipLease | null };
       const row = rowFor(this.sql, request.person.userId);
       if (row !== null) {
-        if (lockBusyOrClearSync(this.sql, row, now)) return { done: { status: "busy" } };
-        return { done: { status: "already_managed" } };
+        if (lockBusyOrClearSync(this.sql, row, now)) return { done: { status: "busy" }, lease: null };
+        return { done: { status: "already_managed" }, lease: null };
       }
       if (request.durationMs > request.maximumRemainingMs) {
         const result = { status: "maximum_exceeded", allowedDurationMs: request.maximumRemainingMs };
         saveOperationSync(this.sql, request.operationId, payloadJson, result, now);
-        return { done: result };
+        return { done: result, lease: null };
       }
-      insertGrantPendingSync(this.sql, request.operationId, 0, request.person, request.grantedBy, "import", now, utc(parseTime(now) + request.durationMs));
+      const generation = insertGrantPendingSync(this.sql, request.operationId, 0, request.person, request.grantedBy, "import", now, utc(parseTime(now) + request.durationMs));
       reserveOperationSync(this.sql, request.operationId, payloadJson, now);
-      return { done: null };
+      const lease = reserveTwitchOperationSync(this.sql, {
+        operationId: request.operationId,
+        requestId: request.operationId,
+        kind: "import",
+        userId: request.person.userId,
+        generation,
+        now,
+        payloadJson,
+      });
+      claimRowForOperationSync(this.sql, lease, "grant");
+      return { done: null, lease };
     });
     if (initial.done !== null) {
       if (initial.done.status !== "busy") this.transaction(() => { saveOperationSync(this.sql, request.operationId, payloadJson, initial.done, now); });
       await this.rearm(now);
       return initial.done;
     }
-    await this.rearm(this.now());
+    const lease = initial.lease;
+    await this.rearm(lease.startedAt);
     const lookup = await this.safeGet(request.person.userId);
     const completedAt = this.now();
     const result = this.transaction(() => {
+      const current = currentLeaseRowSync(this.sql, lease);
+      if (current === null) {
+        settleTwitchOperationSync(this.sql, lease.operationId, lookup, completedAt);
+        return { status: "busy" };
+      }
+      const rowAtStart = rowFor(this.sql, request.person.userId);
+      if (rowAtStart === null) return { status: "not_managed" };
       if (!lookup.ok) {
-        this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND status = 'grant_pending'", request.person.userId);
         const unavailable = { status: "twitch_unavailable", reason: lookup.reason };
+        settleUnfinishedRowOperationsSync(this.sql, request.person.userId, lease.generation, unavailable, completedAt);
+        this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", request.person.userId, lease.generation, lease.leaseId);
+        settleTwitchOperationSync(this.sql, lease.operationId, unavailable, completedAt);
         saveOperationSync(this.sql, request.operationId, payloadJson, unavailable, completedAt);
         return unavailable;
       }
       if (!lookup.isVip) {
-        this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND status = 'grant_pending'", request.person.userId);
         const noLongerVip = { status: "not_vip" };
+        settleUnfinishedRowOperationsSync(this.sql, request.person.userId, lease.generation, noLongerVip, completedAt);
+        this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", request.person.userId, lease.generation, lease.leaseId);
+        settleTwitchOperationSync(this.sql, lease.operationId, noLongerVip, completedAt);
         saveOperationSync(this.sql, request.operationId, payloadJson, noLongerVip, completedAt);
         return noLongerVip;
       }
       this.sql.exec(
-        `UPDATE temp_vips SET status = 'active', pending_op = NULL, pending_since = NULL,
+        `UPDATE temp_vips SET status = 'active', pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
            user_login = ?, user_display_name = ?, revision = revision + 1
-         WHERE user_id = ? AND status = 'grant_pending'`,
+         WHERE user_id = ? AND grant_generation = ? AND lease_id = ?`,
         request.person.login,
         request.person.displayName,
         request.person.userId,
+        lease.generation,
+        lease.leaseId,
       );
       const row = rowFor(this.sql, request.person.userId);
       const imported: ModuleTempVipResult = { status: "imported", ...(row === null ? {} : { row: publicRow(row) }) };
+      settleTwitchOperationSync(this.sql, lease.operationId, imported, completedAt);
       enqueueEventSync(this.sql, this.options.channelId, request.operationId, 0, completedAt, request.grantedBy?.userId ?? null,
         "temp_vips.imported", { userId: request.person.userId, login: request.person.login, expiresAt: row?.expires_at ?? null });
       saveOperationSync(this.sql, request.operationId, payloadJson, imported, completedAt);
@@ -764,56 +1055,65 @@ export class TempVipStore {
     const payloadJson = JSON.stringify({ action: "end", userId: request.userId });
     const start = this.transaction(() => {
       const cached = cachedOperationSync(this.sql, request.operationId, payloadJson, now);
-      if (cached !== null) return { result: cached, row: null as TempVipRowSql | null, retryAt: null as number | null };
+      if (cached !== null) return { result: cached, lease: null as TempVipLease | null };
       let row = rowFor(this.sql, request.userId);
       if (row === null) {
         const result = { status: "not_managed" };
         saveOperationSync(this.sql, request.operationId, payloadJson, result, now);
-        return { result, row: null, retryAt: null };
+        return { result, lease: null };
       }
-      if (lockBusyOrClearSync(this.sql, row, now)) return { result: { status: "busy" }, row: null, retryAt: null };
+      if (lockBusyOrClearSync(this.sql, row, now)) return { result: { status: "busy" }, lease: null };
       row = rowFor(this.sql, request.userId);
-      if (row === null || row.status !== "active") return { result: { status: "busy" }, row: null, retryAt: null };
+      if (row === null || row.status !== "active") return { result: { status: "busy" }, lease: null };
       const reservedAt = this.now();
       const retryAt = reserveRemovalSlotSync(this.sql, reservedAt);
       if (retryAt !== null) {
         this.sql.exec(
           `UPDATE temp_vips SET end_reason = 'ended_early', expires_at = ?, removal_retry_at = ?, pending_op = NULL,
-             pending_since = NULL, revision = revision + 1 WHERE user_id = ?`,
+             pending_since = NULL, lease_id = NULL, lease_deadline = NULL, revision = revision + 1 WHERE user_id = ? AND grant_generation = ?`,
           reservedAt,
           utc(retryAt),
           row.user_id,
+          row.grant_generation,
         );
         const result = { status: "queued", retryAt: utc(retryAt) };
         saveOperationSync(this.sql, request.operationId, payloadJson, result, reservedAt);
-        return { result, row: null, retryAt };
+        return { result, lease: null };
       }
       this.sql.exec(
-        `UPDATE temp_vips SET end_reason = 'ended_early', pending_op = 'remove', pending_since = ?,
-           eventsub_verification = 0, removal_retry_at = NULL,
-           revision = revision + 1 WHERE user_id = ?`,
-        reservedAt,
+        `UPDATE temp_vips SET end_reason = 'ended_early', removal_retry_at = NULL, revision = revision + 1
+         WHERE user_id = ? AND grant_generation = ?`,
         row.user_id,
+        row.grant_generation,
       );
-      return { result: null, row: { ...row, end_reason: "ended_early", pending_op: "remove", pending_since: reservedAt }, retryAt: null };
+      reserveOperationSync(this.sql, request.operationId, payloadJson, reservedAt);
+      const lease = reserveTwitchOperationSync(this.sql, {
+        operationId: request.operationId,
+        requestId: request.operationId,
+        kind: "remove_manual",
+        userId: request.userId,
+        generation: row.grant_generation,
+        now: reservedAt,
+        payloadJson,
+      });
+      claimRowForOperationSync(this.sql, lease, "remove");
+      return { result: null, lease };
     });
-    if (start.result !== null) {
+    if (start.lease === null) {
       await this.rearm(this.now());
       return start.result;
     }
+    await this.rearm(start.lease.startedAt);
     const removed = await this.safeRemove(request.userId);
     const completedAt = this.now();
-    const started = start.row;
-    const result = this.transaction(() => this.finishRemovalSync(
-      request.userId,
-      started.grant_generation,
-      started.pending_since,
-      request.operationId,
-      removed,
-      completedAt,
-      null,
-      payloadJson,
-    ));
+    const result = this.transaction(() => {
+      const current = currentLeaseRowSync(this.sql, start.lease as TempVipLease);
+      if (current === null) {
+        settleTwitchOperationSync(this.sql, (start.lease as TempVipLease).operationId, removed, completedAt);
+        return { status: "busy" };
+      }
+      return this.finishRemovalSync(start.lease as TempVipLease, removed, completedAt, null, payloadJson);
+    });
     await this.rearm(completedAt);
     return result;
   }
@@ -834,8 +1134,9 @@ export class TempVipStore {
       if (lockBusyOrClearSync(this.sql, row, now)) return { status: "busy" };
       row = rowFor(this.sql, request.userId);
       if (row === null) return { status: "not_managed" };
-      this.sql.exec("DELETE FROM temp_vips WHERE user_id = ?", request.userId);
       const released = { status: "released" };
+      settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, released, now);
+      this.sql.exec("DELETE FROM temp_vips WHERE user_id = ?", request.userId);
       enqueueEventSync(this.sql, this.options.channelId, request.operationId, 0, now, null, "temp_vips.released", { userId: request.userId, login: row.user_login });
       saveOperationSync(this.sql, request.operationId, payloadJson, released, now);
       return released;
@@ -853,49 +1154,68 @@ export class TempVipStore {
     const eventAt = parseTime(event.eventSubTimestamp);
     const now = this.now();
     const initial = this.transaction(() => {
-      this.sql.exec("DELETE FROM temp_vip_operations WHERE expires_at <= ?", now);
+      this.sql.exec("DELETE FROM temp_vip_requests WHERE expires_at <= ? AND result_json IS NOT NULL", now);
       const row = rowFor(this.sql, event.userId);
       const stale = tombstoneMatchSync(this.sql, event.userId, eventAt, now, row?.grant_generation ?? null);
-      if (stale || (row !== null && eventAt < parseTime(row.granted_at))) return { result: { status: "ignored_stale_echo" } };
-      if (row === null) return { result: { status: "ignored_unmanaged" } };
-      if (row.pending_op === "remove" && row.pending_since !== null && parseTime(now) - parseTime(row.pending_since) < TEMP_VIP_PENDING_LOCK_MS) {
-        return { result: { status: row.eventsub_verification === 1 ? "busy" : "ignored_own_echo" } };
+      if (stale || (row !== null && eventAt < parseTime(row.granted_at))) return { result: { status: "ignored_stale_echo" }, lease: null as TempVipLease | null };
+      if (row === null) return { result: { status: "ignored_unmanaged" }, lease: null };
+      if (row.pending_op === "remove" && row.lease_deadline !== null && Date.parse(now) < row.lease_deadline) {
+        return { result: { status: row.eventsub_verification === 1 ? "busy" : "ignored_own_echo" }, lease: null };
       }
-      if (lockBusyOrClearSync(this.sql, row, now)) return { result: { status: "busy" } };
-      this.sql.exec("UPDATE temp_vips SET pending_op = 'remove', pending_since = ?, eventsub_verification = 1, revision = revision + 1 WHERE user_id = ?", now, row.user_id);
-      return { result: null, generation: row.grant_generation, claimedAt: now };
+      if (lockBusyOrClearSync(this.sql, row, now)) return { result: { status: "busy" }, lease: null };
+      const payloadJson = JSON.stringify({ action: "eventsub_verification", userId: event.userId, eventSubTimestamp: event.eventSubTimestamp });
+      const lease = reserveTwitchOperationSync(this.sql, {
+        operationId: crypto.randomUUID(),
+        requestId: event.triggerId,
+        kind: "eventsub_verification",
+        userId: row.user_id,
+        generation: row.grant_generation,
+        now,
+        payloadJson,
+      });
+      claimRowForOperationSync(this.sql, lease, "remove", true);
+      return { result: null, lease };
     });
     if (initial.result !== null) {
       await this.rearm(now);
       return initial.result;
     }
+    const lease = initial.lease;
+    await this.rearm(lease.startedAt);
     const lookup = await this.safeGet(event.userId);
     const completedAt = this.now();
-    if (!lookup.ok) {
-      this.transaction(() => this.sql.exec(
-        `UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, eventsub_verification = 0, revision = revision + 1
-         WHERE user_id = ? AND grant_generation = ? AND pending_since = ? AND eventsub_verification = 1`,
-        event.userId,
-        initial.generation,
-        initial.claimedAt,
-      ));
-      await this.rearm(completedAt);
-      throw new Error(`temp_vip_event_check_failed:${lookup.reason}`);
-    }
     const result = this.transaction(() => {
-      const row = rowFor(this.sql, event.userId);
-      if (row === null || row.grant_generation !== initial.generation || row.pending_op !== "remove" ||
-          row.pending_since !== initial.claimedAt || row.eventsub_verification !== 1) return { status: "busy" };
+      const row = currentLeaseRowSync(this.sql, lease);
+      if (row === null) {
+        settleTwitchOperationSync(this.sql, lease.operationId, lookup, completedAt);
+        return { status: "busy" };
+      }
+      if (!lookup.ok) {
+        this.sql.exec(
+          `UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
+             eventsub_verification = 0, revision = revision + 1
+           WHERE user_id = ? AND grant_generation = ? AND lease_id = ?`,
+          event.userId,
+          lease.generation,
+          lease.leaseId,
+        );
+        settleTwitchOperationSync(this.sql, lease.operationId, lookup, completedAt);
+        return { status: `lookup_failed:${lookup.reason}` };
+      }
       if (lookup.isVip) {
-        this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, eventsub_verification = 0, revision = revision + 1 WHERE user_id = ?", event.userId);
+        this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL, eventsub_verification = 0, revision = revision + 1 WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", event.userId, lease.generation, lease.leaseId);
+        settleTwitchOperationSync(this.sql, lease.operationId, { status: "ignored_stale_event" }, completedAt);
         return { status: "ignored_stale_event" };
       }
       const reason: TempVipEndReason = "removed_on_twitch";
-      this.sql.exec("DELETE FROM temp_vips WHERE user_id = ?", event.userId);
+      const removed = { status: "removed_on_twitch" };
+      settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, removed, completedAt);
+      this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", event.userId, lease.generation, lease.leaseId);
       enqueueEventSync(this.sql, this.options.channelId, event.triggerId, 0, completedAt, null, "temp_vips.ended", { userId: event.userId, login: row.user_login, reason });
-      return { status: "removed_on_twitch" };
+      return removed;
     });
     await this.rearm(completedAt);
+    if (result.status.startsWith("lookup_failed:")) throw new Error(`temp_vip_event_check_failed:${result.status.slice("lookup_failed:".length)}`);
     return result;
   }
 
@@ -904,110 +1224,232 @@ export class TempVipStore {
     const currentTime = (): string => utc(Math.max(parseTime(now), parseTime(this.now())));
     const startedAt = currentTime();
     this.transaction(() => {
-      this.sql.exec("DELETE FROM temp_vip_operations WHERE expires_at <= ?", startedAt);
+      this.sql.exec("DELETE FROM temp_vip_requests WHERE expires_at <= ? AND result_json IS NOT NULL", startedAt);
+      this.sql.exec("DELETE FROM temp_vip_operations WHERE expires_at <= ? AND result_json IS NOT NULL", startedAt);
       this.sql.exec("DELETE FROM temp_vip_tombstones WHERE retain_until <= ?", startedAt);
     });
     let recoveredGrants = 0;
-    const recoverable = this.sql.exec<TempVipRowSql>(
-      `SELECT * FROM temp_vips WHERE status = 'grant_unknown'
-        OR (status = 'grant_pending' AND pending_since <= ?)
-      ORDER BY COALESCE(grant_recovery_at, pending_since), user_id`,
-      utc(parseTime(startedAt) - TEMP_VIP_PENDING_LOCK_MS),
-    ).toArray().filter((row) => row.status === "grant_pending" || row.grant_recovery_at === null || row.grant_recovery_at <= startedAt);
-    for (const snapshot of recoverable) {
-      const claimId = crypto.randomUUID();
+    let removed = 0;
+    const recoveryCandidates = this.sql.exec<TempVipRowSql>(
+      `SELECT * FROM temp_vips
+       WHERE status = 'grant_pending' OR status = 'grant_unknown'
+       ORDER BY COALESCE(grant_recovery_at, pending_since, expires_at), user_id`,
+    ).toArray();
+    for (const snapshot of recoveryCandidates) {
       const claimedAt = currentTime();
-      const claimed = this.transaction(() => {
+      const claim = this.transaction(() => {
         const row = rowFor(this.sql, snapshot.user_id);
         if (row === null || row.grant_generation !== snapshot.grant_generation) return null;
-        if (row.status === "grant_pending" &&
-            (row.pending_since === null || parseTime(claimedAt) - parseTime(row.pending_since) < TEMP_VIP_PENDING_LOCK_MS)) return null;
+        const hasLease = row.pending_op !== null;
+        const expiredLease = hasLease
+          ? row.lease_deadline === null
+            ? row.pending_since === null || parseTime(claimedAt) - parseTime(row.pending_since) >= TEMP_VIP_LEASE_MS
+            : Date.parse(claimedAt) >= row.lease_deadline
+          : row.status === "grant_pending" && row.pending_since === null;
+        if (hasLease && !expiredLease) return null;
+        if (row.status === "grant_pending" && !expiredLease) return null;
+        if (row.status === "grant_unknown" && !hasLease && row.grant_recovery_at !== null && row.grant_recovery_at > claimedAt) return null;
         if (row.status === "grant_pending") {
-          this.sql.exec("UPDATE temp_vips SET status = 'grant_unknown', grant_recovery_at = ?, revision = revision + 1 WHERE user_id = ?",
-            claimedAt, row.user_id);
+          this.sql.exec("UPDATE temp_vips SET status = 'grant_unknown', grant_recovery_at = ?, revision = revision + 1 WHERE user_id = ? AND grant_generation = ?",
+            claimedAt, row.user_id, row.grant_generation);
         }
-        const current = rowFor(this.sql, snapshot.user_id);
-        if (current === null || current.status !== "grant_unknown") return null;
-        if (current.grant_recovery_at !== null && current.grant_recovery_at > claimedAt) return null;
-        if (current.recovery_claim !== null && current.pending_since !== null &&
-            parseTime(claimedAt) - parseTime(current.pending_since) < TEMP_VIP_PENDING_LOCK_MS) return null;
-        this.sql.exec(
-          `UPDATE temp_vips SET pending_op = 'grant', pending_since = ?, recovery_claim = ?, revision = revision + 1
-           WHERE user_id = ? AND grant_generation = ? AND status = 'grant_unknown'`,
-          claimedAt,
-          claimId,
-          current.user_id,
-          current.grant_generation,
-        );
-        return { generation: current.grant_generation, claimId, claimedAt };
+        const current = rowFor(this.sql, row.user_id);
+        if (current === null) return null;
+        const requestId = current.grant_operation_id || currentOperationForRowSync(this.sql, current)?.request_id || `recovery:${current.user_id}:${String(current.grant_generation)}`;
+        const kind: TempVipOperationKind = current.source === "import" ? "recovery_import" : "recovery_grant";
+        const payloadJson = JSON.stringify({ action: kind, userId: current.user_id, generation: current.grant_generation, requestId });
+        const lease = reserveTwitchOperationSync(this.sql, {
+          requestId,
+          kind,
+          userId: current.user_id,
+          generation: current.grant_generation,
+          now: claimedAt,
+          payloadJson,
+        });
+        claimRowForOperationSync(this.sql, lease, "grant");
+        updateRootOperationLeaseSync(this.sql, requestId, lease);
+        return { lease, requestId };
       });
-      if (claimed === null) continue;
-      await this.rearm(claimed.claimedAt);
+      if (claim === null) continue;
+      await this.rearm(claim.lease.startedAt);
       const lookup = await this.safeGet(snapshot.user_id);
       const completedAt = currentTime();
       const applied = this.transaction(() => {
-        const row = rowFor(this.sql, snapshot.user_id);
-        if (row === null || row.status !== "grant_unknown" || row.grant_generation !== claimed.generation ||
-            row.recovery_claim !== claimed.claimId || row.pending_since !== claimed.claimedAt) return false;
+        const row = currentLeaseRowSync(this.sql, claim.lease);
+        settleTwitchOperationSync(this.sql, claim.lease.operationId, lookup, completedAt);
+        if (row === null) return false;
         if (!lookup.ok) {
           const attempts = row.grant_recovery_attempts + 1;
           this.sql.exec(
-            `UPDATE temp_vips SET pending_op = 'grant', pending_since = ?, grant_recovery_attempts = ?,
-               grant_recovery_at = ?, recovery_claim = NULL, revision = revision + 1
-             WHERE user_id = ? AND grant_generation = ? AND recovery_claim = ?`,
-            completedAt,
+            `UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
+               grant_recovery_attempts = ?, grant_recovery_at = ?, revision = revision + 1
+             WHERE user_id = ? AND grant_generation = ? AND lease_id = ?`,
             attempts,
             utc(parseTime(completedAt) + grantRecoveryDelay(attempts)),
             row.user_id,
-            claimed.generation,
-            claimed.claimId,
+            row.grant_generation,
+            claim.lease.leaseId,
           );
           return true;
         }
         if (lookup.isVip && (row.source === "import" || row.grant_phase === "adding")) {
           this.sql.exec(
-            `UPDATE temp_vips SET status = 'active', pending_op = NULL, pending_since = NULL,
-               grant_recovery_at = NULL, grant_recovery_attempts = 0, recovery_claim = NULL,
-               revision = revision + 1 WHERE user_id = ? AND grant_generation = ? AND recovery_claim = ?`,
+            `UPDATE temp_vips SET status = 'active', pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
+               grant_recovery_at = NULL, grant_recovery_attempts = 0, revision = revision + 1
+             WHERE user_id = ? AND grant_generation = ? AND lease_id = ?`,
             row.user_id,
-            claimed.generation,
-            claimed.claimId,
+            row.grant_generation,
+            claim.lease.leaseId,
           );
           const recovered = rowFor(this.sql, row.user_id);
-          enqueueEventSync(
-            this.sql,
-            this.options.channelId,
-            row.grant_operation_id,
-            row.grant_event_index,
-            completedAt,
-            row.granted_by_user_id,
-            row.source === "import" ? "temp_vips.imported" : "temp_vips.granted",
-            { userId: row.user_id, login: row.user_login, expiresAt: row.expires_at, source: row.source },
-          );
-          settleReservedOperationSync(this.sql, row.grant_operation_id, {
+          const result: ModuleTempVipResult = {
             status: row.source === "import" ? "imported" : "granted",
             ...(recovered === null ? {} : { row: publicRow(recovered) }),
-          }, completedAt);
+          };
+          const originalPayload = this.sql.exec<{ payload_json: string }>(
+            "SELECT payload_json FROM temp_vip_requests WHERE operation_id = ?", claim.requestId,
+          ).toArray()[0]?.payload_json;
+          if (originalPayload !== undefined) saveOperationSync(this.sql, claim.requestId, originalPayload, result, completedAt);
+          settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, result, completedAt);
+          enqueueEventSync(this.sql, this.options.channelId, claim.requestId, row.grant_event_index, completedAt, row.granted_by_user_id,
+            row.source === "import" ? "temp_vips.imported" : "temp_vips.granted",
+            { userId: row.user_id, login: row.user_login, expiresAt: row.expires_at, source: row.source });
           return true;
         }
-        this.sql.exec(
-          "DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ? AND recovery_claim = ?",
-          row.user_id,
-          claimed.generation,
-          claimed.claimId,
-        );
         let result: ModuleTempVipResult;
         if (row.source === "import") result = { status: "not_vip" };
         else if (row.grant_phase === "checking" && lookup.isVip) result = { status: "already_vip" };
         else if (row.grant_phase === "checking") result = { status: "twitch_unavailable", reason: "network" };
         else result = { status: "rejected", reason: "network" };
-        settleReservedOperationSync(this.sql, row.grant_operation_id, result, completedAt);
+        settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, result, completedAt);
+        this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", row.user_id, row.grant_generation, claim.lease.leaseId);
+        const originalPayload = this.sql.exec<{ payload_json: string }>(
+          "SELECT payload_json FROM temp_vip_requests WHERE operation_id = ?", claim.requestId,
+        ).toArray()[0]?.payload_json;
+        if (originalPayload !== undefined) saveOperationSync(this.sql, claim.requestId, originalPayload, result, completedAt);
         return true;
       });
       if (lookup.ok && applied) recoveredGrants += 1;
     }
 
-    let removed = 0;
+    const removalCandidates = this.sql.exec<TempVipRowSql>(
+      `SELECT * FROM temp_vips WHERE pending_op = 'remove' ORDER BY pending_since, user_id`,
+    ).toArray();
+    for (const snapshot of removalCandidates) {
+      const claimedAt = currentTime();
+      const claim = this.transaction(() => {
+        const row = rowFor(this.sql, snapshot.user_id);
+        if (row === null || row.grant_generation !== snapshot.grant_generation || row.pending_op !== "remove") return null;
+        const expiredLease = row.lease_deadline === null
+          ? row.pending_since === null || parseTime(claimedAt) - parseTime(row.pending_since) >= TEMP_VIP_LEASE_MS
+          : Date.parse(claimedAt) >= row.lease_deadline;
+        if (!expiredLease) return null;
+        const currentOperation = currentOperationForRowSync(this.sql, row);
+        const requestId = currentOperation?.request_id ?? currentOperation?.operation_id ?? `recovery:${row.user_id}:${String(row.grant_generation)}`;
+        const original = originalOperationForRequestSync(this.sql, row.user_id, row.grant_generation, requestId) ?? currentOperation;
+        const isEventsubVerification = row.eventsub_verification === 1 || original?.kind === "eventsub_verification" || original?.kind === "recovery_eventsub";
+        const kind: TempVipOperationKind = isEventsubVerification ? "recovery_eventsub" : "recovery_removal";
+        const payloadJson = JSON.stringify({ action: kind, userId: row.user_id, generation: row.grant_generation, requestId });
+        const lease = reserveTwitchOperationSync(this.sql, {
+          requestId,
+          kind,
+          userId: row.user_id,
+          generation: row.grant_generation,
+          now: claimedAt,
+          payloadJson,
+        });
+        claimRowForOperationSync(this.sql, lease, "remove", isEventsubVerification);
+        if (original !== null) updateRootOperationLeaseSync(this.sql, original.operation_id, lease);
+        return {
+          lease: { ...lease, ...(original === null ? {} : { removalStartedAt: original.created_at }) },
+          requestId,
+          originalOperationId: original?.operation_id ?? null,
+          originalKind: original?.kind ?? "remove_expiry",
+        };
+      });
+      if (claim === null) continue;
+      await this.rearm(claim.lease.startedAt);
+      const lookup = await this.safeGet(snapshot.user_id);
+      const completedAt = currentTime();
+      const nextDelete = this.transaction(() => {
+        const row = currentLeaseRowSync(this.sql, claim.lease);
+        settleTwitchOperationSync(this.sql, claim.lease.operationId, lookup, completedAt);
+        if (row === null) return null;
+        if (claim.lease.kind === "recovery_eventsub") {
+          if (!lookup.ok) {
+            this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL, eventsub_verification = 0, revision = revision + 1 WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", row.user_id, row.grant_generation, claim.lease.leaseId);
+            if (claim.originalOperationId !== null) settleTwitchOperationSync(this.sql, claim.originalOperationId, { status: "verification_failed", reason: lookup.reason }, completedAt);
+            return null;
+          }
+          if (lookup.isVip) {
+            this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL, eventsub_verification = 0, revision = revision + 1 WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", row.user_id, row.grant_generation, claim.lease.leaseId);
+            if (claim.originalOperationId !== null) settleTwitchOperationSync(this.sql, claim.originalOperationId, { status: "ignored_stale_event" }, completedAt);
+            return null;
+          }
+          const removed = { status: "removed_on_twitch" };
+          settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, removed, completedAt);
+          this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", row.user_id, row.grant_generation, claim.lease.leaseId);
+          enqueueEventSync(this.sql, this.options.channelId, claim.requestId, 0, completedAt, null, "temp_vips.ended", {
+            userId: row.user_id, login: row.user_login, reason: "removed_on_twitch",
+          });
+          return null;
+        }
+        if (!lookup.ok) return { lease: claim.lease, failure: { ok: false as const, reason: lookup.reason } };
+        if (!lookup.isVip) return { lease: claim.lease, failure: { ok: true as const } };
+        const retryAt = reserveRemovalSlotSync(this.sql, completedAt);
+        if (retryAt !== null) {
+          const queued: ModuleTempVipResult = { status: "queued", retryAt: utc(retryAt) };
+          settleUnfinishedRowOperationsSync(this.sql, row.user_id, row.grant_generation, queued, completedAt);
+          this.sql.exec(
+            `UPDATE temp_vips SET expires_at = CASE WHEN end_reason = 'ended_early' THEN ? ELSE expires_at END,
+               removal_retry_at = ?, pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
+               eventsub_verification = 0, revision = revision + 1
+             WHERE user_id = ? AND grant_generation = ? AND lease_id = ?`,
+            completedAt, utc(retryAt), row.user_id, row.grant_generation, claim.lease.leaseId,
+          );
+          const payload = this.sql.exec<{ payload_json: string }>("SELECT payload_json FROM temp_vip_requests WHERE operation_id = ?", claim.requestId).toArray()[0]?.payload_json;
+          if (payload !== undefined) saveOperationSync(this.sql, claim.requestId, payload, queued, completedAt);
+          if (claim.originalOperationId !== null) settleTwitchOperationSync(this.sql, claim.originalOperationId, queued, completedAt);
+          return null;
+        }
+        const deleteKind: TempVipOperationKind = claim.originalKind === "remove_manual" ? "remove_manual" : "remove_expiry";
+        const payloadJson = JSON.stringify({ action: deleteKind, userId: row.user_id, generation: row.grant_generation, requestId: claim.requestId });
+        const lease = reserveTwitchOperationSync(this.sql, {
+          requestId: claim.requestId,
+          kind: deleteKind,
+          userId: row.user_id,
+          generation: row.grant_generation,
+          now: completedAt,
+          payloadJson,
+        });
+        claimRowForOperationSync(this.sql, lease, "remove");
+        if (claim.originalOperationId !== null) updateRootOperationLeaseSync(this.sql, claim.originalOperationId, lease);
+        return { lease, failure: null };
+      });
+      if (nextDelete === null) continue;
+      if (nextDelete.failure !== null) {
+        this.transaction(() => {
+          const current = currentLeaseRowSync(this.sql, nextDelete.lease);
+          if (current === null) return;
+          const result = this.finishRemovalSync(nextDelete.lease, nextDelete.failure, completedAt, null,
+            this.sql.exec<{ payload_json: string }>("SELECT payload_json FROM temp_vip_requests WHERE operation_id = ?", nextDelete.lease.requestId).toArray()[0]?.payload_json ?? "");
+          if (result.status === "ended") removed += 1;
+        });
+        continue;
+      }
+      await this.rearm(nextDelete.lease.startedAt);
+      const removal = await this.safeRemove(nextDelete.lease.userId);
+      const removedAt = currentTime();
+      const result = this.transaction(() => {
+        const current = currentLeaseRowSync(this.sql, nextDelete.lease);
+        settleTwitchOperationSync(this.sql, nextDelete.lease.operationId, removal, removedAt);
+        if (current === null) return { status: "busy" };
+        return this.finishRemovalSync(nextDelete.lease, removal, removedAt, null,
+          this.sql.exec<{ payload_json: string }>("SELECT payload_json FROM temp_vip_requests WHERE operation_id = ?", nextDelete.lease.requestId).toArray()[0]?.payload_json ?? "");
+      });
+      if (result.status === "ended") removed += 1;
+    }
+
     for (;;) {
       if (removed >= TEMP_VIP_REMOVALS_PER_WINDOW) break;
       const scanAt = currentTime();
@@ -1020,39 +1462,49 @@ export class TempVipStore {
       const claimedAt = currentTime();
       const claim = this.transaction(() => {
         const row = rowFor(this.sql, due.user_id);
-        if (row === null || row.status !== "active") return { row: null, retryAt: null };
-        const orphanedRemoval = row.pending_op === "remove" && row.pending_since !== null &&
-          parseTime(claimedAt) - parseTime(row.pending_since) >= TEMP_VIP_PENDING_LOCK_MS;
-        if (lockBusyOrClearSync(this.sql, row, claimedAt)) return { row: null, retryAt: null };
-        const current = rowFor(this.sql, due.user_id);
-        if (current === null || (!orphanedRemoval && !this.isDue(current, claimedAt))) return { row: null, retryAt: null };
+        if (row === null || row.status !== "active" || row.pending_op !== null) return { lease: null, retryAt: null };
+        if (!this.isDue(row, claimedAt)) return { lease: null, retryAt: null };
         const retryAt = reserveRemovalSlotSync(this.sql, claimedAt);
-        if (retryAt !== null) return { row: null, retryAt };
-        this.sql.exec(
-          `UPDATE temp_vips SET pending_op = 'remove', pending_since = ?, eventsub_verification = 0,
-             removal_retry_at = NULL, revision = revision + 1 WHERE user_id = ?`,
-          claimedAt,
-          row.user_id,
-        );
-        return { row: { ...current, pending_op: "remove", pending_since: claimedAt }, retryAt: null };
+        if (retryAt !== null) {
+          this.sql.exec(
+            `UPDATE temp_vips SET expires_at = CASE WHEN end_reason = 'ended_early' THEN ? ELSE expires_at END,
+               removal_retry_at = ?, pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
+               eventsub_verification = 0, revision = revision + 1 WHERE user_id = ? AND grant_generation = ?`,
+            claimedAt, utc(retryAt), row.user_id, row.grant_generation,
+          );
+          return { lease: null, retryAt };
+        }
+        const operationId = `expiry:${row.user_id}:${String(row.grant_generation)}:${crypto.randomUUID()}`;
+        const payloadJson = JSON.stringify({ action: "expiry", userId: row.user_id, generation: row.grant_generation });
+        const lease = reserveTwitchOperationSync(this.sql, {
+          operationId,
+          requestId: operationId,
+          kind: "remove_expiry",
+          userId: row.user_id,
+          generation: row.grant_generation,
+          now: claimedAt,
+          payloadJson,
+        });
+        claimRowForOperationSync(this.sql, lease, "remove");
+        this.sql.exec("UPDATE temp_vips SET removal_retry_at = NULL WHERE user_id = ? AND grant_generation = ?", row.user_id, row.grant_generation);
+        return { lease, retryAt: null };
       });
       if (claim.retryAt !== null) break;
-      const claimed = claim.row;
-      if (claimed === null) break;
-      const removal = await this.safeRemove(claimed.user_id);
+      const lease = claim.lease;
+      if (lease === null) break;
+      await this.rearm(lease.startedAt);
+      const removal = await this.safeRemove(lease.userId);
       const completedAt = currentTime();
-      const operationId = `expiry:${claimed.user_id}:${String(claimed.grant_generation)}:${claimed.pending_since}`;
-      this.transaction(() => this.finishRemovalSync(
-        claimed.user_id,
-        claimed.grant_generation,
-        claimed.pending_since,
-        operationId,
-        removal,
-        completedAt,
-        null,
-        JSON.stringify({ action: "expiry", userId: due.user_id, generation: due.grant_generation }),
-      ));
-      removed += 1;
+      const result = this.transaction(() => {
+        const current = currentLeaseRowSync(this.sql, lease);
+        if (current === null) {
+          settleTwitchOperationSync(this.sql, lease.operationId, removal, completedAt);
+          return { status: "busy" };
+        }
+        return this.finishRemovalSync(lease, removal, completedAt, null,
+          JSON.stringify({ action: "expiry", userId: lease.userId, generation: lease.generation }));
+      });
+      if (result.status === "ended") removed += 1;
     }
     await this.rearm(currentTime());
     return { removed, recoveredGrants };
@@ -1101,13 +1553,13 @@ export class TempVipStore {
       const currentRemaining = Math.max(0, expiresAtMs - parseTime(now));
       const result = { status: "maximum_exceeded", allowedDurationMs: Math.max(0, maximumRemainingMs - currentRemaining) };
       saveOperationSync(this.sql, operationId, payloadJson, result, now);
-      if (clearFailedRemoval) this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, revision = revision + 1 WHERE user_id = ?", row.user_id);
+      if (clearFailedRemoval) this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL, revision = revision + 1 WHERE user_id = ? AND grant_generation = ?", row.user_id, row.grant_generation);
       return result;
     }
     this.sql.exec(
       `UPDATE temp_vips SET expires_at = ?,
          user_login = COALESCE(?, user_login), user_display_name = COALESCE(?, user_display_name),
-         pending_op = NULL, pending_since = NULL, status = 'active',
+         pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL, status = 'active',
          grant_recovery_at = NULL, grant_recovery_attempts = 0,
          removal_failed_at = NULL, removal_retry_at = NULL, removal_attempts = 0, removal_error = NULL, end_reason = NULL,
          revision = revision + 1 WHERE user_id = ?`,
@@ -1128,67 +1580,67 @@ export class TempVipStore {
   }
 
   private finishRemovalSync(
-    userId: string,
-    generation: number,
-    removeStartedAt: string,
-    operationId: string,
+    lease: TempVipLease,
     result: { ok: true } | TempVipTwitchFailure,
     now: string,
     actorUserId: string | null,
     payloadJson: string,
   ): ModuleTempVipResult {
-    const row = rowFor(this.sql, userId);
-    if (row === null) return { status: "not_managed" };
+    const row = currentLeaseRowSync(this.sql, lease);
+    if (row === null) return { status: "busy" };
     if (result.ok) {
-      this.sql.exec("DELETE FROM temp_vips WHERE user_id = ?", userId);
+      const reason: TempVipEndReason = row.end_reason ?? "expired";
+      const ended: ModuleTempVipResult = { status: "ended", reason };
+      settleUnfinishedRowOperationsSync(this.sql, lease.userId, lease.generation, ended, now);
+      this.sql.exec("DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ? AND lease_id = ?", lease.userId, lease.generation, lease.leaseId);
       this.sql.exec(
         `INSERT OR REPLACE INTO temp_vip_tombstones
           (user_id, generation, remove_started_at, removed_at, retain_until)
          VALUES (?, ?, ?, ?, ?)`,
-        userId,
-        generation,
-        removeStartedAt,
+        lease.userId,
+        lease.generation,
+        lease.removalStartedAt ?? lease.startedAt,
         now,
         utc(parseTime(now) + TEMP_VIP_ECHO_TOMBSTONE_MS),
       );
-      const reason: TempVipEndReason = row.end_reason ?? "expired";
-      enqueueEventSync(this.sql, this.options.channelId, operationId, 0, now, actorUserId ?? row.granted_by_user_id,
-        "temp_vips.ended", { userId, login: row.user_login, reason });
-      const ended = { status: "ended", reason };
-      if (payloadJson.length > 0) saveOperationSync(this.sql, operationId, payloadJson, ended, now);
+      settleTwitchOperationSync(this.sql, lease.operationId, ended, now);
+      settleTwitchOperationSync(this.sql, lease.requestId, ended, now);
+      enqueueEventSync(this.sql, this.options.channelId, lease.requestId, 0, now, actorUserId ?? row.granted_by_user_id,
+        "temp_vips.ended", { userId: lease.userId, login: row.user_login, reason });
+      if (payloadJson.length > 0) saveOperationSync(this.sql, lease.requestId, payloadJson, ended, now);
       return ended;
     }
     const attempts = row.removal_attempts + 1;
     this.sql.exec(
-      `UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, removal_failed_at = ?, removal_retry_at = NULL,
+      `UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, lease_id = NULL, lease_deadline = NULL,
+         eventsub_verification = 0, removal_failed_at = ?, removal_retry_at = NULL,
          removal_attempts = ?, removal_error = ?, expires_at = CASE WHEN end_reason = 'ended_early' THEN ? ELSE expires_at END,
-         revision = revision + 1 WHERE user_id = ?`,
+         revision = revision + 1 WHERE user_id = ? AND grant_generation = ? AND lease_id = ?`,
       now,
       attempts,
       result.reason.slice(0, 200),
       now,
-      userId,
+      lease.userId,
+      lease.generation,
+      lease.leaseId,
     );
     const retryAt = utc(parseTime(now) + backoffDelay(attempts));
-    enqueueEventSync(this.sql, this.options.channelId, operationId, 0, now, actorUserId, "temp_vips.removal_failed", {
-      userId,
+    enqueueEventSync(this.sql, this.options.channelId, lease.requestId, 0, now, actorUserId, "temp_vips.removal_failed", {
+      userId: lease.userId,
       login: row.user_login,
       reason: result.reason,
       attempts,
       retryAt,
     });
     const failed: ModuleTempVipResult = { status: "removal_failed", reason: result.reason, retryAt };
-    if (payloadJson.length > 0) saveOperationSync(this.sql, operationId, payloadJson, failed, now);
+    settleTwitchOperationSync(this.sql, lease.operationId, failed, now);
+    settleTwitchOperationSync(this.sql, lease.requestId, failed, now);
+    if (payloadJson.length > 0) saveOperationSync(this.sql, lease.requestId, payloadJson, failed, now);
     return failed;
   }
 
   private isDue(row: TempVipRowSql, now: string): boolean {
-    if (row.status !== "active") return false;
-    if (row.pending_op !== null && row.pending_since !== null) {
-      const pendingAge = parseTime(now) - parseTime(row.pending_since);
-      if (pendingAge < TEMP_VIP_PENDING_LOCK_MS) return false;
-      if (row.pending_op === "remove") return true;
-    }
+    if (row.status !== "active" || row.pending_op !== null) return false;
     const dueAt = row.removal_retry_at !== null
       ? parseTime(row.removal_retry_at)
       : row.removal_failed_at === null
@@ -1208,18 +1660,17 @@ export class TempVipStore {
       : null;
     const deadlines = rows.flatMap((row) => {
       if (row.status === "grant_unknown") {
-        if (row.recovery_claim !== null && row.pending_since !== null) {
-          return [parseTime(row.pending_since) + TEMP_VIP_PENDING_LOCK_MS];
+        if (row.lease_deadline !== null && row.pending_op !== null) {
+          return [row.lease_deadline];
         }
         return row.grant_recovery_at === null ? [] : [parseTime(row.grant_recovery_at)];
       }
-      if (row.status === "grant_pending") return row.pending_since === null ? [] : [parseTime(row.pending_since) + TEMP_VIP_PENDING_LOCK_MS];
-      if (row.pending_op !== null && row.pending_since !== null && nowMs - parseTime(row.pending_since) < TEMP_VIP_PENDING_LOCK_MS) {
-        return [parseTime(row.pending_since) + TEMP_VIP_PENDING_LOCK_MS];
-      }
-      if (row.pending_op === "remove" && row.pending_since !== null) {
-        return [parseTime(row.pending_since) + TEMP_VIP_PENDING_LOCK_MS];
-      }
+      if (row.status === "grant_pending") return row.lease_deadline === null
+        ? row.pending_since === null ? [] : [parseTime(row.pending_since) + TEMP_VIP_LEASE_MS]
+        : [row.lease_deadline];
+      if (row.pending_op !== null) return row.lease_deadline !== null
+        ? [row.lease_deadline]
+        : row.pending_since === null ? [] : [parseTime(row.pending_since) + TEMP_VIP_LEASE_MS];
       const dueAt = row.removal_retry_at !== null
         ? parseTime(row.removal_retry_at)
         : row.removal_failed_at === null
@@ -1234,9 +1685,13 @@ export class TempVipStore {
     ).one().retain_until;
     if (nextTombstone !== null) deadlines.push(parseTime(nextTombstone));
     const nextOperationExpiry = this.sql.exec<{ expires_at: string | null }>(
-      "SELECT MIN(expires_at) AS expires_at FROM temp_vip_operations",
+      "SELECT MIN(expires_at) AS expires_at FROM temp_vip_requests WHERE result_json IS NOT NULL",
     ).one().expires_at;
     if (nextOperationExpiry !== null) deadlines.push(parseTime(nextOperationExpiry));
+    const nextAsyncOperationExpiry = this.sql.exec<{ expires_at: string | null }>(
+      "SELECT MIN(expires_at) AS expires_at FROM temp_vip_operations WHERE result_json IS NOT NULL",
+    ).one().expires_at;
+    if (nextAsyncOperationExpiry !== null) deadlines.push(parseTime(nextAsyncOperationExpiry));
     const earliest = deadlines.length === 0 ? null : Math.max(Date.now() + 1, Math.min(...deadlines));
     await this.options.scheduleAlarm(earliest);
   }

@@ -5010,10 +5010,12 @@ export class ChannelObject extends DurableObject<Env> {
           await this.clearAlarmEntry(TEMP_VIP_EXPIRY_ALARM_KEY, undefined, null);
           return;
         }
+        const existingDeadline = (await this.ensureAlarmScheduleTable())[TEMP_VIP_EXPIRY_ALARM_KEY]?.deadline;
+        const safeDeadline = existingDeadline === undefined ? deadline : Math.min(deadline, existingDeadline);
         await this.scheduleAlarmEntry(
           TEMP_VIP_EXPIRY_ALARM_KEY,
           TEMP_VIP_EXPIRY_ALARM_HANDLER,
-          deadline,
+          safeDeadline,
           undefined,
           undefined,
           null,

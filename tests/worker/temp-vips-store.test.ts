@@ -55,6 +55,41 @@ describe("temporary VIP store", () => {
     });
   });
 
+  it("keeps a regrant request unsettled until its new generation finishes", async () => {
+    const input = {
+      operationId: "regrant-after-failed-removal",
+      person,
+      grantedBy: actor,
+      durationMs: 86_400_000,
+      maximumRemainingMs: 90 * 86_400_000,
+      source: "command" as const,
+    };
+    await inStore(async (store, state) => {
+      await store.grant({ ...input, operationId: "regrant-seed" });
+      state.storage.sql.exec("UPDATE temp_vips SET removal_failed_at = ? WHERE user_id = ?", "2026-11-01T11:59:00.000Z", person.userId);
+
+      const granted = await store.grant(input);
+      const replay = await store.grant(input);
+      expect(granted.status).toBe("granted");
+      expect(replay).toEqual(granted);
+      expect(state.storage.sql.exec<{ kind: string; generation: number }>(
+        "SELECT kind, generation FROM temp_vip_operations WHERE request_id = ? ORDER BY generation, kind",
+        input.operationId,
+      ).toArray()).toEqual([
+        { kind: "grant_check", generation: 1 },
+        { kind: "grant_add", generation: 2 },
+      ]);
+      expect(JSON.parse(state.storage.sql.exec<{ result_json: string }>(
+        "SELECT result_json FROM temp_vip_requests WHERE operation_id = ?", input.operationId,
+      ).one().result_json)).toMatchObject({ status: "granted" });
+    }, {
+      twitch: {
+        get: vi.fn().mockResolvedValue({ ok: true, isVip: false }),
+        add: vi.fn().mockResolvedValue({ ok: true }),
+      },
+    });
+  });
+
   it("holds a per-person grant lock while a Twitch call is in flight", async () => {
     let finishLookup: ((value: { ok: true; isVip: boolean }) => void) | undefined;
     const lookup = new Promise<{ ok: true; isVip: boolean }>((resolve) => { finishLookup = resolve; });
@@ -133,7 +168,7 @@ describe("temporary VIP store", () => {
       const interrupted = store.grant(input);
       await addStarted;
       expect(state.storage.sql.exec<{ payload_json: string; result_json: string | null }>(
-        "SELECT payload_json, result_json FROM temp_vip_operations WHERE operation_id = ?",
+        "SELECT payload_json, result_json FROM temp_vip_requests WHERE operation_id = ?",
         input.operationId,
       ).one()).toMatchObject({ result_json: null });
       now = "2026-11-01T12:06:00.000Z";
@@ -438,7 +473,7 @@ describe("temporary VIP store", () => {
       }
       now = "2026-11-01T12:00:11.000Z";
       const expiry = store.runExpiry("2026-11-01T12:00:00.000Z");
-      expect(remove).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => { expect(remove).toHaveBeenCalledTimes(1); });
 
       const manualStatuses: string[] = [];
       for (let index = 1; index < 11; index += 1) {
@@ -476,5 +511,230 @@ describe("temporary VIP store", () => {
       expect(await store.list()).toEqual([]);
       expect(remove).toHaveBeenCalledTimes(11);
     }, { now: () => now, twitch: { remove } });
+  });
+
+  it("recovers an expired EventSub verification with GET and preserves a future VIP", async () => {
+    let now = "2026-11-01T12:00:00.000Z";
+    let finishVerification: ((value: { ok: true; isVip: boolean }) => void) | undefined;
+    let markVerificationStarted: (() => void) | undefined;
+    const verification = new Promise<{ ok: true; isVip: boolean }>((resolve) => { finishVerification = resolve; });
+    const verificationStarted = new Promise<void>((resolve) => { markVerificationStarted = resolve; });
+    const get = vi.fn()
+      .mockResolvedValueOnce({ ok: true, isVip: false })
+      .mockImplementationOnce(() => { markVerificationStarted?.(); return verification; })
+      .mockResolvedValueOnce({ ok: true, isVip: true });
+    const remove = vi.fn().mockResolvedValue({ ok: true });
+
+    await inStore(async (store) => {
+      await store.grant({ operationId: "verification-recovery-grant", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+      const event = store.handleRemoved({ triggerId: "verification-recovery-event", userId: person.userId, eventSubTimestamp: now });
+      await verificationStarted;
+
+      now = "2026-11-01T12:06:00.000Z";
+      await store.runExpiry(now);
+      expect(get).toHaveBeenCalledTimes(3);
+      expect(remove).not.toHaveBeenCalled();
+      expect(await store.list()).toMatchObject([{ status: "active", expiresAt: "2026-11-02T12:00:00.000Z" }]);
+
+      finishVerification?.({ ok: true, isVip: true });
+      expect((await event).status).toBe("busy");
+      expect(await store.list()).toMatchObject([{ status: "active" }]);
+    }, { now: () => now, twitch: { get, remove } });
+  });
+
+  it("fences late grant POST and removal DELETE completions from replacement generations", async () => {
+    let now = "2026-11-01T12:00:00.000Z";
+    let finishOldAdd: ((value: { ok: true }) => void) | undefined;
+    let finishNewAdd: ((value: { ok: true }) => void) | undefined;
+    let finishOldRemove: ((value: { ok: true }) => void) | undefined;
+    let markOldAddStarted: (() => void) | undefined;
+    let markNewAddStarted: (() => void) | undefined;
+    let markOldRemoveStarted: (() => void) | undefined;
+    const oldAddStarted = new Promise<void>((resolve) => { markOldAddStarted = resolve; });
+    const newAddStarted = new Promise<void>((resolve) => { markNewAddStarted = resolve; });
+    const oldRemoveStarted = new Promise<void>((resolve) => { markOldRemoveStarted = resolve; });
+    const get = vi.fn().mockResolvedValue({ ok: true, isVip: false });
+    const add = vi.fn()
+      .mockImplementationOnce(() => { markOldAddStarted?.(); return new Promise<{ ok: true }>((resolve) => { finishOldAdd = resolve; }); })
+      .mockImplementationOnce(() => { markNewAddStarted?.(); return new Promise<{ ok: true }>((resolve) => { finishNewAdd = resolve; }); })
+      .mockResolvedValue({ ok: true });
+    const remove = vi.fn().mockImplementationOnce(() => {
+      markOldRemoveStarted?.();
+      return new Promise<{ ok: true }>((resolve) => { finishOldRemove = resolve; });
+    });
+
+    await inStore(async (store) => {
+      const oldGrant = store.grant({ operationId: "late-post-generation-one", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+      await oldAddStarted;
+      now = "2026-11-01T12:06:00.000Z";
+      await store.runExpiry(now);
+      const newGrant = store.grant({ operationId: "late-post-generation-two", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+      await newAddStarted;
+      finishOldAdd?.({ ok: true });
+      await oldGrant;
+      expect(await store.list()).toMatchObject([{ status: "grant_pending", grantGeneration: 2, expiresAt: "2026-11-02T12:06:00.000Z" }]);
+      finishNewAdd?.({ ok: true });
+      await newGrant;
+      expect(await store.list()).toMatchObject([{ status: "active", grantGeneration: 2 }]);
+
+      const oldEnd = store.end({ operationId: "late-delete-generation-two", userId: person.userId });
+      await oldRemoveStarted;
+      now = "2026-11-01T12:12:00.000Z";
+      await store.runExpiry(now);
+      expect(await store.list()).toEqual([]);
+      await store.grant({ operationId: "late-delete-generation-three", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+      finishOldRemove?.({ ok: true });
+      await oldEnd;
+      expect(await store.list()).toMatchObject([{ status: "active", grantGeneration: 3, expiresAt: "2026-11-02T12:12:00.000Z" }]);
+    }, { now: () => now, twitch: { get, add, remove } });
+  });
+
+  it("settles the original manual-end operation during recovery before a regrant replay", async () => {
+    let now = "2026-11-01T12:00:00.000Z";
+    let finishRemove: ((value: { ok: true }) => void) | undefined;
+    let markRemoveStarted: (() => void) | undefined;
+    const removeStarted = new Promise<void>((resolve) => { markRemoveStarted = resolve; });
+    const remove = vi.fn().mockImplementationOnce(() => {
+      markRemoveStarted?.();
+      return new Promise<{ ok: true }>((resolve) => { finishRemove = resolve; });
+    });
+    const endRequest = { operationId: "manual-end-recovery-original", userId: person.userId };
+
+    await inStore(async (store) => {
+      await store.grant({ operationId: "manual-end-recovery-grant", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+      const interrupted = store.end(endRequest);
+      await removeStarted;
+      now = "2026-11-01T12:06:00.000Z";
+      await store.runExpiry(now);
+      expect(await store.list()).toEqual([]);
+
+      await store.grant({ operationId: "manual-end-recovery-regrant", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+      expect((await store.end(endRequest)).status).toBe("ended");
+      expect(await store.list()).toMatchObject([{ grantGeneration: 2, status: "active" }]);
+
+      finishRemove?.({ ok: true });
+      await interrupted;
+      expect(await store.list()).toMatchObject([{ grantGeneration: 2, status: "active" }]);
+    }, { now: () => now, twitch: { remove } });
+  });
+
+  it("settles reserved grant results when release or EventSub deletes the row", async () => {
+    let now = "2026-11-01T12:00:00.000Z";
+    let finishAdd: ((value: { ok: true }) => void) | undefined;
+    let markAddStarted: (() => void) | undefined;
+    let markEventAddStarted: (() => void) | undefined;
+    const addStarted = new Promise<void>((resolve) => { markAddStarted = resolve; });
+    const eventAddStarted = new Promise<void>((resolve) => { markEventAddStarted = resolve; });
+    let addCalls = 0;
+    const add = vi.fn().mockImplementation(() => new Promise<{ ok: true }>((resolve) => {
+      addCalls += 1;
+      finishAdd = resolve;
+      if (addCalls === 1) markAddStarted?.();
+      if (addCalls === 2) markEventAddStarted?.();
+    }));
+    const grantRequest = { operationId: "grant-settled-by-release", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" as const };
+
+    await inStore(async (store) => {
+      const interrupted = store.grant(grantRequest);
+      await addStarted;
+      now = "2026-11-01T12:06:00.000Z";
+      expect((await store.release({ operationId: "release-interrupted-grant", userId: person.userId })).status).toBe("released");
+      const replay = await store.grant(grantRequest);
+      expect(replay.status).not.toBe("busy");
+      expect(await store.list()).toEqual([]);
+      finishAdd?.({ ok: true });
+      await interrupted;
+
+      const eventPerson = { ...person, userId: "eventsub-grant-user" };
+      const eventGrantRequest = { ...grantRequest, operationId: "grant-settled-by-eventsub", person: eventPerson };
+      const eventGrant = store.grant(eventGrantRequest);
+      await eventAddStarted;
+      now = "2026-11-01T12:12:00.000Z";
+      const removed = await store.handleRemoved({ triggerId: "grant-expiry-eventsub", userId: eventPerson.userId, eventSubTimestamp: now });
+      expect(removed.status).toBe("removed_on_twitch");
+      expect((await store.grant(eventGrantRequest)).status).not.toBe("busy");
+      finishAdd?.({ ok: true });
+      await eventGrant;
+    }, { now: () => now, twitch: { add, get: vi.fn().mockResolvedValue({ ok: true, isVip: false }) } });
+  });
+
+  it("persists the slot deadline for an orphaned early end", async () => {
+    let now = "2026-11-01T12:00:00.000Z";
+    let finishFirstRemove: ((value: { ok: true }) => void) | undefined;
+    let markFirstRemoveStarted: (() => void) | undefined;
+    const firstRemoveStarted = new Promise<void>((resolve) => { markFirstRemoveStarted = resolve; });
+    const remove = vi.fn()
+      .mockImplementationOnce(() => new Promise<{ ok: true }>((resolve) => {
+        finishFirstRemove = resolve;
+        markFirstRemoveStarted?.();
+      }))
+      .mockResolvedValue({ ok: true });
+    const get = vi.fn()
+      .mockResolvedValueOnce({ ok: true, isVip: false })
+      .mockResolvedValueOnce({ ok: true, isVip: true });
+
+    await inStore(async (store, state) => {
+      await store.grant({ operationId: "orphaned-early-end-grant", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+      const interrupted = store.end({ operationId: "orphaned-early-end", userId: person.userId });
+      await firstRemoveStarted;
+      now = "2026-11-01T12:06:00.000Z";
+      state.storage.transactionSync(() => {
+        const nowMs = Date.parse(now);
+        for (let index = 0; index < 10; index += 1) {
+          state.storage.sql.exec("INSERT INTO temp_vip_removal_slots (reserved_at) VALUES (?)", nowMs);
+        }
+      });
+
+      await store.runExpiry(now);
+      expect(state.storage.sql.exec<{ end_reason: string; removal_retry_at: string }>(
+        "SELECT end_reason, removal_retry_at FROM temp_vips WHERE user_id = ?", person.userId,
+      ).one()).toEqual({ end_reason: "ended_early", removal_retry_at: "2026-11-01T12:06:10.000Z" });
+      now = "2026-11-01T12:06:10.000Z";
+      await store.runExpiry(now);
+      expect(await store.list()).toEqual([]);
+      finishFirstRemove?.({ ok: true });
+      await interrupted;
+    }, { now: () => now, twitch: { get, remove } });
+  });
+
+  it("persists the manual DELETE operation and lease alarm before Twitch I/O", async () => {
+    const now = "2026-11-01T12:00:00.000Z";
+    let storage: DurableObjectState["storage"] | undefined;
+    let markRemoveStarted: (() => void) | undefined;
+    let finishRemove: ((value: { ok: true }) => void) | undefined;
+    const removeStarted = new Promise<void>((resolve) => { markRemoveStarted = resolve; });
+    const scheduled: number[] = [];
+    const remove = vi.fn(() => {
+      const op = storage?.sql.exec<{
+        kind: string;
+        user_id: string;
+        generation: number;
+        lease_id: string;
+        lease_deadline: number;
+        payload_json: string;
+        result_json: string | null;
+      }>("SELECT kind, user_id, generation, lease_id, lease_deadline, payload_json, result_json FROM temp_vip_operations WHERE operation_id = 'manual-delete-alarm'").toArray()[0];
+      expect(op).toMatchObject({ kind: "remove_manual", user_id: person.userId, generation: 1, result_json: null });
+      expect(op?.lease_id).toBeTruthy();
+      expect(op?.lease_deadline).toBe(Date.parse(now) + 5 * 60_000);
+      expect(JSON.parse(op?.payload_json ?? "{}")).toMatchObject({ action: "end", userId: person.userId });
+      markRemoveStarted?.();
+      return new Promise<{ ok: true }>((resolve) => { finishRemove = resolve; });
+    });
+
+    await inStore(async (store, state) => {
+      storage = state.storage;
+      await store.grant({ operationId: "manual-delete-alarm-grant", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+      await store.acknowledgeOutbox(store.pendingOutbox().map(({ eventId }) => eventId));
+      const ending = store.end({ operationId: "manual-delete-alarm", userId: person.userId });
+      await removeStarted;
+      expect(scheduled).toContain(Date.parse(now) + 5 * 60_000);
+      expect((await store.list())[0]?.status).toBe("active");
+      finishRemove?.({ ok: true });
+      await ending;
+    }, { now: () => now, scheduleAlarm: (deadline) => {
+      if (deadline !== null) scheduled.push(deadline);
+      return Promise.resolve();
+    }, twitch: { remove } });
   });
 });
