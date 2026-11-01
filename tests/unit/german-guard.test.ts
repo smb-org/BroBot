@@ -79,6 +79,8 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/quiz/locale.ts": "Bilingual DE/EN quiz panel and starter-set catalogue; only its `de` values are German.",
   "src/modules/quiz/overlay/locale.ts": "Bilingual DE/EN quiz overlay catalogue; only its `de` values are German.",
   "src/modules/quiz/panel/settings-editor-locale.ts": "Bilingual DE/EN quiz settings editor catalogue; only its de values are German.",
+  "src/modules/temp_vips/panel/locale.ts": "Bilingual DE/EN temporary VIP panel text catalogue; only its de values are German.",
+  "src/modules/temp_vips/panel/action-locale.ts": "Bilingual DE/EN temporary VIP cockpit action text catalogue; only its de values are German.",
   "src/modules/temp_vips/panel/settings-editor-locale.ts": "Bilingual DE/EN temporary VIP settings editor catalogue; only its de values are German.",
   "src/modules/text_library/overlay/locale.ts": "Bilingual DE/EN text-block overlay editor catalogue; only its `de` half is German.",
   "src/modules/sun/contracts/catalog.ts": "Bilingual DE/EN fallback, duration and mandatory-state catalogue; only its `de` half is German.",

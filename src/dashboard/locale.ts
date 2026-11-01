@@ -1343,6 +1343,8 @@ export interface DashboardTexts {
     available: string;
     load: string;
     managementLocked: string;
+    tempVipEntriesBlockDisable: string;
+    openTempVipList: string;
     requiresModulesLock: (modules: string) => string;
     dependentModulesLock: (modules: string) => string;
     noneActive: string;
@@ -2006,6 +2008,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     module: {
       module: "Modul", available: "Verfügbare Module", load: "Module werden geladen …",
       managementLocked: "Nur Broadcaster und Verwalter dürfen Module ändern.", noneActive: "Keine Module aktiv.",
+      tempVipEntriesBlockDisable: "Erst temporäre VIPs beenden oder die Verwaltung abgeben, bevor du das Modul deaktivierst.",
+      openTempVipList: "VIP-Liste öffnen",
       requiresModulesLock: (modules) => `Benötigt: ${modules}`,
       dependentModulesLock: (modules) => `Erst ausschalten: ${modules}`,
       infoTitle: "Modulinformationen", mandatoryReasonLabel: "Warum immer aktiv", templateVariablesTitle: "Vorlagenvariablen",
@@ -2674,6 +2678,8 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
     module: {
       module: "Module", available: "Available modules", load: "Loading modules …",
       managementLocked: "Only broadcasters and managers may change modules.", noneActive: "No modules active.",
+      tempVipEntriesBlockDisable: "End temporary VIPs or release their management before disabling this module.",
+      openTempVipList: "Open VIP list",
       requiresModulesLock: (modules) => `Requires: ${modules}`,
       dependentModulesLock: (modules) => `Turn off first: ${modules}`,
       infoTitle: "Module information", mandatoryReasonLabel: "Why it stays active", templateVariablesTitle: "Template variables",

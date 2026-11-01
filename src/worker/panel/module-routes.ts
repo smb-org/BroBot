@@ -58,6 +58,8 @@ import { notifyModuleScheduleInputsChanged, reconcileChannelTimerSchedules } fro
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { moduleBallots } from "../module-ballots";
 import { modulePoints } from "../module-points";
+import { moduleTempVipRoutes } from "../module-temp-vips";
+import { listChannelVips } from "../twitch/vips";
 import { createModuleSecretAccess } from "../module-secrets";
 import { liftModerationBan } from "../moderation";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../../modules/contracts/text-block-write-guard";
@@ -74,6 +76,7 @@ interface ModuleRouteEnvironment {
     | "externalFetchBudget"
     | "ballots"
     | "points"
+    | "tempVips"
     | "botCredentials" | "getUserEmotes" | "getGlobalEmotes"
     | "readChannelBlockedTerms"
     | "runModuleAlarm"
@@ -313,6 +316,15 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     const moduleId = suffix === undefined ? "" : decodeURIComponent(suffix.split("/", 1)[0] ?? "");
     if (!MODULES.some((module) => module.id === moduleId)) throw new Error("Point access requires a registered module route.");
     return modulePoints(context.env.CHANNEL, channelId, moduleId);
+  });
+  context.set("tempVips", (channelId) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Temporary VIP access must use the authorized route channel.");
+    const marker = "/modules/";
+    const suffix = new URL(context.req.url).pathname.split(marker, 2)[1];
+    const moduleId = suffix === undefined ? "" : decodeURIComponent(suffix.split("/", 1)[0] ?? "");
+    if (moduleId !== "temp_vips") throw new Error("Temporary VIP access requires the temporary VIP route.");
+    return moduleTempVipRoutes(context.env.CHANNEL, channelId, () =>
+      measureServerTiming(context, "helix", () => listChannelVips(context.env, channelId, fetch)));
   });
   context.set("botCredentials", async (channelId) => {
     if (channelId !== context.req.param("channelId")) throw new Error("Bot credentials must use the authorized route channel.");

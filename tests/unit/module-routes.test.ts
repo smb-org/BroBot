@@ -297,6 +297,32 @@ describe("Module management in the panel", () => {
     ]);
   });
 
+  it("requires a manager to save module settings while allowing an operator to read them", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-operator");
+    await insertMember(database, "kanal-a", "user-operator", "operator");
+    await insertLoginIdentityAndSession(database, "user-manager");
+    await insertMember(database, "kanal-a", "user-manager", "manager");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES ('kanal-a', 'test-modul', 1, '{\"betrag\":42}', 1)",
+    ).run();
+
+    const settingsPath = "/api/channels/kanal-a/modules/test-modul/settings";
+    const read = await panelRouter.fetch(await requestFor("user-operator", settingsPath), environment);
+    const denied = await panelRouter.fetch(
+      await requestFor("user-operator", settingsPath, "PATCH", { revision: 1, settings: { betrag: 43 } }),
+      environment,
+    );
+    const saved = await panelRouter.fetch(
+      await requestFor("user-manager", settingsPath, "PATCH", { revision: 1, settings: { betrag: 43 } }),
+      environment,
+    );
+
+    expect(read.status).toBe(200);
+    expect(denied.status).toBe(403);
+    expect(saved.status).toBe(200);
+  });
+
   it("updates only the authorized broadcaster channel title and category with its channel token", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "user-1");

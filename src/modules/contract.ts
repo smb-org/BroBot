@@ -1464,6 +1464,17 @@ export interface ModuleTempVipAccess {
   handleRemoved: (event: ModuleTempVipRemovedEvent) => Promise<ModuleTempVipResult>;
 }
 
+/** Route access binds the durable VIP queue to one channel and adds read-only Twitch VIP discovery. */
+export type ModuleTempVipRouteAccess = Pick<
+  ModuleTempVipAccess,
+  "grant" | "extend" | "importExisting" | "end" | "release" | "list"
+> & {
+  listExisting: () => Promise<
+    | { ok: true; people: ModuleTempVipPerson[] }
+    | { ok: false; reason: string }
+  >;
+};
+
 export type ModuleStreamState = "online" | "offline" | "unknown";
 
 export const MODULE_NAVIGATION_CATEGORIES = ["chat", "participation", "games", "twitch", "data", "stream", "admin"] as const;
@@ -2204,6 +2215,8 @@ export interface ModuleRouteVariables {
   ballots: (channelId: string) => ModuleBallotAccess;
   /** Returns point ledger access bound to the authorized route channel and mounted module. */
   points: (channelId: string) => ModulePointsAccess;
+  /** Returns temporary VIP access bound to the authorized route channel and module. */
+  tempVips: (channelId: string) => ModuleTempVipRouteAccess;
   /** Returns the bot token and granted scopes for the authorized channel when available. */
   botCredentials?: (channelId: string) => Promise<{ userId: string; accessToken: string; scopes: readonly string[] } | null>;
   /** Reads blocked terms only for the authorized route channel. */
