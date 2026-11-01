@@ -14,6 +14,7 @@ describe("temporary VIP Helix outcomes", () => {
     ["add", 425, null, "community_gate"],
     ["add", 429, null, "rate_limited"],
     ["remove", 404, null, "not_vip"],
+    ["remove", 422, "The user is not a VIP", "not_vip"],
     ["remove", 204, null, "success"],
     ["add", 418, null, "unknown_status"],
   ] as const)("maps %s status %i to %s", (operation, status, message, expected) => {
@@ -24,6 +25,13 @@ describe("temporary VIP Helix outcomes", () => {
     expect(mapVipHttpStatus("add", null, null, "timeout")).toMatchObject({ reason: "network", ambiguous: true });
     expect(mapVipHttpStatus("add", 503, null).ambiguous).toBe(true);
     expect(mapVipHttpStatus("add", 429, null).ambiguous).toBe(false);
+  });
+
+  it("treats a DELETE 422 for a user who is no longer a VIP as success", () => {
+    expect(mapVipCallFailure({
+      kind: "http_error",
+      result: { ok: false, status: 422, reason: "http_422", message: "The user is not a VIP", body: {} },
+    }, "remove")).toEqual({ ok: true });
   });
 
   it.each([

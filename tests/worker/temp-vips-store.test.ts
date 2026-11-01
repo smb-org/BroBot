@@ -94,6 +94,11 @@ describe("temporary VIP store", () => {
       const recovered = await store.runExpiry("2026-11-01T12:01:00.000Z");
       expect(recovered.recoveredGrants).toBe(1);
       expect(await store.list()).toMatchObject([{ status: "active", expiresAt: "2026-11-02T12:00:00.000Z" }]);
+      expect((await store.grant({
+        operationId: "grant-unknown", person, grantedBy: actor, durationMs: 86_400_000,
+        maximumRemainingMs: 90 * 86_400_000, source: "command",
+      })).status).toBe("granted");
+      expect(await store.list()).toMatchObject([{ expiresAt: "2026-11-02T12:00:00.000Z" }]);
       expect(state.storage.sql.exec<{ code: string; event_id: string }>(
         "SELECT code, event_id FROM temp_vip_outbox",
       ).toArray()).toEqual([{
@@ -108,6 +113,116 @@ describe("temporary VIP store", () => {
         add: vi.fn().mockResolvedValue({ ok: false, reason: "network", ambiguous: true }),
       },
     });
+  });
+
+  it("settles the reserved grant operation after recovery and does not extend on replay", async () => {
+    let now = "2026-11-01T12:00:00.000Z";
+    let resolveAdd: ((value: { ok: true } | { ok: false; reason: string; ambiguous: boolean }) => void) | undefined;
+    let markAddStarted: (() => void) | undefined;
+    const addStarted = new Promise<void>((resolve) => { markAddStarted = resolve; });
+    const add = vi.fn(() => new Promise<{ ok: true } | { ok: false; reason: string; ambiguous: boolean }>((resolve) => {
+      resolveAdd = resolve;
+      markAddStarted?.();
+    }));
+    const input = {
+      operationId: "grant-crash-replay", person, grantedBy: actor, durationMs: 86_400_000,
+      maximumRemainingMs: 90 * 86_400_000, source: "command" as const,
+    };
+
+    await inStore(async (store, state) => {
+      const interrupted = store.grant(input);
+      await addStarted;
+      expect(state.storage.sql.exec<{ payload_json: string; result_json: string | null }>(
+        "SELECT payload_json, result_json FROM temp_vip_operations WHERE operation_id = ?",
+        input.operationId,
+      ).one()).toMatchObject({ result_json: null });
+      now = "2026-11-01T12:06:00.000Z";
+
+      expect((await store.runExpiry(now)).recoveredGrants).toBe(1);
+      const recoveredExpiry = (await store.list())[0]?.expiresAt;
+      const replay = await store.grant(input);
+
+      expect(replay.status).toBe("granted");
+      expect((await store.list())[0]?.expiresAt).toBe(recoveredExpiry);
+      resolveAdd?.({ ok: false, reason: "network", ambiguous: true });
+      await interrupted;
+      expect((await store.grant(input)).status).toBe("granted");
+    }, {
+      now: () => now,
+      twitch: {
+        get: vi.fn()
+          .mockResolvedValueOnce({ ok: true, isVip: false })
+          .mockResolvedValueOnce({ ok: true, isVip: true }),
+        add,
+      },
+    });
+  });
+
+  it("schedules grant recovery before starting the Twitch POST", async () => {
+    const order: string[] = [];
+    let resolveAdd: ((value: { ok: true }) => void) | undefined;
+    let markAddStarted: (() => void) | undefined;
+    const addStarted = new Promise<void>((resolve) => { markAddStarted = resolve; });
+    const add = vi.fn(() => new Promise<{ ok: true }>((resolve) => {
+      order.push("post");
+      resolveAdd = resolve;
+      markAddStarted?.();
+    }));
+    await inStore(async (store) => {
+      const pending = store.grant({
+        operationId: "grant-alarm-before-post", person, grantedBy: actor, durationMs: 86_400_000,
+        maximumRemainingMs: 90 * 86_400_000, source: "command",
+      });
+      await addStarted;
+
+      expect(order[0]).toBe("alarm");
+      expect(order.indexOf("alarm")).toBeLessThan(order.indexOf("post"));
+      resolveAdd?.({ ok: true });
+      await pending;
+    }, {
+      scheduleAlarm: vi.fn(() => { order.push("alarm"); return Promise.resolve(); }),
+      twitch: { add },
+    });
+  });
+
+  it("leases grant recovery and fences an older lookup from a newer generation", async () => {
+    let now = "2026-11-01T12:00:00.000Z";
+    let finishOldLookup: ((value: { ok: true; isVip: boolean }) => void) | undefined;
+    let markOldLookupStarted: (() => void) | undefined;
+    const oldLookup = new Promise<{ ok: true; isVip: boolean }>((resolve) => { finishOldLookup = resolve; });
+    const oldLookupStarted = new Promise<void>((resolve) => { markOldLookupStarted = resolve; });
+    const get = vi.fn()
+      .mockResolvedValueOnce({ ok: true, isVip: false })
+      .mockImplementationOnce(() => { markOldLookupStarted?.(); return oldLookup; })
+      .mockResolvedValueOnce({ ok: true, isVip: true })
+      .mockResolvedValueOnce({ ok: true, isVip: false });
+    const add = vi.fn().mockResolvedValue({ ok: false, reason: "network", ambiguous: true });
+
+    await inStore(async (store) => {
+      await store.grant({
+        operationId: "recovery-generation-one", person, grantedBy: actor, durationMs: 86_400_000,
+        maximumRemainingMs: 90 * 86_400_000, source: "command",
+      });
+      now = "2026-11-01T12:01:00.000Z";
+      const staleRecovery = store.runExpiry(now);
+      await oldLookupStarted;
+      expect(get).toHaveBeenCalledTimes(2);
+      expect((await store.runExpiry(now)).recoveredGrants).toBe(0);
+      expect(get).toHaveBeenCalledTimes(2);
+
+      now = "2026-11-01T12:06:00.000Z";
+      expect((await store.runExpiry(now)).recoveredGrants).toBe(1);
+      expect((await store.list())[0]?.status).toBe("active");
+      expect((await store.release({ operationId: "release-recovered-generation", userId: person.userId })).status).toBe("released");
+      await store.grant({
+        operationId: "recovery-generation-two", person, grantedBy: actor, durationMs: 86_400_000,
+        maximumRemainingMs: 90 * 86_400_000, source: "command",
+      });
+
+      finishOldLookup?.({ ok: true, isVip: false });
+      await staleRecovery;
+      expect(await store.list()).toMatchObject([{ status: "grant_unknown", grantGeneration: 2 }]);
+    }, { now: () => now, twitch: { get, add } });
   });
 
   it("recovers a grant lock left behind after the five-minute lease", async () => {
@@ -200,6 +315,44 @@ describe("temporary VIP store", () => {
     }, { twitch: { get } });
   });
 
+  it("clears an already-removed VIP so later unmanaged VIPs are never retried", async () => {
+    const remove = vi.fn()
+      .mockResolvedValueOnce({ ok: false, reason: "network", ambiguous: true })
+      .mockResolvedValueOnce({ ok: true });
+    await inStore(async (store) => {
+      await store.grant({ operationId: "remove-timeout-grant", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+      expect((await store.end({ operationId: "remove-timeout-end", userId: person.userId })).status).toBe("removal_failed");
+
+      await store.runExpiry("2026-11-01T12:05:00.000Z");
+
+      expect(remove).toHaveBeenCalledTimes(2);
+      expect(await store.list()).toEqual([]);
+      await store.runExpiry("2026-11-02T12:00:00.000Z");
+      expect(remove).toHaveBeenCalledTimes(2);
+    }, { twitch: { remove } });
+  });
+
+  it("returns busy for a duplicate EventSub delivery while verification is in flight", async () => {
+    let finishVerification: ((value: { ok: true; isVip: boolean } | { ok: false; reason: string }) => void) | undefined;
+    const verification = new Promise<{ ok: true; isVip: boolean } | { ok: false; reason: string }>((resolve) => { finishVerification = resolve; });
+    const get = vi.fn()
+      .mockResolvedValueOnce({ ok: true, isVip: false })
+      .mockImplementationOnce(() => verification)
+      .mockResolvedValueOnce({ ok: true, isVip: false });
+    await inStore(async (store) => {
+      await store.grant({ operationId: "eventsub-overlap-grant", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+      const event = { triggerId: "eventsub-overlap-first", userId: person.userId, eventSubTimestamp: "2026-11-01T12:00:01.000Z" };
+      const first = store.handleRemoved(event);
+      const firstRejection = expect(first).rejects.toThrow("temp_vip_event_check_failed:network");
+
+      expect((await store.handleRemoved({ ...event, triggerId: "eventsub-overlap-duplicate" })).status).toBe("busy");
+      finishVerification?.({ ok: false, reason: "network" });
+      await firstRejection;
+      expect((await store.handleRemoved({ ...event, triggerId: "eventsub-overlap-retry" })).status).toBe("removed_on_twitch");
+      expect(await store.list()).toEqual([]);
+    }, { twitch: { get } });
+  });
+
   it("backs removal failures off by five, fifteen, then sixty minutes", async () => {
     const remove = vi.fn()
       .mockResolvedValueOnce({ ok: false, reason: "rate_limited" })
@@ -265,5 +418,63 @@ describe("temporary VIP store", () => {
       expect(remove).toHaveBeenCalledTimes(10);
       expect(await store.list()).toHaveLength(1);
     }, { twitch: { remove } });
+  });
+
+  it("counts expiry and manual removals against the current shared window", async () => {
+    let now = "2026-11-01T12:00:00.000Z";
+    let finishExpiryRemoval: ((value: { ok: true }) => void) | undefined;
+    const expiryRemoval = new Promise<{ ok: true }>((resolve) => { finishExpiryRemoval = resolve; });
+    const remove = vi.fn()
+      .mockImplementationOnce(() => expiryRemoval)
+      .mockResolvedValue({ ok: true });
+
+    await inStore(async (store) => {
+      for (let index = 0; index < 11; index += 1) {
+        await store.grant({
+          operationId: `shared-window-grant-${String(index)}`,
+          person: { ...person, userId: `shared-window-user-${String(index)}` },
+          grantedBy: actor, durationMs: 1, maximumRemainingMs: 90 * 86_400_000, source: "command",
+        });
+      }
+      now = "2026-11-01T12:00:11.000Z";
+      const expiry = store.runExpiry("2026-11-01T12:00:00.000Z");
+      expect(remove).toHaveBeenCalledTimes(1);
+
+      const manualStatuses: string[] = [];
+      for (let index = 1; index < 11; index += 1) {
+        manualStatuses.push((await store.end({ operationId: `shared-window-end-${String(index)}`, userId: `shared-window-user-${String(index)}` })).status);
+      }
+      expect(manualStatuses.filter((status) => status === "ended")).toHaveLength(9);
+      expect(manualStatuses[manualStatuses.length - 1]).toBe("queued");
+      expect(remove).toHaveBeenCalledTimes(10);
+
+      finishExpiryRemoval?.({ ok: true });
+      await expiry;
+    }, { now: () => now, twitch: { remove } });
+  });
+
+  it("lets a queued manual end override an existing retry backoff without resetting attempts", async () => {
+    const now = "2026-11-01T12:00:00.000Z";
+    const remove = vi.fn()
+      .mockResolvedValueOnce({ ok: false, reason: "rate_limited" })
+      .mockResolvedValue({ ok: true });
+    await inStore(async (store) => {
+      await store.grant({ operationId: "queued-retry-target", person, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+      await store.end({ operationId: "queued-retry-failed", userId: person.userId });
+
+      for (let index = 0; index < 9; index += 1) {
+        const userId = `queued-retry-other-${String(index)}`;
+        await store.grant({ operationId: `queued-retry-grant-${String(index)}`, person: { ...person, userId }, grantedBy: actor, durationMs: 86_400_000, maximumRemainingMs: 90 * 86_400_000, source: "command" });
+        await store.end({ operationId: `queued-retry-end-${String(index)}`, userId });
+      }
+
+      const queued = await store.end({ operationId: "queued-retry-queued", userId: person.userId });
+      expect(queued).toMatchObject({ status: "queued", retryAt: "2026-11-01T12:00:10.000Z" });
+      expect(await store.list()).toMatchObject([{ removalAttempts: 1, removalFailedAt: "2026-11-01T12:00:00.000Z" }]);
+
+      await store.runExpiry(queued.retryAt ?? "2026-11-01T12:00:10.000Z");
+      expect(await store.list()).toEqual([]);
+      expect(remove).toHaveBeenCalledTimes(11);
+    }, { now: () => now, twitch: { remove } });
   });
 });

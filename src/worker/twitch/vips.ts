@@ -53,6 +53,9 @@ export const mapVipHttpStatus = (
   if (status === 409) return { reason: "no_slots", ambiguous: false };
   if (status === 422) {
     const normalized = (message ?? "").toLowerCase();
+    if (operation === "remove" && normalized.includes("not a vip")) {
+      return { reason: "not_vip", ambiguous: false };
+    }
     return {
       reason: normalized.includes("moderator") || normalized.includes("mod") ? "moderator" : "already_vip",
       ambiguous: false,

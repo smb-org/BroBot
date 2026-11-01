@@ -56,6 +56,7 @@ interface TempVipRowSql extends Record<string, string | number | null> {
   granted_by_login: string | null;
   pending_op: "grant" | "remove" | null;
   pending_since: string | null;
+  eventsub_verification: number;
   status: "active" | "grant_pending" | "grant_unknown";
   grant_phase: "checking" | "adding";
   grant_operation_id: string;
@@ -63,7 +64,9 @@ interface TempVipRowSql extends Record<string, string | number | null> {
   grant_generation: number;
   grant_recovery_at: string | null;
   grant_recovery_attempts: number;
+  recovery_claim: string | null;
   removal_failed_at: string | null;
+  removal_retry_at: string | null;
   removal_attempts: number;
   removal_error: string | null;
   end_reason: "ended_early" | null;
@@ -119,6 +122,7 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
     granted_by_login TEXT,
     pending_op TEXT CHECK (pending_op IN ('grant', 'remove')),
     pending_since TEXT,
+    eventsub_verification INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL CHECK (status IN ('active', 'grant_pending', 'grant_unknown')),
     grant_phase TEXT NOT NULL DEFAULT 'checking' CHECK (grant_phase IN ('checking', 'adding')),
     grant_operation_id TEXT NOT NULL DEFAULT '',
@@ -126,7 +130,9 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
     grant_generation INTEGER NOT NULL,
     grant_recovery_at TEXT,
     grant_recovery_attempts INTEGER NOT NULL DEFAULT 0,
+    recovery_claim TEXT,
     removal_failed_at TEXT,
+    removal_retry_at TEXT,
     removal_attempts INTEGER NOT NULL DEFAULT 0,
     removal_error TEXT,
     end_reason TEXT CHECK (end_reason IN ('ended_early')),
@@ -164,6 +170,16 @@ const ensureTempVipsSchema = (sql: SqlStorage): void => {
     code TEXT NOT NULL,
     detail_json TEXT NOT NULL
   )`);
+  const tempVipColumns = sql.exec<{ name: string }>("PRAGMA table_info(temp_vips)").toArray();
+  if (!tempVipColumns.some(({ name }) => name === "eventsub_verification")) {
+    sql.exec("ALTER TABLE temp_vips ADD COLUMN eventsub_verification INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!tempVipColumns.some(({ name }) => name === "recovery_claim")) {
+    sql.exec("ALTER TABLE temp_vips ADD COLUMN recovery_claim TEXT");
+  }
+  if (!tempVipColumns.some(({ name }) => name === "removal_retry_at")) {
+    sql.exec("ALTER TABLE temp_vips ADD COLUMN removal_retry_at TEXT");
+  }
 };
 
 const nextGenerationSync = (sql: SqlStorage, userId: string): number => {
@@ -227,11 +243,51 @@ const saveOperationSync = (
      VALUES (?, ?, ?, ?)
      ON CONFLICT(operation_id) DO UPDATE SET
        result_json = excluded.result_json, expires_at = excluded.expires_at
-     WHERE temp_vip_operations.payload_json = excluded.payload_json`,
+     WHERE temp_vip_operations.payload_json = excluded.payload_json
+       AND temp_vip_operations.result_json IS NULL`,
     operationId,
     payloadJson,
     JSON.stringify(result),
     utc(parseTime(now) + TEMP_VIP_OPERATION_RETENTION_MS),
+  );
+};
+
+const reserveOperationSync = (
+  sql: SqlStorage,
+  operationId: string,
+  payloadJson: string,
+  now: string,
+): void => {
+  sql.exec(
+    `INSERT INTO temp_vip_operations (operation_id, payload_json, result_json, expires_at)
+     VALUES (?, ?, NULL, ?)
+     ON CONFLICT(operation_id) DO NOTHING`,
+    operationId,
+    payloadJson,
+    utc(parseTime(now) + TEMP_VIP_OPERATION_RETENTION_MS),
+  );
+};
+
+const settleReservedOperationSync = (
+  sql: SqlStorage,
+  operationId: string,
+  result: ModuleTempVipResult,
+  now: string,
+): void => {
+  const prior = sql.exec<{ result_json: string | null }>(
+    "SELECT result_json FROM temp_vip_operations WHERE operation_id = ?",
+    operationId,
+  ).toArray()[0];
+  if (prior === undefined) return;
+  if (prior.result_json !== null &&
+      (JSON.parse(prior.result_json) as ModuleTempVipResult).status !== "grant_unknown") return;
+  sql.exec(
+    `UPDATE temp_vip_operations SET result_json = ?, expires_at = ?
+     WHERE operation_id = ? AND result_json IS ?`,
+    JSON.stringify(result),
+    utc(parseTime(now) + TEMP_VIP_OPERATION_RETENTION_MS),
+    operationId,
+    prior.result_json,
   );
 };
 
@@ -241,6 +297,7 @@ const lockBusyOrClearSync = (sql: SqlStorage, row: TempVipRowSql, now: string): 
   if (parseTime(now) - parseTime(row.pending_since) < TEMP_VIP_PENDING_LOCK_MS) return true;
   sql.exec(
     `UPDATE temp_vips SET pending_op = NULL, pending_since = NULL,
+       eventsub_verification = 0, recovery_claim = NULL,
        status = CASE WHEN status = 'grant_pending' THEN 'grant_unknown' ELSE status END,
        grant_recovery_at = CASE WHEN status = 'grant_pending' THEN ? ELSE grant_recovery_at END,
        revision = revision + 1
@@ -384,6 +441,7 @@ export class TempVipStore {
         this.sql, request.operationId, 0, request.person, request.grantedBy, request.source, now,
         utc(parseTime(now) + request.durationMs),
       );
+      reserveOperationSync(this.sql, request.operationId, payloadJson, now);
       return { kind: "create" as const };
     });
     if (initial.kind === "done") {
@@ -392,6 +450,7 @@ export class TempVipStore {
     }
 
     if (initial.kind === "check_existing") {
+      await this.rearm(this.now());
       const lookup = await this.safeGet(request.person.userId);
       if (!lookup.ok) {
         const result = this.transaction(() => {
@@ -406,7 +465,11 @@ export class TempVipStore {
       if (lookup.isVip) {
         const result = this.transaction(() => {
           const row = rowFor(this.sql, request.person.userId);
-          if (row === null) return { status: "not_managed" };
+          if (row === null) {
+            const missing = { status: "not_managed" };
+            saveOperationSync(this.sql, request.operationId, payloadJson, missing, this.now());
+            return missing;
+          }
           const extended = this.extendRowSync(row, request.durationMs, request.maximumRemainingMs, this.now(), request.operationId, payloadJson, {
             person: request.person,
             actorUserId: request.grantedBy?.userId ?? null,
@@ -439,9 +502,11 @@ export class TempVipStore {
           this.sql, request.operationId, replacingFailedRow ? 1 : 0, request.person, request.grantedBy, request.source, this.now(),
           utc(parseTime(this.now()) + request.durationMs),
         );
+        reserveOperationSync(this.sql, request.operationId, payloadJson, this.now());
       });
     }
 
+    await this.rearm(this.now());
     const lookup = await this.safeGet(request.person.userId);
     if (!lookup.ok) {
       const result = this.transaction(() => {
@@ -540,6 +605,7 @@ export class TempVipStore {
       await this.rearm(now);
       return initial;
     }
+    await this.rearm(this.now());
     const lookup = await this.safeGet(request.person.userId);
     const completedAt = this.now();
     const result = this.transaction(() => {
@@ -577,12 +643,14 @@ export class TempVipStore {
         completedAt,
         utc(parseTime(completedAt) + request.durationMs),
       );
+      reserveOperationSync(this.sql, request.operationId, payloadJson, completedAt);
       return { status: "regrant_pending" };
     });
     if (result.status === "regrant_pending") {
       this.transaction(() => {
         this.sql.exec("UPDATE temp_vips SET grant_phase = 'adding', revision = revision + 1 WHERE user_id = ? AND status = 'grant_pending'", request.person.userId);
       });
+      await this.rearm(this.now());
       const add = await this.safeAdd(request.person.userId);
       const settledAt = this.now();
       const settled = this.transaction(() => {
@@ -647,6 +715,7 @@ export class TempVipStore {
         return { done: result };
       }
       insertGrantPendingSync(this.sql, request.operationId, 0, request.person, request.grantedBy, "import", now, utc(parseTime(now) + request.durationMs));
+      reserveOperationSync(this.sql, request.operationId, payloadJson, now);
       return { done: null };
     });
     if (initial.done !== null) {
@@ -654,6 +723,7 @@ export class TempVipStore {
       await this.rearm(now);
       return initial.done;
     }
+    await this.rearm(this.now());
     const lookup = await this.safeGet(request.person.userId);
     const completedAt = this.now();
     const result = this.transaction(() => {
@@ -704,28 +774,31 @@ export class TempVipStore {
       if (lockBusyOrClearSync(this.sql, row, now)) return { result: { status: "busy" }, row: null, retryAt: null };
       row = rowFor(this.sql, request.userId);
       if (row === null || row.status !== "active") return { result: { status: "busy" }, row: null, retryAt: null };
-      const retryAt = reserveRemovalSlotSync(this.sql, now);
+      const reservedAt = this.now();
+      const retryAt = reserveRemovalSlotSync(this.sql, reservedAt);
       if (retryAt !== null) {
         this.sql.exec(
-          `UPDATE temp_vips SET end_reason = 'ended_early', expires_at = ?, pending_op = NULL,
+          `UPDATE temp_vips SET end_reason = 'ended_early', expires_at = ?, removal_retry_at = ?, pending_op = NULL,
              pending_since = NULL, revision = revision + 1 WHERE user_id = ?`,
-          now,
+          reservedAt,
+          utc(retryAt),
           row.user_id,
         );
         const result = { status: "queued", retryAt: utc(retryAt) };
-        saveOperationSync(this.sql, request.operationId, payloadJson, result, now);
+        saveOperationSync(this.sql, request.operationId, payloadJson, result, reservedAt);
         return { result, row: null, retryAt };
       }
       this.sql.exec(
         `UPDATE temp_vips SET end_reason = 'ended_early', pending_op = 'remove', pending_since = ?,
+           eventsub_verification = 0, removal_retry_at = NULL,
            revision = revision + 1 WHERE user_id = ?`,
-        now,
+        reservedAt,
         row.user_id,
       );
-      return { result: null, row: { ...row, end_reason: "ended_early", pending_op: "remove", pending_since: now }, retryAt: null };
+      return { result: null, row: { ...row, end_reason: "ended_early", pending_op: "remove", pending_since: reservedAt }, retryAt: null };
     });
     if (start.result !== null) {
-      await this.rearm(now);
+      await this.rearm(this.now());
       return start.result;
     }
     const removed = await this.safeRemove(request.userId);
@@ -786,11 +859,11 @@ export class TempVipStore {
       if (stale || (row !== null && eventAt < parseTime(row.granted_at))) return { result: { status: "ignored_stale_echo" } };
       if (row === null) return { result: { status: "ignored_unmanaged" } };
       if (row.pending_op === "remove" && row.pending_since !== null && parseTime(now) - parseTime(row.pending_since) < TEMP_VIP_PENDING_LOCK_MS) {
-        return { result: { status: "ignored_own_echo" } };
+        return { result: { status: row.eventsub_verification === 1 ? "busy" : "ignored_own_echo" } };
       }
       if (lockBusyOrClearSync(this.sql, row, now)) return { result: { status: "busy" } };
-      this.sql.exec("UPDATE temp_vips SET pending_op = 'remove', pending_since = ?, revision = revision + 1 WHERE user_id = ?", now, row.user_id);
-      return { result: null };
+      this.sql.exec("UPDATE temp_vips SET pending_op = 'remove', pending_since = ?, eventsub_verification = 1, revision = revision + 1 WHERE user_id = ?", now, row.user_id);
+      return { result: null, generation: row.grant_generation, claimedAt: now };
     });
     if (initial.result !== null) {
       await this.rearm(now);
@@ -799,15 +872,22 @@ export class TempVipStore {
     const lookup = await this.safeGet(event.userId);
     const completedAt = this.now();
     if (!lookup.ok) {
-      this.transaction(() => this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, revision = revision + 1 WHERE user_id = ?", event.userId));
+      this.transaction(() => this.sql.exec(
+        `UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, eventsub_verification = 0, revision = revision + 1
+         WHERE user_id = ? AND grant_generation = ? AND pending_since = ? AND eventsub_verification = 1`,
+        event.userId,
+        initial.generation,
+        initial.claimedAt,
+      ));
       await this.rearm(completedAt);
       throw new Error(`temp_vip_event_check_failed:${lookup.reason}`);
     }
     const result = this.transaction(() => {
       const row = rowFor(this.sql, event.userId);
-      if (row === null) return { status: "ignored_unmanaged" };
+      if (row === null || row.grant_generation !== initial.generation || row.pending_op !== "remove" ||
+          row.pending_since !== initial.claimedAt || row.eventsub_verification !== 1) return { status: "busy" };
       if (lookup.isVip) {
-        this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, revision = revision + 1 WHERE user_id = ?", event.userId);
+        this.sql.exec("UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, eventsub_verification = 0, revision = revision + 1 WHERE user_id = ?", event.userId);
         return { status: "ignored_stale_event" };
       }
       const reason: TempVipEndReason = "removed_on_twitch";
@@ -821,54 +901,79 @@ export class TempVipStore {
 
   public async runExpiry(now = this.now()): Promise<{ removed: number; recoveredGrants: number }> {
     parseTime(now);
+    const currentTime = (): string => utc(Math.max(parseTime(now), parseTime(this.now())));
+    const startedAt = currentTime();
     this.transaction(() => {
-      this.sql.exec("DELETE FROM temp_vip_operations WHERE expires_at <= ?", now);
-      this.sql.exec("DELETE FROM temp_vip_tombstones WHERE retain_until <= ?", now);
+      this.sql.exec("DELETE FROM temp_vip_operations WHERE expires_at <= ?", startedAt);
+      this.sql.exec("DELETE FROM temp_vip_tombstones WHERE retain_until <= ?", startedAt);
     });
     let recoveredGrants = 0;
     const recoverable = this.sql.exec<TempVipRowSql>(
       `SELECT * FROM temp_vips WHERE status = 'grant_unknown'
         OR (status = 'grant_pending' AND pending_since <= ?)
       ORDER BY COALESCE(grant_recovery_at, pending_since), user_id`,
-      utc(parseTime(now) - TEMP_VIP_PENDING_LOCK_MS),
-    ).toArray().filter((row) => row.status === "grant_pending" || row.grant_recovery_at === null || row.grant_recovery_at <= now);
+      utc(parseTime(startedAt) - TEMP_VIP_PENDING_LOCK_MS),
+    ).toArray().filter((row) => row.status === "grant_pending" || row.grant_recovery_at === null || row.grant_recovery_at <= startedAt);
     for (const snapshot of recoverable) {
+      const claimId = crypto.randomUUID();
+      const claimedAt = currentTime();
       const claimed = this.transaction(() => {
         const row = rowFor(this.sql, snapshot.user_id);
-        if (row === null) return null;
-        if (row.status === "grant_pending" && row.pending_since !== null && parseTime(now) - parseTime(row.pending_since) < TEMP_VIP_PENDING_LOCK_MS) return null;
+        if (row === null || row.grant_generation !== snapshot.grant_generation) return null;
+        if (row.status === "grant_pending" &&
+            (row.pending_since === null || parseTime(claimedAt) - parseTime(row.pending_since) < TEMP_VIP_PENDING_LOCK_MS)) return null;
         if (row.status === "grant_pending") {
           this.sql.exec("UPDATE temp_vips SET status = 'grant_unknown', grant_recovery_at = ?, revision = revision + 1 WHERE user_id = ?",
-            utc(parseTime(now)), row.user_id);
+            claimedAt, row.user_id);
         }
-        if (row.status === "grant_unknown" && row.grant_recovery_at !== null && row.grant_recovery_at > now) return null;
-        this.sql.exec("UPDATE temp_vips SET pending_op = 'grant', pending_since = ?, revision = revision + 1 WHERE user_id = ?", now, row.user_id);
-        return row;
+        const current = rowFor(this.sql, snapshot.user_id);
+        if (current === null || current.status !== "grant_unknown") return null;
+        if (current.grant_recovery_at !== null && current.grant_recovery_at > claimedAt) return null;
+        if (current.recovery_claim !== null && current.pending_since !== null &&
+            parseTime(claimedAt) - parseTime(current.pending_since) < TEMP_VIP_PENDING_LOCK_MS) return null;
+        this.sql.exec(
+          `UPDATE temp_vips SET pending_op = 'grant', pending_since = ?, recovery_claim = ?, revision = revision + 1
+           WHERE user_id = ? AND grant_generation = ? AND status = 'grant_unknown'`,
+          claimedAt,
+          claimId,
+          current.user_id,
+          current.grant_generation,
+        );
+        return { generation: current.grant_generation, claimId, claimedAt };
       });
       if (claimed === null) continue;
+      await this.rearm(claimed.claimedAt);
       const lookup = await this.safeGet(snapshot.user_id);
-      const completedAt = now;
-      this.transaction(() => {
+      const completedAt = currentTime();
+      const applied = this.transaction(() => {
         const row = rowFor(this.sql, snapshot.user_id);
-        if (row === null || row.status !== "grant_unknown") return;
+        if (row === null || row.status !== "grant_unknown" || row.grant_generation !== claimed.generation ||
+            row.recovery_claim !== claimed.claimId || row.pending_since !== claimed.claimedAt) return false;
         if (!lookup.ok) {
           const attempts = row.grant_recovery_attempts + 1;
           this.sql.exec(
             `UPDATE temp_vips SET pending_op = 'grant', pending_since = ?, grant_recovery_attempts = ?,
-               grant_recovery_at = ?, revision = revision + 1 WHERE user_id = ?`,
+               grant_recovery_at = ?, recovery_claim = NULL, revision = revision + 1
+             WHERE user_id = ? AND grant_generation = ? AND recovery_claim = ?`,
             completedAt,
             attempts,
             utc(parseTime(completedAt) + grantRecoveryDelay(attempts)),
             row.user_id,
+            claimed.generation,
+            claimed.claimId,
           );
-          return;
+          return true;
         }
         if (lookup.isVip && (row.source === "import" || row.grant_phase === "adding")) {
           this.sql.exec(
             `UPDATE temp_vips SET status = 'active', pending_op = NULL, pending_since = NULL,
-               grant_recovery_at = NULL, grant_recovery_attempts = 0, revision = revision + 1 WHERE user_id = ?`,
+               grant_recovery_at = NULL, grant_recovery_attempts = 0, recovery_claim = NULL,
+               revision = revision + 1 WHERE user_id = ? AND grant_generation = ? AND recovery_claim = ?`,
             row.user_id,
+            claimed.generation,
+            claimed.claimId,
           );
+          const recovered = rowFor(this.sql, row.user_id);
           enqueueEventSync(
             this.sql,
             this.options.channelId,
@@ -879,50 +984,77 @@ export class TempVipStore {
             row.source === "import" ? "temp_vips.imported" : "temp_vips.granted",
             { userId: row.user_id, login: row.user_login, expiresAt: row.expires_at, source: row.source },
           );
-        } else this.sql.exec("DELETE FROM temp_vips WHERE user_id = ?", row.user_id);
+          settleReservedOperationSync(this.sql, row.grant_operation_id, {
+            status: row.source === "import" ? "imported" : "granted",
+            ...(recovered === null ? {} : { row: publicRow(recovered) }),
+          }, completedAt);
+          return true;
+        }
+        this.sql.exec(
+          "DELETE FROM temp_vips WHERE user_id = ? AND grant_generation = ? AND recovery_claim = ?",
+          row.user_id,
+          claimed.generation,
+          claimed.claimId,
+        );
+        let result: ModuleTempVipResult;
+        if (row.source === "import") result = { status: "not_vip" };
+        else if (row.grant_phase === "checking" && lookup.isVip) result = { status: "already_vip" };
+        else if (row.grant_phase === "checking") result = { status: "twitch_unavailable", reason: "network" };
+        else result = { status: "rejected", reason: "network" };
+        settleReservedOperationSync(this.sql, row.grant_operation_id, result, completedAt);
+        return true;
       });
-      if (lookup.ok) recoveredGrants += 1;
+      if (lookup.ok && applied) recoveredGrants += 1;
     }
 
     let removed = 0;
     for (;;) {
       if (removed >= TEMP_VIP_REMOVALS_PER_WINDOW) break;
+      const scanAt = currentTime();
       const due = this.sql.exec<TempVipRowSql>(
         `SELECT * FROM temp_vips WHERE status = 'active'
-          ORDER BY CASE WHEN removal_failed_at IS NOT NULL THEN removal_failed_at ELSE expires_at END, user_id`,
-      ).toArray().find((row) => this.isDue(row, now));
+          ORDER BY CASE WHEN removal_retry_at IS NOT NULL THEN removal_retry_at
+                        WHEN removal_failed_at IS NOT NULL THEN removal_failed_at ELSE expires_at END, user_id`,
+      ).toArray().find((row) => this.isDue(row, scanAt));
       if (due === undefined) break;
+      const claimedAt = currentTime();
       const claim = this.transaction(() => {
         const row = rowFor(this.sql, due.user_id);
         if (row === null || row.status !== "active") return { row: null, retryAt: null };
         const orphanedRemoval = row.pending_op === "remove" && row.pending_since !== null &&
-          parseTime(now) - parseTime(row.pending_since) >= TEMP_VIP_PENDING_LOCK_MS;
-        if (lockBusyOrClearSync(this.sql, row, now)) return { row: null, retryAt: null };
+          parseTime(claimedAt) - parseTime(row.pending_since) >= TEMP_VIP_PENDING_LOCK_MS;
+        if (lockBusyOrClearSync(this.sql, row, claimedAt)) return { row: null, retryAt: null };
         const current = rowFor(this.sql, due.user_id);
-        if (current === null || (!orphanedRemoval && !this.isDue(current, now))) return { row: null, retryAt: null };
-        const retryAt = reserveRemovalSlotSync(this.sql, now);
+        if (current === null || (!orphanedRemoval && !this.isDue(current, claimedAt))) return { row: null, retryAt: null };
+        const retryAt = reserveRemovalSlotSync(this.sql, claimedAt);
         if (retryAt !== null) return { row: null, retryAt };
-        this.sql.exec("UPDATE temp_vips SET pending_op = 'remove', pending_since = ?, revision = revision + 1 WHERE user_id = ?", now, row.user_id);
-        return { row: { ...current, pending_op: "remove", pending_since: now }, retryAt: null };
+        this.sql.exec(
+          `UPDATE temp_vips SET pending_op = 'remove', pending_since = ?, eventsub_verification = 0,
+             removal_retry_at = NULL, revision = revision + 1 WHERE user_id = ?`,
+          claimedAt,
+          row.user_id,
+        );
+        return { row: { ...current, pending_op: "remove", pending_since: claimedAt }, retryAt: null };
       });
       if (claim.retryAt !== null) break;
       const claimed = claim.row;
       if (claimed === null) break;
       const removal = await this.safeRemove(claimed.user_id);
-      const operationId = `expiry:${claimed.user_id}:${String(claimed.grant_generation)}:${now}`;
+      const completedAt = currentTime();
+      const operationId = `expiry:${claimed.user_id}:${String(claimed.grant_generation)}:${claimed.pending_since}`;
       this.transaction(() => this.finishRemovalSync(
         claimed.user_id,
         claimed.grant_generation,
         claimed.pending_since,
         operationId,
         removal,
-        now,
+        completedAt,
         null,
         JSON.stringify({ action: "expiry", userId: due.user_id, generation: due.grant_generation }),
       ));
       removed += 1;
     }
-    await this.rearm(now);
+    await this.rearm(currentTime());
     return { removed, recoveredGrants };
   }
 
@@ -977,7 +1109,7 @@ export class TempVipStore {
          user_login = COALESCE(?, user_login), user_display_name = COALESCE(?, user_display_name),
          pending_op = NULL, pending_since = NULL, status = 'active',
          grant_recovery_at = NULL, grant_recovery_attempts = 0,
-         removal_failed_at = NULL, removal_attempts = 0, removal_error = NULL, end_reason = NULL,
+         removal_failed_at = NULL, removal_retry_at = NULL, removal_attempts = 0, removal_error = NULL, end_reason = NULL,
          revision = revision + 1 WHERE user_id = ?`,
       utc(newExpiry),
       options.person?.login ?? null,
@@ -1028,7 +1160,7 @@ export class TempVipStore {
     }
     const attempts = row.removal_attempts + 1;
     this.sql.exec(
-      `UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, removal_failed_at = ?,
+      `UPDATE temp_vips SET pending_op = NULL, pending_since = NULL, removal_failed_at = ?, removal_retry_at = NULL,
          removal_attempts = ?, removal_error = ?, expires_at = CASE WHEN end_reason = 'ended_early' THEN ? ELSE expires_at END,
          revision = revision + 1 WHERE user_id = ?`,
       now,
@@ -1057,9 +1189,11 @@ export class TempVipStore {
       if (pendingAge < TEMP_VIP_PENDING_LOCK_MS) return false;
       if (row.pending_op === "remove") return true;
     }
-    const dueAt = row.removal_failed_at === null
-      ? parseTime(row.expires_at)
-      : parseTime(row.removal_failed_at) + backoffDelay(row.removal_attempts);
+    const dueAt = row.removal_retry_at !== null
+      ? parseTime(row.removal_retry_at)
+      : row.removal_failed_at === null
+        ? parseTime(row.expires_at)
+        : parseTime(row.removal_failed_at) + backoffDelay(row.removal_attempts);
     return dueAt <= parseTime(now);
   }
 
@@ -1073,7 +1207,12 @@ export class TempVipStore {
       ? (pacing.earliest ?? nowMs) + TEMP_VIP_REMOVAL_WINDOW_MS
       : null;
     const deadlines = rows.flatMap((row) => {
-      if (row.status === "grant_unknown") return row.grant_recovery_at === null ? [] : [parseTime(row.grant_recovery_at)];
+      if (row.status === "grant_unknown") {
+        if (row.recovery_claim !== null && row.pending_since !== null) {
+          return [parseTime(row.pending_since) + TEMP_VIP_PENDING_LOCK_MS];
+        }
+        return row.grant_recovery_at === null ? [] : [parseTime(row.grant_recovery_at)];
+      }
       if (row.status === "grant_pending") return row.pending_since === null ? [] : [parseTime(row.pending_since) + TEMP_VIP_PENDING_LOCK_MS];
       if (row.pending_op !== null && row.pending_since !== null && nowMs - parseTime(row.pending_since) < TEMP_VIP_PENDING_LOCK_MS) {
         return [parseTime(row.pending_since) + TEMP_VIP_PENDING_LOCK_MS];
@@ -1081,9 +1220,11 @@ export class TempVipStore {
       if (row.pending_op === "remove" && row.pending_since !== null) {
         return [parseTime(row.pending_since) + TEMP_VIP_PENDING_LOCK_MS];
       }
-      const dueAt = row.removal_failed_at === null
-        ? parseTime(row.expires_at)
-        : parseTime(row.removal_failed_at) + backoffDelay(row.removal_attempts);
+      const dueAt = row.removal_retry_at !== null
+        ? parseTime(row.removal_retry_at)
+        : row.removal_failed_at === null
+          ? parseTime(row.expires_at)
+          : parseTime(row.removal_failed_at) + backoffDelay(row.removal_attempts);
       return [nextRemovalSlot !== null && dueAt <= nowMs ? nextRemovalSlot : dueAt];
     });
     const hasOutbox = this.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM temp_vip_outbox").one().count > 0;
