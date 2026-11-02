@@ -40,8 +40,8 @@
 .settings-page--slot .unit-input__error > .ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 1; line-height: 18px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .settings-page--slot .slot-reel-table .unit-input__error { min-height: 18px; height: 18px; align-items: center; overflow: hidden; white-space: nowrap; }
 .settings-page--slot .slot-reel-table .unit-input__error > .ui-truncated-text::before { display: block; overflow: hidden; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
-.settings-page--slot .slot-reel-field > .ui-field-error { min-height: 54px; height: 54px; align-items: flex-start; overflow: hidden; white-space: normal; }
-.settings-page--slot .slot-reel-field > .ui-field-error > .ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 18px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.settings-page--slot .slot-reel-field > .ui-field-error { min-height: 18px; height: 18px; align-items: flex-start; overflow: hidden; white-space: normal; }
+.settings-page--slot .slot-reel-field > .ui-field-error > .ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 1; line-height: 18px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .slot-picker-status { display: flex; min-height: 42px; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-3); font-size: 11px; line-height: 1.35; }
 .ui-grouped-picker:has(.slot-picker-status--seven-tv):not(.ui-grouped-picker--sheet) .ui-grouped-picker__list { height: min(330px, 42vh); flex: none; }
 .slot-picker-status--seven-tv { box-sizing: border-box; height: 42px; padding-inline: var(--s3); align-items: stretch; flex-direction: column; justify-content: center; gap: 2px; }

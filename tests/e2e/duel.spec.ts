@@ -156,6 +156,45 @@ test("duel settings use the outer page scroll at 1440x900 so long fields stay re
   await expect(firstFightText).toBeInViewport();
 });
 
+test("duel command fields share one reserved line for counter and error at 390px [protects=a counted command field reserves a single 18px line below the input so fields sit close together, and an error appearing moves nothing; fails_when=counter and error reserve separate rows again or the next field shifts; no_claim=desktop layout]", async ({ page }) => {
+  const settings = duelSettingsForLanguage("en");
+  await installLiveCockpitMocks(page, {
+    channelId,
+    modules: [{ id: "points", enabled: true, settings: "{}" }, { id: "duel", enabled: true, settings: JSON.stringify(settings) }],
+  });
+  await installDuelSettingsApi(page, settings);
+  await page.setViewportSize({ width: 390, height: 1600 });
+  await page.goto(`/channels/${channelId}/modules/duel?lang=en`);
+  await expect(page.locator(".settings-page__columns")).toBeVisible();
+  await waitForWebFonts(page);
+
+  const challenge = page.getByLabel("Challenge command", { exact: true });
+  const accept = page.getByLabel("Accept command", { exact: true });
+  const top = async (locator: ReturnType<Page["locator"]>): Promise<number> => locator.evaluate((element) => Math.round(element.getBoundingClientRect().y * 100) / 100);
+  const description = challenge.locator("xpath=../..").locator(".ui-field__description");
+
+  expect((await description.boundingBox())?.height).toBe(18);
+  const acceptY = await top(accept);
+  const challengeY = await top(challenge);
+  // Measured 110px with the shared line; the former separate error row made it 132px.
+  expect(acceptY - challengeY).toBeLessThan(120);
+
+  await challenge.fill("");
+  await expect(challenge).toHaveAttribute("aria-invalid", "true");
+  await expect(description.locator(".ui-field-error")).toBeVisible();
+  expect((await description.boundingBox())?.height).toBe(18);
+  expect(await top(accept)).toBe(acceptY);
+
+  // Over the limit the error names the limit and replaces the counter on the same line: shown exactly once.
+  await challenge.fill("!".padEnd(30, "x"));
+  await expect(challenge).toHaveAttribute("aria-invalid", "true");
+  await expect(description.locator(".ui-field-error")).toContainText("30 / 25");
+  await expect(description.getByText("30 / 25")).toHaveCount(1);
+  await expect(description.locator(".ui-field__count")).toHaveCount(0);
+  expect((await description.boundingBox())?.height).toBe(18);
+  expect(await top(accept)).toBe(acceptY);
+});
+
 test("operators see Duel cancellation disabled with the manager-only reason", async ({ page }) => {
   await installLiveCockpitMocks(page, {
     channelId,

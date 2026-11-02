@@ -111,7 +111,7 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, erro
       {errorInDescription && effectiveError !== undefined
         ? <FieldError id={errorId} className="ui-field__inline-error" message={effectiveError} />
         : hint === undefined ? null : <TruncatedText className="ui-field__hint" text={hint} />}
-      {maxLength === undefined || !showCount ? null : <span className={`ui-field__count${nearLimit && !overLimit ? " ui-field__count--warning" : ""}${overLimit ? " ui-field__count--error" : ""}`}>{countLabel(count, maxLength)}</span>}
+      {maxLength === undefined || !showCount || (errorInDescription && effectiveError !== undefined) ? null : <span className={`ui-field__count${nearLimit && !overLimit ? " ui-field__count--warning" : ""}${overLimit ? " ui-field__count--error" : ""}`}>{countLabel(count, maxLength)}</span>}
       {describedHelper(null, disabledReason, `field-${id}`)}
     </span>
     {errorInDescription ? null : <FieldError id={errorId} className="ui-field__error" message={effectiveError} />}

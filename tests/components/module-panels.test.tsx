@@ -706,7 +706,8 @@ describe("Module panel loader", () => {
 
     expect(await screen.findByText("Choose a supported account name.")).toBeVisible();
     expect(handle).toHaveAttribute("aria-invalid", "true");
-    expect(handle.closest(".ui-field")?.querySelector(".ui-field__error")).toBeInTheDocument();
+    // A counted field shows the error on the reserved counter line instead of a separate row.
+    expect(handle.closest(".ui-field")?.querySelector(".ui-field__description .ui-field-error")).toBeInTheDocument();
   });
 
   it("localizes a known server field reason and keeps the raw reason as a fallback only", async () => {

@@ -673,7 +673,9 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
           if (typeof current !== "string" || (required && current.trim().length === 0)) {
             errors[field.key] = copy.fields[field.key]?.requiredError ?? copy.invalidMessage;
           } else if (field.kind === "text" && field.maxLength !== undefined && textFieldLength(field, current) > field.maxLength) {
-            errors[field.key] = copy.invalidMessage;
+            // Name the limit with the field's own count label; a server reason still wins in fieldErrors below.
+            const length = textFieldLength(field, current);
+            errors[field.key] = copy.fields[field.key]?.countLabel?.(length, field.maxLength) ?? `${String(length)} / ${String(field.maxLength)}`;
           } else if (field.kind === "text" && field.validate !== undefined &&
               (includeUntouched || validationAttempted || touchedFields.has(field.key)) && !field.validate(current)) {
             errors[field.key] = copy.fields[field.key]?.invalidError ?? copy.invalidMessage;
