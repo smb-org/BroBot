@@ -63,6 +63,17 @@ const insertChannel = async (channelId: string): Promise<void> => {
   ).bind(channelId, channelId, channelId, now, now).run();
 };
 
+/** A direct row insert fires the same SQLite trigger as any store write. */
+const insertVipRow = (state: DurableObjectState, userId: string): void => {
+  state.storage.sql.exec(
+    `INSERT INTO temp_vips (user_id, user_login, user_display_name, expires_at, granted_at, source)
+     VALUES (?, ?, ?, '2099-01-01T00:00:00.000Z', '2026-11-01T12:00:00.000Z', 'command')`,
+    userId,
+    userId,
+    userId,
+  );
+};
+
 const authenticatedRequestFactory = async (
   channelId: string,
 ): Promise<(path: string, method: "POST" | "PATCH", body: unknown) => Request> => {
@@ -227,38 +238,74 @@ describe("module activation schedule RPCs", () => {
     ).bind(channelId).first()).resolves.toEqual({ action: "module.disabled" });
   });
 
-  it("acknowledges the Temporary VIP panel refresh apart from a failing audit write (protects=reads never republish the revision for an acknowledged marker while the audit entry stays queued; fails_when=the marker waits for the audit batch and each list read bumps again; no_claim=the audit retry interval)", async () => {
+  it("publishes the Temporary VIP panel refresh once while 120 audit entries keep failing (protects=a changed row bumps the revision exactly once and reads never republish; fails_when=the audit backlog blocks the refresh or each read bumps again; no_claim=the audit retry interval)", async () => {
     const channelId = `temp-vips-refresh-${crypto.randomUUID()}`;
     await insertChannel(channelId);
     const stub = workerEnvironment.CHANNEL.get(workerEnvironment.CHANNEL.idFromName(channelId));
     await stub.listTempVips();
     const revision = async (): Promise<number> => (await stub.getPanelResourceRevisions())["module:temp_vips:data"] ?? 0;
     const before = await revision();
-    const outboxIds = (state: DurableObjectState): string[] => state.storage.sql
-      .exec<{ event_id: string }>("SELECT event_id FROM temp_vip_outbox ORDER BY event_id").toArray().map((row) => row.event_id);
+    const outboxCount = (state: DurableObjectState): number => state.storage.sql
+      .exec<{ count: number }>("SELECT COUNT(*) AS count FROM temp_vip_outbox").one().count;
+    const audit = (id: number): string =>
+      `INSERT INTO temp_vip_outbox (event_id, operation_id, created_at, actor_user_id, code, detail_json)
+       VALUES ('audit-${String(id)}', 'op-${String(id)}', '2026-11-01T12:00:00.000Z', NULL, 'temp_vips.granted', '{}')`;
 
     await runInDurableObject(stub, async (instance, state) => {
-      state.storage.sql.exec(
-        `INSERT INTO temp_vip_outbox (event_id, operation_id, created_at, actor_user_id, code, detail_json) VALUES
-          ('refresh-1', 'panel', '2026-11-01T12:00:00.000Z', NULL, 'temp_vips.panel_refresh', '{}'),
-          ('audit-1', 'op-1', '2026-11-01T12:00:01.000Z', NULL, 'temp_vips.granted', '{}')`,
-      );
+      for (let id = 0; id < 120; id += 1) state.storage.sql.exec(audit(id));
       const target = instance as unknown as { env: Env; listTempVips(): Promise<unknown> };
       const original = target.env;
-      const failingDb = {
-        prepare: (sql: string) => original.DB.prepare(sql),
-        batch: () => Promise.reject(new Error("audit down")),
-      };
-      target.env = { ...original, DB: failingDb } as unknown as Env;
+      target.env = {
+        ...original,
+        DB: { prepare: (sql: string) => original.DB.prepare(sql), batch: () => Promise.reject(new Error("audit down")) },
+      } as unknown as Env;
       try {
+        insertVipRow(state, "u-refresh");
         await target.listTempVips();
-        expect(outboxIds(state)).toEqual(["audit-1"]);
         await target.listTempVips();
         await target.listTempVips();
       } finally {
         target.env = original;
       }
-      expect(outboxIds(state)).toEqual(["audit-1"]);
+      expect(outboxCount(state)).toBeGreaterThanOrEqual(120);
+    });
+    expect(await revision()).toBe(before + 1);
+  });
+
+  it("keeps the Temporary VIP panel refresh pending after a failed publication and publishes it once later (protects=a failed local publication is retried without a second revision bump; fails_when=the flag clears on a swallowed failure or the retry bumps again; no_claim=the retry interval)", async () => {
+    const channelId = `temp-vips-publish-${crypto.randomUUID()}`;
+    await insertChannel(channelId);
+    const stub = workerEnvironment.CHANNEL.get(workerEnvironment.CHANNEL.idFromName(channelId));
+    await stub.listTempVips();
+    const revision = async (): Promise<number> => (await stub.getPanelResourceRevisions())["module:temp_vips:data"] ?? 0;
+    const before = await revision();
+    const flag = (state: DurableObjectState): number => state.storage.sql
+      .exec<{ dirty: number }>("SELECT dirty FROM temp_vip_panel_dirty").one().dirty;
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const target = instance as unknown as {
+        reconcilePanelResources: (revisions: unknown) => Promise<void>;
+        listTempVips(): Promise<unknown>;
+      };
+      const original = target.reconcilePanelResources.bind(target);
+      let down = true;
+      let attempts = 0;
+      target.reconcilePanelResources = (revisions) => {
+        attempts += 1;
+        return down ? Promise.reject(new Error("publish down")) : original(revisions);
+      };
+      insertVipRow(state, "u-publish");
+      await target.listTempVips();
+      expect(flag(state)).not.toBe(0);
+      await target.listTempVips();
+      expect(flag(state)).not.toBe(0);
+      down = false;
+      await target.listTempVips();
+      expect(flag(state)).toBe(0);
+      const settled = attempts;
+      await target.listTempVips();
+      await target.listTempVips();
+      expect(attempts).toBe(settled);
     });
     expect(await revision()).toBe(before + 1);
   });

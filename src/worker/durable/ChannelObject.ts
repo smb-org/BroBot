@@ -147,7 +147,6 @@ import {
   TempVipStore,
   type TempVipModuleDisableRequest,
   type TempVipModuleDisableResult,
-  TEMP_VIP_PANEL_REFRESH_CODE,
   type TempVipOutboxEvent,
 } from "./temp-vips";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
@@ -5062,18 +5061,43 @@ export class ChannelObject extends DurableObject<Env> {
     });
   }
 
-  private async flushTempVipOutbox(store: TempVipStore): Promise<void> {
-    const events: TempVipOutboxEvent[] = store.pendingOutbox();
-    if (events.length === 0) return;
-    const logged = events.filter((event) => event.code !== TEMP_VIP_PANEL_REFRESH_CODE);
+  /**
+   * Bumps the panel revision once per row change and publishes it. The dirty flag is cleared only after
+   * publication succeeded; otherwise it stays set and the store's retry alarm calls this again.
+   */
+  private async publishTempVipPanelRefresh(store: TempVipStore): Promise<void> {
+    if (store.panelRefreshState() === 0) return;
     try {
-      if (logged.length < events.length) {
+      if (store.panelRefreshState() === 1) {
         await bumpDurablePanelResources(this.ctx.storage, ["module:temp_vips:data"]);
-        await this.notifyCommittedPanelResources();
-        // Acknowledge refresh markers now so a failing audit batch cannot keep republishing the revision.
-        await store.acknowledgeOutbox(events.filter((event) => event.code === TEMP_VIP_PANEL_REFRESH_CODE).map((event) => event.eventId));
+        store.markPanelBumped();
       }
-      if (logged.length > 0) await this.env.DB.batch(logged.map((event) => this.env.DB.prepare(
+      const channelId = this.ownChannelId();
+      const outcome = { published: true };
+      if (channelId !== null) {
+        // notifyCommittedResources swallows local failures, so the callback reports them itself.
+        await notifyCommittedResources(this.env, channelId, async (revisions) => {
+          try {
+            await this.reconcilePanelResources(revisions);
+            outcome.published = true;
+          } catch (error: unknown) {
+            outcome.published = false;
+            throw error;
+          }
+        });
+      }
+      if (outcome.published) await store.clearPanelDirty();
+    } catch (error: unknown) {
+      console.error("Temporary VIP panel refresh remains pending.", this.ownChannelId(), error);
+    }
+  }
+
+  private async flushTempVipOutbox(store: TempVipStore): Promise<void> {
+    await this.publishTempVipPanelRefresh(store);
+    const logged: TempVipOutboxEvent[] = store.pendingOutbox();
+    if (logged.length === 0) return;
+    try {
+      await this.env.DB.batch(logged.map((event) => this.env.DB.prepare(
         `INSERT OR IGNORE INTO event_log
           (event_id, channel_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id)
          VALUES (?, ?, ?, 'temp_vips', ?, ?, ?, ?)`,

@@ -37,9 +37,6 @@ export type TempVipTwitch = {
   remove: (userId: string, beforeAttempt: () => Promise<boolean>) => Promise<{ ok: true } | TempVipTwitchFailure>;
 };
 
-/** Outbox marker that is not an audit event: the channel object turns it into a panel revision bump. */
-export const TEMP_VIP_PANEL_REFRESH_CODE = "temp_vips.panel_refresh";
-
 export interface TempVipOutboxEvent {
   eventId: string;
   operationId: string;
@@ -417,15 +414,25 @@ export class TempVipStore {
   }
 
   private transaction<Result>(run: () => Result): Result {
-    return this.storage.transactionSync(() => {
-      const result = run();
-      if (this.sql.exec<{ dirty: number }>("SELECT dirty FROM temp_vip_panel_dirty").one().dirty === 1) {
-        this.sql.exec("UPDATE temp_vip_panel_dirty SET dirty = 0");
-        enqueueEventSync(this.sql, this.options.channelId, "panel", crypto.randomUUID(), this.now(), null,
-          TEMP_VIP_PANEL_REFRESH_CODE, {});
-      }
-      return result;
-    });
+    return this.storage.transactionSync(run);
+  }
+
+  /**
+   * Panel refresh state, set by SQLite triggers on row changes:
+   * 0 = published, 1 = changed (revision not bumped yet), 2 = bumped but publication still pending.
+   */
+  public panelRefreshState(): 0 | 1 | 2 {
+    return this.sql.exec<{ dirty: 0 | 1 | 2 }>("SELECT dirty FROM temp_vip_panel_dirty").one().dirty;
+  }
+
+  public markPanelBumped(): void {
+    this.sql.exec("UPDATE temp_vip_panel_dirty SET dirty = 2 WHERE dirty = 1");
+  }
+
+  /** Call only after the panel publication succeeded. A change made meanwhile (state 1) stays dirty. */
+  public async clearPanelDirty(): Promise<void> {
+    this.sql.exec("UPDATE temp_vip_panel_dirty SET dirty = 0 WHERE dirty = 2");
+    await this.rearm();
   }
 
   private async isManaged(): Promise<boolean> {
@@ -1962,7 +1969,7 @@ export class TempVipStore {
         : parseTime(row.removal_failed_at) + backoffDelay(row.removal_attempts);
       deadlines.push(dueAt);
     }
-    if (this.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM temp_vip_outbox").one().count > 0) {
+    if (this.panelRefreshState() !== 0 || this.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM temp_vip_outbox").one().count > 0) {
       deadlines.push(parseTime(now) + TEMP_VIP_OUTBOX_RETRY_MS);
     }
     const earliest = deadlines.length === 0

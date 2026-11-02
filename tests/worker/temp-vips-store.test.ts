@@ -1450,7 +1450,7 @@ describe("temporary VIP operation queue", () => {
       const replay = await store.grant(input);
       expect(replay).toEqual(first);
 
-      const initialEvents = pendingEvents(store).filter(({ code }) => code !== "temp_vips.panel_refresh");
+      const initialEvents = pendingEvents(store);
       expect(initialEvents).toHaveLength(1);
       expect(initialEvents[0]?.eventId).toContain(":retained-result:0");
       expect(initialEvents[0]?.code).toBe("temp_vips.granted");
@@ -1877,10 +1877,6 @@ describe("temporary VIP operation queue", () => {
     }
   });
 
-  const refreshMarkers = (store: TempVipStore): number =>
-    pendingEvents(store).filter(({ code }) => code === "temp_vips.panel_refresh").length;
-  const clearOutbox = (store: TempVipStore): Promise<void> =>
-    store.acknowledgeOutbox(pendingEvents(store).map(({ eventId }) => eventId));
   const intent = (operationId: string, expiresAt: string) => (s: TempVipStore) =>
     s.recordIntent({ operationId, person, grantedBy: actor, expiresAt });
   const seedObserved = (s: TempVipStore) => s.addObserved({ operationId: "t-seed", person, actor });
@@ -1898,12 +1894,14 @@ describe("temporary VIP operation queue", () => {
       operationId: "t-extend", person, grantedBy: actor, durationMs: DAY, maximumRemainingMs: MAXIMUM, source: "command" })],
     ["end", true, seedGrant, (s: TempVipStore) => s.end({ operationId: "t-end", userId: person.userId })],
     ["release", true, seedGrant, (s: TempVipStore) => s.release({ operationId: "t-release", userId: person.userId })],
-  ])("queues exactly one panel refresh for %s", async (_name, managed, seed, act) => {
+  ])("flags the panel for refresh after %s", async (_name, managed, seed, act) => {
     await inStore(async (store) => {
       await seed(store);
-      await clearOutbox(store);
+      store.markPanelBumped();
+      await store.clearPanelDirty();
+      expect(store.panelRefreshState()).toBe(0);
       await act(store);
-      expect(refreshMarkers(store)).toBe(1);
+      expect(store.panelRefreshState()).toBe(1);
     }, { isManaged: () => Promise.resolve(managed) });
   });
 
@@ -2131,7 +2129,9 @@ describe("temporary VIP operation queue", () => {
       await store.runExpiry(BASE_NOW);
 
       expect(operationResult(state.storage, "restart-local-moderation").status).toBe("observed");
-      // The channel object acknowledges the panel refresh marker after flushing; do the same so the alarm reflects queue work only.
+      // The channel object publishes the panel refresh after flushing; do the same so the alarm reflects queue work only.
+      store.markPanelBumped();
+      await store.clearPanelDirty();
       await store.acknowledgeOutbox(pendingEvents(store).map((event) => event.eventId));
       expect(state.storage.sql.exec<{ status: string; next_attempt_at: string }>(
         "SELECT status, next_attempt_at FROM temp_vip_ops WHERE operation_id = 'restart-managed-grant'",
