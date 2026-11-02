@@ -1564,6 +1564,7 @@ export const dispatchEventSubNotification = async (
       actor?.userId ?? null,
       diagnostics,
       event.receivedAt,
+      module.id === "channel_events" && event.subscriptionType === "channel.moderate",
     );
     newEntries.push(...diagnosticEntries);
   }

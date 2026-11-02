@@ -1373,6 +1373,52 @@ describe("temporary VIP operation queue", () => {
     });
   });
 
+  it("supersedes an ambiguous grant after a successful non-VIP lookup when release queues during POST", async () => {
+    let markAddStarted: (() => void) | undefined;
+    let finishAdd: ((result: { ok: false; reason: string; ambiguous: true }) => void) | undefined;
+    const addStarted = new Promise<void>((resolve) => { markAddStarted = resolve; });
+    const get = vi.fn().mockResolvedValue({ ok: true as const, isVip: false });
+    const add = vi.fn(() => {
+      markAddStarted?.();
+      return new Promise<{ ok: false; reason: string; ambiguous: true }>((resolve) => { finishAdd = resolve; });
+    });
+    let moduleEnabled = true;
+    const commitModuleDisable = vi.fn(({ expectedRevision }: { expectedRevision: number }) => {
+      moduleEnabled = false;
+      return Promise.resolve({ revision: expectedRevision + 1, lastDisabledRevision: expectedRevision + 1 });
+    });
+
+    await inStore(async (store, state) => {
+      const grant = store.grant(grantInput({ operationId: "release-race-ambiguous-grant" }));
+      await addStarted;
+      const release = store.release({ operationId: "release-race-ambiguous-release", userId: person.userId });
+      await Promise.resolve();
+      expect(state.storage.sql.exec<{ status: string }>(
+        "SELECT status FROM temp_vip_ops WHERE operation_id = 'release-race-ambiguous-release'",
+      ).one().status).toBe("queued");
+
+      finishAdd?.({ ok: false, reason: "network", ambiguous: true });
+
+      await expect(grant).resolves.toMatchObject({ status: "superseded" });
+      await expect(release).resolves.toMatchObject({ status: "not_managed" });
+      expect(get).toHaveBeenCalledOnce();
+      expect(add).toHaveBeenCalledOnce();
+      expect(operationResult(state.storage, "release-race-ambiguous-grant").status).toBe("superseded");
+
+      await expect(store.disableModule({
+        operationId: "release-race-ambiguous-disable",
+        actor: { userId: actor.userId, sessionId: "session-1" },
+        expectedRevision: 1,
+      })).resolves.toMatchObject({ status: "disabled", revision: 2, lastDisabledRevision: 2 });
+      expect(moduleEnabled).toBe(false);
+      expect(commitModuleDisable).toHaveBeenCalledOnce();
+    }, {
+      twitch: { get, add },
+      isModuleEnabled: () => Promise.resolve(moduleEnabled),
+      commitModuleDisable,
+    });
+  });
+
   it("cancels a queued removal retry when releasing management", async () => {
     let removeCount = 0;
     const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) => {

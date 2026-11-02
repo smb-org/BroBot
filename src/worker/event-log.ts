@@ -70,17 +70,24 @@ export const writeModuleDiagnostics = async (
   actorUserId: string | null,
   diagnostics: readonly ModuleDiagnostic[],
   now: string,
+  idempotentForTrigger = false,
 ): Promise<WrittenModuleDiagnostic[]> => {
   if (diagnostics.length === 0) return [];
-  const written = diagnostics.map((diagnostic): WrittenModuleDiagnostic => ({
-    eventId: crypto.randomUUID(),
+  const written = diagnostics.map((diagnostic, index): WrittenModuleDiagnostic => ({
+    eventId: idempotentForTrigger
+      ? `module-diagnostic:${encodeURIComponent(moduleId)}:${encodeURIComponent(triggerId)}:${String(index)}`
+      : crypto.randomUUID(),
     createdAt: now,
     moduleId,
     code: diagnostic.code,
     actorUserId,
   }));
   const inserts = diagnostics.map((diagnostic, index) => db.prepare(
-    `INSERT INTO event_log
+    idempotentForTrigger
+      ? `INSERT OR IGNORE INTO event_log
+      (event_id, channel_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      : `INSERT INTO event_log
       (event_id, channel_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(

@@ -16,6 +16,7 @@ import {
   loadTempVips,
   releaseTempVip,
   retryTempVipRemoval,
+  tempVipManagedActionsAvailable,
 } from "./service";
 import { tempVipsPanelTexts } from "./locale";
 import { formatTempVipResult } from "./result-message";
@@ -319,7 +320,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
       <div className="temp-vips-page__action-buttons">
         {mode === "observe" ? <Button variant="primary" onClick={() => openDialog({ kind: "manualAdd" })} disabled={!canOperate}>
           {labels.addObserved}
-        </Button> : mode === "managed" ? <>
+        </Button> : tempVipManagedActionsAvailable(mode) ? <>
           <Button variant="primary" onClick={() => openDialog({ kind: "grant" })} disabled={!canOperate}>{labels.grant}</Button>
           <Button variant="neutral" onClick={() => openDialog({ kind: "takeover" })} disabled={!canOperate}>{labels.takeOver}</Button>
         </> : null}
@@ -376,7 +377,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
                   <Button variant="neutral" size="compact" onClick={() => openDialog({ kind: "classifyTemporary", row })} disabled={!canOperate || busy}>{labels.temporary}</Button>
                 </> : expiredObserve ? <Button variant="subtle" size="compact" onClick={() => { void copyUnvipCommand(row.login); }}>
                   <Icon name="copy" /> {labels.copyCommand}
-                </Button> : mode === "managed" && row.classification === "temporary" && row.expiresAt !== null ? <>
+                </Button> : tempVipManagedActionsAvailable(mode) && row.classification === "temporary" && row.expiresAt !== null ? <>
                   <Button variant="subtle" size="compact" onClick={() => openDialog({ kind: "extend", row })} disabled={!canOperate || busy}>{labels.extend}</Button>
                   {row.removalFailedAt === null ? null : <Button variant="neutral" size="compact" onClick={() => { void runRowAction(row, "retry"); }} disabled={!canOperate || busy}>{labels.retryRemoval}</Button>}
                   <Button variant="neutral" danger size="compact" onClick={() => { setConfirmRow(row); setConfirmError(undefined); }} disabled={!canOperate || busy}>{labels.endNow}</Button>

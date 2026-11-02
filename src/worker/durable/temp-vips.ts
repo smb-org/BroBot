@@ -1401,7 +1401,7 @@ export class TempVipStore {
     }
     if (added.reason === "precondition_failed") return;
     if (added.ambiguous === true || added.reason === "network" || added.reason === "rate_limited" || added.reason === "unknown_status") {
-      this.requeueOperation(operation, nextPayload, completedAt, TEMP_VIP_RETRY_MS, operation.attempts + 1);
+      this.requeueOperation(operation, nextPayload, completedAt, TEMP_VIP_RETRY_MS, operation.attempts + 1, true);
       return;
     }
     const result: ModuleTempVipResult = added.reason === "already_vip"
@@ -1559,7 +1559,8 @@ export class TempVipStore {
     }
     if (added.reason === "precondition_failed") return;
     if (added.ambiguous === true || added.reason === "network" || added.reason === "rate_limited" || added.reason === "unknown_status") {
-      this.requeueOperation(operation, { ...nextPayload, stage: "post" }, completedAt, TEMP_VIP_RETRY_MS, operation.attempts + 1);
+      this.requeueOperation(operation, { ...nextPayload, stage: "post" }, completedAt, TEMP_VIP_RETRY_MS,
+        operation.attempts + 1, true);
       return;
     }
     this.transaction(() => {
@@ -1834,8 +1835,10 @@ export class TempVipStore {
     now: string,
     delayMs: number,
     attempts: number,
+    needsReconcile = false,
   ): void {
     this.transaction(() => {
+      if (needsReconcile) this.setNeedsReconcileSync(operation.operation_id, true);
       if (this.shouldSupersedeForLaterReleaseSync(operation)) {
         this.finishSync(operation.operation_id, { status: "superseded" }, now, attempts);
       } else {

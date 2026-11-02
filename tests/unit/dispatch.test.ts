@@ -865,6 +865,52 @@ describe("module selection", () => {
     }
   });
 
+  it("writes one channel-events moderation entry when temporary-VIP dispatch retries the same EventSub message", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await activate(database, "kanal-a", "temp_vips");
+      await database.prepare(
+        "UPDATE channel_modules SET settings = ? WHERE channel_id = 'kanal-a' AND module_id = 'temp_vips'",
+      ).bind(JSON.stringify(DEFAULT_TEMP_VIPS_SETTINGS)).run();
+
+      const runtime = environment(database);
+      const channel = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        handleTempVipModeration: () => Promise<{ status: string }>;
+      };
+      const handleTempVipModeration = vi.fn()
+        .mockRejectedValueOnce(new Error("durable moderation enqueue failed"))
+        .mockResolvedValue({ status: "ignored" });
+      channel.handleTempVipModeration = handleTempVipModeration;
+      const event = {
+        channelId: "kanal-a",
+        subscriptionType: "channel.moderate",
+        triggerId: "eventsub-moderation-retry-1",
+        payload: {
+          action: "vip",
+          moderator_user_id: "moderator-1",
+          vip: { user_id: "user-1", user_login: "viewer", user_name: "Viewer" },
+        },
+        receivedAt: NOW,
+        eventSubTimestamp: NOW,
+      };
+
+      await expect(dispatchEventSubNotification(runtime, event, sent(), [channelEventsModule, tempVipsModule]))
+        .rejects.toThrow("durable moderation enqueue failed");
+      await dispatchEventSubNotification(runtime, event, sent(), [channelEventsModule, tempVipsModule]);
+
+      const entries = await eventLog(database);
+      expect(entries.filter(({ module_id, code }) =>
+        module_id === "channel_events" && code.startsWith("channel_events.moderation.")).length).toBe(1);
+      expect(handleTempVipModeration).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      database.close();
+    }
+  });
+
   it("reports an activation the registry doesn't know", () => {
     const { matches, unknownModules } = selectModulesForEvent([activation("verschwunden")], CHAT_TYPE, []);
     expect(matches).toEqual([]);
