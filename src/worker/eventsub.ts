@@ -324,7 +324,10 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   }
 
   const target = notificationTarget(body);
-  const acknowledgeAfterDispatch = target?.subscriptionType === "channel.vip.remove";
+  const moderationAction = target?.subscriptionType === "channel.moderate"
+    ? typeof target.payload.action === "string" ? target.payload.action : null : null;
+  const acknowledgeAfterDispatch = target?.subscriptionType === "channel.vip.remove" ||
+    target?.subscriptionType === "channel.moderate" && (moderationAction === "vip" || moderationAction === "unvip");
   if (target?.subscriptionType === "channel.chat.message") {
     if (notifierChannelId === null || target.channelId !== notifierChannelId) {
       return response("Invalid EventSub notification.", 400);

@@ -38,7 +38,7 @@ export interface TempVipActionReadiness {
 
 export const loadTempVipActionReadiness = async (channelId: string, signal?: AbortSignal): Promise<TempVipActionReadiness> => {
   const response = await readJson<{
-    modules: Array<{ id: string; missingBroadcasterScopes?: string[]; broadcasterScopeMetadataUnknown?: true }>;
+    modules: Array<{ id: string; missingBroadcasterScopes?: string[]; missingOptionalBroadcasterScopes?: string[]; broadcasterScopeMetadataUnknown?: true }>;
   }>(await fetch(
     `/api/channels/${encodeURIComponent(channelId)}/modules`,
     signal === undefined ? undefined : { signal },
@@ -47,7 +47,7 @@ export const loadTempVipActionReadiness = async (channelId: string, signal?: Abo
   if (module === undefined || module.broadcasterScopeMetadataUnknown === true) {
     return { ready: false, missingScopes: [], metadataUnknown: true };
   }
-  const missingScopes = module.missingBroadcasterScopes ?? [];
+  const missingScopes = module.missingOptionalBroadcasterScopes ?? module.missingBroadcasterScopes ?? [];
   return { ready: missingScopes.length === 0, missingScopes, metadataUnknown: false };
 };
 

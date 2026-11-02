@@ -27,7 +27,7 @@ import { resetSampleAfterStatsUrlChangeBestEffort } from "../../modules/belabox/
 import type { PanelModuleState } from "../../panel-contract";
 import type { StreamMarkerResult } from "../../contracts/quick-actions";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
-import { moduleBroadcasterScopeState } from "../module-scopes";
+import { moduleBroadcasterScopeState, moduleOptionalBroadcasterScopeState } from "../module-scopes";
 import { getPanelModuleStates } from "./module-repository";
 import { actorOf, readJsonBody } from "./member-routes";
 import { broadcasterHasScope, broadcasterScopesForChannel } from "../broadcaster-scope";
@@ -267,6 +267,8 @@ const moduleState = (
   mandatory: boolean,
   requiredBroadcasterScopes: readonly string[] = [],
   missingBroadcasterScopes: readonly string[] = [],
+  optionalBroadcasterScopes: readonly string[] = [],
+  missingOptionalBroadcasterScopes: readonly string[] = [],
 ): PanelModuleState => ({
   id,
   enabled: mandatory || enabled,
@@ -275,6 +277,10 @@ const moduleState = (
   ...(requiredBroadcasterScopes.length === 0 ? {} : {
     requiredBroadcasterScopes: [...requiredBroadcasterScopes],
     missingBroadcasterScopes: [...missingBroadcasterScopes],
+  }),
+  ...(optionalBroadcasterScopes.length === 0 ? {} : {
+    optionalBroadcasterScopes: [...optionalBroadcasterScopes],
+    missingOptionalBroadcasterScopes: [...missingOptionalBroadcasterScopes],
   }),
 });
 
@@ -285,8 +291,12 @@ const moduleStateFor = async (
   enabled: boolean,
   settings: string,
 ): Promise<PanelModuleState> => {
-  const scopes = await moduleBroadcasterScopeState(db, channelId, module);
-  return moduleState(module.id, enabled, settings, module.mandatory === true, scopes.required, scopes.missing);
+  const [scopes, optionalScopes] = await Promise.all([
+    moduleBroadcasterScopeState(db, channelId, module),
+    moduleOptionalBroadcasterScopeState(db, channelId, module),
+  ]);
+  return moduleState(module.id, enabled, settings, module.mandatory === true,
+    scopes.required, scopes.missing, optionalScopes.optional, optionalScopes.missingOptional);
 };
 
 export const moduleRouter = new Hono<ModuleRouteEnvironment>();

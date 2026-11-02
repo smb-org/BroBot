@@ -73,6 +73,35 @@ const signedVipRemovalNotification = (messageId: string): Request => {
   });
 };
 
+const signedModerationVipNotification = (messageId: string): Request => {
+  const timestamp = new Date().toISOString();
+  const body = JSON.stringify({
+    subscription: {
+      type: "channel.moderate",
+      condition: { broadcaster_user_id: "channel-a" },
+    },
+    event: {
+      broadcaster_user_id: "channel-a",
+      moderator_user_id: "moderator-a",
+      action: "vip",
+      vip: { user_id: "user-1", user_login: "viewer", user_name: "Viewer" },
+    },
+  });
+  const signature = createHmac("sha256", Buffer.from(secretKey, "ascii"))
+    .update(`${messageId}${timestamp}${body}`, "utf8")
+    .digest("hex");
+  return new Request("https://brobot.example/api/twitch/eventsub", {
+    method: "POST",
+    body,
+    headers: {
+      "Twitch-Eventsub-Message-Id": messageId,
+      "Twitch-Eventsub-Message-Timestamp": timestamp,
+      "Twitch-Eventsub-Message-Signature": `sha256=${signature}`,
+      "Twitch-Eventsub-Message-Type": "notification",
+    },
+  });
+};
+
 describe("EventSub awaited dispatch", () => {
   afterEach(() => vi.restoreAllMocks());
 
@@ -158,6 +187,34 @@ describe("EventSub awaited dispatch", () => {
     expect(response.status).toBe(204);
     expect(after).toEqual({ message_id: "vip-removal-pending" });
     expect(waitUntil).not.toHaveBeenCalled();
+    database.close();
+  });
+
+  it("retries moderation VIP delivery after dispatch failure instead of recording an acknowledgement", async () => {
+    const database = new TestD1Database();
+    vi.mocked(dispatchEventSubNotification).mockReset();
+    vi.mocked(dispatchEventSubNotification).mockRejectedValueOnce(new Error("durable enqueue unavailable"));
+    const environment = {
+      DB: database as unknown as D1Database,
+      TWITCH_EVENTSUB_SECRET: secret,
+    } as unknown as Env;
+    const executionContext = { waitUntil: vi.fn() } as unknown as ExecutionContext;
+
+    const failed = await eventSubRouter.fetch(signedModerationVipNotification("moderation-vip-retry"), environment, executionContext);
+    const beforeRetry = await database.prepare(
+      "SELECT message_id FROM eventsub_messages WHERE message_id = ?",
+    ).bind("moderation-vip-retry").first<{ message_id: string }>();
+    vi.mocked(dispatchEventSubNotification).mockResolvedValueOnce(undefined);
+    const retry = await eventSubRouter.fetch(signedModerationVipNotification("moderation-vip-retry"), environment, executionContext);
+    const afterRetry = await database.prepare(
+      "SELECT message_id FROM eventsub_messages WHERE message_id = ?",
+    ).bind("moderation-vip-retry").first<{ message_id: string }>();
+
+    expect(failed.status).toBe(500);
+    expect(beforeRetry).toBeNull();
+    expect(retry.status).toBe(204);
+    expect(afterRetry).toEqual({ message_id: "moderation-vip-retry" });
+    expect(vi.mocked(dispatchEventSubNotification)).toHaveBeenCalledTimes(2);
     database.close();
   });
 });

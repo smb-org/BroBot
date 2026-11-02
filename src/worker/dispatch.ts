@@ -1515,6 +1515,9 @@ export const dispatchEventSubNotification = async (
             },
           });
     } catch (error: unknown) {
+      const moderationAction = textValue(event.payload.action);
+      if (module.id === "temp_vips" && event.subscriptionType === "channel.moderate" &&
+          (moderationAction === "vip" || moderationAction === "unvip")) throw error;
       // A module that throws doesn't take down the worker or the other
       // modules with it. The error becomes visible, not swallowed.
       diagnostics.push({ code: "host.module.error" satisfies EventCode, detail: { message: errorMessage(error) } });

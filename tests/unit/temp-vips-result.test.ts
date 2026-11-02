@@ -11,6 +11,8 @@ const cases: Array<{ result: ModuleTempVipResult; de: string; en: string }> = [
   { result: { status: "maximum_exceeded", allowedDurationMs: 3 * 86_400_000 }, de: "3 Tage", en: "3 days" },
   { result: { status: "rejected", reason: "unknown_status" }, de: "Twitch", en: "Twitch" },
   { result: { status: "not_managed" }, de: "VIP-Liste", en: "VIP list" },
+  { result: { status: "permanent_vip" }, de: "dauerhaft eingestuft", en: "classified as permanent" },
+  { result: { status: "unclassified_vip" }, de: "noch nicht eingestuft", en: "has not been classified" },
   { result: { status: "busy" }, de: "Kanalwarteschlange", en: "queue" },
   { result: { status: "queued" }, de: "Kanalwarteschlange", en: "queue" },
 ];

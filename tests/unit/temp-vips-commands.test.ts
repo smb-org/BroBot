@@ -217,6 +217,55 @@ describe("temporary VIP chat commands", () => {
     expect(context.tempVips.handleModeration).not.toHaveBeenCalled();
   });
 
+  it("ignores broadcaster-actor unVIP events emitted by managed Twitch mutations", async () => {
+    const context = makeContext();
+
+    await processTempVipsChatMessage(makeModerationEvent("unvip", "channel-1"), context);
+
+    expect(context.tempVips.handleModeration).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["permanent_vip", "ist dauerhaft eingestuft"],
+    ["unclassified_vip", "noch nicht eingestuft"],
+  ])("explains why !vip cannot take over a %s row", async (status, expected) => {
+    const context = makeContext({ language: "de", grant: () => Promise.resolve({ status }) });
+
+    const result = await processTempVipsChatMessage(makeEvent("!vip @gamer 30m"), context);
+
+    const reply = result.actions[0];
+    expect(reply?.kind).toBe("chat");
+    if (reply?.kind !== "chat") return;
+    expect(reply.text).toContain(expected);
+  });
+
+  it.each([
+    ["permanent", "permanent_vip", "ist dauerhaft eingestuft"],
+    ["unclassified", "unclassified_vip", "noch nicht eingestuft"],
+  ] as const)("refuses !unvip for a %s row in observe and managed mode", async (classification, status, expected) => {
+    for (const mode of ["observe", "managed"] as const) {
+      const context = makeContext({
+        language: "de",
+        mode,
+        list: () => Promise.resolve([vipRow({ classification })]),
+        end: () => Promise.resolve({ status }),
+      });
+
+      const result = await processTempVipsChatMessage(makeEvent("!unvip @gamer"), context);
+
+      const reply = result.actions[0];
+      expect(reply?.kind).toBe("chat");
+      if (reply?.kind === "chat") expect(reply.text).toContain(expected);
+      if (mode === "observe") {
+        expect(context.tempVips.end).not.toHaveBeenCalled();
+        expect(context.tempVips.list).toHaveBeenCalledOnce();
+      } else {
+        expect(context.tempVips.end).toHaveBeenCalledOnce();
+      }
+    }
+  });
+
+
   it("replies with a duration example when the duration is invalid", async () => {
     const context = makeContext({ language: "de" });
 

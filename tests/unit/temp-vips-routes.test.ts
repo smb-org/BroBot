@@ -130,6 +130,15 @@ describe("temporary VIP routes", () => {
     expect(harness.access.listExisting).not.toHaveBeenCalled();
   });
 
+  it.each(["observe", "managed"] as const)("allows local-only release in %s mode", async (mode) => {
+    const harness = createHarness("operator", mode);
+
+    const response = await harness.request("/vips/user_demo/release", { operationId });
+
+    expect(response.status).toBe(200);
+    expect(harness.access.release).toHaveBeenCalledWith({ operationId, userId: "user_demo" });
+  });
+
   it("classifies an observed VIP using a channel-local expiry", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(fixedNow));
@@ -148,6 +157,20 @@ describe("temporary VIP routes", () => {
       classification: "temporary",
       expiresAt: "2026-11-01T12:10:00.000Z",
     }));
+  });
+
+  it("keeps a relative classification request stable when the same operation is retried", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(fixedNow));
+    const harness = createHarness("operator", "observe");
+    const body = { operationId, classification: "temporary", durationMs: 24 * 60 * 60_000 };
+
+    expect((await harness.request("/vips/user_demo/classify", body)).status).toBe(200);
+    vi.advanceTimersByTime(60_000);
+    expect((await harness.request("/vips/user_demo/classify", body)).status).toBe(200);
+
+    expect(harness.access.classify).toHaveBeenNthCalledWith(1, expect.objectContaining({ expiresAt: null, durationMs: body.durationMs }));
+    expect(harness.access.classify).toHaveBeenNthCalledWith(2, expect.objectContaining({ expiresAt: null, durationMs: body.durationMs }));
   });
 
   it("keeps classification available after switching to managed mode", async () => {

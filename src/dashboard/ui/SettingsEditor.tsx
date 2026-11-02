@@ -144,6 +144,7 @@ export interface SettingsEditorProps<Settings extends object> {
   effectiveDefaultChatTarget?: ChatOutputTarget;
   customContext?: unknown;
   afterNote?: ReactNode;
+  hiddenNotes?: readonly string[];
 }
 
 export function SettingsEditor<Settings extends object>({
@@ -168,8 +169,17 @@ export function SettingsEditor<Settings extends object>({
   effectiveDefaultChatTarget,
   customContext,
   afterNote,
+  hiddenNotes = [],
 }: SettingsEditorProps<Settings>): ReactElement {
   const section = spec.sections.find((candidate) => candidate.id === sectionId);
+  const renderNote = (note: string | undefined): ReactElement | null => {
+    if (note === undefined || texts.notes?.[note] === undefined) return null;
+    const hidden = hiddenNotes.includes(note);
+    if (hidden) return <div className="ui-settings-editor__hidden-note" aria-hidden="true">
+      <RuleNote>{texts.notes[note]}</RuleNote>
+    </div>;
+    return <RuleNote>{texts.notes[note]}</RuleNote>;
+  };
 
   const renderField = (field: SettingsFieldSpec<Settings>): ReactElement | null => {
     const copy = texts.fields[field.key];
@@ -503,7 +513,7 @@ export function SettingsEditor<Settings extends object>({
   if (readOnly) {
     return readOnlySectionOnly
       ? <InspectorSection title={section === undefined ? "" : texts.sections[section.id]}>
-        {section?.note === undefined || texts.notes?.[section.note] === undefined ? null : <RuleNote>{texts.notes[section.note]}</RuleNote>}
+        {renderNote(section?.note)}
         {afterNote}
         <dl className="properties ui-settings-editor__properties">
           {section?.fields.map(renderReadOnlyProperty)}
@@ -511,7 +521,7 @@ export function SettingsEditor<Settings extends object>({
       </InspectorSection>
       : <div className="ui-settings-editor__readonly-sections">
         {spec.sections.map((candidate) => <InspectorSection title={texts.sections[candidate.id]} key={candidate.id}>
-          {candidate.note === undefined || texts.notes?.[candidate.note] === undefined ? null : <RuleNote>{texts.notes[candidate.note]}</RuleNote>}
+          {renderNote(candidate.note)}
           {candidate.id === sectionId ? afterNote : null}
           <dl className="properties ui-settings-editor__properties">
             {candidate.fields.map(renderReadOnlyProperty)}
@@ -523,7 +533,7 @@ export function SettingsEditor<Settings extends object>({
   return (
     <div data-ui="" className="ui-settings-editor" data-section={sectionId} aria-label={section === undefined ? undefined : texts.sections[section.id]}>
       {section === undefined ? null : <InspectorSection title={texts.sections[section.id]}>
-        {section.note === undefined || texts.notes?.[section.note] === undefined ? null : <RuleNote>{texts.notes[section.note]}</RuleNote>}
+        {renderNote(section.note)}
         {afterNote}
         {section.fields.map(renderField)}
       </InspectorSection>}

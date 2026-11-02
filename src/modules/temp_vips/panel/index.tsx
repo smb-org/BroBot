@@ -380,8 +380,10 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
                   <Button variant="subtle" size="compact" onClick={() => openDialog({ kind: "extend", row })} disabled={!canOperate || busy}>{labels.extend}</Button>
                   {row.removalFailedAt === null ? null : <Button variant="neutral" size="compact" onClick={() => { void runRowAction(row, "retry"); }} disabled={!canOperate || busy}>{labels.retryRemoval}</Button>}
                   <Button variant="neutral" danger size="compact" onClick={() => { setConfirmRow(row); setConfirmError(undefined); }} disabled={!canOperate || busy}>{labels.endNow}</Button>
-                  <Button variant="subtle" size="compact" onClick={() => { void runRowAction(row, "release"); }} disabled={!canOperate || busy} title={labels.releaseHint}>{labels.release}</Button>
-                </> : null}
+                </> : row.classification === "permanent" && mode !== "inactive" && mode !== "loading"
+                  ? <Button variant="neutral" size="compact" onClick={() => openDialog({ kind: "classifyTemporary", row })} disabled={!canOperate || busy}>{labels.temporary}</Button>
+                  : null}
+                {mode !== "inactive" && mode !== "loading" ? <Button variant="subtle" size="compact" onClick={() => { void runRowAction(row, "release"); }} disabled={!canOperate || busy} title={labels.releaseHint}>{labels.release}</Button> : null}
               </div>
             </article>;
           })}

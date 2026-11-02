@@ -37,6 +37,7 @@ const mockObserveDashboard = async (page: Page): Promise<void> => {
   let rows: ModuleTempVipRow[] = [
     personRow("pixelpilz", "unclassified", null),
     personRow("mondfuchs", "temporary", "2026-10-30T11:00:00.000Z"),
+    personRow("nachtfalke", "permanent", null),
   ];
   const timestamp = now;
   const channel = {
@@ -93,7 +94,7 @@ const mockObserveDashboard = async (page: Page): Promise<void> => {
       }));
     }
     if (url.pathname === `/api/channels/${channelId}/modules` && method === "GET") {
-      return route.fulfill(json({ modules: [{ ...channel.modules[0], requiredBroadcasterScopes: ["channel:manage:vips"], missingBroadcasterScopes: ["channel:manage:vips"] }] }));
+      return route.fulfill(json({ modules: [{ ...channel.modules[0], requiredBroadcasterScopes: [], missingBroadcasterScopes: [], optionalBroadcasterScopes: ["channel:manage:vips"], missingOptionalBroadcasterScopes: ["channel:manage:vips"] }] }));
     }
     if (url.pathname === `/api/channels/${channelId}/modules/temp_vips/settings`) {
       return route.fulfill(json({ settings, revision: 1, variables: [] }));
@@ -116,6 +117,11 @@ const mockObserveDashboard = async (page: Page): Promise<void> => {
       row.expiresAt = body.classification === "temporary" ? new Date(Date.parse(now) + (body.durationMs ?? 7 * 24 * 60 * 60 * 1_000)).toISOString() : null;
       return route.fulfill(json({ status: "classified", row }));
     }
+    if (url.pathname.startsWith(`/api/channels/${channelId}/modules/temp_vips/vips/`) && url.pathname.endsWith("/release") && method === "POST") {
+      const userId = url.pathname.split("/").at(-2) ?? "";
+      rows = rows.filter((candidate) => candidate.userId !== userId);
+      return route.fulfill(json({ status: "released" }));
+    }
     if (url.pathname === "/api/csrf") return route.fulfill(json({ token: "csrf-temp-vips-observe" }));
     return route.fulfill(json({}));
   });
@@ -132,13 +138,17 @@ for (const width of widths) {
     await expect(page.locator(".temp-vips-mode")).toContainText("Beobachtungsmodus");
     await expect(page.getByRole("button", { name: "VIP per Login ergänzen" })).toBeVisible();
     const rows = page.locator(".temp-vips-row");
-    await expect(rows).toHaveCount(2);
+    await expect(rows).toHaveCount(3);
     await expect(rows.nth(0)).toContainText("@mondfuchs");
     await expect(rows.nth(0)).toContainText("Abgelaufen – bitte /unvip @mondfuchs");
     await expect(rows.nth(0).getByRole("button", { name: "Befehl kopieren" })).toBeVisible();
     await expect(rows.nth(1)).toContainText("Neu · nicht eingestuft");
     await expect(rows.nth(1).getByRole("button", { name: "Dauerhaft" })).toBeVisible();
     await expect(rows.nth(1).getByRole("button", { name: "Temporär" })).toBeVisible();
+    await expect(rows.nth(0).getByRole("button", { name: "Verwaltung abgeben · VIP behalten" })).toBeVisible();
+    await expect(rows.nth(1).getByRole("button", { name: "Verwaltung abgeben · VIP behalten" })).toBeVisible();
+    await expect(rows.nth(2).getByRole("button", { name: "Verwaltung abgeben · VIP behalten" })).toBeVisible();
+    if (width > 899) await expect(page.getByText(/Hinweis: Verliert Twitch eine Meldung/u)).toBeHidden();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
     await rows.nth(0).getByRole("button", { name: "Befehl kopieren" }).click();
@@ -157,6 +167,12 @@ for (const width of widths) {
     await addDialog.getByRole("button", { name: "VIP per Login ergänzen" }).click();
     await expect(addDialog).toBeHidden();
     await expect(page.locator(".temp-vips-row").filter({ hasText: `@sternchen${String(width)}` })).toContainText("Neu · nicht eingestuft");
+
+    if (width === 390) {
+      const permanentRow = page.locator(".temp-vips-row").filter({ hasText: "@nachtfalke" });
+      await permanentRow.getByRole("button", { name: "Verwaltung abgeben · VIP behalten" }).click();
+      await expect(page.locator(".temp-vips-row").filter({ hasText: "@nachtfalke" })).toHaveCount(0);
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 }

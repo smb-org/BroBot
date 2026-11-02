@@ -1476,6 +1476,9 @@ export interface ModuleTempVipIntentRequest {
   person: ModuleTempVipPerson;
   grantedBy: { userId: string; login: string } | null;
   expiresAt: string;
+  durationMs?: number;
+  maximumRemainingMs?: number;
+  intentAt?: string;
 }
 
 export interface ModuleTempVipObservedAddRequest {
@@ -1489,6 +1492,8 @@ export interface ModuleTempVipClassifyRequest {
   userId: string;
   classification: "permanent" | "temporary";
   expiresAt: string | null;
+  /** Relative requests stay relative in the durable operation so retries replay identically. */
+  durationMs?: number;
   actor: { userId: string; login: string };
 }
 

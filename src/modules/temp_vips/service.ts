@@ -94,6 +94,8 @@ const grantReply = (
     return directChat(event, tempVipChatText(language, result.status, login, expiresAt));
   }
   if (result.status === "already_vip") return directChat(event, tempVipChatText(language, "alreadyVip", login));
+  if (result.status === "permanent_vip") return directChat(event, tempVipChatText(language, "trackedPermanent", login));
+  if (result.status === "unclassified_vip") return directChat(event, tempVipChatText(language, "trackedUnclassified", login));
   if (result.status === "maximum_exceeded") {
     const duration = formatTempVipAllowedDuration(result.allowedDurationMs ?? settings.maximumDurationDays * DAY_MS, language);
     return directChat(event, tempVipChatText(language, "maximumExceeded", duration));
@@ -154,7 +156,7 @@ export const processTempVipsChatMessage = async (
     const login = stringValue(eventUser?.user_login) ?? stringValue(event.payload.target_user_login);
     const moderatorUserId = stringValue(event.payload.moderator_user_id);
     if (userId === null || login === null || moderatorUserId === null) return emptyResult();
-    if (action === "unvip" && moderatorUserId === await context.botUserId?.()) return emptyResult();
+    if (action === "unvip" && (moderatorUserId === event.channelId || moderatorUserId === await context.botUserId?.())) return emptyResult();
     await context.tempVips.handleModeration({
       triggerId: event.triggerId,
       action,
@@ -204,7 +206,16 @@ export const processTempVipsChatMessage = async (
   if (mode === "inactive") return directChat(event, tempVipChatText(language, "moduleInactive"));
 
   if (command.kind === "unvip") {
-    if (mode === "observe") return directChat(event, tempVipChatText(language, "observeUnvipRequired", resolution.person.login));
+    if (mode === "observe") {
+      try {
+        const row = (await context.tempVips.list()).find(({ userId }) => userId === resolution.person.userId);
+        if (row?.classification === "permanent") return directChat(event, tempVipChatText(language, "trackedPermanent", resolution.person.login));
+        if (row?.classification === "unclassified") return directChat(event, tempVipChatText(language, "trackedUnclassified", resolution.person.login));
+      } catch {
+        return directChat(event, tempVipChatText(language, "genericFailure"));
+      }
+      return directChat(event, tempVipChatText(language, "observeUnvipRequired", resolution.person.login));
+    }
     let result: ModuleTempVipResult;
     try {
       result = await context.tempVips.end({ operationId: event.triggerId, userId: resolution.person.userId });
@@ -214,6 +225,8 @@ export const processTempVipsChatMessage = async (
     }
     if (result.status === "ended") return directChat(event, tempVipChatText(language, "ended", resolution.person.login));
     if (result.status === "not_managed") return directChat(event, tempVipChatText(language, "notManaged", resolution.person.login));
+    if (result.status === "permanent_vip") return directChat(event, tempVipChatText(language, "trackedPermanent", resolution.person.login));
+    if (result.status === "unclassified_vip") return directChat(event, tempVipChatText(language, "trackedUnclassified", resolution.person.login));
     if (result.status === "queued") return directChat(event, tempVipChatText(language, "queued", resolution.person.login));
     if (result.status === "twitch_unavailable") {
       return directChat(event, tempVipChatText(language, "rejected", resultReasonText(result.reason, language)));
@@ -240,11 +253,17 @@ export const processTempVipsChatMessage = async (
         operationId: event.triggerId,
         person: resolution.person,
         grantedBy,
+        durationMs,
+        maximumRemainingMs: event.settings.maximumDurationDays * DAY_MS,
+        intentAt: event.receivedAt,
         expiresAt: new Date(Date.parse(event.receivedAt) + durationMs).toISOString(),
       });
-      return result.status === "intent_recorded"
-        ? directChat(event, tempVipChatText(language, "observeVipRequired", resolution.person.login))
-        : directChat(event, tempVipChatText(language, "genericFailure"));
+      if (result.status === "intent_recorded") return directChat(event, tempVipChatText(language, "observeVipRequired", resolution.person.login));
+      if (result.status === "extended" || result.status === "maximum_exceeded" ||
+          result.status === "permanent_vip" || result.status === "unclassified_vip") {
+        return grantReply(event, resolution.person.login, result, language, timeZone, event.settings);
+      }
+      return directChat(event, tempVipChatText(language, "genericFailure"));
     } catch {
       return directChat(event, tempVipChatText(language, "uncertainOutcome", resolution.person.login));
     }

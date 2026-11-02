@@ -828,6 +828,37 @@ describe("module selection", () => {
     expect(matches).toEqual([]);
   });
 
+  it.each(["vip", "unvip"] as const)("dispatches paused temporary-VIP %s lifecycle events and propagates queue failures", async (action) => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await activate(database, "kanal-a", "temp_vips");
+      await database.prepare(
+        "INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES ('kanal-a', 1, ?)",
+      ).bind(NOW).run();
+      const module = {
+        ...fakeModule("temp_vips", vi.fn().mockRejectedValue(new Error("durable moderation enqueue failed")), ["channel.moderate"]),
+        pauseSafeEventSubTypes: ["channel.moderate"],
+      };
+
+      await expect(dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: "channel.moderate",
+        triggerId: `paused-temp-vip-${action}`,
+        payload: {
+          action,
+          moderator_user_id: "moderator-1",
+          [action]: { user: { user_id: "user-1", user_login: "viewer", user_name: "Viewer" } },
+        },
+        receivedAt: NOW,
+        eventSubTimestamp: NOW,
+      }, sent(), [module])).rejects.toThrow("durable moderation enqueue failed");
+      expect(module.handleEvent).toHaveBeenCalledTimes(1);
+    } finally {
+      database.close();
+    }
+  });
+
   it("reports an activation the registry doesn't know", () => {
     const { matches, unknownModules } = selectModulesForEvent([activation("verschwunden")], CHAT_TYPE, []);
     expect(matches).toEqual([]);

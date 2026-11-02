@@ -175,6 +175,7 @@ tempVipsRoutes.post("/vips/:userId/classify", async (context) => {
   const access = context.get("tempVips")(routeParam(context, "channelId"));
   if (await access.mode() === "inactive") return context.json({ error: "temp_vips_module_disabled" }, 409);
   let expiresAt: string | null = null;
+  let durationMs: number | undefined;
   if (classification === "temporary") {
     const settings = await settingsFor(context);
     if (settings === null) return context.json({ error: "temp_vips_settings_unavailable" }, 500);
@@ -192,10 +193,10 @@ tempVipsRoutes.post("/vips/:userId/classify", async (context) => {
       }
       expiresAt = new Date(epoch).toISOString();
     } else {
-      const durationMs = durationFrom(request.body.durationMs);
-      if (durationMs === null) return context.json({ error: "temp_vips_duration_invalid" }, 400);
-      if (durationMs > maximumDurationMs) return context.json({ error: "temp_vips_maximum_exceeded" }, 400);
-      expiresAt = new Date(Date.now() + durationMs).toISOString();
+      const requestedDurationMs = durationFrom(request.body.durationMs);
+      if (requestedDurationMs === null) return context.json({ error: "temp_vips_duration_invalid" }, 400);
+      if (requestedDurationMs > maximumDurationMs) return context.json({ error: "temp_vips_maximum_exceeded" }, 400);
+      durationMs = requestedDurationMs;
     }
   }
   const result = await access.classify({
@@ -203,6 +204,7 @@ tempVipsRoutes.post("/vips/:userId/classify", async (context) => {
     userId: routeParam(context, "userId"),
     classification,
     expiresAt,
+    ...(durationMs === undefined ? {} : { durationMs }),
     actor: actorFor(context),
   });
   return context.json(result);
@@ -321,8 +323,13 @@ const operationFor = async (
   const request = await actionRequest(context);
   if (request === null) return context.json({ error: "temp_vips_request_invalid" }, 400);
   const access = context.get("tempVips")(routeParam(context, "channelId"));
-  const denied = modeDenial(context, await access.mode(), "managed");
-  if (denied !== null) return denied;
+  const mode = await access.mode();
+  if (action === "end") {
+    const denied = modeDenial(context, mode, "managed");
+    if (denied !== null) return denied;
+  } else if (mode === "inactive") {
+    return context.json({ error: "temp_vips_module_disabled" }, 409);
+  }
   const userId = routeParam(context, "userId");
   const operation = { operationId: request.operationId, userId };
   const result = action === "release" ? await access.release(operation) : await access.end(operation);

@@ -1,14 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { adsModule } from "../../src/modules/ads";
+import { tempVipsModule } from "../../src/modules/temp_vips";
 import { LOGIN_SCOPES } from "../../src/worker/auth/oauth";
 import {
   listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUser,
   moduleBroadcasterScopeState,
+  moduleHasRequiredBroadcasterScopes,
   moduleOptionalBroadcasterScopes,
   VOLLUMFANG_BROADCASTER_SCOPES,
 } from "../../src/worker/module-scopes";
+import { getPanelModuleStates } from "../../src/worker/panel/module-repository";
 import {
   upsertLoginIdentity,
   setLoginIdentityStatus,
@@ -133,5 +136,33 @@ describe("broadcaster scopes", () => {
   it("flags channel:manage:ads on the ads module as an optional scope", () => {
     database = new TestD1Database();
     expect(moduleOptionalBroadcasterScopes(adsModule)).toEqual(["channel:manage:ads", "channel:edit:commercial"]);
+  });
+
+  it("keeps temporary VIP observation available without its managed-mode scope", () => {
+    database = new TestD1Database();
+
+    expect(moduleOptionalBroadcasterScopes(tempVipsModule)).toEqual(["channel:manage:vips"]);
+    expect(moduleHasRequiredBroadcasterScopes(tempVipsModule, [])).toBe(true);
+    expect(tempVipsModule.broadcasterScopes).toEqual([]);
+  });
+
+  it("publishes the VIP scope as optional panel metadata while keeping required scope state empty", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "kanal-vip-scope");
+    await insertLoginIdentityAndSession(database, "kanal-vip-scope", []);
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-vip-scope', 'temp_vips', 1, '{}')",
+    ).run();
+
+    const states = await getPanelModuleStates(asD1(database), "kanal-vip-scope");
+    const state = states.find(({ id }) => id === "temp_vips");
+
+    expect(state).toMatchObject({
+      enabled: true,
+      optionalBroadcasterScopes: ["channel:manage:vips"],
+      missingOptionalBroadcasterScopes: ["channel:manage:vips"],
+    });
+    expect(state).not.toHaveProperty("requiredBroadcasterScopes");
+    expect(state).not.toHaveProperty("missingBroadcasterScopes");
   });
 });

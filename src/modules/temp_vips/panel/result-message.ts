@@ -83,6 +83,12 @@ export const formatTempVipResult = (
   if (result.status === "not_vip") return language === "de"
     ? "Dieses Konto ist auf Twitch kein VIP mehr. Aktualisiere die Auswahl und wähle ein aktuelles VIP."
     : "This account is no longer a VIP on Twitch. Refresh the selection and choose a current VIP.";
+  if (result.status === "permanent_vip") return language === "de"
+    ? "Dieser Eintrag ist dauerhaft eingestuft und kann nicht durch Vergeben, Verlängern oder Beenden per Chat geändert werden. Nutze die Einstufung im Dashboard."
+    : "This entry is classified as permanent and cannot be changed by granting, extending, or ending it. Use the dashboard classification action.";
+  if (result.status === "unclassified_vip") return language === "de"
+    ? "Dieser Eintrag ist noch nicht eingestuft. Nutze zuerst eine Einstufung im Dashboard."
+    : "This entry has not been classified yet. Classify it in the dashboard first.";
   if (result.status === "rejected") return rejectedReason(result.reason, language);
   if (result.status === "twitch_unavailable") return language === "de"
     ? "Twitch ist nicht erreichbar. Prüfe die Verbindung und versuche es erneut."
