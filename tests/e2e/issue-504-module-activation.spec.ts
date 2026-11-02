@@ -253,7 +253,11 @@ test("keeps the Points page header and following content in place across Slot st
     api.setModules(true, false);
     await page.goto(`/channels/${channelId}/modules/points?lang=de`);
     await expect(page.getByText("Erst ausschalten: Slot", { exact: true })).toHaveCount(0);
-    expect(await pointsHeaderGeometry(page)).toEqual(dependentGeometry);
+    // Points requires nothing, so it never reserves a lock row; the notice only occupies space while it shows.
+    await expect(page.locator(".module-detail--points .page-header__lock-row")).toHaveCount(0);
+    const freeGeometry = await pointsHeaderGeometry(page);
+    expect(freeGeometry.top).toBe(dependentGeometry.top);
+    expect(freeGeometry.height).toBeLessThanOrEqual(dependentGeometry.height);
   }
 });
 
@@ -281,7 +285,12 @@ test("keeps the Slot header stable while Points toggles at narrow and desktop wi
     await expect(page.getByText("Benötigt: Punkte", { exact: true })).toHaveCount(0);
     await expect(page.locator(".slot-jackpot-meta")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Walzen", exact: true })).toBeVisible();
-    expect(await slotHeaderGeometry(page)).toEqual(lockedGeometry);
+    // With every dependency on, no lock row is reserved: the header only shrinks and nothing moves up top.
+    await expect(page.locator(".settings-page--slot .page-header__lock-row")).toHaveCount(0);
+    const unlockedGeometry = await slotHeaderGeometry(page);
+    expect(unlockedGeometry.top).toBe(lockedGeometry.top);
+    expect(unlockedGeometry.height).toBeLessThan(lockedGeometry.height);
+    expect(unlockedGeometry.contentTop).toBeLessThan(lockedGeometry.contentTop);
   }
 
   expect(api.toggleRequests).toEqual(["points", "points", "points", "points"]);
@@ -317,7 +326,8 @@ test("keeps the Emote Slots title on one line at 1100px without growing its head
   expect(compact.titleText).toBe("Slot");
   expect(compact.titleHeight).toBeLessThanOrEqual(compact.titleLineHeight * 1.25);
   // Slot shares the module page header: title, description, chat commands row, and the save row.
-  expect(compact.height).toBe(164);
+  // All dependencies are on in this fixture, so no lock row is reserved.
+  expect(compact.height).toBe(124);
   expect(Math.abs(compact.switchCenter - compact.titleCenter)).toBeLessThanOrEqual(4);
 });
 
