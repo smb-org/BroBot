@@ -184,7 +184,10 @@ test("slot quote states stay fixed, lock unsafe saves, and persist explicit edit
   expect(wideChat.x).toBeGreaterThan(wideStakes.x);
   await expect(pageRoot.locator(".slot-jackpot-meta")).toHaveText(SLOT_COPY.jackpotCurrent.replace("{amount}", "1.256"));
   const metaBox = await box(pageRoot.locator(".slot-jackpot-meta"));
-  expect(metaBox.width).toBeGreaterThan(200);
+  // The jackpot value is a badge in the header title row, so it never adds a row of its own.
+  const titleRowBox = await box(pageRoot.locator(".settings-page--slot > .page-header .page-header__title-row"));
+  expect(metaBox.y).toBeGreaterThanOrEqual(titleRowBox.y);
+  expect(metaBox.y + metaBox.height).toBeLessThanOrEqual(titleRowBox.y + titleRowBox.height + 0.5);
   const wideRate = await box(rate);
   await page.screenshot({ path: testInfo.outputPath("slot-1920x1080-error.png"), fullPage: false, animations: "disabled" });
   await jackpotWeight.fill("1");
