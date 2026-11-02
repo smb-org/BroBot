@@ -43,6 +43,39 @@ describe("duel command settings", () => {
   });
 });
 
+describe("duel command over the limit", () => {
+  const renderOverLimit = (fieldErrors?: Record<string, string>) => {
+    const copy = duelSettingsEditorCatalog.en;
+    render(<UiProvider>
+      <SettingsEditor
+        spec={settingsEditor.spec}
+        sectionId="commands"
+        settings={{ ...duelSettingsForLanguage("en"), challengeCommand: "!".padEnd(30, "x") }}
+        onChange={() => undefined}
+        texts={copy}
+        templateMessages={copy.templateMessages}
+        {...(fieldErrors === undefined ? {} : { fieldErrors })}
+      />
+    </UiProvider>);
+    return screen.getByRole("textbox", { name: "Challenge command" });
+  };
+
+  it("names the limit once when no other error is given", () => {
+    const challenge = renderOverLimit();
+    expect(challenge).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getAllByText("30 / 25")).toHaveLength(1);
+  });
+
+  it("keeps a specific server reason visible and described instead of the length message", () => {
+    const challenge = renderOverLimit({ challengeCommand: "That command is reserved." });
+    expect(screen.getByText("That command is reserved.")).toBeVisible();
+    expect(screen.queryByText("30 / 25")).toBeNull();
+    const describedBy = challenge.getAttribute("aria-describedby") ?? "";
+    const errorId = describedBy.split(" ").find((id) => document.getElementById(id)?.textContent.includes("That command is reserved."));
+    expect(errorId).toBeDefined();
+  });
+});
+
 describe("duel message settings", () => {
   it("switches a message off without clearing its text and shows its state in read-only mode", () => {
     const saved = duelSettingsForLanguage("en");

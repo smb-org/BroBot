@@ -295,14 +295,12 @@ export function SettingsEditor<Settings extends object>({
     }
     if (field.kind === "text") {
       const maxLength = field.maxLength;
-      // Over the limit the length message (Field's own count label) is the actionable error, so it replaces a generic one.
-      const overLimit = maxLength !== undefined && typeof fieldValue === "string" && textFieldLength(field, fieldValue) > maxLength;
       return (
         <InspectorFieldRow key={field.key} label={copy.label} help={copy.hint}>
           <Field
             id={id}
             label={copy.label}
-            {...(error === undefined || overLimit ? {} : { error })}
+            {...(error === undefined ? {} : { error })}
             // The hint lives in the row's info popover, so a counted field shares one 18px line between counter and error.
             errorInDescription={maxLength !== undefined}
             value={typeof fieldValue === "string" ? fieldValue : ""}
