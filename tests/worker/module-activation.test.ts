@@ -227,6 +227,42 @@ describe("module activation schedule RPCs", () => {
     ).bind(channelId).first()).resolves.toEqual({ action: "module.disabled" });
   });
 
+  it("acknowledges the Temporary VIP panel refresh apart from a failing audit write (protects=reads never republish the revision for an acknowledged marker while the audit entry stays queued; fails_when=the marker waits for the audit batch and each list read bumps again; no_claim=the audit retry interval)", async () => {
+    const channelId = `temp-vips-refresh-${crypto.randomUUID()}`;
+    await insertChannel(channelId);
+    const stub = workerEnvironment.CHANNEL.get(workerEnvironment.CHANNEL.idFromName(channelId));
+    await stub.listTempVips();
+    const revision = async (): Promise<number> => (await stub.getPanelResourceRevisions())["module:temp_vips:data"] ?? 0;
+    const before = await revision();
+    const outboxIds = (state: DurableObjectState): string[] => state.storage.sql
+      .exec<{ event_id: string }>("SELECT event_id FROM temp_vip_outbox ORDER BY event_id").toArray().map((row) => row.event_id);
+
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO temp_vip_outbox (event_id, operation_id, created_at, actor_user_id, code, detail_json) VALUES
+          ('refresh-1', 'panel', '2026-11-01T12:00:00.000Z', NULL, 'temp_vips.panel_refresh', '{}'),
+          ('audit-1', 'op-1', '2026-11-01T12:00:01.000Z', NULL, 'temp_vips.granted', '{}')`,
+      );
+      const target = instance as unknown as { env: Env; listTempVips(): Promise<unknown> };
+      const original = target.env;
+      const failingDb = {
+        prepare: (sql: string) => original.DB.prepare(sql),
+        batch: () => Promise.reject(new Error("audit down")),
+      };
+      target.env = { ...original, DB: failingDb } as unknown as Env;
+      try {
+        await target.listTempVips();
+        expect(outboxIds(state)).toEqual(["audit-1"]);
+        await target.listTempVips();
+        await target.listTempVips();
+      } finally {
+        target.env = original;
+      }
+      expect(outboxIds(state)).toEqual(["audit-1"]);
+    });
+    expect(await revision()).toBe(before + 1);
+  });
+
   it("notifies schedules through a real ChannelObject stub (protects=the schedule-input helper invokes the ChannelObject RPC without a remote call method; fails_when=the helper rejects with the Durable Object call TypeError; no_claim=how a schedule is rendered after its inputs change)", async () => {
     const channelId = `schedule-notify-${crypto.randomUUID()}`;
     await insertChannel(channelId);

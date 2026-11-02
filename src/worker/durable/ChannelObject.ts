@@ -5070,6 +5070,8 @@ export class ChannelObject extends DurableObject<Env> {
       if (logged.length < events.length) {
         await bumpDurablePanelResources(this.ctx.storage, ["module:temp_vips:data"]);
         await this.notifyCommittedPanelResources();
+        // Acknowledge refresh markers now so a failing audit batch cannot keep republishing the revision.
+        await store.acknowledgeOutbox(events.filter((event) => event.code === TEMP_VIP_PANEL_REFRESH_CODE).map((event) => event.eventId));
       }
       if (logged.length > 0) await this.env.DB.batch(logged.map((event) => this.env.DB.prepare(
         `INSERT OR IGNORE INTO event_log
@@ -5084,7 +5086,7 @@ export class ChannelObject extends DurableObject<Env> {
         JSON.stringify(event.detail),
         event.actorUserId,
       )));
-      await store.acknowledgeOutbox(events.map((event) => event.eventId));
+      await store.acknowledgeOutbox(logged.map((event) => event.eventId));
     } catch (error: unknown) {
       console.error("Temporary VIP event-log outbox remains pending.", this.ownChannelId(), error);
     }
