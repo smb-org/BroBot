@@ -301,6 +301,8 @@ export function SettingsEditor<Settings extends object>({
             id={id}
             label={copy.label}
             {...(error === undefined ? {} : { error })}
+            // The hint lives in the row's info popover, so a counted field shares one 18px line between counter and error.
+            errorInDescription={maxLength !== undefined}
             value={typeof fieldValue === "string" ? fieldValue : ""}
             disabled={disabled}
             onChange={(next) => { onChange(field.key, next as Settings[typeof field.key]); }}
