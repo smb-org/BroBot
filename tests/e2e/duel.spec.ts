@@ -184,9 +184,18 @@ test("duel command fields share one reserved line for counter and error at 390px
   await expect(description.locator(".ui-field-error")).toBeVisible();
   expect((await description.boundingBox())?.height).toBe(18);
   expect(await top(accept)).toBe(acceptY);
+
+  // Over the limit the error replaces the counter on the same line: no doubled "n / 25".
+  await challenge.fill("!".padEnd(30, "x"));
+  await expect(challenge).toHaveAttribute("aria-invalid", "true");
+  await expect(description.locator(".ui-field-error")).toBeVisible();
+  await expect(description).not.toContainText("/ 25");
+  await expect(description.locator(".ui-field__count")).toHaveCount(0);
+  expect((await description.boundingBox())?.height).toBe(18);
+  expect(await top(accept)).toBe(acceptY);
 });
 
-test("operators see Duel cancellation disabled with the manager-only reason",async ({ page }) => {
+test("operators see Duel cancellation disabled with the manager-only reason", async ({ page }) => {
   await installLiveCockpitMocks(page, {
     channelId,
     role: "operator",
