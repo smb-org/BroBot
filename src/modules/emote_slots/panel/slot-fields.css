@@ -36,8 +36,8 @@
 .slot-jackpot-row { color: var(--text-2); font-size: 12px; }
 .slot-rate-line { display: flex; height: 40px; align-items: center; gap: 12px; white-space: nowrap; font-size: 12px; }
 .slot-rate-value { margin-left: 8px; font-family: "IBM Plex Mono", ui-monospace, monospace; }
-.settings-page--slot .unit-input__error { min-height: 54px; height: 54px; align-items: flex-start; overflow: hidden; white-space: normal; }
-.settings-page--slot .unit-input__error > .ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 18px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.settings-page--slot .unit-input__error { min-height: 18px; height: 18px; align-items: flex-start; overflow: hidden; white-space: normal; }
+.settings-page--slot .unit-input__error > .ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 1; line-height: 18px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .settings-page--slot .slot-reel-table .unit-input__error { min-height: 18px; height: 18px; align-items: center; overflow: hidden; white-space: nowrap; }
 .settings-page--slot .slot-reel-table .unit-input__error > .ui-truncated-text::before { display: block; overflow: hidden; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .settings-page--slot .slot-reel-field > .ui-field-error { min-height: 54px; height: 54px; align-items: flex-start; overflow: hidden; white-space: normal; }
