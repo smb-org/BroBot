@@ -336,6 +336,13 @@ const ensureTempVipsSchema = (sql: SqlStorage, now: string): void => {
     code TEXT NOT NULL,
     detail_json TEXT NOT NULL
   )`);
+  // Any row change flags the transaction; transaction() turns the flag into one panel refresh marker.
+  sql.exec("CREATE TABLE IF NOT EXISTS temp_vip_panel_dirty (id INTEGER PRIMARY KEY CHECK (id = 1), dirty INTEGER NOT NULL)");
+  sql.exec("INSERT OR IGNORE INTO temp_vip_panel_dirty (id, dirty) VALUES (1, 0)");
+  for (const event of ["INSERT", "UPDATE", "DELETE"]) {
+    sql.exec(`CREATE TRIGGER IF NOT EXISTS temp_vips_panel_dirty_${event.toLowerCase()} AFTER ${event} ON temp_vips
+      BEGIN UPDATE temp_vip_panel_dirty SET dirty = 1; END`);
+  }
 };
 
 const enqueueEventSync = (
@@ -410,7 +417,15 @@ export class TempVipStore {
   }
 
   private transaction<Result>(run: () => Result): Result {
-    return this.storage.transactionSync(run);
+    return this.storage.transactionSync(() => {
+      const result = run();
+      if (this.sql.exec<{ dirty: number }>("SELECT dirty FROM temp_vip_panel_dirty").one().dirty === 1) {
+        this.sql.exec("UPDATE temp_vip_panel_dirty SET dirty = 0");
+        enqueueEventSync(this.sql, this.options.channelId, "panel", crypto.randomUUID(), this.now(), null,
+          TEMP_VIP_PANEL_REFRESH_CODE, {});
+      }
+      return result;
+    });
   }
 
   private async isManaged(): Promise<boolean> {
@@ -1134,11 +1149,6 @@ export class TempVipStore {
           request.person.login, request.person.displayName, twitchStateAt, confirmsIntent ? 1 : 0, request.person.userId,
         );
         const row = rowFor(this.sql, request.person.userId);
-        // Observed rows have no audit event; this marker only makes the open panel refetch.
-        if (existing === null || confirmsIntent) {
-          enqueueEventSync(this.sql, this.options.channelId, operation.operation_id, "panel", now, null,
-            TEMP_VIP_PANEL_REFRESH_CODE, {});
-        }
         this.finishSync(operation.operation_id, {
           status: confirmsIntent ? "intent_confirmed" : existing === null ? "observed" : "already_tracked",
           ...(row === null ? {} : { row: publicRow(row) }),

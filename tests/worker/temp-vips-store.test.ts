@@ -1450,7 +1450,7 @@ describe("temporary VIP operation queue", () => {
       const replay = await store.grant(input);
       expect(replay).toEqual(first);
 
-      const initialEvents = pendingEvents(store);
+      const initialEvents = pendingEvents(store).filter(({ code }) => code !== "temp_vips.panel_refresh");
       expect(initialEvents).toHaveLength(1);
       expect(initialEvents[0]?.eventId).toContain(":retained-result:0");
       expect(initialEvents[0]?.code).toBe("temp_vips.granted");
@@ -1875,6 +1875,36 @@ describe("temporary VIP operation queue", () => {
       await database.prepare("DELETE FROM twitch_login_identity WHERE user_id = ?").bind(id).run();
       await database.prepare("DELETE FROM channels WHERE channel_id = ?").bind(id).run();
     }
+  });
+
+  const refreshMarkers = (store: TempVipStore): number =>
+    pendingEvents(store).filter(({ code }) => code === "temp_vips.panel_refresh").length;
+  const clearOutbox = (store: TempVipStore): Promise<void> =>
+    store.acknowledgeOutbox(pendingEvents(store).map(({ eventId }) => eventId));
+  const intent = (operationId: string, expiresAt: string) => (s: TempVipStore) =>
+    s.recordIntent({ operationId, person, grantedBy: actor, expiresAt });
+  const seedObserved = (s: TempVipStore) => s.addObserved({ operationId: "t-seed", person, actor });
+  const seedGrant = (s: TempVipStore) => s.grant(grantInput({ operationId: "t-seed" }));
+  const noSeed = (): Promise<unknown> => Promise.resolve();
+
+  it.each([
+    ["record_intent (new)", false, noSeed, intent("t-intent", "2026-11-08T12:00:00.000Z")],
+    ["record_intent (edit)", false, intent("t-seed", "2026-11-08T12:00:00.000Z"), intent("t-edit", "2026-11-09T12:00:00.000Z")],
+    ["add_observed", false, noSeed, (s: TempVipStore) => s.addObserved({ operationId: "t-observed", person, actor })],
+    ["classify", false, seedObserved, (s: TempVipStore) => s.classify({
+      operationId: "t-classify", userId: person.userId, classification: "permanent", expiresAt: null, actor })],
+    ["grant", true, noSeed, (s: TempVipStore) => s.grant(grantInput({ operationId: "t-grant" }))],
+    ["extend", true, seedGrant, (s: TempVipStore) => s.extend({
+      operationId: "t-extend", person, grantedBy: actor, durationMs: DAY, maximumRemainingMs: MAXIMUM, source: "command" })],
+    ["end", true, seedGrant, (s: TempVipStore) => s.end({ operationId: "t-end", userId: person.userId })],
+    ["release", true, seedGrant, (s: TempVipStore) => s.release({ operationId: "t-release", userId: person.userId })],
+  ])("queues exactly one panel refresh for %s", async (_name, managed, seed, act) => {
+    await inStore(async (store) => {
+      await seed(store);
+      await clearOutbox(store);
+      await act(store);
+      expect(refreshMarkers(store)).toBe(1);
+    }, { isManaged: () => Promise.resolve(managed) });
   });
 
   it("keeps a disabled module out of observe mode and expiry reminders", async () => {
