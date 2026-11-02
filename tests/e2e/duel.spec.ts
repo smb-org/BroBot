@@ -185,11 +185,11 @@ test("duel command fields share one reserved line for counter and error at 390px
   expect((await description.boundingBox())?.height).toBe(18);
   expect(await top(accept)).toBe(acceptY);
 
-  // Over the limit the error replaces the counter on the same line: no doubled "n / 25".
+  // Over the limit the error names the limit and replaces the counter on the same line: shown exactly once.
   await challenge.fill("!".padEnd(30, "x"));
   await expect(challenge).toHaveAttribute("aria-invalid", "true");
-  await expect(description.locator(".ui-field-error")).toBeVisible();
-  await expect(description).not.toContainText("/ 25");
+  await expect(description.locator(".ui-field-error")).toContainText("30 / 25");
+  await expect(description.getByText("30 / 25")).toHaveCount(1);
   await expect(description.locator(".ui-field__count")).toHaveCount(0);
   expect((await description.boundingBox())?.height).toBe(18);
   expect(await top(accept)).toBe(acceptY);
