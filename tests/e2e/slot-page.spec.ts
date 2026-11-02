@@ -557,6 +557,32 @@ test("Slot numeric errors keep every following control in place (protects=stakes
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test("slot reel field reserves one error line at desktop width (protects=the reel field error line is 18px high so no 54px gap opens above the pair payout field and its error appearing moves nothing; fails_when=the reserve grows again or the payout field shifts when an error appears; no_claim=phone layout)", async ({ page }) => {
+  await installSlotPage(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/channels/${CHANNEL_ID}/modules/emote_slots`);
+
+  const pageRoot = page.locator(".module-detail--settings-page");
+  const reelField = pageRoot.getByTestId("slot-reel-field");
+  const errorLine = reelField.locator(":scope > .ui-field-error");
+  const payout = pageRoot.getByLabel(SLOT_COPY.pairPayout, { exact: true });
+  const top = async (locator: ReturnType<Page["locator"]>): Promise<number> => locator.evaluate((element) => Math.round(element.getBoundingClientRect().y * 100) / 100);
+
+  await expect(payout).toBeVisible();
+  expect((await errorLine.boundingBox())?.height).toBe(18);
+  const payoutY = await top(payout);
+  const rateBottom = await pageRoot.locator(".slot-rate-line").evaluate((element) => element.getBoundingClientRect().bottom);
+  // Rate line, one error line, section gap and the field label: well below the former 54px reserve.
+  expect(payoutY - rateBottom).toBeLessThan(18 + 24 + 40);
+
+  const firstWeight = pageRoot.getByLabel(SLOT_COPY.weightAria.replace("{name}", DEFAULT_SETTINGS.symbols[0]?.name ?? ""));
+  await firstWeight.fill("1.5");
+  await expect(firstWeight).toHaveAttribute("aria-invalid", "true");
+  await expect(errorLine).toContainText(SLOT_COPY.weightError);
+  expect((await errorLine.boundingBox())?.height).toBe(18);
+  expect(await top(payout)).toBe(payoutY);
+});
+
 test("slot reel rows stack at phone width without sideways scrolling (protects=every reel row fits a 390px viewport with its weight input fully visible; fails_when=the reel table scrolls sideways or a weight input leaves the viewport; no_claim=desktop table layout)", async ({ page }) => {
   await installSlotPage(page);
   await page.setViewportSize({ width: 390, height: 844 });
