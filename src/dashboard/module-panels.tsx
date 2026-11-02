@@ -153,7 +153,7 @@ const SlotJackpotMeta = ({ channelId, language }: { channelId: string; language:
   const jackpot = query.data === undefined ? undefined : (query.data.jackpots.emote_slots ?? 0);
   const amount = jackpot === undefined ? "\u00a0" : formatNumber(jackpot, language);
   const text = emoteSlotsCatalog[language].panel.jackpotCurrent.replace("{amount}", amount);
-  return <span aria-live="polite"><Badge mono className="slot-jackpot-meta">{text}</Badge></span>;
+  return <span aria-live="polite" title={text}><Badge mono className="slot-jackpot-meta">{text}</Badge></span>;
 };
 
 export const ModuleCount = ({ count, label }: { count: number; label: (formattedCount: string) => string }): ReactElement => {
