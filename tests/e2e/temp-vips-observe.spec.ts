@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import type { ModuleTempVipRow } from "../../src/modules/contract";
+import { getPanelModuleDataForChannels } from "../../src/worker/panel/module-repository";
+import { insertChannel } from "../unit/fixtures";
+import { TestD1Database } from "../unit/test-d1";
 
 const channelId = "channel-temp-vips-observe";
 const now = "2026-10-31T12:00:00.000Z";
@@ -33,6 +36,22 @@ const json = (body: unknown, status = 200) => ({
   body: JSON.stringify(body),
 });
 
+const productionTempVipModuleMetadata = async () => {
+  const database = new TestD1Database();
+  try {
+    await insertChannel(database, channelId);
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'temp_vips', 1, ?)",
+    ).bind(channelId, JSON.stringify(settings)).run();
+    const { states } = await getPanelModuleDataForChannels(database as unknown as D1Database, [channelId]);
+    const module = states.get(channelId)?.find(({ id }) => id === "temp_vips");
+    if (module === undefined) throw new Error("Production module metadata did not include temp_vips.");
+    return module;
+  } finally {
+    database.close();
+  }
+};
+
 const mockObserveDashboard = async (page: Page): Promise<void> => {
   let rows: ModuleTempVipRow[] = [
     personRow("pixelpilz", "unclassified", null),
@@ -40,6 +59,7 @@ const mockObserveDashboard = async (page: Page): Promise<void> => {
     personRow("nachtfalke", "permanent", null),
   ];
   const timestamp = now;
+  const tempVipModule = await productionTempVipModuleMetadata();
   const channel = {
     channelId,
     login: "beispielkanal",
@@ -56,7 +76,7 @@ const mockObserveDashboard = async (page: Page): Promise<void> => {
     chatSubscription: { status: "enabled", subscriptionId: "sub-temp-vips-observe", reason: null, updatedAt: timestamp },
     streamState: "online",
     streamStartedAt: "2026-10-31T11:00:00.000Z",
-    modules: [{ id: "temp_vips", enabled: true, settings: JSON.stringify(settings), mandatory: false }],
+    modules: [tempVipModule],
     controls: {
       mute: { active: false, until: null, mode: null },
       pause: { active: false, until: null, mode: null },
@@ -94,7 +114,7 @@ const mockObserveDashboard = async (page: Page): Promise<void> => {
       }));
     }
     if (url.pathname === `/api/channels/${channelId}/modules` && method === "GET") {
-      return route.fulfill(json({ modules: [{ ...channel.modules[0], requiredBroadcasterScopes: [], missingBroadcasterScopes: [], optionalBroadcasterScopes: ["channel:manage:vips"], missingOptionalBroadcasterScopes: ["channel:manage:vips"] }] }));
+      return route.fulfill(json({ modules: channel.modules }));
     }
     if (url.pathname === `/api/channels/${channelId}/modules/temp_vips/settings`) {
       return route.fulfill(json({ settings, revision: 1, variables: [] }));

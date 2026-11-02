@@ -8,10 +8,12 @@ import {
   listRequiredBroadcasterScopesForUser,
   moduleBroadcasterScopeState,
   moduleHasRequiredBroadcasterScopes,
+  moduleOptionalBroadcasterScopeState,
   moduleOptionalBroadcasterScopes,
   VOLLUMFANG_BROADCASTER_SCOPES,
 } from "../../src/worker/module-scopes";
 import { getPanelModuleStates } from "../../src/worker/panel/module-repository";
+import { broadcasterScopesForChannel } from "../../src/worker/broadcaster-scope";
 import {
   upsertLoginIdentity,
   setLoginIdentityStatus,
@@ -62,6 +64,18 @@ describe("broadcaster scopes", () => {
     ).first()).resolves.toEqual({
       scopes_json: '["channel:bot","channel:read:ads"]',
       token_scopes_json: '["channel:bot"]',
+    });
+  });
+
+  it("uses current token scopes for operational VIP readiness despite a broader history", async () => {
+    database = new TestD1Database();
+    await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot", "channel:manage:vips"]));
+    await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot"]));
+
+    await expect(broadcasterScopesForChannel(asD1(database), "user-1")).resolves.toEqual(["channel:bot"]);
+    await expect(moduleOptionalBroadcasterScopeState(asD1(database), "user-1", tempVipsModule)).resolves.toEqual({
+      optional: ["channel:manage:vips"],
+      missingOptional: ["channel:manage:vips"],
     });
   });
 

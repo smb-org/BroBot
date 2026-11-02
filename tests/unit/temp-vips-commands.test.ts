@@ -209,20 +209,26 @@ describe("temporary VIP chat commands", () => {
     });
   });
 
-  it("ignores the bot's own managed unVIP moderation event", async () => {
+  it("queues the bot's own managed unVIP moderation event for lifecycle ordering", async () => {
     const context = makeContext();
 
     await processTempVipsChatMessage(makeModerationEvent("unvip", "bot-user"), context);
 
-    expect(context.tempVips.handleModeration).not.toHaveBeenCalled();
+    expect(context.tempVips.handleModeration).toHaveBeenCalledWith(expect.objectContaining({
+      action: "unvip",
+      moderatorUserId: "bot-user",
+    }));
   });
 
-  it("ignores broadcaster-actor unVIP events emitted by managed Twitch mutations", async () => {
-    const context = makeContext();
+  it("processes broadcaster-authored unVIP events in observe mode", async () => {
+    const context = makeContext({ mode: "observe" });
 
     await processTempVipsChatMessage(makeModerationEvent("unvip", "channel-1"), context);
 
-    expect(context.tempVips.handleModeration).not.toHaveBeenCalled();
+    expect(context.tempVips.handleModeration).toHaveBeenCalledWith(expect.objectContaining({
+      action: "unvip",
+      moderatorUserId: "channel-1",
+    }));
   });
 
   it.each([

@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult, StoredPointWelcome } from "../../src/modules/contract";
 import { belaboxModule } from "../../src/modules/belabox";
+import { tempVipsModule } from "../../src/modules/temp_vips";
+import { DEFAULT_TEMP_VIPS_SETTINGS } from "../../src/modules/temp_vips/contracts";
 import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { channelEventsModule } from "../../src/modules/channel_events";
 import { chatVotingModule } from "../../src/modules/chat_voting";
@@ -273,7 +275,7 @@ describe("channel timeline ad breaks", () => {
         "SELECT COUNT(*) AS count FROM channel_timeline_events WHERE kind = 'ad_break'",
       ).first()).resolves.toEqual({ count: 0 });
 
-      await database.prepare("UPDATE twitch_login_identity SET scopes_json = ? WHERE user_id = ?")
+      await database.prepare("UPDATE twitch_login_identity SET token_scopes_json = ? WHERE user_id = ?")
         .bind(JSON.stringify(["channel:read:ads"]), "kanal-a").run();
       await dispatchEventSubNotification(environment(database), adEvent, vi.fn<typeof fetch>(), []);
       await dispatchEventSubNotification(environment(database), adEvent, vi.fn<typeof fetch>(), []);
@@ -834,26 +836,30 @@ describe("module selection", () => {
       await insertChannel(database, "kanal-a");
       await activate(database, "kanal-a", "temp_vips");
       await database.prepare(
+        "UPDATE channel_modules SET settings = ? WHERE channel_id = 'kanal-a' AND module_id = 'temp_vips'",
+      ).bind(JSON.stringify(DEFAULT_TEMP_VIPS_SETTINGS)).run();
+      await database.prepare(
         "INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES ('kanal-a', 1, ?)",
       ).bind(NOW).run();
-      const module = {
-        ...fakeModule("temp_vips", vi.fn().mockRejectedValue(new Error("durable moderation enqueue failed")), ["channel.moderate"]),
-        pauseSafeEventSubTypes: ["channel.moderate"],
-      };
-
-      await expect(dispatchEventSubNotification(environment(database), {
-        channelId: "kanal-a",
-        subscriptionType: "channel.moderate",
-        triggerId: `paused-temp-vip-${action}`,
-        payload: {
-          action,
-          moderator_user_id: "moderator-1",
-          [action]: { user: { user_id: "user-1", user_login: "viewer", user_name: "Viewer" } },
-        },
-        receivedAt: NOW,
-        eventSubTimestamp: NOW,
-      }, sent(), [module])).rejects.toThrow("durable moderation enqueue failed");
-      expect(module.handleEvent).toHaveBeenCalledTimes(1);
+      const handleEvent = vi.spyOn(tempVipsModule, "handleEvent")
+        .mockRejectedValue(new Error("durable moderation enqueue failed"));
+      try {
+        await expect(dispatchEventSubNotification(environment(database), {
+          channelId: "kanal-a",
+          subscriptionType: "channel.moderate",
+          triggerId: `paused-temp-vip-${action}`,
+          payload: {
+            action,
+            moderator_user_id: "moderator-1",
+            [action]: { user: { user_id: "user-1", user_login: "viewer", user_name: "Viewer" } },
+          },
+          receivedAt: NOW,
+          eventSubTimestamp: NOW,
+        }, sent(), [tempVipsModule])).rejects.toThrow("durable moderation enqueue failed");
+        expect(handleEvent).toHaveBeenCalledTimes(1);
+      } finally {
+        handleEvent.mockRestore();
+      }
     } finally {
       database.close();
     }

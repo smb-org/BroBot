@@ -240,9 +240,9 @@ describe("stream timeline against D1 and the channel object", () => {
     const now = new Date().toISOString();
     await worker.DB.prepare(
       `INSERT INTO twitch_login_identity
-         (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'a', 'r', ?, 'connected', ?, ?)`,
-    ).bind(consented, consented, JSON.stringify(["channel:read:ads"]), now, now, now).run();
+         (user_id, login, scopes_json, token_scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'a', 'r', ?, 'connected', ?, ?)`,
+    ).bind(consented, consented, JSON.stringify(["channel:read:ads"]), JSON.stringify(["channel:read:ads"]), now, now, now).run();
     const started = Date.now() - 20_000;
 
     for (const channelId of [consented, anonymous]) {

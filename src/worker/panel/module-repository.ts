@@ -26,10 +26,10 @@ export const getPanelModuleDataForChannels = async (
           WHERE channel_id IN (${placeholders})`,
       ).bind(...ids).all<{ channel_id: string; module_id: string; enabled: number; settings: string }>(),
       db.prepare(
-        `SELECT user_id, scopes_json, status
+        `SELECT user_id, token_scopes_json, status
            FROM twitch_login_identity
           WHERE user_id IN (${placeholders})`,
-      ).bind(...ids).all<{ user_id: string; scopes_json: string; status: string }>(),
+      ).bind(...ids).all<{ user_id: string; token_scopes_json: string; status: string }>(),
     ]);
     const storedByChannel = new Map<string, Map<string, { enabled: number; settings: string }>>();
     const activeByChannel = new Map<string, PanelActiveModule[]>();
@@ -47,7 +47,7 @@ export const getPanelModuleDataForChannels = async (
       let scopes: string[] = [];
       if (row.status === "connected") {
         try {
-          const parsed: unknown = JSON.parse(row.scopes_json);
+          const parsed: unknown = JSON.parse(row.token_scopes_json);
           if (Array.isArray(parsed) && parsed.every((scope) => typeof scope === "string")) scopes = parsed;
         } catch {
           scopes = [];

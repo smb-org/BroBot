@@ -156,7 +156,6 @@ export const processTempVipsChatMessage = async (
     const login = stringValue(eventUser?.user_login) ?? stringValue(event.payload.target_user_login);
     const moderatorUserId = stringValue(event.payload.moderator_user_id);
     if (userId === null || login === null || moderatorUserId === null) return emptyResult();
-    if (action === "unvip" && (moderatorUserId === event.channelId || moderatorUserId === await context.botUserId?.())) return emptyResult();
     await context.tempVips.handleModeration({
       triggerId: event.triggerId,
       action,

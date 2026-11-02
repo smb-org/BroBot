@@ -9,16 +9,19 @@ import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
-vi.mock("../../src/modules/registry", () => ({
-  MODULES: [
-    { id: "chat", eventSubTypes: ["channel.chat.message"] },
-    { id: "timers", eventSubTypes: ["channel.chat.message", "stream.online", "stream.offline"] },
-    { id: "channel_events", mandatory: true, eventSubTypes: ["channel.shoutout.create"] },
-    { id: "moderation", eventSubTypes: ["channel.moderate"] },
-    { id: "temp_vips", broadcasterScopes: ["channel:manage:vips"], eventSubTypes: ["channel.chat.message", "channel.moderate", "channel.vip.remove"], scopeIndependentEventSubTypes: ["channel.chat.message", "channel.moderate"] },
-    { id: "aus", eventSubTypes: ["channel.follow"] },
-  ],
-}));
+vi.mock("../../src/modules/registry", async () => {
+  const { tempVipsModule } = await import("../../src/modules/temp_vips");
+  return {
+    MODULES: [
+      { id: "chat", eventSubTypes: ["channel.chat.message"] },
+      { id: "timers", eventSubTypes: ["channel.chat.message", "stream.online", "stream.offline"] },
+      { id: "channel_events", mandatory: true, eventSubTypes: ["channel.shoutout.create"] },
+      { id: "moderation", eventSubTypes: ["channel.moderate"] },
+      tempVipsModule,
+      { id: "aus", eventSubTypes: ["channel.follow"] },
+    ],
+  };
+});
 
 const asD1 = (database: TestD1Database): D1Database => database as unknown as D1Database;
 
@@ -169,9 +172,12 @@ describe("EventSub reconciliation", () => {
     });
   });
 
-  it("keeps temporary VIP chat and moderation subscriptions available without broadcaster VIP scope", async () => {
+  it("keeps temporary VIP chat and moderation subscriptions without the current VIP token scope", async () => {
     await insertChannel(database, "kanal-a");
     await insertLoginIdentityAndSession(database, "kanal-a", ["channel:bot"]);
+    await database.prepare(
+      "UPDATE twitch_login_identity SET scopes_json = ? WHERE user_id = 'kanal-a'",
+    ).bind(JSON.stringify(["channel:bot", "channel:manage:vips"])).run();
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
        VALUES ('kanal-a', 'temp_vips', 1, '{}')`,
