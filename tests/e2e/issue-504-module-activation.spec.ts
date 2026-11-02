@@ -391,6 +391,24 @@ test("keeps the Slot header and jackpot badge in place when a seven-digit jackpo
   await expect(badge.locator("xpath=..")).toHaveAttribute("title", /1\.000\.000/u);
 });
 
+test("truncates a ten-digit jackpot with an ellipsis and keeps the full value reachable (protects=the jackpot badge is a block that clips with text-overflow, not a flex box; fails_when=the badge is not overflowing, lacks the ellipsis, is a flex container, or loses the full value in its title or text; no_claim=values that fit the badge)", async ({ page }) => {
+  await mockDashboard(page, moduleStates(true, true));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route(`**/api/channels/${channelId}/modules/points/summary`, (route) => route.fulfill(json({ jackpots: { emote_slots: 1_000_000_000 } })));
+
+  await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
+  const badge = page.locator(".slot-jackpot-meta");
+  await expect(badge).toContainText("1.000.000.000");
+  const style = await badge.evaluate((element) => {
+    const computed = getComputedStyle(element);
+    return { overflowing: element.scrollWidth > element.clientWidth, textOverflow: computed.textOverflow, display: computed.display };
+  });
+  expect(style.overflowing).toBe(true);
+  expect(style.textOverflow).toBe("ellipsis");
+  expect(style.display).not.toMatch(/flex/u);
+  await expect(badge.locator("xpath=..")).toHaveAttribute("title", /1\.000\.000\.000/u);
+});
+
 test("keeps the Emote Slots title on one line at 1100px without growing its header", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 900 });
   await mockDashboard(page, moduleStates(true, true));

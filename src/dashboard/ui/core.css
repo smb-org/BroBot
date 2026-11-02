@@ -875,7 +875,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
    The locked-rate footer is two lines (36px); reserve that height for the loading placeholder too. */
 .settings-page--slot .page-header__save, .settings-page--slot .page-header__save-reserve, .settings-page--slot .page-header__save .ui-save-bar--persistent { min-height: 36px; }
 /* Fixed width: long jackpot values are cut with an ellipsis instead of wrapping or widening the header. */
-.settings-page--slot .slot-jackpot-meta { box-sizing: border-box; width: 28ch; max-width: 100%; justify-content: center; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.settings-page--slot .slot-jackpot-meta { box-sizing: border-box; width: 28ch; max-width: 100%; display: inline-block; vertical-align: top; text-align: left; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* Module page headers share one layout: the page actions (chat commands) sit top right on the first row, as high as the icon;
    the save cluster and the more-menu sit one row lower, right-aligned, below them. Narrow screens: see the 768px block. */
 :is(.module-detail, .settings-page) > .page-header { align-items: start; }
