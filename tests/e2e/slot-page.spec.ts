@@ -557,6 +557,23 @@ test("Slot numeric errors keep every following control in place (protects=stakes
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test("slot reel rows stack at phone width without sideways scrolling (protects=every reel row fits a 390px viewport with its weight input fully visible; fails_when=the reel table scrolls sideways or a weight input leaves the viewport; no_claim=desktop table layout)", async ({ page }) => {
+  await installSlotPage(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/channels/${CHANNEL_ID}/modules/emote_slots`);
+
+  const scroller = page.locator(".slot-reel-scroll");
+  await expect(scroller).toBeVisible();
+  expect(await scroller.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const weights = page.locator('.slot-reel-table td[data-label] input[type="number"], .slot-reel-table td[data-label] input:not([type="radio"])');
+  expect(await weights.count()).toBeGreaterThan(0);
+  for (const input of await weights.all()) {
+    const inputBox = await box(input);
+    expect(inputBox.x).toBeGreaterThanOrEqual(0);
+    expect(inputBox.x + inputBox.width).toBeLessThanOrEqual(390);
+  }
+});
+
 test("jackpot header shows zero before the first funded spin (protects=a loaded points summary without an emote_slots entry renders the jackpot amount 0; fails_when=the header shows the label with an empty amount; no_claim=jackpot funding and settlement)", async ({ page }) => {
   await installSlotPage(page);
   await page.route(`**${pointsSummaryPath}`, (route) => route.fulfill({
