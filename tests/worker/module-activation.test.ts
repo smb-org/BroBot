@@ -322,6 +322,16 @@ describe("module activation schedule RPCs", () => {
       const target = instance as unknown as {
         reconcilePanelResources: (revisions: unknown) => Promise<void>;
         listTempVips(): Promise<unknown>;
+        publishTempVipPanelRefresh: (store: unknown) => Promise<void>;
+      };
+      const publishRefresh = target.publishTempVipPanelRefresh.bind(target);
+      let refreshCalls = 0;
+      let secondEntered: () => void = () => undefined;
+      const secondRefreshEntered = new Promise<void>((resolve) => { secondEntered = resolve; });
+      target.publishTempVipPanelRefresh = (store) => {
+        refreshCalls += 1;
+        if (refreshCalls === 2) secondEntered();
+        return publishRefresh(store);
       };
       const original = target.reconcilePanelResources.bind(target);
       let calls = 0;
@@ -338,7 +348,7 @@ describe("module activation schedule RPCs", () => {
       while (calls < 1) await new Promise((resolve) => setTimeout(resolve, 0));
       insertVipRow(state, "u-overlap-b");
       const second = target.listTempVips();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await secondRefreshEntered;
       release();
       await Promise.all([first, second]);
       expect(flag(state)).not.toBe(0);
