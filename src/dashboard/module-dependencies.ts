@@ -15,9 +15,10 @@ export const moduleParticipatesInDependency = (moduleId: string): boolean => {
     || MODULES.some((module) => module.requiresModules?.includes(moduleId) === true);
 };
 
-/** True while at least one module this one requires is off, i.e. a lock notice can appear. */
+/** True while a lock notice can show: a required module is off, or an active module requires this one. */
 export const moduleHasInactiveRequirement = (moduleId: string, modules: readonly PanelModuleState[]): boolean =>
-  (MODULES.find((module) => module.id === moduleId)?.requiresModules ?? []).some((requiredId) => !moduleIsEnabled(modules, requiredId));
+  (MODULES.find((module) => module.id === moduleId)?.requiresModules ?? []).some((requiredId) => !moduleIsEnabled(modules, requiredId))
+  || MODULES.some((module) => module.requiresModules?.includes(moduleId) === true && moduleIsEnabled(modules, module.id));
 
 const serverDependentModules =(details: unknown): string[] | null => {
   if (typeof details !== "object" || details === null || Array.isArray(details)) return null;

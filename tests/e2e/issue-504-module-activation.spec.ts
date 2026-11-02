@@ -55,12 +55,14 @@ const mockDashboard = async (page: Page, initialModules: PanelModuleState[], ini
   let modules = initialModules;
   let errorCode = initialError;
   const toggleRequests: string[] = [];
+  let responseDelayMs = 0;
   const currentChannel = (): PanelChannelState => channelState(modules);
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
     const method = request.method();
+    if (responseDelayMs > 0 && method === "GET" && pathname !== "/api/csrf") await new Promise((resolve) => setTimeout(resolve, responseDelayMs));
 
     if (pathname === "/api/channels") {
       return route.fulfill(json({ channels: [currentChannel()], bot: currentChannel().bot, platformAdmin: false, viewerIsBot: false }));
@@ -105,6 +107,7 @@ const mockDashboard = async (page: Page, initialModules: PanelModuleState[], ini
     toggleRequests,
     setModules: (pointsEnabled: boolean, slotEnabled: boolean, blitzEnabled = false) => { modules = moduleStates(pointsEnabled, slotEnabled, blitzEnabled); },
     setErrorCode: (value: string | null) => { errorCode = value; },
+    setResponseDelay: (value: number) => { responseDelayMs = value; },
   };
 };
 
@@ -294,6 +297,38 @@ test("keeps the Slot header stable while Points toggles at narrow and desktop wi
   }
 
   expect(api.toggleRequests).toEqual(["points", "points", "points", "points"]);
+});
+
+test("reserves the Points lock row while Slot is on and keeps both headers still across delayed loads (protects=Points shows its dependent reason row and neither header nor following content moves when modules and settings arrive late; fails_when=the lock row is missing or header height or content top differs between the early and loaded state; no_claim=changes made while the page is open)", async ({ page }) => {
+  const api = await mockDashboard(page, moduleStates(true, true));
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  await page.goto(`/channels/${channelId}/modules/points?lang=de`);
+  await expect(page.getByText("Erst ausschalten: Slot", { exact: true })).toBeVisible();
+  await expect(page.locator(".module-detail--points .page-header__lock-row")).toHaveCount(1);
+  const pointsLoaded = await pointsHeaderGeometry(page);
+
+  api.setResponseDelay(1500);
+  await page.goto(`/channels/${channelId}/modules/points?lang=de`);
+  await expect(page.locator(".module-detail--points > .module-detail-heading")).toBeVisible();
+  const pointsEarly = await pointsHeaderGeometry(page);
+  await expect(page.getByText("Erst ausschalten: Slot", { exact: true })).toBeVisible();
+  expect(await pointsHeaderGeometry(page)).toEqual(pointsLoaded);
+  expect(pointsEarly).toEqual(pointsLoaded);
+
+  api.setResponseDelay(0);
+  await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
+  await expect(page.getByRole("heading", { name: "Walzen", exact: true })).toBeVisible();
+  const slotLoaded = await slotHeaderGeometry(page);
+
+  api.setResponseDelay(1500);
+  await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
+  await expect(page.locator(".settings-page--slot > .page-header")).toBeVisible();
+  const slotEarly = await slotHeaderGeometry(page);
+  await expect(page.getByRole("heading", { name: "Walzen", exact: true })).toBeVisible();
+  expect(await slotHeaderGeometry(page)).toEqual(slotLoaded);
+  expect(slotEarly.height).toBe(slotLoaded.height);
+  expect(slotEarly.top).toBe(slotLoaded.top);
 });
 
 test("keeps the Emote Slots title on one line at 1100px without growing its header", async ({ page }) => {

@@ -51,7 +51,7 @@
 .slot-reconnect-dialog__actions { display: flex; justify-content: flex-end; margin-top: 20px; }
 .slot-picker-emoji { font-size: 18px; }
 /* The locked-rate footer is two lines (36px); reserve that height so it never grows the header. */
-.settings-page--slot .page-header__save, .settings-page--slot .page-header__save .ui-save-bar--persistent { min-height: 36px; }
+.settings-page--slot .page-header__save, .settings-page--slot .page-header__save-reserve, .settings-page--slot .page-header__save .ui-save-bar--persistent { min-height: 36px; }
 .settings-page--slot .ui-save-bar__message { min-width: 0; overflow: hidden; line-height: 1.3; }
 .settings-page--slot .ui-save-bar__message-copy.ui-truncated-text { overflow: hidden; }
 .settings-page--slot .ui-save-bar__message-copy.ui-truncated-text::before { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.3; text-overflow: ellipsis; white-space: normal; overflow-wrap: normal; word-break: normal; }
