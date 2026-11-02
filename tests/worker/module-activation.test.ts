@@ -310,6 +310,43 @@ describe("module activation schedule RPCs", () => {
     expect(await revision()).toBe(before + 1);
   });
 
+  it("keeps a newer pending Temporary VIP panel refresh when an older overlapping publication succeeds (protects=overlapping flushes are serialized so an older success cannot clear a newer change's flag; fails_when=the older publication clears the flag while the newer one failed and nothing retries; no_claim=the retry interval)", async () => {
+    const channelId = `temp-vips-overlap-${crypto.randomUUID()}`;
+    await insertChannel(channelId);
+    const stub = workerEnvironment.CHANNEL.get(workerEnvironment.CHANNEL.idFromName(channelId));
+    await stub.listTempVips();
+    const flag = (state: DurableObjectState): number => state.storage.sql
+      .exec<{ dirty: number }>("SELECT dirty FROM temp_vip_panel_dirty").one().dirty;
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const target = instance as unknown as {
+        reconcilePanelResources: (revisions: unknown) => Promise<void>;
+        listTempVips(): Promise<unknown>;
+      };
+      const original = target.reconcilePanelResources.bind(target);
+      let calls = 0;
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      target.reconcilePanelResources = (revisions) => {
+        calls += 1;
+        if (calls === 1) return held.then(() => original(revisions));
+        if (calls === 2) return Promise.reject(new Error("publish down"));
+        return original(revisions);
+      };
+      insertVipRow(state, "u-overlap-a");
+      const first = target.listTempVips();
+      while (calls < 1) await new Promise((resolve) => setTimeout(resolve, 0));
+      insertVipRow(state, "u-overlap-b");
+      const second = target.listTempVips();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      release();
+      await Promise.all([first, second]);
+      expect(flag(state)).not.toBe(0);
+      await target.listTempVips();
+      expect(flag(state)).toBe(0);
+    });
+  });
+
   it("notifies schedules through a real ChannelObject stub (protects=the schedule-input helper invokes the ChannelObject RPC without a remote call method; fails_when=the helper rejects with the Durable Object call TypeError; no_claim=how a schedule is rendered after its inputs change)", async () => {
     const channelId = `schedule-notify-${crypto.randomUUID()}`;
     await insertChannel(channelId);

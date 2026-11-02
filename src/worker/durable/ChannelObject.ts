@@ -839,6 +839,7 @@ export class ChannelObject extends DurableObject<Env> {
   private adScheduleRefreshGeneration = 0;
   private adScheduleOperationQueue: Promise<void> = Promise.resolve();
   private belaboxPollQueue: Promise<void> = Promise.resolve();
+  private tempVipPanelRefresh: Promise<void> = Promise.resolve();
   private moduleLifecycleMutationQueue: Promise<void> = Promise.resolve();
   private statisticsWindowAlarmQueue: Promise<void> = Promise.resolve();
   private statisticsWordCounts = new Map<string, BufferedStatisticsWordCount>();
@@ -5064,8 +5065,15 @@ export class ChannelObject extends DurableObject<Env> {
   /**
    * Bumps the panel revision once per row change and publishes it. The dirty flag is cleared only after
    * publication succeeded; otherwise it stays set and the store's retry alarm calls this again.
+   * Runs are serialized so an older publication cannot clear a newer pending flag.
    */
-  private async publishTempVipPanelRefresh(store: TempVipStore): Promise<void> {
+  private publishTempVipPanelRefresh(store: TempVipStore): Promise<void> {
+    const run = this.tempVipPanelRefresh.then(() => this.runTempVipPanelRefresh(store));
+    this.tempVipPanelRefresh = run;
+    return run;
+  }
+
+  private async runTempVipPanelRefresh(store: TempVipStore): Promise<void> {
     if (store.panelRefreshState() === 0) return;
     try {
       if (store.panelRefreshState() === 1) {
