@@ -19,7 +19,7 @@ import { PanelApiError, getChannelModuleSettings, getChannelModuleSummary, getCh
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
-import { moduleDependencyLockReason, moduleHasInactiveRequirement, moduleParticipatesInDependency } from "./module-dependencies";
+import { moduleDependencyLockReason, moduleLockNoticePossible, moduleParticipatesInDependency } from "./module-dependencies";
 import { deriveModuleHowToPlay, moduleChatCommandsForSettings, moduleSettingsForHelp } from "./module-how-to-play-model";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
@@ -1371,7 +1371,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
-  const reserveDependencyHint = moduleHasInactiveRequirement(moduleId, modules);
+  const reserveDependencyHint = moduleLockNoticePossible(moduleId, modules);
   const dependencyLockReason = mandatory ? null : moduleDependencyLockReason(moduleId, !enabled, modules);
   const headerLockHint = dependencyLockReason ?? (manageable ? null : texts.module.managementLocked);
   const disabledReason = mandatory ? mandatoryReason : dependencyLockReason ?? (manageable ? null : texts.module.managementLocked);

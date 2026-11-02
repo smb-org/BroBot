@@ -16,7 +16,7 @@ export const moduleParticipatesInDependency = (moduleId: string): boolean => {
 };
 
 /** True while a lock notice can show: a required module is off, or an active module requires this one. */
-export const moduleHasInactiveRequirement = (moduleId: string, modules: readonly PanelModuleState[]): boolean =>
+export const moduleLockNoticePossible = (moduleId: string, modules: readonly PanelModuleState[]): boolean =>
   (MODULES.find((module) => module.id === moduleId)?.requiresModules ?? []).some((requiredId) => !moduleIsEnabled(modules, requiredId))
   || MODULES.some((module) => module.requiresModules?.includes(moduleId) === true && moduleIsEnabled(modules, module.id));
 
