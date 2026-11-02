@@ -1390,8 +1390,11 @@ export interface ModulePointsAccess {
   };
 }
 
-export type TempVipSource = "command" | "dashboard" | "import" | "channel_points";
+export type TempVipSource = "command" | "dashboard" | "import" | "channel_points" | "observed";
 export type TempVipEndReason = "expired" | "ended_early" | "removed_on_twitch";
+export type ModuleTempVipMode = "observe" | "managed" | "inactive";
+type ModuleTempVipClassification = "unclassified" | "permanent" | "temporary";
+type ModuleTempVipConfirmation = "confirmed" | "awaiting_vip";
 
 export interface ModuleTempVipPerson {
   userId: string;
@@ -1400,7 +1403,7 @@ export interface ModuleTempVipPerson {
 }
 
 export interface ModuleTempVipRow extends ModuleTempVipPerson {
-  expiresAt: string;
+  expiresAt: string | null;
   grantedAt: string;
   grantedByUserId: string | null;
   grantedByLogin: string | null;
@@ -1409,6 +1412,9 @@ export interface ModuleTempVipRow extends ModuleTempVipPerson {
   removalAttempts: number;
   removalError: string | null;
   endReason: "ended_early" | null;
+  classification: ModuleTempVipClassification;
+  confirmation: ModuleTempVipConfirmation;
+  expiryReminderAt: string | null;
 }
 
 export interface ModuleTempVipResult {
@@ -1457,8 +1463,47 @@ export interface ModuleTempVipRemovedEvent {
   eventSubTimestamp: string;
 }
 
+export interface ModuleTempVipModerationEvent {
+  triggerId: string;
+  action: "vip" | "unvip";
+  person: ModuleTempVipPerson;
+  moderatorUserId: string;
+  eventSubTimestamp: string;
+}
+
+export interface ModuleTempVipIntentRequest {
+  operationId: string;
+  person: ModuleTempVipPerson;
+  grantedBy: { userId: string; login: string } | null;
+  expiresAt: string;
+  durationMs?: number;
+  maximumRemainingMs?: number;
+  intentAt?: string;
+}
+
+export interface ModuleTempVipObservedAddRequest {
+  operationId: string;
+  person: ModuleTempVipPerson;
+  actor: { userId: string; login: string };
+}
+
+export interface ModuleTempVipClassifyRequest {
+  operationId: string;
+  userId: string;
+  classification: "permanent" | "temporary";
+  expiresAt: string | null;
+  /** Relative requests stay relative in the durable operation so retries replay identically. */
+  durationMs?: number;
+  actor: { userId: string; login: string };
+}
+
 /** Channel-bound temporary VIP storage and Twitch operations owned by the host. */
 export interface ModuleTempVipAccess {
+  mode: () => Promise<ModuleTempVipMode>;
+  recordIntent: (request: ModuleTempVipIntentRequest) => Promise<ModuleTempVipResult>;
+  addObserved: (request: ModuleTempVipObservedAddRequest) => Promise<ModuleTempVipResult>;
+  classify: (request: ModuleTempVipClassifyRequest) => Promise<ModuleTempVipResult>;
+  handleModeration: (event: ModuleTempVipModerationEvent) => Promise<ModuleTempVipResult>;
   grant: (request: ModuleTempVipGrantRequest) => Promise<ModuleTempVipResult>;
   extend: (request: ModuleTempVipExtendRequest) => Promise<ModuleTempVipResult>;
   importExisting: (request: ModuleTempVipImportRequest) => Promise<ModuleTempVipResult>;
@@ -1474,7 +1519,7 @@ export interface ModuleTempVipAccess {
 /** Route access binds the durable VIP queue to one channel and adds read-only Twitch VIP discovery. */
 export type ModuleTempVipRouteAccess = Pick<
   ModuleTempVipAccess,
-  "grant" | "extend" | "importExisting" | "replayImport" | "end" | "retryRemovalNow" | "release" | "list"
+  "mode" | "addObserved" | "classify" | "grant" | "extend" | "importExisting" | "replayImport" | "end" | "retryRemovalNow" | "release" | "list"
 > & {
   listExisting: () => Promise<
     | { ok: true; people: ModuleTempVipPerson[] }
@@ -2432,6 +2477,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   /** Broadcaster consent the host verifies before the EventSub subscription. */
   broadcasterScopes?: readonly string[];
   eventSubTypes?: readonly string[];
+  /** EventSub types authenticated by the bot token and independent of broadcaster scopes. */
+  scopeIndependentEventSubTypes?: readonly string[];
   /** Lifecycle inputs this optional module must still receive while channel automation is paused. */
   pauseSafeEventSubTypes?: readonly string[];
   routes?: Hono<ModuleRouteEnvironment>;

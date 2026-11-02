@@ -232,7 +232,7 @@ describe("stream timeline against D1 and the channel object", () => {
     expect(JSON.stringify(rows)).not.toContain("creator-user-7");
   });
 
-  it("writes ad breaks only for a channel whose broadcaster granted the ads scope", async () => {
+  it("writes ad breaks from historical ads consent after a narrower login", async () => {
     const consented = "timeline-ads-yes";
     const anonymous = "timeline-ads-no";
     await insertPointChannel(consented);
@@ -240,9 +240,9 @@ describe("stream timeline against D1 and the channel object", () => {
     const now = new Date().toISOString();
     await worker.DB.prepare(
       `INSERT INTO twitch_login_identity
-         (user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'a', 'r', ?, 'connected', ?, ?)`,
-    ).bind(consented, consented, JSON.stringify(["channel:read:ads"]), now, now, now).run();
+         (user_id, login, scopes_json, token_scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'a', 'r', ?, 'connected', ?, ?)`,
+    ).bind(consented, consented, JSON.stringify(["channel:read:ads"]), "[]", now, now, now).run();
     const started = Date.now() - 20_000;
 
     for (const channelId of [consented, anonymous]) {

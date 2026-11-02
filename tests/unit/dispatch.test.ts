@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import type { BotModule, ModuleEvent, ModuleExecutionContext, ModuleResult, StoredPointWelcome } from "../../src/modules/contract";
 import { belaboxModule } from "../../src/modules/belabox";
+import { tempVipsModule } from "../../src/modules/temp_vips";
+import { DEFAULT_TEMP_VIPS_SETTINGS } from "../../src/modules/temp_vips/contracts";
 import { BELABOX_DEFAULT_SETTINGS, BELABOX_STATS_URL_SECRET } from "../../src/modules/belabox/contracts";
 import { channelEventsModule } from "../../src/modules/channel_events";
 import { chatVotingModule } from "../../src/modules/chat_voting";
@@ -826,6 +828,87 @@ describe("module selection", () => {
       [fakeModule("modul-a", () => ({ actions: [], diagnostics: [] }), ["channel.raid"])],
     );
     expect(matches).toEqual([]);
+  });
+
+  it.each(["vip", "unvip"] as const)("dispatches paused temporary-VIP %s lifecycle events and propagates queue failures", async (action) => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await activate(database, "kanal-a", "temp_vips");
+      await database.prepare(
+        "UPDATE channel_modules SET settings = ? WHERE channel_id = 'kanal-a' AND module_id = 'temp_vips'",
+      ).bind(JSON.stringify(DEFAULT_TEMP_VIPS_SETTINGS)).run();
+      await database.prepare(
+        "INSERT INTO channel_controls (channel_id, paused, updated_at) VALUES ('kanal-a', 1, ?)",
+      ).bind(NOW).run();
+      const handleEvent = vi.spyOn(tempVipsModule, "handleEvent")
+        .mockRejectedValue(new Error("durable moderation enqueue failed"));
+      try {
+        await expect(dispatchEventSubNotification(environment(database), {
+          channelId: "kanal-a",
+          subscriptionType: "channel.moderate",
+          triggerId: `paused-temp-vip-${action}`,
+          payload: {
+            action,
+            moderator_user_id: "moderator-1",
+            [action]: { user: { user_id: "user-1", user_login: "viewer", user_name: "Viewer" } },
+          },
+          receivedAt: NOW,
+          eventSubTimestamp: NOW,
+        }, sent(), [tempVipsModule])).rejects.toThrow("durable moderation enqueue failed");
+        expect(handleEvent).toHaveBeenCalledTimes(1);
+      } finally {
+        handleEvent.mockRestore();
+      }
+    } finally {
+      database.close();
+    }
+  });
+
+  it("writes one channel-events moderation entry when temporary-VIP dispatch retries the same EventSub message", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await activate(database, "kanal-a", "temp_vips");
+      await database.prepare(
+        "UPDATE channel_modules SET settings = ? WHERE channel_id = 'kanal-a' AND module_id = 'temp_vips'",
+      ).bind(JSON.stringify(DEFAULT_TEMP_VIPS_SETTINGS)).run();
+
+      const runtime = environment(database);
+      const channel = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        handleTempVipModeration: () => Promise<{ status: string }>;
+      };
+      const handleTempVipModeration = vi.fn()
+        .mockRejectedValueOnce(new Error("durable moderation enqueue failed"))
+        .mockResolvedValue({ status: "ignored" });
+      channel.handleTempVipModeration = handleTempVipModeration;
+      const event = {
+        channelId: "kanal-a",
+        subscriptionType: "channel.moderate",
+        triggerId: "eventsub-moderation-retry-1",
+        payload: {
+          action: "vip",
+          moderator_user_id: "moderator-1",
+          vip: { user_id: "user-1", user_login: "viewer", user_name: "Viewer" },
+        },
+        receivedAt: NOW,
+        eventSubTimestamp: NOW,
+      };
+
+      await expect(dispatchEventSubNotification(runtime, event, sent(), [channelEventsModule, tempVipsModule]))
+        .rejects.toThrow("durable moderation enqueue failed");
+      await dispatchEventSubNotification(runtime, event, sent(), [channelEventsModule, tempVipsModule]);
+
+      const entries = await eventLog(database);
+      expect(entries.filter(({ module_id, code }) =>
+        module_id === "channel_events" && code.startsWith("channel_events.moderation.")).length).toBe(1);
+      expect(handleTempVipModeration).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      database.close();
+    }
   });
 
   it("reports an activation the registry doesn't know", () => {

@@ -1,14 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { adsModule } from "../../src/modules/ads";
+import { tempVipsModule } from "../../src/modules/temp_vips";
 import { LOGIN_SCOPES } from "../../src/worker/auth/oauth";
 import {
   listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUser,
   moduleBroadcasterScopeState,
+  moduleHasRequiredBroadcasterScopes,
+  moduleOptionalBroadcasterScopeState,
   moduleOptionalBroadcasterScopes,
   VOLLUMFANG_BROADCASTER_SCOPES,
 } from "../../src/worker/module-scopes";
+import { getPanelModuleStates } from "../../src/worker/panel/module-repository";
+import { broadcasterHasScope, broadcasterScopesForChannel, broadcasterTokenHasScope } from "../../src/worker/broadcaster-scope";
 import {
   upsertLoginIdentity,
   setLoginIdentityStatus,
@@ -59,6 +64,45 @@ describe("broadcaster scopes", () => {
     ).first()).resolves.toEqual({
       scopes_json: '["channel:bot","channel:read:ads"]',
       token_scopes_json: '["channel:bot"]',
+    });
+  });
+
+  it("keeps historical consent separate from current token scope readiness", async () => {
+    database = new TestD1Database();
+    await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot", "channel:manage:vips"]));
+    await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot"]));
+
+    await expect(broadcasterScopesForChannel(asD1(database), "user-1")).resolves.toEqual([
+      "channel:bot", "channel:manage:vips",
+    ]);
+    await expect(broadcasterHasScope(asD1(database), "user-1", "channel:manage:vips")).resolves.toBe(true);
+    await expect(broadcasterTokenHasScope(asD1(database), "user-1", "channel:manage:vips")).resolves.toBe(false);
+    await expect(moduleOptionalBroadcasterScopeState(asD1(database), "user-1", tempVipsModule)).resolves.toEqual({
+      optional: ["channel:manage:vips"],
+      missingOptional: [],
+    });
+  });
+
+  it("preserves other module scope state for a legacy identity with no current token scopes", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "legacy-channel");
+    await upsertLoginIdentity(asD1(database), {
+      ...loginIdentity("legacy-channel", ["channel:read:ads"]),
+      tokenScopesJson: "[]",
+    });
+
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions WHERE user_id = 'legacy-channel'").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(moduleBroadcasterScopeState(asD1(database), "legacy-channel", adsModule)).resolves.toEqual({
+      required: ["channel:read:ads"],
+      missing: [],
+    });
+    await expect(broadcasterHasScope(asD1(database), "legacy-channel", "channel:read:ads")).resolves.toBe(true);
+
+    const states = await getPanelModuleStates(asD1(database), "legacy-channel");
+    expect(states.find(({ id }) => id === "ads")).toMatchObject({
+      requiredBroadcasterScopes: ["channel:read:ads"],
+      missingBroadcasterScopes: [],
     });
   });
 
@@ -133,5 +177,33 @@ describe("broadcaster scopes", () => {
   it("flags channel:manage:ads on the ads module as an optional scope", () => {
     database = new TestD1Database();
     expect(moduleOptionalBroadcasterScopes(adsModule)).toEqual(["channel:manage:ads", "channel:edit:commercial"]);
+  });
+
+  it("keeps temporary VIP observation available without its managed-mode scope", () => {
+    database = new TestD1Database();
+
+    expect(moduleOptionalBroadcasterScopes(tempVipsModule)).toEqual(["channel:manage:vips"]);
+    expect(moduleHasRequiredBroadcasterScopes(tempVipsModule, [])).toBe(true);
+    expect(tempVipsModule.broadcasterScopes).toEqual([]);
+  });
+
+  it("publishes the VIP scope as optional panel metadata while keeping required scope state empty", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "kanal-vip-scope");
+    await insertLoginIdentityAndSession(database, "kanal-vip-scope", []);
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-vip-scope', 'temp_vips', 1, '{}')",
+    ).run();
+
+    const states = await getPanelModuleStates(asD1(database), "kanal-vip-scope");
+    const state = states.find(({ id }) => id === "temp_vips");
+
+    expect(state).toMatchObject({
+      enabled: true,
+      optionalBroadcasterScopes: ["channel:manage:vips"],
+      missingOptionalBroadcasterScopes: ["channel:manage:vips"],
+    });
+    expect(state).not.toHaveProperty("requiredBroadcasterScopes");
+    expect(state).not.toHaveProperty("missingBroadcasterScopes");
   });
 });

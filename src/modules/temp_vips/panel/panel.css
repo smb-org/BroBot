@@ -18,6 +18,8 @@
   .temp-vips-page__actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); }
   .temp-vips-page__action-buttons { display: flex; flex-wrap: wrap; gap: var(--s2); }
   .temp-vips-page__feedback { flex: 1 1 200px; min-width: 0; min-height: 24px; overflow: hidden; color: var(--text-2); font-size: var(--text-field-label); line-height: 24px; text-overflow: ellipsis; white-space: nowrap; }
+  .temp-vips-mode { display: flex; flex: none; min-height: 72px; align-items: center; padding: var(--s3) var(--s4); border-left: 2px solid var(--brand-text); color: var(--text-2); background: var(--surface-hover); font-size: var(--text-field-label); line-height: 1.45; }
+  .temp-vips-mode--observe { border-left-color: var(--warn); }
   .temp-vips-page__tabs { display: none; }
   .temp-vips-page__tabs-list { display: flex; gap: var(--s1); border-bottom: 1px solid var(--line); }
   .temp-vips-page__tab { min-height: 40px; padding-inline: var(--s3); border: 1px solid transparent; color: var(--text-2); background: transparent; font-size: 13px; cursor: pointer; }
@@ -37,6 +39,7 @@
   .temp-vips-row__label { color: var(--text-3); font-size: var(--text-column-heading); }
   .temp-vips-row__expiry time { font-size: var(--text-field-label); font-variant-numeric: tabular-nums; }
   .temp-vips-row__warning { color: var(--warn) !important; }
+  .temp-vips-row__status { color: var(--brand-text) !important; }
   .temp-vips-row__actions { display: flex; grid-column: 1 / -1; flex-wrap: wrap; gap: var(--s2); }
   .temp-vips-row__actions .ui-button { max-width: 100%; }
 

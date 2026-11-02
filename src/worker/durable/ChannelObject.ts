@@ -86,7 +86,12 @@ import type {
   ModuleTempVipExtendRequest,
   ModuleTempVipGrantRequest,
   ModuleTempVipImportRequest,
+  ModuleTempVipIntentRequest,
+  ModuleTempVipObservedAddRequest,
+  ModuleTempVipClassifyRequest,
+  ModuleTempVipModerationEvent,
   ModuleTempVipOperationRequest,
+  ModuleTempVipMode,
   ModuleTempVipRemovedEvent,
   ModuleTempVipResult,
   ModuleTempVipRow,
@@ -150,7 +155,7 @@ import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../
 import { refreshAdPrewarningAlarm } from "../../modules/ads/adapters/prewarning-alarm";
 import type { AdPrewarningScheduler } from "../../modules/ads/adapters/prewarning-alarm";
 import { getAppAccessToken } from "../app-token";
-import { broadcasterHasScope } from "../broadcaster-scope";
+import { broadcasterHasScope, broadcasterTokenHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { getChannelVip, addChannelVip, removeChannelVip } from "../twitch/vips";
 import { fetchLiveChattersTotal, fetchLiveViewerCount } from "../twitch/aggregate-counts";
@@ -834,6 +839,7 @@ export class ChannelObject extends DurableObject<Env> {
   private adScheduleRefreshGeneration = 0;
   private adScheduleOperationQueue: Promise<void> = Promise.resolve();
   private belaboxPollQueue: Promise<void> = Promise.resolve();
+  private tempVipPanelRefresh: Promise<void> = Promise.resolve();
   private moduleLifecycleMutationQueue: Promise<void> = Promise.resolve();
   private statisticsWindowAlarmQueue: Promise<void> = Promise.resolve();
   private statisticsWordCounts = new Map<string, BufferedStatisticsWordCount>();
@@ -5006,6 +5012,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (channelId === null) throw new Error("Temporary VIP storage requires a named channel Durable Object.");
     return new TempVipStore(this.ctx.storage, {
       channelId,
+      isManaged: () => broadcasterTokenHasScope(this.env.DB, channelId, "channel:manage:vips"),
       twitch: {
         get: (userId) => getChannelVip(this.env, channelId, userId),
         add: (userId, beforeAttempt) => addChannelVip(this.env, channelId, userId, fetch, beforeAttempt),
@@ -5055,11 +5062,50 @@ export class ChannelObject extends DurableObject<Env> {
     });
   }
 
-  private async flushTempVipOutbox(store: TempVipStore): Promise<void> {
-    const events: TempVipOutboxEvent[] = store.pendingOutbox();
-    if (events.length === 0) return;
+  /**
+   * Bumps the panel revision once per row change and publishes it. The dirty flag is cleared only after
+   * publication succeeded; otherwise it stays set and the store's retry alarm calls this again.
+   * Runs are serialized so an older publication cannot clear a newer pending flag.
+   */
+  private publishTempVipPanelRefresh(store: TempVipStore): Promise<void> {
+    const run = this.tempVipPanelRefresh.then(() => this.runTempVipPanelRefresh(store));
+    this.tempVipPanelRefresh = run;
+    return run;
+  }
+
+  private async runTempVipPanelRefresh(store: TempVipStore): Promise<void> {
+    if (store.panelRefreshState() === 0) return;
     try {
-      await this.env.DB.batch(events.map((event) => this.env.DB.prepare(
+      if (store.panelRefreshState() === 1) {
+        await bumpDurablePanelResources(this.ctx.storage, ["module:temp_vips:data"]);
+        store.markPanelBumped();
+      }
+      const channelId = this.ownChannelId();
+      const outcome = { published: true };
+      if (channelId !== null) {
+        // notifyCommittedResources swallows local failures, so the callback reports them itself.
+        await notifyCommittedResources(this.env, channelId, async (revisions) => {
+          try {
+            await this.reconcilePanelResources(revisions);
+            outcome.published = true;
+          } catch (error: unknown) {
+            outcome.published = false;
+            throw error;
+          }
+        });
+      }
+      if (outcome.published) await store.clearPanelDirty();
+    } catch (error: unknown) {
+      console.error("Temporary VIP panel refresh remains pending.", this.ownChannelId(), error);
+    }
+  }
+
+  private async flushTempVipOutbox(store: TempVipStore): Promise<void> {
+    await this.publishTempVipPanelRefresh(store);
+    const logged: TempVipOutboxEvent[] = store.pendingOutbox();
+    if (logged.length === 0) return;
+    try {
+      await this.env.DB.batch(logged.map((event) => this.env.DB.prepare(
         `INSERT OR IGNORE INTO event_log
           (event_id, channel_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id)
          VALUES (?, ?, ?, 'temp_vips', ?, ?, ?, ?)`,
@@ -5072,7 +5118,7 @@ export class ChannelObject extends DurableObject<Env> {
         JSON.stringify(event.detail),
         event.actorUserId,
       )));
-      await store.acknowledgeOutbox(events.map((event) => event.eventId));
+      await store.acknowledgeOutbox(logged.map((event) => event.eventId));
     } catch (error: unknown) {
       console.error("Temporary VIP event-log outbox remains pending.", this.ownChannelId(), error);
     }
@@ -5124,8 +5170,43 @@ export class ChannelObject extends DurableObject<Env> {
     return result;
   }
 
-  public listTempVips(): Promise<ModuleTempVipRow[]> {
-    return this.tempVipStore().list();
+  public async tempVipMode(): Promise<ModuleTempVipMode> {
+    return this.tempVipStore().mode();
+  }
+
+  public async recordTempVipIntent(request: ModuleTempVipIntentRequest): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.recordIntent(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async addObservedTempVip(request: ModuleTempVipObservedAddRequest): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.addObserved(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async classifyTempVip(request: ModuleTempVipClassifyRequest): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.classify(request);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async handleTempVipModeration(event: ModuleTempVipModerationEvent): Promise<ModuleTempVipResult> {
+    const store = this.tempVipStore();
+    const result = await store.handleModeration(event);
+    await this.flushTempVipOutbox(store);
+    return result;
+  }
+
+  public async listTempVips(): Promise<ModuleTempVipRow[]> {
+    const store = this.tempVipStore();
+    const rows = await store.list();
+    await this.flushTempVipOutbox(store);
+    return rows;
   }
 
   public disableTempVipModule(request: TempVipModuleDisableRequest): Promise<TempVipModuleDisableResult> {

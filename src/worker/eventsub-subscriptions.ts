@@ -196,6 +196,7 @@ interface EventSubTargetRow {
   module_id: string | null;
   channel_bot_consent: number;
   broadcaster_scopes_json: string | null;
+  broadcaster_token_scopes_json: string | null;
   broadcaster_status: string | null;
   bot_is_moderator: number | null;
 }
@@ -253,6 +254,7 @@ export const listDesiredEventSubTargets = async (
   const query = `SELECT channel.channel_id, channel_modules.module_id
        , CASE WHEN ${channelBotConsentCondition("channel")} THEN 1 ELSE 0 END AS channel_bot_consent
        , broadcaster_identity.scopes_json AS broadcaster_scopes_json
+       , broadcaster_identity.token_scopes_json AS broadcaster_token_scopes_json
        , broadcaster_identity.status AS broadcaster_status
        , bot_status.is_moderator AS bot_is_moderator
        FROM channels AS channel
@@ -287,10 +289,16 @@ export const listDesiredEventSubTargets = async (
       if (module === undefined) continue;
       const requiredScopes = moduleScopeRequirement(module);
       const grantedScopes = row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_scopes_json) : [];
-      if (requiredScopes.length === 0
-        ? row.channel_bot_consent !== 1
-        : !moduleHasRequiredBroadcasterScopes(module, grantedScopes)) continue;
+      const currentTokenScopes = row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_token_scopes_json) : [];
+      const vipRemovalScopeSatisfied = currentTokenScopes.includes("channel:manage:vips");
+      const moduleScopeSatisfied = requiredScopes.length === 0
+        ? row.channel_bot_consent === 1
+        : moduleHasRequiredBroadcasterScopes(module, grantedScopes);
       for (const subscriptionType of module.eventSubTypes ?? []) {
+        if (subscriptionType === "channel.vip.remove" && !vipRemovalScopeSatisfied) continue;
+        const scopeIndependent = module.scopeIndependentEventSubTypes?.includes(subscriptionType) === true;
+        if (!moduleScopeSatisfied && !scopeIndependent) continue;
+        if (scopeIndependent && row.channel_bot_consent !== 1) continue;
         for (const definition of EVENTSUB_SUBSCRIPTION_DEFINITIONS) {
           if (definition.subscriptionType !== subscriptionType) continue;
           const baseTarget: EventSubTarget = {

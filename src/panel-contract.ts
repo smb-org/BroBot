@@ -157,6 +157,10 @@ export interface PanelModuleState {
   requiredBroadcasterScopes?: string[];
   /** Declared scopes the broadcaster identity does not currently prove. */
   missingBroadcasterScopes?: string[];
+  /** Permissions used only for optional module modes or operator actions. */
+  optionalBroadcasterScopes?: string[];
+  /** Optional permissions the broadcaster identity does not currently prove. */
+  missingOptionalBroadcasterScopes?: string[];
   /** Present when a committed mutation could not reload this module's scope metadata. */
   broadcasterScopeMetadataUnknown?: true;
 }

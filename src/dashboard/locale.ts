@@ -3612,6 +3612,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     },
     "temp_vips.released": (detail) => `VIP-Verwaltung für ${detailText(detail, "login", "Nutzer")} abgegeben`,
     "temp_vips.removal_failed": (detail) => `VIP für ${detailText(detail, "login", "Nutzer")} konnte nicht entfernt werden (${detailText(detail, "reason", "unbekannter Grund")})`,
+    "temp_vips.classified": (detail) => `VIP für ${detailText(detail, "login", "Nutzer")} als ${detail.classification === "permanent" ? "dauerhaft" : "temporär"} eingestuft`,
+    "temp_vips.expire_reminder": (detail) => `Zeit-VIP für ${detailText(detail, "login", "Nutzer")} ist abgelaufen; bitte auf Twitch entfernen`,
   },
   en: {
     "host.action.failed": "Action failed",
@@ -3742,6 +3744,8 @@ export const eventTexts: LocaleCatalog<Record<EventCode, EventText>> = {
     },
     "temp_vips.released": (detail) => `VIP management released for ${detailText(detail, "login", "user")}`,
     "temp_vips.removal_failed": (detail) => `VIP for ${detailText(detail, "login", "user")} could not be removed (${detailText(detail, "reason", "unknown reason")})`,
+    "temp_vips.classified": (detail) => `VIP for ${detailText(detail, "login", "user")} classified as ${detail.classification === "permanent" ? "permanent" : "temporary"}`,
+    "temp_vips.expire_reminder": (detail) => `Temporary VIP for ${detailText(detail, "login", "user")} expired; remove it on Twitch`,
   },
 };
 
@@ -3848,6 +3852,8 @@ export const eventToneEntries: Record<EventCode, EventToneEntry> = {
   "temp_vips.ended": { family: "moderation", tier: "outlined", word: { de: "VIP", en: "VIP" }, numberKey: null, tone: "info" },
   "temp_vips.released": { family: "moderation", tier: "outlined", word: { de: "VIP", en: "VIP" }, numberKey: null, tone: "warning" },
   "temp_vips.removal_failed": { family: "moderation", tier: "outlined", word: { de: "Fehler", en: "Error" }, numberKey: null, tone: "error" },
+  "temp_vips.classified": { family: "moderation", tier: "outlined", word: { de: "VIP", en: "VIP" }, numberKey: null, tone: "info" },
+  "temp_vips.expire_reminder": { family: "moderation", tier: "outlined", word: { de: "VIP", en: "VIP" }, numberKey: null, tone: "warning" },
 };
 
 export function eventText(code: string, language?: DashboardLanguage): string;

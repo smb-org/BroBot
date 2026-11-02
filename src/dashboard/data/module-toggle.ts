@@ -51,6 +51,8 @@ const withoutScopeMetadata = (module: PanelModuleState): PanelModuleState => {
   delete state.broadcasterScopeMetadataUnknown;
   delete state.requiredBroadcasterScopes;
   delete state.missingBroadcasterScopes;
+  delete state.optionalBroadcasterScopes;
+  delete state.missingOptionalBroadcasterScopes;
   return state;
 };
 

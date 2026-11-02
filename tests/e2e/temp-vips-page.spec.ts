@@ -26,6 +26,9 @@ const initialRows: ModuleTempVipRow[] = [
     grantedByUserId: "user_helper",
     grantedByLogin: "helferhase",
     source: "dashboard" as const,
+    classification: "temporary" as const,
+    confirmation: "confirmed" as const,
+    expiryReminderAt: null,
     removalFailedAt: null,
     removalAttempts: 0,
     removalError: null,
@@ -40,6 +43,9 @@ const initialRows: ModuleTempVipRow[] = [
     grantedByUserId: "user_helper",
     grantedByLogin: "helferhase",
     source: "import" as const,
+    classification: "temporary" as const,
+    confirmation: "confirmed" as const,
+    expiryReminderAt: null,
     removalFailedAt: addTime(-60 * 60 * 1_000),
     removalAttempts: 1,
     removalError: "network",
@@ -147,7 +153,7 @@ const mockDashboard = async (page: Page, options: { missingBroadcasterScopes?: s
       }));
     }
     if (url.pathname === `/api/channels/${channelId}/modules` && method === "GET") {
-      return route.fulfill(json({ modules: [{ ...modules[0] as PanelModuleState, settings: JSON.stringify(savedSettings), requiredBroadcasterScopes: ["channel:manage:vips"], missingBroadcasterScopes: options.missingBroadcasterScopes ?? [] }] }));
+      return route.fulfill(json({ modules: [{ ...modules[0] as PanelModuleState, settings: JSON.stringify(savedSettings), requiredBroadcasterScopes: [], missingBroadcasterScopes: [], optionalBroadcasterScopes: ["channel:manage:vips"], missingOptionalBroadcasterScopes: options.missingBroadcasterScopes ?? [] }] }));
     }
     if (url.pathname === `/api/channels/${channelId}/modules/temp_vips/settings` && method === "GET") {
       return route.fulfill(json({ settings: savedSettings, revision: settingsSaves + 1, variables: [] }));
@@ -163,7 +169,7 @@ const mockDashboard = async (page: Page, options: { missingBroadcasterScopes?: s
     }
     if (url.pathname === `/api/channels/${channelId}/modules/temp_vips/vips`) {
       vipsLoads += 1;
-      return route.fulfill(json({ rows, settings: savedSettings, timeZone: "Europe/Berlin", now }));
+      return route.fulfill(json({ rows, settings: savedSettings, timeZone: "Europe/Berlin", mode: (options.missingBroadcasterScopes?.length ?? 0) > 0 ? "observe" : "managed", now }));
     }
     if (url.pathname === `/api/channels/${channelId}/modules/temp_vips/existing-vips`) {
       return route.fulfill(json({ people: existingVips }));
@@ -269,6 +275,7 @@ test("renders the sorted VIP list and dialogs at the requested widths with revie
       await expect(defaultDuration).toBeHidden();
     } else {
       await expect(defaultDuration).toBeVisible();
+      await expect(page.getByText(/Hinweis: Verliert Twitch eine Meldung/u)).toBeVisible();
       const listBox = await page.locator(".temp-vips-page").boundingBox();
       const settingsBox = await defaultDuration.boundingBox();
       expect(listBox).not.toBeNull();
@@ -524,4 +531,8 @@ test("disables the cockpit grant action when broadcaster VIP permission is missi
   await expect(action).toBeDisabled();
   await expect(page.locator(".live-cockpit-actions__grid .live-action__reason")).toContainText("channel:manage:vips");
   expect(api.grants).toHaveLength(0);
+
+  await page.goto(`/channels/${channelId}/modules/temp_vips?lang=de`);
+  await expect(page.locator(".temp-vips-mode")).toContainText("Beobachtungsmodus");
+  await expect(page.getByRole("button", { name: "VIP per Login ergänzen" })).toBeVisible();
 });

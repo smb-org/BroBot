@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { MODULES } from "../modules/registry";
 import { VotekickThresholdExample } from "../modules/votekick/panel/threshold-example";
 import { MODULE_NAVIGATION_CATEGORIES } from "../modules/contract";
-import type { ModulePanelProperties, ModuleRegisteredTemplateVariable } from "../modules/contract";
+import type { ModulePanelProperties, ModuleRegisteredTemplateVariable, ModuleTempVipMode } from "../modules/contract";
 import type { BelaboxSettings } from "../modules/belabox/contracts";
 import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
 import { calculateSlotPayoutRateForDraft } from "../modules/emote_slots/domain/payout-rate";
@@ -303,6 +303,17 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
 }): ReactElement => {
   const [generation, setGeneration] = useState(0);
   const queryClient = useDashboardQueryClient();
+  const tempVipModeQuery = useModuleQuery<{ mode: ModuleTempVipMode } | null>(
+    channelId,
+    "temp_vips",
+    "vips",
+    async (signal) => {
+      if (module.id !== "temp_vips") return null;
+      const { loadTempVips } = await import("../modules/temp_vips/panel/service");
+      return loadTempVips(channelId, signal);
+    },
+    { enabled: module.id === "temp_vips" },
+  );
   const settingsQuery = useModuleQuery(channelId, module.id, "settings", async (signal) => {
     if (module.settingsEditor === undefined) throw new Error("Module settings editor is unavailable.");
     const definitionPromise = loadModuleSettingsEditor(module.id);
@@ -382,6 +393,9 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       retryLabel={dashboardCommonTexts(language).retry}
       channelVariables={loaded.variables}
       registeredTemplateVariables={loaded.registeredTemplateVariables}
+      {...(module.id === "temp_vips" && tempVipModeQuery.data !== null && tempVipModeQuery.data !== undefined
+        ? { tempVipMode: tempVipModeQuery.data.mode }
+        : {})}
       initial={loaded.settings}
       initialRevision={loaded.revision}
       {...(page === undefined ? {} : { page })}
@@ -481,7 +495,7 @@ const BelaboxSettingsPanelMount = ({ module, channelId, language, canManageConte
   />;
 };
 
-const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, viewerIsBot, definition, copy, retryLabel, channelVariables, registeredTemplateVariables, initial, initialRevision, settingsSaveTarget, onReload, page }: {
+const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, language, viewerIsBot, definition, copy, retryLabel, channelVariables, registeredTemplateVariables, tempVipMode, initial, initialRevision, settingsSaveTarget, onReload, page }: {
   module: (typeof MODULES)[number];
   channelId: string;
   canManageContent: boolean;
@@ -492,6 +506,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   retryLabel: string;
   channelVariables: readonly PanelChannelVariable[];
   registeredTemplateVariables: readonly ModuleRegisteredTemplateVariable[];
+  tempVipMode?: ModuleTempVipMode;
   initial: Record<string, unknown>;
   initialRevision: number;
   settingsSaveTarget?: HTMLElement | null;
@@ -607,6 +622,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       {...(copy.messageEnabledLabel === undefined ? {} : { messageEnabledLabel: copy.messageEnabledLabel })}
       {...(effectiveDefaultChatTarget === undefined ? {} : { effectiveDefaultChatTarget })}
       afterNote={votekickThresholdExample(sectionId)}
+      {...(module.id === "temp_vips" && tempVipMode === "observe" ? { hiddenNotes: ["ownershipCaveat"] } : {})}
       onIssuesChange={reportTemplateIssues}
     />
   );

@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 
 import { hasRequiredChannelRole } from "../../contracts/values";
-import { DEFAULT_CHANNEL_TIME_ZONE, type ModuleRouteEnvironment, type ModuleTempVipPerson } from "../contract";
+import { DEFAULT_CHANNEL_TIME_ZONE, type ModuleRouteEnvironment, type ModuleTempVipMode, type ModuleTempVipPerson } from "../contract";
 import { TEMP_VIP_MINIMUM_DURATION_MS } from "./domain";
 import { channelDateTimeToEpoch } from "./domain/time-zone";
 import { tempVipsSettingsSchema } from "./contracts";
@@ -33,6 +33,13 @@ const operatorDenied = (context: { json: (body: { error: string }, status: 403) 
 
 const isOperator = (role: Parameters<typeof hasRequiredChannelRole>[0]): boolean =>
   hasRequiredChannelRole(role, "operator");
+
+const modeDenial = (context: RouteContext, mode: ModuleTempVipMode, expected: "managed" | "observe"): Response | null => {
+  if (mode === expected) return null;
+  const error = mode === "inactive" ? "temp_vips_module_disabled"
+    : mode === "observe" ? "temp_vips_observe_mode" : "temp_vips_not_observe_mode";
+  return context.json({ error }, 409);
+};
 
 export const tempVipsRoutes = new Hono<ModuleRouteEnvironment>();
 
@@ -113,27 +120,102 @@ const actionRequest = async (context: RouteContext): Promise<
 
 tempVipsRoutes.get("/vips", async (context) => {
   const channelId = routeParam(context, "channelId");
-  const [rows, settings, timeZone] = await Promise.all([
-    context.get("tempVips")(channelId).list(),
+  const access = context.get("tempVips")(channelId);
+  const [rows, settings, timeZone, mode] = await Promise.all([
+    access.list(),
     settingsFor(context),
     timeZoneFor(context),
+    access.mode(),
   ]);
   if (settings === null) return context.json({ error: "temp_vips_settings_unavailable" }, 500);
-  rows.sort((left, right) => Date.parse(left.expiresAt) - Date.parse(right.expiresAt) || left.login.localeCompare(right.login));
-  return context.json({ rows, settings, timeZone, now: new Date().toISOString() });
+  const now = Date.now();
+  rows.sort((left, right) => {
+    const rank = (row: typeof left): number => row.classification === "temporary" && row.expiresAt !== null &&
+        Date.parse(row.expiresAt) <= now ? 0
+      : row.classification === "unclassified" || row.confirmation === "awaiting_vip" ? 1
+        : row.classification === "temporary" ? 2 : 3;
+    const expiry = (row: typeof left): number => row.expiresAt === null ? Number.POSITIVE_INFINITY : Date.parse(row.expiresAt);
+    return rank(left) - rank(right) || expiry(left) - expiry(right) || left.login.localeCompare(right.login);
+  });
+  return context.json({ rows, settings, timeZone, mode, now: new Date(now).toISOString() });
 });
 
 tempVipsRoutes.get("/existing-vips", async (context) => {
   if (!isOperator(context.get("channelRole"))) return operatorDenied(context);
-  const result = await context.get("tempVips")(routeParam(context, "channelId")).listExisting();
+  const access = context.get("tempVips")(routeParam(context, "channelId"));
+  const denied = modeDenial(context, await access.mode(), "managed");
+  if (denied !== null) return denied;
+  const result = await access.listExisting();
   if (!result.ok) return context.json({ error: "temp_vips_twitch_unavailable", reason: result.reason }, 502);
   return context.json({ people: result.people });
+});
+
+tempVipsRoutes.post("/vips/observed", async (context) => {
+  if (!isOperator(context.get("channelRole"))) return operatorDenied(context);
+  const request = await actionRequest(context);
+  if (request === null) return context.json({ error: "temp_vips_request_invalid" }, 400);
+  const access = context.get("tempVips")(routeParam(context, "channelId"));
+  const denied = modeDenial(context, await access.mode(), "observe");
+  if (denied !== null) return denied;
+  const resolved = await resolvePerson(context, request.body.login);
+  if (resolved.kind === "missing") return context.json({ error: "temp_vips_user_not_found" }, 404);
+  if (resolved.kind === "unavailable") return context.json({ error: "temp_vips_twitch_unavailable" }, 502);
+  const result = await access.addObserved({ operationId: request.operationId, person: resolved.person, actor: actorFor(context) });
+  return context.json(result);
+});
+
+tempVipsRoutes.post("/vips/:userId/classify", async (context) => {
+  if (!isOperator(context.get("channelRole"))) return operatorDenied(context);
+  const request = await actionRequest(context);
+  if (request === null) return context.json({ error: "temp_vips_request_invalid" }, 400);
+  const classification = request.body.classification;
+  if (classification !== "permanent" && classification !== "temporary") {
+    return context.json({ error: "temp_vips_classification_invalid" }, 400);
+  }
+  const access = context.get("tempVips")(routeParam(context, "channelId"));
+  if (await access.mode() === "inactive") return context.json({ error: "temp_vips_module_disabled" }, 409);
+  let expiresAt: string | null = null;
+  let durationMs: number | undefined;
+  if (classification === "temporary") {
+    const settings = await settingsFor(context);
+    if (settings === null) return context.json({ error: "temp_vips_settings_unavailable" }, 500);
+    const maximumDurationMs = settings.maximumDurationDays * DAY_MS;
+    if (request.body.expiresAtLocal !== undefined) {
+      if (typeof request.body.expiresAtLocal !== "string" || request.body.durationMs !== undefined) {
+        return context.json({ error: "temp_vips_expiry_invalid" }, 400);
+      }
+      const zone = await timeZoneFor(context);
+      const epoch = channelDateTimeToEpoch(request.body.expiresAtLocal, zone);
+      if (epoch === null) return context.json({ error: "temp_vips_expiry_invalid" }, 400);
+      const remaining = epoch - Date.now();
+      if (remaining < TEMP_VIP_MINIMUM_DURATION_MS || remaining > maximumDurationMs) {
+        return context.json({ error: "temp_vips_expiry_invalid" }, 400);
+      }
+      expiresAt = new Date(epoch).toISOString();
+    } else {
+      const requestedDurationMs = durationFrom(request.body.durationMs);
+      if (requestedDurationMs === null) return context.json({ error: "temp_vips_duration_invalid" }, 400);
+      if (requestedDurationMs > maximumDurationMs) return context.json({ error: "temp_vips_maximum_exceeded" }, 400);
+      durationMs = requestedDurationMs;
+    }
+  }
+  const result = await access.classify({
+    operationId: request.operationId,
+    userId: routeParam(context, "userId"),
+    classification,
+    expiresAt,
+    ...(durationMs === undefined ? {} : { durationMs }),
+    actor: actorFor(context),
+  });
+  return context.json(result);
 });
 
 tempVipsRoutes.post("/vips/grant", async (context) => {
   if (!isOperator(context.get("channelRole"))) return operatorDenied(context);
   const request = await actionRequest(context);
   if (request === null) return context.json({ error: "temp_vips_request_invalid" }, 400);
+  const denied = modeDenial(context, await context.get("tempVips")(routeParam(context, "channelId")).mode(), "managed");
+  if (denied !== null) return denied;
   const settings = await settingsFor(context);
   if (settings === null) return context.json({ error: "temp_vips_settings_unavailable" }, 500);
   const durationMs = request.body.durationMs === undefined
@@ -160,6 +242,8 @@ tempVipsRoutes.post("/vips/import", async (context) => {
   if (request === null || typeof request.body.userId !== "string" || request.body.userId.length === 0) {
     return context.json({ error: "temp_vips_request_invalid" }, 400);
   }
+  const denied = modeDenial(context, await context.get("tempVips")(routeParam(context, "channelId")).mode(), "managed");
+  if (denied !== null) return denied;
   const [settings, timeZone] = await Promise.all([settingsFor(context), timeZoneFor(context)]);
   if (settings === null) return context.json({ error: "temp_vips_settings_unavailable" }, 500);
   let durationMs: number | null;
@@ -212,6 +296,8 @@ tempVipsRoutes.post("/vips/:userId/extend", async (context) => {
   const request = await actionRequest(context);
   const durationMs = request === null ? null : durationFrom(request.body.durationMs);
   if (request === null) return context.json({ error: "temp_vips_request_invalid" }, 400);
+  const denied = modeDenial(context, await context.get("tempVips")(routeParam(context, "channelId")).mode(), "managed");
+  if (denied !== null) return denied;
   if (durationMs === null) return context.json({ error: "temp_vips_duration_invalid" }, 400);
   const channelId = routeParam(context, "channelId");
   const [settings, rows] = await Promise.all([settingsFor(context), context.get("tempVips")(channelId).list()]);
@@ -237,6 +323,13 @@ const operationFor = async (
   const request = await actionRequest(context);
   if (request === null) return context.json({ error: "temp_vips_request_invalid" }, 400);
   const access = context.get("tempVips")(routeParam(context, "channelId"));
+  const mode = await access.mode();
+  if (action === "end") {
+    const denied = modeDenial(context, mode, "managed");
+    if (denied !== null) return denied;
+  } else if (mode === "inactive") {
+    return context.json({ error: "temp_vips_module_disabled" }, 409);
+  }
   const userId = routeParam(context, "userId");
   const operation = { operationId: request.operationId, userId };
   const result = action === "release" ? await access.release(operation) : await access.end(operation);
@@ -247,7 +340,10 @@ tempVipsRoutes.post("/vips/:userId/end", (context) => operationFor(context, "end
 tempVipsRoutes.post("/vips/:userId/release", (context) => operationFor(context, "release"));
 tempVipsRoutes.post("/vips/:userId/retry", async (context) => {
   if (!isOperator(context.get("channelRole"))) return operatorDenied(context);
-  const result = await context.get("tempVips")(routeParam(context, "channelId")).retryRemovalNow(routeParam(context, "userId"));
+  const access = context.get("tempVips")(routeParam(context, "channelId"));
+  const denied = modeDenial(context, await access.mode(), "managed");
+  if (denied !== null) return denied;
+  const result = await access.retryRemovalNow(routeParam(context, "userId"));
   return context.json(result);
 });
 

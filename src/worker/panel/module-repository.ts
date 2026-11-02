@@ -1,5 +1,6 @@
 import type { PanelActiveModule, PanelModuleState } from "../../panel-contract";
 import { MODULES } from "../../modules/registry";
+import { moduleOptionalBroadcasterScopes } from "../module-scopes";
 
 /** Builds sidebar/module-page state with one identity-scope read per channel. */
 export interface PanelModuleBatch {
@@ -60,6 +61,7 @@ export const getPanelModuleDataForChannels = async (
       states.set(channelId, MODULES.map((module) => {
         const existing = rows?.get(module.id);
         const required = [...new Set(module.broadcasterScopes ?? [])];
+        const optional = moduleOptionalBroadcasterScopes(module);
         return {
           id: module.id,
           enabled: module.mandatory === true || existing?.enabled === 1,
@@ -68,6 +70,10 @@ export const getPanelModuleDataForChannels = async (
           ...(required.length === 0 ? {} : {
             requiredBroadcasterScopes: required,
             missingBroadcasterScopes: required.filter((scope) => !granted.has(scope)),
+          }),
+          ...(optional.length === 0 ? {} : {
+            optionalBroadcasterScopes: optional,
+            missingOptionalBroadcasterScopes: optional.filter((scope) => !granted.has(scope)),
           }),
         };
       }));

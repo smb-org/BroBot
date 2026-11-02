@@ -336,6 +336,8 @@ export const EVENT_CODES = [
   "temp_vips.ended",
   "temp_vips.released",
   "temp_vips.removal_failed",
+  "temp_vips.classified",
+  "temp_vips.expire_reminder",
   "votekick.rejected",
   "template_parameters_invalid",
 ] as const;

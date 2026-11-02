@@ -1085,6 +1085,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-rule-note { display: flex; align-items: flex-start; gap: 8px; padding: 12px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); color: var(--color-text-2); background: var(--color-rail); font-size: 12px; line-height: 1.5; }
 .ui-rule-note > .ui-icon { flex: none; margin-top: 2px; color: var(--color-text-3); }
 .ui-rule-note > div { min-width: 0; overflow-wrap: anywhere; }
+.ui-settings-editor__hidden-note { visibility: hidden; pointer-events: none; }
 
 .ui-select__option { display: grid; gap: 2px; min-width: 0; }
 .ui-select__option-label { color: var(--text); font-size: 13px; }

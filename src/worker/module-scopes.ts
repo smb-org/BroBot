@@ -53,7 +53,8 @@ const declaredScopes = (module: BotModule | undefined): string[] =>
 
 /** Scopes a module knows about for optional operator actions. */
 export const moduleOptionalBroadcasterScopes = (module: BotModule): string[] =>
-  module.id === "ads" ? [...ADS_OPTIONAL_BROADCASTER_SCOPES] : [];
+  module.id === "ads" ? [...ADS_OPTIONAL_BROADCASTER_SCOPES]
+    : module.id === "temp_vips" ? ["channel:manage:vips"] : [];
 
 const parseScopes = (serialized: string | null | undefined): string[] => {
   if (serialized === null || serialized === undefined) return [];
@@ -88,6 +89,17 @@ export const moduleBroadcasterScopeState = async (
   if (required.length === 0) return { required, missing: [] };
   const granted = new Set(await broadcasterIdentityScopes(db, channelId));
   return { required, missing: required.filter((scope) => !granted.has(scope)) };
+};
+
+export const moduleOptionalBroadcasterScopeState = async (
+  db: D1Database,
+  channelId: string,
+  module: BotModule,
+): Promise<{ optional: string[]; missingOptional: string[] }> => {
+  const optional = moduleOptionalBroadcasterScopes(module);
+  if (optional.length === 0) return { optional, missingOptional: [] };
+  const granted = new Set(await broadcasterIdentityScopes(db, channelId));
+  return { optional, missingOptional: optional.filter((scope) => !granted.has(scope)) };
 };
 
 export const moduleHasRequiredBroadcasterScopes = (

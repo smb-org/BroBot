@@ -2,7 +2,12 @@ import { useEffect, useState, type ReactElement } from "react";
 
 import type { ModuleImmediateActionContentProperties } from "../../contract";
 import { Field, UnitInput } from "../../../dashboard/ui";
-import { loadTempVipActionReadiness, loadTempVips, type TempVipActionReadiness, type TempVipsPanelData } from "./service";
+import {
+  loadTempVips,
+  tempVipActionReadinessForMode,
+  type TempVipActionReadiness,
+  type TempVipsPanelData,
+} from "./service";
 import { tempVipsCockpitActionTexts } from "./action-locale";
 
 interface SettingsLoadState {
@@ -25,8 +30,9 @@ export default function TempVipsCockpitActionContent({ channelId, language, onDr
 
   useEffect(() => {
     const controller = new AbortController();
-    void Promise.all([loadTempVips(channelId, controller.signal), loadTempVipActionReadiness(channelId, controller.signal)]).then(([data, permissionState]) => {
+    void loadTempVips(channelId, controller.signal).then((data) => {
       if (controller.signal.aborted) return;
+      const permissionState = tempVipActionReadinessForMode(data.mode);
       setDuration(Math.min(data.settings.defaultDurationDays, data.settings.maximumDurationDays));
       setState({ channelId, settings: data.settings, timeZone: data.timeZone, permission: permissionState, failed: false });
     }).catch(() => {

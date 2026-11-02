@@ -355,6 +355,10 @@ const invalidatePanelResource = (
     invalidateBelaboxLiveQueries(queryClient, channelId, scheduledQueryRefreshes, resourceRefreshes);
     return;
   }
+  if (moduleId === "temp_vips" && part === "settings") {
+    // The VIP list carries the managed/observe mode, which follows the broadcaster scopes that bump this resource.
+    invalidate(queryClient, queryKeys.module(channelId, moduleId, "vips"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+  }
   invalidate(queryClient, queryKeys.module(channelId, moduleId, part), scheduledQueryRefreshes, resourceRefreshes, channelId);
 };
 

@@ -1,5 +1,5 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import type { ModuleTempVipPerson, ModuleTempVipResult, ModuleTempVipRow } from "../../contract";
+import type { ModuleTempVipMode, ModuleTempVipPerson, ModuleTempVipResult, ModuleTempVipRow } from "../../contract";
 import type { TempVipsSettings } from "../contracts";
 import { createTempVipSubmissionTracker } from "./submission";
 
@@ -11,6 +11,7 @@ export interface TempVipsPanelData {
   rows: ModuleTempVipRow[];
   settings: TempVipsSettings;
   timeZone: string;
+  mode: ModuleTempVipMode;
   now: string;
 }
 
@@ -35,20 +36,16 @@ export interface TempVipActionReadiness {
   metadataUnknown: boolean;
 }
 
-export const loadTempVipActionReadiness = async (channelId: string, signal?: AbortSignal): Promise<TempVipActionReadiness> => {
-  const response = await readJson<{
-    modules: Array<{ id: string; missingBroadcasterScopes?: string[]; broadcasterScopeMetadataUnknown?: true }>;
-  }>(await fetch(
-    `/api/channels/${encodeURIComponent(channelId)}/modules`,
-    signal === undefined ? undefined : { signal },
-  ));
-  const module = response.modules.find(({ id }) => id === "temp_vips");
-  if (module === undefined || module.broadcasterScopeMetadataUnknown === true) {
-    return { ready: false, missingScopes: [], metadataUnknown: true };
-  }
-  const missingScopes = module.missingBroadcasterScopes ?? [];
-  return { ready: missingScopes.length === 0, missingScopes, metadataUnknown: false };
-};
+export const tempVipManagedActionsAvailable = (mode: ModuleTempVipMode | "loading"): boolean => mode === "managed";
+
+export const tempVipActionReadinessForMode = (mode: ModuleTempVipMode): TempVipActionReadiness => ({
+  ready: tempVipManagedActionsAvailable(mode),
+  missingScopes: mode === "observe" ? ["channel:manage:vips"] : [],
+  metadataUnknown: false,
+});
+
+export const loadTempVipActionReadiness = async (channelId: string, signal?: AbortSignal): Promise<TempVipActionReadiness> =>
+  tempVipActionReadinessForMode((await loadTempVips(channelId, signal)).mode);
 
 export const loadExistingVips = async (channelId: string, signal?: AbortSignal): Promise<ModuleTempVipPerson[]> => {
   const response = await readJson<{ people: ModuleTempVipPerson[] }>(await fetch(
@@ -75,6 +72,16 @@ const mutate = async (channelId: string, path: string, body: Record<string, unkn
 
 export const grantTempVip = (channelId: string, login: string, durationMs: number): Promise<ModuleTempVipResult> =>
   mutate(channelId, "/vips/grant", { login, durationMs });
+
+export const addObservedTempVip = (channelId: string, login: string): Promise<ModuleTempVipResult> =>
+  mutate(channelId, "/vips/observed", { login });
+
+export const classifyTempVip = (
+  channelId: string,
+  userId: string,
+  input: { classification: "permanent" } | { classification: "temporary"; durationMs: number } | { classification: "temporary"; expiresAtLocal: string },
+): Promise<ModuleTempVipResult> =>
+  mutate(channelId, `/vips/${encodeURIComponent(userId)}/classify`, input);
 
 export const importTempVip = (channelId: string, userId: string, duration: number | { expiresAtLocal: string }): Promise<ModuleTempVipResult> =>
   mutate(channelId, "/vips/import", { userId, ...(typeof duration === "number" ? { durationMs: duration } : duration) });
