@@ -155,7 +155,7 @@ import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../
 import { refreshAdPrewarningAlarm } from "../../modules/ads/adapters/prewarning-alarm";
 import type { AdPrewarningScheduler } from "../../modules/ads/adapters/prewarning-alarm";
 import { getAppAccessToken } from "../app-token";
-import { broadcasterHasScope } from "../broadcaster-scope";
+import { broadcasterHasScope, broadcasterTokenHasScope } from "../broadcaster-scope";
 import { helixRequest } from "../twitch/helix";
 import { getChannelVip, addChannelVip, removeChannelVip } from "../twitch/vips";
 import { fetchLiveChattersTotal, fetchLiveViewerCount } from "../twitch/aggregate-counts";
@@ -5011,7 +5011,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (channelId === null) throw new Error("Temporary VIP storage requires a named channel Durable Object.");
     return new TempVipStore(this.ctx.storage, {
       channelId,
-      isManaged: () => broadcasterHasScope(this.env.DB, channelId, "channel:manage:vips"),
+      isManaged: () => broadcasterTokenHasScope(this.env.DB, channelId, "channel:manage:vips"),
       twitch: {
         get: (userId) => getChannelVip(this.env, channelId, userId),
         add: (userId, beforeAttempt) => addChannelVip(this.env, channelId, userId, fetch, beforeAttempt),

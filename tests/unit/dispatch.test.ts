@@ -275,7 +275,7 @@ describe("channel timeline ad breaks", () => {
         "SELECT COUNT(*) AS count FROM channel_timeline_events WHERE kind = 'ad_break'",
       ).first()).resolves.toEqual({ count: 0 });
 
-      await database.prepare("UPDATE twitch_login_identity SET token_scopes_json = ? WHERE user_id = ?")
+      await database.prepare("UPDATE twitch_login_identity SET scopes_json = ? WHERE user_id = ?")
         .bind(JSON.stringify(["channel:read:ads"]), "kanal-a").run();
       await dispatchEventSubNotification(environment(database), adEvent, vi.fn<typeof fetch>(), []);
       await dispatchEventSubNotification(environment(database), adEvent, vi.fn<typeof fetch>(), []);

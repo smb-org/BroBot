@@ -1711,7 +1711,7 @@ describe("Module management in the panel", () => {
     await insertMember(database, "channel-demo", "user-1", "broadcaster");
     const failingDatabase = {
       prepare: (sql: string) => {
-        if (sql.includes("SELECT token_scopes_json, status") && sql.includes("twitch_login_identity")) {
+        if (sql.includes("SELECT scopes_json, status") && sql.includes("twitch_login_identity")) {
           throw new Error("scope_lookup_failure");
         }
         return database.prepare(sql);

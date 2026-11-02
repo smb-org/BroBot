@@ -35,7 +35,7 @@ interface ModuleChannelRow {
 }
 
 interface IdentityScopeRow {
-  token_scopes_json: string;
+  scopes_json: string;
   status: string;
 }
 
@@ -73,11 +73,11 @@ const broadcasterIdentityScopes = async (
   channelId: string,
 ): Promise<string[]> => {
   const row = await db.prepare(
-    `SELECT token_scopes_json, status
+    `SELECT scopes_json, status
        FROM twitch_login_identity
       WHERE user_id = ?`,
   ).bind(channelId).first<IdentityScopeRow>();
-  return row?.status === "connected" ? parseScopes(row.token_scopes_json) : [];
+  return row?.status === "connected" ? parseScopes(row.scopes_json) : [];
 };
 
 export const moduleBroadcasterScopeState = async (

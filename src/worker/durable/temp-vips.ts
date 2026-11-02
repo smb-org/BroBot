@@ -585,6 +585,20 @@ export class TempVipStore {
     ).one().present === 1;
   }
 
+  private shouldSupersedeForLaterReleaseSync(operation: TempVipOperationSql): boolean {
+    const current = this.sql.exec<{ status: string; needs_reconcile: number }>(
+      "SELECT status, needs_reconcile FROM temp_vip_ops WHERE operation_id = ?",
+      operation.operation_id,
+    ).toArray()[0];
+    const needsReconcile = current?.status === "running"
+      ? current.needs_reconcile === 1
+      : operation.needs_reconcile === 1;
+    const removal = operation.kind === "end" || operation.kind === "expire";
+    const reconciliation = needsReconcile &&
+      (operation.kind === "grant" || operation.kind === "extend" || operation.kind === "import");
+    return (removal || reconciliation) && this.hasLaterReleaseSync(operation);
+  }
+
   private requeueSync(
     operation: TempVipOperationSql,
     payload: OperationPayload,
@@ -736,10 +750,11 @@ export class TempVipStore {
             claimed.operation.operation_id,
           ).toArray()[0];
           if (current?.status === "running") {
-            if (current.kind === "grant" || current.kind === "extend" || current.kind === "end" || current.kind === "expire") {
+            if (current.kind === "grant" || current.kind === "extend" || current.kind === "import" ||
+                current.kind === "end" || current.kind === "expire") {
               this.setNeedsReconcileSync(current.operation_id, true);
             }
-            if ((current.kind === "end" || current.kind === "expire") && this.hasLaterReleaseSync(current)) {
+            if (this.shouldSupersedeForLaterReleaseSync(current)) {
               this.finishSync(current.operation_id, { status: "superseded" }, now, current.attempts + 1);
             } else {
               this.requeueSync(current, decodePayload(current.payload_json), now, TEMP_VIP_RETRY_MS, current.attempts + 1);
@@ -1800,7 +1815,7 @@ export class TempVipStore {
       ).one();
       if (attempts.count >= TEMP_VIP_MUTATIONS_PER_WINDOW) {
         const retryAt = (attempts.earliest ?? nowMs) + TEMP_VIP_MUTATION_WINDOW_MS;
-        if ((operation.kind === "end" || operation.kind === "expire") && this.hasLaterReleaseSync(operation)) {
+        if (this.shouldSupersedeForLaterReleaseSync(operation)) {
           this.finishSync(operation.operation_id, { status: "superseded" }, now, operation.attempts);
         } else {
           this.requeueSync(operation, payload, now, retryAt - nowMs, operation.attempts);
@@ -1821,7 +1836,7 @@ export class TempVipStore {
     attempts: number,
   ): void {
     this.transaction(() => {
-      if ((operation.kind === "end" || operation.kind === "expire") && this.hasLaterReleaseSync(operation)) {
+      if (this.shouldSupersedeForLaterReleaseSync(operation)) {
         this.finishSync(operation.operation_id, { status: "superseded" }, now, attempts);
       } else {
         this.requeueSync(operation, payload, now, delayMs, attempts);

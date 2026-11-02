@@ -1311,6 +1311,68 @@ describe("temporary VIP operation queue", () => {
     });
   });
 
+  it("supersedes a deferred grant when release queues during a failed reconciliation lookup", async () => {
+    let managed = false;
+    let markLookupStarted: (() => void) | undefined;
+    let finishLookup: ((result: { ok: false; reason: string }) => void) | undefined;
+    const lookupStarted = new Promise<void>((resolve) => { markLookupStarted = resolve; });
+    const get = vi.fn(() => {
+      markLookupStarted?.();
+      return new Promise<{ ok: true; isVip: boolean } | { ok: false; reason: string }>((resolve) => {
+        finishLookup = resolve;
+      });
+    });
+    let moduleEnabled = true;
+    const commitModuleDisable = vi.fn(({ expectedRevision }: { expectedRevision: number }) => {
+      moduleEnabled = false;
+      return Promise.resolve({ revision: expectedRevision + 1, lastDisabledRevision: expectedRevision + 1 });
+    });
+
+    await inStore(async (store, state) => {
+      await store.recordIntent({
+        operationId: "release-race-intent",
+        person,
+        grantedBy: actor,
+        durationMs: DAY,
+        maximumRemainingMs: MAXIMUM,
+        intentAt: BASE_NOW,
+        expiresAt: new Date(BASE_MS + DAY).toISOString(),
+      });
+      managed = false;
+      await expect(store.grant(grantInput({ operationId: "release-race-deferred-grant" })))
+        .resolves.toMatchObject({ status: "queued" });
+
+      managed = true;
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      const reconciliation = store.runExpiry();
+      await lookupStarted;
+
+      const release = store.release({ operationId: "release-race-release", userId: person.userId });
+      expect(state.storage.sql.exec<{ status: string }>(
+        "SELECT status FROM temp_vip_ops WHERE operation_id = 'release-race-release'",
+      ).one().status).toBe("queued");
+      finishLookup?.({ ok: false, reason: "network" });
+
+      await expect(reconciliation).resolves.toMatchObject({ queued: 0 });
+      await expect(release).resolves.toMatchObject({ status: "released" });
+      expect(operationResult(state.storage, "release-race-deferred-grant").status).toBe("superseded");
+      expect(await store.list()).toEqual([]);
+
+      await expect(store.disableModule({
+        operationId: "release-race-disable",
+        actor: { userId: actor.userId, sessionId: "session-1" },
+        expectedRevision: 1,
+      })).resolves.toMatchObject({ status: "disabled", revision: 2, lastDisabledRevision: 2 });
+      expect(moduleEnabled).toBe(false);
+      expect(commitModuleDisable).toHaveBeenCalledOnce();
+    }, {
+      isManaged: () => Promise.resolve(managed),
+      isModuleEnabled: () => Promise.resolve(moduleEnabled),
+      twitch: { get },
+      commitModuleDisable,
+    });
+  });
+
   it("cancels a queued removal retry when releasing management", async () => {
     let removeCount = 0;
     const remove = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) => {

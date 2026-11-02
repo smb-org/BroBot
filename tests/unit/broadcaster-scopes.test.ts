@@ -13,7 +13,7 @@ import {
   VOLLUMFANG_BROADCASTER_SCOPES,
 } from "../../src/worker/module-scopes";
 import { getPanelModuleStates } from "../../src/worker/panel/module-repository";
-import { broadcasterScopesForChannel } from "../../src/worker/broadcaster-scope";
+import { broadcasterHasScope, broadcasterScopesForChannel, broadcasterTokenHasScope } from "../../src/worker/broadcaster-scope";
 import {
   upsertLoginIdentity,
   setLoginIdentityStatus,
@@ -67,15 +67,42 @@ describe("broadcaster scopes", () => {
     });
   });
 
-  it("uses current token scopes for operational VIP readiness despite a broader history", async () => {
+  it("keeps historical consent separate from current token scope readiness", async () => {
     database = new TestD1Database();
     await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot", "channel:manage:vips"]));
     await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot"]));
 
-    await expect(broadcasterScopesForChannel(asD1(database), "user-1")).resolves.toEqual(["channel:bot"]);
+    await expect(broadcasterScopesForChannel(asD1(database), "user-1")).resolves.toEqual([
+      "channel:bot", "channel:manage:vips",
+    ]);
+    await expect(broadcasterHasScope(asD1(database), "user-1", "channel:manage:vips")).resolves.toBe(true);
+    await expect(broadcasterTokenHasScope(asD1(database), "user-1", "channel:manage:vips")).resolves.toBe(false);
     await expect(moduleOptionalBroadcasterScopeState(asD1(database), "user-1", tempVipsModule)).resolves.toEqual({
       optional: ["channel:manage:vips"],
-      missingOptional: ["channel:manage:vips"],
+      missingOptional: [],
+    });
+  });
+
+  it("preserves other module scope state for a legacy identity with no current token scopes", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "legacy-channel");
+    await upsertLoginIdentity(asD1(database), {
+      ...loginIdentity("legacy-channel", ["channel:read:ads"]),
+      tokenScopesJson: "[]",
+    });
+
+    await expect(database.prepare("SELECT COUNT(*) AS count FROM auth_sessions WHERE user_id = 'legacy-channel'").first())
+      .resolves.toEqual({ count: 0 });
+    await expect(moduleBroadcasterScopeState(asD1(database), "legacy-channel", adsModule)).resolves.toEqual({
+      required: ["channel:read:ads"],
+      missing: [],
+    });
+    await expect(broadcasterHasScope(asD1(database), "legacy-channel", "channel:read:ads")).resolves.toBe(true);
+
+    const states = await getPanelModuleStates(asD1(database), "legacy-channel");
+    expect(states.find(({ id }) => id === "ads")).toMatchObject({
+      requiredBroadcasterScopes: ["channel:read:ads"],
+      missingBroadcasterScopes: [],
     });
   });
 
