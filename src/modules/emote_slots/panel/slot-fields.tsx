@@ -291,11 +291,11 @@ export function SlotReelTable({
             </span>
           </span></td>
           <td><span className="slot-source-badge">{symbol.source === "emoji" ? copy.emoji : symbol.source === "twitch" ? copy.twitch : copy.sevenTv}</span></td>
-          <td>{numberValue(symbol.weight, (next) => updateNumber(index, "weight", next),
+          <td data-label={copy.weight}>{numberValue(symbol.weight, (next) => updateNumber(index, "weight", next),
             copy.weightAria.replace("{name}", symbol.name), 1, 99, numericError(symbol.weight, 1, 99, copy.weightError))}</td>
-          <td>{symbol.isJackpot ? <span className="slot-jackpot-row">{copy.jackpotRow}</span> : <div className="slot-multiplier"><span aria-hidden="true">×</span>{numberValue(symbol.triple,
+          <td data-label={copy.triple}>{symbol.isJackpot ? <span className="slot-jackpot-row">{copy.jackpotRow}</span> : <div className="slot-multiplier"><span aria-hidden="true">×</span>{numberValue(symbol.triple,
             (next) => updateNumber(index, "triple", next), copy.tripleAria.replace("{name}", symbol.name), 2, 500, numericError(symbol.triple, 2, 500, copy.tripleError))}</div>}</td>
-          <td><NativeRadio className="slot-jackpot-radio" name="slot-jackpot-symbol" value={symbol.id}
+          <td data-label={copy.jackpotRow}><NativeRadio className="slot-jackpot-radio" name="slot-jackpot-symbol" value={symbol.id}
             checked={symbol.isJackpot} disabled={disabled || readOnly}
             onChange={() => onChange(parsedSettings.symbols.map((item) => item.id === symbol.id
               // The jackpot row hides its multiplier, so an invalid one would lock save invisibly.

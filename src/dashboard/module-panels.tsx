@@ -19,7 +19,7 @@ import { PanelApiError, getChannelModuleSettings, getChannelModuleSummary, getCh
 import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "./data";
 import { apiErrorText, dashboardCommonTexts, dashboardLanguage, dashboardTexts, formatNumber, serverFieldErrorText, type DashboardLanguage } from "./locale";
 import { moduleDescription, moduleName, moduleScopePurpose, moduleWorkspaceTexts, statusWord } from "./module-labels";
-import { moduleDependencyLockReason, moduleParticipatesInDependency } from "./module-dependencies";
+import { moduleDependencyLockReason, moduleLockNoticePossible, moduleParticipatesInDependency } from "./module-dependencies";
 import { deriveModuleHowToPlay, moduleChatCommandsForSettings, moduleSettingsForHelp } from "./module-how-to-play-model";
 import { templateTextLength } from "../template";
 import { modulePermissionsAreMissing } from "./channel-health";
@@ -28,7 +28,7 @@ import { resolveMessageEnabledFlags } from "../contracts/resolve-message-enabled
 import type { MessageEnabledField } from "../contracts/resolve-message-enabled";
 import { dashboardRoutePath, type DashboardRoute } from "./router";
 import { effectivePanelTemplateVariables, panelTemplateOptions, registeredModuleTemplateGroup, type PanelChannelVariable } from "./ui/template-variable-options";
-import { Button, ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, Section, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorCatalog, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
+import { Badge, Button, ChatCommandsHelp, ConfirmDialog, EditorShell, Icon, ListRow, LoadState, LoadStateLines, NavigationIcon, notify, PageHeader, registerDashboardNavigationGuard, Section, SettingsEditor, SettingsPage, StatusLed, LockedReason, Tabs, mapServerFieldErrors, textFieldLength, useDraftGuard, type EditorInvalidField, type EditorSection, type SettingsEditorCatalog, type SettingsEditorDefinition, type SettingsEditorSpec, type TemplateTextFieldVariable, type StatusLedState } from "./ui";
 import { useDraft } from "./ui/useDraft";
 import { useChannelSettings } from "./data/channel-settings";
 import { Switch as SwitchPrimitive } from "./ui/primitives/switch";
@@ -153,7 +153,7 @@ const SlotJackpotMeta = ({ channelId, language }: { channelId: string; language:
   const jackpot = query.data === undefined ? undefined : (query.data.jackpots.emote_slots ?? 0);
   const amount = jackpot === undefined ? "\u00a0" : formatNumber(jackpot, language);
   const text = emoteSlotsCatalog[language].panel.jackpotCurrent.replace("{amount}", amount);
-  return <span className="slot-jackpot-meta" aria-live="polite" title={jackpot === undefined ? undefined : text}>{text}</span>;
+  return <span aria-live="polite" title={text}><Badge mono className="slot-jackpot-meta">{text}</Badge></span>;
 };
 
 export const ModuleCount = ({ count, label }: { count: number; label: (formattedCount: string) => string }): ReactElement => {
@@ -235,7 +235,7 @@ interface ModulePanelMountProperties {
 interface ModuleSettingsPageOptions {
   title: string;
   subtitle: string;
-  meta?: ReactNode;
+  badges?: ReactNode;
   icon: ReactNode;
   active: boolean;
   onToggle: (active: boolean) => void;
@@ -355,7 +355,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       kind="modules"
       title={page.title}
       subtitle={page.subtitle}
-      {...(page.meta === undefined ? {} : { meta: page.meta })}
+      {...(page.badges === undefined ? {} : { badges: page.badges })}
       icon={page.icon}
       {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
       active={page.active}
@@ -921,7 +921,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
     kind="modules"
     title={page.title}
     subtitle={page.subtitle}
-    {...(page.meta === undefined ? {} : { meta: page.meta })}
+    {...(page.badges === undefined ? {} : { badges: page.badges })}
     {...(module.id === "belabox" ? { topContent: <BelaboxSettingsPanelMount key="belabox-panel" module={module} channelId={channelId}
       language={language} canManageContent={canManageContent}
       lowBitrateKbps={typeof currentValue.lowBitrateKbps === "number" ? currentValue.lowBitrateKbps : 1_000}
@@ -1371,7 +1371,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
   const mandatoryReason = registered?.mandatoryReason?.[dashboardLanguage()] ?? labels.mandatoryReason;
   const enabled = mandatory || moduleState?.enabled === true;
   const manageable = canManageModules(ownRole);
-  const reserveDependencyHint = moduleParticipatesInDependency(moduleId);
+  const reserveDependencyHint = moduleLockNoticePossible(moduleId, modules);
   const dependencyLockReason = mandatory ? null : moduleDependencyLockReason(moduleId, !enabled, modules);
   const headerLockHint = dependencyLockReason ?? (manageable ? null : texts.module.managementLocked);
   const disabledReason = mandatory ? mandatoryReason : dependencyLockReason ?? (manageable ? null : texts.module.managementLocked);
@@ -1411,7 +1411,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
         page={{
           title: details.name,
           subtitle: details.description,
-          ...(moduleId === "emote_slots" ? { meta: <SlotJackpotMeta channelId={channelId} language={dashboardLanguage()} /> } : {}),
+          ...(moduleId === "emote_slots" ? { badges: <SlotJackpotMeta channelId={channelId} language={dashboardLanguage()} /> } : {}),
           icon: iconFor(moduleId, "module-heading-glyph"),
           active: enabled,
           onToggle: (nextEnabled) => { if (nextEnabled !== enabled) onToggle(); },

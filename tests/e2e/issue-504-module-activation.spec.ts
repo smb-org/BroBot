@@ -55,12 +55,14 @@ const mockDashboard = async (page: Page, initialModules: PanelModuleState[], ini
   let modules = initialModules;
   let errorCode = initialError;
   const toggleRequests: string[] = [];
+  let responseDelayMs = 0;
   const currentChannel = (): PanelChannelState => channelState(modules);
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());
     const method = request.method();
+    if (responseDelayMs > 0 && method === "GET" && pathname !== "/api/csrf") await new Promise((resolve) => setTimeout(resolve, responseDelayMs));
 
     if (pathname === "/api/channels") {
       return route.fulfill(json({ channels: [currentChannel()], bot: currentChannel().bot, platformAdmin: false, viewerIsBot: false }));
@@ -105,6 +107,7 @@ const mockDashboard = async (page: Page, initialModules: PanelModuleState[], ini
     toggleRequests,
     setModules: (pointsEnabled: boolean, slotEnabled: boolean, blitzEnabled = false) => { modules = moduleStates(pointsEnabled, slotEnabled, blitzEnabled); },
     setErrorCode: (value: string | null) => { errorCode = value; },
+    setResponseDelay: (value: number) => { responseDelayMs = value; },
   };
 };
 
@@ -253,7 +256,11 @@ test("keeps the Points page header and following content in place across Slot st
     api.setModules(true, false);
     await page.goto(`/channels/${channelId}/modules/points?lang=de`);
     await expect(page.getByText("Erst ausschalten: Slot", { exact: true })).toHaveCount(0);
-    expect(await pointsHeaderGeometry(page)).toEqual(dependentGeometry);
+    // Points requires nothing, so it never reserves a lock row; the notice only occupies space while it shows.
+    await expect(page.locator(".module-detail--points .page-header__lock-row")).toHaveCount(0);
+    const freeGeometry = await pointsHeaderGeometry(page);
+    expect(freeGeometry.top).toBe(dependentGeometry.top);
+    expect(freeGeometry.height).toBeLessThanOrEqual(dependentGeometry.height);
   }
 });
 
@@ -281,10 +288,125 @@ test("keeps the Slot header stable while Points toggles at narrow and desktop wi
     await expect(page.getByText("Benötigt: Punkte", { exact: true })).toHaveCount(0);
     await expect(page.locator(".slot-jackpot-meta")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Walzen", exact: true })).toBeVisible();
-    expect(await slotHeaderGeometry(page)).toEqual(lockedGeometry);
+    // With every dependency on, no lock row is reserved: the header only shrinks and nothing moves up top.
+    await expect(page.locator(".settings-page--slot .page-header__lock-row")).toHaveCount(0);
+    const unlockedGeometry = await slotHeaderGeometry(page);
+    expect(unlockedGeometry.top).toBe(lockedGeometry.top);
+    expect(unlockedGeometry.height).toBeLessThan(lockedGeometry.height);
+    expect(unlockedGeometry.contentTop).toBeLessThan(lockedGeometry.contentTop);
   }
 
   expect(api.toggleRequests).toEqual(["points", "points", "points", "points"]);
+});
+
+test("reserves the Points lock row while Slot is on and keeps both headers still across delayed loads (protects=Points shows its dependent reason row and neither header nor following content moves when modules and settings arrive late; fails_when=the lock row is missing or header height or content top differs between the early and loaded state; no_claim=changes made while the page is open)", async ({ page }) => {
+  const api = await mockDashboard(page, moduleStates(true, true));
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  await page.goto(`/channels/${channelId}/modules/points?lang=de`);
+  await expect(page.getByText("Erst ausschalten: Slot", { exact: true })).toBeVisible();
+  await expect(page.locator(".module-detail--points .page-header__lock-row")).toHaveCount(1);
+  const pointsLoaded = await pointsHeaderGeometry(page);
+
+  api.setResponseDelay(1500);
+  await page.goto(`/channels/${channelId}/modules/points?lang=de`);
+  await expect(page.locator(".module-detail--points > .module-detail-heading")).toBeVisible();
+  const pointsEarly = await pointsHeaderGeometry(page);
+  await expect(page.getByText("Erst ausschalten: Slot", { exact: true })).toBeVisible();
+  expect(await pointsHeaderGeometry(page)).toEqual(pointsLoaded);
+  expect(pointsEarly).toEqual(pointsLoaded);
+
+  api.setResponseDelay(0);
+  await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
+  await expect(page.getByRole("heading", { name: "Walzen", exact: true })).toBeVisible();
+  const slotLoaded = await slotHeaderGeometry(page);
+
+  api.setResponseDelay(1500);
+  await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
+  await expect(page.locator(".settings-page--slot > .page-header")).toBeVisible();
+  const slotEarly = await slotHeaderGeometry(page);
+  await expect(page.getByRole("heading", { name: "Walzen", exact: true })).toBeVisible();
+  expect(await slotHeaderGeometry(page)).toEqual(slotLoaded);
+  expect(slotEarly.height).toBe(slotLoaded.height);
+  expect(slotEarly.top).toBe(slotLoaded.top);
+});
+
+const slotHeaderAndNext = async (page: Page): Promise<{ top: number; height: number; nextTop: number }> => page
+  .locator(".settings-page--slot > .page-header")
+  .evaluate((header) => {
+    const next = header.nextElementSibling;
+    if (next === null) throw new Error("Slot header has no following content.");
+    return {
+      top: Math.round((header.getBoundingClientRect().top + window.scrollY) * 100) / 100,
+      height: Math.round(header.getBoundingClientRect().height * 100) / 100,
+      nextTop: Math.round((next.getBoundingClientRect().top + window.scrollY) * 100) / 100,
+    };
+  });
+
+test("keeps the Slot header still while the lazy editor chunk and its CSS arrive (protects=a cold Slot load does not resize the header when the editor script and stylesheet land; fails_when=header height or the following content top differs before and after the delayed assets; no_claim=layout inside the editor body)", async ({ page }) => {
+  await mockDashboard(page, moduleStates(true, true));
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.route(/\/(?:src\/modules\/emote_slots\/panel\/|assets\/[^/]*(?:slot|emote)[^/]*)/iu, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await route.continue();
+  });
+
+  await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
+  await expect(page.locator(".settings-page--slot > .page-header")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Walzen", exact: true })).toHaveCount(0);
+  const early = await slotHeaderAndNext(page);
+  await expect(page.getByRole("heading", { name: "Walzen", exact: true })).toBeVisible({ timeout: 20_000 });
+  const loaded = await slotHeaderAndNext(page);
+  expect(early.top).toBe(loaded.top);
+  expect(early.height).toBe(loaded.height);
+  expect(early.nextTop).toBe(loaded.nextTop);
+});
+
+test("keeps the Slot header and jackpot badge in place when a seven-digit jackpot arrives late (protects=the jackpot badge has a fixed width, truncates instead of wrapping, and keeps the full text in its title; fails_when=header height or badge box changes when 1000000 replaces the placeholder; no_claim=values wider than the badge, which are cut)", async ({ page }) => {
+  await mockDashboard(page, moduleStates(true, true));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route(`**/api/channels/${channelId}/modules/points/summary`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.fulfill(json({ jackpots: { emote_slots: 1_000_000 } }));
+  });
+
+  await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
+  const badge = page.locator(".slot-jackpot-meta");
+  await expect(badge).toBeVisible();
+  await expect(badge).not.toContainText("1.000.000");
+  const readBoxes = async () => badge.evaluate((element) => {
+    const rect = (target: Element | null) => {
+      if (target === null) throw new Error("Slot header or badge is missing.");
+      const { x, y, width, height } = target.getBoundingClientRect();
+      return { x, y, width, height };
+    };
+    return { header: rect(element.closest(".page-header")), badge: rect(element) };
+  });
+  await expect.poll(async () => (await readBoxes()).header.height).toBeGreaterThan(0);
+  const early = await readBoxes();
+  await expect(badge).not.toContainText("1.000.000");
+  await expect(badge).toContainText("1.000.000");
+  const loaded = await readBoxes();
+  expect(loaded).toEqual(early);
+  await expect(badge.locator("xpath=..")).toHaveAttribute("title", /1\.000\.000/u);
+});
+
+test("truncates a ten-digit jackpot with an ellipsis and keeps the full value reachable (protects=the jackpot badge is a block that clips with text-overflow, not a flex box; fails_when=the badge is not overflowing, lacks the ellipsis, is a flex container, or loses the full value in its title or text; no_claim=values that fit the badge)", async ({ page }) => {
+  await mockDashboard(page, moduleStates(true, true));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route(`**/api/channels/${channelId}/modules/points/summary`, (route) => route.fulfill(json({ jackpots: { emote_slots: 1_000_000_000 } })));
+
+  await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
+  const badge = page.locator(".slot-jackpot-meta");
+  await expect(badge).toContainText("1.000.000.000");
+  const style = await badge.evaluate((element) => {
+    const computed = getComputedStyle(element);
+    return { overflowing: element.scrollWidth > element.clientWidth, textOverflow: computed.textOverflow, display: computed.display };
+  });
+  expect(style.overflowing).toBe(true);
+  expect(style.textOverflow).toBe("ellipsis");
+  expect(style.display).not.toMatch(/flex/u);
+  await expect(badge.locator("xpath=..")).toHaveAttribute("title", /1\.000\.000\.000/u);
 });
 
 test("keeps the Emote Slots title on one line at 1100px without growing its header", async ({ page }) => {
@@ -317,7 +439,8 @@ test("keeps the Emote Slots title on one line at 1100px without growing its head
   expect(compact.titleText).toBe("Slot");
   expect(compact.titleHeight).toBeLessThanOrEqual(compact.titleLineHeight * 1.25);
   // Slot shares the module page header: title, description, chat commands row, and the save row.
-  expect(compact.height).toBe(166);
+  // All dependencies are on in this fixture, so no lock row is reserved.
+  expect(compact.height).toBe(124);
   expect(Math.abs(compact.switchCenter - compact.titleCenter)).toBeLessThanOrEqual(4);
 });
 
