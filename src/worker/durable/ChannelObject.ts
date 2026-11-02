@@ -147,6 +147,7 @@ import {
   TempVipStore,
   type TempVipModuleDisableRequest,
   type TempVipModuleDisableResult,
+  TEMP_VIP_PANEL_REFRESH_CODE,
   type TempVipOutboxEvent,
 } from "./temp-vips";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
@@ -5064,8 +5065,13 @@ export class ChannelObject extends DurableObject<Env> {
   private async flushTempVipOutbox(store: TempVipStore): Promise<void> {
     const events: TempVipOutboxEvent[] = store.pendingOutbox();
     if (events.length === 0) return;
+    const logged = events.filter((event) => event.code !== TEMP_VIP_PANEL_REFRESH_CODE);
     try {
-      await this.env.DB.batch(events.map((event) => this.env.DB.prepare(
+      if (logged.length < events.length) {
+        await bumpDurablePanelResources(this.ctx.storage, ["module:temp_vips:data"]);
+        await this.notifyCommittedPanelResources();
+      }
+      if (logged.length > 0) await this.env.DB.batch(logged.map((event) => this.env.DB.prepare(
         `INSERT OR IGNORE INTO event_log
           (event_id, channel_id, created_at, module_id, trigger_id, code, detail_json, actor_user_id)
          VALUES (?, ?, ?, 'temp_vips', ?, ?, ?, ?)`,

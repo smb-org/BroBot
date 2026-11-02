@@ -669,6 +669,8 @@ describe("dashboard realtime messages", () => {
     ["module:belabox:live", "belabox"],
     ["module:chat_voting:data", "module-data"],
     ["module:ads:schedule", "ads"],
+    ["module:temp_vips:settings", "temp-vips-scope"],
+    ["module:temp_vips:data", "temp-vips-data"],
     ["channels", "channel-list"],
   ] as const)("maps revision %s to its query area", async (resource, area) => {
     const revisionChannel = `revision-${area}`;
@@ -705,6 +707,8 @@ describe("dashboard realtime messages", () => {
       belabox: [moduleQueryKey(revisionChannel, "belabox", "streams")],
       "module-data": [moduleQueryKey(revisionChannel, "chat_voting", "panel"), queryKeys.channel(revisionChannel, "live-cockpit", { modules: "chat_voting:true" })],
       ads: [moduleQueryKey(revisionChannel, "ads", "schedule")],
+      "temp-vips-scope": [moduleQueryKey(revisionChannel, "temp_vips", "settings"), moduleQueryKey(revisionChannel, "temp_vips", "vips")],
+      "temp-vips-data": [moduleQueryKey(revisionChannel, "temp_vips", "vips")],
       "channel-list": [queryKeys.channels()],
     };
     const affected = affectedKeys[area];

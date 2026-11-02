@@ -1835,6 +1835,48 @@ describe("temporary VIP operation queue", () => {
     }
   });
 
+  it("bumps the temp VIP data revision when moderation delivers an observed VIP", async () => {
+    const database = (env as unknown as { DB: D1Database }).DB;
+    const id = channelId();
+    const timestamp = new Date(BASE_MS).toISOString();
+    await database.prepare(
+      "INSERT INTO channels (channel_id, login, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    ).bind(id, id, id, timestamp, timestamp).run();
+    await database.prepare(
+      `INSERT INTO twitch_login_identity
+        (user_id, login, scopes_json, token_scopes_json, access_token_ciphertext,
+         refresh_token_ciphertext, expires_at, status, reason, created_at, updated_at)
+       VALUES (?, ?, '["channel:manage:vips"]', '[]', 'fictional_access', 'fictional_refresh', ?, 'connected', NULL, ?, ?)`,
+    ).bind(id, id, "2099-11-01T12:00:00.000Z", timestamp, timestamp).run();
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'temp_vips', 1, '{}')",
+    ).bind(id).run();
+
+    const stub = namespace.get(namespace.idFromName(id));
+    try {
+      await runInDurableObject(stub, async (instance) => {
+        const object = instance as unknown as {
+          handleTempVipModeration: (event: Parameters<TempVipStore["handleModeration"]>[0]) => Promise<ModuleTempVipResult>;
+          getPanelResourceRevisions: () => Promise<Record<string, number>>;
+        };
+        expect((await object.getPanelResourceRevisions())["module:temp_vips:data"]).toBeUndefined();
+        const result = await object.handleTempVipModeration({
+          triggerId: "observed-revision-1",
+          action: "vip",
+          person: { userId: "user-observed", login: "observed", displayName: "Observed" },
+          moderatorUserId: "mod-2",
+          eventSubTimestamp: BASE_NOW,
+        });
+        expect(result.status).toBe("observed");
+        expect((await object.getPanelResourceRevisions())["module:temp_vips:data"]).toBe(1);
+      });
+    } finally {
+      await database.prepare("DELETE FROM channel_modules WHERE channel_id = ? AND module_id = 'temp_vips'").bind(id).run();
+      await database.prepare("DELETE FROM twitch_login_identity WHERE user_id = ?").bind(id).run();
+      await database.prepare("DELETE FROM channels WHERE channel_id = ?").bind(id).run();
+    }
+  });
+
   it("keeps a disabled module out of observe mode and expiry reminders", async () => {
     await inStore(async (store, state) => {
       insertRow(state.storage, { expiresAt: "2026-11-01T11:59:00.000Z" });
@@ -2059,6 +2101,8 @@ describe("temporary VIP operation queue", () => {
       await store.runExpiry(BASE_NOW);
 
       expect(operationResult(state.storage, "restart-local-moderation").status).toBe("observed");
+      // The channel object acknowledges the panel refresh marker after flushing; do the same so the alarm reflects queue work only.
+      await store.acknowledgeOutbox(pendingEvents(store).map((event) => event.eventId));
       expect(state.storage.sql.exec<{ status: string; next_attempt_at: string }>(
         "SELECT status, next_attempt_at FROM temp_vip_ops WHERE operation_id = 'restart-managed-grant'",
       ).one().status).toBe("queued");

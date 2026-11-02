@@ -37,6 +37,9 @@ export type TempVipTwitch = {
   remove: (userId: string, beforeAttempt: () => Promise<boolean>) => Promise<{ ok: true } | TempVipTwitchFailure>;
 };
 
+/** Outbox marker that is not an audit event: the channel object turns it into a panel revision bump. */
+export const TEMP_VIP_PANEL_REFRESH_CODE = "temp_vips.panel_refresh";
+
 export interface TempVipOutboxEvent {
   eventId: string;
   operationId: string;
@@ -1131,6 +1134,11 @@ export class TempVipStore {
           request.person.login, request.person.displayName, twitchStateAt, confirmsIntent ? 1 : 0, request.person.userId,
         );
         const row = rowFor(this.sql, request.person.userId);
+        // Observed rows have no audit event; this marker only makes the open panel refetch.
+        if (existing === null || confirmsIntent) {
+          enqueueEventSync(this.sql, this.options.channelId, operation.operation_id, "panel", now, null,
+            TEMP_VIP_PANEL_REFRESH_CODE, {});
+        }
         this.finishSync(operation.operation_id, {
           status: confirmsIntent ? "intent_confirmed" : existing === null ? "observed" : "already_tracked",
           ...(row === null ? {} : { row: publicRow(row) }),
