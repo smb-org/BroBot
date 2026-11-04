@@ -366,6 +366,7 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
 
   const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
     event.preventDefault();
+    if (action.content?.hideSubmit === true) return;
     void run(new FormData(event.currentTarget));
   };
 

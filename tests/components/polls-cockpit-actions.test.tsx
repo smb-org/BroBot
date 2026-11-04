@@ -6,7 +6,9 @@ import { moduleQueryKey } from "../../src/dashboard/data";
 import { setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { UiProvider } from "../../src/dashboard/ui";
 import type { PollsEntry, PollsRun } from "../../src/modules/polls/contracts";
-import { loadFreshPrediction, loadPollsActionReadiness, loadPollsState, resolvePollsRun, startPollsEntry } from "../../src/modules/polls/panel/service";
+import PollsCockpitResolveActionContent from "../../src/modules/polls/panel/resolve-cockpit-action-content";
+import { loadFreshPrediction, loadPollsActionReadiness, loadPollsState, reconcilePolls, resolvePollsRun, startPollsEntry } from "../../src/modules/polls/panel/service";
+import PollsCockpitStartActionContent from "../../src/modules/polls/panel/cockpit-action-content";
 import type { PollsPanelState } from "../../src/modules/polls/panel/service";
 import { clickSelectOption, renderWithQuery } from "../query-test-utils";
 
@@ -15,6 +17,7 @@ vi.mock("../../src/modules/polls/panel/service", async (importOriginal) => ({
   loadFreshPrediction: vi.fn(),
   loadPollsActionReadiness: vi.fn(),
   loadPollsState: vi.fn(),
+  reconcilePolls: vi.fn(),
   resolvePollsRun: vi.fn(),
   startPollsEntry: vi.fn(),
 }));
@@ -91,6 +94,7 @@ afterEach(() => {
 beforeEach(() => {
   vi.mocked(loadPollsActionReadiness).mockReset().mockResolvedValue({ ready: true, missingScopes: [], metadataUnknown: false });
   vi.mocked(loadPollsState).mockReset().mockResolvedValue(stateWith());
+  vi.mocked(reconcilePolls).mockReset().mockResolvedValue();
   vi.mocked(loadFreshPrediction).mockReset().mockResolvedValue(openPrediction);
   vi.mocked(startPollsEntry).mockReset().mockResolvedValue({ ...openPrediction, id: "started-poll", kind: "poll" });
   vi.mocked(resolvePollsRun).mockReset().mockResolvedValue({ ...openPrediction, status: "resolved", winningChoiceId: "boss-falls" });
@@ -159,6 +163,99 @@ describe("polls cockpit actions", () => {
     fireEvent.click(within(predictionRow).getByRole("button", { name: /Starten|Start/u }));
     await waitFor(() => expect(startPollsEntry).toHaveBeenCalledWith("channel-polls", predictionEntry.id));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /Umfrage\/Prediction starten|Start poll\/prediction/u })).toBeNull());
+  });
+
+  it("keeps the start dialog open when Enter submits its search field", async () => {
+    vi.mocked(loadPollsState).mockResolvedValue(stateWith([pollEntry]));
+    const onActionStart = vi.fn(() => Date.now());
+    renderWithQuery(<UiProvider><ImmediateActions
+      channelId="channel-polls"
+      streamState="online"
+      role="operator"
+      modules={[{ id: "polls", enabled: true }]}
+      onActionStart={onActionStart}
+    /></UiProvider>);
+
+    const startAction = await screen.findByRole("button", { name: /Umfrage\/Prediction starten|Start poll\/prediction/u });
+    await waitFor(() => expect(startAction).toBeEnabled());
+    fireEvent.click(startAction);
+    const dialog = await screen.findByRole("dialog", { name: /Umfrage\/Prediction starten|Start poll\/prediction/u });
+    const search = await within(dialog).findByRole("textbox", { name: /Einträge suchen|Search entries/u });
+    fireEvent.change(search, { target: { value: "Mittag" } });
+    fireEvent.submit(search.closest("form") as HTMLFormElement);
+
+    expect(await screen.findByRole("dialog", { name: /Umfrage\/Prediction starten|Start poll\/prediction/u })).toBe(dialog);
+    expect(search).toHaveProperty("value", "Mittag");
+    expect(onActionStart).not.toHaveBeenCalled();
+    expect(startPollsEntry).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a stale active run when the start dialog opens", async () => {
+    const stalePoll = { ...openPrediction, id: "stale-poll", kind: "poll" as const, title: pollEntry.title };
+    vi.mocked(loadPollsState).mockResolvedValue({
+      active: { poll: stalePoll, prediction: null },
+      open: [],
+      entries: [pollEntry],
+    });
+    vi.mocked(reconcilePolls).mockImplementation(() => {
+      vi.mocked(loadPollsState).mockResolvedValue(stateWith([pollEntry]));
+      return Promise.resolve();
+    });
+    renderPollsActions();
+
+    const startAction = await screen.findByRole("button", { name: /Umfrage\/Prediction starten|Start poll\/prediction/u });
+    await waitFor(() => expect(startAction).toBeEnabled());
+    fireEvent.click(startAction);
+    const dialog = await screen.findByRole("dialog", { name: /Umfrage\/Prediction starten|Start poll\/prediction/u });
+    const start = await within(dialog).findByRole("button", { name: /Starten|Start/u });
+
+    await waitFor(() => expect(reconcilePolls).toHaveBeenCalledTimes(1));
+    expect(reconcilePolls).toHaveBeenCalledWith("channel-polls", false);
+    await waitFor(() => expect(start).toBeEnabled());
+  });
+
+  it("preserves valid polls data after a failed availability refresh and renders both action contents", async () => {
+    const cachedState = stateWith([pollEntry], openPrediction);
+    vi.mocked(loadPollsState).mockRejectedValue(new Error("Polls state refresh failed."));
+    const dataKey = moduleQueryKey("channel-polls", "polls", "data");
+    const { queryClient } = renderWithQuery(<UiProvider><ImmediateActions
+      channelId="channel-polls"
+      streamState="online"
+      role="operator"
+      modules={[{ id: "polls", enabled: true }]}
+    /></UiProvider>, undefined, { initialData: [{ queryKey: dataKey, data: cachedState }], staleTime: 0, gcTime: 60_000 });
+
+    await waitFor(() => expect(loadPollsState).toHaveBeenCalled());
+    await waitFor(() => expect(queryClient.getQueryData(dataKey)).toEqual(cachedState));
+    expect(queryClient.getQueryData(dataKey)).toEqual(cachedState);
+    const resolveAction = await screen.findByRole("button", { name: /Prediction auflösen|Resolve prediction/u });
+    await waitFor(() => expect(resolveAction.getAttribute("title")).toMatch(/Offene Predictions konnten nicht geprüft werden|Open predictions could not be checked/u));
+
+    const startAction = await screen.findByRole("button", { name: /Umfrage\/Prediction starten|Start poll\/prediction/u });
+    await waitFor(() => expect(startAction).toBeEnabled());
+    fireEvent.click(startAction);
+    const startDialog = await screen.findByRole("dialog", { name: /Umfrage\/Prediction starten|Start poll\/prediction/u });
+    expect(await within(startDialog).findByRole("article", { name: pollEntry.title })).not.toBeNull();
+    fireEvent.click(within(startDialog).getByRole("button", { name: /Abbrechen|Cancel/u }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Umfrage\/Prediction starten|Start poll\/prediction/u })).toBeNull());
+
+    renderWithQuery(<UiProvider><PollsCockpitResolveActionContent channelId="channel-polls" language="en" /></UiProvider>, undefined, { queryClient });
+    expect(await screen.findByRole("radio", { name: "Boss fällt" })).not.toBeNull();
+    expect(queryClient.getQueryData(dataKey)).toEqual(cachedState);
+  });
+
+  it.each(["missing", "invalid"] as const)("shows error status rows when either action content receives %s state", async (stateKind) => {
+    const dataKey = moduleQueryKey("channel-polls", "polls", "data");
+    vi.mocked(loadPollsState).mockRejectedValue(new Error("Polls state refresh failed."));
+    const initialData = stateKind === "invalid" ? [{ queryKey: dataKey, data: null }] : [];
+    const { queryClient } = renderWithQuery(<UiProvider><>
+      <PollsCockpitStartActionContent channelId="channel-polls" language="en" />
+      <PollsCockpitResolveActionContent channelId="channel-polls" language="en" />
+    </></UiProvider>, undefined, { initialData, staleTime: 0 });
+
+    await waitFor(() => expect(loadPollsState).toHaveBeenCalled());
+    expect(await screen.findAllByRole("alert")).toHaveLength(2);
+    expect(queryClient.getQueryData(dataKey)).toBe(stateKind === "invalid" ? null : undefined);
   });
 
   it("keeps the resolve action unavailable without an open prediction and enables it when one appears", async () => {

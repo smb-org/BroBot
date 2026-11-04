@@ -44,7 +44,7 @@ const pollsStartPermission: ModuleImmediateActionCondition = {
 const pollsResolveAvailability: ModuleImmediateActionCondition = {
   query: {
     moduleId: POLLS_MODULE_ID,
-    part: "data",
+    part: "action-availability-resolve",
     load: async (channelId, signal): Promise<PollsPanelState | null> => {
       try {
         return await loadPollsState(channelId, signal);

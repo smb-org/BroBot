@@ -6,7 +6,7 @@ import { connectedRefetchInterval, useModuleQuery } from "../../../dashboard/dat
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import { Button, Select } from "../../../dashboard/ui";
 import type { PollsRunChoice } from "../contracts";
-import { openPollsPredictions } from "./action-model";
+import { isPollsPanelState, openPollsPredictions } from "./action-model";
 import { pollsCockpitActionTexts } from "./action-locale";
 import { pollsPanelTexts } from "./locale";
 import { ResolvePredictionContents } from "./ResolveDialog";
@@ -29,7 +29,10 @@ export default function PollsCockpitResolveActionContent({ channelId, language, 
   const stateQuery = useModuleQuery(channelId, "polls", "data", (signal) => loadPollsState(channelId, signal), {
     refetchInterval: connectedRefetchInterval(realtimeStatus === "connected", 15_000),
   });
-  const predictions = useMemo(() => stateQuery.data === undefined ? [] : openPollsPredictions(stateQuery.data), [stateQuery.data]);
+  const data = isPollsPanelState(stateQuery.data) ? stateQuery.data : undefined;
+  const stateInvalid = stateQuery.data !== undefined && data === undefined;
+  const stateFailed = stateQuery.isError || stateInvalid;
+  const predictions = useMemo(() => data === undefined ? [] : openPollsPredictions(data), [data]);
   const selectedRun = predictions.find(({ id }) => id === selectedRunId) ?? predictions[0] ?? null;
   const runOptions = useMemo(() => predictions.map((run) => ({
     value: run.id,
@@ -54,9 +57,9 @@ export default function PollsCockpitResolveActionContent({ channelId, language, 
   };
 
   return <div className="polls-cockpit-action polls-cockpit-action--resolve">
-    {stateQuery.isError ? <div className="polls-cockpit-action__status" role="alert">{actionTexts.openPredictionCheckFailed}</div> : null}
+    {stateFailed ? <div className="polls-cockpit-action__status" role="alert">{actionTexts.openPredictionCheckFailed}</div> : null}
     {predictions.length === 0
-      ? <p className="polls-cockpit-action__empty">{stateQuery.data === undefined ? labels.loading : actionTexts.noOpenPrediction}</p>
+      ? <p className="polls-cockpit-action__empty">{data === undefined ? stateFailed ? actionTexts.openPredictionCheckFailed : labels.loading : actionTexts.noOpenPrediction}</p>
       : <>
         <Select
           label={predictions.length > 1 ? actionTexts.choosePrediction : labels.prediction}

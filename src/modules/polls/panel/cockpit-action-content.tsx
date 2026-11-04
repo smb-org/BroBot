@@ -1,14 +1,14 @@
-import { useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { ModuleImmediateActionContentProperties } from "../../contract";
 import { connectedRefetchInterval, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import { Button, Field, SegmentChoice } from "../../../dashboard/ui";
 import type { PollsKind } from "../contracts";
-import { blockingPollsRun, pollsEntryStartReason } from "./action-model";
+import { blockingPollsRun, isPollsPanelState, pollsEntryStartReason } from "./action-model";
 import { pollsCockpitActionTexts } from "./action-locale";
 import { pollsPanelTexts } from "./locale";
-import { loadPollsState } from "./service";
+import { loadPollsState, reconcilePolls } from "./service";
 import "./panel.css";
 
 type EntryFilter = "all" | PollsKind;
@@ -18,16 +18,30 @@ export default function PollsCockpitStartActionContent({ channelId, language, on
   const actionTexts = pollsCockpitActionTexts[language];
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<EntryFilter>("all");
+  const reconcileAttemptedFor = useRef<string | null>(null);
   const realtimeStatus = useDashboardRealtimeStatus(channelId);
   const stateQuery = useModuleQuery(channelId, "polls", "data", (signal) => loadPollsState(channelId, signal), {
     refetchInterval: connectedRefetchInterval(realtimeStatus === "connected", 15_000),
   });
-  const data = stateQuery.data;
+  const stateFetched = stateQuery.isFetched;
+  const refetchState = stateQuery.refetch;
+  const data = isPollsPanelState(stateQuery.data) ? stateQuery.data : undefined;
+  const stateInvalid = stateQuery.data !== undefined && data === undefined;
+  const stateFailed = stateQuery.isError || stateInvalid;
   const visibleEntries = useMemo(() => {
     const term = search.trim().toLocaleLowerCase();
     return (data?.entries ?? []).filter((entry) => (filter === "all" || entry.kind === filter) &&
       (term.length === 0 || entry.title.toLocaleLowerCase().includes(term)));
   }, [data?.entries, filter, search]);
+
+  useEffect(() => {
+    if (!stateFetched || data === undefined || reconcileAttemptedFor.current === channelId) return;
+    if (blockingPollsRun(data, "poll") === null && blockingPollsRun(data, "prediction") === null) return;
+    reconcileAttemptedFor.current = channelId;
+    void reconcilePolls(channelId, false).then(async () => {
+      await refetchState();
+    }).catch(() => {});
+  }, [channelId, data, refetchState, stateFetched]);
 
   const startEntry = (entryId: string): void => {
     const formData = new FormData();
@@ -57,13 +71,13 @@ export default function PollsCockpitStartActionContent({ channelId, language, on
         size="compact"
       />
     </div>
-    <div className="polls-cockpit-action__status" role={stateQuery.isError ? "alert" : "status"} aria-live="polite">
-      {stateQuery.isError ? labels.loadFailed : data === undefined ? labels.loading : " "}
+    <div className="polls-cockpit-action__status" role={stateFailed ? "alert" : "status"} aria-live="polite">
+      {stateFailed ? labels.loadFailed : data === undefined ? labels.loading : " "}
     </div>
     <div className="polls-cockpit-action__list" aria-busy={stateQuery.isFetching}>
       {visibleEntries.length === 0
         ? data === undefined
-          ? <p className="polls-cockpit-action__empty">{labels.loading}</p>
+          ? <p className="polls-cockpit-action__empty">{stateFailed ? labels.loadFailed : labels.loading}</p>
           : data.entries.length === 0
             ? <div className="polls-cockpit-action__empty">
               <p>{actionTexts.emptyEntries}</p>
@@ -73,7 +87,7 @@ export default function PollsCockpitStartActionContent({ channelId, language, on
         : visibleEntries.map((entry) => {
           const blockedRun = data === undefined ? null : blockingPollsRun(data, entry.kind);
           const reason = data === undefined ? null : pollsEntryStartReason(data, entry.kind, language);
-          const disabled = stateQuery.isError || data === undefined || blockedRun !== null;
+          const disabled = stateFailed || data === undefined || blockedRun !== null;
           return <article className="polls-cockpit-action__entry" aria-label={entry.title} key={entry.id}>
             <div className="polls-cockpit-action__identity">
               <span className="polls-cockpit-action__kind">{entry.kind === "poll" ? labels.poll : labels.prediction}</span>
