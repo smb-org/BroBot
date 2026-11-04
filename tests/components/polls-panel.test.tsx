@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 
 import { PanelApiError } from "../../src/contracts/panel-error";
 import { UiProvider } from "../../src/dashboard/ui";
+import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import type { PollsEntry, PollsRun } from "../../src/modules/polls/contracts";
 import PollsPanel from "../../src/modules/polls/panel";
 import { renderWithQuery } from "../query-test-utils";
@@ -151,5 +152,69 @@ describe("polls panel", () => {
     mount(false);
     await screen.findByText("Best snack?");
     expect(mocks.reconcilePolls).not.toHaveBeenCalled();
+  });
+
+  const openCreateDialog = async () => {
+    const newButton = await screen.findByRole("button", { name: "Neu" });
+    await waitFor(() => { expect(newButton).toBeEnabled(); });
+    fireEvent.click(newButton);
+    return screen.findByRole("dialog", { name: "Neuer Eintrag" });
+  };
+
+  it("keeps focus and the full text while typing several characters into a choice", async () => {
+    mocks.loadPollsHistory.mockResolvedValue({ runs: [], nextCursor: null });
+    mount(true);
+    const dialog = await openCreateDialog();
+    const input = within(dialog).getByLabelText("Antwort 1");
+    input.focus();
+    let text = "";
+    for (const character of "Kuchen") {
+      text += character;
+      fireEvent.change(within(dialog).getByLabelText("Antwort 1"), { target: { value: text } });
+    }
+    const after = within(dialog).getByLabelText("Antwort 1");
+    expect(after).toBe(input);
+    expect(after).toHaveFocus();
+    expect(after).toHaveValue("Kuchen");
+  });
+
+  it("asks for confirmation when navigating away with a dirty editor", async () => {
+    mocks.loadPollsHistory.mockResolvedValue({ runs: [], nextCursor: null });
+    mount(true);
+    const dialog = await openCreateDialog();
+    fireEvent.change(within(dialog).getByLabelText("Titel"), { target: { value: "Beste Snacks" } });
+    const proceed = vi.fn();
+    const cancel = vi.fn();
+    runDashboardNavigationGuards(proceed, cancel);
+    expect(proceed).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: /Verwerfen/u })).toBeVisible();
+  });
+
+  it("refetches the state query on the fallback interval while realtime is disconnected", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "setInterval"], shouldAdvanceTime: true });
+    try {
+      mocks.loadPollsHistory.mockResolvedValue({ runs: [], nextCursor: null });
+      mount(true);
+      await screen.findByRole("region", { name: "Läuft gerade" });
+      await waitFor(() => { expect(mocks.loadPollsState).toHaveBeenCalledTimes(1); });
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(mocks.loadPollsState.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("saves a duplicated entry without further edits", async () => {
+    mocks.loadPollsState.mockResolvedValue(state({ entries: [pollEntry] }));
+    mocks.loadPollsHistory.mockResolvedValue({ runs: [], nextCursor: null });
+    mocks.createPollsEntry.mockResolvedValue(pollEntry);
+    mount(true);
+    const duplicate = await screen.findByRole("button", { name: "Duplizieren" });
+    fireEvent.click(duplicate);
+    const dialog = await screen.findByRole("dialog", { name: "Neuer Eintrag" });
+    const save = within(dialog).getByRole("button", { name: "Speichern" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => { expect(mocks.createPollsEntry).toHaveBeenCalledTimes(1); });
   });
 });

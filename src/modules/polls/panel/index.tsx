@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { useModuleQuery } from "../../../dashboard/data";
+import { connectedRefetchInterval, useModuleQuery } from "../../../dashboard/data";
+import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
 import { Badge, Button, ConfirmDialog, Field, Icon, SegmentChoice, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import {
@@ -28,6 +29,7 @@ import {
   updatePollsEntry,
 } from "./service";
 import type { PollsPanelState } from "./service";
+import { newDraftChoice } from "./draft-choice";
 import EntryEditorDialog, { type PollsEntryDraft } from "./EntryEditorDialog";
 import ResolveDialog from "./ResolveDialog";
 import "./panel.css";
@@ -44,7 +46,7 @@ const isOpenRun = (run: PollsRun): boolean => run.status === "active" || run.sta
 const entryToDraft = (entry: PollsEntry): PollsEntryDraft => ({
   kind: entry.kind,
   title: entry.title,
-  choices: [...entry.choices],
+  choices: entry.choices.map((text) => newDraftChoice(text)),
   durationSeconds: entry.durationSeconds,
   channelPointsVotingEnabled: entry.channelPointsVotingEnabled,
   channelPointsPerVote: entry.channelPointsPerVote ?? "",
@@ -53,7 +55,7 @@ const entryToDraft = (entry: PollsEntry): PollsEntryDraft => ({
 const newDraft = (kind: PollsKind = "poll"): PollsEntryDraft => ({
   kind,
   title: "",
-  choices: ["", ""],
+  choices: [newDraftChoice(), newDraftChoice()],
   durationSeconds: kind === "poll" ? 60 : 120,
   channelPointsVotingEnabled: false,
   channelPointsPerVote: "",
@@ -243,11 +245,13 @@ export default function PollsPanel({ channelId, language = "de", canOperate = tr
   const reconcilePendingRef = useRef(false);
   const isOperator = canOperate;
 
-  const stateQuery = useModuleQuery(channelId, "polls", "data", (signal) => loadPollsState(channelId, signal));
+  const realtimeStatus = useDashboardRealtimeStatus(channelId);
+  const refetchInterval = connectedRefetchInterval(realtimeStatus === "connected", 15_000);
+  const stateQuery = useModuleQuery(channelId, "polls", "data", (signal) => loadPollsState(channelId, signal), { refetchInterval });
   const cursor = historyCursors[historyCursors.length - 1] ?? null;
   const historyPart = cursor === null ? "history:first" : `history:${cursor}`;
   const historyQuery = useModuleQuery(channelId, "polls", historyPart,
-    (signal) => loadPollsHistory(channelId, cursor, signal));
+    (signal) => loadPollsHistory(channelId, cursor, signal), { refetchInterval });
   const data = stateQuery.data ?? EMPTY_STATE;
   const historyRuns = historyQuery.data?.runs ?? [];
   const hasTimedRun = data.active.poll !== null || data.active.prediction !== null;

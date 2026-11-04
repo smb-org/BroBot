@@ -1,15 +1,16 @@
-import { useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { Button, ConfirmDialog, Dialog, Field, FieldError, SaveStatus, SegmentChoice, SwitchRow, UnitInput, textFieldLength, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { Button, ConfirmDialog, Dialog, Field, FieldError, SaveStatus, SegmentChoice, SwitchRow, UnitInput, registerDashboardNavigationGuard, textFieldLength, useDraft, useDraftGuard } from "../../../dashboard/ui";
 import type { PollsEntry, PollsEntryInput, PollsKind } from "../contracts";
 import { POLLS_ENTRY_LIMITS, pollsEntryInputSchema } from "../contracts";
+import { newDraftChoice, type PollsDraftChoice } from "./draft-choice";
 import { pollsPanelTexts } from "./locale";
 
 export interface PollsEntryDraft {
   kind: PollsKind;
   title: string;
-  choices: string[];
+  choices: PollsDraftChoice[];
   durationSeconds: number | "";
   channelPointsVotingEnabled: boolean;
   channelPointsPerVote: number | "";
@@ -20,7 +21,7 @@ type EditorField = "title" | "choices" | `choice:${number}` | "durationSeconds" 
 const payloadFor = (draft: PollsEntryDraft): unknown => ({
   kind: draft.kind,
   title: draft.title,
-  choices: draft.choices,
+  choices: draft.choices.map(({ text }) => text),
   durationSeconds: typeof draft.durationSeconds === "number" ? draft.durationSeconds : Number.NaN,
   channelPointsVotingEnabled: draft.kind === "poll" && draft.channelPointsVotingEnabled,
   channelPointsPerVote: draft.kind !== "poll" || !draft.channelPointsVotingEnabled
@@ -88,7 +89,7 @@ interface EntryEditorDialogProperties {
 
 export default function EntryEditorDialog({ language, canOperate, entry, initial, onClose, onSave }: EntryEditorDialogProperties): ReactElement {
   const labels = pollsPanelTexts[language];
-  const draft = useDraft(initial);
+  const draft = useDraft(initial, entry === null);
   const [attempted, setAttempted] = useState(false);
   const [serverErrors, setServerErrors] = useState<Partial<Record<EditorField, string>>>({});
   const [saveError, setSaveError] = useState<string | undefined>();
@@ -146,6 +147,7 @@ export default function EntryEditorDialog({ language, canOperate, entry, initial
     if (error === null) onClose();
   };
   const draftGuard = useDraftGuard(draft.dirty, persistDraft, draft.reset);
+  useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
   const requestClose = (): void => {
     if (pending) return;
     draftGuard.guardSwitch(onClose);
@@ -153,7 +155,7 @@ export default function EntryEditorDialog({ language, canOperate, entry, initial
 
   const updateChoice = (index: number, value: string): void => {
     clearEditorErrors();
-    draft.setValue((current) => ({ ...current, choices: current.choices.map((choice, position) => position === index ? value : choice) }));
+    draft.setValue((current) => ({ ...current, choices: current.choices.map((choice, position) => position === index ? { ...choice, text: value } : choice) }));
   };
   const moveChoice = (index: number, target: number): void => {
     clearEditorErrors();
@@ -170,7 +172,7 @@ export default function EntryEditorDialog({ language, canOperate, entry, initial
     const limits = POLLS_ENTRY_LIMITS[kind];
     draft.setValue((current) => {
       const choices = current.choices.slice(0, limits.choices.maxCount);
-      while (choices.length < limits.choices.minCount) choices.push("");
+      while (choices.length < limits.choices.minCount) choices.push(newDraftChoice());
       return {
         ...current,
         kind,
@@ -187,7 +189,8 @@ export default function EntryEditorDialog({ language, canOperate, entry, initial
 
   const limits = POLLS_ENTRY_LIMITS[draft.value.kind];
   const choiceRows = draft.value.choices.map((choice, index) => ({
-    choice,
+    choice: choice.text,
+    rowKey: choice.key,
     index,
     error: errors[`choice:${String(index)}` as `choice:${number}`],
   }));
@@ -223,7 +226,7 @@ export default function EntryEditorDialog({ language, canOperate, entry, initial
           <span className="polls-editor__limit-hint">{labels.choicesLimit(limits.choices.minCount, limits.choices.maxCount)}</span>
           {errors.choices === undefined ? null : <FieldError message={errors.choices} />}
           <div className="polls-editor__choices">
-            {choiceRows.map(({ choice, index, error: choiceError }) => <div className="polls-editor__choice" key={`${String(index)}:${choice}`}>
+            {choiceRows.map(({ choice, rowKey, index, error: choiceError }) => <div className="polls-editor__choice" key={rowKey}>
               <Field
                 label={labels.choice(index + 1)}
                 value={choice}
@@ -247,7 +250,7 @@ export default function EntryEditorDialog({ language, canOperate, entry, initial
             </div>)}
           </div>
           <Button size="compact" icon="add" disabled={pending || readOnly || draft.value.choices.length >= limits.choices.maxCount} onClick={() => {
-            draft.setValue((current) => ({ ...current, choices: [...current.choices, ""] }));
+            draft.setValue((current) => ({ ...current, choices: [...current.choices, newDraftChoice()] }));
             clearEditorErrors();
           }}>{labels.addChoice}</Button>
         </div>
