@@ -282,8 +282,21 @@ export const createPollsRepository = (db: D1Database): PollsRepository => ({
       snapshot.startedAt, snapshot.endsAt, snapshot.lockedAt, snapshot.endedAt,
       snapshot.winningChoiceId, snapshot.observedAt, terminalPayload,
     );
-    const mutationResult = await mutation.all<{ run_id: string }>();
-    const applied = mutationResult.results[0];
+    const metadata = db.prepare(
+      `UPDATE polls_runs
+          SET entry_id = COALESCE(entry_id, ?), source = 'brobot'
+        WHERE channel_id = ? AND kind = ? AND twitch_id = ?
+          AND (? = 'brobot' OR ? IS NOT NULL)`,
+    ).bind(
+      snapshot.entryId ?? null,
+      channelId,
+      snapshot.kind,
+      snapshot.twitchId,
+      snapshot.source ?? "twitch",
+      snapshot.entryId ?? null,
+    );
+    const [mutationResult] = await db.batch([mutation, metadata]);
+    const applied = mutationResult?.results[0] as { run_id: string } | undefined;
     if (applied === undefined) return "ignored";
     return applied.run_id === runId ? "inserted" : "updated";
   },

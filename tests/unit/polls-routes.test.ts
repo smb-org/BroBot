@@ -15,15 +15,18 @@ vi.mock("../../src/modules/polls/service", () => mocks);
 
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
 import { pollsRoutes } from "../../src/modules/polls/routes";
+import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { TestD1Database } from "./test-d1";
+import { insertLoginIdentityAndSession } from "./fixtures";
 
 const channelId = "channel_polls";
+const actorUserId = "operator_polls";
 const now = "2026-11-04T12:00:00.000Z";
 
 describe("polls routes", () => {
   let database: TestD1Database;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetAllMocks();
     database = new TestD1Database();
     database.sqlite.prepare(
@@ -33,6 +36,11 @@ describe("polls routes", () => {
     database.sqlite.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'polls', 1, '{}')",
     ).run(channelId);
+    await insertLoginIdentityAndSession(database, actorUserId);
+    database.sqlite.prepare(
+      `INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at)
+       VALUES (?, ?, 'operator', ?, ?)`,
+    ).run(channelId, actorUserId, now, now);
     mocks.reconcile.mockResolvedValue(undefined);
   });
 
@@ -46,9 +54,9 @@ describe("polls routes", () => {
     const app = new Hono<ModuleRouteEnvironment>();
     app.use("*", async (context, next) => {
       context.set("channelRole", role as "operator");
-      context.set("actor", { userId: "operator_polls", sessionId: "polls-session" });
-      context.set("authorizeMutation", () => ({ sql: "", values: [] }));
-      context.set("authorizeManagementMutation", () => ({ sql: "", values: [] }));
+      context.set("actor", { userId: actorUserId, sessionId: `session-${actorUserId}` });
+      context.set("authorizeMutation", authorizeModuleMutation);
+      context.set("authorizeManagementMutation", authorizeModuleManagementMutation);
       context.set("prepareModuleAudit", () => database.prepare("SELECT 1") as unknown as D1PreparedStatement);
       context.set("writeModuleAudit", writeModuleAudit);
       await next();
@@ -108,6 +116,48 @@ describe("polls routes", () => {
       kind: "poll", title: "Fictional poll", choices: ["First", "Second"], durationSeconds: 60,
       channelPointsVotingEnabled: false, channelPointsPerVote: null,
     });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("allows an operator to create, edit, and delete entries and dismiss an unknown run", async () => {
+    const input = {
+      kind: "poll", title: "Fictional poll", choices: ["First", "Second"], durationSeconds: 60,
+      channelPointsVotingEnabled: false, channelPointsPerVote: null,
+    };
+    const createdResponse = await makeRequest("operator", "/entries", input);
+    expect(createdResponse.status).toBe(201);
+    const created = await createdResponse.json<{ entry: { id: string; revision: number } }>();
+
+    const updatedResponse = await makeRequest("operator", `/entries/${created.entry.id}`, {
+      ...input, title: "Updated fictional poll", revision: created.entry.revision,
+    }, "PUT");
+    expect(updatedResponse.status).toBe(200);
+
+    const deletedResponse = await makeRequest("operator", `/entries/${created.entry.id}`, undefined, "DELETE");
+    expect(deletedResponse.status).toBe(204);
+
+    database.sqlite.prepare(
+      `INSERT INTO polls_runs (
+         channel_id, run_id, kind, twitch_id, entry_id, source, title, choices_json, status,
+         started_at, ends_at, locked_at, ended_at, winning_choice_id, last_event_at
+       ) VALUES (?, ?, 'prediction', ?, NULL, 'twitch', ?, '[]', 'unknown', ?, NULL, NULL, NULL, NULL, ?)`,
+    ).run(channelId, "run_unknown", "twitch_prediction_unknown", "Fictional prediction", now, now);
+    const dismissedResponse = await makeRequest("operator", "/runs/run_unknown/dismiss");
+    expect(dismissedResponse.status).toBe(200);
+    await expect(dismissedResponse.json()).resolves.toMatchObject({ run: { status: "canceled" } });
+  });
+
+  it.each([
+    ["POST", "/entries"],
+    ["PUT", "/entries/entry_missing"],
+    ["DELETE", "/entries/entry_missing"],
+    ["POST", "/runs/run_unknown/dismiss"],
+  ] as const)("rejects plain members from %s %s", async (method, path) => {
+    const response = await makeRequest("viewer", path, {
+      kind: "poll", title: "Fictional poll", choices: ["First", "Second"], durationSeconds: 60,
+      channelPointsVotingEnabled: false, channelPointsPerVote: null, revision: 1,
+    }, method);
 
     expect(response.status).toBe(403);
   });

@@ -13,6 +13,7 @@ import {
   resolvePredictionRun,
   startEntry,
   type PollsActionOutcome,
+  type PollsMutationAuthorization,
 } from "./service";
 
 type PollsRouteContext = Context<ModuleRouteEnvironment>;
@@ -23,6 +24,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const channelIdFrom = (context: PollsRouteContext): string => context.req.param("channelId") ?? "";
 const repository = (context: PollsRouteContext) => createPollsRepository(context.env.DB);
 const nowIso = (): string => new Date().toISOString();
+const authorizeCurrentOperator = (
+  context: PollsRouteContext,
+  channelId: string,
+): PollsMutationAuthorization => async () => {
+  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), nowIso());
+  const currentMember = await context.env.DB.prepare(
+    `SELECT channel_id FROM channels WHERE channel_id = ? ${authorization.sql}`,
+  ).bind(channelId, ...authorization.values).first<{ channel_id: string }>();
+  return currentMember !== null;
+};
 
 const denied = (context: PollsRouteContext): Response =>
   context.json({ error: "polls_management_denied" }, 403);
@@ -73,7 +84,8 @@ const actionStatus = (reason: string): { status: 409 | 403 | 404 | 422 | 424 | 4
   }
   if (reason === "not_found") return { status: 404, error: "polls_run_not_found" };
   if (reason === "not_eligible") return { status: 403, error: "polls_not_eligible" };
-  if (["not_connected", "token_unavailable", "scope_missing", "revoked", "refresh_failed", "precondition_failed"].includes(reason)) {
+  if (reason === "precondition_failed") return { status: 403, error: "polls_management_denied" };
+  if (["not_connected", "token_unavailable", "scope_missing", "revoked", "refresh_failed"].includes(reason)) {
     return { status: 424, error: `polls_${reason}` };
   }
   if (reason === "rate_limited") return { status: 429, error: "polls_rate_limited" };
@@ -129,7 +141,7 @@ pollsRoutes.post("/entries", async (context) => {
   const now = nowIso();
   const entryId = crypto.randomUUID();
   const input = parsed.data;
-  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
+  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `INSERT INTO polls_entries (
        channel_id, entry_id, kind, title, choices_json, duration_seconds,
@@ -185,7 +197,7 @@ pollsRoutes.put("/entries/:entryId", async (context) => {
   if (expectedRevision !== current.revision) return context.json({ error: "polls_entry_conflict" }, 409);
 
   const now = nowIso();
-  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
+  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `UPDATE polls_entries
         SET title = ?, choices_json = ?, duration_seconds = ?, channel_points_voting_enabled = ?,
@@ -227,7 +239,7 @@ pollsRoutes.delete("/entries/:entryId", async (context) => {
   const current = await repository(context).getEntry(channelId, entryId);
   if (current === null) return context.body(null, 404);
   const now = nowIso();
-  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
+  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `DELETE FROM polls_entries WHERE channel_id = ? AND entry_id = ? ${authorization.sql} RETURNING entry_id`,
   ).bind(channelId, entryId, ...authorization.values);
@@ -250,7 +262,9 @@ pollsRoutes.post("/entries/:entryId/start", async (context) => {
   if (deniedResponse !== null) return deniedResponse;
   const channelId = channelIdFrom(context);
   if (!await moduleEnabled(context.env.DB, channelId)) return moduleDisabled(context);
-  const outcome = await startEntry(context.env, channelId, context.req.param("entryId"), nowIso());
+  const outcome = await startEntry(
+    context.env, channelId, context.req.param("entryId"), nowIso(), authorizeCurrentOperator(context, channelId),
+  );
   if (!outcome.ok) {
     return outcome.reason === "not_found"
       ? context.json({ error: "polls_entry_not_found" }, 404)
@@ -262,14 +276,24 @@ pollsRoutes.post("/entries/:entryId/start", async (context) => {
 
 const runAction = async (
   context: PollsRouteContext,
-  handler: (env: Env, channelId: string, runId: string) => Promise<PollsActionOutcome>,
+  handler: (
+    env: Env,
+    channelId: string,
+    runId: string,
+    authorize: PollsMutationAuthorization,
+  ) => Promise<PollsActionOutcome>,
   auditAction: AuditAction,
 ): Promise<Response> => {
   const deniedResponse = requireOperator(context);
   if (deniedResponse !== null) return deniedResponse;
   const channelId = channelIdFrom(context);
   if (!await moduleEnabled(context.env.DB, channelId)) return moduleDisabled(context);
-  const outcome = await handler(context.env, channelId, context.req.param("runId") ?? "");
+  const outcome = await handler(
+    context.env,
+    channelId,
+    context.req.param("runId") ?? "",
+    authorizeCurrentOperator(context, channelId),
+  );
   if (!outcome.ok) return actionFailure(context, outcome);
   await writeRunAudit(context, auditAction, outcome.run);
   return context.json({ run: outcome.run });
@@ -287,7 +311,13 @@ pollsRoutes.post("/runs/:runId/resolve", async (context) => {
   if (!isRecord(requestBody) || typeof requestBody.winningChoiceId !== "string" || requestBody.winningChoiceId.length === 0) {
     return context.json({ error: "polls_invalid_choice" }, 422);
   }
-  const outcome = await resolvePredictionRun(context.env, channelId, context.req.param("runId"), requestBody.winningChoiceId);
+  const outcome = await resolvePredictionRun(
+    context.env,
+    channelId,
+    context.req.param("runId"),
+    requestBody.winningChoiceId,
+    authorizeCurrentOperator(context, channelId),
+  );
   if (!outcome.ok) return actionFailure(context, outcome);
   await writeRunAudit(context, "polls.run.resolved", outcome.run);
   return context.json({ run: outcome.run });
@@ -311,7 +341,7 @@ pollsRoutes.post("/runs/:runId/dismiss", async (context) => {
   if (current === null) return context.json({ error: "polls_run_not_found" }, 404);
   if (current.status !== "unknown") return context.json({ error: "polls_run_not_dismissible" }, 409);
   const now = nowIso();
-  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
+  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
     `UPDATE polls_runs SET status = 'canceled', ended_at = ?, last_event_at = ?
       WHERE channel_id = ? AND run_id = ? AND status = 'unknown' ${authorization.sql}

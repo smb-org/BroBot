@@ -16,35 +16,53 @@ const PREDICTIONS_URL = "https://api.twitch.tv/helix/predictions";
 
 const pollSchema = z.object({
   id: z.string().min(1),
+  broadcaster_id: z.string().min(1),
+  broadcaster_name: z.string(),
+  broadcaster_login: z.string().min(1),
   title: z.string(),
   choices: z.array(z.object({
     id: z.string().min(1),
     title: z.string(),
-    votes: z.number().int().nonnegative().optional(),
-    channel_points_votes: z.number().int().nonnegative().optional(),
+    votes: z.number().int().nonnegative(),
+    channel_points_votes: z.number().int().nonnegative(),
+    bits_votes: z.number().int().nonnegative(),
   })),
-  status: z.string(),
+  bits_voting_enabled: z.boolean(),
+  bits_per_vote: z.number().int().nonnegative(),
+  channel_points_voting_enabled: z.boolean(),
+  channel_points_per_vote: z.number().int().nonnegative(),
+  status: z.enum(["ACTIVE", "COMPLETED", "TERMINATED", "ARCHIVED", "MODERATED", "INVALID"]),
+  duration: z.number().int().nonnegative(),
   started_at: z.string(),
-  ends_at: z.string().nullable().optional(),
-  ended_at: z.string().nullable().optional(),
-  duration: z.number().int().nonnegative().optional(),
+  ended_at: z.string().nullable(),
 });
 
 const predictionSchema = z.object({
   id: z.string().min(1),
+  broadcaster_id: z.string().min(1),
+  broadcaster_name: z.string(),
+  broadcaster_login: z.string().min(1),
   title: z.string(),
+  winning_outcome_id: z.string().nullable(),
   outcomes: z.array(z.object({
     id: z.string().min(1),
     title: z.string(),
-    users: z.number().int().nonnegative().optional(),
-    channel_points: z.number().int().nonnegative().optional(),
+    users: z.number().int().nonnegative(),
+    channel_points: z.number().int().nonnegative(),
+    top_predictors: z.array(z.object({
+      user_name: z.string(),
+      user_login: z.string(),
+      user_id: z.string(),
+      channel_points_won: z.number().int().nonnegative().nullable(),
+      channel_points_used: z.number().int().nonnegative(),
+    })).nullable(),
+    color: z.enum(["BLUE", "PINK"]),
   })),
-  status: z.string(),
-  started_at: z.string(),
-  locks_at: z.string().nullable().optional(),
-  locked_at: z.string().nullable().optional(),
-  ended_at: z.string().nullable().optional(),
-  winning_outcome_id: z.string().nullable().optional(),
+  prediction_window: z.number().int().nonnegative(),
+  status: z.enum(["ACTIVE", "LOCKED", "RESOLVED", "CANCELED"]),
+  created_at: z.string(),
+  ended_at: z.string().nullable(),
+  locked_at: z.string().nullable(),
 });
 
 const pollsEnvelopeSchema = z.object({ data: z.array(pollSchema) });
@@ -81,6 +99,7 @@ interface RequestSpec<Data> {
   method?: "GET" | "POST" | "PATCH";
   query?: Readonly<Record<string, string | undefined>>;
   body?: unknown;
+  authorize?: () => Promise<boolean>;
   schema: z.ZodType<{ data: Data }>;
   fetcher: typeof fetch;
 }
@@ -100,7 +119,10 @@ const requestWithBroadcasterToken = async <Data>(spec: RequestSpec<Data>): Promi
       schema: spec.schema,
       fetcher: spec.fetcher,
     }),
-    { fetcher: spec.fetcher },
+    {
+      fetcher: spec.fetcher,
+      ...(spec.authorize === undefined ? {} : { beforeCall: spec.authorize }),
+    },
   );
   return result.kind === "ok"
     ? { ok: true, data: result.value.data }
@@ -117,6 +139,7 @@ export const createPoll = (
   environment: Env,
   broadcasterId: string,
   entry: PollsEntryInput,
+  authorize: () => Promise<boolean>,
   fetcher: typeof fetch = fetch,
 ): Promise<PollsHelixResult<HelixPoll[]>> => requestWithBroadcasterToken({
   environment,
@@ -133,6 +156,7 @@ export const createPoll = (
     channel_points_per_vote: entry.channelPointsPerVote,
   },
   schema: pollsEnvelopeSchema,
+  authorize,
   fetcher,
 });
 
@@ -141,6 +165,7 @@ export const endPoll = (
   broadcasterId: string,
   twitchId: string,
   status: "TERMINATED" | "ARCHIVED",
+  authorize: () => Promise<boolean>,
   fetcher: typeof fetch = fetch,
 ): Promise<PollsHelixResult<HelixPoll[]>> => requestWithBroadcasterToken({
   environment,
@@ -150,6 +175,7 @@ export const endPoll = (
   method: "PATCH",
   body: { broadcaster_id: broadcasterId, id: twitchId, status },
   schema: pollsEnvelopeSchema,
+  authorize,
   fetcher,
 });
 
@@ -172,6 +198,7 @@ export const createPrediction = (
   environment: Env,
   broadcasterId: string,
   entry: PollsEntryInput,
+  authorize: () => Promise<boolean>,
   fetcher: typeof fetch = fetch,
 ): Promise<PollsHelixResult<HelixPrediction[]>> => requestWithBroadcasterToken({
   environment,
@@ -186,6 +213,7 @@ export const createPrediction = (
     prediction_window: entry.durationSeconds,
   },
   schema: predictionsEnvelopeSchema,
+  authorize,
   fetcher,
 });
 
@@ -199,6 +227,7 @@ export const patchPrediction = (
   broadcasterId: string,
   twitchId: string,
   change: PredictionChange,
+  authorize: () => Promise<boolean>,
   fetcher: typeof fetch = fetch,
 ): Promise<PollsHelixResult<HelixPrediction[]>> => requestWithBroadcasterToken({
   environment,
@@ -213,6 +242,7 @@ export const patchPrediction = (
     ...(change.status === "RESOLVED" ? { winning_outcome_id: change.winningOutcomeId } : {}),
   },
   schema: predictionsEnvelopeSchema,
+  authorize,
   fetcher,
 });
 

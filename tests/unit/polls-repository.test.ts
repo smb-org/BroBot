@@ -107,6 +107,23 @@ describe("polls repository", () => {
       .resolves.toMatchObject({ source: "brobot", entryId: entry.id });
   });
 
+  it("keeps the prediction refund deadline 24 hours after its creation time", async () => {
+    const repository = createPollsRepository(database as unknown as D1Database);
+    const createdAt = "2026-11-04T12:00:00.000Z";
+    await repository.upsertRunSnapshot(channelId, runSnapshot("twitch_prediction_fictional", {
+      startedAt: createdAt,
+      endsAt: "2026-11-04T12:02:00.000Z",
+      observedAt: "2026-11-04T12:00:03.000Z",
+    }));
+
+    await expect(repository.findRunByTwitchId(channelId, "prediction", "twitch_prediction_fictional"))
+      .resolves.toMatchObject({
+        startedAt: createdAt,
+        endsAt: "2026-11-04T12:02:00.000Z",
+        refundDeadline: "2026-11-05T12:00:00.000Z",
+      });
+  });
+
   it("returns stable history pages ordered by start time", async () => {
     const repository = createPollsRepository(database as unknown as D1Database);
     for (const [twitchId, startedAt] of [

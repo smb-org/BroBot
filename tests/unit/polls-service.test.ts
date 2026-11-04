@@ -8,34 +8,59 @@ vi.mock("../../src/worker/auth/broadcaster-token", () => ({
   withBroadcasterToken: mocks.withBroadcasterToken,
 }));
 
-import { reconcile, resolvePredictionRun, startEntry } from "../../src/modules/polls/service";
+import { processPollsEvent, reconcile, resolvePredictionRun, startEntry } from "../../src/modules/polls/service";
+import type { ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { createPollsRepository } from "../../src/modules/polls/repository";
 import { TestD1Database } from "./test-d1";
 
 const channelId = "channel_polls";
 const now = "2026-11-04T12:00:00.000Z";
 const prediction = {
-  id: "twitch_prediction_demo",
+  id: "twitch_prediction_fictional",
   broadcaster_id: channelId,
+  broadcaster_name: "Polls Demo",
+  broadcaster_login: "polls_demo",
   title: "Fictional prediction",
   outcomes: [
-    { id: "outcome_first", title: "First", users: 4, channel_points: 120 },
-    { id: "outcome_second", title: "Second", users: 1, channel_points: 20 },
+    { id: "outcome_first", title: "First", users: 4, channel_points: 120, top_predictors: null, color: "BLUE" },
+    { id: "outcome_second", title: "Second", users: 1, channel_points: 20, top_predictors: null, color: "PINK" },
   ],
-  started_at: now,
-  locks_at: "2026-11-04T12:02:00.000Z",
-  locked_at: null,
-  ended_at: null,
   winning_outcome_id: null,
+  prediction_window: 120,
+  created_at: now,
   status: "ACTIVE",
+  ended_at: null,
+  locked_at: null,
 };
+
+const helixPoll = {
+  id: "twitch_poll_fictional",
+  broadcaster_id: channelId,
+  broadcaster_name: "Polls Demo",
+  broadcaster_login: "polls_demo",
+  title: "Fictional poll",
+  choices: [
+    { id: "choice_first", title: "First", votes: 3, channel_points_votes: 60, bits_votes: 0 },
+    { id: "choice_second", title: "Second", votes: 1, channel_points_votes: 20, bits_votes: 0 },
+  ],
+  bits_voting_enabled: false,
+  bits_per_vote: 0,
+  channel_points_voting_enabled: false,
+  channel_points_per_vote: 0,
+  status: "ACTIVE",
+  duration: 60,
+  started_at: now,
+  ended_at: null,
+};
+
+const authorized = (): Promise<boolean> => Promise.resolve(true);
 
 const jsonResponse = (data: unknown, status = 200): Response => new Response(JSON.stringify(data), {
   status,
   headers: { "Content-Type": "application/json" },
 });
 
-const installFetch = (handler: (url: URL, method: string) => Response) => {
+const installFetch = (handler: (url: URL, method: string) => Response | Promise<Response>) => {
   const fetcher = vi.fn<typeof fetch>((input, init) => Promise.resolve(handler(new URL(input instanceof Request ? input.url : input.toString()), init?.method ?? "GET")));
   vi.stubGlobal("fetch", fetcher);
   return fetcher;
@@ -53,7 +78,11 @@ describe("polls service", () => {
       _broadcasterId: string,
       _scopes: string[],
       request: (accessToken: string) => Promise<unknown>,
+      dependencies?: { beforeCall?: () => Promise<boolean> },
     ) => {
+      if (dependencies?.beforeCall !== undefined && !await dependencies.beforeCall()) {
+        return { kind: "precondition_failed" };
+      }
       const result = await request("broadcaster-token") as { ok: boolean; status?: number; data?: unknown };
       return result.ok ? { kind: "ok", value: result.data } : { kind: "http_error", result };
     });
@@ -77,7 +106,7 @@ describe("polls service", () => {
       choices: prediction.outcomes.map((outcome) => ({
         id: outcome.id, title: outcome.title, votes: null, users: outcome.users, channelPoints: outcome.channel_points,
       })),
-      status: "active", startedAt: now, endsAt: prediction.locks_at, lockedAt: null, endedAt: null,
+      status: "active", startedAt: prediction.created_at, endsAt: "2026-11-04T12:02:00.000Z", lockedAt: null, endedAt: null,
       winningChoiceId: null, observedAt: now, terminalPayload: null, source: "twitch",
     });
     expect(run).toBe("inserted");
@@ -85,24 +114,95 @@ describe("polls service", () => {
       ? jsonResponse({ data: [{
         ...prediction, status: "RESOLVED", ended_at: "2026-11-04T12:03:00.000Z", winning_outcome_id: "outcome_first",
       }] })
-      : jsonResponse({ data: [{ ...prediction, status: "LOCKED", locked_at: prediction.locks_at }] }));
+      : jsonResponse({ data: [{ ...prediction, status: "LOCKED", locked_at: "2026-11-04T12:02:00.000Z" }] }));
 
-    const result = await resolvePredictionRun(environment, channelId, await getRunId(), "outcome_first");
+    const result = await resolvePredictionRun(environment, channelId, await getRunId(), "outcome_first", authorized);
 
     expect(result).toMatchObject({ ok: true, run: { status: "resolved", winningChoiceId: "outcome_first" } });
+  });
+
+  it("uses Helix prediction creation time for its start, lock, and refund deadlines", async () => {
+    const created = await repository.createEntry(channelId, {
+      kind: "prediction", title: "Fictional prediction", choices: ["First", "Second"], durationSeconds: 120,
+      channelPointsVotingEnabled: false, channelPointsPerVote: null,
+    }, now);
+    if (created === "limit_reached") throw new Error("Unexpected entry limit.");
+    installFetch((_url, method) => method === "POST"
+      ? jsonResponse({ data: [prediction] })
+      : jsonResponse({ data: [] }));
+
+    const result = await startEntry(environment, channelId, created.id, "2026-11-04T12:00:03.000Z", authorized);
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        startedAt: "2026-11-04T12:00:00.000Z",
+        endsAt: "2026-11-04T12:02:00.000Z",
+        refundDeadline: "2026-11-05T12:00:00.000Z",
+      },
+    });
   });
 
   it("resolves a prediction first discovered by reconciliation GET", async () => {
     installFetch((url, method) => url.pathname.endsWith("/predictions")
       ? jsonResponse({ data: [method === "PATCH"
         ? { ...prediction, status: "RESOLVED", ended_at: "2026-11-04T12:03:00.000Z", winning_outcome_id: "outcome_first" }
-        : { ...prediction, status: "LOCKED", locked_at: prediction.locks_at }] })
+        : { ...prediction, status: "LOCKED", locked_at: "2026-11-04T12:02:00.000Z" }] })
       : jsonResponse({ data: [] }));
     await reconcile(environment, channelId, now, { force: true });
     const run = await repository.findRunByTwitchId(channelId, "prediction", prediction.id);
     if (run === null) throw new Error("Reconciliation did not insert the prediction.");
-    await expect(resolvePredictionRun(environment, channelId, run.id, "outcome_first"))
+    await expect(resolvePredictionRun(environment, channelId, run.id, "outcome_first", authorized))
       .resolves.toMatchObject({ ok: true, run: { status: "resolved", winningChoiceId: "outcome_first" } });
+  });
+
+  it("associates a BroBot entry when EventSub begin arrives before the Helix create response", async () => {
+    const created = await repository.createEntry(channelId, {
+      kind: "poll", title: "Fictional poll", choices: ["First", "Second"], durationSeconds: 60,
+      channelPointsVotingEnabled: false, channelPointsPerVote: null,
+    }, now);
+    if (created === "limit_reached") throw new Error("Unexpected entry limit.");
+    const eventTimestamp = "2026-11-04T12:00:05.000Z";
+    const context = { DB: database as unknown as D1Database } as ModuleExecutionContext;
+    installFetch(async (_url, method) => {
+      if (method !== "POST") return jsonResponse({ data: [] });
+      const event: ModuleEvent = {
+        channelId,
+        subscriptionType: "channel.poll.begin",
+        triggerId: "event_poll_begin_fictional",
+        payload: {
+          id: helixPoll.id,
+          broadcaster_user_id: channelId,
+          title: helixPoll.title,
+          choices: helixPoll.choices,
+          started_at: helixPoll.started_at,
+          ends_at: "2026-11-04T12:01:00.000Z",
+        },
+        settings: {},
+        receivedAt: eventTimestamp,
+        eventSubTimestamp: eventTimestamp,
+        actor: null,
+        chatStatus: null,
+      };
+      await processPollsEvent(event, context);
+      return jsonResponse({ data: [helixPoll] });
+    });
+
+    const result = await startEntry(environment, channelId, created.id, "2026-11-04T12:00:01.000Z", authorized);
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        twitchId: helixPoll.id,
+        status: "active",
+        source: "brobot",
+        entryId: created.id,
+        lastEventAt: eventTimestamp,
+      },
+    });
+    await expect(repository.getEntry(channelId, created.id)).resolves.toMatchObject({
+      lastStartedAt: "2026-11-04T12:00:01.000Z",
+    });
   });
 
   it("reconciles after Twitch rejects a start because a poll is already active", async () => {
@@ -114,17 +214,18 @@ describe("polls service", () => {
     const fetcher = installFetch((url, method) => {
       if (method === "POST") return jsonResponse({ message: "A poll is already active for this broadcaster." }, 400);
       if (url.pathname.endsWith("/polls")) return jsonResponse({ data: [{
-        id: "twitch_poll_foreign", title: "Foreign poll",
-        choices: [{ id: "choice_first", title: "First", votes: 0 }, { id: "choice_second", title: "Second", votes: 0 }],
-        started_at: now, ends_at: "2026-11-04T12:01:00.000Z", ended_at: null, status: "ACTIVE",
+        ...helixPoll,
+        id: "twitch_poll_other_fictional",
+        title: "Another fictional poll",
+        started_at: now,
       }] });
       return jsonResponse({ data: [] });
     });
 
-    await expect(startEntry(environment, channelId, entry.id, "2026-11-04T12:00:01.000Z"))
+    await expect(startEntry(environment, channelId, entry.id, "2026-11-04T12:00:01.000Z", authorized))
       .resolves.toEqual({ ok: false, reason: "already_active" });
     expect(fetcher).toHaveBeenCalled();
-    await expect(repository.findRunByTwitchId(channelId, "poll", "twitch_poll_foreign"))
+    await expect(repository.findRunByTwitchId(channelId, "poll", "twitch_poll_other_fictional"))
       .resolves.toMatchObject({ source: "twitch", status: "active" });
   });
 

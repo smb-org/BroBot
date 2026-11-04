@@ -110,23 +110,51 @@ export type PollsHelixResult<Data> = { ok: true; data: Data } | { ok: false; rea
 
 export interface HelixPoll {
   id: string;
+  broadcaster_id: string;
+  broadcaster_name: string;
+  broadcaster_login: string;
   title: string;
-  choices: readonly { id: string; title: string; votes?: number | undefined; channel_points_votes?: number | undefined }[];
-  status: string;
+  choices: readonly {
+    id: string;
+    title: string;
+    votes: number;
+    channel_points_votes: number;
+    bits_votes: number;
+  }[];
+  bits_voting_enabled: boolean;
+  bits_per_vote: number;
+  channel_points_voting_enabled: boolean;
+  channel_points_per_vote: number;
+  status: "ACTIVE" | "COMPLETED" | "TERMINATED" | "ARCHIVED" | "MODERATED" | "INVALID";
+  duration: number;
   started_at: string;
-  ends_at?: string | null | undefined;
-  ended_at?: string | null | undefined;
-  duration?: number | undefined;
+  ended_at: string | null;
 }
 
 export interface HelixPrediction {
   id: string;
+  broadcaster_id: string;
+  broadcaster_name: string;
+  broadcaster_login: string;
   title: string;
-  outcomes: readonly { id: string; title: string; users?: number | undefined; channel_points?: number | undefined }[];
-  status: string;
-  started_at: string;
-  locks_at?: string | null | undefined;
-  locked_at?: string | null | undefined;
-  ended_at?: string | null | undefined;
-  winning_outcome_id?: string | null | undefined;
+  winning_outcome_id: string | null;
+  outcomes: readonly {
+    id: string;
+    title: string;
+    users: number;
+    channel_points: number;
+    top_predictors: readonly {
+      user_name: string;
+      user_login: string;
+      user_id: string;
+      channel_points_won: number | null;
+      channel_points_used: number;
+    }[] | null;
+    color: "BLUE" | "PINK";
+  }[];
+  prediction_window: number;
+  status: "ACTIVE" | "LOCKED" | "RESOLVED" | "CANCELED";
+  created_at: string;
+  ended_at: string | null;
+  locked_at: string | null;
 }

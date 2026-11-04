@@ -1,4 +1,6 @@
 import type {
+  HelixPoll,
+  HelixPrediction,
   PollRunStatus,
   PollsKind,
   PollsRunChoice,
@@ -207,28 +209,8 @@ const predictionStatusFromHelix = (value: string): PredictionRunStatus => {
   }
 };
 
-export interface HelixPollSnapshotData {
-  id: string;
-  title: string;
-  choices: readonly { id: string; title: string; votes?: number | undefined; channel_points_votes?: number | undefined }[];
-  status: string;
-  started_at: string;
-  ends_at?: string | null | undefined;
-  ended_at?: string | null | undefined;
-  duration?: number | undefined;
-}
-
-export interface HelixPredictionSnapshotData {
-  id: string;
-  title: string;
-  outcomes: readonly { id: string; title: string; users?: number | undefined; channel_points?: number | undefined }[];
-  status: string;
-  started_at: string;
-  locks_at?: string | null | undefined;
-  locked_at?: string | null | undefined;
-  ended_at?: string | null | undefined;
-  winning_outcome_id?: string | null | undefined;
-}
+export type HelixPollSnapshotData = HelixPoll;
+export type HelixPredictionSnapshotData = HelixPrediction;
 
 const helixChoices = (
   choices: readonly {
@@ -251,8 +233,8 @@ const helixChoices = (
 export const snapshotFromHelixPoll = (data: HelixPollSnapshotData, observedAt: string): RunSnapshot => {
   const status = pollStatusFromHelix(data.status);
   const startedAt = timestamp(data.started_at) ?? observedAt;
-  const durationEnd = Number.isSafeInteger(data.duration) && (data.duration as number) >= 0
-    ? new Date(Date.parse(startedAt) + (data.duration as number) * 1_000).toISOString()
+  const durationEnd = Number.isSafeInteger(data.duration) && data.duration >= 0
+    ? new Date(Date.parse(startedAt) + data.duration * 1_000).toISOString()
     : null;
   return {
     kind: "poll",
@@ -261,7 +243,7 @@ export const snapshotFromHelixPoll = (data: HelixPollSnapshotData, observedAt: s
     choices: helixChoices(data.choices, "poll"),
     status,
     startedAt,
-    endsAt: timestamp(data.ends_at) ?? durationEnd,
+    endsAt: durationEnd,
     lockedAt: null,
     endedAt: timestamp(data.ended_at),
     winningChoiceId: null,
@@ -270,17 +252,24 @@ export const snapshotFromHelixPoll = (data: HelixPollSnapshotData, observedAt: s
   };
 };
 
-export const snapshotFromHelixPrediction = (data: HelixPredictionSnapshotData, observedAt: string): RunSnapshot => ({
-  kind: "prediction",
-  twitchId: data.id,
-  title: data.title,
-  choices: helixChoices(data.outcomes, "prediction"),
-  status: predictionStatusFromHelix(data.status),
-  startedAt: timestamp(data.started_at) ?? observedAt,
-  endsAt: timestamp(data.locks_at),
-  lockedAt: timestamp(data.locked_at),
-  endedAt: timestamp(data.ended_at),
-  winningChoiceId: nonEmptyString(data.winning_outcome_id),
-  observedAt,
-  terminalPayload: null,
-});
+export const snapshotFromHelixPrediction = (data: HelixPredictionSnapshotData, observedAt: string): RunSnapshot => {
+  const startedAt = timestamp(data.created_at) ?? observedAt;
+  const endsAt = Number.isSafeInteger(data.prediction_window) && data.prediction_window >= 0
+    ? new Date(Date.parse(startedAt) + data.prediction_window * 1_000).toISOString()
+    : null;
+  return {
+    kind: "prediction",
+    twitchId: data.id,
+    title: data.title,
+    choices: helixChoices(data.outcomes, "prediction"),
+    status: predictionStatusFromHelix(data.status),
+    startedAt,
+    endsAt,
+    // EventSub has absolute locks_at timestamps; Helix predictions have a relative prediction_window.
+    lockedAt: timestamp(data.locked_at),
+    endedAt: timestamp(data.ended_at),
+    winningChoiceId: nonEmptyString(data.winning_outcome_id),
+    observedAt,
+    terminalPayload: null,
+  };
+};

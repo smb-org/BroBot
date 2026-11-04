@@ -21,6 +21,8 @@ export type PollsActionOutcome =
   | { ok: true; run: PollsRun }
   | { ok: false; reason: PollsHelixReason | "not_found" | "not_open" | "already_active" };
 
+export type PollsMutationAuthorization = () => Promise<boolean>;
+
 const success = (run: PollsRun | null): PollsActionOutcome => run === null
   ? { ok: false, reason: "invalid_response" }
   : { ok: true, run };
@@ -149,6 +151,7 @@ export const startEntry = async (
   channelId: string,
   entryId: string,
   now: string,
+  authorize: PollsMutationAuthorization,
 ): Promise<PollsActionOutcome> => {
   const repository = createPollsRepository(env.DB);
   const entry = await entryForStart(env, channelId, entryId);
@@ -164,8 +167,8 @@ export const startEntry = async (
 
   const { createPoll, createPrediction } = await loadHelix();
   const helix = entry.kind === "poll"
-    ? await createPoll(env, channelId, entry)
-    : await createPrediction(env, channelId, entry);
+    ? await createPoll(env, channelId, entry, authorize)
+    : await createPrediction(env, channelId, entry, authorize);
   if (!helix.ok) {
     if (helix.reason === "already_active") {
       await reconcileKinds(env, channelId, now, true, [entry.kind]);
@@ -201,30 +204,49 @@ const runForAction = async (
 
 const isActionFailure = (value: PollsRun | PollsActionOutcome): value is PollsActionOutcome => "ok" in value;
 
-export const endPollRun = async (env: Env, channelId: string, runId: string): Promise<PollsActionOutcome> => {
+export const endPollRun = async (
+  env: Env,
+  channelId: string,
+  runId: string,
+  authorize: PollsMutationAuthorization,
+): Promise<PollsActionOutcome> => {
   const current = await runForAction(env, channelId, runId, "poll", ["active"]);
   if (isActionFailure(current)) return current;
-  const helix = await (await loadHelix()).endPoll(env, channelId, current.twitchId, "TERMINATED");
+  const helix = await (await loadHelix()).endPoll(env, channelId, current.twitchId, "TERMINATED", authorize);
   if (!helix.ok) return failed(helix.reason);
   const item = resultForId(helix.data, current.twitchId);
   if (item === null) return failed("invalid_response");
   return success(await recordSnapshot(env, channelId, snapshotFromHelixPoll(item, new Date().toISOString())));
 };
 
-export const lockPredictionRun = async (env: Env, channelId: string, runId: string): Promise<PollsActionOutcome> => {
+export const lockPredictionRun = async (
+  env: Env,
+  channelId: string,
+  runId: string,
+  authorize: PollsMutationAuthorization,
+): Promise<PollsActionOutcome> => {
   const current = await runForAction(env, channelId, runId, "prediction", ["active"]);
   if (isActionFailure(current)) return current;
-  const helix = await (await loadHelix()).patchPrediction(env, channelId, current.twitchId, { status: "LOCKED" });
+  const helix = await (await loadHelix()).patchPrediction(
+    env, channelId, current.twitchId, { status: "LOCKED" }, authorize,
+  );
   if (!helix.ok) return failed(helix.reason);
   const item = resultForId(helix.data, current.twitchId);
   if (item === null) return failed("invalid_response");
   return success(await recordSnapshot(env, channelId, snapshotFromHelixPrediction(item, new Date().toISOString())));
 };
 
-export const cancelPredictionRun = async (env: Env, channelId: string, runId: string): Promise<PollsActionOutcome> => {
+export const cancelPredictionRun = async (
+  env: Env,
+  channelId: string,
+  runId: string,
+  authorize: PollsMutationAuthorization,
+): Promise<PollsActionOutcome> => {
   const current = await runForAction(env, channelId, runId, "prediction", ["active", "locked"]);
   if (isActionFailure(current)) return current;
-  const helix = await (await loadHelix()).patchPrediction(env, channelId, current.twitchId, { status: "CANCELED" });
+  const helix = await (await loadHelix()).patchPrediction(
+    env, channelId, current.twitchId, { status: "CANCELED" }, authorize,
+  );
   if (!helix.ok) return failed(helix.reason);
   const item = resultForId(helix.data, current.twitchId);
   if (item === null) return failed("invalid_response");
@@ -236,6 +258,7 @@ export const resolvePredictionRun = async (
   channelId: string,
   runId: string,
   winningChoiceId: string,
+  authorize: PollsMutationAuthorization,
 ): Promise<PollsActionOutcome> => {
   const repository = createPollsRepository(env.DB);
   const current = await repository.findRunById(channelId, runId);
@@ -259,7 +282,7 @@ export const resolvePredictionRun = async (
   const patched = await patchPrediction(env, channelId, refreshed.twitchId, {
     status: "RESOLVED",
     winningOutcomeId: winningChoiceId,
-  });
+  }, authorize);
   if (!patched.ok) return failed(patched.reason);
   const resolved = resultForId(patched.data, refreshed.twitchId);
   if (resolved === null) return failed("invalid_response");
