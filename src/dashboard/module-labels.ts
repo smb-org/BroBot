@@ -29,6 +29,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     belabox: "BELABOX",
     statistics: "Statistiken",
     quiz: "Quiz",
+    polls: "Umfragen & Predictions",
     temp_vips: "Temporäre VIPs",
   },
   en: {
@@ -47,6 +48,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     belabox: "BELABOX",
     statistics: "Statistics",
     quiz: "Quiz",
+    polls: "Polls & Predictions",
     temp_vips: "Temporary VIPs",
   },
 };
@@ -84,6 +86,8 @@ interface EventSubscriptionNames {
   streamStarted: string;
   streamEnded: string;
   vipRemovals: string;
+  polls: string;
+  predictions: string;
 }
 
 const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
@@ -104,6 +108,8 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     streamStarted: "Streamstarts",
     streamEnded: "Streamenden",
     vipRemovals: "VIP-Entzüge",
+    polls: "Umfragen",
+    predictions: "Predictions",
   },
   en: {
     chatMessages: "Chat messages",
@@ -122,6 +128,8 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     streamStarted: "Stream starts",
     streamEnded: "Stream ends",
     vipRemovals: "VIP removals",
+    polls: "Polls",
+    predictions: "Predictions",
   },
 };
 
@@ -147,6 +155,8 @@ export const eventSubName = (
   if (subscriptionType === "channel.ad_break.begin") return texts.adBreaks;
   if (subscriptionType === "channel.update") return texts.channelUpdates;
   if (subscriptionType === "channel.vip.remove") return texts.vipRemovals;
+  if (subscriptionType.startsWith("channel.poll.")) return texts.polls;
+  if (subscriptionType.startsWith("channel.prediction.")) return texts.predictions;
   if (subscriptionType === "stream.online") return texts.streamStarted;
   if (subscriptionType === "stream.offline") return texts.streamEnded;
   return subscriptionType;
@@ -170,6 +180,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     belabox: "Verwaltet die BELABOX-Relay-Statistikverbindung.",
     statistics: "Erfasst während des Livestreams alle fünf Minuten aggregierte Chat-, Viewer- und Chatter-Zahlen. Aktive Chatter sind die ungefähre Zahl unterschiedlicher Chatter, die in den fünf Minuten vor der Fenstergrenze geschrieben haben; ohne Stichprobe an der Grenze kann der Wert fehlen. Dafür nutzt der Bot die bestehende kurzlebige, pseudonyme Chatter-Verfolgung. Dauerhaft gespeichert werden Fenstersummen, eine kanalweite Liste der häufigsten Wörter mit Zählern (höchstens 5.000, ohne Zuordnung zu Personen oder Nachrichten) und Zeitleisten-Ereignisse je Stream (Start und Ende, Titel- und Kategoriewechsel, Clips, Werbepausen nur mit Einwilligung, Emote-Spitzen sowie eingehende und ausgehende Raids mit Kennung, Login und Anzeigenamen des Partnerkanals) samt Stream-, Kategorie- und Clip-Kennungen bis zum Löschen des Kanals; keine Namen oder Kennungen einzelner Zuschauer oder Clip-Ersteller und keine einzelnen Nachrichten.",
     quiz: "Verwaltet eigene Quiz-Fragensets für den Kanal.",
+    polls: "Verwaltet vorbereitete Umfragen und Predictions und speichert Twitch-Läufe mit ihren Ergebnissen im Verlauf.",
     temp_vips: "Verwaltet VIP auf Zeit und erinnert oder entzieht es nach Ablauf.",
   },
   en: {
@@ -187,6 +198,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     belabox: "Manages the BELABOX relay stats connection.",
     statistics: "Collects aggregate chat, viewer, and chatter counts every five minutes during a live stream. Active chatters approximates distinct chatters who sent a message in the five minutes before each window boundary; the value may be missing when no boundary sample was taken. It relies on the existing short-lived pseudonymous chatter tracking. Retained are window totals, a channel-wide list of the most frequent words with counts (at most 5,000, not linked to people or messages), and stream timeline events (stream start and end, title and category changes, clips, ad breaks only with consent, emote spikes, and incoming and outgoing raids with the partner channel's ID, login, and display name) including stream, category, and clip IDs until the channel is deleted; no names or IDs of individual viewers or clip creators, and no individual messages.",
     quiz: "Manage channel-owned quiz question sets.",
+    polls: "Manage prepared polls and predictions and keep Twitch runs with their results in channel history.",
     temp_vips: "Manages time-limited VIPs and reminds or removes them when they expire.",
   },
 };
