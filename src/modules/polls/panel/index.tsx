@@ -14,6 +14,8 @@ import {
   type PollsRunChoice,
 } from "../contracts";
 import { pollsPanelTexts } from "./locale";
+import { blockingPollsRun, pollsEntryStartReason } from "./action-model";
+import { pollsApiErrorMessage } from "./error-message";
 import {
   cancelPollsRun,
   createPollsEntry,
@@ -41,8 +43,6 @@ type ConfirmState = { kind: "delete"; entry: PollsEntry } | { kind: "cancel"; ru
 
 const EMPTY_STATE: PollsPanelState = { active: { poll: null, prediction: null }, open: [], entries: [] };
 
-const isOpenRun = (run: PollsRun): boolean => run.status === "active" || run.status === "locked";
-
 const entryToDraft = (entry: PollsEntry): PollsEntryDraft => ({
   kind: entry.kind,
   title: entry.title,
@@ -60,32 +60,6 @@ const newDraft = (kind: PollsKind = "poll"): PollsEntryDraft => ({
   channelPointsVotingEnabled: false,
   channelPointsPerVote: "",
 });
-
-const apiErrorMessage = (error: unknown, labels: typeof pollsPanelTexts.en): string => {
-  if (!(error instanceof PanelApiError)) return labels.requestFailed;
-  const code = error.code;
-  if (code === "polls_not_eligible") return labels.notEligible;
-  if (code === "polls_already_active") return labels.alreadyActive;
-  if (code === "polls_not_connected") return labels.missingConnection;
-  if (code === "polls_token_unavailable") return labels.tokenUnavailable;
-  if (code === "polls_scope_missing") return labels.missingScope;
-  if (code === "polls_revoked") return labels.revoked;
-  if (code === "polls_refresh_failed") return labels.refreshFailed;
-  if (code === "polls_rate_limited" || error.status === 429) return labels.rateLimited;
-  if (code === "polls_network") return labels.network;
-  if (code === "polls_unknown_status") return labels.twitchStatusUnknown;
-  if (code === "polls_invalid_response") return labels.twitchInvalidResponse;
-  if (code === "polls_entry_limit") return labels.entryLimit;
-  if (code === "polls_entry_conflict") return labels.conflict;
-  if (code === "polls_module_disabled") return labels.moduleDisabled;
-  if (code === "polls_management_denied" || code === "polls_precondition_failed") return labels.managementDenied;
-  if (code === "polls_run_not_found" || code === "polls_entry_not_found") return labels.runNotFound;
-  if (code === "polls_not_open") return labels.notOpen;
-  if (code === "polls_run_not_dismissible") return labels.notDismissible;
-  if (code === "polls_invalid_choice") return labels.choiceInvalid;
-  if (code === "polls_invalid_entry" || code === "polls_invalid_input") return labels.invalidEntry;
-  return labels.requestFailed;
-};
 
 const refreshAfterWrite = async (
   refreshState: () => Promise<unknown>,
@@ -278,7 +252,7 @@ export default function PollsPanel({ channelId, language = "de", canOperate = tr
     void reconcilePolls(channelId, false).then(async () => {
       await refreshData();
     }).catch((error: unknown) => {
-      const message = apiErrorMessage(error, labels);
+      const message = pollsApiErrorMessage(error, labels);
       setFeedback(message);
       notify({ tone: "error", message });
     }).finally(() => {
@@ -287,14 +261,7 @@ export default function PollsPanel({ channelId, language = "de", canOperate = tr
     });
   }, [channelId, isOperator, labels, refreshData, stateQuery.data, stateQuery.isFetched]);
 
-  const blockingRun = (kind: PollsKind): PollsRun | null => {
-    const active = data.active[kind];
-    if (active !== null && isOpenRun(active)) return active;
-    if (kind === "prediction") {
-      return data.open.find((run) => run.kind === kind && run.status === "locked") ?? null;
-    }
-    return null;
-  };
+  const blockingRun = (kind: PollsKind): PollsRun | null => blockingPollsRun(data, kind);
 
   const visibleEntries = useMemo(() => {
     const term = search.trim().toLocaleLowerCase();
@@ -306,7 +273,7 @@ export default function PollsPanel({ channelId, language = "de", canOperate = tr
     .filter((run) => run.dismissedAt === null && (run.status === "unknown" || (run.kind === "prediction" && run.status === "locked")))
     .sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt)), [data.open]);
 
-  const feedbackForError = (error: unknown): string => apiErrorMessage(error, labels);
+  const feedbackForError = (error: unknown): string => pollsApiErrorMessage(error, labels);
 
   const showSuccess = async (message: string): Promise<void> => {
     setFeedback(message);
@@ -477,9 +444,7 @@ export default function PollsPanel({ channelId, language = "de", canOperate = tr
         {visibleEntries.length === 0 ? <p className="polls-section__empty polls-entries__empty">{stateQuery.data === undefined ? labels.loading : labels.noEntries}</p> :
           visibleEntries.map((entry) => {
             const blocked = blockingRun(entry.kind);
-            const reason = blocked === null ? undefined : blocked.status === "locked"
-              ? labels.runningLockReason
-              : entry.kind === "poll" ? labels.runningPollReason : labels.runningPredictionReason;
+            const reason = pollsEntryStartReason(data, entry.kind, activeLanguage) ?? undefined;
             const startDisabled = pendingEntryId !== null || blocked !== null;
             return <article className="polls-entry-row" aria-label={entry.title} key={entry.id}>
               <div className="polls-entry-row__identity">

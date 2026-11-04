@@ -2056,9 +2056,11 @@ export interface ModuleImmediateActionContentProperties {
   language: ModuleLanguage;
   onDraftChange?: (dirty: boolean) => void;
   onReadinessChange?: (ready: boolean, reason: string | null) => void;
+  /** Lets dialog content provide a context-specific button that still runs through the action result path. */
+  onActionExecute?: (formData: FormData) => Promise<void>;
 }
 
-interface ModuleImmediateActionExecutionProperties extends ModuleImmediateActionContentProperties {
+interface ModuleImmediateActionExecutionProperties extends Omit<ModuleImmediateActionContentProperties, "onActionExecute"> {
   formData: FormData;
   viewerUserId?: string | null;
   pollId?: string;
@@ -2084,6 +2086,8 @@ export interface ModuleImmediateActionDefinition {
   content?: {
     presentation: "popover" | "dialog";
     requiresReadiness?: boolean;
+    /** The content renders its own context-specific action buttons. */
+    hideSubmit?: boolean;
     load: () => Promise<{ default: ComponentType<ModuleImmediateActionContentProperties> }>;
   };
 }
