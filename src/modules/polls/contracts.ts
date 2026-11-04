@@ -18,6 +18,12 @@ const PREDICTION_LIMITS = {
   durationSeconds: { min: 30, max: 1800 },
 } as const;
 
+/** Shared Twitch field limits for the panel editor and server-side input schema. */
+export const POLLS_ENTRY_LIMITS = {
+  poll: POLL_LIMITS,
+  prediction: PREDICTION_LIMITS,
+} as const;
+
 export type PollsKind = "poll" | "prediction";
 export type PollRunStatus = "active" | "completed" | "terminated" | "archived" | "unknown";
 export type PredictionRunStatus = "active" | "locked" | "resolved" | "canceled" | "unknown";
