@@ -111,7 +111,7 @@ pollsRoutes.get("/state", async (context) => {
       poll: openRuns.find((run) => run.kind === "poll" && run.status === "active") ?? null,
       prediction: openRuns.find((run) => run.kind === "prediction" && run.status === "active") ?? null,
     },
-    open: openRuns.filter((run) => run.kind === "prediction" && (run.status === "locked" || run.status === "unknown")),
+    open: openRuns.filter((run) => run.status === "unknown" || (run.kind === "prediction" && run.status === "locked")),
     entries,
   });
 });

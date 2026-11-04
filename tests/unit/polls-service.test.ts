@@ -229,6 +229,24 @@ describe("polls service", () => {
       .resolves.toMatchObject({ source: "twitch", status: "active" });
   });
 
+  it("does not let an unknown poll block a start", async () => {
+    const entry = await repository.createEntry(channelId, {
+      kind: "poll", title: "Fictional poll", choices: ["First", "Second"], durationSeconds: 60,
+      channelPointsVotingEnabled: false, channelPointsPerVote: null,
+    }, now);
+    if (entry === "limit_reached") throw new Error("Unexpected entry limit.");
+    await repository.upsertRunSnapshot(channelId, {
+      kind: "poll", twitchId: "twitch_poll_stale", title: "Stale poll", choices: [], status: "unknown",
+      startedAt: now, endsAt: null, lockedAt: null, endedAt: null, winningChoiceId: null,
+      observedAt: now, terminalPayload: null,
+    });
+    const fetcher = installFetch((_url, method) => jsonResponse({ data: method === "POST" ? [helixPoll] : [] }));
+
+    await expect(startEntry(environment, channelId, entry.id, "2026-11-04T12:00:01.000Z", authorized))
+      .resolves.toMatchObject({ ok: true });
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true);
+  });
+
   it("marks an open run unknown when the by-ID Helix answer omits it", async () => {
     const inserted = await repository.upsertRunSnapshot(channelId, {
       kind: "prediction", twitchId: prediction.id, title: prediction.title, choices: [], status: "active",

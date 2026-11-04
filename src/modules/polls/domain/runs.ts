@@ -72,7 +72,24 @@ const choiceRows = (
   return choices;
 };
 
-const eventSubEnvelope = (payload: Readonly<Record<string, unknown>>, kind: PollsKind): EventSubEnvelope | null => {
+const PAYLOAD_SCALARS = ["id", "title", "status", "started_at", "ended_at", "locked_at", "locks_at", "ends_at", "winning_outcome_id"] as const;
+const PAYLOAD_CHOICE_FIELDS = ["id", "title", "color", "votes", "channel_points_votes", "bits_votes", "users", "channel_points"] as const;
+
+/** Keeps only aggregates: no top predictors, no viewer or broadcaster identities. */
+const aggregatePayload = (payload: Readonly<Record<string, unknown>>): Record<string, unknown> => {
+  const pick = (source: Readonly<Record<string, unknown>>, keys: readonly string[]): Record<string, unknown> =>
+    Object.fromEntries(keys.filter((key) => source[key] !== undefined).map((key) => [key, source[key]]));
+  const result = pick(payload, PAYLOAD_SCALARS);
+  for (const key of ["choices", "outcomes"]) {
+    const rows = payload[key];
+    if (Array.isArray(rows)) {
+      result[key] = rows.filter(isRecord).map((row) => pick(row, PAYLOAD_CHOICE_FIELDS));
+    }
+  }
+  return result;
+};
+
+const eventSubEnvelope =(payload: Readonly<Record<string, unknown>>, kind: PollsKind): EventSubEnvelope | null => {
   const id = nonEmptyString(payload.id);
   const title = nonEmptyString(payload.title);
   const startedAt = timestamp(payload.started_at);
@@ -182,7 +199,7 @@ export const snapshotFromEventSub = (
     winningChoiceId: envelope.winningChoiceId,
     observedAt: timestamp(receivedAt) ?? receivedAt,
     terminalPayload: isEnd && (kind === "poll" ? isPollTerminal(status) : isPredictionTerminal(status))
-      ? payload
+      ? aggregatePayload(payload)
       : null,
   };
 };

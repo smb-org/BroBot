@@ -157,10 +157,12 @@ export const startEntry = async (
   const entry = await entryForStart(env, channelId, entryId);
   if (entry === null) return failed("not_found");
 
-  const openOfKind = (await repository.listOpenRuns(channelId)).filter((run) => run.kind === entry.kind);
-  if (openOfKind.length > 0) {
+  // Unknown runs never block a start; Twitch rejects it if something is really active.
+  const blocking = (run: PollsRun): boolean =>
+    run.kind === entry.kind && (run.status === "active" || run.status === "locked");
+  if ((await repository.listOpenRuns(channelId)).some(blocking)) {
     await reconcileKinds(env, channelId, now, true, [entry.kind]);
-    if ((await repository.listOpenRuns(channelId)).some((run) => run.kind === entry.kind)) {
+    if ((await repository.listOpenRuns(channelId)).some(blocking)) {
       return failed("already_active");
     }
   }

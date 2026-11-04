@@ -187,6 +187,23 @@ describe("polls routes", () => {
     await expect(response.json()).resolves.toEqual({ error: "polls_already_active" });
   });
 
+  it("lists an unknown poll in open runs and lets an operator dismiss it", async () => {
+    database.sqlite.prepare(
+      `INSERT INTO polls_runs (
+         channel_id, run_id, kind, twitch_id, entry_id, source, title, choices_json, status,
+         started_at, ends_at, locked_at, ended_at, winning_choice_id, last_event_at
+       ) VALUES (?, ?, 'poll', ?, NULL, 'twitch', ?, ?, 'unknown', ?, NULL, NULL, NULL, NULL, ?)`,
+    ).run(channelId, "run_unknown_poll", "twitch_poll_unknown", "Fictional poll", "[]", now, now);
+
+    const state = await makeRequest("viewer", "/state", undefined, "GET");
+    const stateBody = await state.json<{ open: { id: string }[] }>();
+    expect(stateBody.open.map((run) => run.id)).toEqual(["run_unknown_poll"]);
+
+    const dismissed = await makeRequest("operator", "/runs/run_unknown_poll/dismiss");
+    expect(dismissed.status).toBe(200);
+    await expect(dismissed.json()).resolves.toMatchObject({ run: { status: "canceled" } });
+  });
+
   it("rejects dismissing a prediction that is locked rather than unknown", async () => {
     database.sqlite.prepare(
       `INSERT INTO polls_runs (
