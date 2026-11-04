@@ -55,7 +55,6 @@ export default function PollsCockpitStartActionContent({ channelId, language, on
           { value: "prediction", label: labels.predictions },
         ]}
         size="compact"
-        wrap
       />
     </div>
     <div className="polls-cockpit-action__status" role={stateQuery.isError ? "alert" : "status"} aria-live="polite">

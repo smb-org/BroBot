@@ -225,6 +225,7 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
 }): ReactElement => {
   const texts = dashboardTexts();
   const [open, setOpen] = useState(false);
+  const [footerElement, setFooterElement] = useState<HTMLElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [draftDirty, setDraftDirty] = useState(false);
   const [contentFailed, setContentFailed] = useState(false);
@@ -409,12 +410,12 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
           <Button size="compact" variant="neutral" onClick={retryModuleChunkLoad}>{dashboardCommonTexts().retry}</Button>
         </div>
         : Content === null ? null : <fieldset disabled={busy} className="live-action-frame__fields"><Content channelId={channelId} language={language} onDraftChange={setDraftDirty}
-          onActionExecute={run}
+          onActionExecute={run} footerElement={footerElement}
           {...(requiresContentReadiness ? { onReadinessChange: reportContentReadiness } : {})} /></fieldset>}
     </div>
     {contentReadinessReason === null ? null : <span className="sr-only" id={contentReadinessReasonId}>{contentReadinessReason}</span>}
     <p className={`live-action-frame__error${error === null ? "" : " has-error"}`} aria-live="polite" role="status">{error === null ? "\u00a0" : feedbackMessage(error)}</p>
-    <footer className="live-action-frame__footer">
+    <footer className="live-action-frame__footer" ref={setFooterElement}>
       <Button variant="subtle" disabled={busy} onClick={close}>{texts.streamManager.actionCancel}</Button>
       {action.content?.hideSubmit === true ? null : <Button variant="primary" type="submit" disabled={disabled || busy || contentLoading || contentFailed || !contentReady}
         {...(contentReadinessReason === null ? {} : { describedBy: contentReadinessReasonId, title: contentReadinessReason })}>

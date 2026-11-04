@@ -61,7 +61,7 @@ export function ResolvePredictionContents({ channelId, run, language, canOperate
               />
               <span className="polls-resolve-choice__title">{choice.title}</span>
               <span className="polls-resolve-choice__counts">
-                {formatCount(choice.users)} {labels.users} · {formatCount(choice.channelPoints)} {labels.points}
+                {formatCount(choice.users)} {labels.users(choice.users ?? 0)} · {formatCount(choice.channelPoints)} {labels.points}
               </span>
             </label>)}
           </div>}

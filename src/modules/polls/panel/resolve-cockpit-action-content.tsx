@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { createPortal } from "react-dom";
 
 import type { ModuleImmediateActionContentProperties } from "../../contract";
 import { connectedRefetchInterval, useModuleQuery } from "../../../dashboard/data";
@@ -18,7 +19,7 @@ const formatPredictionDate = (value: string, language: "de" | "en"): string => {
   return new Intl.DateTimeFormat(language === "de" ? "de-DE" : "en-US", { dateStyle: "short", timeStyle: "short" }).format(timestamp);
 };
 
-export default function PollsCockpitResolveActionContent({ channelId, language, onActionExecute }: ModuleImmediateActionContentProperties): ReactElement {
+export default function PollsCockpitResolveActionContent({ channelId, language, onActionExecute, footerElement }: ModuleImmediateActionContentProperties): ReactElement {
   const labels = pollsPanelTexts[language];
   const actionTexts = pollsCockpitActionTexts[language];
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -53,9 +54,7 @@ export default function PollsCockpitResolveActionContent({ channelId, language, 
   };
 
   return <div className="polls-cockpit-action polls-cockpit-action--resolve">
-    <div className="polls-cockpit-action__status" role={stateQuery.isError ? "alert" : "status"} aria-live="polite">
-      {stateQuery.isError ? actionTexts.openPredictionCheckFailed : stateQuery.data === undefined ? labels.loading : " "}
-    </div>
+    {stateQuery.isError ? <div className="polls-cockpit-action__status" role="alert">{actionTexts.openPredictionCheckFailed}</div> : null}
     {predictions.length === 0
       ? <p className="polls-cockpit-action__empty">{stateQuery.data === undefined ? labels.loading : actionTexts.noOpenPrediction}</p>
       : <>
@@ -75,13 +74,14 @@ export default function PollsCockpitResolveActionContent({ channelId, language, 
           onChoiceChange={onChoiceChange}
           onReadyChange={onReadyChange}
         />}
-        <div className="polls-cockpit-action__confirm">
+        {footerElement === null || footerElement === undefined ? null : createPortal(
           <Button
             variant="primary"
             disabled={selectedRun === null || selectedChoice === null || !choicesReady || onActionExecute === undefined}
             onClick={resolveSelected}
-          >{selectedChoice === null ? labels.resolve : labels.resolveChoice(selectedChoice.title)}</Button>
-        </div>
+          >{selectedChoice === null ? labels.resolve : labels.resolveChoice(selectedChoice.title)}</Button>,
+          footerElement,
+        )}
       </>}
   </div>;
 }

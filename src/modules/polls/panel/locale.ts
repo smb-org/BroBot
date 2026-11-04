@@ -11,7 +11,7 @@ export const pollsPanelTexts: Readonly<Record<ModuleLanguage, {
   remaining: string;
   ended: string;
   votes: string;
-  users: string;
+  users: (count: number) => string;
   points: string;
   end: string;
   lock: string;
@@ -150,7 +150,7 @@ export const pollsPanelTexts: Readonly<Record<ModuleLanguage, {
     remaining: "Verbleibend",
     ended: "Beendet",
     votes: "Stimmen",
-    users: "Personen",
+    users: (count) => count === 1 ? "Person" : "Personen",
     points: "Punkte",
     end: "Beenden",
     lock: "Sperren",
@@ -289,7 +289,7 @@ export const pollsPanelTexts: Readonly<Record<ModuleLanguage, {
     remaining: "Remaining",
     ended: "Ended",
     votes: "Votes",
-    users: "People",
+    users: (count) => count === 1 ? "person" : "people",
     points: "Points",
     end: "End",
     lock: "Lock",

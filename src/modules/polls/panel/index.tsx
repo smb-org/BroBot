@@ -168,7 +168,7 @@ function RunSlot({
           <span className="polls-run-choice__value mono">
             {kind === "poll"
               ? `${formatCount(choice.votes, language)} ${labels.votes}`
-              : `${formatCount(choice.users, language)} ${labels.users} · ${formatCount(choice.channelPoints, language)} ${labels.points}`}
+              : `${formatCount(choice.users, language)} ${labels.users(choice.users ?? 0)} · ${formatCount(choice.channelPoints, language)} ${labels.points}`}
           </span>
         </div>;
       })}

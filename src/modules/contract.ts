@@ -2058,6 +2058,8 @@ export interface ModuleImmediateActionContentProperties {
   onReadinessChange?: (ready: boolean, reason: string | null) => void;
   /** Lets dialog content provide a context-specific button that still runs through the action result path. */
   onActionExecute?: (formData: FormData) => Promise<void>;
+  /** The dialog footer, so content can portal its own primary button next to the cancel button. */
+  footerElement?: HTMLElement | null;
 }
 
 interface ModuleImmediateActionExecutionProperties extends Omit<ModuleImmediateActionContentProperties, "onActionExecute"> {
