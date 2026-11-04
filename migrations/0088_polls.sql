@@ -38,6 +38,7 @@ CREATE TABLE polls_runs (
   winning_choice_id TEXT,
   last_event_at TEXT NOT NULL,
   terminal_payload_json TEXT CHECK (terminal_payload_json IS NULL OR json_valid(terminal_payload_json)),
+  dismissed_at TEXT,
   UNIQUE (channel_id, kind, twitch_id)
 );
 
@@ -46,7 +47,7 @@ CREATE INDEX polls_runs_channel_history_idx
 
 CREATE INDEX polls_runs_channel_open_idx
   ON polls_runs (channel_id, kind, started_at)
-  WHERE status IN ('active', 'locked', 'unknown');
+  WHERE status IN ('active', 'locked') OR (status = 'unknown' AND dismissed_at IS NULL);
 
 CREATE TABLE polls_reconcile_state (
   channel_id TEXT PRIMARY KEY REFERENCES channels(channel_id) ON DELETE CASCADE,
@@ -94,6 +95,7 @@ WHEN OLD.channel_id IS NOT NEW.channel_id OR OLD.run_id IS NOT NEW.run_id OR OLD
   OR OLD.started_at IS NOT NEW.started_at OR OLD.ends_at IS NOT NEW.ends_at OR OLD.locked_at IS NOT NEW.locked_at
   OR OLD.ended_at IS NOT NEW.ended_at OR OLD.winning_choice_id IS NOT NEW.winning_choice_id
   OR OLD.last_event_at IS NOT NEW.last_event_at OR OLD.terminal_payload_json IS NOT NEW.terminal_payload_json
+  OR OLD.dismissed_at IS NOT NEW.dismissed_at
 BEGIN
   INSERT INTO panel_resource_revisions
   SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'polls_runs'

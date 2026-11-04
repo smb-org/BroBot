@@ -88,6 +88,7 @@ export interface PollsRun {
   winningChoiceId: string | null;
   refundDeadline: string | null;
   lastEventAt: string;
+  dismissedAt: string | null;
 }
 
 export type PollsHelixReason =
@@ -128,7 +129,7 @@ export interface HelixPoll {
   status: "ACTIVE" | "COMPLETED" | "TERMINATED" | "ARCHIVED" | "MODERATED" | "INVALID";
   duration: number;
   started_at: string;
-  ended_at: string | null;
+  ended_at?: string | null | undefined;
 }
 
 export interface HelixPrediction {
@@ -137,24 +138,24 @@ export interface HelixPrediction {
   broadcaster_name: string;
   broadcaster_login: string;
   title: string;
-  winning_outcome_id: string | null;
+  winning_outcome_id?: string | null | undefined;
   outcomes: readonly {
     id: string;
     title: string;
     users: number;
     channel_points: number;
-    top_predictors: readonly {
+    top_predictors?: readonly {
       user_name: string;
       user_login: string;
       user_id: string;
-      channel_points_won: number | null;
+      channel_points_won?: number | null | undefined;
       channel_points_used: number;
-    }[] | null;
+    }[] | null | undefined;
     color: "BLUE" | "PINK";
   }[];
   prediction_window: number;
   status: "ACTIVE" | "LOCKED" | "RESOLVED" | "CANCELED";
   created_at: string;
-  ended_at: string | null;
-  locked_at: string | null;
+  ended_at?: string | null | undefined;
+  locked_at?: string | null | undefined;
 }

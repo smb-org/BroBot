@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../src/modules/polls/service", () => mocks);
 
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
+import { createPollsRepository } from "../../src/modules/polls/repository";
 import { pollsRoutes } from "../../src/modules/polls/routes";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { TestD1Database } from "./test-d1";
@@ -145,7 +146,7 @@ describe("polls routes", () => {
     ).run(channelId, "run_unknown", "twitch_prediction_unknown", "Fictional prediction", now, now);
     const dismissedResponse = await makeRequest("operator", "/runs/run_unknown/dismiss");
     expect(dismissedResponse.status).toBe(200);
-    await expect(dismissedResponse.json()).resolves.toMatchObject({ run: { status: "canceled" } });
+    await expect(dismissedResponse.json()).resolves.toMatchObject({ run: { status: "unknown" } });
   });
 
   it.each([
@@ -201,7 +202,31 @@ describe("polls routes", () => {
 
     const dismissed = await makeRequest("operator", "/runs/run_unknown_poll/dismiss");
     expect(dismissed.status).toBe(200);
-    await expect(dismissed.json()).resolves.toMatchObject({ run: { status: "canceled" } });
+    await expect(dismissed.json()).resolves.toMatchObject({ run: { status: "unknown", dismissedAt: expect.any(String) as unknown } });
+
+    const after = await (await makeRequest("viewer", "/state", undefined, "GET")).json<{ open: { id: string }[] }>();
+    expect(after.open).toEqual([]);
+  });
+
+  it("applies a later Twitch result to a dismissed unknown prediction", async () => {
+    database.sqlite.prepare(
+      `INSERT INTO polls_runs (
+         channel_id, run_id, kind, twitch_id, entry_id, source, title, choices_json, status,
+         started_at, ends_at, locked_at, ended_at, winning_choice_id, last_event_at
+       ) VALUES (?, ?, 'prediction', ?, NULL, 'twitch', ?, ?, 'unknown', ?, NULL, NULL, NULL, NULL, ?)`,
+    ).run(channelId, "run_unknown_prediction", "twitch_prediction_unknown", "Fictional prediction", "[]", now, now);
+    expect((await makeRequest("operator", "/runs/run_unknown_prediction/dismiss")).status).toBe(200);
+
+    const repository = createPollsRepository(database as unknown as D1Database);
+    await repository.upsertRunSnapshot(channelId, {
+      kind: "prediction", twitchId: "twitch_prediction_unknown", title: "Fictional prediction", choices: [],
+      status: "resolved", startedAt: now, endsAt: null, lockedAt: null, endedAt: "2026-11-04T12:05:00.000Z",
+      winningChoiceId: "outcome_first", observedAt: "2026-11-04T12:05:00.000Z", terminalPayload: null,
+    });
+
+    await expect(repository.findRunById(channelId, "run_unknown_prediction"))
+      .resolves.toMatchObject({ status: "resolved", winningChoiceId: "outcome_first" });
+    await expect(repository.listOpenRuns(channelId)).resolves.toEqual([]);
   });
 
   it("rejects dismissing a prediction that is locked rather than unknown", async () => {

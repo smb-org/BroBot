@@ -339,27 +339,27 @@ pollsRoutes.post("/runs/:runId/dismiss", async (context) => {
   const runId = context.req.param("runId");
   const current = await repository(context).findRunById(channelId, runId);
   if (current === null) return context.json({ error: "polls_run_not_found" }, 404);
-  if (current.status !== "unknown") return context.json({ error: "polls_run_not_dismissible" }, 409);
+  if (current.status !== "unknown" || current.dismissedAt !== null) return context.json({ error: "polls_run_not_dismissible" }, 409);
   const now = nowIso();
   const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
   const mutation = context.env.DB.prepare(
-    `UPDATE polls_runs SET status = 'canceled', ended_at = ?, last_event_at = ?
-      WHERE channel_id = ? AND run_id = ? AND status = 'unknown' ${authorization.sql}
+    `UPDATE polls_runs SET dismissed_at = ?
+      WHERE channel_id = ? AND run_id = ? AND status = 'unknown' AND dismissed_at IS NULL ${authorization.sql}
      RETURNING run_id`,
-  ).bind(now, now, channelId, runId, ...authorization.values);
+  ).bind(now, channelId, runId, ...authorization.values);
   const audit = context.get("prepareModuleAudit")({
     channelId,
     moduleId: POLLS_MODULE_ID,
     action: "polls.run.dismissed" satisfies AuditAction,
     before: runAuditSnapshot(current),
-    after: { ...runAuditSnapshot(current), status: "canceled" },
+    after: { ...runAuditSnapshot(current), dismissed: true },
   }, now);
   const [result] = await context.env.DB.batch([mutation, audit]);
   if ((result?.meta.changes ?? 0) === 0) {
     const latest = await repository(context).findRunById(channelId, runId);
     return latest === null
       ? context.json({ error: "polls_run_not_found" }, 404)
-      : latest.status !== "unknown"
+      : latest.status !== "unknown" || latest.dismissedAt !== null
         ? context.json({ error: "polls_run_not_dismissible" }, 409)
         : denied(context);
   }

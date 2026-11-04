@@ -34,7 +34,7 @@ const pollSchema = z.object({
   status: z.enum(["ACTIVE", "COMPLETED", "TERMINATED", "ARCHIVED", "MODERATED", "INVALID"]),
   duration: z.number().int().nonnegative(),
   started_at: z.string(),
-  ended_at: z.string().nullable(),
+  ended_at: z.string().nullish(),
 });
 
 const predictionSchema = z.object({
@@ -43,7 +43,7 @@ const predictionSchema = z.object({
   broadcaster_name: z.string(),
   broadcaster_login: z.string().min(1),
   title: z.string(),
-  winning_outcome_id: z.string().nullable(),
+  winning_outcome_id: z.string().nullish(),
   outcomes: z.array(z.object({
     id: z.string().min(1),
     title: z.string(),
@@ -53,16 +53,16 @@ const predictionSchema = z.object({
       user_name: z.string(),
       user_login: z.string(),
       user_id: z.string(),
-      channel_points_won: z.number().int().nonnegative().nullable(),
+      channel_points_won: z.number().int().nonnegative().nullish(),
       channel_points_used: z.number().int().nonnegative(),
-    })).nullable(),
+    })).nullish(),
     color: z.enum(["BLUE", "PINK"]),
   })),
   prediction_window: z.number().int().nonnegative(),
   status: z.enum(["ACTIVE", "LOCKED", "RESOLVED", "CANCELED"]),
   created_at: z.string(),
-  ended_at: z.string().nullable(),
-  locked_at: z.string().nullable(),
+  ended_at: z.string().nullish(),
+  locked_at: z.string().nullish(),
 });
 
 const pollsEnvelopeSchema = z.object({ data: z.array(pollSchema) });

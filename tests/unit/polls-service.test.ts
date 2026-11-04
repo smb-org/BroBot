@@ -205,6 +205,40 @@ describe("polls service", () => {
     });
   });
 
+  it("stores the run without an entry when the entry is deleted while Helix creates it", async () => {
+    const created = await repository.createEntry(channelId, {
+      kind: "poll", title: "Fictional poll", choices: ["First", "Second"], durationSeconds: 60,
+      channelPointsVotingEnabled: false, channelPointsPerVote: null,
+    }, now);
+    if (created === "limit_reached") throw new Error("Unexpected entry limit.");
+    installFetch(async (_url, method) => {
+      if (method === "POST") await repository.deleteEntry(channelId, created.id);
+      return jsonResponse({ data: method === "POST" ? [helixPoll] : [] });
+    });
+
+    await expect(startEntry(environment, channelId, created.id, "2026-11-04T12:00:01.000Z", authorized))
+      .resolves.toMatchObject({ ok: true, run: { twitchId: helixPoll.id, entryId: null, source: "brobot" } });
+  });
+
+  it("accepts Helix responses that omit nullable fields", async () => {
+    // JSON.stringify drops undefined, so the key is absent on the wire.
+    const omittedPoll = { ...helixPoll, ended_at: undefined };
+    const omittedPrediction = {
+      id: prediction.id, broadcaster_id: channelId, broadcaster_name: "Polls Demo", broadcaster_login: "polls_demo",
+      title: prediction.title,
+      outcomes: [{ id: "outcome_first", title: "First", users: 0, channel_points: 0, color: "BLUE" }],
+      prediction_window: 120, status: "ACTIVE", created_at: now,
+    };
+    installFetch((url) => jsonResponse({ data: [url.pathname.endsWith("/predictions") ? omittedPrediction : omittedPoll] }));
+
+    await reconcile(environment, channelId, "2026-11-04T12:00:20.000Z", { force: true });
+
+    await expect(repository.findRunByTwitchId(channelId, "poll", helixPoll.id))
+      .resolves.toMatchObject({ status: "active", endedAt: null });
+    await expect(repository.findRunByTwitchId(channelId, "prediction", prediction.id))
+      .resolves.toMatchObject({ status: "active", endedAt: null, lockedAt: null, winningChoiceId: null });
+  });
+
   it("reconciles after Twitch rejects a start because a poll is already active", async () => {
     const entry = await repository.createEntry(channelId, {
       kind: "poll", title: "Fictional poll", choices: ["First", "Second"], durationSeconds: 60,

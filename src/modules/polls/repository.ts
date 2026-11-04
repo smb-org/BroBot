@@ -64,6 +64,7 @@ interface RunRow {
   ended_at: string | null;
   winning_choice_id: string | null;
   last_event_at: string;
+  dismissed_at: string | null;
 }
 
 interface RunCursor {
@@ -133,13 +134,14 @@ const mapRun = (row: RunRow): PollsRun => ({
   winningChoiceId: row.winning_choice_id,
   refundDeadline: refundDeadlineFor(row),
   lastEventAt: row.last_event_at,
+  dismissedAt: row.dismissed_at,
 });
 
 export const entryColumns = `entry_id, kind, title, choices_json, duration_seconds,
   channel_points_voting_enabled, channel_points_per_vote, revision, created_at, updated_at, last_started_at`;
 
 export const runColumns = `run_id, kind, twitch_id, entry_id, source, title, choices_json, status,
-  started_at, ends_at, locked_at, ended_at, winning_choice_id, last_event_at`;
+  started_at, ends_at, locked_at, ended_at, winning_choice_id, last_event_at, dismissed_at`;
 
 const terminalStatus = (kind: PollsKind, status: PollsRunStatus): boolean => kind === "poll"
   ? status === "completed" || status === "terminated" || status === "archived"
@@ -251,8 +253,9 @@ export const createPollsRepository = (db: D1Database): PollsRepository => ({
       `INSERT INTO polls_runs (
          channel_id, run_id, kind, twitch_id, entry_id, source, title, choices_json, status,
          started_at, ends_at, locked_at, ended_at, winning_choice_id, last_event_at, terminal_payload_json
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, (SELECT entry_id FROM polls_entries WHERE channel_id = ? AND entry_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(channel_id, kind, twitch_id) DO UPDATE SET
+         dismissed_at = CASE WHEN excluded.status = 'unknown' THEN polls_runs.dismissed_at ELSE NULL END,
          entry_id = COALESCE(polls_runs.entry_id, excluded.entry_id),
          source = CASE
            WHEN polls_runs.source = 'brobot' OR excluded.source = 'brobot' OR excluded.entry_id IS NOT NULL THEN 'brobot'
@@ -277,17 +280,19 @@ export const createPollsRepository = (db: D1Database): PollsRepository => ({
               AND excluded.last_event_at >= polls_runs.last_event_at)
        RETURNING run_id`,
     ).bind(
-      channelId, runId, snapshot.kind, snapshot.twitchId, snapshot.entryId ?? null,
+      channelId, runId, snapshot.kind, snapshot.twitchId, channelId, snapshot.entryId ?? null,
       snapshot.source ?? "twitch", snapshot.title, JSON.stringify(snapshot.choices), snapshot.status,
       snapshot.startedAt, snapshot.endsAt, snapshot.lockedAt, snapshot.endedAt,
       snapshot.winningChoiceId, snapshot.observedAt, terminalPayload,
     );
     const metadata = db.prepare(
       `UPDATE polls_runs
-          SET entry_id = COALESCE(entry_id, ?), source = 'brobot'
+          SET entry_id = COALESCE(entry_id, (SELECT entry_id FROM polls_entries WHERE channel_id = ? AND entry_id = ?)),
+              source = 'brobot'
         WHERE channel_id = ? AND kind = ? AND twitch_id = ?
           AND (? = 'brobot' OR ? IS NOT NULL)`,
     ).bind(
+      channelId,
       snapshot.entryId ?? null,
       channelId,
       snapshot.kind,
@@ -304,7 +309,8 @@ export const createPollsRepository = (db: D1Database): PollsRepository => ({
   async listOpenRuns(channelId) {
     const result = await db.prepare(
       `SELECT ${runColumns} FROM polls_runs
-        WHERE channel_id = ? AND status IN ('active', 'locked', 'unknown')
+        WHERE channel_id = ?
+          AND (status IN ('active', 'locked') OR (status = 'unknown' AND dismissed_at IS NULL))
         ORDER BY started_at ASC, run_id ASC`,
     ).bind(channelId).all<RunRow>();
     return result.results.map(mapRun);
