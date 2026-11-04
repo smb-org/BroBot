@@ -131,8 +131,8 @@
   .polls-entry-row__title { min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
   .polls-entry-row__meta { grid-column: 2; overflow: hidden; color: var(--text-3); font-size: var(--text-field-label); text-overflow: ellipsis; white-space: nowrap; }
   .polls-entry-row__actions { display: flex; align-items: center; gap: var(--s1); }
-  .polls-entry-row__start { display: grid; width: 240px; justify-items: start; gap: var(--s1); }
-  .polls-entry-row__reason { max-width: 100%; color: var(--text-3); font-size: var(--text-status-label); line-height: var(--leading-tight); }
+  .polls-entry-row__controls { display: grid; justify-items: end; gap: var(--s1); padding-block: var(--s1); }
+  .polls-entry-row__reason { min-height: 2.6em; max-width: 340px; text-align: right; color: var(--text-3); font-size: var(--text-status-label); line-height: var(--leading-tight); }
 
   .polls-history__heading { min-height: 32px; margin-bottom: 0; }
   .polls-history__pagination { display: flex; align-items: center; gap: var(--s2); color: var(--text-2); font-family: var(--font-mono); font-size: var(--text-number); }
@@ -152,6 +152,7 @@
   .polls-history-row__result { color: var(--text-2); }
   .polls-editor-dialog { width: min(760px, calc(100vw - 32px)); }
   .polls-editor { display: flex; max-height: min(80dvh, 820px); flex-direction: column; gap: var(--s3); overflow: auto; }
+  .polls-editor .segment-choice-field :is(.segment-choice-field__hint, .segment-choice-field__warning, .segment-choice-field__error) { display: none; }
   .polls-editor__kind { display: flex; align-items: center; gap: var(--s4); }
   .polls-editor__kind strong { color: var(--text-2); font-size: var(--text-body); }
   .polls-editor__choice-section { display: flex; flex-direction: column; gap: var(--s2); }
@@ -185,6 +186,8 @@
     .polls-entries__toolbar > .segment-choice-field { grid-row: 2; grid-column: 1 / -1; }
     .polls-entry-row { grid-template-columns: minmax(0, 1fr); gap: var(--s2); padding-block: var(--s2); }
     .polls-entry-row__actions { flex-wrap: wrap; }
+    .polls-entry-row__controls { justify-items: stretch; }
+    .polls-entry-row__reason { text-align: left; }
     .polls-entry-row__identity { grid-template-columns: max-content minmax(0, 1fr); }
     .polls-entry-row__meta { grid-column: 2; }
     .polls-history-row { grid-template-columns: max-content minmax(0, 1fr) max-content; gap: var(--s1) var(--s2); padding-block: var(--s2); }

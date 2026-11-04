@@ -221,7 +221,7 @@ export default function EntryEditorDialog({ language, canOperate, entry, initial
         <div className="polls-editor__choice-section">
           <span className="ui-field__label">{labels.choices}</span>
           <span className="polls-editor__limit-hint">{labels.choicesLimit(limits.choices.minCount, limits.choices.maxCount)}</span>
-          <FieldError {...(errors.choices === undefined ? {} : { message: errors.choices })} />
+          {errors.choices === undefined ? null : <FieldError message={errors.choices} />}
           <div className="polls-editor__choices">
             {choiceRows.map(({ choice, index, error: choiceError }) => <div className="polls-editor__choice" key={`${String(index)}:${choice}`}>
               <Field

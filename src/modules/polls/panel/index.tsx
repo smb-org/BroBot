@@ -483,14 +483,14 @@ export default function PollsPanel({ channelId, language = "de", canOperate = tr
                 <strong className="polls-entry-row__title" title={entry.title}>{entry.title}</strong>
                 <span className="polls-entry-row__meta">{labels.choiceCount(entry.choices.length)} · {String(entry.durationSeconds)} {labels.seconds}</span>
               </div>
-              {isOperator ? <div className="polls-entry-row__actions">
-                <div className="polls-entry-row__start">
-                  <Button variant="primary" size="compact" disabled={startDisabled} {...(reason === undefined ? {} : { title: reason })} onClick={() => { void startEntry(entry); }}>{labels.start}</Button>
-                  <span className="polls-entry-row__reason" role="note">{reason ?? "\u00a0"}</span>
-                </div>
+              {isOperator ? <div className="polls-entry-row__controls">
+                <div className="polls-entry-row__actions">
+                <Button variant="primary" size="compact" disabled={startDisabled} {...(reason === undefined ? {} : { title: reason })} onClick={() => { void startEntry(entry); }}>{labels.start}</Button>
                 <Button size="compact" icon="edit" disabled={pendingEntryId !== null} onClick={() => setEditor({ kind: "edit", entry })}>{labels.edit}</Button>
                 <Button size="compact" icon="copy" disabled={pendingEntryId !== null} onClick={() => setEditor({ kind: "create", initial: entryToDraft(entry) })}>{labels.duplicate}</Button>
                 <Button size="compact" danger="subtle" icon="remove" disabled={pendingEntryId !== null} onClick={() => { setConfirm({ kind: "delete", entry }); setConfirmError(undefined); }}>{labels.delete}</Button>
+                </div>
+                <span className="polls-entry-row__reason" role="note">{reason ?? " "}</span>
               </div> : null}
             </article>;
           })}
