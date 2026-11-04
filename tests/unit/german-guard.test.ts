@@ -44,6 +44,7 @@ const ALLOWLIST: Record<string, string> = {
   "src/dashboard/module-labels.ts": "Bilingual DE/EN module name/status/workspace text catalogue; only its `de` half is German.",
   "src/modules/ads/panel/locale.ts": "Bilingual DE/EN ads panel text catalogue; only its `de` half is German.",
   "src/modules/polls/panel/locale.ts": "Bilingual DE/EN polls panel text catalogue; only its `de` half is German.",
+  "src/modules/polls/panel/action-locale.ts": "Bilingual DE/EN polls cockpit action text catalogue; only its `de` half is German.",
   "src/modules/ads/action-locale.ts": "Bilingual DE/EN ads immediate-action metadata; only its `de` half is German.",
   "src/modules/ads/panel/action-content-locale.ts": "Bilingual DE/EN ads action form text; only its `de` half is German.",
   "src/modules/votekick/panel/immediate-action-locale.ts": "Bilingual DE/EN Votekick immediate-action text; only its `de` half is German.",

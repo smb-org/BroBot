@@ -4,6 +4,22 @@ import type { PollsEntry, PollsEntryInput, PollsRun } from "../contracts";
 const basePath = (channelId: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/polls`;
 
+const POLLS_BROADCASTER_SCOPES = ["channel:manage:polls", "channel:manage:predictions"] as const;
+
+export interface PollsActionReadiness {
+  ready: boolean;
+  missingScopes: string[];
+  metadataUnknown: boolean;
+}
+
+const unknownPollsActionReadiness = (): PollsActionReadiness => ({ ready: false, missingScopes: [], metadataUnknown: true });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const stringArray = (value: unknown): string[] | null =>
+  Array.isArray(value) && value.every((item): item is string => typeof item === "string") ? value : null;
+
 export interface PollsPanelState {
   active: { poll: PollsRun | null; prediction: PollsRun | null };
   open: PollsRun[];
@@ -14,6 +30,22 @@ export interface PollsHistoryPage {
   runs: PollsRun[];
   nextCursor: string | null;
 }
+
+export const loadPollsActionReadiness = async (channelId: string, signal?: AbortSignal): Promise<PollsActionReadiness> => {
+  const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/modules`, signal === undefined ? {} : { signal });
+  if (!response.ok) throw new Error("Polls broadcaster scope metadata could not be loaded.");
+  const payload: unknown = await response.json();
+  if (!isRecord(payload) || !Array.isArray(payload.modules)) return unknownPollsActionReadiness();
+  const module: unknown = (payload.modules as unknown[]).find((candidate) => isRecord(candidate) && candidate.id === "polls");
+  if (!isRecord(module) || module.broadcasterScopeMetadataUnknown === true) return unknownPollsActionReadiness();
+  const required = stringArray(module.requiredBroadcasterScopes);
+  const missing = stringArray(module.missingBroadcasterScopes);
+  if (required === null || missing === null || !POLLS_BROADCASTER_SCOPES.every((scope) => required.includes(scope))) {
+    return unknownPollsActionReadiness();
+  }
+  const missingScopes = POLLS_BROADCASTER_SCOPES.filter((scope) => missing.includes(scope));
+  return { ready: missingScopes.length === 0, missingScopes: [...missingScopes], metadataUnknown: false };
+};
 
 const readJson = async <Value,>(response: Response): Promise<Value> => {
   const payload: unknown = await response.json().catch(() => null);
