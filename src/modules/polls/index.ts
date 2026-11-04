@@ -35,4 +35,5 @@ export const pollsModule: BotModule<typeof pollsSettingsSchema> = {
   routes: pollsRoutes,
   defaultEnabled: false,
   panelIcon: { paths: ["M4 6h10", "M4 12h16", "M4 18h7"] },
+  panel: () => import("./panel"),
 };
