@@ -1,22 +1,18 @@
 import type { ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
-import type { PollsEntry, PollsKind, PollsRun } from "./contracts";
+import type {
+  HelixPoll,
+  HelixPrediction,
+  PollsEntry,
+  PollsHelixReason,
+  PollsHelixResult,
+  PollsKind,
+  PollsRun,
+} from "./contracts";
 import { snapshotFromEventSub, snapshotFromHelixPoll, snapshotFromHelixPrediction, type RunSnapshot } from "./domain/runs";
 import { createPollsRepository } from "./repository";
-// The Helix client lives in the worker layer (broadcaster token handling); it is not another module.
-/* eslint-disable no-restricted-imports */
-import {
-  createPoll,
-  createPrediction,
-  endPoll,
-  getPolls,
-  getPredictions,
-  patchPrediction,
-  type HelixPoll,
-  type HelixPrediction,
-  type PollsHelixReason,
-  type PollsHelixResult,
-} from "../../worker/twitch/polls";
-/* eslint-enable no-restricted-imports */
+
+// The Helix client lives in the worker layer; it is loaded lazily to keep the module boundary.
+const loadHelix = () => import("../../worker/twitch/polls");
 
 const POLLS_RECONCILE_INTERVAL_MS = 15_000;
 const HELIX_ID_LIMIT = 5;
@@ -97,6 +93,7 @@ const reconcileKinds = async (
   const repository = createPollsRepository(env.DB);
   const openRuns = await repository.listOpenRuns(channelId);
   let firstFailure: PollsHelixReason | null = null;
+  const { getPolls, getPredictions } = await loadHelix();
 
   for (const kind of kinds) {
     const openOfKind = openRuns.filter((run) => run.kind === kind);
@@ -165,6 +162,7 @@ export const startEntry = async (
     }
   }
 
+  const { createPoll, createPrediction } = await loadHelix();
   const helix = entry.kind === "poll"
     ? await createPoll(env, channelId, entry)
     : await createPrediction(env, channelId, entry);
@@ -206,7 +204,7 @@ const isActionFailure = (value: PollsRun | PollsActionOutcome): value is PollsAc
 export const endPollRun = async (env: Env, channelId: string, runId: string): Promise<PollsActionOutcome> => {
   const current = await runForAction(env, channelId, runId, "poll", ["active"]);
   if (isActionFailure(current)) return current;
-  const helix = await endPoll(env, channelId, current.twitchId, "TERMINATED");
+  const helix = await (await loadHelix()).endPoll(env, channelId, current.twitchId, "TERMINATED");
   if (!helix.ok) return failed(helix.reason);
   const item = resultForId(helix.data, current.twitchId);
   if (item === null) return failed("invalid_response");
@@ -216,7 +214,7 @@ export const endPollRun = async (env: Env, channelId: string, runId: string): Pr
 export const lockPredictionRun = async (env: Env, channelId: string, runId: string): Promise<PollsActionOutcome> => {
   const current = await runForAction(env, channelId, runId, "prediction", ["active"]);
   if (isActionFailure(current)) return current;
-  const helix = await patchPrediction(env, channelId, current.twitchId, { status: "LOCKED" });
+  const helix = await (await loadHelix()).patchPrediction(env, channelId, current.twitchId, { status: "LOCKED" });
   if (!helix.ok) return failed(helix.reason);
   const item = resultForId(helix.data, current.twitchId);
   if (item === null) return failed("invalid_response");
@@ -226,7 +224,7 @@ export const lockPredictionRun = async (env: Env, channelId: string, runId: stri
 export const cancelPredictionRun = async (env: Env, channelId: string, runId: string): Promise<PollsActionOutcome> => {
   const current = await runForAction(env, channelId, runId, "prediction", ["active", "locked"]);
   if (isActionFailure(current)) return current;
-  const helix = await patchPrediction(env, channelId, current.twitchId, { status: "CANCELED" });
+  const helix = await (await loadHelix()).patchPrediction(env, channelId, current.twitchId, { status: "CANCELED" });
   if (!helix.ok) return failed(helix.reason);
   const item = resultForId(helix.data, current.twitchId);
   if (item === null) return failed("invalid_response");
@@ -245,6 +243,7 @@ export const resolvePredictionRun = async (
   if (current.kind !== "prediction") return failed("not_open");
 
   const observedAt = new Date().toISOString();
+  const { getPredictions, patchPrediction } = await loadHelix();
   const fresh = await getPredictions(env, channelId, [current.twitchId]);
   if (!fresh.ok) return failed(fresh.reason);
   const freshPrediction = resultForId(fresh.data, current.twitchId);
@@ -283,7 +282,7 @@ export const loadFreshPrediction = async (
   const current = await repository.findRunById(channelId, runId);
   if (current === null) return failed("not_found");
   if (current.kind !== "prediction") return failed("not_open");
-  const fresh = await getPredictions(env, channelId, [current.twitchId]);
+  const fresh = await (await loadHelix()).getPredictions(env, channelId, [current.twitchId]);
   if (!fresh.ok) return failed(fresh.reason);
   const item = resultForId(fresh.data, current.twitchId);
   if (item === null) return failed("not_found");

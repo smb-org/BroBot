@@ -90,8 +90,6 @@ export const pollsRoutes = new Hono<ModuleRouteEnvironment>();
 
 pollsRoutes.get("/state", async (context) => {
   const channelId = channelIdFrom(context);
-  // A disabled module never calls Twitch, so this GET stays free of writes.
-  if (await moduleEnabled(context.env.DB, channelId)) await reconcile(context.env, channelId, nowIso(), { force: false });
   const [openRuns, entries] = await Promise.all([
     repository(context).listOpenRuns(channelId),
     repository(context).listEntries(channelId),
@@ -344,11 +342,14 @@ pollsRoutes.post("/reconcile", async (context) => {
   if (deniedResponse !== null) return deniedResponse;
   const channelId = channelIdFrom(context);
   if (!await moduleEnabled(context.env.DB, channelId)) return moduleDisabled(context);
-  const result = await reconcile(context.env, channelId, nowIso(), { force: true });
+  const requestBody = await body(context.req.raw);
+  const force = isRecord(requestBody) && requestBody["force"] === true;
+  const result = await reconcile(context.env, channelId, nowIso(), { force });
   if (result !== "success") {
     const mapped = actionStatus(result);
     return context.json({ error: mapped.error }, mapped.status);
   }
+  if (!force) return context.json({ ok: true });
   await context.get("writeModuleAudit")({
     channelId,
     moduleId: POLLS_MODULE_ID,

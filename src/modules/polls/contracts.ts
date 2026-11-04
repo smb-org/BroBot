@@ -89,3 +89,44 @@ export interface PollsRun {
   refundDeadline: string | null;
   lastEventAt: string;
 }
+
+export type PollsHelixReason =
+  | "success"
+  | "already_active"
+  | "not_eligible"
+  | "invalid_input"
+  | "rate_limited"
+  | "network"
+  | "unknown_status"
+  | "invalid_response"
+  | "not_connected"
+  | "token_unavailable"
+  | "scope_missing"
+  | "revoked"
+  | "refresh_failed"
+  | "precondition_failed";
+
+export type PollsHelixResult<Data> = { ok: true; data: Data } | { ok: false; reason: PollsHelixReason };
+
+export interface HelixPoll {
+  id: string;
+  title: string;
+  choices: readonly { id: string; title: string; votes?: number | undefined; channel_points_votes?: number | undefined }[];
+  status: string;
+  started_at: string;
+  ends_at?: string | null | undefined;
+  ended_at?: string | null | undefined;
+  duration?: number | undefined;
+}
+
+export interface HelixPrediction {
+  id: string;
+  title: string;
+  outcomes: readonly { id: string; title: string; users?: number | undefined; channel_points?: number | undefined }[];
+  status: string;
+  started_at: string;
+  locks_at?: string | null | undefined;
+  locked_at?: string | null | undefined;
+  ended_at?: string | null | undefined;
+  winning_outcome_id?: string | null | undefined;
+}
