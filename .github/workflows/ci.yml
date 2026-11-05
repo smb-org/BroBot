@@ -101,7 +101,8 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # A shard takes 12-14 minutes of tests plus setup; 15 cancelled shard 1 at test 222 of 224.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -127,6 +128,10 @@ jobs:
               -e "s|^OVERLAY_TOKEN_PEPPER=.*|OVERLAY_TOKEN_PEPPER=$(key)|" \
               .dev.vars.example > .dev.vars
       - run: pnpm run test:e2e --shard=${{ matrix.shard }}/3
+        env:
+          # Wrangler writes its log under the container home by default; keep it in the
+          # workspace so a dying local Worker leaves its reason in the uploaded artifact.
+          WRANGLER_LOG_PATH: ${{ github.workspace }}/wrangler-logs
       - name: Browser-Artefakte hochladen
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -135,6 +140,7 @@ jobs:
           path: |
             playwright-report
             test-results
+            wrangler-logs
           if-no-files-found: ignore
           retention-days: 14
 

@@ -209,8 +209,8 @@ describe("polls panel", () => {
     mocks.loadPollsHistory.mockResolvedValue({ runs: [], nextCursor: null });
     mocks.createPollsEntry.mockResolvedValue(pollEntry);
     mount(true);
-    const duplicate = await screen.findByRole("button", { name: "Duplizieren" });
-    fireEvent.click(duplicate);
+    fireEvent.click(await screen.findByRole("button", { name: "Weitere Aktionen" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Duplizieren" }));
     const dialog = await screen.findByRole("dialog", { name: "Neuer Eintrag" });
     const save = within(dialog).getByRole("button", { name: "Speichern" });
     expect(save).toBeEnabled();
