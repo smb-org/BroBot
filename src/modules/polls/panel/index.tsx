@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { connectedRefetchInterval, useModuleQuery } from "../../../dashboard/data";
 import { useDashboardRealtimeStatus } from "../../../dashboard/data/realtime";
-import { Badge, Button, ConfirmDialog, Field, Icon, SegmentChoice, notify } from "../../../dashboard/ui";
+import { ActionMenu, Badge, Button, ConfirmDialog, Field, Icon, SegmentChoice, notify } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import {
   POLLS_ENTRY_MAXIMUM_COUNT,
@@ -456,8 +456,10 @@ export default function PollsPanel({ channelId, language = "de", canOperate = tr
                 <div className="polls-entry-row__actions">
                 <Button variant="primary" size="compact" disabled={startDisabled} {...(reason === undefined ? {} : { title: reason })} onClick={() => { void startEntry(entry); }}>{labels.start}</Button>
                 <Button size="compact" icon="edit" disabled={pendingEntryId !== null} onClick={() => setEditor({ kind: "edit", entry })}>{labels.edit}</Button>
-                <Button size="compact" icon="copy" disabled={pendingEntryId !== null} onClick={() => setEditor({ kind: "create", initial: entryToDraft(entry) })}>{labels.duplicate}</Button>
-                <Button size="compact" danger="subtle" icon="remove" disabled={pendingEntryId !== null} onClick={() => { setConfirm({ kind: "delete", entry }); setConfirmError(undefined); }}>{labels.delete}</Button>
+                <ActionMenu label={labels.moreActions} items={[
+                  { label: labels.duplicate, disabled: pendingEntryId !== null, onSelect: () => setEditor({ kind: "create", initial: entryToDraft(entry) }) },
+                  { label: labels.delete, danger: true, disabled: pendingEntryId !== null, onSelect: () => { setConfirm({ kind: "delete", entry }); setConfirmError(undefined); } },
+                ]} />
                 </div>
                 <span className="polls-entry-row__reason" role="note">{reason ?? " "}</span>
               </div> : null}

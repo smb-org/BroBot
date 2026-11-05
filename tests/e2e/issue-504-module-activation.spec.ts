@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { DEFAULT_EMOTE_SLOT_SETTINGS } from "../../src/modules/emote_slots/contracts";
 import type { PanelChannelState, PanelModuleState } from "../../src/panel-contract";
+import { waitForWebFonts } from "./web-fonts";
 
 test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
@@ -399,11 +400,15 @@ test("truncates a ten-digit jackpot with an ellipsis and keeps the full value re
   await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
   const badge = page.locator(".slot-jackpot-meta");
   await expect(badge).toContainText("1.000.000.000");
-  const style = await badge.evaluate((element) => {
+  // The badge is 28ch wide, so whether the text overflows depends on the glyph metrics of the
+  // badge font. Measure only once the web fonts are loaded, never against the fallback face.
+  await waitForWebFonts(page);
+  const measure = () => badge.evaluate((element) => {
     const computed = getComputedStyle(element);
     return { overflowing: element.scrollWidth > element.clientWidth, textOverflow: computed.textOverflow, display: computed.display };
   });
-  expect(style.overflowing).toBe(true);
+  await expect.poll(async () => (await measure()).overflowing).toBe(true);
+  const style = await measure();
   expect(style.textOverflow).toBe("ellipsis");
   expect(style.display).not.toMatch(/flex/u);
   await expect(badge.locator("xpath=..")).toHaveAttribute("title", /1\.000\.000\.000/u);

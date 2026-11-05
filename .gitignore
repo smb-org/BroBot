@@ -5,6 +5,7 @@ playwright-report/
 test-results/
 reports/
 .wrangler/
+wrangler-logs/
 .worktrees/
 .local/
 .dev.vars

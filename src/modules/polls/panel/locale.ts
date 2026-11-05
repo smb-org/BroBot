@@ -37,6 +37,7 @@ export const pollsPanelTexts: Readonly<Record<ModuleLanguage, {
   editEntry: string;
   duplicate: string;
   delete: string;
+  moreActions: string;
   start: string;
   edit: string;
   kind: string;
@@ -176,6 +177,7 @@ export const pollsPanelTexts: Readonly<Record<ModuleLanguage, {
     editEntry: "Eintrag bearbeiten",
     duplicate: "Duplizieren",
     delete: "Löschen",
+    moreActions: "Weitere Aktionen",
     start: "Starten",
     edit: "Bearbeiten",
     kind: "Typ",
@@ -315,6 +317,7 @@ export const pollsPanelTexts: Readonly<Record<ModuleLanguage, {
     editEntry: "Edit entry",
     duplicate: "Duplicate",
     delete: "Delete",
+    moreActions: "More actions",
     start: "Start",
     edit: "Edit",
     kind: "Kind",

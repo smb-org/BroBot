@@ -1,6 +1,8 @@
 @layer components.module {
 .settings-page--duel .settings-page__columns { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: max-content max-content; overflow-y: auto; align-content: start; }
 .settings-page--duel .settings-page__column { overflow: visible; }
+/* Switch rows already reserve a line for the field error; the extra locked-reason line only stacks a second gap. */
+.settings-page--duel .ui-switch-row > .ui-locked-reason--reserved { display: none; }
 .settings-page--duel .settings-page__column:first-child { grid-column: 1 / -1; }
 .settings-page--duel .settings-page__column-stack { display: flex; min-width: 0; flex-direction: column; gap: 24px; }
 @media (min-width: 1750px) {
