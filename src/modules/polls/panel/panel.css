@@ -234,7 +234,8 @@
     .polls-run-choice__title { font-size: var(--text-status-label); }
     .polls-run-choice__value { font-size: var(--text-number); }
     .polls-entry-row__actions { gap: var(--s1); }
-    .polls-entry-row__actions > .ui-button { flex: 1 1 auto; }
+    .polls-entry-row__actions > .ui-button:not(.ui-button--icon-only) { flex: 1 1 auto; }
+    .polls-entry-row__actions > .ui-button--icon-only { flex: none; }
     .polls-entry-row__reason { max-width: 100%; }
     .polls-editor__choice { grid-template-columns: minmax(0, 1fr); }
     .polls-editor__choice-actions { padding: 0; }
