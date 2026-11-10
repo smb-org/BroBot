@@ -85,6 +85,10 @@ const rewardSchema = z.object({
     ? max_per_user_per_stream_setting.max_per_user_per_stream : null,
 }));
 const rewardsEnvelopeSchema = z.object({ data: z.array(rewardSchema) });
+const rewardsPageSchema = z.object({
+  data: z.array(rewardSchema),
+  pagination: z.object({ cursor: z.string().nullish() }).nullish(),
+}).transform(({ data, pagination }) => ({ data: { items: data, cursor: pagination?.cursor ?? null } }));
 const redemptionSchema = z.object({
   id: z.string().min(1), user_id: z.string().nullish().transform((value) => value ?? ""),
   user_login: z.string().nullish().transform((value) => value ?? ""),
@@ -162,12 +166,27 @@ const payloadFromInput = (input: ChannelPointsRewardInput) => ({
   ...(input.maxPerUserPerStream === null ? {} : { max_per_user_per_stream: input.maxPerUserPerStream }),
 });
 
-export const getManageableRewards = (
+export const getManageableRewards = async (
   environment: Env, broadcasterId: string, authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
-): Promise<ChannelPointsHelixResult<HelixCustomReward[]>> => request({
-  environment, broadcasterId, scope: "channel:read:redemptions", url: REWARDS_URL,
-  query: { broadcaster_id: broadcasterId, only_manageable_rewards: "true" }, schema: rewardsEnvelopeSchema, authorize, fetcher,
-});
+): Promise<ChannelPointsHelixResult<HelixCustomReward[]>> => {
+  const result: HelixCustomReward[] = [];
+  let after: string | undefined;
+  const cursors = new Set<string>();
+  for (let page = 0; page < 100; page += 1) {
+    const current = await request({
+      environment, broadcasterId, scope: "channel:read:redemptions", url: REWARDS_URL,
+      query: { broadcaster_id: broadcasterId, only_manageable_rewards: "true", first: "50", after },
+      schema: rewardsPageSchema, authorize, fetcher,
+    });
+    if (!current.ok) return current;
+    result.push(...current.data.items);
+    const nextCursor = current.data.cursor ?? undefined;
+    if (nextCursor === undefined || cursors.has(nextCursor)) return { ok: true, data: result };
+    cursors.add(nextCursor);
+    after = nextCursor;
+  }
+  return { ok: true, data: result };
+};
 
 export const createCustomReward = (
   environment: Env, broadcasterId: string, input: ChannelPointsRewardInput, authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
@@ -246,13 +265,26 @@ export const listRedemptionsByIds = async (
   authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
 ): Promise<ChannelPointsHelixResult<HelixRedemption[]>> => {
   if (redemptionIds.length < 1 || redemptionIds.length > 50) return { ok: false, reason: "invalid_input" };
-  const url = new URL(REDEMPTIONS_URL);
-  for (const id of redemptionIds) url.searchParams.append("id", id);
-  url.searchParams.set("broadcaster_id", broadcasterId);
-  url.searchParams.set("reward_id", rewardId);
-  const result = await request({
-    environment, broadcasterId, scope: "channel:read:redemptions", url: url.toString(),
-    schema: redemptionPageSchema, authorize, fetcher,
-  });
-  return result.ok ? { ok: true, data: result.data.items } : result;
+  const result: HelixRedemption[] = [];
+  let after: string | undefined;
+  const cursors = new Set<string>();
+  for (let page = 0; page < 100; page += 1) {
+    const url = new URL(REDEMPTIONS_URL);
+    for (const id of redemptionIds) url.searchParams.append("id", id);
+    url.searchParams.set("broadcaster_id", broadcasterId);
+    url.searchParams.set("reward_id", rewardId);
+    url.searchParams.set("first", "50");
+    if (after !== undefined) url.searchParams.set("after", after);
+    const current = await request({
+      environment, broadcasterId, scope: "channel:read:redemptions", url: url.toString(),
+      schema: redemptionPageSchema, authorize, fetcher,
+    });
+    if (!current.ok) return current;
+    result.push(...current.data.items);
+    const nextCursor = current.data.cursor ?? undefined;
+    if (nextCursor === undefined || cursors.has(nextCursor)) return { ok: true, data: result };
+    cursors.add(nextCursor);
+    after = nextCursor;
+  }
+  return { ok: true, data: result };
 };

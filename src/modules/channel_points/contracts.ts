@@ -22,8 +22,9 @@ export const channelPointsRewardInputSchema = z.object({
 export type ChannelPointsRewardInput = z.output<typeof channelPointsRewardInputSchema>;
 export type ChannelPointsRewardMode = "auto" | "queue";
 export type ChannelPointsRedemptionStatus =
-  | "received" | "running" | "queued" | "pending" | "fulfilled" | "refunded" | "failed_to_update";
+  | "received" | "running" | "queued" | "pending" | "fulfilled" | "refunded" | "failed_to_update" | "orphaned";
 export type TwitchRedemptionStatus = "FULFILLED" | "CANCELED";
+export type NormalizedTwitchRedemptionStatus = "unfulfilled" | "fulfilled" | "canceled" | "unknown";
 
 export interface ChannelPointsReward extends ChannelPointsRewardInput {
   id: string;
@@ -36,6 +37,7 @@ export interface ChannelPointsReward extends ChannelPointsRewardInput {
 export interface ChannelPointsRedemption {
   redemptionId: string;
   rewardId: string;
+  twitchRewardId: string;
   rewardTitle: string;
   userId: string;
   userLogin: string;

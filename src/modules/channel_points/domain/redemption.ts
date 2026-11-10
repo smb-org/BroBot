@@ -1,10 +1,26 @@
-import type { ChannelPointsRedemptionStatus, ChannelPointsRewardMode, HelixRedemption, TwitchRedemptionStatus } from "../contracts";
+import type {
+  ChannelPointsRedemptionStatus, ChannelPointsRewardMode, HelixRedemption,
+  NormalizedTwitchRedemptionStatus, TwitchRedemptionStatus,
+} from "../contracts";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
 const text = (value: unknown, fallback = ""): string => typeof value === "string" ? value : fallback;
 const integer = (value: unknown): number | null => typeof value === "number" && Number.isSafeInteger(value) ? value : null;
+
+/** EventSub sends lowercase statuses; normalize them before they enter the redemption lifecycle. */
+export const eventSubRedemptionStatus = (value: unknown): NormalizedTwitchRedemptionStatus | null => {
+  if (value === "unfulfilled" || value === "fulfilled" || value === "canceled" || value === "unknown") return value;
+  return null;
+};
+
+/** Helix sends uppercase statuses; normalize them before reconciliation applies state changes. */
+export const helixRedemptionStatus = (value: HelixRedemption["status"]): NormalizedTwitchRedemptionStatus => {
+  if (value === "UNFULFILLED") return "unfulfilled";
+  if (value === "FULFILLED") return "fulfilled";
+  return "canceled";
+};
 
 /** Parses an EventSub redemption with Twitch's optional string fields treated as nullable. */
 export const redemptionFromEventSub = (value: unknown): {

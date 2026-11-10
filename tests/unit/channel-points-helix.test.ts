@@ -33,13 +33,23 @@ const rewardInput: ChannelPointsRewardInput = {
 };
 const environment = { DB: {} as D1Database, TWITCH_CLIENT_ID: "client_fictional" } as Env;
 const responseReward = (overrides: Record<string, unknown> = {}) => ({
-  id: "reward_fictional", title: "Fictional reward", prompt: "", cost: 10, is_enabled: true,
+  id: "reward_fictional", broadcaster_id: "channel_fictional", broadcaster_login: "fictional_demo",
+  broadcaster_name: "Fictional Demo", title: "Fictional reward", prompt: "", cost: 10, is_enabled: true,
+  image: { url_1x: "https://example.test/reward.png", url_2x: "https://example.test/reward.png", url_4x: "https://example.test/reward.png" },
+  default_image: { url_1x: "https://example.test/default.png", url_2x: "https://example.test/default.png", url_4x: "https://example.test/default.png" },
   background_color: "#9147FF", is_user_input_required: false,
+  is_paused: false, is_in_stock: true, redemptions_redeemed_current_stream: 0, cooldown_expires_at: null,
   global_cooldown_setting: { is_enabled: true, global_cooldown_seconds: 30 },
   max_per_stream_setting: { is_enabled: true, max_per_stream: 5 },
   max_per_user_per_stream_setting: { is_enabled: true, max_per_user_per_stream: 2 },
   should_redemptions_skip_request_queue: false,
   ...overrides,
+});
+const helixRedemption = (id: string, status: "UNFULFILLED" | "FULFILLED" | "CANCELED") => ({
+  id, broadcaster_id: "channel_fictional", broadcaster_login: "fictional_demo", broadcaster_name: "Fictional Demo",
+  user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo", user_input: "hello",
+  redeemed_at: "2026-11-10T12:00:00.000Z", status,
+  reward: { id: "reward_fictional", title: "Fictional reward", prompt: "Say hello", cost: 10 },
 });
 const captureRequests = (bodies: readonly unknown[], statuses: readonly number[] = []) => {
   const calls: Array<{ url: URL; method: string; body: unknown }> = [];
@@ -78,20 +88,30 @@ const expectRequest = (
 
 describe("channel points Helix wrapper", () => {
   it("gets manageable rewards and decodes enabled nested limits from a realistic response", async () => {
-    const capture = captureRequests([{ data: [responseReward()] }]);
+    const capture = captureRequests([
+      { data: [responseReward()], pagination: { cursor: "rewards_next" } },
+      { data: [responseReward({ id: "reward_second", title: "Second reward" })], pagination: {} },
+    ]);
     const response = await getManageableRewards(environment, "channel_fictional", () => Promise.resolve(true), capture.fetcher);
     expectRequest(capture.calls, 0, "GET", [
+      ["broadcaster_id", "channel_fictional"], ["only_manageable_rewards", "true"], ["first", "50"],
+    ], undefined);
+    expectRequest(capture.calls, 1, "GET", [
       ["broadcaster_id", "channel_fictional"], ["only_manageable_rewards", "true"],
+      ["first", "50"], ["after", "rewards_next"],
     ], undefined);
     expect(response).toMatchObject({
       ok: true,
-      data: [{
-        id: "reward_fictional", prompt: "", background_color: "#9147FF", is_user_input_required: false,
-        is_global_cooldown_enabled: true, global_cooldown_seconds: 30,
-        is_max_per_stream_enabled: true, max_per_stream: 5,
-        is_max_per_user_per_stream_enabled: true, max_per_user_per_stream: 2,
-        is_paused: null, is_in_stock: null,
-      }],
+      data: [
+        {
+          id: "reward_fictional", prompt: "", background_color: "#9147FF", is_user_input_required: false,
+          is_global_cooldown_enabled: true, global_cooldown_seconds: 30,
+          is_max_per_stream_enabled: true, max_per_stream: 5,
+          is_max_per_user_per_stream_enabled: true, max_per_user_per_stream: 2,
+        is_paused: false, is_in_stock: true,
+        },
+        { id: "reward_second", title: "Second reward" },
+      ],
     });
   });
 
@@ -102,7 +122,7 @@ describe("channel points Helix wrapper", () => {
     })] }]);
     const response = await getManageableRewards(environment, "channel_fictional", () => Promise.resolve(true), capture.fetcher);
     expectRequest(capture.calls, 0, "GET", [
-      ["broadcaster_id", "channel_fictional"], ["only_manageable_rewards", "true"],
+      ["broadcaster_id", "channel_fictional"], ["only_manageable_rewards", "true"], ["first", "50"],
     ], undefined);
     expect(response).toMatchObject({
       ok: true,
@@ -190,11 +210,7 @@ describe("channel points Helix wrapper", () => {
   });
 
   it("uses after to fetch the next page of unfulfilled redemptions", async () => {
-    const redemption = (id: string) => ({
-      id, user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo", user_input: "",
-      redeemed_at: "2026-11-10T12:00:00.000Z", status: "UNFULFILLED",
-      reward: { id: "reward_fictional", title: "Fictional reward" },
-    });
+    const redemption = (id: string) => helixRedemption(id, "UNFULFILLED");
     const capture = captureRequests([
       { data: [redemption("redemption_one")], pagination: { cursor: "cursor_next" } },
       { data: [redemption("redemption_two")], pagination: {} },
@@ -225,11 +241,7 @@ describe("channel points Helix wrapper", () => {
   });
 
   it("gets authoritative redemption statuses by batches of IDs", async () => {
-    const capture = captureRequests([{ data: [{
-      id: "redemption_fictional", user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo",
-      user_input: "", redeemed_at: "2026-11-10T12:00:00.000Z", status: "CANCELED",
-      reward: { id: "reward_fictional", title: "Fictional reward" },
-    }] }]);
+    const capture = captureRequests([{ data: [helixRedemption("redemption_fictional", "CANCELED")] }]);
     const result = await listRedemptionsByIds(
       environment, "channel_fictional", "reward_fictional", ["redemption_fictional"],
       () => Promise.resolve(true), capture.fetcher,
@@ -241,9 +253,29 @@ describe("channel points Helix wrapper", () => {
     if (call === undefined) throw new Error("Expected one redemption status request.");
     expect([...call.url.searchParams.entries()].sort(([leftKey, leftValue], [rightKey, rightValue]) =>
       leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue))).toEqual([
-      ["broadcaster_id", "channel_fictional"], ["id", "redemption_fictional"], ["reward_id", "reward_fictional"],
+      ["broadcaster_id", "channel_fictional"], ["first", "50"], ["id", "redemption_fictional"], ["reward_id", "reward_fictional"],
     ]);
     expect(result).toMatchObject({ ok: true, data: [{ id: "redemption_fictional", status: "CANCELED" }] });
+  });
+
+  it("requests and follows every page when looking up 25 redemption IDs", async () => {
+    const ids = Array.from({ length: 25 }, (_, index) => `redemption_${String(index)}`);
+    const capture = captureRequests([
+      { data: ids.slice(0, 20).map((id) => helixRedemption(id, "CANCELED")), pagination: { cursor: "redemptions_next" } },
+      { data: ids.slice(20).map((id) => helixRedemption(id, "FULFILLED")), pagination: {} },
+    ]);
+    const result = await listRedemptionsByIds(
+      environment, "channel_fictional", "reward_fictional", ids, () => Promise.resolve(true), capture.fetcher,
+    );
+    expect(capture.calls).toHaveLength(2);
+    expect(capture.calls.map(({ url }) => url.searchParams.get("first"))).toEqual(["50", "50"]);
+    expect(capture.calls.map(({ url }) => url.searchParams.get("after"))).toEqual([null, "redemptions_next"]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data).toHaveLength(25);
+      expect(result.data[0]).toMatchObject({ id: ids[0], status: "CANCELED" });
+      expect(result.data.at(-1)).toMatchObject({ id: ids[24], status: "FULFILLED" });
+    }
   });
 
   it("rejects authoritative redemption lookups larger than Twitch's 50-ID limit", async () => {

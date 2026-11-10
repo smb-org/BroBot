@@ -30,9 +30,9 @@ describe("channel points migration", () => {
       ).run();
       database.prepare(
         `INSERT INTO channel_points_redemptions (
-           channel_id, redemption_id, reward_id, reward_title, user_id, user_login, user_name,
+           channel_id, redemption_id, reward_id, twitch_reward_id, reward_title, user_id, user_login, user_name,
            user_input, redeemed_at, status, created_at, updated_at
-         ) VALUES ('channel_points', 'redemption_one', 'reward_local', 'Fictional reward',
+         ) VALUES ('channel_points', 'redemption_one', 'reward_local', 'reward_twitch', 'Fictional reward',
            'viewer_one', 'viewer_demo', 'Viewer Demo', '', 'now', 'received', 'now', 'now')`,
       ).run();
       expect(database.prepare(
@@ -40,14 +40,22 @@ describe("channel points migration", () => {
       ).get()).toMatchObject({ status: "received", claimed_at: null });
       expect(database.prepare("PRAGMA table_info(channel_points_rewards)").all())
         .toEqual(expect.arrayContaining([expect.objectContaining({ name: "last_twitch_event_at" })]));
+      expect(database.prepare("PRAGMA table_info(channel_points_redemptions)").all())
+        .toEqual(expect.arrayContaining([expect.objectContaining({ name: "twitch_reward_id" })]));
+      database.prepare(
+        "UPDATE channel_points_redemptions SET status='orphaned' WHERE redemption_id='redemption_one'",
+      ).run();
+      expect(database.prepare(
+        "SELECT status FROM channel_points_redemptions WHERE redemption_id='redemption_one'",
+      ).get()).toMatchObject({ status: "orphaned" });
       const before = database.prepare(
         "SELECT revision FROM panel_resource_revisions WHERE channel_id = ? AND resource = 'module:channel_points:data'",
       ).get("channel_points") as { revision: number };
       expect(() => database.prepare(
         `INSERT INTO channel_points_redemptions (
-           channel_id, redemption_id, reward_id, reward_title, user_id, user_login, user_name,
+           channel_id, redemption_id, reward_id, twitch_reward_id, reward_title, user_id, user_login, user_name,
            user_input, redeemed_at, status, created_at, updated_at
-         ) VALUES ('channel_points', 'redemption_one', 'reward_local', 'Fictional reward',
+         ) VALUES ('channel_points', 'redemption_one', 'reward_local', 'reward_twitch', 'Fictional reward',
            'viewer_one', 'viewer_demo', 'Viewer Demo', '', 'now', 'received', 'now', 'now')`,
       ).run()).toThrow();
       database.prepare("UPDATE channel_points_rewards SET cost = 20 WHERE channel_id = 'channel_points'").run();

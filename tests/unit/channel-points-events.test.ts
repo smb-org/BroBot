@@ -5,6 +5,8 @@ import { channelPointsModule } from "../../src/modules/channel_points";
 import { MODULES } from "../../src/modules/registry";
 import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../../src/worker/module-authorization";
 import {
+  CHANNEL_POINTS_LIFECYCLE_ALARM,
+  CHANNEL_POINTS_LIFECYCLE_HANDLER,
   channelPointsLifecycleAlarm,
   processChannelPointsEvent,
   reconcileChannelPoints,
@@ -19,6 +21,9 @@ const mocks = vi.hoisted(() => ({
   listByIds: vi.fn(),
   manageable: vi.fn(),
   setEnabled: vi.fn(),
+  createCustomReward: vi.fn(),
+  updateCustomReward: vi.fn(),
+  deleteCustomReward: vi.fn(),
 }));
 vi.mock("../../src/worker/twitch/channel-points", () => ({
   updateRedemptionStatus: mocks.update,
@@ -26,6 +31,9 @@ vi.mock("../../src/worker/twitch/channel-points", () => ({
   listRedemptionsByIds: mocks.listByIds,
   getManageableRewards: mocks.manageable,
   setCustomRewardEnabled: mocks.setEnabled,
+  createCustomReward: mocks.createCustomReward,
+  updateCustomReward: mocks.updateCustomReward,
+  deleteCustomReward: mocks.deleteCustomReward,
 }));
 
 const channelId = "channel_points";
@@ -47,12 +55,43 @@ const reward: ChannelPointsRewardInput = {
 };
 const redemptionPayload = (id = "redemption_one") => ({
   id,
+  broadcaster_user_id: channelId,
+  broadcaster_user_login: "points_demo",
+  broadcaster_user_name: "Points Demo",
   user_id: "viewer_one",
   user_login: "viewer_demo",
   user_name: "Viewer Demo",
   user_input: "hello",
+  status: "unfulfilled",
   redeemed_at: now,
-  reward: { id: "reward_twitch", title: "Fictional reward" },
+  reward: {
+    id: "reward_twitch", title: "Fictional reward", prompt: "Say hello", cost: 10,
+    is_user_input_required: false,
+  },
+});
+const rewardEventPayload = (overrides: Record<string, unknown> = {}) => ({
+  id: "reward_twitch", broadcaster_user_id: channelId, broadcaster_user_login: "points_demo",
+  broadcaster_user_name: "Points Demo", title: "Fictional reward", prompt: "Say hello", cost: 10,
+  is_enabled: true, background_color: "#9147FF", is_user_input_required: false,
+  should_redemptions_skip_request_queue: false,
+  max_per_stream: { is_enabled: false, value: 0 },
+  max_per_user_per_stream: { is_enabled: false, value: 0 },
+  global_cooldown: { is_enabled: false, seconds: 0 },
+  ...overrides,
+});
+const rewardRemovalPayload = (id: string) => ({
+  id, broadcaster_user_id: channelId, broadcaster_user_login: "points_demo", broadcaster_user_name: "Points Demo",
+});
+const helixRedemption = (
+  id: string,
+  status: "UNFULFILLED" | "FULFILLED" | "CANCELED",
+  rewardId = "reward_twitch",
+  rewardTitle = "Fictional reward",
+) => ({
+  id, broadcaster_id: channelId, broadcaster_login: "points_demo", broadcaster_name: "Points Demo",
+  user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo", user_input: "hello",
+  redeemed_at: now, status,
+  reward: { id: rewardId, title: rewardTitle, prompt: "Say hello", cost: 10 },
 });
 const event = (subscriptionType: string, payload: Record<string, unknown>): ModuleEvent => ({
   channelId,
@@ -115,6 +154,9 @@ describe("channel points redemption processing", () => {
     mocks.listByIds.mockReset().mockResolvedValue({ ok: true, data: [] });
     mocks.manageable.mockReset().mockResolvedValue({ ok: true, data: [manageableReward] });
     mocks.setEnabled.mockReset().mockResolvedValue({ ok: true, data: [] });
+    mocks.createCustomReward.mockReset().mockResolvedValue({ ok: true, data: [{ ...manageableReward, id: "reward_twitch_new" }] });
+    mocks.updateCustomReward.mockReset().mockResolvedValue({ ok: true, data: [manageableReward] });
+    mocks.deleteCustomReward.mockReset().mockResolvedValue({ ok: true, data: [] });
     sendChat.mockReset().mockResolvedValue({ sent: true, delivery: "sent", reason: null });
     database = new TestD1Database();
     database.sqlite.prepare(
@@ -166,7 +208,7 @@ describe("channel points redemption processing", () => {
   it("keeps a fulfilled redemption when stale EventSub and action results arrive", async () => {
     await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
     await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.update", {
-      ...redemptionPayload(), status: "UNFULFILLED",
+      ...redemptionPayload(), status: "unfulfilled",
     }), context);
     const repository = createChannelPointsRepository(database as unknown as D1Database);
     await expect(repository.updateRedemption(channelId, "redemption_one", {
@@ -179,14 +221,14 @@ describe("channel points redemption processing", () => {
   it("accepts Twitch terminal status over a non-terminal state and records a mismatch", async () => {
     const repository = createChannelPointsRepository(database as unknown as D1Database);
     await repository.latchRedemption(channelId, {
-      id: "redemption_one", rewardId: "reward_local", rewardTitle: "Fictional reward", userId: "viewer_one",
+      id: "redemption_one", rewardId: "reward_local", twitchRewardId: "reward_twitch", rewardTitle: "Fictional reward", userId: "viewer_one",
       userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "hello", redeemedAt: now,
     }, now);
     await repository.updateRedemption(channelId, "redemption_one", {
       status: "failed_to_update", pendingTwitchStatus: "CANCELED",
     }, ["received"], now);
     await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.update", {
-      ...redemptionPayload(), status: "FULFILLED",
+      ...redemptionPayload(), status: "fulfilled",
     }), context);
     const saved = await repository.getRedemption(channelId, "redemption_one");
     expect(saved).toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
@@ -196,7 +238,7 @@ describe("channel points redemption processing", () => {
 
   it("latches a cancellation that arrives before its redemption add event", async () => {
     await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.update", {
-      ...redemptionPayload(), status: "CANCELED",
+      ...redemptionPayload(), status: "canceled",
     }), context);
     await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
 
@@ -206,9 +248,18 @@ describe("channel points redemption processing", () => {
       .resolves.toMatchObject({ status: "refunded", pendingTwitchStatus: null });
   });
 
+  it("ignores an unknown EventSub redemption status", async () => {
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.update", {
+      ...redemptionPayload(), status: "unknown",
+    }), context);
+
+    await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
+      .resolves.toBeNull();
+  });
+
   it("serializes a first cancellation ahead of an interleaved add without running the action", async () => {
     const cancellation = event("channel.channel_points_custom_reward_redemption.update", {
-      ...redemptionPayload(), status: "CANCELED",
+      ...redemptionPayload(), status: "canceled",
     }) as ModuleEvent<Record<string, never>>;
     let tail = Promise.resolve();
     const serializedContext = {
@@ -244,7 +295,7 @@ describe("channel points redemption processing", () => {
       async () => {
         interleaved = true;
         await repository.latchRedemption(channelId, {
-          id: "redemption_one", rewardId: "reward_local", rewardTitle: reward.title, userId: "viewer_one",
+          id: "redemption_one", rewardId: "reward_local", twitchRewardId: "reward_twitch", rewardTitle: reward.title, userId: "viewer_one",
           userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "hello", redeemedAt: now,
         }, now);
       },
@@ -255,7 +306,7 @@ describe("channel points redemption processing", () => {
       environment: { DB: interleavedDatabase } as unknown as Env,
     } as ModuleExecutionContext;
     await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.update", {
-      ...redemptionPayload(), status: "CANCELED",
+      ...redemptionPayload(), status: "canceled",
     }), cancellationContext);
     await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
 
@@ -270,13 +321,10 @@ describe("channel points redemption processing", () => {
     const repository = createChannelPointsRepository(database as unknown as D1Database);
     await repository.updateReward(channelId, "reward_local", { ...reward, mode: "queue" }, now);
     await repository.latchRedemption(channelId, {
-      id: "redemption_interrupted_queue", rewardId: "reward_local", rewardTitle: reward.title,
+      id: "redemption_interrupted_queue", rewardId: "reward_local", twitchRewardId: "reward_twitch", rewardTitle: reward.title,
       userId: "viewer_one", userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "hello", redeemedAt: now,
     }, now);
-    mocks.list.mockResolvedValue({ ok: true, data: [{
-      ...redemptionPayload("redemption_interrupted_queue"), user_id: "viewer_one", user_login: "viewer_demo",
-      user_name: "Viewer Demo", status: "UNFULFILLED",
-    }] });
+    mocks.list.mockResolvedValue({ ok: true, data: [helixRedemption("redemption_interrupted_queue", "UNFULFILLED")] });
 
     await reconcileChannelPoints(
       { DB: database as unknown as D1Database } as Env, channelId, now,
@@ -311,10 +359,7 @@ describe("channel points redemption processing", () => {
 
   it("marks a failed status patch for retry and reconciles it without repeating the chat action", async () => {
     mocks.update.mockResolvedValueOnce({ ok: false, reason: "unknown_status" }).mockResolvedValueOnce({ ok: true, data: [] });
-    mocks.list.mockResolvedValue({ ok: true, data: [{
-      ...redemptionPayload(),
-      user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo", status: "UNFULFILLED",
-    }] });
+    mocks.list.mockResolvedValue({ ok: true, data: [helixRedemption("redemption_one", "UNFULFILLED")] });
     await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
     await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
       .resolves.toMatchObject({ status: "failed_to_update", pendingTwitchStatus: "FULFILLED" });
@@ -332,27 +377,136 @@ describe("channel points redemption processing", () => {
   });
 
   it("adopts a known reward update and marks a known removal without touching foreign rewards", async () => {
-    await processChannelPointsEvent(event("channel.channel_points_custom_reward.update", {
-      id: "reward_twitch", title: "Renamed reward", cost: 25, is_enabled: true, is_user_input_required: false,
-    }), context);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward.update", rewardEventPayload({
+      title: "Renamed reward", cost: 25,
+    })), context);
     expect(await createChannelPointsRepository(database as unknown as D1Database).getReward(channelId, "reward_local"))
-      .toMatchObject({ title: "Renamed reward", cost: 25, prompt: null, maxPerStream: null });
-    await processChannelPointsEvent(event("channel.channel_points_custom_reward.remove", { id: "reward_twitch" }), context);
+      .toMatchObject({ title: "Renamed reward", cost: 25, prompt: "Say hello", maxPerStream: null });
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward.remove", rewardRemovalPayload("reward_twitch")), context);
     expect(await createChannelPointsRepository(database as unknown as D1Database).getReward(channelId, "reward_local"))
       .toMatchObject({ twitchState: "deleted_on_twitch" });
-    await processChannelPointsEvent(event("channel.channel_points_custom_reward.remove", { id: "foreign_reward" }), context);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward.remove", rewardRemovalPayload("foreign_reward")), context);
     expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM channel_points_rewards").get()).toMatchObject({ count: 1 });
+  });
+
+  it("marks queued redemptions orphaned when their reward is removed locally", async () => {
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await repository.updateReward(channelId, "reward_local", { ...reward, mode: "queue" }, now);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+
+    const activation = activationContext(database);
+    await activation.runModuleAlarm(CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, {
+      kind: "reward.delete", actor: { userId: "operator_one" }, now, id: "reward_local",
+    });
+
+    const orphaned = await repository.getRedemption(channelId, "redemption_one");
+    expect(orphaned).toMatchObject({ status: "orphaned", twitchRewardId: "reward_twitch" });
+    expect(orphaned?.outcomeReason?.en).toContain("deleted on Twitch");
+    await expect(repository.getReward(channelId, "reward_local")).resolves.toBeNull();
+  });
+
+  it("orphan open redemptions when Twitch omits their reward from manageable rewards", async () => {
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await repository.updateReward(channelId, "reward_local", { ...reward, mode: "queue" }, now);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+    mocks.manageable.mockResolvedValue({ ok: true, data: [] });
+
+    await reconcileChannelPoints(
+      { DB: database as unknown as D1Database } as Env, channelId, now,
+      { force: true, context, authorize: () => Promise.resolve(true) },
+    );
+
+    await expect(repository.getRedemption(channelId, "redemption_one"))
+      .resolves.toMatchObject({ status: "orphaned", twitchRewardId: "reward_twitch" });
+    expect(mocks.listByIds).not.toHaveBeenCalled();
+  });
+
+  it("preserves an old redemption reward ID after the local reward is recreated", async () => {
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await repository.updateReward(channelId, "reward_local", { ...reward, mode: "queue" }, now);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward.remove", rewardRemovalPayload("reward_twitch")), context);
+
+    const activation = activationContext(database);
+    await activation.runModuleAlarm(CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, {
+      kind: "reward.recreate", actor: { userId: "operator_one" }, now, id: "reward_local",
+    });
+    mocks.manageable.mockResolvedValue({ ok: true, data: [{ ...manageableReward, id: "reward_twitch_new" }] });
+
+    await reconcileChannelPoints(
+      { DB: database as unknown as D1Database } as Env, channelId, now,
+      { force: true, context, authorize: () => Promise.resolve(true) },
+    );
+
+    await expect(repository.getReward(channelId, "reward_local"))
+      .resolves.toMatchObject({ twitchRewardId: "reward_twitch_new", twitchState: "active" });
+    await expect(repository.getRedemption(channelId, "redemption_one"))
+      .resolves.toMatchObject({ twitchRewardId: "reward_twitch", status: "orphaned" });
+    expect(mocks.listByIds).not.toHaveBeenCalled();
+  });
+
+  it("uses each redemption's original reward ID after the reward has been recreated", async () => {
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await repository.updateReward(channelId, "reward_local", { ...reward, mode: "queue" }, now);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+    await repository.markRewardDeleted(channelId, "reward_twitch", now);
+    await repository.replaceTwitchId(channelId, "reward_local", "reward_twitch_new", now);
+    mocks.manageable.mockResolvedValue({ ok: true, data: [{ ...manageableReward, id: "reward_twitch_new" }] });
+    mocks.listByIds.mockResolvedValue({ ok: false, reason: "not_found" });
+
+    await reconcileChannelPoints(
+      { DB: database as unknown as D1Database } as Env, channelId, now,
+      { force: true, context, authorize: () => Promise.resolve(true) },
+    );
+
+    expect(mocks.listByIds).toHaveBeenCalledWith(
+      expect.anything(), channelId, "reward_twitch", ["redemption_one"], expect.any(Function),
+    );
+    await expect(repository.getReward(channelId, "reward_local"))
+      .resolves.toMatchObject({ twitchRewardId: "reward_twitch_new", twitchState: "active" });
+    await expect(repository.getRedemption(channelId, "redemption_one"))
+      .resolves.toMatchObject({ status: "orphaned", twitchRewardId: "reward_twitch" });
+  });
+
+  it("rejects stale reward events after Helix reconciliation and reward updates", async () => {
+    const reconciledAt = "2026-11-10T12:01:00.000Z";
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    mocks.manageable.mockResolvedValue({ ok: true, data: [{
+      ...manageableReward, title: "Reconciled reward", cost: 20, is_enabled: false,
+    }] });
+    await reconcileChannelPoints(
+      { DB: database as unknown as D1Database } as Env, channelId, reconciledAt,
+      { force: true, context, authorize: () => Promise.resolve(true) },
+    );
+    await processChannelPointsEvent({
+      ...event("channel.channel_points_custom_reward.update", rewardEventPayload({ title: "Stale after reconcile", cost: 99 })),
+      eventSubTimestamp: "2026-11-10T12:00:30.000Z",
+    }, context);
+    await expect(repository.getReward(channelId, "reward_local"))
+      .resolves.toMatchObject({ title: "Reconciled reward", cost: 20, enabled: false });
+
+    const updatedAt = "2026-11-10T12:02:00.000Z";
+    await activationContext(database).runModuleAlarm(CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, {
+      kind: "reward.update", actor: { userId: "operator_one" }, now: updatedAt, id: "reward_local",
+      reward: { ...reward, title: "Updated reward", cost: 30, enabled: true },
+    });
+    await processChannelPointsEvent({
+      ...event("channel.channel_points_custom_reward.update", rewardEventPayload({ title: "Stale after update", cost: 44 })),
+      eventSubTimestamp: "2026-11-10T12:01:30.000Z",
+    }, context);
+    await expect(repository.getReward(channelId, "reward_local"))
+      .resolves.toMatchObject({ title: "Updated reward", cost: 30, enabled: true });
   });
 
   it("keeps a reward deletion tombstone when an older update is delivered afterward", async () => {
     await processChannelPointsEvent({
-      ...event("channel.channel_points_custom_reward.remove", { id: "reward_twitch" }),
+      ...event("channel.channel_points_custom_reward.remove", rewardRemovalPayload("reward_twitch")),
       eventSubTimestamp: "2026-11-10T12:02:00.000Z",
     }, context);
     await processChannelPointsEvent({
-      ...event("channel.channel_points_custom_reward.update", {
-        id: "reward_twitch", title: "Stale reward", cost: 999, is_enabled: true,
-      }),
+      ...event("channel.channel_points_custom_reward.update", rewardEventPayload({
+        title: "Stale reward", cost: 999,
+      })),
       eventSubTimestamp: "2026-11-10T12:01:00.000Z",
     }, context);
 
@@ -415,7 +569,7 @@ describe("channel points redemption processing", () => {
     mocks.list.mockImplementation((_environment, _channel, rewardId) => Promise.resolve(
       rewardId === "reward_twitch"
         ? { ok: false, reason: "unknown_status" }
-        : { ok: true, data: [{ ...redemptionPayload("redemption_healthy"), reward: { id: "reward_twitch_two", title: "Healthy reward" } }] },
+        : { ok: true, data: [helixRedemption("redemption_healthy", "UNFULFILLED", "reward_twitch_two", "Healthy reward")] },
     ));
 
     const result = await reconcileChannelPoints(
@@ -433,16 +587,13 @@ describe("channel points redemption processing", () => {
   it("applies a missed Twitch cancellation before retrying failed status patches", async () => {
     const repository = createChannelPointsRepository(database as unknown as D1Database);
     await repository.latchRedemption(channelId, {
-      id: "redemption_missed_cancel", rewardId: "reward_local", rewardTitle: reward.title,
+      id: "redemption_missed_cancel", rewardId: "reward_local", twitchRewardId: "reward_twitch", rewardTitle: reward.title,
       userId: "viewer_one", userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "hello", redeemedAt: now,
     }, now);
     await repository.updateRedemption(channelId, "redemption_missed_cancel", {
       status: "failed_to_update", pendingTwitchStatus: "CANCELED", claimedAt: "2026-11-10T11:57:00.000Z",
     }, ["received"], now);
-    mocks.listByIds.mockResolvedValue({ ok: true, data: [{
-      id: "redemption_missed_cancel", user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo",
-      user_input: "hello", redeemed_at: now, status: "CANCELED", reward: { id: "reward_twitch", title: reward.title },
-    }] });
+    mocks.listByIds.mockResolvedValue({ ok: true, data: [helixRedemption("redemption_missed_cancel", "CANCELED")] });
 
     await reconcileChannelPoints(
       { DB: database as unknown as D1Database } as Env, channelId, now,
@@ -462,7 +613,7 @@ describe("channel points redemption processing", () => {
     const repository = createChannelPointsRepository(database as unknown as D1Database);
     for (let index = 0; index < 51; index += 1) {
       await repository.latchRedemption(channelId, {
-        id: `redemption_batch_${String(index)}`, rewardId: "reward_local", rewardTitle: reward.title,
+        id: `redemption_batch_${String(index)}`, rewardId: "reward_local", twitchRewardId: "reward_twitch", rewardTitle: reward.title,
         userId: "viewer_one", userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "hello", redeemedAt: now,
       }, now);
     }
@@ -478,12 +629,12 @@ describe("channel points redemption processing", () => {
   });
 
   it("adopts enabled nested EventSub cooldown and per-stream limits", async () => {
-    await processChannelPointsEvent(event("channel.channel_points_custom_reward.update", {
-      id: "reward_twitch", title: "Limited reward", cost: 25, is_enabled: true,
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward.update", rewardEventPayload({
+      title: "Limited reward", cost: 25,
       global_cooldown: { is_enabled: true, seconds: 90 },
       max_per_stream: { is_enabled: true, value: 8 },
       max_per_user_per_stream: { is_enabled: true, value: 2 },
-    }), context);
+    })), context);
 
     expect(await createChannelPointsRepository(database as unknown as D1Database).getReward(channelId, "reward_local"))
       .toMatchObject({

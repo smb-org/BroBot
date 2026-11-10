@@ -1,6 +1,9 @@
 import type { AuthorizeModuleMutation, ModuleAlarmContext, ModuleAlarmDefinition, ModuleEvent, ModuleExecutionContext, ModuleMutationActor, ModuleResult } from "../contract";
 import type { ChannelPointsActionOutcome } from "./domain/redemption";
-import { channelPointsActionTransition, redemptionFromEventSub, redemptionFromHelix, rewardSnapshotFromEventSub } from "./domain/redemption";
+import {
+  channelPointsActionTransition, eventSubRedemptionStatus, helixRedemptionStatus,
+  redemptionFromEventSub, redemptionFromHelix, rewardSnapshotFromEventSub,
+} from "./domain/redemption";
 import type {
   ChannelPointsRedemption,
   ChannelPointsRedemptionStatus,
@@ -8,6 +11,7 @@ import type {
   ChannelPointsRewardInput,
   ChannelPointsHelixReason,
   HelixRedemption,
+  NormalizedTwitchRedemptionStatus,
   TwitchRedemptionStatus,
 } from "./contracts";
 import { CHANNEL_POINTS_MAX_REWARDS, channelPointsRewardInputSchema } from "./contracts";
@@ -31,6 +35,10 @@ const providerDisabled: { de: string; en: string } = {
   de: "Das Modul für diese Belohnungsaktion ist deaktiviert.",
   en: "The module providing this reward action is disabled.",
 };
+const deletedRewardReason = {
+  de: "Diese Belohnung wurde auf Twitch gelöscht. Twitch erstattet nicht erfüllte Einlösungen automatisch.",
+  en: "This reward was deleted on Twitch. Twitch automatically refunds its unfulfilled redemptions.",
+};
 export type ChannelPointsMutationAuthorization = () => Promise<boolean>;
 interface ChannelPointsReconcileFailure {
   rewardId: string;
@@ -44,24 +52,40 @@ const expiredBeforeFor = (now: string): string => {
   return Number.isFinite(timestamp) ? new Date(timestamp - REDEMPTION_CLAIM_LEASE_MS).toISOString() : now;
 };
 
+const confirmTwitchRewardDeleted = async (
+  environment: Env,
+  channelId: string,
+  twitchRewardId: string,
+  now: string,
+  eventAt?: string,
+): Promise<void> => {
+  const repository = createChannelPointsRepository(environment.DB);
+  const currentReward = await repository.getRewardByTwitchId(channelId, twitchRewardId);
+  if (currentReward !== null && !await repository.markRewardDeleted(channelId, twitchRewardId, now, eventAt)) return;
+  await repository.orphanOpenRedemptions(channelId, twitchRewardId, deletedRewardReason, now);
+};
+
 const sendStatus = async (
   environment: Env,
   channelId: string,
-  reward: ChannelPointsReward,
+  twitchRewardId: string,
   redemptionId: string,
-  status: "FULFILLED" | "CANCELED",
+  status: TwitchRedemptionStatus,
   authorize: ChannelPointsMutationAuthorization,
 ): Promise<"success" | ChannelPointsHelixReason> => {
   const result = await (await loadHelix()).updateRedemptionStatus(
-    environment, channelId, reward.twitchRewardId, [redemptionId], status, authorize,
+    environment, channelId, twitchRewardId, [redemptionId], status, authorize,
   );
+  if (!result.ok && result.reason === "not_found") {
+    await confirmTwitchRewardDeleted(environment, channelId, twitchRewardId, new Date().toISOString());
+  }
   return result.ok ? "success" : result.reason;
 };
 
 const applyOutcome = async (
   environment: Env,
   channelId: string,
-  reward: ChannelPointsReward,
+  twitchRewardId: string,
   redemptionId: string,
   outcome: ChannelPointsActionOutcome,
   now: string,
@@ -76,7 +100,7 @@ const applyOutcome = async (
     claimedAt: transition.status === "pending" || transition.status === "running" ? now : null,
   }, ["running"], now);
   if (!recorded || transition.pendingTwitchStatus === undefined) return;
-  const patched = await sendStatus(environment, channelId, reward, redemptionId, transition.pendingTwitchStatus, authorize);
+  const patched = await sendStatus(environment, channelId, twitchRewardId, redemptionId, transition.pendingTwitchStatus, authorize);
   const finishedAt = new Date().toISOString();
   if (patched === "success") {
     await repository.updateRedemption(channelId, redemptionId, {
@@ -141,6 +165,7 @@ const persistFromAction = async (
   const inserted = await repository.latchRedemption(channelId, {
     ...redemption,
     rewardId: reward.id,
+    twitchRewardId: redemption.rewardId,
     ...(reward.mode === "queue" ? { initialStatus: "queued" as const } : {}),
   }, now);
   if (!inserted || reward.mode === "queue") return;
@@ -167,10 +192,10 @@ const persistTwitchTerminalStatus = async (
   environment: Env,
   channelId: string,
   redemption: NonNullable<ReturnType<typeof redemptionFromEventSub>>,
-  status: unknown,
+  status: NormalizedTwitchRedemptionStatus | null,
   now: string,
 ): Promise<void> => {
-  if (status !== "FULFILLED" && status !== "CANCELED") return;
+  if (status !== "fulfilled" && status !== "canceled") return;
   const repository = createChannelPointsRepository(environment.DB);
   const saved = await repository.getRedemption(channelId, redemption.id);
   if (saved === null) {
@@ -179,27 +204,29 @@ const persistTwitchTerminalStatus = async (
     const inserted = await repository.latchRedemption(channelId, {
       ...redemption,
       rewardId: reward.id,
-      initialStatus: status === "FULFILLED" ? "fulfilled" : "refunded",
+      twitchRewardId: redemption.rewardId,
+      initialStatus: status === "fulfilled" ? "fulfilled" : "refunded",
     }, now);
     if (inserted) return;
   }
   const current = saved ?? await repository.getRedemption(channelId, redemption.id);
   if (current === null) return;
-  const reportedStatus: TwitchRedemptionStatus = status;
-  const expectedStatus = current.status === "fulfilled" ? "FULFILLED"
-    : current.status === "refunded" ? "CANCELED"
-      : current.pendingTwitchStatus;
+  const reportedStatus = status;
+  const expectedStatus: NormalizedTwitchRedemptionStatus | null = current.status === "fulfilled" ? "fulfilled"
+    : current.status === "refunded" ? "canceled"
+      : current.pendingTwitchStatus === "FULFILLED" ? "fulfilled"
+        : current.pendingTwitchStatus === "CANCELED" ? "canceled" : null;
   const mismatch = expectedStatus !== null && expectedStatus !== reportedStatus;
   const mismatchReason = mismatch ? {
-    de: `Twitch hat ${reportedStatus === "FULFILLED" ? "erledigt" : "erstattet"} gemeldet, obwohl BroBot ${expectedStatus === "FULFILLED" ? "Erledigung" : "Erstattung"} gespeichert hatte.`,
-    en: `Twitch reported ${reportedStatus === "FULFILLED" ? "fulfilled" : "refunded"} while BroBot had recorded ${expectedStatus === "FULFILLED" ? "fulfilled" : "refunded"}.`,
+    de: `Twitch hat ${reportedStatus === "fulfilled" ? "erledigt" : "erstattet"} gemeldet, obwohl BroBot ${expectedStatus === "fulfilled" ? "Erledigung" : "Erstattung"} gespeichert hatte.`,
+    en: `Twitch reported ${reportedStatus === "fulfilled" ? "fulfilled" : "refunded"} while BroBot had recorded ${expectedStatus === "fulfilled" ? "fulfilled" : "refunded"}.`,
   } : null;
   const outcomeReason = mismatchReason === null ? current.outcomeReason : {
     de: [current.outcomeReason?.de, mismatchReason.de].filter(Boolean).join(" "),
     en: [current.outcomeReason?.en, mismatchReason.en].filter(Boolean).join(" "),
   };
   await repository.updateRedemption(channelId, redemption.id, {
-    status: status === "FULFILLED" ? "fulfilled" : "refunded",
+    status: status === "fulfilled" ? "fulfilled" : "refunded",
     pendingTwitchStatus: null,
     outcomeReason,
     claimedAt: null,
@@ -221,7 +248,7 @@ const processChannelPointsEventInLane = async (
   } else if (event.subscriptionType === "channel.channel_points_custom_reward_redemption.update") {
     const redemption = redemptionFromEventSub(event.payload);
     if (redemption !== null) await persistTwitchTerminalStatus(
-      environment, event.channelId, redemption, event.payload["status"], now,
+      environment, event.channelId, redemption, eventSubRedemptionStatus(event.payload["status"]), now,
     );
   } else if (event.subscriptionType === "channel.channel_points_custom_reward.update") {
     const reward = rewardSnapshotFromEventSub(event.payload);
@@ -235,9 +262,7 @@ const processChannelPointsEventInLane = async (
     }
   } else if (event.subscriptionType === "channel.channel_points_custom_reward.remove") {
     const twitchRewardId = typeof event.payload["id"] === "string" ? event.payload["id"] : "";
-    if (twitchRewardId !== "" && await repository.getRewardByTwitchId(event.channelId, twitchRewardId) !== null) {
-      await repository.markRewardDeleted(event.channelId, twitchRewardId, now, now);
-    }
+    if (twitchRewardId !== "") await confirmTwitchRewardDeleted(environment, event.channelId, twitchRewardId, now, now);
   }
   return noResult;
 };
@@ -267,24 +292,23 @@ const runClaimedAction = async (
   authorize: ChannelPointsMutationAuthorization,
 ): Promise<void> => {
   const redemption = {
-    id: row.redemptionId, rewardId: reward.twitchRewardId, rewardTitle: row.rewardTitle, userId: row.userId,
+    id: row.redemptionId, rewardId: row.twitchRewardId, rewardTitle: row.rewardTitle, userId: row.userId,
     userLogin: row.userLogin, userName: row.userName, userInput: row.userInput, redeemedAt: row.redeemedAt,
   };
   const outcome = await actionOutcome(environment, channelId, reward, redemption, context);
-  await applyOutcome(environment, channelId, reward, row.redemptionId, outcome, new Date().toISOString(), authorize);
+  await applyOutcome(environment, channelId, row.twitchRewardId, row.redemptionId, outcome, new Date().toISOString(), authorize);
 };
 
 const sendPendingTwitchPatch = async (
   environment: Env,
   channelId: string,
-  reward: ChannelPointsReward,
   row: ChannelPointsRedemption,
   expectedStatus: "running" | "failed_to_update",
   authorize: ChannelPointsMutationAuthorization,
 ): Promise<void> => {
   const pendingStatus = row.pendingTwitchStatus;
   if (pendingStatus === null) return;
-  const patched = await sendStatus(environment, channelId, reward, row.redemptionId, pendingStatus, authorize);
+  const patched = await sendStatus(environment, channelId, row.twitchRewardId, row.redemptionId, pendingStatus, authorize);
   const repository = createChannelPointsRepository(environment.DB);
   const finishedAt = new Date().toISOString();
   if (patched === "success") {
@@ -319,7 +343,7 @@ const retryExisting = async (
     if (row.pendingTwitchStatus === null || !await repository.claimFailedPatch(channelId, row.redemptionId, expiredBefore, now)) return;
     const claimed = await repository.getRedemption(channelId, row.redemptionId);
     if (claimed?.status === "failed_to_update") {
-      await sendPendingTwitchPatch(environment, channelId, reward, claimed, "failed_to_update", authorize);
+      await sendPendingTwitchPatch(environment, channelId, claimed, "failed_to_update", authorize);
     }
     return;
   }
@@ -335,7 +359,7 @@ const retryExisting = async (
   const current = await repository.getRedemption(channelId, row.redemptionId);
   if (current === null || current.status !== "running") return;
   if (current.pendingTwitchStatus !== null) {
-    await sendPendingTwitchPatch(environment, channelId, reward, current, "running", authorize);
+    await sendPendingTwitchPatch(environment, channelId, current, "running", authorize);
     return;
   }
   await runClaimedAction(environment, channelId, reward, current, context, authorize);
@@ -372,7 +396,7 @@ export const reconcileChannelPoints = async (
         const remote = manageableById.get(reward.twitchRewardId);
         try {
           if (remote === undefined) {
-            await repository.markRewardDeleted(channelId, reward.twitchRewardId, now);
+            await confirmTwitchRewardDeleted(environment, channelId, reward.twitchRewardId, now);
           } else {
             await repository.adoptTwitchReward(channelId, {
               id: remote.id, title: remote.title, prompt: remote.prompt, cost: remote.cost,
@@ -395,14 +419,11 @@ export const reconcileChannelPoints = async (
   const openRows = await repository.listOpenRedemptions(channelId, expiredBeforeFor(now));
   const confirmedUnfulfilledIds = new Set<string>();
   const helix = await loadHelix();
-  const rewardById = new Map(rewards.map((reward) => [reward.id, reward]));
   const openRowsByTwitchReward = new Map<string, ChannelPointsRedemption[]>();
   for (const row of openRows) {
-    const reward = rewardById.get(row.rewardId);
-    if (reward === undefined) continue;
-    const group = openRowsByTwitchReward.get(reward.twitchRewardId) ?? [];
+    const group = openRowsByTwitchReward.get(row.twitchRewardId) ?? [];
     group.push(row);
-    openRowsByTwitchReward.set(reward.twitchRewardId, group);
+    openRowsByTwitchReward.set(row.twitchRewardId, group);
   }
   for (const [twitchRewardId, rewardRows] of openRowsByTwitchReward) {
     for (let offset = 0; offset < rewardRows.length; offset += 50) {
@@ -413,23 +434,29 @@ export const reconcileChannelPoints = async (
           environment, channelId, twitchRewardId, batch.map(({ redemptionId }) => redemptionId), authorize,
         );
         if (!result.ok) {
-          fail(twitchRewardId, result.reason);
+          if (result.reason === "not_found") {
+            await confirmTwitchRewardDeleted(environment, channelId, twitchRewardId, now);
+          } else fail(twitchRewardId, result.reason);
           continue;
         }
         for (const item of result.data) {
           const row = rowsById.get(item.id);
           if (row === undefined) continue;
-          if (item.status === "UNFULFILLED") {
+          const status = helixRedemptionStatus(item.status);
+          if (status === "unfulfilled") {
             confirmedUnfulfilledIds.add(item.id);
             continue;
           }
-          const terminalStatus = item.status === "FULFILLED" ? "fulfilled" : "refunded";
-          const expectedStatus = row.status === "fulfilled" ? "FULFILLED"
-            : row.status === "refunded" ? "CANCELED" : row.pendingTwitchStatus;
-          const mismatch = expectedStatus !== null && expectedStatus !== item.status;
+          if (status === "unknown") continue;
+          const terminalStatus = status === "fulfilled" ? "fulfilled" : "refunded";
+          const expectedStatus = row.status === "fulfilled" ? "fulfilled"
+            : row.status === "refunded" ? "canceled"
+              : row.pendingTwitchStatus === "FULFILLED" ? "fulfilled"
+                : row.pendingTwitchStatus === "CANCELED" ? "canceled" : null;
+          const mismatch = expectedStatus !== null && expectedStatus !== status;
           const mismatchReason = mismatch ? {
-            de: `Twitch hat ${item.status === "FULFILLED" ? "erledigt" : "erstattet"} gemeldet, obwohl BroBot ${expectedStatus === "FULFILLED" ? "Erledigung" : "Erstattung"} gespeichert hatte.`,
-            en: `Twitch reported ${item.status === "FULFILLED" ? "fulfilled" : "refunded"} while BroBot had recorded ${expectedStatus === "FULFILLED" ? "fulfilled" : "refunded"}.`,
+            de: `Twitch hat ${status === "fulfilled" ? "erledigt" : "erstattet"} gemeldet, obwohl BroBot ${expectedStatus === "fulfilled" ? "Erledigung" : "Erstattung"} gespeichert hatte.`,
+            en: `Twitch reported ${status === "fulfilled" ? "fulfilled" : "refunded"} while BroBot had recorded ${expectedStatus === "fulfilled" ? "fulfilled" : "refunded"}.`,
           } : null;
           const outcomeReason = mismatchReason === null ? row.outcomeReason : {
             de: [row.outcomeReason?.de, mismatchReason.de].filter(Boolean).join(" "),
@@ -452,7 +479,9 @@ export const reconcileChannelPoints = async (
     try {
       const result = await helix.listUnfulfilledRedemptions(environment, channelId, reward.twitchRewardId, authorize);
       if (!result.ok) {
-        fail(reward.twitchRewardId, result.reason);
+        if (result.reason === "not_found") {
+          await confirmTwitchRewardDeleted(environment, channelId, reward.twitchRewardId, now);
+        } else fail(reward.twitchRewardId, result.reason);
         continue;
       }
       for (const item of result.data) {
@@ -474,6 +503,7 @@ export const reconcileChannelPoints = async (
       if (row.status === "failed_to_update" && row.pendingTwitchStatus === null) continue;
       const reward = await repository.getReward(channelId, row.rewardId);
       if (reward === null) continue;
+      if (row.twitchRewardId !== reward.twitchRewardId) continue;
       if (row.status === "received" && reward.mode === "queue") {
         await repository.updateRedemption(channelId, row.redemptionId, {
           status: "queued", pendingTwitchStatus: null, claimedAt: null,
@@ -584,7 +614,12 @@ const performRewardMutation = async (
     const updated = await helix.updateCustomReward(
       environment, channelId, current.twitchRewardId, invocation.reward, authorize,
     );
-    if (!updated.ok) return { ok: false, reason: updated.reason };
+    if (!updated.ok) {
+      if (updated.reason === "not_found") {
+        await confirmTwitchRewardDeleted(environment, channelId, current.twitchRewardId, invocation.now);
+      }
+      return { ok: false, reason: updated.reason };
+    }
     const saved = await repository.updateReward(
       channelId, current.id, invocation.reward, invocation.now,
       managementWriteGuard(channelId, invocation.actor, authorizeManagementMutation),
@@ -596,11 +631,15 @@ const performRewardMutation = async (
   if (invocation.kind === "reward.delete") {
     if (current.twitchState !== "deleted_on_twitch") {
       const deleted = await helix.deleteCustomReward(environment, channelId, current.twitchRewardId, authorize);
-      if (!deleted.ok && deleted.reason !== "not_found") return { ok: false, reason: deleted.reason };
+      if (!deleted.ok) {
+        if (deleted.reason !== "not_found") return { ok: false, reason: deleted.reason };
+        await confirmTwitchRewardDeleted(environment, channelId, current.twitchRewardId, invocation.now);
+      }
     }
     const saved = await repository.deleteReward(
       channelId, current.id, managementWriteGuard(channelId, invocation.actor, authorizeManagementMutation),
     );
+    if (saved) await confirmTwitchRewardDeleted(environment, channelId, current.twitchRewardId, invocation.now);
     return saved ? { ok: true } : { ok: false, reason: "precondition_failed" };
   }
   if (current.twitchState !== "deleted_on_twitch") return { ok: false, error: "channel_points_reward_not_deleted" };
@@ -650,17 +689,24 @@ const activationSync = async (
       }
       const result = await setCustomRewardEnabled(environment, channelId, row.twitch_reward_id, desired, authorize);
       if (!result.ok) {
+        if (result.reason === "not_found") {
+          await confirmTwitchRewardDeleted(environment, channelId, row.twitch_reward_id, new Date().toISOString());
+          continue;
+        }
         failures.push({ rewardId: row.twitch_reward_id, reason: result.reason });
         continue;
       }
-      if (enabled) {
-        const currentGuard = managementWriteGuard(channelId, actor, authorizeManagementMutation);
-        const write = await db.prepare(
-          `UPDATE channel_points_rewards SET enabled=?,restore_enabled=NULL,updated_at=?
-            WHERE channel_id=? AND id=? AND EXISTS (SELECT channel_id FROM channels WHERE channel_id=? ${currentGuard.sql})`,
-        ).bind(Number(desired), new Date().toISOString(), channelId, row.id, channelId, ...currentGuard.values).run();
-        if (write.meta.changes === 0) failures.push({ rewardId: row.twitch_reward_id, reason: "precondition_failed" });
-      }
+      const currentGuard = managementWriteGuard(channelId, actor, authorizeManagementMutation);
+      const synchronizedAt = new Date().toISOString();
+      const write = await db.prepare(
+        `UPDATE channel_points_rewards
+            SET enabled=CASE WHEN ?=1 THEN ? ELSE enabled END,
+                restore_enabled=CASE WHEN ?=1 THEN NULL ELSE restore_enabled END,
+                last_twitch_event_at=?,updated_at=?
+          WHERE channel_id=? AND id=? AND EXISTS (SELECT channel_id FROM channels WHERE channel_id=? ${currentGuard.sql})`,
+      ).bind(Number(enabled), Number(desired), Number(enabled), synchronizedAt, synchronizedAt,
+        channelId, row.id, channelId, ...currentGuard.values).run();
+      if (write.meta.changes === 0) failures.push({ rewardId: row.twitch_reward_id, reason: "precondition_failed" });
     } catch {
       failures.push({ rewardId: row.twitch_reward_id, reason: "unknown_status" });
     }

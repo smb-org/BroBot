@@ -70,14 +70,30 @@ const redemptionEvent = (id: string): ModuleEvent => ({
   subscriptionType: "channel.channel_points_custom_reward_redemption.add",
   triggerId: `event_${id}`,
   payload: {
-    id, user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo", user_input: "",
-    redeemed_at: now, reward: { id: "reward_twitch", title: "Fictional reward" },
+    id, broadcaster_user_id: channelId, broadcaster_user_login: channelId, broadcaster_user_name: channelId,
+    user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo", user_input: "",
+    status: "unfulfilled", redeemed_at: now,
+    reward: {
+      id: "reward_twitch", title: "Fictional reward", prompt: "Say hello", cost: 10,
+      is_user_input_required: false,
+    },
   },
   settings: {},
   receivedAt: now,
   eventSubTimestamp: now,
   actor: null,
   chatStatus: null,
+});
+const helixRedemption = (
+  id: string,
+  status: "UNFULFILLED" | "FULFILLED" | "CANCELED",
+  rewardId = "reward_twitch",
+  rewardTitle = "Fictional reward",
+) => ({
+  id, broadcaster_id: channelId, broadcaster_login: channelId, broadcaster_name: channelId,
+  user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo", user_input: "",
+  redeemed_at: now, status,
+  reward: { id: rewardId, title: rewardTitle, prompt: "Say hello", cost: 10 },
 });
 
 describe("channel points redemption flow on local D1", () => {
@@ -139,9 +155,13 @@ describe("channel points redemption flow on local D1", () => {
       ...redemptionEvent("redemption_stale_action"),
       subscriptionType: "channel.channel_points_custom_reward_redemption.update",
       payload: {
-        id: "redemption_stale_action", user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo",
-        user_input: "", redeemed_at: now, status: "FULFILLED",
-        reward: { id: "reward_twitch", title: "Fictional reward" },
+        id: "redemption_stale_action", broadcaster_user_id: channelId, broadcaster_user_login: channelId,
+        broadcaster_user_name: channelId, user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo",
+        user_input: "", redeemed_at: now, status: "fulfilled",
+        reward: {
+          id: "reward_twitch", title: "Fictional reward", prompt: "Say hello", cost: 10,
+          is_user_input_required: false,
+        },
       },
     }, context);
     finishPatch({ ok: false, reason: "unknown_status" });
@@ -157,10 +177,7 @@ describe("channel points redemption flow on local D1", () => {
       "UPDATE channel_points_redemptions SET claimed_at=? WHERE channel_id=? AND redemption_id=?",
     ).bind("2026-11-10T11:57:00.000Z", channelId, "redemption_concurrent_retry").run();
     sendChat.mockResolvedValue({ sent: true, delivery: "sent", reason: null });
-    mocks.listByIds.mockResolvedValue({ ok: true, data: [{
-      id: "redemption_concurrent_retry", user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo",
-      user_input: "", redeemed_at: now, status: "UNFULFILLED", reward: { id: "reward_twitch", title: "Fictional reward" },
-    }] });
+    mocks.listByIds.mockResolvedValue({ ok: true, data: [helixRedemption("redemption_concurrent_retry", "UNFULFILLED")] });
     await Promise.all([
       reconcileChannelPoints(environment, channelId, now, { force: true, context }),
       reconcileChannelPoints(environment, channelId, now, { force: true, context }),
@@ -192,11 +209,11 @@ describe("channel points redemption flow on local D1", () => {
     await database.prepare("DELETE FROM channel_points_redemptions WHERE channel_id=?").bind(channelId).run();
     await repository.insertReward(channelId, { ...reward, title: "Second reward" }, "reward_local_two", "reward_twitch_two", now);
     await repository.latchRedemption(channelId, {
-      id: "redemption_group_one", rewardId: "reward_local", rewardTitle: "Fictional reward",
+      id: "redemption_group_one", rewardId: "reward_local", twitchRewardId: "reward_twitch", rewardTitle: "Fictional reward",
       userId: "viewer_one", userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "", redeemedAt: now,
     }, now);
     await repository.latchRedemption(channelId, {
-      id: "redemption_group_two", rewardId: "reward_local_two", rewardTitle: "Second reward",
+      id: "redemption_group_two", rewardId: "reward_local_two", twitchRewardId: "reward_twitch_two", rewardTitle: "Second reward",
       userId: "viewer_one", userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "", redeemedAt: now,
     }, now);
     mocks.manageable.mockResolvedValue({ ok: true, data: [manageableReward, {
@@ -204,10 +221,7 @@ describe("channel points redemption flow on local D1", () => {
     }] });
     mocks.listByIds.mockImplementation((_environment, _channel, rewardId, redemptionIds) => {
       const id = (redemptionIds as string[])[0] ?? "";
-      return Promise.resolve({ ok: true, data: [{
-        id, user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo", user_input: "",
-        redeemed_at: now, status: "CANCELED", reward: { id: String(rewardId), title: "Fictional reward" },
-      }] });
+      return Promise.resolve({ ok: true, data: [helixRedemption(id, "CANCELED", String(rewardId))] });
     });
 
     await reconcileChannelPoints(environment, channelId, now, { force: true, context });
@@ -228,7 +242,7 @@ describe("channel points redemption flow on local D1", () => {
   it("reclaims expired running rows but leaves rows within the lease alone", async () => {
     for (const id of ["redemption_expired_lease", "redemption_active_lease"]) {
       await repository.latchRedemption(channelId, {
-        id, rewardId: "reward_local", rewardTitle: "Fictional reward", userId: "viewer_one",
+        id, rewardId: "reward_local", twitchRewardId: "reward_twitch", rewardTitle: "Fictional reward", userId: "viewer_one",
         userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "", redeemedAt: now,
       }, now);
     }
@@ -238,10 +252,7 @@ describe("channel points redemption flow on local D1", () => {
     await database.prepare(
       "UPDATE channel_points_redemptions SET status='running',claimed_at=? WHERE channel_id=? AND redemption_id=?",
     ).bind("2026-11-10T11:59:00.000Z", channelId, "redemption_active_lease").run();
-    mocks.listByIds.mockResolvedValue({ ok: true, data: [{
-      id: "redemption_expired_lease", user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo",
-      user_input: "", redeemed_at: now, status: "UNFULFILLED", reward: { id: "reward_twitch", title: "Fictional reward" },
-    }] });
+    mocks.listByIds.mockResolvedValue({ ok: true, data: [helixRedemption("redemption_expired_lease", "UNFULFILLED")] });
     await reconcileChannelPoints(environment, channelId, now, { force: true, context });
     expect(sendChat).toHaveBeenCalledTimes(1);
     await expect(repository.getRedemption(channelId, "redemption_expired_lease"))
