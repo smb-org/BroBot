@@ -1121,6 +1121,12 @@ const MountedModuleView = ({ module, channelId, pageId, streamSessionIdentity, c
       onRetry={retryModuleChunkLoad}
       properties={{
         channelId,
+        ...(module.id === "channel_points" ? {
+          channelPointsActions: MODULES.flatMap((candidate) => (candidate.channelPointsActions ?? []).map((definition) => ({
+            moduleId: candidate.id,
+            definition,
+          }))),
+        } : {}),
         ...(pageId === undefined ? {} : { pageId }),
         ...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity }),
         language: dashboardLanguage(),

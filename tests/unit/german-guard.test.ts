@@ -29,6 +29,7 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/channel_points/index.ts": "Bilingual DE/EN channel points action name; only the German value is German.",
   "src/modules/channel_points/actions/chat-message.ts": "Bilingual DE/EN channel points chat-action refund text; only its German values are German.",
   "src/modules/channel_points/service.ts": "Bilingual DE/EN channel points redemption history reasons; only its German values are German.",
+  "src/modules/channel_points/panel/locale.ts": "Bilingual DE/EN channel-points panel catalogue; only its German values are German.",
   "src/modules/boss_fight/locale.ts": "Bilingual DE/EN boss-fight module catalogue; only its de values are German.",
   "src/modules/boss_fight/panel/settings-editor-locale.ts": "Bilingual DE/EN boss-fight settings editor catalogue; only its de values are German.",
   "src/modules/blitz_round/locale.ts": "Bilingual DE/EN blitz module catalogue; only its de values are German.",

@@ -13,6 +13,7 @@ export interface SelectOption {
   selectedLabel?: string;
   description?: string;
   group?: string;
+  disabled?: boolean;
 }
 
 export interface SelectProps {
@@ -73,7 +74,7 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
     const groupOptions = filteredOptions.filter((option) => option.group === groupName);
     return groupOptions.length === 0 ? null : <SelectGroup key={groupName}>
       <SelectLabel>{groupName}</SelectLabel>
-      {groupOptions.map((option) => <SelectItem key={option.value} value={option.value}>{optionContents(option)}</SelectItem>)}
+      {groupOptions.map((option) => <SelectItem key={option.value} value={option.value} disabled={option.disabled ?? false}>{optionContents(option)}</SelectItem>)}
     </SelectGroup>;
   };
 
@@ -119,10 +120,10 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
         <Combobox.Positioner align="start" sideOffset={4} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
           <Combobox.Popup data-ui="" className="ui-select__dropdown">
             <Combobox.List className="ui-select__options" aria-label={label ?? ariaLabel}>
-              {filteredOptions.filter((option) => option.group === undefined).map((option) => <Combobox.Item key={option.value} value={option.value} className="ui-select__combobox-option">{optionContents(option)}<Combobox.ItemIndicator className="ui-select__check"><Check aria-hidden="true" size={14} /></Combobox.ItemIndicator></Combobox.Item>)}
+              {filteredOptions.filter((option) => option.group === undefined).map((option) => <Combobox.Item key={option.value} value={option.value} disabled={option.disabled ?? false} className="ui-select__combobox-option">{optionContents(option)}<Combobox.ItemIndicator className="ui-select__check"><Check aria-hidden="true" size={14} /></Combobox.ItemIndicator></Combobox.Item>)}
               {groups.filter((groupName) => filteredOptions.some((option) => option.group === groupName)).map((groupName) => <div role="group" aria-label={groupName} key={groupName}>
                 <div className="ui-select__group-label">{groupName}</div>
-                {filteredOptions.filter((option) => option.group === groupName).map((option) => <Combobox.Item key={option.value} value={option.value} className="ui-select__combobox-option">{optionContents(option)}<Combobox.ItemIndicator className="ui-select__check"><Check aria-hidden="true" size={14} /></Combobox.ItemIndicator></Combobox.Item>)}
+                {filteredOptions.filter((option) => option.group === groupName).map((option) => <Combobox.Item key={option.value} value={option.value} disabled={option.disabled ?? false} className="ui-select__combobox-option">{optionContents(option)}<Combobox.ItemIndicator className="ui-select__check"><Check aria-hidden="true" size={14} /></Combobox.ItemIndicator></Combobox.Item>)}
               </div>)}
               {filteredOptions.length === 0 ? <div className="ui-select__empty" role="status">{placeholder}</div> : null}
             </Combobox.List>
@@ -135,7 +136,7 @@ export function Select({ label, ariaLabel, hint, error, value, onChange, options
       </SelectTrigger>
       <SelectContent className="ui-select__dropdown" anchor={dropdownBelowField ? fieldRef : undefined}
         alignItemWithTrigger={dropdownBelowField ? false : undefined}>
-        {options.filter((option) => option.group === undefined).map((option) => <SelectItem key={option.value} value={option.value}>{optionContents(option)}</SelectItem>)}
+        {options.filter((option) => option.group === undefined).map((option) => <SelectItem key={option.value} value={option.value} disabled={option.disabled ?? false}>{optionContents(option)}</SelectItem>)}
         {groups.map(group)}
       </SelectContent>
     </SelectPrimitive.Root>}

@@ -1,4 +1,4 @@
-import { useId, type KeyboardEvent, type ReactNode } from "react";
+import { useId, type KeyboardEvent, type ReactNode, type Ref } from "react";
 
 import { Icon, type IconName } from "./Icon";
 import { Input } from "./primitives/input";
@@ -29,6 +29,7 @@ interface FieldBaseProps {
   id?: string;
   normalize?: (value: string) => string;
   className?: string;
+  inputRef?: Ref<HTMLInputElement>;
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
 }
 
@@ -47,7 +48,7 @@ export type FieldProps = FieldBaseProps & FieldCountProps & (
   | ({ variant?: undefined; clearLabel?: never } & FieldAdornmentProps)
 );
 
-export function Field({ label, ariaLabel, labelHidden = false, hint, error, errorInDescription = false, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, countLength, countWhenNearLimitOnly = false, name, id: suppliedId, icon, prefix, leftLabel, normalize, maxLength, countLabel, className, onKeyDown, variant, clearLabel }: FieldProps) {
+export function Field({ label, ariaLabel, labelHidden = false, hint, error, errorInDescription = false, value, onChange, placeholder, disabled = false, required = false, readOnly = false, type = "text", autoComplete, spellCheck, mono = false, countLength, countWhenNearLimitOnly = false, name, id: suppliedId, icon, prefix, leftLabel, normalize, maxLength, countLabel, className, inputRef, onKeyDown, variant, clearLabel }: FieldProps) {
   const generatedId = useId();
   const id = suppliedId ?? generatedId;
   const disabledReason = useDisabledFieldReason();
@@ -69,6 +70,7 @@ export function Field({ label, ariaLabel, labelHidden = false, hint, error, erro
     <div className="ui-field__control">
       {leading === null ? null : <span className={`ui-field__leading${leadingLabel === undefined ? "" : " ui-field__leading--prefix"}`}>{leading}</span>}
       <Input
+        ref={inputRef}
         id={id}
         aria-label={ariaLabel ?? ((labelHidden || searchVariant) ? label : undefined)}
         aria-describedby={describedBy}

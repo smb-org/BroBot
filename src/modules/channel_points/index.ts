@@ -37,6 +37,7 @@ export const channelPointsModule: BotModule<typeof settingsSchema> = {
   handleEvent: processChannelPointsEvent,
   routes: channelPointsRoutes,
   panelIcon: { paths: ["M5 5h14v14H5z", "M9 12h6", "M12 9v6"] },
+  panel: () => import("./panel"),
   channelPointsActions: [chatMessageAction],
   onActivationChange: async (activation) => {
     const result: unknown = await activation.runModuleAlarm(
