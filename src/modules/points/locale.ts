@@ -21,6 +21,13 @@ export const pointsCatalog = {
       safetyNet: (amount: number, currency: string) => `Notgroschen: +${new Intl.NumberFormat("de-DE").format(amount)} ${currency}.`,
       blitzGame: "Blitzrunde (einfach mitraten)",
     },
+    channelPointsActions: {
+      name: "Punkte gutschreiben",
+      amountLabel: "Punkte",
+      amountUnit: "Punkte",
+      disabled: "Das Punktesystem ist deaktiviert.",
+      rejected: "Die Punktegutschrift wurde abgelehnt.",
+    },
   },
   en: {
     name: "Points",
@@ -41,6 +48,13 @@ export const pointsCatalog = {
       startBonus: (amount: number, currency: string) => `Start balance ${new Intl.NumberFormat("en-US").format(amount)} ${currency}`,
       safetyNet: (amount: number, currency: string) => `Safety net: +${new Intl.NumberFormat("en-US").format(amount)} ${currency}.`,
       blitzGame: "Blitz Round (just guess along)",
+    },
+    channelPointsActions: {
+      name: "Credit points",
+      amountLabel: "Points",
+      amountUnit: "Points",
+      disabled: "The points module is disabled.",
+      rejected: "The points credit was rejected.",
     },
   },
 } satisfies Readonly<Record<ModuleLanguage, object>>;

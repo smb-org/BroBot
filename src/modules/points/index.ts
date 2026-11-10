@@ -3,6 +3,7 @@ import { DEFAULT_POINTS_SETTINGS, POINTS_MODULE_ID, pointsDefaultSettingsForLang
 import { pointsCatalog } from "./locale";
 import { pointsRoutes } from "./routes";
 import { processPointsMessage } from "./service";
+import { creditPointsAction } from "./actions/credit-points";
 
 export const pointsModule: BotModule<typeof pointsSettingsSchema> = {
   id: POINTS_MODULE_ID,
@@ -31,6 +32,7 @@ export const pointsModule: BotModule<typeof pointsSettingsSchema> = {
   settingsReadSchema: pointsSettingsReadSchema,
   defaultSettings: DEFAULT_POINTS_SETTINGS,
   defaultSettingsForLanguage: pointsDefaultSettingsForLanguage,
+  channelPointsActions: [creditPointsAction],
   panel: () => import("./panel"),
   panelManagesSettings: true,
   routes: pointsRoutes,
