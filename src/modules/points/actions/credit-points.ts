@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { ChannelPointsActionDefinition, ModuleExecutionContext } from "../../contract";
-import { POINTS_MODULE_ID, isPointViewerAccountId } from "../contracts";
+import { POINTS_MODULE_ID, isPointViewerAccountId, pointsSettingsReadSchema } from "../contracts";
 import { pointsCatalog } from "../locale";
 
 export const creditPointsConfigSchema = z.object({
@@ -15,27 +15,11 @@ const refund = (reason: "disabled" | "rejected") => ({
   },
 });
 
-const definitiveLedgerErrors = new Set([
-  "account_kind_conflict",
-  "balance_overflow",
-  "invalid_account",
-  "invalid_account_id",
-  "invalid_movement",
-  "invalid_operation_id",
-  "invalid_operation_kind",
-  "invalid_pot_share",
-  "ledger_not_zero_sum",
-  "operation_conflict",
-]);
-
-const hasLedgerOperation = async (
-  context: ModuleExecutionContext,
-  accountId: string,
-  operationId: string,
-): Promise<boolean> => {
-  const history = await context.points.history(accountId, undefined, 100);
-  return history.rows.some((row) => row.operationId === operationId &&
-    row.moduleId === POINTS_MODULE_ID && row.kind === "bonus");
+const isCreditOperation = (operation: { kind: string; result: unknown } | null): boolean => {
+  if (operation === null || operation.kind !== "bonus" || typeof operation.result !== "object" ||
+      operation.result === null || Array.isArray(operation.result)) return false;
+  const amount: unknown = Reflect.get(operation.result, "amount");
+  return typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 1 && amount <= 1_000_000;
 };
 
 export const creditPointsAction: ChannelPointsActionDefinition<typeof creditPointsConfigSchema> = {
@@ -55,9 +39,14 @@ export const creditPointsAction: ChannelPointsActionDefinition<typeof creditPoin
 
     try {
       const module = await context.DB.prepare(
-        "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = ?",
-      ).bind(context.channelId, POINTS_MODULE_ID).first<{ enabled: number }>();
+        "SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = ?",
+      ).bind(context.channelId, POINTS_MODULE_ID).first<{ enabled: number; settings: string }>();
       if (module?.enabled !== 1) return refund("disabled");
+      const existingOperation = await context.points.getOperation(`channel-points:credit-points:${operationId}`);
+      if (existingOperation !== null) return isCreditOperation(existingOperation) ? "fulfilled" : "pending";
+
+      const settings = pointsSettingsReadSchema.parse(JSON.parse(module.settings) as unknown);
+      await context.points.touchAccount(redemption.userId, redemption.userLogin, settings.startBonus);
     } catch {
       return "pending";
     }
@@ -77,14 +66,15 @@ export const creditPointsAction: ChannelPointsActionDefinition<typeof creditPoin
       });
       return "fulfilled";
     } catch (error) {
-      if (error instanceof Error && definitiveLedgerErrors.has(error.message)) return refund("rejected");
+      let existingOperation: Awaited<ReturnType<ModuleExecutionContext["points"]["getOperation"]>>;
       try {
-        return await hasLedgerOperation(context, redemption.userId, ledgerOperationId)
-          ? "fulfilled"
-          : refund("rejected");
+        existingOperation = await context.points.getOperation(ledgerOperationId);
       } catch {
         return "pending";
       }
+      if (existingOperation !== null) return isCreditOperation(existingOperation) ? "fulfilled" : "pending";
+      if (error instanceof Error && error.message === "operation_conflict") return "pending";
+      return refund("rejected");
     }
   },
 };

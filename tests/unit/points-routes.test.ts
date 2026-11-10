@@ -52,6 +52,7 @@ const createHarness = (options: { role?: "manager" | "operator"; failFirstAudit?
       balance += userMovement.delta ?? 0;
       return Promise.resolve({ replayed: false, result: detail, balances: { [detail.accountId]: balance } });
     }),
+    getOperation: vi.fn(() => Promise.resolve(null)),
     settle: vi.fn(() => Promise.resolve({ replayed: false, result: null, balances: {} })),
     touchAccount: vi.fn(() => Promise.resolve({ welcomePending: false, startBonus: null })),
     prepareChatActivity: vi.fn(() => Promise.resolve({

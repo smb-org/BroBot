@@ -13,6 +13,7 @@ export const modulePoints = (
   if (namespace === undefined) {
     return {
       apply: () => unavailable(),
+      getOperation: () => unavailable(),
       settle: () => unavailable(),
       touchAccount: () => unavailable(),
       prepareChatActivity: () => unavailable(),
@@ -64,6 +65,7 @@ export const modulePoints = (
   return {
     apply: (operationId, kind: PointsKind, movements: PointsMovement[], result, payloadIdentity) =>
       object.applyPointOperation(moduleId, operationId, kind, movements, result, payloadIdentity),
+    getOperation: (operationId) => object.getPointOperation(moduleId, operationId),
     settle: (operationId, kind, actor, stake, params, options) =>
       object.settlePointOperation(moduleId, operationId, kind, actor, stake, params, options),
     touchAccount: (accountId, login, startBonus) => object.touchPointAccount(moduleId, accountId, login, startBonus),
