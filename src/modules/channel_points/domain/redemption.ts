@@ -28,6 +28,9 @@ export const rewardSnapshotFromEventSub = (value: unknown): {
   maxPerUserPerStream: number | null; enabled: boolean;
 } | null => {
   const input = record(value);
+  const globalCooldown = record(input?.["global_cooldown"]);
+  const maxPerStream = record(input?.["max_per_stream"]);
+  const maxPerUserPerStream = record(input?.["max_per_user_per_stream"]);
   const cost = integer(input?.["cost"]);
   if (input === null || typeof input["id"] !== "string" || typeof input["title"] !== "string" ||
       cost === null || typeof input["is_enabled"] !== "boolean") return null;
@@ -35,9 +38,10 @@ export const rewardSnapshotFromEventSub = (value: unknown): {
     twitchRewardId: input["id"], title: input["title"], prompt: typeof input["prompt"] === "string" ? input["prompt"] : null,
     cost, backgroundColor: typeof input["background_color"] === "string" ? input["background_color"] : null,
     isUserInputRequired: input["is_user_input_required"] === true,
-    globalCooldownSeconds: integer(input["global_cooldown_seconds"]),
-    maxPerStream: input["is_max_per_stream_enabled"] === false ? null : integer(input["max_per_stream"]),
-    maxPerUserPerStream: input["is_max_per_user_per_stream_enabled"] === false ? null : integer(input["max_per_user_per_stream"]),
+    globalCooldownSeconds: globalCooldown?.["is_enabled"] === true ? integer(globalCooldown["seconds"]) : null,
+    maxPerStream: maxPerStream?.["is_enabled"] === true ? integer(maxPerStream["value"]) : null,
+    maxPerUserPerStream: maxPerUserPerStream?.["is_enabled"] === true
+      ? integer(maxPerUserPerStream["value"]) : null,
     enabled: input["is_enabled"],
   };
 };

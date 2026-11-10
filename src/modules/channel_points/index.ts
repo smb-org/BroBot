@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { BotModule } from "../contract";
+import type { BotModule, ModuleActivationResult } from "../contract";
 import { CHANNEL_POINTS_MODULE_ID } from "./contracts";
 import { chatMessageAction } from "./actions/chat-message";
 import { processChannelPointsEvent } from "./service";
@@ -44,21 +44,41 @@ export const channelPointsModule: BotModule<typeof settingsSchema> = {
       ).bind(activation.now, channelId).run();
     }
     const rows = await activation.DB.prepare(
-      "SELECT id, twitch_reward_id, enabled, restore_enabled FROM channel_points_rewards WHERE channel_id = ?",
+      "SELECT id, twitch_reward_id, enabled, restore_enabled FROM channel_points_rewards WHERE channel_id = ? AND twitch_state != 'deleted_on_twitch'",
     ).bind(channelId).all<{ id: string; twitch_reward_id: string; enabled: number; restore_enabled: number | null }>();
     const { setCustomRewardEnabled } = await import("../../worker/twitch/channel-points");
+    const failedRewards: Array<{ rewardId: string; reason: string }> = [];
     for (const row of rows.results) {
       const desired = enabled ? (row.restore_enabled ?? row.enabled) === 1 : false;
-      if (!await authorizationForMutation()) throw new Error("Channel points activation authorization changed.");
-      const result = await setCustomRewardEnabled(
-        activation.environment, channelId, row.twitch_reward_id, desired, authorizationForMutation,
-      );
-      if (!result.ok) throw new Error("Could not synchronize a channel points reward: " + result.reason);
-      if (enabled) {
-        await activation.DB.prepare(
-          "UPDATE channel_points_rewards SET enabled = ?, restore_enabled = NULL, updated_at = ? WHERE channel_id = ? AND id = ?",
-        ).bind(Number(desired), activation.now, channelId, row.id).run();
+      try {
+        if (!await authorizationForMutation()) {
+          failedRewards.push({ rewardId: row.twitch_reward_id, reason: "precondition_failed" });
+          continue;
+        }
+        const result = await setCustomRewardEnabled(
+          activation.environment, channelId, row.twitch_reward_id, desired, authorizationForMutation,
+        );
+        if (!result.ok) {
+          failedRewards.push({ rewardId: row.twitch_reward_id, reason: result.reason });
+          continue;
+        }
+        if (enabled) {
+          await activation.DB.prepare(
+            "UPDATE channel_points_rewards SET enabled = ?, restore_enabled = NULL, updated_at = ? WHERE channel_id = ? AND id = ?",
+          ).bind(Number(desired), activation.now, channelId, row.id).run();
+        }
+      } catch {
+        failedRewards.push({ rewardId: row.twitch_reward_id, reason: "unknown_status" });
       }
     }
+    if (failedRewards.length > 0) {
+      const result: ModuleActivationResult = {
+        ok: false,
+        error: "channel_points_activation_sync_failed",
+        failedRewards,
+      };
+      return result;
+    }
+    return undefined;
   },
 };

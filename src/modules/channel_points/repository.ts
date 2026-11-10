@@ -41,7 +41,10 @@ export interface ChannelPointsRepository {
   markRewardDeleted(channelId: string, twitchRewardId: string, now: string): Promise<void>;
   deleteReward(channelId: string, id: string): Promise<void>;
   replaceTwitchId(channelId: string, id: string, twitchRewardId: string, now: string): Promise<void>;
-  latchRedemption(channelId: string, redemption: { id: string; rewardId: string; rewardTitle: string; userId: string; userLogin: string; userName: string; userInput: string; redeemedAt: string }, now: string): Promise<boolean>;
+  latchRedemption(channelId: string, redemption: {
+    id: string; rewardId: string; rewardTitle: string; userId: string; userLogin: string; userName: string;
+    userInput: string; redeemedAt: string; initialStatus?: "fulfilled" | "refunded";
+  }, now: string): Promise<boolean>;
   getRedemption(channelId: string, id: string): Promise<ChannelPointsRedemption | null>;
   updateRedemption(channelId: string, id: string, change: { status: ChannelPointsRedemptionStatus; pendingTwitchStatus?: TwitchRedemptionStatus | null; outcomeReason?: { de: string; en: string } | null; claimedAt?: string | null }, fromStatuses: readonly ChannelPointsRedemptionStatus[], now: string): Promise<boolean>;
   claimRedemption(channelId: string, id: string, fromStatuses: readonly ChannelPointsRedemptionStatus[], expiredBefore: string, now: string): Promise<boolean>;
@@ -100,9 +103,9 @@ export const createChannelPointsRepository = (db: D1Database): ChannelPointsRepo
       .bind(twitchRewardId, now, channelId, id).run();
   },
   async latchRedemption(channelId, redemption, now) {
-    const result = await db.prepare("INSERT OR IGNORE INTO channel_points_redemptions (channel_id,redemption_id,reward_id,reward_title,user_id,user_login,user_name,user_input,redeemed_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'received',?,?)")
+    const result = await db.prepare("INSERT OR IGNORE INTO channel_points_redemptions (channel_id,redemption_id,reward_id,reward_title,user_id,user_login,user_name,user_input,redeemed_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
       .bind(channelId, redemption.id, redemption.rewardId, redemption.rewardTitle, redemption.userId, redemption.userLogin,
-        redemption.userName, redemption.userInput, redemption.redeemedAt, now, now).run();
+        redemption.userName, redemption.userInput, redemption.redeemedAt, redemption.initialStatus ?? "received", now, now).run();
     return result.meta.changes > 0;
   },
   async getRedemption(channelId, id) {

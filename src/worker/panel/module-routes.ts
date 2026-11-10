@@ -103,11 +103,12 @@ const logPostCommitFailure = (moduleId: string, step: string, error: unknown): v
   });
 };
 
-const runPostCommitStep = async (moduleId: string, step: string, action: () => Promise<unknown>): Promise<void> => {
+const runPostCommitStep = async (moduleId: string, step: string, action: () => Promise<unknown>): Promise<unknown> => {
   try {
-    await action();
+    return await action();
   } catch (error) {
     logPostCommitFailure(moduleId, step, error);
+    return undefined;
   }
 };
 
@@ -1259,17 +1260,18 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       });
     }
   }
+  let activationResult: unknown;
   if (module.onActivationChange !== undefined) {
     const onActivationChange = module.onActivationChange;
-    await runPostCommitStep(module.id, "activation_change", async () => {
+    activationResult = await runPostCommitStep(module.id, "activation_change", async () =>
       await onActivationChange({
         DB: context.env.DB,
         environment: context.env,
         authorizeMutation: context.get("authorizeManagementMutation"),
         actor,
         now,
-      }, channelId, enabled);
-    });
+      }, channelId, enabled),
+    );
   }
   await runPostCommitStep(module.id, "eventsub_reconciliation", () =>
     maintainEventSubSubscriptions(context.env, now, fetch, channelId));
@@ -1286,6 +1288,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   return context.json({
     module: updatedModule,
     revision,
+    ...(activationResult === undefined ? {} : { activationResult }),
   });
 });
 

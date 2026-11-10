@@ -165,7 +165,16 @@ const persistTwitchTerminalStatus = async (
   if (status !== "FULFILLED" && status !== "CANCELED") return;
   const repository = createChannelPointsRepository(environment.DB);
   const saved = await repository.getRedemption(channelId, redemption.id);
-  if (saved === null) return;
+  if (saved === null) {
+    const reward = await repository.getRewardByTwitchId(channelId, redemption.rewardId);
+    if (reward === null) return;
+    await repository.latchRedemption(channelId, {
+      ...redemption,
+      rewardId: reward.id,
+      initialStatus: status === "FULFILLED" ? "fulfilled" : "refunded",
+    }, now);
+    return;
+  }
   const reportedStatus: TwitchRedemptionStatus = status;
   const expectedStatus = saved.status === "fulfilled" ? "FULFILLED"
     : saved.status === "refunded" ? "CANCELED"

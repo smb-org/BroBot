@@ -1,3 +1,47 @@
+/**
+ * Twitch Helix channel-points contracts used here:
+ *
+ * Create Custom Rewards
+ *   POST /helix/channel_points/custom_rewards?broadcaster_id={broadcaster_id}
+ *   Body: { title, cost, prompt?, is_enabled?, background_color?, is_user_input_required?,
+ *     is_max_per_stream_enabled?, max_per_stream?, is_max_per_user_per_stream_enabled?,
+ *     max_per_user_per_stream?, is_global_cooldown_enabled?, global_cooldown_seconds?,
+ *     should_redemptions_skip_request_queue? }
+ *   Response: { data: [CustomReward] }, where CustomReward is {
+ *     id, broadcaster_id, broadcaster_login, broadcaster_name, title, prompt, cost, is_enabled,
+ *     background_color, image?, default_image?, is_user_input_required, is_paused, is_in_stock,
+ *     should_redemptions_skip_request_queue, redemptions_redeemed_current_stream?,
+ *     global_cooldown_setting: { is_enabled, global_cooldown_seconds },
+ *     max_per_stream_setting: { is_enabled, max_per_stream },
+ *     max_per_user_per_stream_setting: { is_enabled, max_per_user_per_stream }
+ *   }.
+ *
+ * Update Custom Reward
+ *   PATCH /helix/channel_points/custom_rewards?broadcaster_id={broadcaster_id}&id={reward_id}
+ *   Body: any partial subset of the create reward fields; response is { data: [CustomReward] }.
+ * Delete Custom Reward
+ *   DELETE /helix/channel_points/custom_rewards?broadcaster_id={broadcaster_id}&id={reward_id}
+ *   Body: none; response: { data: [{ broadcaster_id, id }] }.
+ * Get Custom Rewards
+ *   GET /helix/channel_points/custom_rewards?broadcaster_id={broadcaster_id}&only_manageable_rewards=true
+ *   Response: { data: [CustomReward] }.
+ *   CustomReward includes global_cooldown_setting: { is_enabled, global_cooldown_seconds },
+ *   max_per_stream_setting: { is_enabled, max_per_stream }, and
+ *   max_per_user_per_stream_setting: { is_enabled, max_per_user_per_stream }.
+ *
+ * Update Custom Reward Redemption Status
+ *   PATCH /helix/channel_points/custom_rewards/redemptions?id={redemption_id}[&id=...]&broadcaster_id={broadcaster_id}&reward_id={reward_id}
+ *   Body: { status: "FULFILLED" | "CANCELED" }; response: { data: [Redemption] }.
+ * Get Custom Reward Redemptions
+ *   GET /helix/channel_points/custom_rewards/redemptions?broadcaster_id={broadcaster_id}&reward_id={reward_id}&status=UNFULFILLED&first={1..50}&after={cursor}
+ *   Redemption: { id, broadcaster_id, broadcaster_login, broadcaster_name, user_id, user_login,
+ *     user_name, user_input, status, redeemed_at, reward: { id, title, prompt, cost } }.
+ *   Response: { data: [Redemption], pagination: { cursor? } }.
+ *
+ * EventSub reward events use global_cooldown: { is_enabled, seconds },
+ * max_per_stream: { is_enabled, value }, and max_per_user_per_stream: { is_enabled, value }.
+ * Redemption events include status and reward: { id, title, cost, prompt }.
+ */
 import { z } from "zod";
 
 import type {
@@ -15,18 +59,30 @@ const rewardSchema = z.object({
   id: z.string().min(1), title: z.string(), prompt: nullableString, cost: z.number().int().positive(),
   is_enabled: z.boolean(), background_color: nullableString,
   is_user_input_required: z.boolean().nullish().transform((value) => value ?? false),
-  is_global_cooldown_enabled: z.boolean().nullish().transform((value) => value ?? false),
-  global_cooldown_seconds: nullableInteger, max_per_stream: nullableInteger, max_per_user_per_stream: nullableInteger,
-  is_max_per_stream_enabled: z.boolean().nullish().transform((value) => value ?? false),
-  is_max_per_user_per_stream_enabled: z.boolean().nullish().transform((value) => value ?? false),
+  global_cooldown_setting: z.object({
+    is_enabled: z.boolean().nullish().transform((value) => value ?? false),
+    global_cooldown_seconds: nullableInteger,
+  }).nullish().transform((value) => value ?? { is_enabled: false, global_cooldown_seconds: null }),
+  max_per_stream_setting: z.object({
+    is_enabled: z.boolean().nullish().transform((value) => value ?? false),
+    max_per_stream: nullableInteger,
+  }).nullish().transform((value) => value ?? { is_enabled: false, max_per_stream: null }),
+  max_per_user_per_stream_setting: z.object({
+    is_enabled: z.boolean().nullish().transform((value) => value ?? false),
+    max_per_user_per_stream: nullableInteger,
+  }).nullish().transform((value) => value ?? { is_enabled: false, max_per_user_per_stream: null }),
   is_paused: z.boolean().nullish().transform((value) => value ?? null),
   is_in_stock: z.boolean().nullish().transform((value) => value ?? null),
   should_redemptions_skip_request_queue: z.boolean().nullish().transform((value) => value ?? null),
-}).transform((reward) => ({
+}).transform(({ global_cooldown_setting, max_per_stream_setting, max_per_user_per_stream_setting, ...reward }) => ({
   ...reward,
-  global_cooldown_seconds: reward.is_global_cooldown_enabled ? reward.global_cooldown_seconds : null,
-  max_per_stream: reward.is_max_per_stream_enabled ? reward.max_per_stream : null,
-  max_per_user_per_stream: reward.is_max_per_user_per_stream_enabled ? reward.max_per_user_per_stream : null,
+  is_global_cooldown_enabled: global_cooldown_setting.is_enabled,
+  global_cooldown_seconds: global_cooldown_setting.is_enabled ? global_cooldown_setting.global_cooldown_seconds : null,
+  is_max_per_stream_enabled: max_per_stream_setting.is_enabled,
+  max_per_stream: max_per_stream_setting.is_enabled ? max_per_stream_setting.max_per_stream : null,
+  is_max_per_user_per_stream_enabled: max_per_user_per_stream_setting.is_enabled,
+  max_per_user_per_stream: max_per_user_per_stream_setting.is_enabled
+    ? max_per_user_per_stream_setting.max_per_user_per_stream : null,
 }));
 const rewardsEnvelopeSchema = z.object({ data: z.array(rewardSchema) });
 const redemptionSchema = z.object({
@@ -116,15 +172,15 @@ export const createCustomReward = (
   environment: Env, broadcasterId: string, input: ChannelPointsRewardInput, authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
 ): Promise<ChannelPointsHelixResult<HelixCustomReward[]>> => request({
   environment, broadcasterId, scope: "channel:manage:redemptions", url: REWARDS_URL, method: "POST",
-  body: { broadcaster_id: broadcasterId, ...payloadFromInput(input) }, schema: rewardsEnvelopeSchema, authorize, fetcher,
+  query: { broadcaster_id: broadcasterId }, body: payloadFromInput(input), schema: rewardsEnvelopeSchema, authorize, fetcher,
 });
 
 export const updateCustomReward = (
   environment: Env, broadcasterId: string, rewardId: string, input: ChannelPointsRewardInput,
   authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
 ): Promise<ChannelPointsHelixResult<HelixCustomReward[]>> => request({
-  environment, broadcasterId, scope: "channel:manage:redemptions", url: REWARDS_URL, method: "PUT",
-  body: { broadcaster_id: broadcasterId, id: rewardId, ...payloadFromInput(input) },
+  environment, broadcasterId, scope: "channel:manage:redemptions", url: REWARDS_URL, method: "PATCH",
+  query: { broadcaster_id: broadcasterId, id: rewardId }, body: payloadFromInput(input),
   schema: rewardsEnvelopeSchema, authorize, fetcher,
 });
 
@@ -139,20 +195,11 @@ export const setCustomRewardEnabled = async (
   environment: Env, broadcasterId: string, rewardId: string, enabled: boolean,
   authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
 ): Promise<ChannelPointsHelixResult<HelixCustomReward[]>> => {
-  const current = await request({
-    environment, broadcasterId, scope: "channel:read:redemptions", url: REWARDS_URL,
-    query: { broadcaster_id: broadcasterId, id: rewardId }, schema: rewardsEnvelopeSchema, authorize, fetcher,
+  return request({
+    environment, broadcasterId, scope: "channel:manage:redemptions", url: REWARDS_URL, method: "PATCH",
+    query: { broadcaster_id: broadcasterId, id: rewardId }, body: { is_enabled: enabled },
+    schema: rewardsEnvelopeSchema, authorize, fetcher,
   });
-  if (!current.ok) return current;
-  const reward = current.data[0];
-  if (reward === undefined) return { ok: false, reason: "invalid_response" };
-  const input: ChannelPointsRewardInput = {
-    title: reward.title, prompt: reward.prompt, cost: reward.cost, backgroundColor: reward.background_color,
-    isUserInputRequired: reward.is_user_input_required, globalCooldownSeconds: reward.global_cooldown_seconds,
-    maxPerStream: reward.max_per_stream, maxPerUserPerStream: reward.max_per_user_per_stream,
-    actionModuleId: "channel_points", actionId: "chat-message", actionConfig: {}, mode: "auto", enabled,
-  };
-  return updateCustomReward(environment, broadcasterId, rewardId, input, authorize, fetcher);
 };
 
 export const updateRedemptionStatus = async (
@@ -174,12 +221,12 @@ export const listUnfulfilledRedemptions = async (
   environment: Env, broadcasterId: string, rewardId: string, authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
 ): Promise<ChannelPointsHelixResult<HelixRedemption[]>> => {
   const result: HelixRedemption[] = [];
-  let cursor: string | undefined;
+  let after: string | undefined;
   const cursors = new Set<string>();
   for (let page = 0; page < 100; page += 1) {
     const current = await request({
       environment, broadcasterId, scope: "channel:read:redemptions", url: REDEMPTIONS_URL,
-      query: { broadcaster_id: broadcasterId, reward_id: rewardId, status: "UNFULFILLED", first: "50", cursor },
+      query: { broadcaster_id: broadcasterId, reward_id: rewardId, status: "UNFULFILLED", first: "50", after },
       schema: redemptionPageSchema, authorize, fetcher,
     });
     if (!current.ok) return current;
@@ -187,7 +234,7 @@ export const listUnfulfilledRedemptions = async (
     const nextCursor = current.data.cursor ?? undefined;
     if (nextCursor === undefined || cursors.has(nextCursor)) return { ok: true, data: result };
     cursors.add(nextCursor);
-    cursor = nextCursor;
+    after = nextCursor;
   }
   return { ok: true, data: result };
 };

@@ -141,6 +141,18 @@ describe("channel points redemption processing", () => {
     expect(saved?.outcomeReason?.de).toContain("Twitch");
   });
 
+  it("latches a cancellation that arrives before its redemption add event", async () => {
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.update", {
+      ...redemptionPayload(), status: "CANCELED",
+    }), context);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+    await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
+      .resolves.toMatchObject({ status: "refunded", pendingTwitchStatus: null });
+  });
+
   it("refunds when the action provider module is disabled", async () => {
     database.sqlite.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'channel_points'")
       .run(channelId);
@@ -196,6 +208,20 @@ describe("channel points redemption processing", () => {
     expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM channel_points_rewards").get()).toMatchObject({ count: 1 });
   });
 
+  it("adopts enabled nested EventSub cooldown and per-stream limits", async () => {
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward.update", {
+      id: "reward_twitch", title: "Limited reward", cost: 25, is_enabled: true,
+      global_cooldown: { is_enabled: true, seconds: 90 },
+      max_per_stream: { is_enabled: true, value: 8 },
+      max_per_user_per_stream: { is_enabled: true, value: 2 },
+    }), context);
+
+    expect(await createChannelPointsRepository(database as unknown as D1Database).getReward(channelId, "reward_local"))
+      .toMatchObject({
+        title: "Limited reward", globalCooldownSeconds: 90, maxPerStream: 8, maxPerUserPerStream: 2,
+      });
+  });
+
   it("disables rewards with the module and restores their saved enabled state", async () => {
     const lifecycle = channelPointsModule.onActivationChange;
     expect(lifecycle).toBeDefined();
@@ -218,5 +244,43 @@ describe("channel points redemption processing", () => {
     );
     expect(database.sqlite.prepare("SELECT enabled,restore_enabled FROM channel_points_rewards").get())
       .toMatchObject({ enabled: 1, restore_enabled: null });
+  });
+
+  it("skips deleted rewards, reports individual sync failures, and retries active rewards on the next toggle", async () => {
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await repository.insertReward(channelId, { ...reward, title: "Second reward" }, "reward_local_two", "reward_twitch_two", now);
+    await database.prepare("UPDATE channel_points_rewards SET twitch_state='deleted_on_twitch' WHERE id=?")
+      .bind("reward_local_two").run();
+    await repository.insertReward(channelId, { ...reward, title: "Third reward" }, "reward_local_three", "reward_twitch_three", now);
+    mocks.setEnabled.mockImplementation((_environment, _channelId, rewardId) => Promise.resolve(
+      rewardId === "reward_twitch" ? { ok: false, reason: "unknown_status" } : { ok: true, data: [] },
+    ));
+    const lifecycle = channelPointsModule.onActivationChange;
+    const activation = {
+      DB: database as unknown as D1Database,
+      environment: { DB: database } as unknown as Env,
+      authorizeMutation: () => ({ sql: "", values: [] }),
+      actor: { userId: "operator_one" },
+      now,
+    };
+
+    const result = await lifecycle?.(activation, channelId, true);
+
+    const firstAttempt = mocks.setEnabled.mock.calls.map((call) => String(call[2]));
+    expect(firstAttempt).toHaveLength(2);
+    expect(firstAttempt).toEqual(expect.arrayContaining(["reward_twitch", "reward_twitch_three"]));
+    expect(result).toEqual({
+      ok: false,
+      error: "channel_points_activation_sync_failed",
+      failedRewards: [{ rewardId: "reward_twitch", reason: "unknown_status" }],
+    });
+    expect(database.sqlite.prepare("SELECT enabled,restore_enabled FROM channel_points_rewards WHERE id=?")
+      .get("reward_local_three")).toMatchObject({ enabled: 1, restore_enabled: null });
+
+    mocks.setEnabled.mockReset().mockResolvedValue({ ok: true, data: [] });
+    await lifecycle?.(activation, channelId, true);
+    const retryAttempt = mocks.setEnabled.mock.calls.map((call) => String(call[2]));
+    expect(retryAttempt).toHaveLength(2);
+    expect(retryAttempt).toEqual(expect.arrayContaining(["reward_twitch", "reward_twitch_three"]));
   });
 });

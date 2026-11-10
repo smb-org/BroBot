@@ -1998,6 +1998,11 @@ export interface ModuleEnableContext {
 
 /** Host inputs for a post-commit module activation side effect. */
 type ModuleActivationContext = ModuleEnableContext & { environment: Env };
+export interface ModuleActivationResult {
+  ok: false;
+  error: string;
+  failedRewards: readonly { rewardId: string; reason: string }[];
+}
 
 /** Configuration editor loaded on demand for one channel-points action. */
 interface ChannelPointsActionEditorProperties {
@@ -2622,7 +2627,7 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     context: ModuleActivationContext,
     channelId: string,
     enabled: boolean,
-  ) => void | Promise<void>;
+  ) => undefined | ModuleActivationResult | Promise<undefined | ModuleActivationResult>;
   // Module migrations and further action kinds join the contract once the
   // first module needs them. Command processing launched with
   // ModuleResult.
