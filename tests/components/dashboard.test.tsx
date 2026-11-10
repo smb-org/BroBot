@@ -5,6 +5,7 @@ import { DashboardApp } from "../../src/dashboard/main";
 import { dashboardRoutePath, parseDashboardRoute } from "../../src/dashboard/router";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
 import { queryKeys } from "../../src/dashboard/data/keys";
+import { dismissToast, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
 import { clickSelectOption, renderWithQuery as renderWithQueryBase, type DashboardQueryTestOptions } from "../query-test-utils";
 import { jsonResponse } from "../unit/fixtures";
 
@@ -259,6 +260,7 @@ describe("Dashboard skeleton", () => {
 
   afterEach(() => {
     cleanup();
+    for (const toast of toastsSnapshot()) dismissToast(toast.id);
     activePanelRevisions = {};
     TestWebSocket.reset();
     vi.unstubAllGlobals();
@@ -2908,6 +2910,53 @@ describe("Dashboard skeleton", () => {
     expect(await screen.findByRole("button", { name: "Befehl anlegen" })).toBeInTheDocument();
     expect(overviewAufrufe).toBe(2);
     expect(fetcher.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/channels/kanal-a/overview")).toHaveLength(2);
+  });
+
+  it("shows failed reward synchronization and retries the same module toggle", async () => {
+    const channel = { ...healthyChannel("kanal-a", "Alpha"), modules: [{ id: "channel_points", enabled: true, settings: "{}" }] };
+    const requests: Array<{ enabled: boolean }> = [];
+    let attempts = 0;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
+      if (url.pathname === "/api/channels/kanal-a/overview") return jsonResponse({ ...overview(channel), activeModules: [] });
+      if (url.pathname === "/api/channels/kanal-a/modules" && init?.method === undefined) {
+        return jsonResponse({ modules: [{ id: "channel_points", enabled: attempts === 0, settings: "{}" }] });
+      }
+      if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
+      if (url.pathname === "/api/channels/kanal-a/modules/channel_points" && init?.method === "PATCH") {
+        if (typeof init.body !== "string") throw new Error("Module mutation body must be JSON.");
+        requests.push(JSON.parse(init.body) as { enabled: boolean });
+        attempts += 1;
+        return attempts === 1
+          ? jsonResponse({
+            module: { id: "channel_points", enabled: false, settings: "{}" },
+            revision: 2,
+            activationResult: {
+              ok: false,
+              error: "channel_points_activation_sync_failed",
+              failedRewards: [
+                { rewardId: "reward_one", reason: "unknown_status" },
+                { rewardId: "reward_two", reason: "unknown_status" },
+              ],
+            },
+          })
+          : jsonResponse({ module: { id: "channel_points", enabled: false, settings: "{}" }, revision: 3 });
+      }
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/modules");
+
+    render(<DashboardApp />);
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Kanalpunkte: Läuft" }));
+    const failure = await screen.findByRole("alert");
+    expect(failure).toHaveTextContent("Modul ist aus, aber 2 Belohnungen konnten auf Twitch nicht deaktiviert werden.");
+    fireEvent.click(within(failure).getByRole("button", { name: "Erneut versuchen" }));
+
+    await waitFor(() => expect(attempts).toBe(2));
+    expect(requests).toEqual([{ enabled: false }, { enabled: false }]);
   });
 
   it("refreshes a warm cached overview after a module-list toggle so the detail page mounts", async () => {

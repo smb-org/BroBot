@@ -21,7 +21,7 @@ import type {
   PanelTwitchUser,
 } from "../panel-contract";
 import type { ChannelControlDuration, ChannelRole, ChatOutputTarget, OverlayElementKind } from "../contracts/values";
-import type { ModuleRegisteredTemplateVariable } from "../modules/contract";
+import type { ModuleActivationResult, ModuleRegisteredTemplateVariable } from "../modules/contract";
 import type { DryRunRequest, DryRunResponse } from "../contracts/dry-run";
 import type { StreamMarkerResult, TestMessageResult } from "../contracts/quick-actions";
 import type { NormalizedWeather } from "../modules/weather/contracts";
@@ -601,7 +601,11 @@ export const setChannelModuleEnabled = (
   moduleId: string,
   enabled: boolean,
   expectedRevision?: number,
-): Promise<{ module: PanelModuleState; revision: number }> => requestMutation(
+): Promise<{ module: PanelModuleState; revision: number; activationResult?: ModuleActivationResult }> => requestMutation<{
+  module: PanelModuleState;
+  revision: number;
+  activationResult?: ModuleActivationResult;
+}>(
   modulePath(channelId, moduleId),
   "PATCH",
   { enabled, ...(expectedRevision === undefined ? {} : { expectedRevision }) },

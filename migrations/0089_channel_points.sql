@@ -17,7 +17,7 @@ CREATE TABLE channel_points_rewards (
   enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
   restore_enabled INTEGER CHECK (restore_enabled IS NULL OR restore_enabled IN (0, 1)),
   last_twitch_event_at TEXT,
-  twitch_state TEXT NOT NULL CHECK (twitch_state IN ('active', 'deleted_on_twitch')),
+  twitch_state TEXT NOT NULL CHECK (twitch_state IN ('creating', 'active', 'deleted_on_twitch')),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (channel_id, id),

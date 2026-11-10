@@ -29,7 +29,7 @@ export type NormalizedTwitchRedemptionStatus = "unfulfilled" | "fulfilled" | "ca
 export interface ChannelPointsReward extends ChannelPointsRewardInput {
   id: string;
   twitchRewardId: string;
-  twitchState: "active" | "deleted_on_twitch";
+  twitchState: "creating" | "active" | "deleted_on_twitch";
   createdAt: string;
   updatedAt: string;
 }

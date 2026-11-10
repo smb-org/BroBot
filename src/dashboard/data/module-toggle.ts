@@ -161,6 +161,36 @@ const refreshQuietly = async (queryClient: QueryClient, channelId: string, scope
   }
 };
 
+const reportActivationFailure = (
+  queryClient: QueryClient,
+  channelId: string,
+  moduleId: string,
+  enabled: boolean,
+  activationResult: { ok: false; failedRewards: readonly { rewardId: string; reason: string }[] } | undefined,
+  scope: string,
+  shouldShowToast: () => boolean,
+): boolean => {
+  const count = activationResult?.failedRewards.length ?? 0;
+  if (activationResult === undefined || count === 0 || !shouldShowToast()) return false;
+  const labels = moduleWorkspaceTexts();
+  notify({
+    tone: "error",
+    message: labels.activationSyncFailed(enabled, count),
+    scope,
+    action: {
+      label: labels.retry,
+      onClick: () => {
+        void toggleModuleWithUndo(queryClient, channelId, moduleId, enabled, shouldShowToast).catch((error: unknown) => {
+          if (!shouldShowToast()) return;
+          const modules = queryClient.getQueryData<PanelModulesResponse>(queryKeys.channel(channelId, "modules"))?.modules ?? [];
+          reportToggleError(error, moduleId, modules, scope);
+        });
+      },
+    },
+  });
+  return true;
+};
+
 const undoModuleToggle = async (
   queryClient: QueryClient,
   channelId: string,
@@ -174,6 +204,9 @@ const undoModuleToggle = async (
     const result = await setChannelModuleEnabled(channelId, moduleId, !enabled, expectedRevision);
     applyModuleResponse(queryClient, channelId, result.module, result.revision);
     await refreshQuietly(queryClient, channelId, scope, shouldShowToast);
+    if (shouldShowToast()) reportActivationFailure(
+      queryClient, channelId, moduleId, !enabled, result.activationResult, scope, shouldShowToast,
+    );
   } catch (error: unknown) {
     if (shouldShowToast()) {
       const modules = queryClient.getQueryData<PanelModulesResponse>(queryKeys.channel(channelId, "modules"))?.modules ?? [];
@@ -195,6 +228,9 @@ export const toggleModuleWithUndo = async (
   applyModuleResponse(queryClient, channelId, result.module, result.revision);
   await refreshQuietly(queryClient, channelId, scope, shouldShowToast);
   if (!shouldShowToast()) return result;
+  if (reportActivationFailure(
+    queryClient, channelId, moduleId, enabled, result.activationResult, scope, shouldShowToast,
+  )) return result;
   const labels = moduleWorkspaceTexts();
   notify({
     tone: "success",

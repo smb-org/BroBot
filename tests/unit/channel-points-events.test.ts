@@ -178,7 +178,10 @@ describe("channel points redemption processing", () => {
     } as unknown as ModuleExecutionContext;
   });
 
-  afterEach(() => { database.close(); });
+  afterEach(() => {
+    database.close();
+    vi.useRealTimers();
+  });
 
   it("registers channel points EventSub types, scopes, default state, and its built-in action", () => {
     expect(MODULES).toContain(channelPointsModule);
@@ -203,6 +206,155 @@ describe("channel points redemption processing", () => {
     expect(mocks.update).toHaveBeenCalledTimes(1);
     await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
       .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+  });
+
+  it("recovers a Twitch reward after management authorization expires during creation", async () => {
+    const activation = activationContext(database);
+    const createdReward = { ...manageableReward, id: "reward_twitch_created", title: "Recovered reward" };
+    mocks.createCustomReward.mockImplementationOnce(() => {
+      expect(database.sqlite.prepare("SELECT twitch_state FROM channel_points_rewards WHERE id=?")
+        .get("reward_local_created")).toEqual({ twitch_state: "creating" });
+      database.sqlite.prepare("DELETE FROM channel_members WHERE channel_id=? AND user_id=?")
+        .run(channelId, "operator_one");
+      return Promise.resolve({ ok: true, data: [createdReward] });
+    });
+
+    await expect(activation.runModuleAlarm(CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, {
+      kind: "reward.create", actor: { userId: "operator_one" }, now, id: "reward_local_created",
+      reward: { ...reward, title: "Recovered reward" },
+    })).resolves.toMatchObject({ ok: false, reason: "precondition_failed" });
+
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await expect(repository.getReward(channelId, "reward_local_created"))
+      .resolves.toMatchObject({ twitchRewardId: "creating:reward_local_created", twitchState: "creating" });
+    mocks.manageable.mockResolvedValueOnce({ ok: true, data: [createdReward] });
+
+    await reconcileChannelPoints(
+      { DB: database as unknown as D1Database } as Env, channelId, now,
+      { force: true, context, authorize: () => Promise.resolve(true) },
+    );
+
+    await expect(repository.getReward(channelId, "reward_local_created"))
+      .resolves.toMatchObject({ twitchRewardId: "reward_twitch_created", twitchState: "active" });
+  });
+
+  it("recovers a Twitch reward when D1 fails after successful creation", async () => {
+    const createdReward = { ...manageableReward, id: "reward_twitch_created", title: "Recovered reward" };
+    mocks.createCustomReward.mockImplementationOnce(() => {
+      expect(database.sqlite.prepare("SELECT twitch_state FROM channel_points_rewards WHERE id=?")
+        .get("reward_local_created")).toEqual({ twitch_state: "creating" });
+      return Promise.resolve({ ok: true, data: [createdReward] });
+    });
+    let failedFinalWrite = false;
+    const failingDatabase = {
+      prepare(sql: string) {
+        const statement = database.prepare(sql);
+        if (!sql.includes("SET twitch_reward_id=?,twitch_state='active'")) return statement;
+        const wrapped = {
+          bind(...values: Parameters<typeof statement.bind>) {
+            statement.bind(...values);
+            return wrapped;
+          },
+          first: <T,>() => statement.first<T>(),
+          all: <T,>(...typeHint: readonly T[]) => statement.all<T>(...typeHint),
+          run: () => {
+            if (!failedFinalWrite) {
+              failedFinalWrite = true;
+              return Promise.reject(new Error("Injected D1 failure after Twitch creation."));
+            }
+            return statement.run();
+          },
+        };
+        return wrapped;
+      },
+      batch: database.batch.bind(database),
+    } as unknown as D1Database;
+
+    await expect(channelPointsLifecycleAlarm.handle({
+      DB: failingDatabase,
+      environment: { DB: failingDatabase } as unknown as Env,
+      authorizeMutation: authorizeModuleMutation,
+      authorizeManagementMutation: authorizeModuleManagementMutation,
+      channelId,
+    } as never, CHANNEL_POINTS_LIFECYCLE_ALARM, Date.now(), undefined, {
+      kind: "reward.create", actor: { userId: "operator_one" }, now, id: "reward_local_created",
+      reward: { ...reward, title: "Recovered reward" },
+    })).rejects.toThrow("Injected D1 failure after Twitch creation.");
+
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await expect(repository.getReward(channelId, "reward_local_created"))
+      .resolves.toMatchObject({ twitchRewardId: "creating:reward_local_created", twitchState: "creating" });
+    mocks.manageable.mockResolvedValueOnce({ ok: true, data: [createdReward] });
+
+    await reconcileChannelPoints(
+      { DB: database as unknown as D1Database } as Env, channelId, now,
+      { force: true, context, authorize: () => Promise.resolve(true) },
+    );
+
+    await expect(repository.getReward(channelId, "reward_local_created"))
+      .resolves.toMatchObject({ twitchRewardId: "reward_twitch_created", twitchState: "active" });
+  });
+
+  it("removes an expired creation intent when Twitch has no matching reward", async () => {
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await repository.insertCreatingReward(channelId, { ...reward, title: "Expired reward" }, "reward_local_expired",
+      "2026-11-10T11:49:59.999Z", { sql: "", values: [] });
+    mocks.manageable.mockResolvedValueOnce({ ok: true, data: [manageableReward] });
+
+    await reconcileChannelPoints(
+      { DB: database as unknown as D1Database } as Env, channelId, now,
+      { force: true, context, authorize: () => Promise.resolve(true) },
+    );
+
+    await expect(repository.getReward(channelId, "reward_local_expired")).resolves.toBeNull();
+  });
+
+  it("latches a delayed redemption as orphaned after its reward was removed", async () => {
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward.remove", rewardRemovalPayload("reward_twitch")), context);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+    const orphaned = await createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one");
+    expect(orphaned).toMatchObject({ status: "orphaned" });
+    expect(orphaned?.outcomeReason?.en).toContain("deleted on Twitch");
+  });
+
+  it("keeps the later queued update when an earlier update webhook arrives late", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-10T12:01:00.000Z"));
+    const activation = activationContext(database, true);
+    let finishFirstUpdate: (result: { ok: true; data: typeof manageableReward[] }) => void = () => {};
+    let firstUpdateStarted!: () => void;
+    const firstUpdateStartedPromise = new Promise<void>((resolve) => { firstUpdateStarted = resolve; });
+    mocks.updateCustomReward.mockImplementationOnce(() => new Promise((resolve) => {
+      finishFirstUpdate = resolve;
+      firstUpdateStarted();
+    }));
+    const firstUpdate = activation.runModuleAlarm(CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, {
+      kind: "reward.update", actor: { userId: "operator_one" }, now: "2026-11-10T11:00:00.000Z",
+      id: "reward_local", reward: { ...reward, title: "First update" },
+    });
+    await firstUpdateStartedPromise;
+    vi.setSystemTime(new Date("2026-11-10T12:02:00.000Z"));
+    const secondUpdate = activation.runModuleAlarm(CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, {
+      kind: "reward.update", actor: { userId: "operator_one" }, now: "2026-11-10T11:00:00.000Z",
+      id: "reward_local", reward: { ...reward, title: "Second update" },
+    });
+    finishFirstUpdate({ ok: true, data: [manageableReward] });
+    await Promise.all([firstUpdate, secondUpdate]);
+
+    await processChannelPointsEvent({
+      ...event("channel.channel_points_custom_reward.update", rewardEventPayload({ title: "Delayed first update" })),
+      eventSubTimestamp: "2026-11-10T12:01:30.000Z",
+    }, context);
+
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await expect(repository.getReward(channelId, "reward_local"))
+      .resolves.toMatchObject({ title: "Second update" });
+    expect(database.sqlite.prepare("SELECT last_twitch_event_at FROM channel_points_rewards WHERE id=?")
+      .get("reward_local")).toEqual({ last_twitch_event_at: "2026-11-10T12:02:00.000Z" });
+    vi.useRealTimers();
   });
 
   it("keeps a fulfilled redemption when stale EventSub and action results arrive", async () => {

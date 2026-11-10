@@ -21,6 +21,7 @@ const loadHelix = () => import("../../worker/twitch/channel-points");
 const loadActionContext = () => import("../../worker/module-action-context");
 const RECONCILE_INTERVAL_MS = 15_000;
 const REDEMPTION_CLAIM_LEASE_MS = 2 * 60 * 1_000;
+const CREATING_REWARD_MAX_AGE_MS = 10 * 60 * 1_000;
 export const CHANNEL_POINTS_LIFECYCLE_HANDLER = "serialized-lifecycle";
 export const CHANNEL_POINTS_LIFECYCLE_ALARM = "channel-points";
 const redemptionStatuses: readonly ChannelPointsRedemptionStatus[] = [
@@ -185,6 +186,17 @@ const processNewRedemption = async (
   const repository = createChannelPointsRepository(environment.DB);
   const reward = await repository.getRewardByTwitchId(channelId, redemption.rewardId);
   if (reward === null) return;
+  if (reward.twitchState === "deleted_on_twitch") {
+    await repository.latchRedemption(channelId, {
+      ...redemption,
+      rewardId: reward.id,
+      twitchRewardId: redemption.rewardId,
+      initialStatus: "orphaned",
+      initialOutcomeReason: deletedRewardReason,
+    }, new Date().toISOString());
+    return;
+  }
+  if (reward.twitchState !== "active") return;
   await persistFromAction(environment, channelId, reward, redemption, context, authorize);
 };
 
@@ -392,7 +404,29 @@ export const reconcileChannelPoints = async (
     } else {
       manageableIds = new Set(result.data.map(({ id }) => id));
       const manageableById = new Map(result.data.map((reward) => [reward.id, reward]));
-      for (const reward of rewards) {
+      const claimedCreatingRemoteIds = new Set<string>();
+      const reconcileTimestamp = Date.parse(now);
+      for (const reward of rewards.filter(({ twitchState }) => twitchState === "creating")) {
+        const remote = result.data.find((candidate) => candidate.title === reward.title && !claimedCreatingRemoteIds.has(candidate.id));
+        try {
+          if (remote !== undefined) {
+            claimedCreatingRemoteIds.add(remote.id);
+            await repository.adoptCreatingReward(channelId, reward.id, {
+              twitchRewardId: remote.id, title: remote.title, prompt: remote.prompt, cost: remote.cost,
+              backgroundColor: remote.background_color, isUserInputRequired: remote.is_user_input_required,
+              globalCooldownSeconds: remote.global_cooldown_seconds, maxPerStream: remote.max_per_stream,
+              maxPerUserPerStream: remote.max_per_user_per_stream, isEnabled: remote.is_enabled,
+            }, now);
+          } else if (Number.isFinite(reconcileTimestamp) && Number.isFinite(Date.parse(reward.updatedAt)) &&
+              reconcileTimestamp - Date.parse(reward.updatedAt) >= CREATING_REWARD_MAX_AGE_MS) {
+            await repository.deleteCreatingReward(channelId, reward.id);
+          }
+        } catch {
+          fail(reward.twitchRewardId, "unknown_status");
+        }
+      }
+      rewards = await repository.listRewards(channelId);
+      for (const reward of rewards.filter(({ twitchState }) => twitchState !== "creating")) {
         const remote = manageableById.get(reward.twitchRewardId);
         try {
           if (remote === undefined) {
@@ -591,15 +625,28 @@ const performRewardMutation = async (
 
   if (invocation.kind === "reward.create") {
     const count = await environment.DB.prepare(
-      "SELECT COUNT(*) AS count FROM channel_points_rewards WHERE channel_id = ? AND twitch_state = 'active'",
+      "SELECT COUNT(*) AS count FROM channel_points_rewards WHERE channel_id = ? AND twitch_state IN ('creating','active')",
     ).bind(channelId).first<{ count: number }>();
     if ((count?.count ?? 0) >= CHANNEL_POINTS_MAX_REWARDS) return { ok: false, reason: "reward_limit" };
+    const creationStartedAt = new Date().toISOString();
+    const inserted = await repository.insertCreatingReward(
+      channelId, invocation.reward, invocation.id, creationStartedAt,
+      managementWriteGuard(channelId, invocation.actor, authorizeManagementMutation),
+    );
+    if (!inserted) return { ok: false, reason: "precondition_failed" };
     const created = await helix.createCustomReward(environment, channelId, invocation.reward, authorize);
-    if (!created.ok) return { ok: false, reason: created.reason };
+    if (!created.ok) {
+      await repository.deleteCreatingReward(channelId, invocation.id);
+      return { ok: false, reason: created.reason };
+    }
     const remote = created.data[0];
-    if (remote === undefined) return { ok: false, reason: "invalid_response" };
-    const saved = await repository.insertReward(
-      channelId, invocation.reward, invocation.id, remote.id, invocation.now,
+    if (remote === undefined) {
+      await repository.deleteCreatingReward(channelId, invocation.id);
+      return { ok: false, reason: "invalid_response" };
+    }
+    const watermark = new Date().toISOString();
+    const saved = await repository.finalizeCreatingReward(
+      channelId, invocation.id, remote.id, watermark,
       managementWriteGuard(channelId, invocation.actor, authorizeManagementMutation),
     );
     if (!saved) return { ok: false, reason: "precondition_failed" };
@@ -609,19 +656,21 @@ const performRewardMutation = async (
 
   const current = await repository.getReward(channelId, invocation.id);
   if (current === null) return { ok: false, error: "channel_points_reward_not_found" };
+  if (current.twitchState === "creating") return { ok: false, reason: "precondition_failed" };
   if (invocation.kind === "reward.update") {
     if (current.twitchState === "deleted_on_twitch") return { ok: false, error: "channel_points_reward_deleted" };
+    const watermark = new Date().toISOString();
     const updated = await helix.updateCustomReward(
       environment, channelId, current.twitchRewardId, invocation.reward, authorize,
     );
     if (!updated.ok) {
       if (updated.reason === "not_found") {
-        await confirmTwitchRewardDeleted(environment, channelId, current.twitchRewardId, invocation.now);
+        await confirmTwitchRewardDeleted(environment, channelId, current.twitchRewardId, watermark);
       }
       return { ok: false, reason: updated.reason };
     }
     const saved = await repository.updateReward(
-      channelId, current.id, invocation.reward, invocation.now,
+      channelId, current.id, invocation.reward, watermark,
       managementWriteGuard(channelId, invocation.actor, authorizeManagementMutation),
     );
     if (!saved) return { ok: false, reason: "precondition_failed" };
@@ -667,14 +716,14 @@ const activationSync = async (
   const now = new Date().toISOString();
   const guard = managementWriteGuard(channelId, actor, authorizeManagementMutation);
   const rows = await db.prepare(
-    "SELECT id,twitch_reward_id,enabled,restore_enabled FROM channel_points_rewards WHERE channel_id=? AND twitch_state!='deleted_on_twitch'",
+    "SELECT id,twitch_reward_id,enabled,restore_enabled FROM channel_points_rewards WHERE channel_id=? AND twitch_state='active'",
   ).bind(channelId).all<{ id: string; twitch_reward_id: string; enabled: number; restore_enabled: number | null }>();
   const failures: Array<{ rewardId: string; reason: string }> = [];
   if (!enabled) {
     await db.prepare(
       `UPDATE channel_points_rewards
           SET restore_enabled=COALESCE(restore_enabled,enabled),enabled=0,updated_at=?
-        WHERE channel_id=? AND twitch_state!='deleted_on_twitch'
+        WHERE channel_id=? AND twitch_state='active'
           AND EXISTS (SELECT channel_id FROM channels WHERE channel_id=? ${guard.sql})`,
     ).bind(now, channelId, channelId, ...guard.values).run();
   }

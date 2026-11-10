@@ -273,8 +273,10 @@ export interface ModuleWorkspaceTexts {
   immediateDescription: string;
   activeCount: (count: number) => string;
   undo: string;
+  retry: string;
   undoConflict: string;
   changed: (name: string, enabled: boolean) => string;
+  activationSyncFailed: (enabled: boolean, count: number) => string;
 }
 
 const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
@@ -289,8 +291,14 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     immediateDescription: "Änderungen gelten sofort. Ausgeschaltete Module behalten ihre Einstellungen.",
     activeCount: (count) => `${String(count)} aktiv`,
     undo: "Rückgängig",
+    retry: "Erneut versuchen",
     undoConflict: "Inzwischen geändert",
     changed: (name, enabled) => `${name} wurde ${enabled ? "eingeschaltet" : "ausgeschaltet"}.`,
+    activationSyncFailed: (enabled, count) => {
+      const singular = count === 1;
+      const noun = singular ? "Belohnung" : "Belohnungen";
+      return `Modul ist ${enabled ? "an" : "aus"}, aber ${String(count)} ${noun} ${singular ? "konnte" : "konnten"} auf Twitch nicht ${enabled ? "aktiviert" : "deaktiviert"} werden. Erneut versuchen`;
+    },
   },
   en: {
     content: "Module content",
@@ -303,8 +311,10 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     immediateDescription: "Changes take effect immediately. Switched off modules keep their settings.",
     activeCount: (count) => `${String(count)} active`,
     undo: "Undo",
+    retry: "Try again",
     undoConflict: "Changed in the meantime",
     changed: (name, enabled) => `${name} was turned ${enabled ? "on" : "off"}.`,
+    activationSyncFailed: (enabled, count) => `The module is ${enabled ? "on" : "off"}, but ${String(count)} reward${count === 1 ? "" : "s"} could not be ${enabled ? "enabled" : "disabled"} on Twitch. Try again`,
   },
 };
 
