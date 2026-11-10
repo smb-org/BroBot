@@ -297,7 +297,7 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     activationSyncFailed: (enabled, count) => {
       const singular = count === 1;
       const noun = singular ? "Belohnung" : "Belohnungen";
-      return `Modul ist ${enabled ? "an" : "aus"}, aber ${String(count)} ${noun} ${singular ? "konnte" : "konnten"} auf Twitch nicht ${enabled ? "aktiviert" : "deaktiviert"} werden. Erneut versuchen`;
+      return `Modul ist ${enabled ? "an" : "aus"}, aber ${String(count)} ${noun} ${singular ? "konnte" : "konnten"} auf Twitch nicht ${enabled ? "aktiviert" : "deaktiviert"} werden.`;
     },
   },
   en: {
@@ -314,7 +314,7 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     retry: "Try again",
     undoConflict: "Changed in the meantime",
     changed: (name, enabled) => `${name} was turned ${enabled ? "on" : "off"}.`,
-    activationSyncFailed: (enabled, count) => `The module is ${enabled ? "on" : "off"}, but ${String(count)} reward${count === 1 ? "" : "s"} could not be ${enabled ? "enabled" : "disabled"} on Twitch. Try again`,
+    activationSyncFailed: (enabled, count) => `The module is ${enabled ? "on" : "off"}, but ${String(count)} reward${count === 1 ? "" : "s"} could not be ${enabled ? "enabled" : "disabled"} on Twitch.`,
   },
 };
 
