@@ -1692,6 +1692,7 @@ describe("panel resource revisions", () => {
         "panel_resource_revisions",
         "pending_realtime_user_revocations",
         "polls_reconcile_state",
+        "channel_points_reconcile_state",
         "text_command_user_cooldowns",
         "timer_schedule_reconciliation",
         "twitch_app_access_token",

@@ -16,6 +16,9 @@ import { createReadInterleavingDatabase, TestD1Database, type TestPreparedStatem
 const testModuleSchema = z.object({ betrag: z.number() });
 let prepareEnableCommand = false;
 let enableHookCallCount = 0;
+let activationResultForTest: {
+  ok: false; error: string; failedRewards: readonly { rewardId: string; reason: string }[];
+} | undefined;
 const testModuleRoutes = new Hono<ModuleRouteEnvironment>();
 testModuleRoutes.get("/ballots/:ballotId", async (context) => {
   const channelId = context.req.param("channelId");
@@ -71,6 +74,7 @@ const testModule: BotModule<typeof testModuleSchema> = {
       }, now),
     ];
   },
+  onActivationChange: () => activationResultForTest,
 };
 
 const mandatoryTestModule: BotModule<typeof testModuleSchema> = {
@@ -267,6 +271,7 @@ describe("Module management in the panel", () => {
     environment = environmentFor(database);
     prepareEnableCommand = false;
     enableHookCallCount = 0;
+    activationResultForTest = undefined;
     registeredModules.splice(3);
   });
 
@@ -2023,6 +2028,32 @@ describe("Module management in the panel", () => {
       "SELECT enabled, revision FROM channel_modules WHERE channel_id = 'kanal-a' AND module_id = 'test-modul'",
     ).first()).resolves.toEqual({ enabled: 0, revision: 2 });
     await expect(auditCount(database)).resolves.toBe(2);
+  });
+
+  it("returns a partial activation result when post-commit module work reports failures", async () => {
+    activationResultForTest = {
+      ok: false,
+      error: "channel_points_activation_sync_failed",
+      failedRewards: [{ rewardId: "reward_twitch", reason: "unknown_status" }],
+    };
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "broadcaster");
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/test-modul", "PATCH", { enabled: true }),
+      environment,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      module: { enabled: true },
+      activationResult: {
+        ok: false,
+        error: "channel_points_activation_sync_failed",
+        failedRewards: [{ rewardId: "reward_twitch", reason: "unknown_status" }],
+      },
+    });
   });
 
   it("preserves settings and skips the initialization hook when re-enabling", async () => {

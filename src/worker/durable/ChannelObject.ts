@@ -53,7 +53,7 @@ import {
 } from "../../modules/timers/durable";
 import { sameTimerAlarmIdentity } from "../../modules/timers/identity";
 import { acceptsTimerAlarmClear, acceptsTimerAlarmSet } from "../../modules/timers/identity";
-import { authorizeModuleMutation } from "../module-authorization";
+import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../module-authorization";
 import type { ActorContext } from "../db/guards";
 import type { TimerIntervalState } from "../../modules/timers/contracts";
 import type { SkipTimerOccurrenceResult } from "../../modules/timers/contracts";
@@ -1194,6 +1194,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async serializeModuleLifecycleMutation<Result>(operation: () => Promise<Result>): Promise<Result> {
+    // ponytail: Channel-points lifecycle work may call Helix while holding this lane; helixRequest caps each request at 5 seconds.
     const previous = this.moduleLifecycleMutationQueue;
     let release!: () => void;
     this.moduleLifecycleMutationQueue = new Promise<void>((resolve) => { release = resolve; });
@@ -3633,6 +3634,12 @@ export class ChannelObject extends DurableObject<Env> {
     const handler = `module:${moduleId}:${registration.key}`;
     const context: ModuleAlarmContext = {
       DB: this.env.DB,
+      // Only the channel-points lifecycle needs Worker integrations; the Env is not structured-cloneable over test RPC.
+      ...(moduleId === "channel_points" ? {
+        environment: this.env,
+        authorizeMutation: authorizeModuleMutation,
+        authorizeManagementMutation: authorizeModuleManagementMutation,
+      } : {}),
       channelId,
       writeModuleAudit: (entry, changedAt, options) => writeModuleAudit(
         this.env.DB, options?.actorUserId ?? "system", changedAt,
@@ -4768,6 +4775,56 @@ export class ChannelObject extends DurableObject<Env> {
   public async recordBotChatMessage(senderId: string, text: string): Promise<void> {
     await this.ensurePointRoundRecovery();
     await recordRecentBotChatMessage(this.ctx.storage, senderId, text, Date.now());
+  }
+
+  /** Sends a module action message once per operation through the shared output gate. */
+  public async sendModuleChatMessage(
+    moduleId: string,
+    operationId: string,
+    text: string,
+  ): Promise<{ sent: boolean; delivery: "sent" | "rejected" | "ambiguous" | "not_attempted"; reason: string | null }> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return { sent: false, delivery: "not_attempted", reason: "channel_unavailable" };
+    const key = "channel-points-action:" + moduleId + ":" + operationId;
+    const existingClaim = await readModuleAlarmSendClaim(this.ctx.storage, key);
+    if (existingClaim?.status === "sent") return { sent: true, delivery: "sent", reason: null };
+    if (existingClaim?.status === "sending") return { sent: false, delivery: "ambiguous", reason: "already_attempted" };
+    const suppression = { reason: null as string | null };
+    const valid = async (): Promise<boolean> => {
+      const [state, registration] = await Promise.all([
+        readDispatchChannelState(this.env.DB, channelId, new Date().toISOString()),
+        Promise.resolve(MODULES.find((module) => module.id === moduleId)),
+      ]);
+      const activation = state.activations.find((entry) => entry.moduleId === moduleId);
+      suppression.reason = chatOutputSuppressionReason({
+        moduleEnabled: registration?.mandatory === true || activation?.enabled === true,
+        mandatory: registration?.mandatory === true,
+        paused: state.controls.pause.active,
+        muted: state.controls.mute.active,
+      });
+      return suppression.reason === null;
+    };
+    const result = await sendChatMessage(
+      this.env, channelId, text, undefined, fetch, valid,
+      async () => await claimModuleAlarmSend(this.ctx.storage, key, Date.now(), undefined, { automated: true }),
+      [],
+      async (delivery) => {
+        if (delivery !== "not_attempted") await finishModuleAlarmSend(this.ctx.storage, key, delivery, Date.now());
+      },
+      await readChannelDefaultChatTarget(this.env.DB, channelId),
+      undefined,
+      (senderId, messageText) => this.recordBotChatMessage(senderId, messageText),
+    );
+    if (result.reason === "already_attempted") {
+      const claim = await readModuleAlarmSendClaim(this.ctx.storage, key);
+      if (claim?.status === "sent") return { sent: true, delivery: "sent", reason: null };
+      return { sent: false, delivery: "ambiguous", reason: result.reason };
+    }
+    return {
+      sent: result.sent,
+      delivery: result.delivery,
+      reason: suppression.reason ?? result.reason,
+    };
   }
 
   public async getChatActivityCount(): Promise<number> {

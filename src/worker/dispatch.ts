@@ -1,6 +1,6 @@
 import type { EventCode } from "../contracts/values";
 import { normalizeChatMessagePayload } from "../contracts/chat-message-text";
-import type { BotModule, ChatOutputTarget, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatDelivery, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState, ModuleTextBlockConditionDefinition, StoredPointWelcome } from "../modules/contract";
+import type { BotModule, ChatOutputTarget, ModuleAction, ModuleActor, ModuleChannelInfo, ModuleChatDelivery, ModuleChatStatus, ModuleDiagnostic, ModuleEvent, ModuleExecutionContext, ModuleFollowedAt, ModuleLanguage, ModuleResult, ModuleStreamState, ModuleTextBlockConditionDefinition, StoredPointWelcome } from "../modules/contract";
 import type { RealtimeMessage } from "../realtime-contract";
 import { MODULES, validateModuleTemplateVariable, variablesForModuleTemplateContext } from "../modules/registry";
 import {
@@ -1421,10 +1421,10 @@ export const dispatchEventSubNotification = async (
         channelLanguage,
         readChannelVariables: channelVariables,
       });
-        result = module.handleEvent === undefined
-          ? null
-          : await module.handleEvent(moduleEvent, {
+        const moduleExecutionContext: ModuleExecutionContext = {
             DB: environment.DB,
+            environment: environment as unknown as Env,
+            channelId: event.channelId,
             authorizeMutation: authorizeModuleMutation,
             ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),
             points,
@@ -1513,7 +1513,62 @@ export const dispatchEventSubNotification = async (
                 ? object.runModuleAlarm(module.id, handlerKey, alarmKey)
                 : object.runModuleAlarm(module.id, handlerKey, alarmKey, invocation);
             },
-          });
+          };
+        const moduleExecutionContextFor = (moduleId: string): ModuleExecutionContext => ({
+          ...moduleExecutionContext,
+          points: modulePoints(environment.CHANNEL, event.channelId, moduleId),
+          ballots: moduleBallots(environment.CHANNEL, event.channelId, moduleId),
+          tempVips: moduleTempVips(environment.CHANNEL, event.channelId),
+          activeChatters: {
+            count: async (windowMs) => {
+              if (MODULES.find((candidate) => candidate.id === moduleId)?.needsActiveChatters !== true ||
+                  environment.CHANNEL === undefined) return 0;
+              return await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId)).getActiveChatterCount(windowMs);
+            },
+            seen: async (userId) => {
+              if (MODULES.find((candidate) => candidate.id === moduleId)?.needsActiveChatters !== true ||
+                  environment.CHANNEL === undefined) return null;
+              return await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId)).getActiveChatter(userId);
+            },
+          },
+          sendChat: async (text, operationId) => {
+            if (environment.CHANNEL === undefined) {
+              return { sent: false, delivery: "not_attempted", reason: "channel_object_unavailable" };
+            }
+            return await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId))
+              .sendModuleChatMessage(moduleId, operationId, text);
+          },
+          scheduleAlarm: async (handlerKey, alarmKey, deadline, ownerRevision, streamGeneration, identity, planSequence) => {
+            if (environment.CHANNEL === undefined) return;
+            await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId))
+              .scheduleModuleAlarm(moduleId, handlerKey, alarmKey, deadline, ownerRevision, streamGeneration, identity, planSequence);
+          },
+          clearAlarm: async (alarmKey, ownerRevision, streamGeneration, identity, planSequence) => {
+            if (environment.CHANNEL === undefined) return;
+            await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId))
+              .clearModuleAlarm(moduleId, alarmKey, ownerRevision, streamGeneration, identity, planSequence);
+          },
+          getAlarmDeadline: (alarmKey) => environment.CHANNEL === undefined ? Promise.resolve(null)
+            : environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId)).getModuleAlarmDeadline(moduleId, alarmKey),
+          getAlarmPlan: (alarmKey) => environment.CHANNEL === undefined ? Promise.resolve(null)
+            : environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId)).getModuleAlarmPlan(moduleId, alarmKey),
+          runModuleAlarm: (handlerKey, alarmKey, invocation) => {
+            if (environment.CHANNEL === undefined) return Promise.resolve(undefined);
+            const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
+            return invocation === undefined
+              ? object.runModuleAlarm(moduleId, handlerKey, alarmKey)
+              : object.runModuleAlarm(moduleId, handlerKey, alarmKey, invocation);
+          },
+        });
+        moduleExecutionContext.sendChat = async (text, operationId) => {
+          if (environment.CHANNEL === undefined) {
+            return { sent: false, delivery: "not_attempted", reason: "channel_object_unavailable" };
+          }
+          return await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId))
+            .sendModuleChatMessage(module.id, operationId, text);
+        };
+        moduleExecutionContext.forModule = moduleExecutionContextFor;
+        result = module.handleEvent === undefined ? null : await module.handleEvent(moduleEvent, moduleExecutionContext);
     } catch (error: unknown) {
       const moderationAction = textValue(event.payload.action);
       if (module.id === "temp_vips" && event.subscriptionType === "channel.moderate" &&

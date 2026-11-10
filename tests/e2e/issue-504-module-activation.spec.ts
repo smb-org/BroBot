@@ -182,7 +182,7 @@ test("locks dependency switches in the reserved reasons and captures both requir
 
   api.setModules(true, true, true);
   await page.goto(`/channels/${channelId}/modules?lang=de`);
-  const pointsSwitch = page.getByRole("switch", { name: "Punkte: Läuft" });
+  const pointsSwitch = page.getByRole("switch", { name: "Punkte: Läuft", exact: true });
   await expect(pointsSwitch).toBeDisabled();
   await expect(moduleWorkspaceRow(page, "points").getByText("Erst ausschalten: Slot, Blitzrunde", { exact: true })).toBeVisible();
   expect(api.toggleRequests).toEqual([]);
@@ -219,8 +219,8 @@ test("keeps module rows and following row tops stable while Points and Slot togg
     expect(api.toggleRequests).toEqual(requestsBeforeBlockedAttempt);
     expect(await moduleRowGeometry(page)).toEqual(initialGeometry);
 
-    await page.getByRole("switch", { name: "Punkte: Aus" }).click();
-    await expect(page.getByRole("switch", { name: "Punkte: Läuft" })).toBeChecked();
+    await page.getByRole("switch", { name: "Punkte: Aus", exact: true }).click();
+    await expect(page.getByRole("switch", { name: "Punkte: Läuft", exact: true })).toBeChecked();
     await expect(slotSwitch).toBeEnabled();
     expect(await moduleRowGeometry(page)).toEqual(initialGeometry);
 
@@ -233,8 +233,8 @@ test("keeps module rows and following row tops stable while Points and Slot togg
     await expect(page.getByRole("switch", { name: "Slot: Aus" })).not.toBeChecked();
     expect(await moduleRowGeometry(page)).toEqual(initialGeometry);
 
-    await page.getByRole("switch", { name: "Punkte: Läuft" }).click();
-    await expect(page.getByRole("switch", { name: "Punkte: Aus" })).not.toBeChecked();
+    await page.getByRole("switch", { name: "Punkte: Läuft", exact: true }).click();
+    await expect(page.getByRole("switch", { name: "Punkte: Aus", exact: true })).not.toBeChecked();
     expect(await moduleRowGeometry(page)).toEqual(initialGeometry);
   }
 
@@ -283,8 +283,8 @@ test("keeps the Slot header stable while Points toggles at narrow and desktop wi
     const lockedGeometry = await slotHeaderGeometry(page);
 
     await page.goto(`/channels/${channelId}/modules?lang=de`);
-    await page.getByRole("switch", { name: "Punkte: Aus" }).click();
-    await expect(page.getByRole("switch", { name: "Punkte: Läuft" })).toBeChecked();
+    await page.getByRole("switch", { name: "Punkte: Aus", exact: true }).click();
+    await expect(page.getByRole("switch", { name: "Punkte: Läuft", exact: true })).toBeChecked();
     await page.goto(`/channels/${channelId}/modules/emote_slots?lang=de`);
     await expect(page.getByText("Benötigt: Punkte", { exact: true })).toHaveCount(0);
     await expect(page.locator(".slot-jackpot-meta")).toBeVisible();
@@ -465,7 +465,7 @@ test("shows active dependents when another manager enables Slot first (protects=
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/channels/${channelId}/modules?lang=de`);
 
-  await page.getByRole("switch", { name: "Punkte: Läuft" }).click();
+  await page.getByRole("switch", { name: "Punkte: Läuft", exact: true }).click();
   await expect(page.getByText("Erst ausschalten: Slot", { exact: true })).toBeVisible();
   await expect(page.getByText("Die Änderung ist fehlgeschlagen.")).toHaveCount(0);
   expect(api.toggleRequests).toEqual(["points"]);

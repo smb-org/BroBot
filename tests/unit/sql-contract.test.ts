@@ -145,6 +145,8 @@ const sqlGetFixtures = new Map<string, string>([
   ["leaseGuard", ""],
   ["candidateRowsQuery", "SELECT channel_id, module_id FROM event_log WHERE created_at < '2026-01-01T00:00:00.000Z'"],
   ["whereClause", "channel_id = ? AND module_id = ?"],
+  ["authorization", ""],
+  ["ordering", ""],
   ["sessionGuard.sql", belaboxStreamSessionGuard("channel-id", {
     state: "online",
     changedAt: now,
@@ -172,6 +174,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["lastBroadcasterRoleChangeGuard", lastBroadcasterRoleChangeGuard],
   ["lastBroadcasterGuard", lastBroadcasterGuard],
   ["actorGuard(MANAGING_ROLES)", actorGuard(MANAGING_ROLES)],
+  ["currentGuard.sql", actorGuard(MANAGING_ROLES)],
   ["actorGuard(ANY_MEMBER_ROLES)", actorGuard(ANY_MEMBER_ROLES)],
   ["addedIdGuard", overlayElementIdCollisionGuard(1)],
   ["referencedVariablesGuard", referencedVariablesGuard],
@@ -368,10 +371,10 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(77);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(67);
-      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(156);
-      expect(objects).toHaveLength(300);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(80);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(72);
+      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(162);
+      expect(objects).toHaveLength(314);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

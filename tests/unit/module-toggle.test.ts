@@ -124,4 +124,5 @@ describe("module toggle response cache", () => {
     unsubscribe();
     queryClient.clear();
   });
+
 });

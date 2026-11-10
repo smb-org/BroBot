@@ -31,6 +31,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     quiz: "Quiz",
     polls: "Umfragen & Predictions",
     overlay_alerts: "Overlay-Einblendungen",
+    channel_points: "Kanalpunkte",
     temp_vips: "Temporäre VIPs",
   },
   en: {
@@ -51,6 +52,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     quiz: "Quiz",
     polls: "Polls & Predictions",
     overlay_alerts: "Overlay alerts",
+    channel_points: "Channel points",
     temp_vips: "Temporary VIPs",
   },
 };
@@ -90,6 +92,8 @@ interface EventSubscriptionNames {
   vipRemovals: string;
   polls: string;
   predictions: string;
+  channelPointsRewards: string;
+  channelPointsRedemptions: string;
 }
 
 const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
@@ -112,6 +116,8 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     vipRemovals: "VIP-Entzüge",
     polls: "Umfragen",
     predictions: "Predictions",
+    channelPointsRewards: "Kanalpunkt-Belohnungen",
+    channelPointsRedemptions: "Kanalpunkt-Einlösungen",
   },
   en: {
     chatMessages: "Chat messages",
@@ -132,6 +138,8 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     vipRemovals: "VIP removals",
     polls: "Polls",
     predictions: "Predictions",
+    channelPointsRewards: "Channel point rewards",
+    channelPointsRedemptions: "Channel point redemptions",
   },
 };
 
@@ -159,6 +167,8 @@ export const eventSubName = (
   if (subscriptionType === "channel.vip.remove") return texts.vipRemovals;
   if (subscriptionType.startsWith("channel.poll.")) return texts.polls;
   if (subscriptionType.startsWith("channel.prediction.")) return texts.predictions;
+  if (subscriptionType.startsWith("channel.channel_points_custom_reward_redemption.")) return texts.channelPointsRedemptions;
+  if (subscriptionType.startsWith("channel.channel_points_custom_reward.")) return texts.channelPointsRewards;
   if (subscriptionType === "stream.online") return texts.streamStarted;
   if (subscriptionType === "stream.offline") return texts.streamEnded;
   return subscriptionType;
@@ -184,6 +194,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     quiz: "Verwaltet eigene Quiz-Fragensets für den Kanal.",
     polls: "Verwaltet vorbereitete Umfragen und Predictions und speichert Twitch-Läufe mit ihren Ergebnissen im Verlauf.",
     overlay_alerts: "Verwaltet die Medienbibliothek für Overlay-Einblendungen.",
+    channel_points: "Verwaltet eigene Kanalpunkt-Belohnungen und verarbeitet Einlösungen automatisch oder für eine spätere Freigabe.",
     temp_vips: "Verwaltet VIP auf Zeit und erinnert oder entzieht es nach Ablauf.",
   },
   en: {
@@ -203,6 +214,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     quiz: "Manage channel-owned quiz question sets.",
     polls: "Manage prepared polls and predictions and keep Twitch runs with their results in channel history.",
     overlay_alerts: "Manage the media library for overlay alerts.",
+    channel_points: "Manage custom channel point rewards and process redemptions automatically or leave them queued for review.",
     temp_vips: "Manages time-limited VIPs and reminds or removes them when they expire.",
   },
 };
@@ -225,6 +237,12 @@ export const moduleScopePurpose = (
   }
   if (moduleId === "votekick" && scope === "moderation:read") {
     return language === "de" ? "Moderatoren vor Votekicks schützen" : "Protect moderators from votekicks";
+  }
+  if (moduleId === "channel_points" && scope === "channel:read:redemptions") {
+    return language === "de" ? "Einlösungen und Belohnungen lesen" : "Read redemptions and rewards";
+  }
+  if (moduleId === "channel_points" && scope === "channel:manage:redemptions") {
+    return language === "de" ? "Belohnungen und Einlösungen verwalten" : "Manage rewards and redemptions";
   }
   return language === "de" ? "wird vom Modul benötigt" : "required by this module";
 };
@@ -255,8 +273,10 @@ export interface ModuleWorkspaceTexts {
   immediateDescription: string;
   activeCount: (count: number) => string;
   undo: string;
+  retry: string;
   undoConflict: string;
   changed: (name: string, enabled: boolean) => string;
+  activationSyncFailed: (enabled: boolean, count: number) => string;
 }
 
 const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
@@ -271,8 +291,14 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     immediateDescription: "Änderungen gelten sofort. Ausgeschaltete Module behalten ihre Einstellungen.",
     activeCount: (count) => `${String(count)} aktiv`,
     undo: "Rückgängig",
+    retry: "Erneut versuchen",
     undoConflict: "Inzwischen geändert",
     changed: (name, enabled) => `${name} wurde ${enabled ? "eingeschaltet" : "ausgeschaltet"}.`,
+    activationSyncFailed: (enabled, count) => {
+      const singular = count === 1;
+      const noun = singular ? "Belohnung" : "Belohnungen";
+      return `Modul ist ${enabled ? "an" : "aus"}, aber ${String(count)} ${noun} ${singular ? "konnte" : "konnten"} auf Twitch nicht ${enabled ? "aktiviert" : "deaktiviert"} werden.`;
+    },
   },
   en: {
     content: "Module content",
@@ -285,8 +311,10 @@ const workspaceCatalog: LocaleCatalog<ModuleWorkspaceTexts> = {
     immediateDescription: "Changes take effect immediately. Switched off modules keep their settings.",
     activeCount: (count) => `${String(count)} active`,
     undo: "Undo",
+    retry: "Try again",
     undoConflict: "Changed in the meantime",
     changed: (name, enabled) => `${name} was turned ${enabled ? "on" : "off"}.`,
+    activationSyncFailed: (enabled, count) => `The module is ${enabled ? "on" : "off"}, but ${String(count)} reward${count === 1 ? "" : "s"} could not be ${enabled ? "enabled" : "disabled"} on Twitch.`,
   },
 };
 

@@ -103,11 +103,12 @@ const logPostCommitFailure = (moduleId: string, step: string, error: unknown): v
   });
 };
 
-const runPostCommitStep = async (moduleId: string, step: string, action: () => Promise<unknown>): Promise<void> => {
+const runPostCommitStep = async (moduleId: string, step: string, action: () => Promise<unknown>): Promise<unknown> => {
   try {
-    await action();
+    return await action();
   } catch (error) {
     logPostCommitFailure(moduleId, step, error);
+    return undefined;
   }
 };
 
@@ -1259,6 +1260,25 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       });
     }
   }
+  let activationResult: unknown;
+  if (module.onActivationChange !== undefined) {
+    const onActivationChange = module.onActivationChange;
+    activationResult = await runPostCommitStep(module.id, "activation_change", async () =>
+      await onActivationChange({
+        DB: context.env.DB,
+        environment: context.env,
+        authorizeMutation: context.get("authorizeManagementMutation"),
+        actor,
+        now,
+        runModuleAlarm: (handlerKey, alarmKey, invocation) => {
+          const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+          return invocation === undefined
+            ? object.runModuleAlarm(module.id, handlerKey, alarmKey)
+            : object.runModuleAlarm(module.id, handlerKey, alarmKey, invocation);
+        },
+      }, channelId, enabled),
+    );
+  }
   await runPostCommitStep(module.id, "eventsub_reconciliation", () =>
     maintainEventSubSubscriptions(context.env, now, fetch, channelId));
   let updatedModule: PanelModuleState;
@@ -1274,6 +1294,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   return context.json({
     module: updatedModule,
     revision,
+    ...(activationResult === undefined ? {} : { activationResult }),
   });
 });
 
