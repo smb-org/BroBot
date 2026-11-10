@@ -1,12 +1,23 @@
 import type { ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import type { ChannelPointsActionOutcome } from "./domain/redemption";
 import { channelPointsActionTransition, redemptionFromEventSub, redemptionFromHelix, rewardSnapshotFromEventSub } from "./domain/redemption";
-import type { ChannelPointsRedemption, ChannelPointsReward, ChannelPointsHelixReason, HelixRedemption } from "./contracts";
+import type {
+  ChannelPointsRedemption,
+  ChannelPointsRedemptionStatus,
+  ChannelPointsReward,
+  ChannelPointsHelixReason,
+  HelixRedemption,
+  TwitchRedemptionStatus,
+} from "./contracts";
 import { createChannelPointsRepository } from "./repository";
 
 const loadHelix = () => import("../../worker/twitch/channel-points");
 const loadActionContext = () => import("../../worker/module-action-context");
 const RECONCILE_INTERVAL_MS = 15_000;
+const REDEMPTION_CLAIM_LEASE_MS = 2 * 60 * 1_000;
+const redemptionStatuses: readonly ChannelPointsRedemptionStatus[] = [
+  "received", "running", "queued", "pending", "fulfilled", "refunded", "failed_to_update",
+];
 const noResult: ModuleResult = { actions: [], diagnostics: [] };
 const missingAction: { de: string; en: string } = {
   de: "Die Belohnungsaktion ist nicht mehr verfügbar.",
@@ -17,6 +28,11 @@ const providerDisabled: { de: string; en: string } = {
   en: "The module providing this reward action is disabled.",
 };
 export type ChannelPointsMutationAuthorization = () => Promise<boolean>;
+
+const expiredBeforeFor = (now: string): string => {
+  const timestamp = Date.parse(now);
+  return Number.isFinite(timestamp) ? new Date(timestamp - REDEMPTION_CLAIM_LEASE_MS).toISOString() : now;
+};
 
 const sendStatus = async (
   environment: Env,
@@ -42,26 +58,30 @@ const applyOutcome = async (
   authorize: ChannelPointsMutationAuthorization,
 ): Promise<void> => {
   const repository = createChannelPointsRepository(environment.DB);
-  const transition = channelPointsActionTransition(reward.mode, outcome);
-  await repository.updateRedemption(channelId, redemptionId, {
+  const transition = channelPointsActionTransition("auto", outcome);
+  const recorded = await repository.updateRedemption(channelId, redemptionId, {
     status: transition.status,
     pendingTwitchStatus: transition.pendingTwitchStatus ?? null,
     outcomeReason: transition.outcomeReason ?? null,
-  }, now);
-  if (transition.pendingTwitchStatus === undefined) return;
+    claimedAt: transition.status === "pending" || transition.status === "running" ? now : null,
+  }, ["running"], now);
+  if (!recorded || transition.pendingTwitchStatus === undefined) return;
   const patched = await sendStatus(environment, channelId, reward, redemptionId, transition.pendingTwitchStatus, authorize);
+  const finishedAt = new Date().toISOString();
   if (patched === "success") {
     await repository.updateRedemption(channelId, redemptionId, {
       status: transition.pendingTwitchStatus === "FULFILLED" ? "fulfilled" : "refunded",
       pendingTwitchStatus: null,
       outcomeReason: transition.outcomeReason ?? null,
-    }, new Date().toISOString());
+      claimedAt: null,
+    }, ["running"], finishedAt);
   } else {
     await repository.updateRedemption(channelId, redemptionId, {
       status: "failed_to_update",
       pendingTwitchStatus: transition.pendingTwitchStatus,
       outcomeReason: transition.outcomeReason ?? null,
-    }, new Date().toISOString());
+      claimedAt: finishedAt,
+    }, ["running"], finishedAt);
   }
 };
 
@@ -90,7 +110,7 @@ const actionOutcome = async (
     return await action.execute(actionContext, {
       redemption,
       config: parsedConfig.data,
-      operationId: "channel-points-redemption:" + redemption.id,
+      operationId: redemption.id,
     });
   } catch {
     // A side effect may have reached Twitch before the handler failed; leave it open for idempotent retry.
@@ -108,15 +128,18 @@ const persistFromAction = async (
   alreadyLatched: boolean,
 ): Promise<void> => {
   const repository = createChannelPointsRepository(environment.DB);
-  if (!alreadyLatched && !await repository.latchRedemption(
-    channelId, { ...redemption, rewardId: reward.id }, new Date().toISOString(),
-  )) return;
+  const now = new Date().toISOString();
+  if (!alreadyLatched && !await repository.latchRedemption(channelId, { ...redemption, rewardId: reward.id }, now)) return;
   if (reward.mode === "queue") {
-    await repository.updateRedemption(channelId, redemption.id, { status: "queued", pendingTwitchStatus: null }, new Date().toISOString());
+    await repository.updateRedemption(channelId, redemption.id, {
+      status: "queued", pendingTwitchStatus: null, claimedAt: null,
+    }, ["received"], now);
     return;
   }
-  const outcome = await actionOutcome(environment, channelId, reward, redemption, context);
-  await applyOutcome(environment, channelId, reward, redemption.id, outcome, new Date().toISOString(), authorize);
+  if (!await repository.claimRedemption(channelId, redemption.id, ["received"], expiredBeforeFor(now), now)) return;
+  const claimed = await repository.getRedemption(channelId, redemption.id);
+  if (claimed === null || claimed.status !== "running") return;
+  await runClaimedAction(environment, channelId, reward, claimed, context, authorize);
 };
 
 const processNewRedemption = async (
@@ -143,11 +166,25 @@ const persistTwitchTerminalStatus = async (
   const repository = createChannelPointsRepository(environment.DB);
   const saved = await repository.getRedemption(channelId, redemption.id);
   if (saved === null) return;
+  const reportedStatus: TwitchRedemptionStatus = status;
+  const expectedStatus = saved.status === "fulfilled" ? "FULFILLED"
+    : saved.status === "refunded" ? "CANCELED"
+      : saved.pendingTwitchStatus;
+  const mismatch = expectedStatus !== null && expectedStatus !== reportedStatus;
+  const mismatchReason = mismatch ? {
+    de: `Twitch hat ${reportedStatus === "FULFILLED" ? "erledigt" : "erstattet"} gemeldet, obwohl BroBot ${expectedStatus === "FULFILLED" ? "Erledigung" : "Erstattung"} gespeichert hatte.`,
+    en: `Twitch reported ${reportedStatus === "FULFILLED" ? "fulfilled" : "refunded"} while BroBot had recorded ${expectedStatus === "FULFILLED" ? "fulfilled" : "refunded"}.`,
+  } : null;
+  const outcomeReason = mismatchReason === null ? saved.outcomeReason : {
+    de: [saved.outcomeReason?.de, mismatchReason.de].filter(Boolean).join(" "),
+    en: [saved.outcomeReason?.en, mismatchReason.en].filter(Boolean).join(" "),
+  };
   await repository.updateRedemption(channelId, redemption.id, {
     status: status === "FULFILLED" ? "fulfilled" : "refunded",
     pendingTwitchStatus: null,
-    outcomeReason: saved.outcomeReason,
-  }, now);
+    outcomeReason,
+    claimedAt: null,
+  }, redemptionStatuses, now);
 };
 
 export const processChannelPointsEvent = async (
@@ -189,6 +226,52 @@ export const processChannelPointsEvent = async (
 
 const redemptionRecord = (item: HelixRedemption) => redemptionFromHelix(item);
 
+const runClaimedAction = async (
+  environment: Env,
+  channelId: string,
+  reward: ChannelPointsReward,
+  row: ChannelPointsRedemption,
+  context: ModuleExecutionContext | null,
+  authorize: ChannelPointsMutationAuthorization,
+): Promise<void> => {
+  const redemption = {
+    id: row.redemptionId, rewardId: reward.twitchRewardId, rewardTitle: row.rewardTitle, userId: row.userId,
+    userLogin: row.userLogin, userName: row.userName, userInput: row.userInput, redeemedAt: row.redeemedAt,
+  };
+  const outcome = await actionOutcome(environment, channelId, reward, redemption, context);
+  await applyOutcome(environment, channelId, reward, row.redemptionId, outcome, new Date().toISOString(), authorize);
+};
+
+const sendPendingTwitchPatch = async (
+  environment: Env,
+  channelId: string,
+  reward: ChannelPointsReward,
+  row: ChannelPointsRedemption,
+  expectedStatus: "running" | "failed_to_update",
+  authorize: ChannelPointsMutationAuthorization,
+): Promise<void> => {
+  const pendingStatus = row.pendingTwitchStatus;
+  if (pendingStatus === null) return;
+  const patched = await sendStatus(environment, channelId, reward, row.redemptionId, pendingStatus, authorize);
+  const repository = createChannelPointsRepository(environment.DB);
+  const finishedAt = new Date().toISOString();
+  if (patched === "success") {
+    await repository.updateRedemption(channelId, row.redemptionId, {
+      status: pendingStatus === "FULFILLED" ? "fulfilled" : "refunded",
+      pendingTwitchStatus: null,
+      outcomeReason: row.outcomeReason,
+      claimedAt: null,
+    }, [expectedStatus], finishedAt);
+    return;
+  }
+  await repository.updateRedemption(channelId, row.redemptionId, {
+    status: "failed_to_update",
+    pendingTwitchStatus: pendingStatus,
+    outcomeReason: row.outcomeReason,
+    claimedAt: finishedAt,
+  }, [expectedStatus], finishedAt);
+};
+
 const retryExisting = async (
   environment: Env,
   channelId: string,
@@ -199,22 +282,31 @@ const retryExisting = async (
   now: string,
 ): Promise<void> => {
   const repository = createChannelPointsRepository(environment.DB);
+  const expiredBefore = expiredBeforeFor(now);
   if (row.status === "failed_to_update") {
-    if (row.pendingTwitchStatus === null) return;
-    const patched = await sendStatus(environment, channelId, reward, row.redemptionId, row.pendingTwitchStatus, authorize);
-    if (patched === "success") await repository.updateRedemption(channelId, row.redemptionId, {
-      status: row.pendingTwitchStatus === "FULFILLED" ? "fulfilled" : "refunded",
-      pendingTwitchStatus: null, outcomeReason: row.outcomeReason,
-    }, now);
+    if (row.pendingTwitchStatus === null || !await repository.claimFailedPatch(channelId, row.redemptionId, expiredBefore, now)) return;
+    const claimed = await repository.getRedemption(channelId, row.redemptionId);
+    if (claimed?.status === "failed_to_update") {
+      await sendPendingTwitchPatch(environment, channelId, reward, claimed, "failed_to_update", authorize);
+    }
     return;
   }
-  if (row.status !== "pending") return;
-  const redemption = {
-    id: row.redemptionId, rewardId: reward.twitchRewardId, rewardTitle: row.rewardTitle, userId: row.userId,
-    userLogin: row.userLogin, userName: row.userName, userInput: row.userInput, redeemedAt: row.redeemedAt,
-  };
-  const outcome = await actionOutcome(environment, channelId, reward, redemption, context);
-  await applyOutcome(environment, channelId, reward, row.redemptionId, outcome, now, authorize);
+  let claimed: boolean;
+  if (row.status === "running") {
+    claimed = await repository.reclaimRunningRedemption(channelId, row.redemptionId, expiredBefore, now);
+  } else if (row.status === "received" || row.status === "pending" || row.status === "queued") {
+    claimed = await repository.claimRedemption(channelId, row.redemptionId, [row.status], expiredBefore, now);
+  } else {
+    return;
+  }
+  if (!claimed) return;
+  const current = await repository.getRedemption(channelId, row.redemptionId);
+  if (current === null || current.status !== "running") return;
+  if (current.pendingTwitchStatus !== null) {
+    await sendPendingTwitchPatch(environment, channelId, reward, current, "running", authorize);
+    return;
+  }
+  await runClaimedAction(environment, channelId, reward, current, context, authorize);
 };
 
 export const reconcileChannelPoints = async (
@@ -242,7 +334,7 @@ export const reconcileChannelPoints = async (
       }
     }
   }
-  for (const row of await repository.listRetryable(channelId)) {
+  for (const row of await repository.listRetryable(channelId, expiredBeforeFor(now))) {
     if (row.status === "failed_to_update" && row.pendingTwitchStatus === null) continue;
     const reward = await repository.getReward(channelId, row.rewardId);
     if (reward !== null) await retryExisting(environment, channelId, row, reward, options.context ?? null, authorize, now);

@@ -36,6 +36,7 @@ CREATE TABLE channel_points_redemptions (
   user_input TEXT NOT NULL,
   redeemed_at TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('received', 'running', 'queued', 'pending', 'fulfilled', 'refunded', 'failed_to_update')),
+  claimed_at TEXT,
   pending_twitch_status TEXT CHECK (pending_twitch_status IS NULL OR pending_twitch_status IN ('FULFILLED', 'CANCELED')),
   outcome_reason_json TEXT CHECK (outcome_reason_json IS NULL OR json_valid(outcome_reason_json)),
   created_at TEXT NOT NULL,

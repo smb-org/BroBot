@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { createChannelPointsRepository } from "../../src/modules/channel_points/repository";
-import { processChannelPointsEvent } from "../../src/modules/channel_points/service";
+import { processChannelPointsEvent, reconcileChannelPoints } from "../../src/modules/channel_points/service";
 import type { ChannelPointsRewardInput } from "../../src/modules/channel_points/contracts";
 
 const mocks = vi.hoisted(() => ({ update: vi.fn(), list: vi.fn(), setEnabled: vi.fn() }));
@@ -93,6 +93,7 @@ describe("channel points redemption flow on local D1", () => {
 
   beforeEach(() => {
     mocks.update.mockReset().mockResolvedValue({ ok: true, data: [] });
+    mocks.list.mockReset().mockResolvedValue({ ok: true, data: [] });
     sendChat.mockReset().mockResolvedValue({ sent: true, delivery: "sent", reason: null });
   });
 
@@ -100,10 +101,71 @@ describe("channel points redemption flow on local D1", () => {
     await processChannelPointsEvent(redemptionEvent("redemption_duplicate"), context);
     await processChannelPointsEvent(redemptionEvent("redemption_duplicate"), context);
     expect(sendChat).toHaveBeenCalledTimes(1);
+    expect(sendChat.mock.calls[0]?.[1]).toBe("redemption_duplicate");
     expect(mocks.update).toHaveBeenCalledTimes(1);
     expect(mocks.update.mock.calls[0]?.[4]).toBe("FULFILLED");
     await expect(repository.getRedemption(channelId, "redemption_duplicate"))
       .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+  });
+
+  it("keeps a Twitch terminal event when an older action PATCH finishes afterward", async () => {
+    let finishPatch: (result: { ok: false; reason: "unknown_status" }) => void = () => {};
+    mocks.update.mockImplementationOnce(() => new Promise<{ ok: false; reason: "unknown_status" }>((resolve) => {
+      finishPatch = resolve;
+    }));
+    const processing = processChannelPointsEvent(redemptionEvent("redemption_stale_action"), context);
+    await vi.waitFor(() => { expect(mocks.update).toHaveBeenCalledTimes(1); });
+    await processChannelPointsEvent({
+      ...redemptionEvent("redemption_stale_action"),
+      subscriptionType: "channel.channel_points_custom_reward_redemption.update",
+      payload: {
+        id: "redemption_stale_action", user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo",
+        user_input: "", redeemed_at: now, status: "FULFILLED",
+        reward: { id: "reward_twitch", title: "Fictional reward" },
+      },
+    }, context);
+    finishPatch({ ok: false, reason: "unknown_status" });
+    await processing;
+    await expect(repository.getRedemption(channelId, "redemption_stale_action"))
+      .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+  });
+
+  it("runs a pending redemption action once across concurrent reconciles", async () => {
+    sendChat.mockResolvedValueOnce({ sent: false, delivery: "ambiguous", reason: "timeout" });
+    await processChannelPointsEvent(redemptionEvent("redemption_concurrent_retry"), context);
+    await database.prepare(
+      "UPDATE channel_points_redemptions SET claimed_at=? WHERE channel_id=? AND redemption_id=?",
+    ).bind("2026-11-10T11:57:00.000Z", channelId, "redemption_concurrent_retry").run();
+    sendChat.mockResolvedValue({ sent: true, delivery: "sent", reason: null });
+    await Promise.all([
+      reconcileChannelPoints(environment, channelId, now, { force: true, context }),
+      reconcileChannelPoints(environment, channelId, now, { force: true, context }),
+    ]);
+    expect(sendChat).toHaveBeenCalledTimes(2);
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    await expect(repository.getRedemption(channelId, "redemption_concurrent_retry"))
+      .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+  });
+
+  it("reclaims expired running rows but leaves rows within the lease alone", async () => {
+    for (const id of ["redemption_expired_lease", "redemption_active_lease"]) {
+      await repository.latchRedemption(channelId, {
+        id, rewardId: "reward_local", rewardTitle: "Fictional reward", userId: "viewer_one",
+        userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "", redeemedAt: now,
+      }, now);
+    }
+    await database.prepare(
+      "UPDATE channel_points_redemptions SET status='running',claimed_at=? WHERE channel_id=? AND redemption_id=?",
+    ).bind("2026-11-10T11:57:00.000Z", channelId, "redemption_expired_lease").run();
+    await database.prepare(
+      "UPDATE channel_points_redemptions SET status='running',claimed_at=? WHERE channel_id=? AND redemption_id=?",
+    ).bind("2026-11-10T11:59:00.000Z", channelId, "redemption_active_lease").run();
+    await reconcileChannelPoints(environment, channelId, now, { force: true, context });
+    expect(sendChat).toHaveBeenCalledTimes(1);
+    await expect(repository.getRedemption(channelId, "redemption_expired_lease"))
+      .resolves.toMatchObject({ status: "fulfilled" });
+    await expect(repository.getRedemption(channelId, "redemption_active_lease"))
+      .resolves.toMatchObject({ status: "running" });
   });
 
   it("cancels the redemption on Twitch and stores refunded when the action refunds", async () => {

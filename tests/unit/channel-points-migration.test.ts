@@ -35,6 +35,9 @@ describe("channel points migration", () => {
          ) VALUES ('channel_points', 'redemption_one', 'reward_local', 'Fictional reward',
            'viewer_one', 'viewer_demo', 'Viewer Demo', '', 'now', 'received', 'now', 'now')`,
       ).run();
+      expect(database.prepare(
+        "SELECT status, claimed_at FROM channel_points_redemptions WHERE channel_id = 'channel_points' AND redemption_id = 'redemption_one'",
+      ).get()).toMatchObject({ status: "received", claimed_at: null });
       const before = database.prepare(
         "SELECT revision FROM panel_resource_revisions WHERE channel_id = ? AND resource = 'module:channel_points:data'",
       ).get("channel_points") as { revision: number };

@@ -110,6 +110,37 @@ describe("channel points redemption processing", () => {
       .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
   });
 
+  it("keeps a fulfilled redemption when stale EventSub and action results arrive", async () => {
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.update", {
+      ...redemptionPayload(), status: "UNFULFILLED",
+    }), context);
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await expect(repository.updateRedemption(channelId, "redemption_one", {
+      status: "failed_to_update", pendingTwitchStatus: "CANCELED",
+    }, ["running"], now)).resolves.toBe(false);
+    await expect(repository.getRedemption(channelId, "redemption_one"))
+      .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+  });
+
+  it("accepts Twitch terminal status over a non-terminal state and records a mismatch", async () => {
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await repository.latchRedemption(channelId, {
+      id: "redemption_one", rewardId: "reward_local", rewardTitle: "Fictional reward", userId: "viewer_one",
+      userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "hello", redeemedAt: now,
+    }, now);
+    await repository.updateRedemption(channelId, "redemption_one", {
+      status: "failed_to_update", pendingTwitchStatus: "CANCELED",
+    }, ["received"], now);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.update", {
+      ...redemptionPayload(), status: "FULFILLED",
+    }), context);
+    const saved = await repository.getRedemption(channelId, "redemption_one");
+    expect(saved).toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+    expect(saved?.outcomeReason?.en).toContain("Twitch reported fulfilled");
+    expect(saved?.outcomeReason?.de).toContain("Twitch");
+  });
+
   it("refunds when the action provider module is disabled", async () => {
     database.sqlite.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'channel_points'")
       .run(channelId);
@@ -139,6 +170,9 @@ describe("channel points redemption processing", () => {
     await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
     await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
       .resolves.toMatchObject({ status: "failed_to_update", pendingTwitchStatus: "FULFILLED" });
+    database.sqlite.prepare(
+      "UPDATE channel_points_redemptions SET claimed_at='2026-11-10T11:57:00.000Z' WHERE channel_id=? AND redemption_id=?",
+    ).run(channelId, "redemption_one");
     await reconcileChannelPoints(
       { DB: database as unknown as D1Database } as Env, channelId, now,
       { force: true, context, authorize: () => Promise.resolve(true) },
