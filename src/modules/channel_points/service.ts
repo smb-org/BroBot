@@ -405,9 +405,13 @@ export const reconcileChannelPoints = async (
       manageableIds = new Set(result.data.map(({ id }) => id));
       const manageableById = new Map(result.data.map((reward) => [reward.id, reward]));
       const claimedCreatingRemoteIds = new Set<string>();
+      const linkedRemoteIds = new Set(rewards
+        .filter(({ twitchState }) => twitchState !== "creating")
+        .map(({ twitchRewardId }) => twitchRewardId));
       const reconcileTimestamp = Date.parse(now);
       for (const reward of rewards.filter(({ twitchState }) => twitchState === "creating")) {
-        const remote = result.data.find((candidate) => candidate.title === reward.title && !claimedCreatingRemoteIds.has(candidate.id));
+        const remote = result.data.find((candidate) => candidate.title === reward.title &&
+          !linkedRemoteIds.has(candidate.id) && !claimedCreatingRemoteIds.has(candidate.id));
         try {
           if (remote !== undefined) {
             claimedCreatingRemoteIds.add(remote.id);
@@ -634,6 +638,7 @@ const performRewardMutation = async (
       managementWriteGuard(channelId, invocation.actor, authorizeManagementMutation),
     );
     if (!inserted) return { ok: false, reason: "precondition_failed" };
+    const watermark = new Date().toISOString();
     const created = await helix.createCustomReward(environment, channelId, invocation.reward, authorize);
     if (!created.ok) {
       await repository.deleteCreatingReward(channelId, invocation.id);
@@ -644,7 +649,6 @@ const performRewardMutation = async (
       await repository.deleteCreatingReward(channelId, invocation.id);
       return { ok: false, reason: "invalid_response" };
     }
-    const watermark = new Date().toISOString();
     const saved = await repository.finalizeCreatingReward(
       channelId, invocation.id, remote.id, watermark,
       managementWriteGuard(channelId, invocation.actor, authorizeManagementMutation),

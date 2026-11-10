@@ -238,6 +238,40 @@ describe("channel points redemption processing", () => {
       .resolves.toMatchObject({ twitchRewardId: "reward_twitch_created", twitchState: "active" });
   });
 
+  it("keeps a deletion queued during creation when its event predates the Helix response", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-10T12:01:00.000Z"));
+    const activation = activationContext(database, true);
+    const createdReward = { ...manageableReward, id: "reward_twitch_created", title: "Created reward" };
+    let finishCreation: (result: { ok: true; data: typeof manageableReward[] }) => void = () => {};
+    let creationStarted!: () => void;
+    const creationStartedPromise = new Promise<void>((resolve) => { creationStarted = resolve; });
+    mocks.createCustomReward.mockImplementationOnce(() => new Promise((resolve) => {
+      finishCreation = resolve;
+      creationStarted();
+    }));
+
+    const create = activation.runModuleAlarm(CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, {
+      kind: "reward.create", actor: { userId: "operator_one" }, now, id: "reward_local_created",
+      reward: { ...reward, title: "Created reward" },
+    });
+    await creationStartedPromise;
+    vi.setSystemTime(new Date("2026-11-10T12:01:30.000Z"));
+    const removal = activation.runModuleAlarm(CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, {
+      kind: "event",
+      event: {
+        ...event("channel.channel_points_custom_reward.remove", rewardRemovalPayload("reward_twitch_created")),
+        eventSubTimestamp: "2026-11-10T12:01:30.000Z",
+      },
+    });
+    vi.setSystemTime(new Date("2026-11-10T12:02:00.000Z"));
+    finishCreation({ ok: true, data: [createdReward] });
+    await Promise.all([create, removal]);
+
+    await expect(createChannelPointsRepository(database as unknown as D1Database).getReward(channelId, "reward_local_created"))
+      .resolves.toMatchObject({ twitchRewardId: "reward_twitch_created", twitchState: "deleted_on_twitch" });
+  });
+
   it("recovers a Twitch reward when D1 fails after successful creation", async () => {
     const createdReward = { ...manageableReward, id: "reward_twitch_created", title: "Recovered reward" };
     mocks.createCustomReward.mockImplementationOnce(() => {
@@ -307,6 +341,21 @@ describe("channel points redemption processing", () => {
     );
 
     await expect(repository.getReward(channelId, "reward_local_expired")).resolves.toBeNull();
+  });
+
+  it("expires a creation intent when its matching remote reward is already linked", async () => {
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await repository.insertCreatingReward(channelId, { ...reward, title: "Fictional reward" }, "reward_local_expired",
+      "2026-11-10T11:49:59.999Z", { sql: "", values: [] });
+    mocks.manageable.mockResolvedValueOnce({ ok: true, data: [manageableReward] });
+
+    await reconcileChannelPoints(
+      { DB: database as unknown as D1Database } as Env, channelId, now,
+      { force: true, context, authorize: () => Promise.resolve(true) },
+    );
+
+    await expect(repository.getReward(channelId, "reward_local_expired")).resolves.toBeNull();
+    await expect(repository.getReward(channelId, "reward_local")).resolves.toMatchObject({ twitchRewardId: "reward_twitch" });
   });
 
   it("latches a delayed redemption as orphaned after its reward was removed", async () => {

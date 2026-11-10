@@ -5,7 +5,7 @@ import { PanelApiError, setChannelModuleEnabled } from "../api";
 import { apiErrorText, dashboardTexts } from "../locale";
 import { moduleDependencyErrorMessage } from "../module-dependencies";
 import { moduleName, moduleWorkspaceTexts } from "../module-labels";
-import { dismissToastsForScope, notify } from "../ui/toast-store";
+import { dismissToast, dismissToastsForScope, notify } from "../ui/toast-store";
 import { queryKeys } from "./keys";
 
 interface AppliedModuleState {
@@ -167,24 +167,42 @@ const reportActivationFailure = (
   moduleId: string,
   enabled: boolean,
   activationResult: { ok: false; failedRewards: readonly { rewardId: string; reason: string }[] } | undefined,
+  revision: number,
   scope: string,
   shouldShowToast: () => boolean,
 ): boolean => {
   const count = activationResult?.failedRewards.length ?? 0;
   if (activationResult === undefined || count === 0 || !shouldShowToast()) return false;
   const labels = moduleWorkspaceTexts();
-  notify({
+  let retryToastId = 0;
+  retryToastId = notify({
     tone: "error",
     message: labels.activationSyncFailed(enabled, count),
     scope,
     action: {
       label: labels.retry,
       onClick: () => {
-        void toggleModuleWithUndo(queryClient, channelId, moduleId, enabled, shouldShowToast).catch((error: unknown) => {
-          if (!shouldShowToast()) return;
-          const modules = queryClient.getQueryData<PanelModulesResponse>(queryKeys.channel(channelId, "modules"))?.modules ?? [];
-          reportToggleError(error, moduleId, modules, scope);
-        });
+        const latest = appliedModuleStates.get(queryClient)?.get(channelId)?.get(moduleId);
+        const cached = queryClient.getQueryData<PanelModulesResponse>(queryKeys.channel(channelId, "modules"))
+          ?.modules.find(({ id }) => id === moduleId);
+        if (latest?.revision !== revision || latest.module.enabled !== enabled ||
+            (cached !== undefined && cached.enabled !== enabled)) {
+          dismissToast(retryToastId);
+          return;
+        }
+        void toggleModuleWithUndo(queryClient, channelId, moduleId, enabled, shouldShowToast, revision)
+          .then(() => { dismissToast(retryToastId); }).catch((error: unknown) => {
+            if (error instanceof PanelApiError && error.status === 409) {
+              dismissToast(retryToastId);
+              if (!shouldShowToast()) return;
+              const modules = queryClient.getQueryData<PanelModulesResponse>(queryKeys.channel(channelId, "modules"))?.modules ?? [];
+              reportToggleError(error, moduleId, modules, scope);
+              return;
+            }
+            if (!shouldShowToast()) return;
+            const modules = queryClient.getQueryData<PanelModulesResponse>(queryKeys.channel(channelId, "modules"))?.modules ?? [];
+            reportToggleError(error, moduleId, modules, scope);
+          });
       },
     },
   });
@@ -205,7 +223,7 @@ const undoModuleToggle = async (
     applyModuleResponse(queryClient, channelId, result.module, result.revision);
     await refreshQuietly(queryClient, channelId, scope, shouldShowToast);
     if (shouldShowToast()) reportActivationFailure(
-      queryClient, channelId, moduleId, !enabled, result.activationResult, scope, shouldShowToast,
+      queryClient, channelId, moduleId, !enabled, result.activationResult, result.revision, scope, shouldShowToast,
     );
   } catch (error: unknown) {
     if (shouldShowToast()) {
@@ -222,14 +240,15 @@ export const toggleModuleWithUndo = async (
   moduleId: string,
   enabled: boolean,
   shouldShowToast: () => boolean = () => true,
+  expectedRevision?: number,
 ): Promise<{ module: PanelModuleState; revision: number }> => {
-  const result = await setChannelModuleEnabled(channelId, moduleId, enabled);
+  const result = await setChannelModuleEnabled(channelId, moduleId, enabled, expectedRevision);
   const scope = moduleToggleToastScope(channelId);
   applyModuleResponse(queryClient, channelId, result.module, result.revision);
   await refreshQuietly(queryClient, channelId, scope, shouldShowToast);
   if (!shouldShowToast()) return result;
   if (reportActivationFailure(
-    queryClient, channelId, moduleId, enabled, result.activationResult, scope, shouldShowToast,
+    queryClient, channelId, moduleId, enabled, result.activationResult, result.revision, scope, shouldShowToast,
   )) return result;
   const labels = moduleWorkspaceTexts();
   notify({
