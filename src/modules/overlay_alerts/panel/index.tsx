@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent, type Dispatch, type ReactElement, type SetStateAction } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
-import { useModuleQuery } from "../../../dashboard/data";
+import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { Button, ConfirmDialog, FilePicker, Icon } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { MediaAssetMetadata } from "../contracts";
@@ -121,6 +121,14 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canMana
   const lang: Language = language === "en" ? "en" : "de";
   const labels = overlayAlertsPanelTexts[lang];
   const query = useModuleQuery(channelId, "overlay_alerts", "data", (signal) => loadMediaAssets(channelId, signal));
+  const queryClient = useDashboardQueryClient();
+  const writeMedia = <Value,>(
+    write: () => Promise<Value>,
+    updateList: (assets: MediaAssetMetadata[], result: Value) => MediaAssetMetadata[],
+  ): Promise<Value> => runModuleQueryWrite(queryClient, channelId, "overlay_alerts", "data", write, {
+    baselineRevision: null,
+    updateCache: (current, result) => updateList(Array.isArray(current) ? current as MediaAssetMetadata[] : [], result),
+  });
   const fileInput = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState("");
   const [pending, setPending] = useState(false);
@@ -133,9 +141,11 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canMana
     setPending(true);
     setStatus("");
     try {
-      await uploadMediaAsset(channelId, file);
+      await writeMedia(
+        () => uploadMediaAsset(channelId, file),
+        (assets, created) => [created, ...assets.filter((asset) => asset.id !== created.id)],
+      );
       setStatus(labels.uploadSuccess);
-      await query.refetch();
     } catch (error) {
       setStatus(mediaErrorMessage(error, lang));
     } finally {
@@ -149,10 +159,10 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canMana
     setPending(true);
     setStatus("");
     try {
-      await deleteMediaAsset(channelId, confirming.id);
+      const { id } = confirming;
+      await writeMedia(() => deleteMediaAsset(channelId, id), (assets) => assets.filter((asset) => asset.id !== id));
       setConfirming(null);
       setStatus(labels.deleteSuccess);
-      await query.refetch();
     } catch (error) {
       setStatus(error instanceof PanelApiError && error.code === "media_in_use" ? labels.mediaInUse : labels.deleteFailed);
       setConfirming(null);

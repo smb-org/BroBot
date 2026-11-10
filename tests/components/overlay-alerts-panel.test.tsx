@@ -119,6 +119,23 @@ describe("overlay alert media panel", () => {
     expect(await screen.findByRole("button", { name: "Abspielen: fanfare.wav" })).toBeVisible();
   });
 
+  it("keeps an uploaded asset listed when the initial list response arrives late", async () => {
+    let resolveInitial: (assets: unknown[]) => void = () => undefined;
+    mocks.loadMediaAssets
+      .mockReturnValueOnce(new Promise((resolve) => { resolveInitial = resolve; }))
+      .mockResolvedValue([imageAsset]);
+    mount(true);
+    const file = new File([new Uint8Array([1, 2, 3])], "sample.png", { type: "image/png" });
+
+    fireEvent.change(await screen.findByLabelText("Datei auswählen"), { target: { files: [file] } });
+    expect(await screen.findByText("sample.png")).toBeVisible();
+
+    resolveInitial([]);
+    await waitFor(() => expect(mocks.loadMediaAssets).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("sample.png")).toBeVisible();
+    expect(screen.queryByText("Noch keine Medien")).not.toBeInTheDocument();
+  });
+
   it("hides upload and delete actions from read-only members", async () => {
     mount(false);
 
