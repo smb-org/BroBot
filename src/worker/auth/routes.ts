@@ -62,6 +62,7 @@ import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { revokeRealtimeSessionForUser } from "../realtime";
 import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
 import { MODULES, moduleOverlayElementForKind } from "../../modules/registry";
+import { getMediaAssetForDelivery, mediaAssetResponse } from "../../modules/overlay_alerts/repository";
 import {
   listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUser,
@@ -403,6 +404,29 @@ authRouter.get("/api/overlay/variables/:name", async (context) => {
 
   context.header("Content-Language", record.language);
   return context.json({ name: variable.name, value: variable.value });
+});
+
+authRouter.get("/api/overlay/media/:id/:sha256", async (context) => {
+  const token = readBearerToken(context.req.header("Authorization"));
+  if (token === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
+
+  const record = await authenticateOverlayToken(context.env.DB, {
+    token,
+    pepper: context.env.OVERLAY_TOKEN_PEPPER,
+    now: nowIso(),
+    onCommittedTouch: (channelId) => notifyCommittedResources(context.env, channelId),
+  });
+  if (record === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
+
+  const asset = await getMediaAssetForDelivery(
+    context.env.DB,
+    record.channelId,
+    context.req.param("id"),
+    context.req.param("sha256"),
+  );
+  return asset === null
+    ? context.json({ error: "media_not_found" satisfies ApiErrorCode }, 404)
+    : mediaAssetResponse(asset);
 });
 
 authRouter.get("/auth/login", async (context) => {

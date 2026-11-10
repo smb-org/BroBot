@@ -32,6 +32,7 @@ export { Sidebar } from "./Sidebar";
 export type { SidebarEntry, SidebarGroup } from "./Sidebar";
 
 export { Field } from "./Field";
+export { FilePicker } from "./FilePicker";
 export { ChannelLocationMenu } from "./ChannelLocationMenu";
 export { GameMultiSelect, type GameMultiSelectGame, type GameMultiSelectMessages } from "./GameMultiSelect";
 export { ColorField } from "./ColorField";

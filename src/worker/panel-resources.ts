@@ -27,6 +27,7 @@ export const PANEL_RESOURCE_NOTIFIER_COVERAGE = {
     "GET /auth/twitch/callback",
     "GET /api/overlay/bootstrap",
     "GET /api/overlay/variables/:name",
+    "GET /api/overlay/media/:id/:sha256",
   ],
   nonPanelGetRoutes: [
     "/healthz",

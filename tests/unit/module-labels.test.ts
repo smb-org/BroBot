@@ -56,6 +56,18 @@ describe("Module labels", () => {
     expect(entry?.description?.en.trim().length).toBeGreaterThan(0);
   });
 
+  it("registers overlay alerts as an optional module with bilingual labels", () => {
+    const mediaModule = MODULES.find((module) => module.id === "overlay_alerts");
+
+    expect(mediaModule?.defaultEnabled).toBe(false);
+    expect(mediaModule?.routes).toBeDefined();
+    expect(mediaModule?.panel).toBeDefined();
+    expect(moduleName("overlay_alerts", "de")).toBe("Overlay-Einblendungen");
+    expect(moduleName("overlay_alerts", "en")).toBe("Overlay alerts");
+    expect(moduleDescription("overlay_alerts", "de")).toContain("Medienbibliothek");
+    expect(moduleDescription("overlay_alerts", "en")).toContain("media library");
+  });
+
   it("uses the raid announcements and shoutout name for the existing raid module id in both catalogues", () => {
     expect(moduleName("raid", "de")).toBe("Raid-Ankündigungen & Shoutout");
     expect(moduleName("raid", "en")).toBe("Raid announcements & shoutout");
