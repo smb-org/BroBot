@@ -37,7 +37,8 @@ const overlayDocument = async (
 };
 
 const isTokenAuthenticatedOverlayApi = (pathname: string): boolean =>
-  pathname === "/api/overlay/bootstrap" || /^\/api\/overlay\/variables\/[^/]+$/u.test(pathname);
+  pathname === "/api/overlay/bootstrap" || /^\/api\/overlay\/variables\/[^/]+$/u.test(pathname) ||
+  /^\/api\/overlay\/media\/[^/]+\/[^/]+$/u.test(pathname);
 
 const addWildcardCors = (response: Response, extraHeaders?: HeadersInit): Response => {
   const headers = new Headers(response.headers);
