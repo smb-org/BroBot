@@ -86,7 +86,8 @@ export const mediaAssetResponse = (asset: StoredMediaAsset): Response => {
   return new Response(body, {
     headers: {
       "Content-Type": asset.mimeType,
-      "Cache-Control": "public, max-age=31536000, immutable",
+      "Cache-Control": "private, max-age=31536000, immutable",
+      Vary: "Authorization",
       "X-Content-Type-Options": "nosniff",
     },
   });

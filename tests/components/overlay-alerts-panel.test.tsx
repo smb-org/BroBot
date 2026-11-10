@@ -35,9 +35,29 @@ const soundAsset = {
   createdAt: "2026-11-10T12:00:00.000Z",
 };
 
-const mount = (canOperate: boolean) => renderWithQuery(
-  <UiProvider><OverlayAlertsPanel channelId="media_channel_a" language="de" canOperate={canOperate} /></UiProvider>,
+const secondSound = { ...soundAsset, id: "sound-asset-2", sha256: "c".repeat(64), fileName: "fanfare.wav" };
+
+const mount = (canManage: boolean) => renderWithQuery(
+  <UiProvider><OverlayAlertsPanel channelId="media_channel_a" language="de" canManage={canManage} /></UiProvider>,
 );
+
+type FakeAudio = HTMLAudioElement & { fakePlaying?: boolean };
+
+/** jsdom does not implement media playback, so model play, pause and paused. */
+const installFakePlayback = () => {
+  Object.defineProperty(HTMLMediaElement.prototype, "paused", {
+    configurable: true,
+    get(this: FakeAudio) { return this.fakePlaying !== true; },
+  });
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (this: FakeAudio) {
+    this.fakePlaying = true;
+    return Promise.resolve();
+  });
+  const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function (this: FakeAudio) {
+    this.fakePlaying = false;
+  });
+  return { play, pause };
+};
 
 describe("overlay alert media panel", () => {
   beforeEach(() => {
@@ -73,6 +93,30 @@ describe("overlay alert media panel", () => {
 
     await waitFor(() => expect(mocks.uploadMediaAsset).toHaveBeenCalledWith("media_channel_a", file));
     expect(await screen.findByRole("alert")).toHaveTextContent("Datei darf höchstens 1 MB groß sein.");
+  });
+
+  it("stops the first sound when a second preview starts and ignores its stale ended event", async () => {
+    mocks.loadMediaAssets.mockResolvedValue([soundAsset, secondSound]);
+    const { pause } = installFakePlayback();
+    const { container } = mount(true);
+    await screen.findByText("chime.wav");
+    const [firstAudio, secondAudio] = Array.from(container.querySelectorAll("audio")) as FakeAudio[];
+
+    fireEvent.click(screen.getByRole("button", { name: "Abspielen: chime.wav" }));
+    await screen.findByRole("button", { name: "Pausieren: chime.wav" });
+    fireEvent.click(screen.getByRole("button", { name: "Abspielen: fanfare.wav" }));
+
+    await screen.findByRole("button", { name: "Pausieren: fanfare.wav" });
+    expect(pause).toHaveBeenCalled();
+    expect(firstAudio?.fakePlaying).toBe(false);
+    expect(secondAudio?.fakePlaying).toBe(true);
+    expect(screen.getByRole("button", { name: "Abspielen: chime.wav" })).toBeVisible();
+
+    fireEvent.ended(firstAudio as HTMLAudioElement);
+    expect(screen.getByRole("button", { name: "Pausieren: fanfare.wav" })).toBeVisible();
+
+    fireEvent.ended(secondAudio as HTMLAudioElement);
+    expect(await screen.findByRole("button", { name: "Abspielen: fanfare.wav" })).toBeVisible();
   });
 
   it("hides upload and delete actions from read-only members", async () => {

@@ -78,23 +78,25 @@ const addChannel = async (db: TestD1Database, id: string): Promise<void> => {
   ).bind(id).run();
 };
 
-const addMember = async (db: TestD1Database, id: string): Promise<void> => {
+const addMember = async (db: TestD1Database, id: string, role = "manager"): Promise<void> => {
   await db.prepare(
     "INSERT INTO channel_members (channel_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-  ).bind(channelId, id, "operator", now, now).run();
+  ).bind(channelId, id, role, now, now).run();
 };
 
 const createApp = (routes = createOverlayAlertsRoutes()) => {
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     const userId = context.req.header("x-test-user") === viewerId ? viewerId : operatorId;
-    context.set("channelRole", "operator");
+    context.set("channelRole", context.req.header("x-test-role") === "operator" ? "operator" : "manager");
     context.set("actor", { userId, sessionId: "session-" + userId });
     context.set("authorizeMutation", (targetChannelId, actor) => ({
       sql: "AND EXISTS (SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?)",
       values: [targetChannelId, actor.userId],
     }));
-    context.set("authorizeManagementMutation", authorizeModuleManagementMutation);
+    // Without a session id the real guard checks the member role directly, which is what these tests exercise.
+    context.set("authorizeManagementMutation", (targetChannelId, actor, at) =>
+      authorizeModuleManagementMutation(targetChannelId, { userId: actor.userId }, at));
     context.set("prepareModuleAudit", () => database.prepare("SELECT 1") as unknown as D1PreparedStatement);
     context.set("writeModuleAudit", () => Promise.resolve());
     await next();
@@ -108,6 +110,7 @@ const request = async (
   options: {
     method?: string;
     userId?: string;
+    role?: "operator";
     bytes?: Uint8Array;
     mimeType?: string;
     fileName?: string;
@@ -116,6 +119,7 @@ const request = async (
 ): Promise<Response> => {
   const headers = new Headers();
   if (options.userId !== undefined) headers.set("x-test-user", options.userId);
+  if (options.role !== undefined) headers.set("x-test-role", options.role);
   if (options.mimeType !== undefined) headers.set("Content-Type", options.mimeType);
   if (options.fileName !== undefined) headers.set("X-File-Name", options.fileName);
   const method = options.method ?? "GET";
@@ -250,7 +254,8 @@ describe("overlay alert media routes", () => {
     expect(response.status).toBe(200);
     expect([...bytes]).toEqual([...fixtureBytes["image/png"]]);
     expect(response.headers.get("Content-Type")).toBe("image/png");
-    expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+    expect(response.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+    expect(response.headers.get("Vary")).toBe("Authorization");
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect((await request("/media/" + created.id + "/" + "0".repeat(64))).status).toBe(404);
 
@@ -282,10 +287,29 @@ describe("overlay alert media routes", () => {
     ), { DB: database as unknown as D1Database, OVERLAY_TOKEN_PEPPER: overlayPepper });
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+    expect(response.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+    expect(response.headers.get("Vary")).toBe("Authorization");
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(fixtureBytes["image/png"]);
     expect(foreignResponse.status).toBe(404);
+  });
+
+  it("rejects a revoked overlay token on the second media request", async () => {
+    const created = await readMediaAsset(await upload());
+    const token = "media-revoked-token";
+    await database.prepare(
+      `INSERT INTO overlay_tokens (token_id, channel_id, token_hash, expires_at, created_at, last_used_at)
+       VALUES ('media-token-revoked', ?, ?, NULL, ?, ?)`,
+    ).bind(channelId, await hashOverlayToken(token, overlayPepper), now, new Date().toISOString()).run();
+    const fetchMedia = () => authRouter.fetch(new Request(
+      "https://brobot.example/api/overlay/media/" + created.id + "/" + created.sha256,
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), { DB: database as unknown as D1Database, OVERLAY_TOKEN_PEPPER: overlayPepper });
+
+    expect((await fetchMedia()).status).toBe(200);
+    database.sqlite.prepare("UPDATE overlay_tokens SET revoked_at = ? WHERE token_id = 'media-token-revoked'").run(now);
+
+    expect((await fetchMedia()).status).toBe(401);
   });
 
   it("lists metadata without returning bytes or writing", async () => {
@@ -302,7 +326,33 @@ describe("overlay alert media routes", () => {
     expect(after).toBe(before);
   });
 
-  it("allows operator uploads", async () => {
+  it("denies operator uploads and deletes", async () => {
+    const created = await readMediaAsset(await upload());
+    const denied = await request("/media", {
+      method: "POST", bytes: fixtureBytes["image/gif"], mimeType: "image/gif", userId: operatorId, role: "operator",
+    });
+    const deniedDelete = await request("/media/" + created.id, { method: "DELETE", userId: operatorId, role: "operator" });
+
+    expect(denied.status).toBe(403);
+    expect(deniedDelete.status).toBe(403);
+    expect(await readMediaAssets(await request("/media"))).toHaveLength(1);
+  });
+
+  it("denies a manager whose role was demoted to operator in the database", async () => {
+    const created = await readMediaAsset(await upload());
+    database.sqlite.prepare("UPDATE channel_members SET role = 'operator' WHERE user_id = ?").run(operatorId);
+
+    const deniedUpload = await request("/media", {
+      method: "POST", bytes: fixtureBytes["image/gif"], mimeType: "image/gif", userId: operatorId,
+    });
+    const deniedDelete = await request("/media/" + created.id, { method: "DELETE", userId: operatorId });
+
+    expect(deniedUpload.status).toBe(403);
+    expect(deniedDelete.status).toBe(403);
+    expect(await readMediaAssets(await request("/media"))).toHaveLength(1);
+  });
+
+  it("allows manager uploads", async () => {
     const response = await upload(fixtureBytes["image/png"], "image/png", operatorId);
     expect(response.status).toBe(201);
   });

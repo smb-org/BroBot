@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent, type ReactElement } from "react";
+import { useEffect, useRef, useState, type DragEvent, type Dispatch, type ReactElement, type SetStateAction } from "react";
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { useModuleQuery } from "../../../dashboard/data";
@@ -40,7 +40,7 @@ function MediaRow({
   asset,
   channelId,
   language,
-  canOperate,
+  canManage,
   playingId,
   setPlayingId,
   onDelete,
@@ -48,15 +48,26 @@ function MediaRow({
   asset: MediaAssetMetadata;
   channelId: string;
   language: Language;
-  canOperate: boolean;
+  canManage: boolean;
   playingId: string | null;
-  setPlayingId: (id: string | null) => void;
+  setPlayingId: Dispatch<SetStateAction<string | null>>;
   onDelete: (asset: MediaAssetMetadata) => void;
 }): ReactElement {
   const audioRef = useRef<HTMLAudioElement>(null);
   const labels = overlayAlertsPanelTexts[language];
   const isPlaying = playingId === asset.id;
   const url = mediaAssetUrl(channelId, asset);
+
+  // Starting another sound makes this one inactive: stop it and rewind.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!isPlaying && audio !== null && !audio.paused) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+  }, [isPlaying]);
+
+  const clearIfActive = (): void => setPlayingId((current) => current === asset.id ? null : current);
 
   const togglePlayback = (): void => {
     const audio = audioRef.current;
@@ -66,7 +77,8 @@ function MediaRow({
       setPlayingId(null);
       return;
     }
-    audioRef.current?.play().then(() => setPlayingId(asset.id)).catch(() => setPlayingId(null));
+    setPlayingId(asset.id);
+    audio.play().catch(clearIfActive);
   };
 
   return <li className="overlay-alerts-media-row">
@@ -83,8 +95,8 @@ function MediaRow({
           ref={audioRef}
           src={url}
           preload="none"
-          onEnded={() => setPlayingId(null)}
-          onPause={() => { if (isPlaying) setPlayingId(null); }}
+          onEnded={clearIfActive}
+          onPause={clearIfActive}
         />
         <Button
           icon={isPlaying ? "player-pause" : "player-play"}
@@ -94,7 +106,7 @@ function MediaRow({
           onClick={togglePlayback}
         />
       </> : null}
-      {!canOperate ? null : <Button
+      {!canManage ? null : <Button
         icon="remove"
         iconOnly
         danger="subtle"
@@ -105,7 +117,7 @@ function MediaRow({
   </li>;
 }
 
-export default function OverlayAlertsPanel({ channelId, language = "de", canOperate = false }: ModulePanelProperties): ReactElement {
+export default function OverlayAlertsPanel({ channelId, language = "de", canManage = false }: ModulePanelProperties): ReactElement {
   const lang: Language = language === "en" ? "en" : "de";
   const labels = overlayAlertsPanelTexts[lang];
   const query = useModuleQuery(channelId, "overlay_alerts", "data", (signal) => loadMediaAssets(channelId, signal));
@@ -117,7 +129,7 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canOper
   const [confirming, setConfirming] = useState<MediaAssetMetadata | null>(null);
 
   const upload = async (file: File | undefined): Promise<void> => {
-    if (file === undefined || !canOperate || pending) return;
+    if (file === undefined || !canManage || pending) return;
     setPending(true);
     setStatus("");
     try {
@@ -152,7 +164,7 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canOper
   const handleDrop = (event: DragEvent<HTMLLabelElement>): void => {
     event.preventDefault();
     setDragging(false);
-    if (canOperate) void upload(event.dataTransfer.files[0]);
+    if (canManage) void upload(event.dataTransfer.files[0]);
   };
 
   const assets = query.data ?? [];
@@ -162,7 +174,7 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canOper
         <div>
           <h2 id="overlay-alerts-media-heading">{labels.heading}</h2>
         </div>
-        {canOperate ? <Button
+        {canManage ? <Button
           variant="primary"
           icon="add"
           disabled={pending}
@@ -170,7 +182,7 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canOper
         >{labels.upload}</Button> : null}
       </div>
 
-      {canOperate ? <label
+      {canManage ? <label
         className={`overlay-alerts-drop-zone${dragging ? " is-dragging" : ""}`}
         onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
         onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
@@ -209,7 +221,7 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canOper
               asset={asset}
               channelId={channelId}
               language={lang}
-              canOperate={canOperate}
+              canManage={canManage}
               playingId={playingId}
               setPlayingId={setPlayingId}
               onDelete={setConfirming}

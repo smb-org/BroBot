@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 
-import { hasRequiredChannelRole, type AuditAction } from "../../contracts/values";
+import { canManage, type AuditAction } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import {
   detectMediaType,
@@ -34,13 +34,13 @@ type UploadPayloadResult =
 const channelIdFrom = (context: MediaRouteContext): string => context.req.param("channelId") ?? "";
 const nowIso = (): string => new Date().toISOString();
 
-const requireOperator = (context: MediaRouteContext): Response | null =>
-  hasRequiredChannelRole(context.get("channelRole"), "operator")
+const requireManager = (context: MediaRouteContext): Response | null =>
+  canManage(context.get("channelRole"))
     ? null
     : context.json({ error: "media_management_denied" }, 403);
 
-const currentOperatorCanMutate = async (context: MediaRouteContext, channelId: string, now: string): Promise<boolean> => {
-  const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+const currentManagerCanMutate = async (context: MediaRouteContext, channelId: string, now: string): Promise<boolean> => {
+  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
   const currentMember = await context.env.DB.prepare(
     `SELECT channel_id FROM channels WHERE channel_id = ? ${authorization.sql}`,
   ).bind(channelId, ...authorization.values).first<{ channel_id: string }>();
@@ -179,7 +179,7 @@ export const createOverlayAlertsRoutes = (options: {
   });
 
   routes.post("/media", async (context) => {
-    const deniedResponse = requireOperator(context);
+    const deniedResponse = requireManager(context);
     if (deniedResponse !== null) return deniedResponse;
     const upload = await readUploadPayload(context.req.raw);
     if (!upload.ok) return context.json({ error: upload.error }, upload.status);
@@ -192,7 +192,7 @@ export const createOverlayAlertsRoutes = (options: {
 
     const channelId = channelIdFrom(context);
     const now = nowIso();
-    if (!await currentOperatorCanMutate(context, channelId, now)) {
+    if (!await currentManagerCanMutate(context, channelId, now)) {
       return context.json({ error: "media_management_denied" }, 403);
     }
     const sha256 = await sha256Hex(upload.payload.bytes);
@@ -201,7 +201,7 @@ export const createOverlayAlertsRoutes = (options: {
 
     const id = crypto.randomUUID();
     const fileName = safeMediaFileName(upload.payload.fileName);
-    const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+    const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
     const mutation = context.env.DB.prepare(
       `INSERT INTO media_assets (
          channel_id, id, kind, mime_type, byte_size, sha256, file_name, data, created_at
@@ -239,7 +239,7 @@ export const createOverlayAlertsRoutes = (options: {
   });
 
   routes.delete("/media/:id", async (context) => {
-    const deniedResponse = requireOperator(context);
+    const deniedResponse = requireManager(context);
     if (deniedResponse !== null) return deniedResponse;
     const channelId = channelIdFrom(context);
     const id = context.req.param("id");
@@ -248,10 +248,10 @@ export const createOverlayAlertsRoutes = (options: {
     if (await checkMediaInUse(channelId, id)) return context.json({ error: "media_in_use" }, 409);
 
     const now = nowIso();
-    if (!await currentOperatorCanMutate(context, channelId, now)) {
+    if (!await currentManagerCanMutate(context, channelId, now)) {
       return context.json({ error: "media_management_denied" }, 403);
     }
-    const authorization = context.get("authorizeMutation")(channelId, context.get("actor"), now);
+    const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
     const mutation = context.env.DB.prepare(
       `DELETE FROM media_assets WHERE channel_id = ? AND id = ? ${authorization.sql} RETURNING id`,
     ).bind(channelId, id, ...authorization.values);
