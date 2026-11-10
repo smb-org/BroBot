@@ -3000,7 +3000,11 @@ describe("Dashboard skeleton", () => {
     await toggleModuleWithUndo(rendered.queryClient, "kanal-a", "channel_points", true);
     await waitFor(() => expect(requests).toEqual([{ enabled: false }, { enabled: true }]));
 
-    fireEvent.click(within(failure).getByRole("button", { name: "Erneut versuchen" }));
+    await act(async () => {
+      fireEvent.click(within(failure).getByRole("button", { name: "Erneut versuchen" }));
+      // Let CSRF and any retry PATCH settle before asserting that nothing was sent.
+      await new Promise((resolve) => { setTimeout(resolve, 50); });
+    });
 
     expect(requests).toEqual([{ enabled: false }, { enabled: true }]);
     await waitFor(() => expect(failure).not.toBeInTheDocument());
