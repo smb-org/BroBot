@@ -53,7 +53,7 @@ import {
 } from "../../modules/timers/durable";
 import { sameTimerAlarmIdentity } from "../../modules/timers/identity";
 import { acceptsTimerAlarmClear, acceptsTimerAlarmSet } from "../../modules/timers/identity";
-import { authorizeModuleMutation } from "../module-authorization";
+import { authorizeModuleManagementMutation, authorizeModuleMutation } from "../module-authorization";
 import type { ActorContext } from "../db/guards";
 import type { TimerIntervalState } from "../../modules/timers/contracts";
 import type { SkipTimerOccurrenceResult } from "../../modules/timers/contracts";
@@ -1194,6 +1194,7 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async serializeModuleLifecycleMutation<Result>(operation: () => Promise<Result>): Promise<Result> {
+    // ponytail: Channel-points lifecycle work may call Helix while holding this lane; helixRequest caps each request at 5 seconds.
     const previous = this.moduleLifecycleMutationQueue;
     let release!: () => void;
     this.moduleLifecycleMutationQueue = new Promise<void>((resolve) => { release = resolve; });
@@ -3633,6 +3634,12 @@ export class ChannelObject extends DurableObject<Env> {
     const handler = `module:${moduleId}:${registration.key}`;
     const context: ModuleAlarmContext = {
       DB: this.env.DB,
+      // Only the channel-points lifecycle needs Worker integrations; the Env is not structured-cloneable over test RPC.
+      ...(moduleId === "channel_points" ? {
+        environment: this.env,
+        authorizeMutation: authorizeModuleMutation,
+        authorizeManagementMutation: authorizeModuleManagementMutation,
+      } : {}),
       channelId,
       writeModuleAudit: (entry, changedAt, options) => writeModuleAudit(
         this.env.DB, options?.actorUserId ?? "system", changedAt,

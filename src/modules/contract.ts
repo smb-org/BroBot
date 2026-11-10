@@ -799,6 +799,11 @@ export interface ModuleAlarmContext {
   /** Replayable audit writes, scoped by the host to this alarm's channel and module. */
   writeModuleAudit?: WriteModuleAudit;
   DB: D1Database;
+  /** Worker bindings for modules whose serialized lifecycle calls use Helix. */
+  environment?: Env;
+  /** Actor-scoped guards for route operations executed inside the alarm lane. */
+  authorizeMutation?: AuthorizeModuleMutation;
+  authorizeManagementMutation?: AuthorizeModuleMutation;
   channelId: string;
   /** Full identity and D1 plan sequence for the alarm currently being handled. */
   alarmIdentity?: ModuleAlarmIdentity | null;
@@ -1997,7 +2002,10 @@ export interface ModuleEnableContext {
 }
 
 /** Host inputs for a post-commit module activation side effect. */
-type ModuleActivationContext = ModuleEnableContext & { environment: Env };
+type ModuleActivationContext = ModuleEnableContext & {
+  environment: Env;
+  runModuleAlarm: (handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>;
+};
 export interface ModuleActivationResult {
   ok: false;
   error: string;

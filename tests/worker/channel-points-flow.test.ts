@@ -3,13 +3,22 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { createChannelPointsRepository } from "../../src/modules/channel_points/repository";
-import { processChannelPointsEvent, reconcileChannelPoints } from "../../src/modules/channel_points/service";
+import {
+  CHANNEL_POINTS_LIFECYCLE_ALARM,
+  CHANNEL_POINTS_LIFECYCLE_HANDLER,
+  processChannelPointsEvent,
+  reconcileChannelPoints,
+} from "../../src/modules/channel_points/service";
 import type { ChannelPointsRewardInput } from "../../src/modules/channel_points/contracts";
 
-const mocks = vi.hoisted(() => ({ update: vi.fn(), list: vi.fn(), setEnabled: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  update: vi.fn(), list: vi.fn(), listByIds: vi.fn(), manageable: vi.fn(), setEnabled: vi.fn(),
+}));
 vi.mock("../../src/worker/twitch/channel-points", () => ({
   updateRedemptionStatus: mocks.update,
   listUnfulfilledRedemptions: mocks.list,
+  listRedemptionsByIds: mocks.listByIds,
+  getManageableRewards: mocks.manageable,
   setCustomRewardEnabled: mocks.setEnabled,
 }));
 
@@ -75,6 +84,12 @@ describe("channel points redemption flow on local D1", () => {
   const sendChat = vi.fn();
   const context = { DB: database, environment, channelId, sendChat } as unknown as ModuleExecutionContext;
   const repository = createChannelPointsRepository(database);
+  const manageableReward = {
+    id: "reward_twitch", title: "Fictional reward", prompt: null, cost: 10, is_enabled: true,
+    background_color: null, is_user_input_required: false, global_cooldown_seconds: null,
+    max_per_stream: null, max_per_user_per_stream: null, is_paused: null, is_in_stock: null,
+    should_redemptions_skip_request_queue: false,
+  };
 
   beforeAll(async () => {
     for (const path of Object.keys(migrationSources).sort((left, right) => left.localeCompare(right))) {
@@ -88,12 +103,17 @@ describe("channel points redemption flow on local D1", () => {
     await database.prepare(
       "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'channel_points', 1, '{}')",
     ).bind(channelId).run();
+    await database.prepare(
+      "INSERT INTO channel_members (channel_id,user_id,role,created_at,updated_at) VALUES (?,?,?,?,?)",
+    ).bind(channelId, channelId, "broadcaster", now, now).run();
     await repository.insertReward(channelId, reward, "reward_local", "reward_twitch", now);
   });
 
   beforeEach(() => {
     mocks.update.mockReset().mockResolvedValue({ ok: true, data: [] });
     mocks.list.mockReset().mockResolvedValue({ ok: true, data: [] });
+    mocks.listByIds.mockReset().mockResolvedValue({ ok: true, data: [] });
+    mocks.manageable.mockReset().mockResolvedValue({ ok: true, data: [manageableReward] });
     sendChat.mockReset().mockResolvedValue({ sent: true, delivery: "sent", reason: null });
   });
 
@@ -176,5 +196,43 @@ describe("channel points redemption flow on local D1", () => {
     );
     await expect(repository.getRedemption(channelId, "redemption_refund"))
       .resolves.toMatchObject({ status: "refunded", pendingTwitchStatus: null });
+  });
+
+  it("serializes activation PATCHes through the real channel Durable Object lane", async () => {
+    const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(channelId));
+    await database.prepare(
+      "UPDATE channel_modules SET enabled=0 WHERE channel_id=? AND module_id='channel_points'",
+    ).bind(channelId).run();
+    await database.prepare(
+      "UPDATE channel_points_rewards SET enabled=1,restore_enabled=NULL WHERE channel_id=?",
+    ).bind(channelId).run();
+    let twitchEnabled = true;
+    // The delay timer must be created inside the Durable Object's own I/O context; resolving it from the test is cross-object I/O.
+    mocks.setEnabled.mockImplementationOnce(() => new Promise<{ ok: true; data: [] }>((resolve) => {
+      setTimeout(() => { twitchEnabled = false; resolve({ ok: true, data: [] }); }, 100);
+    })).mockImplementation((_environment, _channel, _reward, enabled) => {
+      twitchEnabled = enabled as boolean;
+      return Promise.resolve({ ok: true, data: [] });
+    });
+    const invocation = { kind: "activation", actor: { userId: channelId } };
+    const disable = object.runModuleAlarm(
+      "channel_points", CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, invocation,
+    );
+    await vi.waitFor(() => { expect(mocks.setEnabled).toHaveBeenCalledTimes(1); }, { timeout: 10_000 });
+    await database.prepare(
+      "UPDATE channel_modules SET enabled=1 WHERE channel_id=? AND module_id='channel_points'",
+    ).bind(channelId).run();
+    const enable = object.runModuleAlarm(
+      "channel_points", CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, invocation,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.setEnabled).toHaveBeenCalledTimes(1);
+    await Promise.all([Promise.resolve(disable), Promise.resolve(enable)]);
+
+    expect(mocks.setEnabled.mock.calls.map((call) => call[3] as boolean)).toEqual([false, true]);
+    expect(twitchEnabled).toBe(true);
+    await expect(database.prepare(
+      "SELECT enabled,restore_enabled FROM channel_points_rewards WHERE channel_id=? AND id='reward_local'",
+    ).bind(channelId).first()).resolves.toMatchObject({ enabled: 1, restore_enabled: null });
   });
 });

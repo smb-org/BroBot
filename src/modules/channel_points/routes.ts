@@ -3,30 +3,38 @@ import { Hono, type Context } from "hono";
 import { hasRequiredChannelRole } from "../../contracts/values";
 import type { ModuleRouteEnvironment } from "../contract";
 import {
-  CHANNEL_POINTS_MAX_REWARDS,
   CHANNEL_POINTS_MODULE_ID,
   channelPointsRewardInputSchema,
   type ChannelPointsHelixReason,
 } from "./contracts";
 import { createChannelPointsRepository } from "./repository";
-import { reconcileChannelPoints } from "./service";
+import {
+  CHANNEL_POINTS_LIFECYCLE_ALARM,
+  CHANNEL_POINTS_LIFECYCLE_HANDLER,
+} from "./service";
 
 type RouteContext = Context<ModuleRouteEnvironment>;
 const readBody = async (request: Request): Promise<unknown> => request.json().catch(() => null);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const channelIdFrom = (context: RouteContext): string => context.req.param("channelId") ?? "";
+const requireManager = (context: RouteContext): Response | null =>
+  hasRequiredChannelRole(context.get("channelRole"), "manager")
+    ? null
+    : context.json({ error: "channel_points_management_denied" }, 403);
 const requireOperator = (context: RouteContext): Response | null =>
   hasRequiredChannelRole(context.get("channelRole"), "operator")
     ? null
-    : context.json({ error: "channel_points_management_denied" }, 403);
+    : context.json({ error: "channel_points_operation_denied" }, 403);
 const nowIso = (): string => new Date().toISOString();
-const authorizeCurrentOperator = (context: RouteContext, channelId: string) => async (): Promise<boolean> => {
-  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), nowIso());
-  return await context.env.DB.prepare(
-    "SELECT channel_id FROM channels WHERE channel_id = ? " + authorization.sql,
-  ).bind(channelId, ...authorization.values).first<{ channel_id: string }>() !== null;
-};
+const runLifecycle = (context: RouteContext, channelId: string, invocation: unknown): Promise<unknown> =>
+  context.get("runModuleAlarm")(
+    channelId,
+    CHANNEL_POINTS_MODULE_ID,
+    CHANNEL_POINTS_LIFECYCLE_HANDLER,
+    CHANNEL_POINTS_LIFECYCLE_ALARM,
+    invocation,
+  );
 const moduleEnabled = async (db: D1Database, channelId: string): Promise<boolean> =>
   (await db.prepare("SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = ?")
     .bind(channelId, CHANNEL_POINTS_MODULE_ID).first<{ enabled: number }>())?.enabled === 1;
@@ -45,6 +53,10 @@ const actionFailure = (reason: ChannelPointsHelixReason): { status: 403 | 409 | 
 const reasonResponse = (context: RouteContext, reason: ChannelPointsHelixReason): Response => {
   const failure = actionFailure(reason);
   return context.json({ error: failure.error }, failure.status);
+};
+const rewardOperationError = (error: string): { status: 404 | 409; error: string } => {
+  if (error === "channel_points_reward_not_found") return { status: 404, error };
+  return { status: 409, error };
 };
 const validateAction = async (input: ReturnType<typeof channelPointsRewardInputSchema.parse>): Promise<string | null> => {
   const { MODULES } = await import("../registry");
@@ -88,102 +100,102 @@ channelPointsRoutes.get("/redemptions", async (context) => {
 });
 
 channelPointsRoutes.post("/rewards", async (context) => {
-  const denied = requireOperator(context);
+  const denied = requireManager(context);
   if (denied !== null) return denied;
   const channelId = channelIdFrom(context);
-  if (!await moduleEnabled(context.env.DB, channelId)) return context.json({ error: "channel_points_module_disabled" }, 409);
   const parsed = channelPointsRewardInputSchema.safeParse(await readBody(context.req.raw));
   if (!parsed.success) return context.json({ error: "channel_points_invalid_reward" }, 422);
   const actionError = await validateAction(parsed.data);
   if (actionError !== null) return context.json({ error: actionError }, 422);
-  const rewardCount = await context.env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM channel_points_rewards WHERE channel_id = ? AND twitch_state = 'active'",
-  ).bind(channelId).first<{ count: number }>();
-  if ((rewardCount?.count ?? 0) >= CHANNEL_POINTS_MAX_REWARDS) {
-    return reasonResponse(context, "reward_limit");
+  const result = await runLifecycle(context, channelId, {
+    kind: "reward.create", actor: context.get("actor"), now: nowIso(), id: crypto.randomUUID(), reward: parsed.data,
+  });
+  if (!isRecord(result)) return context.json({ error: "channel_points_unknown_status" }, 502);
+  if (result.ok !== true) {
+    if (typeof result.error === "string") {
+      const failure = rewardOperationError(result.error);
+      return context.json({ error: failure.error }, failure.status);
+    }
+    return reasonResponse(context, result.reason as ChannelPointsHelixReason);
   }
-  const authorize = authorizeCurrentOperator(context, channelId);
-  const { createCustomReward } = await import("../../worker/twitch/channel-points");
-  const created = await createCustomReward(context.env, channelId, parsed.data, authorize);
-  if (!created.ok) return reasonResponse(context, created.reason);
-  const remote = created.data[0];
-  if (remote === undefined) return reasonResponse(context, "invalid_response");
-  const now = nowIso();
-  const id = crypto.randomUUID();
-  await createChannelPointsRepository(context.env.DB).insertReward(channelId, parsed.data, id, remote.id, now);
-  return context.json({ reward: await createChannelPointsRepository(context.env.DB).getReward(channelId, id) }, 201);
+  return context.json({ reward: result.reward }, 201);
 });
 
 channelPointsRoutes.put("/rewards/:id", async (context) => {
-  const denied = requireOperator(context);
+  const denied = requireManager(context);
   if (denied !== null) return denied;
   const channelId = channelIdFrom(context);
-  if (!await moduleEnabled(context.env.DB, channelId)) return context.json({ error: "channel_points_module_disabled" }, 409);
   const parsed = channelPointsRewardInputSchema.safeParse(await readBody(context.req.raw));
   if (!parsed.success) return context.json({ error: "channel_points_invalid_reward" }, 422);
   const actionError = await validateAction(parsed.data);
   if (actionError !== null) return context.json({ error: actionError }, 422);
-  const repository = createChannelPointsRepository(context.env.DB);
-  const current = await repository.getReward(channelId, context.req.param("id"));
-  if (current === null) return context.json({ error: "channel_points_reward_not_found" }, 404);
-  if (current.twitchState === "deleted_on_twitch") return context.json({ error: "channel_points_reward_deleted" }, 409);
-  const { updateCustomReward } = await import("../../worker/twitch/channel-points");
-  const updated = await updateCustomReward(context.env, channelId, current.twitchRewardId, parsed.data, authorizeCurrentOperator(context, channelId));
-  if (!updated.ok) return reasonResponse(context, updated.reason);
-  await repository.updateReward(channelId, current.id, parsed.data, nowIso());
-  return context.json({ reward: await repository.getReward(channelId, current.id) });
+  const result = await runLifecycle(context, channelId, {
+    kind: "reward.update", actor: context.get("actor"), now: nowIso(), id: context.req.param("id"), reward: parsed.data,
+  });
+  if (!isRecord(result)) return context.json({ error: "channel_points_unknown_status" }, 502);
+  if (result.ok !== true) {
+    if (typeof result.error === "string") {
+      const failure = rewardOperationError(result.error);
+      return context.json({ error: failure.error }, failure.status);
+    }
+    return reasonResponse(context, result.reason as ChannelPointsHelixReason);
+  }
+  return context.json({ reward: result.reward });
 });
 
 channelPointsRoutes.delete("/rewards/:id", async (context) => {
-  const denied = requireOperator(context);
+  const denied = requireManager(context);
   if (denied !== null) return denied;
   const channelId = channelIdFrom(context);
-  if (!await moduleEnabled(context.env.DB, channelId)) return context.json({ error: "channel_points_module_disabled" }, 409);
-  const repository = createChannelPointsRepository(context.env.DB);
-  const current = await repository.getReward(channelId, context.req.param("id"));
-  if (current === null) return context.json({ error: "channel_points_reward_not_found" }, 404);
-  const { deleteCustomReward } = await import("../../worker/twitch/channel-points");
-  const deleted = await deleteCustomReward(context.env, channelId, current.twitchRewardId, authorizeCurrentOperator(context, channelId));
-  if (!deleted.ok) return reasonResponse(context, deleted.reason);
-  await repository.deleteReward(channelId, current.id);
+  const result = await runLifecycle(context, channelId, {
+    kind: "reward.delete", actor: context.get("actor"), now: nowIso(), id: context.req.param("id"),
+  });
+  if (!isRecord(result)) return context.json({ error: "channel_points_unknown_status" }, 502);
+  if (result.ok !== true) {
+    if (typeof result.error === "string") {
+      const failure = rewardOperationError(result.error);
+      return context.json({ error: failure.error }, failure.status);
+    }
+    return reasonResponse(context, result.reason as ChannelPointsHelixReason);
+  }
   return context.json({ ok: true });
 });
 
 channelPointsRoutes.post("/rewards/:id/recreate", async (context) => {
-  const denied = requireOperator(context);
+  const denied = requireManager(context);
   if (denied !== null) return denied;
   const channelId = channelIdFrom(context);
-  if (!await moduleEnabled(context.env.DB, channelId)) return context.json({ error: "channel_points_module_disabled" }, 409);
-  const repository = createChannelPointsRepository(context.env.DB);
-  const current = await repository.getReward(channelId, context.req.param("id"));
-  if (current === null) return context.json({ error: "channel_points_reward_not_found" }, 404);
-  if (current.twitchState !== "deleted_on_twitch") return context.json({ error: "channel_points_reward_not_deleted" }, 409);
-  const { createCustomReward } = await import("../../worker/twitch/channel-points");
-  const created = await createCustomReward(
-    context.env, channelId, current, authorizeCurrentOperator(context, channelId),
-  );
-  if (!created.ok) return reasonResponse(context, created.reason);
-  const remote = created.data[0];
-  if (remote === undefined) return reasonResponse(context, "invalid_response");
-  await repository.replaceTwitchId(channelId, current.id, remote.id, nowIso());
-  return context.json({ reward: await repository.getReward(channelId, current.id) });
+  const result = await runLifecycle(context, channelId, {
+    kind: "reward.recreate", actor: context.get("actor"), now: nowIso(), id: context.req.param("id"),
+  });
+  if (!isRecord(result)) return context.json({ error: "channel_points_unknown_status" }, 502);
+  if (result.ok !== true) {
+    if (typeof result.error === "string") {
+      const failure = rewardOperationError(result.error);
+      return context.json({ error: failure.error }, failure.status);
+    }
+    return reasonResponse(context, result.reason as ChannelPointsHelixReason);
+  }
+  return context.json({ reward: result.reward });
 });
 
 channelPointsRoutes.post("/reconcile", async (context) => {
   const denied = requireOperator(context);
   if (denied !== null) return denied;
   const channelId = channelIdFrom(context);
-  if (!await moduleEnabled(context.env.DB, channelId)) return context.json({ error: "channel_points_module_disabled" }, 409);
-  const authorization = authorizeCurrentOperator(context, channelId);
   const requestBody = await readBody(context.req.raw);
   const force = isRecord(requestBody) && requestBody["force"] === true;
-  const moduleContext = (await import("../../worker/module-action-context"))
-    .createModuleActionExecutionContext(context.env, channelId, CHANNEL_POINTS_MODULE_ID);
-  const result = await reconcileChannelPoints(context.env, channelId, nowIso(), {
-    force,
-    authorize: authorization,
-    context: moduleContext,
+  const result = await runLifecycle(context, channelId, {
+    kind: "reconcile", actor: context.get("actor"), now: nowIso(), force,
   });
-  if (result !== "success") return reasonResponse(context, result);
+  if (result !== "success") {
+    if (isRecord(result) && Array.isArray(result.failedRewards)) {
+      return context.json({ ok: false, failedRewards: result.failedRewards }, 207);
+    }
+    if (isRecord(result) && typeof result.error === "string") {
+      return context.json({ error: result.error }, result.error === "channel_points_module_disabled" ? 409 : 424);
+    }
+    return reasonResponse(context, result as ChannelPointsHelixReason);
+  }
   return context.json({ ok: true });
 });

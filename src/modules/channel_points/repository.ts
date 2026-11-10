@@ -35,15 +35,15 @@ export interface ChannelPointsRepository {
   listRewards(channelId: string): Promise<ChannelPointsReward[]>;
   getReward(channelId: string, id: string): Promise<ChannelPointsReward | null>;
   getRewardByTwitchId(channelId: string, id: string): Promise<ChannelPointsReward | null>;
-  insertReward(channelId: string, reward: ChannelPointsRewardInput, id: string, twitchRewardId: string, now: string): Promise<void>;
-  updateReward(channelId: string, id: string, reward: ChannelPointsRewardInput, now: string): Promise<void>;
-  adoptTwitchReward(channelId: string, reward: { id: string; title: string; prompt: string | null; cost: number; backgroundColor: string | null; isUserInputRequired: boolean; globalCooldownSeconds: number | null; maxPerStream: number | null; maxPerUserPerStream: number | null; isEnabled: boolean }, now: string): Promise<void>;
-  markRewardDeleted(channelId: string, twitchRewardId: string, now: string): Promise<void>;
-  deleteReward(channelId: string, id: string): Promise<void>;
-  replaceTwitchId(channelId: string, id: string, twitchRewardId: string, now: string): Promise<void>;
+  insertReward(channelId: string, reward: ChannelPointsRewardInput, id: string, twitchRewardId: string, now: string, guard?: { sql: string; values: readonly (string | number | null)[] }): Promise<boolean>;
+  updateReward(channelId: string, id: string, reward: ChannelPointsRewardInput, now: string, guard?: { sql: string; values: readonly (string | number | null)[] }): Promise<boolean>;
+  adoptTwitchReward(channelId: string, reward: { id: string; title: string; prompt: string | null; cost: number; backgroundColor: string | null; isUserInputRequired: boolean; globalCooldownSeconds: number | null; maxPerStream: number | null; maxPerUserPerStream: number | null; isEnabled: boolean }, now: string, eventAt?: string): Promise<boolean>;
+  markRewardDeleted(channelId: string, twitchRewardId: string, now: string, eventAt?: string): Promise<boolean>;
+  deleteReward(channelId: string, id: string, guard?: { sql: string; values: readonly (string | number | null)[] }): Promise<boolean>;
+  replaceTwitchId(channelId: string, id: string, twitchRewardId: string, now: string, guard?: { sql: string; values: readonly (string | number | null)[] }): Promise<boolean>;
   latchRedemption(channelId: string, redemption: {
     id: string; rewardId: string; rewardTitle: string; userId: string; userLogin: string; userName: string;
-    userInput: string; redeemedAt: string; initialStatus?: "fulfilled" | "refunded";
+    userInput: string; redeemedAt: string; initialStatus?: "queued" | "fulfilled" | "refunded";
   }, now: string): Promise<boolean>;
   getRedemption(channelId: string, id: string): Promise<ChannelPointsRedemption | null>;
   updateRedemption(channelId: string, id: string, change: { status: ChannelPointsRedemptionStatus; pendingTwitchStatus?: TwitchRedemptionStatus | null; outcomeReason?: { de: string; en: string } | null; claimedAt?: string | null }, fromStatuses: readonly ChannelPointsRedemptionStatus[], now: string): Promise<boolean>;
@@ -52,6 +52,7 @@ export interface ChannelPointsRepository {
   claimFailedPatch(channelId: string, id: string, expiredBefore: string, now: string): Promise<boolean>;
   listRedemptions(channelId: string, cursor: string | null, limit: number): Promise<{ items: ChannelPointsRedemption[]; cursor: string | null }>;
   listRetryable(channelId: string, expiredBefore: string): Promise<ChannelPointsRedemption[]>;
+  listOpenRedemptions(channelId: string, expiredBefore: string): Promise<ChannelPointsRedemption[]>;
   persistReconcileTime(channelId: string, now: string): Promise<void>;
   lastReconciledAt(channelId: string): Promise<string | null>;
 }
@@ -74,33 +75,49 @@ export const createChannelPointsRepository = (db: D1Database): ChannelPointsRepo
     const row = await db.prepare("SELECT * FROM channel_points_rewards WHERE channel_id = ? AND twitch_reward_id = ?").bind(channelId, id).first<RewardRow>();
     return row === null ? null : rewardFromRow(row);
   },
-  async insertReward(channelId, reward, id, twitchRewardId, now) {
-    await db.prepare("INSERT INTO channel_points_rewards (channel_id,id,twitch_reward_id,title,prompt,cost,background_color,is_user_input_required,global_cooldown_seconds,max_per_stream,max_per_user_per_stream,action_module_id,action_id,action_config_json,mode,enabled,twitch_state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',?,?)")
+  async insertReward(channelId, reward, id, twitchRewardId, now, guard) {
+    const authorization = guard === undefined ? "" : ` WHERE EXISTS (SELECT 1 FROM channels WHERE channel_id = ? ${guard.sql})`;
+    const result = await db.prepare(`INSERT INTO channel_points_rewards (channel_id,id,twitch_reward_id,title,prompt,cost,background_color,is_user_input_required,global_cooldown_seconds,max_per_stream,max_per_user_per_stream,action_module_id,action_id,action_config_json,mode,enabled,twitch_state,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',?,?${authorization}`)
       .bind(channelId, id, twitchRewardId, reward.title, reward.prompt, reward.cost, reward.backgroundColor,
         Number(reward.isUserInputRequired), reward.globalCooldownSeconds, reward.maxPerStream, reward.maxPerUserPerStream,
-        reward.actionModuleId, reward.actionId, JSON.stringify(reward.actionConfig), reward.mode, Number(reward.enabled), now, now).run();
+        reward.actionModuleId, reward.actionId, JSON.stringify(reward.actionConfig), reward.mode, Number(reward.enabled), now, now,
+        ...(guard === undefined ? [] : [channelId, ...guard.values])).run();
+    return result.meta.changes > 0;
   },
-  async updateReward(channelId, id, reward, now) {
-    await db.prepare("UPDATE channel_points_rewards SET title=?,prompt=?,cost=?,background_color=?,is_user_input_required=?,global_cooldown_seconds=?,max_per_stream=?,max_per_user_per_stream=?,action_module_id=?,action_id=?,action_config_json=?,mode=?,enabled=?,updated_at=? WHERE channel_id=? AND id=?")
+  async updateReward(channelId, id, reward, now, guard) {
+    const authorization = guard === undefined ? "" : ` AND EXISTS (SELECT 1 FROM channels WHERE channel_id = ? ${guard.sql})`;
+    const result = await db.prepare(`UPDATE channel_points_rewards SET title=?,prompt=?,cost=?,background_color=?,is_user_input_required=?,global_cooldown_seconds=?,max_per_stream=?,max_per_user_per_stream=?,action_module_id=?,action_id=?,action_config_json=?,mode=?,enabled=?,updated_at=? WHERE channel_id=? AND id=?${authorization}`)
       .bind(reward.title, reward.prompt, reward.cost, reward.backgroundColor, Number(reward.isUserInputRequired),
         reward.globalCooldownSeconds, reward.maxPerStream, reward.maxPerUserPerStream, reward.actionModuleId,
-        reward.actionId, JSON.stringify(reward.actionConfig), reward.mode, Number(reward.enabled), now, channelId, id).run();
+        reward.actionId, JSON.stringify(reward.actionConfig), reward.mode, Number(reward.enabled), now, channelId, id,
+        ...(guard === undefined ? [] : [channelId, ...guard.values])).run();
+    return result.meta.changes > 0;
   },
-  async adoptTwitchReward(channelId, reward, now) {
-    await db.prepare("UPDATE channel_points_rewards SET title=?,prompt=?,cost=?,background_color=?,is_user_input_required=?,global_cooldown_seconds=?,max_per_stream=?,max_per_user_per_stream=?,enabled=?,twitch_state='active',updated_at=? WHERE channel_id=? AND twitch_reward_id=?")
+  async adoptTwitchReward(channelId, reward, now, eventAt) {
+    const ordering = eventAt === undefined ? "" : " AND twitch_state = 'active' AND (last_twitch_event_at IS NULL OR last_twitch_event_at <= ?)";
+    const result = await db.prepare(`UPDATE channel_points_rewards SET title=?,prompt=?,cost=?,background_color=?,is_user_input_required=?,global_cooldown_seconds=?,max_per_stream=?,max_per_user_per_stream=?,enabled=?,last_twitch_event_at=COALESCE(?,last_twitch_event_at),updated_at=? WHERE channel_id=? AND twitch_reward_id=?${ordering}`)
       .bind(reward.title, reward.prompt, reward.cost, reward.backgroundColor, Number(reward.isUserInputRequired),
-        reward.globalCooldownSeconds, reward.maxPerStream, reward.maxPerUserPerStream, Number(reward.isEnabled), now, channelId, reward.id).run();
+        reward.globalCooldownSeconds, reward.maxPerStream, reward.maxPerUserPerStream, Number(reward.isEnabled),
+        eventAt ?? null, now, channelId, reward.id, ...(eventAt === undefined ? [] : [eventAt])).run();
+    return result.meta.changes > 0;
   },
-  async markRewardDeleted(channelId, twitchRewardId, now) {
-    await db.prepare("UPDATE channel_points_rewards SET twitch_state='deleted_on_twitch',updated_at=? WHERE channel_id=? AND twitch_reward_id=?")
-      .bind(now, channelId, twitchRewardId).run();
+  async markRewardDeleted(channelId, twitchRewardId, now, eventAt) {
+    const ordering = eventAt === undefined ? "" : " AND (last_twitch_event_at IS NULL OR last_twitch_event_at <= ?)";
+    const result = await db.prepare(`UPDATE channel_points_rewards SET twitch_state='deleted_on_twitch',last_twitch_event_at=COALESCE(?,last_twitch_event_at),updated_at=? WHERE channel_id=? AND twitch_reward_id=?${ordering}`)
+      .bind(eventAt ?? null, now, channelId, twitchRewardId, ...(eventAt === undefined ? [] : [eventAt])).run();
+    return result.meta.changes > 0;
   },
-  async deleteReward(channelId, id) {
-    await db.prepare("DELETE FROM channel_points_rewards WHERE channel_id=? AND id=?").bind(channelId, id).run();
+  async deleteReward(channelId, id, guard) {
+    const authorization = guard === undefined ? "" : ` AND EXISTS (SELECT 1 FROM channels WHERE channel_id = ? ${guard.sql})`;
+    const result = await db.prepare(`DELETE FROM channel_points_rewards WHERE channel_id=? AND id=?${authorization}`)
+      .bind(channelId, id, ...(guard === undefined ? [] : [channelId, ...guard.values])).run();
+    return result.meta.changes > 0;
   },
-  async replaceTwitchId(channelId, id, twitchRewardId, now) {
-    await db.prepare("UPDATE channel_points_rewards SET twitch_reward_id=?,twitch_state='active',updated_at=? WHERE channel_id=? AND id=?")
-      .bind(twitchRewardId, now, channelId, id).run();
+  async replaceTwitchId(channelId, id, twitchRewardId, now, guard) {
+    const authorization = guard === undefined ? "" : ` AND EXISTS (SELECT 1 FROM channels WHERE channel_id = ? ${guard.sql})`;
+    const result = await db.prepare(`UPDATE channel_points_rewards SET twitch_reward_id=?,twitch_state='active',last_twitch_event_at=NULL,updated_at=? WHERE channel_id=? AND id=?${authorization}`)
+      .bind(twitchRewardId, now, channelId, id, ...(guard === undefined ? [] : [channelId, ...guard.values])).run();
+    return result.meta.changes > 0;
   },
   async latchRedemption(channelId, redemption, now) {
     const result = await db.prepare("INSERT OR IGNORE INTO channel_points_redemptions (channel_id,redemption_id,reward_id,reward_title,user_id,user_login,user_name,user_input,redeemed_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
@@ -152,6 +169,11 @@ export const createChannelPointsRepository = (db: D1Database): ChannelPointsRepo
   },
   async listRetryable(channelId, expiredBefore) {
     const rows = await db.prepare("SELECT * FROM channel_points_redemptions WHERE channel_id=? AND (status='received' OR (status IN ('pending','running','failed_to_update') AND (claimed_at IS NULL OR claimed_at<=?) AND (status!='failed_to_update' OR pending_twitch_status IS NOT NULL))) ORDER BY redeemed_at")
+      .bind(channelId, expiredBefore).all<RedemptionRow>();
+    return rows.results.map(redemptionFromRow);
+  },
+  async listOpenRedemptions(channelId, expiredBefore) {
+    const rows = await db.prepare("SELECT * FROM channel_points_redemptions WHERE channel_id=? AND (status IN ('received','queued','pending','failed_to_update') OR (status='running' AND (claimed_at IS NULL OR claimed_at<=?))) ORDER BY redeemed_at")
       .bind(channelId, expiredBefore).all<RedemptionRow>();
     return rows.results.map(redemptionFromRow);
   },

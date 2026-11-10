@@ -17,6 +17,7 @@ import {
   createCustomReward,
   deleteCustomReward,
   getManageableRewards,
+  listRedemptionsByIds,
   listUnfulfilledRedemptions,
   setCustomRewardEnabled,
   updateCustomReward,
@@ -213,6 +214,27 @@ describe("channel points Helix wrapper", () => {
     );
     expect(response).toEqual({ ok: false, reason: "invalid_input" });
     expect(capture.calls).toHaveLength(0);
+  });
+
+  it("gets authoritative redemption statuses by batches of IDs", async () => {
+    const capture = captureRequests([{ data: [{
+      id: "redemption_fictional", user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo",
+      user_input: "", redeemed_at: "2026-11-10T12:00:00.000Z", status: "CANCELED",
+      reward: { id: "reward_fictional", title: "Fictional reward" },
+    }] }]);
+    const result = await listRedemptionsByIds(
+      environment, "channel_fictional", ["redemption_fictional"], () => Promise.resolve(true), capture.fetcher,
+    );
+    expect(capture.calls).toHaveLength(1);
+    expect(capture.calls[0]?.method).toBe("GET");
+    expect(capture.calls[0]?.url.pathname).toBe("/helix/channel_points/custom_rewards/redemptions");
+    const call = capture.calls.at(0);
+    if (call === undefined) throw new Error("Expected one redemption status request.");
+    expect([...call.url.searchParams.entries()].sort(([leftKey, leftValue], [rightKey, rightValue]) =>
+      leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue))).toEqual([
+      ["broadcaster_id", "channel_fictional"], ["id", "redemption_fictional"],
+    ]);
+    expect(result).toMatchObject({ ok: true, data: [{ id: "redemption_fictional", status: "CANCELED" }] });
   });
 
   it("maps eligibility, reward limit, and duplicate-title errors while keeping create request shape", async () => {

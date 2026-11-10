@@ -38,6 +38,8 @@ describe("channel points migration", () => {
       expect(database.prepare(
         "SELECT status, claimed_at FROM channel_points_redemptions WHERE channel_id = 'channel_points' AND redemption_id = 'redemption_one'",
       ).get()).toMatchObject({ status: "received", claimed_at: null });
+      expect(database.prepare("PRAGMA table_info(channel_points_rewards)").all())
+        .toEqual(expect.arrayContaining([expect.objectContaining({ name: "last_twitch_event_at" })]));
       const before = database.prepare(
         "SELECT revision FROM panel_resource_revisions WHERE channel_id = ? AND resource = 'module:channel_points:data'",
       ).get("channel_points") as { revision: number };

@@ -1270,6 +1270,12 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
         authorizeMutation: context.get("authorizeManagementMutation"),
         actor,
         now,
+        runModuleAlarm: (handlerKey, alarmKey, invocation) => {
+          const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+          return invocation === undefined
+            ? object.runModuleAlarm(module.id, handlerKey, alarmKey)
+            : object.runModuleAlarm(module.id, handlerKey, alarmKey, invocation);
+        },
       }, channelId, enabled),
     );
   }

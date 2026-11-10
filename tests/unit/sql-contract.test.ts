@@ -145,6 +145,8 @@ const sqlGetFixtures = new Map<string, string>([
   ["leaseGuard", ""],
   ["candidateRowsQuery", "SELECT channel_id, module_id FROM event_log WHERE created_at < '2026-01-01T00:00:00.000Z'"],
   ["whereClause", "channel_id = ? AND module_id = ?"],
+  ["authorization", ""],
+  ["ordering", ""],
   ["sessionGuard.sql", belaboxStreamSessionGuard("channel-id", {
     state: "online",
     changedAt: now,
@@ -172,6 +174,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["lastBroadcasterRoleChangeGuard", lastBroadcasterRoleChangeGuard],
   ["lastBroadcasterGuard", lastBroadcasterGuard],
   ["actorGuard(MANAGING_ROLES)", actorGuard(MANAGING_ROLES)],
+  ["currentGuard.sql", actorGuard(MANAGING_ROLES)],
   ["actorGuard(ANY_MEMBER_ROLES)", actorGuard(ANY_MEMBER_ROLES)],
   ["addedIdGuard", overlayElementIdCollisionGuard(1)],
   ["referencedVariablesGuard", referencedVariablesGuard],

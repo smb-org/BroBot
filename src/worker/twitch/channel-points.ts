@@ -238,3 +238,19 @@ export const listUnfulfilledRedemptions = async (
   }
   return { ok: true, data: result };
 };
+
+/** Reads authoritative Twitch statuses for locally open rows in Helix's 50-ID batches. */
+export const listRedemptionsByIds = async (
+  environment: Env, broadcasterId: string, redemptionIds: readonly string[],
+  authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
+): Promise<ChannelPointsHelixResult<HelixRedemption[]>> => {
+  if (redemptionIds.length < 1 || redemptionIds.length > 50) return { ok: false, reason: "invalid_input" };
+  const url = new URL(REDEMPTIONS_URL);
+  for (const id of redemptionIds) url.searchParams.append("id", id);
+  url.searchParams.set("broadcaster_id", broadcasterId);
+  const result = await request({
+    environment, broadcasterId, scope: "channel:read:redemptions", url: url.toString(),
+    schema: redemptionPageSchema, authorize, fetcher,
+  });
+  return result.ok ? { ok: true, data: result.data.items } : result;
+};
