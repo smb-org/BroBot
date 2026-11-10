@@ -29,7 +29,7 @@ const soundAsset = {
   id: "sound-asset",
   kind: "sound" as const,
   mimeType: "audio/wav",
-  byteSize: 512,
+  byteSize: 120_400,
   sha256: "b".repeat(64),
   fileName: "chime.wav",
   createdAt: "2026-11-10T12:00:00.000Z",
@@ -58,6 +58,8 @@ describe("overlay alert media panel", () => {
     expect(await screen.findByText("sample.png")).toBeVisible();
     expect(screen.getByAltText("Vorschau: sample.png")).toBeVisible();
     expect(screen.getByText("chime.wav")).toBeVisible();
+    expect(screen.getByText("Bild · 128 B")).toBeVisible();
+    expect(screen.getByText("Sound · 118 KB")).toBeVisible();
     expect(screen.getByRole("button", { name: "Abspielen: chime.wav" })).toBeVisible();
   });
 

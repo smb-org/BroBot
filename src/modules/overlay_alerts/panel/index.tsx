@@ -21,18 +21,19 @@ const mediaErrorMessage = (error: unknown, language: Language): string => {
   return labels.uploadFailed;
 };
 
-const formatBytes = (bytes: number, language: Language): string =>
-  new Intl.NumberFormat(language === "de" ? "de-DE" : "en-US", {
-    style: "unit",
-    unit: "byte",
-    unitDisplay: "narrow",
-    maximumFractionDigits: 0,
-  }).format(bytes);
+const formatBytes = (bytes: number, language: Language): string => {
+  const locale = language === "de" ? "de-DE" : "en-US";
+  const format = (value: number, unit: string, digits: number): string =>
+    `${new Intl.NumberFormat(locale, { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(value)} ${unit}`;
+  if (bytes < 1024) return format(bytes, "B", 0);
+  if (bytes < 1024 * 1024) return format(bytes / 1024, "KB", 0);
+  return format(bytes / (1024 * 1024), "MB", 1);
+};
 
 const formatDate = (asset: MediaAssetMetadata, language: Language): string =>
   overlayAlertsPanelTexts[language].typeAndSize(
     asset.kind === "image" ? overlayAlertsPanelTexts[language].image : overlayAlertsPanelTexts[language].sound,
-    `${asset.mimeType} · ${formatBytes(asset.byteSize, language)}`,
+    formatBytes(asset.byteSize, language),
   );
 
 function MediaRow({
