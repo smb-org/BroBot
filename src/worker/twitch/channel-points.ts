@@ -118,6 +118,7 @@ const mapHttp = (status: number | null, message: string | null): ChannelPointsHe
     if (/50|limit|maximum/iu.test(message ?? "")) return "reward_limit";
     return "invalid_input";
   }
+  if (status === 404) return "not_found";
   if (status === 429) return "rate_limited";
   return "unknown_status";
 };
@@ -241,13 +242,14 @@ export const listUnfulfilledRedemptions = async (
 
 /** Reads authoritative Twitch statuses for locally open rows in Helix's 50-ID batches. */
 export const listRedemptionsByIds = async (
-  environment: Env, broadcasterId: string, redemptionIds: readonly string[],
+  environment: Env, broadcasterId: string, rewardId: string, redemptionIds: readonly string[],
   authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
 ): Promise<ChannelPointsHelixResult<HelixRedemption[]>> => {
   if (redemptionIds.length < 1 || redemptionIds.length > 50) return { ok: false, reason: "invalid_input" };
   const url = new URL(REDEMPTIONS_URL);
   for (const id of redemptionIds) url.searchParams.append("id", id);
   url.searchParams.set("broadcaster_id", broadcasterId);
+  url.searchParams.set("reward_id", rewardId);
   const result = await request({
     environment, broadcasterId, scope: "channel:read:redemptions", url: url.toString(),
     schema: redemptionPageSchema, authorize, fetcher,

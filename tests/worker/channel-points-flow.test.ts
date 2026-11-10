@@ -157,6 +157,10 @@ describe("channel points redemption flow on local D1", () => {
       "UPDATE channel_points_redemptions SET claimed_at=? WHERE channel_id=? AND redemption_id=?",
     ).bind("2026-11-10T11:57:00.000Z", channelId, "redemption_concurrent_retry").run();
     sendChat.mockResolvedValue({ sent: true, delivery: "sent", reason: null });
+    mocks.listByIds.mockResolvedValue({ ok: true, data: [{
+      id: "redemption_concurrent_retry", user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo",
+      user_input: "", redeemed_at: now, status: "UNFULFILLED", reward: { id: "reward_twitch", title: "Fictional reward" },
+    }] });
     await Promise.all([
       reconcileChannelPoints(environment, channelId, now, { force: true, context }),
       reconcileChannelPoints(environment, channelId, now, { force: true, context }),
@@ -165,6 +169,60 @@ describe("channel points redemption flow on local D1", () => {
     expect(mocks.update).toHaveBeenCalledTimes(1);
     await expect(repository.getRedemption(channelId, "redemption_concurrent_retry"))
       .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+  });
+
+  it("does not retry an action after a failed lookup when the unfulfilled scan is empty", async () => {
+    sendChat.mockResolvedValueOnce({ sent: false, delivery: "ambiguous", reason: "timeout" });
+    await processChannelPointsEvent(redemptionEvent("redemption_failed_lookup"), context);
+    await database.prepare(
+      "UPDATE channel_points_redemptions SET claimed_at=? WHERE channel_id=? AND redemption_id=?",
+    ).bind("2026-11-10T11:57:00.000Z", channelId, "redemption_failed_lookup").run();
+    mocks.listByIds.mockResolvedValue({ ok: false, reason: "network" });
+    mocks.list.mockResolvedValue({ ok: true, data: [] });
+
+    await reconcileChannelPoints(environment, channelId, now, { force: true, context });
+
+    expect(sendChat).toHaveBeenCalledTimes(1);
+    await expect(repository.getRedemption(channelId, "redemption_failed_lookup"))
+      .resolves.toMatchObject({ status: "pending", pendingTwitchStatus: null });
+  });
+
+  it("looks up open redemptions separately for each Twitch reward", async () => {
+    // Earlier tests leave retryable rows behind; this test counts lookups, so start from none.
+    await database.prepare("DELETE FROM channel_points_redemptions WHERE channel_id=?").bind(channelId).run();
+    await repository.insertReward(channelId, { ...reward, title: "Second reward" }, "reward_local_two", "reward_twitch_two", now);
+    await repository.latchRedemption(channelId, {
+      id: "redemption_group_one", rewardId: "reward_local", rewardTitle: "Fictional reward",
+      userId: "viewer_one", userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "", redeemedAt: now,
+    }, now);
+    await repository.latchRedemption(channelId, {
+      id: "redemption_group_two", rewardId: "reward_local_two", rewardTitle: "Second reward",
+      userId: "viewer_one", userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "", redeemedAt: now,
+    }, now);
+    mocks.manageable.mockResolvedValue({ ok: true, data: [manageableReward, {
+      ...manageableReward, id: "reward_twitch_two", title: "Second reward",
+    }] });
+    mocks.listByIds.mockImplementation((_environment, _channel, rewardId, redemptionIds) => {
+      const id = (redemptionIds as string[])[0] ?? "";
+      return Promise.resolve({ ok: true, data: [{
+        id, user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo", user_input: "",
+        redeemed_at: now, status: "CANCELED", reward: { id: String(rewardId), title: "Fictional reward" },
+      }] });
+    });
+
+    await reconcileChannelPoints(environment, channelId, now, { force: true, context });
+
+    expect(mocks.listByIds).toHaveBeenCalledTimes(2);
+    expect(mocks.listByIds).toHaveBeenCalledWith(
+      environment, channelId, "reward_twitch", ["redemption_group_one"], expect.any(Function),
+    );
+    expect(mocks.listByIds).toHaveBeenCalledWith(
+      environment, channelId, "reward_twitch_two", ["redemption_group_two"], expect.any(Function),
+    );
+    await database.prepare("DELETE FROM channel_points_redemptions WHERE channel_id=? AND redemption_id IN (?,?)")
+      .bind(channelId, "redemption_group_one", "redemption_group_two").run();
+    await database.prepare("DELETE FROM channel_points_rewards WHERE channel_id=? AND id=?")
+      .bind(channelId, "reward_local_two").run();
   });
 
   it("reclaims expired running rows but leaves rows within the lease alone", async () => {
@@ -180,6 +238,10 @@ describe("channel points redemption flow on local D1", () => {
     await database.prepare(
       "UPDATE channel_points_redemptions SET status='running',claimed_at=? WHERE channel_id=? AND redemption_id=?",
     ).bind("2026-11-10T11:59:00.000Z", channelId, "redemption_active_lease").run();
+    mocks.listByIds.mockResolvedValue({ ok: true, data: [{
+      id: "redemption_expired_lease", user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo",
+      user_input: "", redeemed_at: now, status: "UNFULFILLED", reward: { id: "reward_twitch", title: "Fictional reward" },
+    }] });
     await reconcileChannelPoints(environment, channelId, now, { force: true, context });
     expect(sendChat).toHaveBeenCalledTimes(1);
     await expect(repository.getRedemption(channelId, "redemption_expired_lease"))

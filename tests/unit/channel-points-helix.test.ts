@@ -168,6 +168,14 @@ describe("channel points Helix wrapper", () => {
     expect(result).toEqual({ ok: true, data: [] });
   });
 
+  it("reports a missing remote reward when Helix returns 404 on delete", async () => {
+    const capture = captureRequests([{ message: "Reward not found" }], [404]);
+    const result = await deleteCustomReward(
+      environment, "channel_fictional", "reward_fictional", () => Promise.resolve(true), capture.fetcher,
+    );
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+  });
+
   it("updates redemption status with repeatable IDs in the query and status in the body", async () => {
     const capture = captureRequests([{ data: [] }]);
     const result = await updateRedemptionStatus(
@@ -223,7 +231,8 @@ describe("channel points Helix wrapper", () => {
       reward: { id: "reward_fictional", title: "Fictional reward" },
     }] }]);
     const result = await listRedemptionsByIds(
-      environment, "channel_fictional", ["redemption_fictional"], () => Promise.resolve(true), capture.fetcher,
+      environment, "channel_fictional", "reward_fictional", ["redemption_fictional"],
+      () => Promise.resolve(true), capture.fetcher,
     );
     expect(capture.calls).toHaveLength(1);
     expect(capture.calls[0]?.method).toBe("GET");
@@ -232,9 +241,20 @@ describe("channel points Helix wrapper", () => {
     if (call === undefined) throw new Error("Expected one redemption status request.");
     expect([...call.url.searchParams.entries()].sort(([leftKey, leftValue], [rightKey, rightValue]) =>
       leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue))).toEqual([
-      ["broadcaster_id", "channel_fictional"], ["id", "redemption_fictional"],
+      ["broadcaster_id", "channel_fictional"], ["id", "redemption_fictional"], ["reward_id", "reward_fictional"],
     ]);
     expect(result).toMatchObject({ ok: true, data: [{ id: "redemption_fictional", status: "CANCELED" }] });
+  });
+
+  it("rejects authoritative redemption lookups larger than Twitch's 50-ID limit", async () => {
+    const capture = captureRequests([]);
+    const result = await listRedemptionsByIds(
+      environment, "channel_fictional", "reward_fictional",
+      Array.from({ length: 51 }, (_, index) => "redemption_" + String(index)),
+      () => Promise.resolve(true), capture.fetcher,
+    );
+    expect(result).toEqual({ ok: false, reason: "invalid_input" });
+    expect(capture.calls).toHaveLength(0);
   });
 
   it("maps eligibility, reward limit, and duplicate-title errors while keeping create request shape", async () => {

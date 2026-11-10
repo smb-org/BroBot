@@ -200,6 +200,40 @@ describe("channel points routes", () => {
     expect(await managerRecreate.json()).toMatchObject({ reward: { twitchRewardId: "reward_twitch_recreated" } });
   });
 
+  it("deletes a locally tombstoned reward without calling Helix", async () => {
+    database = createDatabase();
+    database.sqlite.prepare(
+      "UPDATE channel_points_rewards SET twitch_state='deleted_on_twitch' WHERE channel_id=? AND id=?",
+    ).run(channelId, "reward_local");
+
+    const response = await makeApp(database, "manager").request(
+      "/api/channels/channel_points/modules/channel_points/rewards/reward_local", { method: "DELETE" },
+      routeEnvironment(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.delete).not.toHaveBeenCalled();
+    expect(database.sqlite.prepare(
+      "SELECT COUNT(*) AS count FROM channel_points_rewards WHERE channel_id=? AND id=?",
+    ).get(channelId, "reward_local")).toMatchObject({ count: 0 });
+  });
+
+  it("deletes the local reward when Helix reports that it is already missing", async () => {
+    database = createDatabase();
+    mocks.delete.mockResolvedValueOnce({ ok: false, reason: "not_found" });
+
+    const response = await makeApp(database, "manager").request(
+      "/api/channels/channel_points/modules/channel_points/rewards/reward_local", { method: "DELETE" },
+      routeEnvironment(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.delete).toHaveBeenCalledOnce();
+    expect(database.sqlite.prepare(
+      "SELECT COUNT(*) AS count FROM channel_points_rewards WHERE channel_id=? AND id=?",
+    ).get(channelId, "reward_local")).toMatchObject({ count: 0 });
+  });
+
   it("allows an operator to reconcile using the operational authorization guard", async () => {
     database = createDatabase();
     mocks.manageable.mockResolvedValue({ ok: true, data: [] });

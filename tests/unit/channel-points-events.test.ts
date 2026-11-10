@@ -273,6 +273,10 @@ describe("channel points redemption processing", () => {
       id: "redemption_interrupted_queue", rewardId: "reward_local", rewardTitle: reward.title,
       userId: "viewer_one", userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "hello", redeemedAt: now,
     }, now);
+    mocks.list.mockResolvedValue({ ok: true, data: [{
+      ...redemptionPayload("redemption_interrupted_queue"), user_id: "viewer_one", user_login: "viewer_demo",
+      user_name: "Viewer Demo", status: "UNFULFILLED",
+    }] });
 
     await reconcileChannelPoints(
       { DB: database as unknown as D1Database } as Env, channelId, now,
@@ -445,11 +449,32 @@ describe("channel points redemption processing", () => {
       { force: true, context, authorize: () => Promise.resolve(true) },
     );
 
-    expect(mocks.listByIds).toHaveBeenCalledWith(expect.anything(), channelId, ["redemption_missed_cancel"], expect.any(Function));
+    expect(mocks.listByIds).toHaveBeenCalledWith(
+      expect.anything(), channelId, "reward_twitch", ["redemption_missed_cancel"], expect.any(Function),
+    );
     expect(mocks.update).not.toHaveBeenCalled();
     expect(sendChat).not.toHaveBeenCalled();
     await expect(repository.getRedemption(channelId, "redemption_missed_cancel"))
       .resolves.toMatchObject({ status: "refunded", pendingTwitchStatus: null });
+  });
+
+  it("batches open redemption lookups in groups of at most 50 for one Twitch reward", async () => {
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    for (let index = 0; index < 51; index += 1) {
+      await repository.latchRedemption(channelId, {
+        id: `redemption_batch_${String(index)}`, rewardId: "reward_local", rewardTitle: reward.title,
+        userId: "viewer_one", userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "hello", redeemedAt: now,
+      }, now);
+    }
+
+    await reconcileChannelPoints(
+      { DB: database as unknown as D1Database } as Env, channelId, now,
+      { force: true, context, authorize: () => Promise.resolve(true) },
+    );
+
+    expect(mocks.listByIds).toHaveBeenCalledTimes(2);
+    expect(mocks.listByIds.mock.calls.map((call) => (call[3] as string[]).length)).toEqual([50, 1]);
+    expect(mocks.listByIds.mock.calls.map((call) => String(call[2]))).toEqual(["reward_twitch", "reward_twitch"]);
   });
 
   it("adopts enabled nested EventSub cooldown and per-stream limits", async () => {

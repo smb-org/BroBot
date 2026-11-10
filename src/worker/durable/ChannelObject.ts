@@ -4786,6 +4786,9 @@ export class ChannelObject extends DurableObject<Env> {
     const channelId = this.ownChannelId();
     if (channelId === null) return { sent: false, delivery: "not_attempted", reason: "channel_unavailable" };
     const key = "channel-points-action:" + moduleId + ":" + operationId;
+    const existingClaim = await readModuleAlarmSendClaim(this.ctx.storage, key);
+    if (existingClaim?.status === "sent") return { sent: true, delivery: "sent", reason: null };
+    if (existingClaim?.status === "sending") return { sent: false, delivery: "ambiguous", reason: "already_attempted" };
     const suppression = { reason: null as string | null };
     const valid = async (): Promise<boolean> => {
       const [state, registration] = await Promise.all([

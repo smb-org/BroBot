@@ -52,7 +52,7 @@ export interface ChannelPointsRedemption {
 export type ChannelPointsHelixReason =
   | "success" | "not_affiliate" | "reward_limit" | "duplicate_title" | "scope_missing"
   | "not_connected" | "token_unavailable" | "revoked" | "refresh_failed" | "precondition_failed"
-  | "rate_limited" | "network" | "invalid_input" | "invalid_response" | "unknown_status";
+  | "rate_limited" | "network" | "invalid_input" | "invalid_response" | "not_found" | "unknown_status";
 
 export type ChannelPointsHelixResult<Data> = { ok: true; data: Data } | { ok: false; reason: ChannelPointsHelixReason };
 
