@@ -379,6 +379,7 @@ const realtimeForms = {
 const expectedModuleSettings = {
   duel: duelSettingsForLanguage("de"),
   heist: heistSettingsForLanguage("de"),
+  overlay_alerts: {},
   blitz_round: {
     prize: 50, answerTimeSeconds: 60, autoStart: false, autoStartIntervalMinutes: 15, chatTarget: null,
     startText: blitzTexts("de").startTextDefault,
@@ -906,6 +907,7 @@ describe("serialized contract shapes", () => {
         "faq",
         "heist",
         "moon",
+        "overlay_alerts",
         "points",
         "polls",
         "quiz",

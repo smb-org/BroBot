@@ -402,6 +402,8 @@ export const AUDIT_ACTIONS = [
   "polls.entry.created",
   "polls.entry.updated",
   "polls.entry.deleted",
+  "overlay_alerts.media.uploaded",
+  "overlay_alerts.media.deleted",
   "polls.run.started",
   "polls.run.ended",
   "polls.run.locked",
@@ -573,4 +575,11 @@ export type ApiErrorCode =
   | "overlay_limit_reached"
   | "overlay_element_limit_reached"
   | "overlay_changed_concurrently"
+  | "media_upload_invalid"
+  | "media_too_large"
+  | "media_type_invalid"
+  | "media_limit_reached"
+  | "media_in_use"
+  | "media_not_found"
+  | "media_management_denied"
   | "unknown_api_route";
