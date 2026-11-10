@@ -75,8 +75,7 @@ export const getMediaAssetForDelivery = async (
       WHERE channel_id = ? AND id = ? AND sha256 = ?`,
   ).bind(channelId, id, sha256).first<MediaAssetRow>();
   if (row === null || row.data === undefined) return null;
-  const data = row.data instanceof Uint8Array ? new Uint8Array(row.data) : new Uint8Array(row.data);
-  return { ...toMetadata(row), channelId: row.channel_id, data };
+  return { ...toMetadata(row), channelId: row.channel_id, data: new Uint8Array(row.data) };
 };
 
 /** D1's row limit is 2 MiB; stored assets are capped at 1 MiB plus small metadata. */
