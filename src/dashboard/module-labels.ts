@@ -30,6 +30,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     statistics: "Statistiken",
     quiz: "Quiz",
     polls: "Umfragen & Predictions",
+    channel_points: "Kanalpunkte",
     temp_vips: "Temporäre VIPs",
   },
   en: {
@@ -49,6 +50,7 @@ const moduleNames: LocaleCatalog<ModuleNames> = {
     statistics: "Statistics",
     quiz: "Quiz",
     polls: "Polls & Predictions",
+    channel_points: "Channel points",
     temp_vips: "Temporary VIPs",
   },
 };
@@ -88,6 +90,8 @@ interface EventSubscriptionNames {
   vipRemovals: string;
   polls: string;
   predictions: string;
+  channelPointsRewards: string;
+  channelPointsRedemptions: string;
 }
 
 const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
@@ -110,6 +114,8 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     vipRemovals: "VIP-Entzüge",
     polls: "Umfragen",
     predictions: "Predictions",
+    channelPointsRewards: "Kanalpunkt-Belohnungen",
+    channelPointsRedemptions: "Kanalpunkt-Einlösungen",
   },
   en: {
     chatMessages: "Chat messages",
@@ -130,6 +136,8 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     vipRemovals: "VIP removals",
     polls: "Polls",
     predictions: "Predictions",
+    channelPointsRewards: "Channel point rewards",
+    channelPointsRedemptions: "Channel point redemptions",
   },
 };
 
@@ -157,6 +165,8 @@ export const eventSubName = (
   if (subscriptionType === "channel.vip.remove") return texts.vipRemovals;
   if (subscriptionType.startsWith("channel.poll.")) return texts.polls;
   if (subscriptionType.startsWith("channel.prediction.")) return texts.predictions;
+  if (subscriptionType.startsWith("channel.channel_points_custom_reward_redemption.")) return texts.channelPointsRedemptions;
+  if (subscriptionType.startsWith("channel.channel_points_custom_reward.")) return texts.channelPointsRewards;
   if (subscriptionType === "stream.online") return texts.streamStarted;
   if (subscriptionType === "stream.offline") return texts.streamEnded;
   return subscriptionType;
@@ -181,6 +191,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     statistics: "Erfasst während des Livestreams alle fünf Minuten aggregierte Chat-, Viewer- und Chatter-Zahlen. Aktive Chatter sind die ungefähre Zahl unterschiedlicher Chatter, die in den fünf Minuten vor der Fenstergrenze geschrieben haben; ohne Stichprobe an der Grenze kann der Wert fehlen. Dafür nutzt der Bot die bestehende kurzlebige, pseudonyme Chatter-Verfolgung. Dauerhaft gespeichert werden Fenstersummen, eine kanalweite Liste der häufigsten Wörter mit Zählern (höchstens 5.000, ohne Zuordnung zu Personen oder Nachrichten) und Zeitleisten-Ereignisse je Stream (Start und Ende, Titel- und Kategoriewechsel, Clips, Werbepausen nur mit Einwilligung, Emote-Spitzen sowie eingehende und ausgehende Raids mit Kennung, Login und Anzeigenamen des Partnerkanals) samt Stream-, Kategorie- und Clip-Kennungen bis zum Löschen des Kanals; keine Namen oder Kennungen einzelner Zuschauer oder Clip-Ersteller und keine einzelnen Nachrichten.",
     quiz: "Verwaltet eigene Quiz-Fragensets für den Kanal.",
     polls: "Verwaltet vorbereitete Umfragen und Predictions und speichert Twitch-Läufe mit ihren Ergebnissen im Verlauf.",
+    channel_points: "Verwaltet eigene Kanalpunkt-Belohnungen und verarbeitet Einlösungen automatisch oder für eine spätere Freigabe.",
     temp_vips: "Verwaltet VIP auf Zeit und erinnert oder entzieht es nach Ablauf.",
   },
   en: {
@@ -199,6 +210,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     statistics: "Collects aggregate chat, viewer, and chatter counts every five minutes during a live stream. Active chatters approximates distinct chatters who sent a message in the five minutes before each window boundary; the value may be missing when no boundary sample was taken. It relies on the existing short-lived pseudonymous chatter tracking. Retained are window totals, a channel-wide list of the most frequent words with counts (at most 5,000, not linked to people or messages), and stream timeline events (stream start and end, title and category changes, clips, ad breaks only with consent, emote spikes, and incoming and outgoing raids with the partner channel's ID, login, and display name) including stream, category, and clip IDs until the channel is deleted; no names or IDs of individual viewers or clip creators, and no individual messages.",
     quiz: "Manage channel-owned quiz question sets.",
     polls: "Manage prepared polls and predictions and keep Twitch runs with their results in channel history.",
+    channel_points: "Manage custom channel point rewards and process redemptions automatically or leave them queued for review.",
     temp_vips: "Manages time-limited VIPs and reminds or removes them when they expire.",
   },
 };
@@ -221,6 +233,12 @@ export const moduleScopePurpose = (
   }
   if (moduleId === "votekick" && scope === "moderation:read") {
     return language === "de" ? "Moderatoren vor Votekicks schützen" : "Protect moderators from votekicks";
+  }
+  if (moduleId === "channel_points" && scope === "channel:read:redemptions") {
+    return language === "de" ? "Einlösungen und Belohnungen lesen" : "Read redemptions and rewards";
+  }
+  if (moduleId === "channel_points" && scope === "channel:manage:redemptions") {
+    return language === "de" ? "Belohnungen und Einlösungen verwalten" : "Manage rewards and redemptions";
   }
   return language === "de" ? "wird vom Modul benötigt" : "required by this module";
 };

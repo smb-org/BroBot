@@ -4770,6 +4770,53 @@ export class ChannelObject extends DurableObject<Env> {
     await recordRecentBotChatMessage(this.ctx.storage, senderId, text, Date.now());
   }
 
+  /** Sends a module action message once per operation through the shared output gate. */
+  public async sendModuleChatMessage(
+    moduleId: string,
+    operationId: string,
+    text: string,
+  ): Promise<{ sent: boolean; delivery: "sent" | "rejected" | "ambiguous" | "not_attempted"; reason: string | null }> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return { sent: false, delivery: "not_attempted", reason: "channel_unavailable" };
+    const key = "channel-points-action:" + moduleId + ":" + operationId;
+    const suppression = { reason: null as string | null };
+    const valid = async (): Promise<boolean> => {
+      const [state, registration] = await Promise.all([
+        readDispatchChannelState(this.env.DB, channelId, new Date().toISOString()),
+        Promise.resolve(MODULES.find((module) => module.id === moduleId)),
+      ]);
+      const activation = state.activations.find((entry) => entry.moduleId === moduleId);
+      suppression.reason = chatOutputSuppressionReason({
+        moduleEnabled: registration?.mandatory === true || activation?.enabled === true,
+        mandatory: registration?.mandatory === true,
+        paused: state.controls.pause.active,
+        muted: state.controls.mute.active,
+      });
+      return suppression.reason === null;
+    };
+    const result = await sendChatMessage(
+      this.env, channelId, text, undefined, fetch, valid,
+      async () => await claimModuleAlarmSend(this.ctx.storage, key, Date.now(), undefined, { automated: true }),
+      [],
+      async (delivery) => {
+        if (delivery !== "not_attempted") await finishModuleAlarmSend(this.ctx.storage, key, delivery, Date.now());
+      },
+      await readChannelDefaultChatTarget(this.env.DB, channelId),
+      undefined,
+      (senderId, messageText) => this.recordBotChatMessage(senderId, messageText),
+    );
+    if (result.reason === "already_attempted") {
+      const claim = await readModuleAlarmSendClaim(this.ctx.storage, key);
+      if (claim?.status === "sent") return { sent: true, delivery: "sent", reason: null };
+      return { sent: false, delivery: "ambiguous", reason: result.reason };
+    }
+    return {
+      sent: result.sent,
+      delivery: result.delivery,
+      reason: suppression.reason ?? result.reason,
+    };
+  }
+
   public async getChatActivityCount(): Promise<number> {
     await this.ensurePointRoundRecovery();
     const current = await this.ctx.storage.get<number>(CHAT_ACTIVITY_COUNT_KEY);

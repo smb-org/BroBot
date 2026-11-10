@@ -641,6 +641,18 @@ export interface ModuleAlarmPlan {
 
 export interface ModuleExecutionContext {
   DB: D1Database;
+  /** Worker environment used for authenticated host integrations. */
+  environment?: Env;
+  /** Twitch broadcaster ID for the event or redemption being processed. */
+  channelId?: string;
+  /** Sends chat through the bound module's guarded, idempotent channel output path. */
+  sendChat?: (text: string, operationId: string) => Promise<{
+    sent: boolean;
+    delivery: "sent" | "rejected" | "ambiguous" | "not_attempted";
+    reason: string | null;
+  }>;
+  /** Returns the same host context with module-owned ledgers bound to another registered module. */
+  forModule?: (moduleId: string) => ModuleExecutionContext;
   authorizeMutation: AuthorizeModuleMutation;
   /** Ephemeral ballot access bound to the event channel and executing module. */
   ballots: ModuleBallotAccess;
@@ -1984,6 +1996,42 @@ export interface ModuleEnableContext {
   now: string;
 }
 
+/** Host inputs for a post-commit module activation side effect. */
+type ModuleActivationContext = ModuleEnableContext & { environment: Env };
+
+/** Configuration editor loaded on demand for one channel-points action. */
+interface ChannelPointsActionEditorProperties {
+  config: Readonly<Record<string, unknown>>;
+  onChange: (config: Readonly<Record<string, unknown>>) => void;
+  language: ModuleLanguage;
+}
+
+/** A reusable action that a channel-points reward can execute. */
+export interface ChannelPointsActionDefinition<ConfigSchema extends z.ZodType = z.ZodType> {
+  /** Stable action identifier stored with the reward. */
+  id: string;
+  /** Localized name shown in the reward editor. */
+  name: Readonly<Record<ModuleLanguage, string>>;
+  /** Validates the action-specific configuration on save and before execution. */
+  configSchema: ConfigSchema;
+  /** Lazily loads the optional action editor; later panel work can supply it. */
+  editor?: () => Promise<{ default: ComponentType<ChannelPointsActionEditorProperties> }>;
+  /** Whether this action requires the reward to request viewer text input. */
+  requiresUserInput?: boolean;
+  /** Executes the action with the provider module's normal host context. */
+  execute: (
+    context: ModuleExecutionContext,
+    input: {
+      redemption: {
+        id: string; rewardId: string; rewardTitle: string; userId: string; userLogin: string;
+        userName: string; userInput: string; redeemedAt: string;
+      };
+      config: z.output<ConfigSchema>;
+      operationId: string;
+    },
+  ) => Promise<"fulfilled" | { refund: { de: string; en: string } } | "pending">;
+}
+
 /** Shared props for lazily loaded panel views. */
 export interface ModulePanelProperties {
   channelId: string;
@@ -2567,6 +2615,14 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     context: ModuleEnableContext,
     channelId: string,
   ) => readonly D1PreparedStatement[] | undefined | Promise<readonly D1PreparedStatement[] | undefined>;
+  /** Channel-points actions provided by this module for rewards configured on its page. */
+  channelPointsActions?: readonly ChannelPointsActionDefinition[];
+  /** Called after the channel_modules enabled flag commits, including retryable post-commit delivery. */
+  onActivationChange?: (
+    context: ModuleActivationContext,
+    channelId: string,
+    enabled: boolean,
+  ) => void | Promise<void>;
   // Module migrations and further action kinds join the contract once the
   // first module needs them. Command processing launched with
   // ModuleResult.

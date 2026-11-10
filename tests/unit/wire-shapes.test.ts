@@ -401,6 +401,7 @@ const expectedModuleSettings = {
   temp_vips: { defaultDurationDays: 7, maximumDurationDays: 90, announceExpiry: false },
   quiz: { answerSeconds: 30, chatQuestions: true, pot: 500, revealSeconds: 8 },
   polls: {},
+  channel_points: {},
   emote_slots: {
     symbols: [
       { id: "cherry", source: "emoji", code: "🍒", name: "Cherry", weight: 4, triple: 3, isJackpot: false },
@@ -896,6 +897,7 @@ describe("serialized contract shapes", () => {
         "blitz_round",
         "boss_fight",
         "channel_events",
+        "channel_points",
         "chat_voting",
         "clips",
         "currency",

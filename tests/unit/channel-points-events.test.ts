@@ -1,0 +1,188 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
+import { channelPointsModule } from "../../src/modules/channel_points";
+import { MODULES } from "../../src/modules/registry";
+import { processChannelPointsEvent, reconcileChannelPoints } from "../../src/modules/channel_points/service";
+import { createChannelPointsRepository } from "../../src/modules/channel_points/repository";
+import type { ChannelPointsRewardInput } from "../../src/modules/channel_points/contracts";
+import { TestD1Database } from "./test-d1";
+
+const mocks = vi.hoisted(() => ({
+  update: vi.fn(),
+  list: vi.fn(),
+  setEnabled: vi.fn(),
+}));
+vi.mock("../../src/worker/twitch/channel-points", () => ({
+  updateRedemptionStatus: mocks.update,
+  listUnfulfilledRedemptions: mocks.list,
+  setCustomRewardEnabled: mocks.setEnabled,
+}));
+
+const channelId = "channel_points";
+const now = "2026-11-10T12:00:00.000Z";
+const reward: ChannelPointsRewardInput = {
+  title: "Fictional reward",
+  prompt: null,
+  cost: 10,
+  backgroundColor: "#9147FF",
+  isUserInputRequired: false,
+  globalCooldownSeconds: null,
+  maxPerStream: null,
+  maxPerUserPerStream: null,
+  actionModuleId: "channel_points",
+  actionId: "chat-message",
+  actionConfig: { message: "Hi {user}: {input} ({reward})" },
+  mode: "auto",
+  enabled: true,
+};
+const redemptionPayload = (id = "redemption_one") => ({
+  id,
+  user_id: "viewer_one",
+  user_login: "viewer_demo",
+  user_name: "Viewer Demo",
+  user_input: "hello",
+  redeemed_at: now,
+  reward: { id: "reward_twitch", title: "Fictional reward" },
+});
+const event = (subscriptionType: string, payload: Record<string, unknown>): ModuleEvent => ({
+  channelId,
+  subscriptionType,
+  triggerId: "event_one",
+  payload,
+  settings: {},
+  receivedAt: now,
+  eventSubTimestamp: now,
+  actor: null,
+  chatStatus: null,
+});
+
+describe("channel points redemption processing", () => {
+  let database: TestD1Database;
+  let context: ModuleExecutionContext;
+  const sendChat = vi.fn();
+
+  beforeEach(async () => {
+    mocks.update.mockReset().mockResolvedValue({ ok: true, data: [] });
+    mocks.list.mockReset().mockResolvedValue({ ok: true, data: [] });
+    mocks.setEnabled.mockReset().mockResolvedValue({ ok: true, data: [] });
+    sendChat.mockReset().mockResolvedValue({ sent: true, delivery: "sent", reason: null });
+    database = new TestD1Database();
+    database.sqlite.prepare(
+      "INSERT INTO channels (channel_id,login,display_name,created_at,updated_at) VALUES (?,?,?,?,?)",
+    ).run(channelId, "points_demo", "Points Demo", now, now);
+    database.sqlite.prepare(
+      "INSERT INTO channel_modules (channel_id,module_id,enabled,settings) VALUES (?, 'channel_points', 1, '{}')",
+    ).run(channelId);
+    await createChannelPointsRepository(database as unknown as D1Database)
+      .insertReward(channelId, reward, "reward_local", "reward_twitch", now);
+    context = {
+      DB: database as unknown as D1Database,
+      environment: { DB: database } as unknown as Env,
+      channelId,
+      sendChat,
+    } as unknown as ModuleExecutionContext;
+  });
+
+  afterEach(() => { database.close(); });
+
+  it("registers channel points EventSub types, scopes, default state, and its built-in action", () => {
+    expect(MODULES).toContain(channelPointsModule);
+    expect(channelPointsModule.defaultEnabled).toBe(false);
+    expect(channelPointsModule.broadcasterScopes).toEqual([
+      "channel:read:redemptions", "channel:manage:redemptions",
+    ]);
+    expect(channelPointsModule.eventSubTypes).toEqual([
+      "channel.channel_points_custom_reward_redemption.add",
+      "channel.channel_points_custom_reward_redemption.update",
+      "channel.channel_points_custom_reward.update",
+      "channel.channel_points_custom_reward.remove",
+    ]);
+    expect(channelPointsModule.channelPointsActions?.map(({ id }) => id)).toEqual(["chat-message"]);
+  });
+
+  it("uses the insert latch so duplicate EventSub deliveries have one effect", async () => {
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+    expect(sendChat).toHaveBeenCalledTimes(1);
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
+      .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+  });
+
+  it("refunds when the action provider module is disabled", async () => {
+    database.sqlite.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'channel_points'")
+      .run(channelId);
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.anything(), channelId, "reward_twitch", ["redemption_one"], "CANCELED", expect.any(Function),
+    );
+    await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
+      .resolves.toMatchObject({ status: "refunded", outcomeReason: { en: "The module providing this reward action is disabled." } });
+  });
+
+  it("leaves an ambiguous chat send pending and does not patch Twitch", async () => {
+    sendChat.mockResolvedValue({ sent: false, delivery: "ambiguous", reason: "timeout" });
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+    expect(mocks.update).not.toHaveBeenCalled();
+    await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
+      .resolves.toMatchObject({ status: "pending", pendingTwitchStatus: null });
+  });
+
+  it("marks a failed status patch for retry and reconciles it without repeating the chat action", async () => {
+    mocks.update.mockResolvedValueOnce({ ok: false, reason: "unknown_status" }).mockResolvedValueOnce({ ok: true, data: [] });
+    mocks.list.mockResolvedValue({ ok: true, data: [{
+      ...redemptionPayload(),
+      user_id: "viewer_one", user_login: "viewer_demo", user_name: "Viewer Demo", status: "UNFULFILLED",
+    }] });
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward_redemption.add", redemptionPayload()), context);
+    await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
+      .resolves.toMatchObject({ status: "failed_to_update", pendingTwitchStatus: "FULFILLED" });
+    await reconcileChannelPoints(
+      { DB: database as unknown as D1Database } as Env, channelId, now,
+      { force: true, context, authorize: () => Promise.resolve(true) },
+    );
+    expect(sendChat).toHaveBeenCalledTimes(1);
+    expect(mocks.update).toHaveBeenCalledTimes(2);
+    await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
+      .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+  });
+
+  it("adopts a known reward update and marks a known removal without touching foreign rewards", async () => {
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward.update", {
+      id: "reward_twitch", title: "Renamed reward", cost: 25, is_enabled: true, is_user_input_required: false,
+    }), context);
+    expect(await createChannelPointsRepository(database as unknown as D1Database).getReward(channelId, "reward_local"))
+      .toMatchObject({ title: "Renamed reward", cost: 25, prompt: null, maxPerStream: null });
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward.remove", { id: "reward_twitch" }), context);
+    expect(await createChannelPointsRepository(database as unknown as D1Database).getReward(channelId, "reward_local"))
+      .toMatchObject({ twitchState: "deleted_on_twitch" });
+    await processChannelPointsEvent(event("channel.channel_points_custom_reward.remove", { id: "foreign_reward" }), context);
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM channel_points_rewards").get()).toMatchObject({ count: 1 });
+  });
+
+  it("disables rewards with the module and restores their saved enabled state", async () => {
+    const lifecycle = channelPointsModule.onActivationChange;
+    expect(lifecycle).toBeDefined();
+    const activation = {
+      DB: database as unknown as D1Database,
+      environment: { DB: database } as unknown as Env,
+      authorizeMutation: () => ({ sql: "", values: [] }),
+      actor: { userId: "operator_one" },
+      now,
+    };
+    await lifecycle?.(activation, channelId, false);
+    expect(mocks.setEnabled).toHaveBeenLastCalledWith(
+      activation.environment, channelId, "reward_twitch", false, expect.any(Function),
+    );
+    expect(database.sqlite.prepare("SELECT enabled,restore_enabled FROM channel_points_rewards").get())
+      .toMatchObject({ enabled: 0, restore_enabled: 1 });
+    await lifecycle?.(activation, channelId, true);
+    expect(mocks.setEnabled).toHaveBeenLastCalledWith(
+      activation.environment, channelId, "reward_twitch", true, expect.any(Function),
+    );
+    expect(database.sqlite.prepare("SELECT enabled,restore_enabled FROM channel_points_rewards").get())
+      .toMatchObject({ enabled: 1, restore_enabled: null });
+  });
+});

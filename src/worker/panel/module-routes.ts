@@ -1259,6 +1259,18 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       });
     }
   }
+  if (module.onActivationChange !== undefined) {
+    const onActivationChange = module.onActivationChange;
+    await runPostCommitStep(module.id, "activation_change", async () => {
+      await onActivationChange({
+        DB: context.env.DB,
+        environment: context.env,
+        authorizeMutation: context.get("authorizeManagementMutation"),
+        actor,
+        now,
+      }, channelId, enabled);
+    });
+  }
   await runPostCommitStep(module.id, "eventsub_reconciliation", () =>
     maintainEventSubSubscriptions(context.env, now, fetch, channelId));
   let updatedModule: PanelModuleState;
