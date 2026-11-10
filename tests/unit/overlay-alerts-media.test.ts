@@ -221,6 +221,30 @@ describe("overlay alert media routes", () => {
     await expect(response.json()).resolves.toMatchObject({ asset: { fileName: "multipart.png", mimeType: "image/png" } });
   });
 
+  it.each([
+    ["audio/x-wav", "audio/wav", fixtureBytes["audio/wav"]],
+    ["audio/vnd.wave", "audio/wav", fixtureBytes["audio/wav"]],
+    ["audio/mp3", "audio/mpeg", fixtureBytes["audio/mpeg"]],
+  ] as const)("stores a multipart %s upload as %s", async (declared, canonical, bytes) => {
+    const boundary = "media-alias-boundary";
+    const prefix = new TextEncoder().encode(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="alias.bin"\r\nContent-Type: ${declared}\r\n\r\n`,
+    );
+    const suffix = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
+    const requestBody = new ArrayBuffer(prefix.byteLength + bytes.byteLength + suffix.byteLength);
+    const view = new Uint8Array(requestBody);
+    view.set(prefix);
+    view.set(bytes, prefix.byteLength);
+    view.set(suffix, prefix.byteLength + bytes.byteLength);
+    const response = await createApp().fetch(new Request(
+      "http://localhost/api/channels/" + channelId + "/modules/overlay_alerts/media",
+      { method: "POST", headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` }, body: requestBody },
+    ), { DB: database as unknown as D1Database });
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({ asset: { mimeType: canonical } });
+  });
+
   it("rejects a channel upload after the two hundred asset limit", async () => {
     const insert = database.sqlite.prepare(
       "INSERT INTO media_assets (channel_id, id, kind, mime_type, byte_size, sha256, file_name, data, created_at) VALUES (?, ?, 'image', 'image/png', 1, ?, 'seed.png', ?, ?)",

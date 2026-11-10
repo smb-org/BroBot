@@ -40,9 +40,22 @@ const hasMediaSignature = (bytes: Uint8Array, mimeType: MediaMimeType): boolean 
   }
 };
 
+/** Browser and OS labels for the same audio formats; stored and served as the canonical type. */
+const MEDIA_MIME_ALIASES: Readonly<Record<string, MediaMimeType>> = {
+  "audio/x-wav": "audio/wav",
+  "audio/wave": "audio/wav",
+  "audio/vnd.wave": "audio/wav",
+  "audio/mp3": "audio/mpeg",
+  "audio/x-mpeg": "audio/mpeg",
+  "audio/x-ogg": "audio/ogg",
+};
+
 /** Validates that the declared MIME type is allowed and matches the file signature. */
 export const detectMediaType = (bytes: Uint8Array, declaredMimeType: string): { mimeType: MediaMimeType; kind: MediaKind } | null => {
-  const mimeType = declaredMimeType.split(";", 1)[0]?.trim().toLowerCase();
+  const declared = declaredMimeType.split(";", 1)[0]?.trim().toLowerCase();
+  const mimeType = declared !== undefined && Object.hasOwn(MEDIA_MIME_ALIASES, declared)
+    ? MEDIA_MIME_ALIASES[declared]
+    : declared;
   if (mimeType === undefined || !Object.hasOwn(ALLOWED_MEDIA_TYPES, mimeType)) return null;
   const allowedMimeType = mimeType as MediaMimeType;
   return hasMediaSignature(bytes, allowedMimeType)
