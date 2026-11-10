@@ -83,63 +83,20 @@ const readBoundedBody = async (request: Request, maximumBytes: number): Promise<
   return bytes;
 };
 
-const findBytes = (source: Uint8Array, pattern: Uint8Array, start = 0): number => {
-  for (let index = start; index <= source.byteLength - pattern.byteLength; index += 1) {
-    if (source[index] !== pattern[0]) continue;
-    let matches = true;
-    for (let offset = 1; offset < pattern.byteLength; offset += 1) {
-      if (source[index + offset] !== pattern[offset]) {
-        matches = false;
-        break;
-      }
-    }
-    if (matches) return index;
+/** The body is already size-capped, so the platform parser only sees bounded input. */
+const parseMultipartPayload = async (body: Uint8Array, contentType: string): Promise<UploadPayloadResult> => {
+  const invalid = { ok: false, status: 400, error: "media_upload_invalid" } as const;
+  let form: FormData;
+  try {
+    form = await new Response(new Blob([new Uint8Array(body)]), { headers: { "Content-Type": contentType } }).formData();
+  } catch {
+    return invalid;
   }
-  return -1;
-};
-
-const parseMultipartPayload = (body: Uint8Array, contentType: string): UploadPayloadResult => {
-  const boundaryMatch = /(?:^|;)\s*boundary=(?:"([^"]+)"|([^;\s]+))/iu.exec(contentType);
-  const boundary = boundaryMatch?.[1] ?? boundaryMatch?.[2];
-  if (boundary === undefined || boundary.length > 70 || /[^\x20-\x7e]/u.test(boundary)) {
-    return { ok: false, status: 400, error: "media_upload_invalid" };
-  }
-  const encoder = new TextEncoder();
-  const opening = encoder.encode(`--${boundary}\r\n`);
-  if (findBytes(body, opening) !== 0) return { ok: false, status: 400, error: "media_upload_invalid" };
-  const headerStart = opening.byteLength;
-  const headerEndMarker = encoder.encode("\r\n\r\n");
-  const headerEnd = findBytes(body, headerEndMarker, headerStart);
-  if (headerEnd < 0 || headerEnd - headerStart > MULTIPART_ENVELOPE_LIMIT) {
-    return { ok: false, status: 400, error: "media_upload_invalid" };
-  }
-  const headers = new TextDecoder().decode(body.subarray(headerStart, headerEnd)).split("\r\n");
-  const disposition = headers.find((header) => header.toLowerCase().startsWith("content-disposition:"));
-  const mimeHeader = headers.find((header) => header.toLowerCase().startsWith("content-type:"));
-  const name = disposition === undefined ? null : /(?:^|;)\s*name="([^"]*)"/iu.exec(disposition)?.[1] ?? null;
-  const fileName = disposition === undefined ? null : /(?:^|;)\s*filename="([^"]*)"/iu.exec(disposition)?.[1] ?? null;
-  const declaredMimeType = mimeHeader?.slice(mimeHeader.indexOf(":") + 1).trim() ?? "";
-  if (name !== "file" || fileName === null || declaredMimeType.length === 0) {
-    return { ok: false, status: 400, error: "media_upload_invalid" };
-  }
-
-  const contentStart = headerEnd + headerEndMarker.byteLength;
-  const closingBoundary = encoder.encode(`\r\n--${boundary}`);
-  const contentEnd = findBytes(body, closingBoundary, contentStart);
-  if (contentEnd < contentStart) return { ok: false, status: 400, error: "media_upload_invalid" };
-  const fileBytes = body.subarray(contentStart, contentEnd);
-  if (fileBytes.byteLength > MEDIA_MAXIMUM_BYTES) return { ok: false, status: 413, error: "media_too_large" };
-
-  const suffixOffset = contentEnd + closingBoundary.byteLength;
-  const closingSuffix = encoder.encode("--\r\n");
-  if (findBytes(body, closingSuffix, suffixOffset) !== suffixOffset ||
-    suffixOffset + closingSuffix.byteLength !== body.byteLength) {
-    return { ok: false, status: 400, error: "media_upload_invalid" };
-  }
-  return {
-    ok: true,
-    payload: { bytes: new Uint8Array(fileBytes), declaredMimeType, fileName },
-  };
+  const file = form.get("file");
+  if (typeof file === "string" || file === null || file.type.length === 0) return invalid;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.byteLength > MEDIA_MAXIMUM_BYTES) return { ok: false, status: 413, error: "media_too_large" };
+  return { ok: true, payload: { bytes, declaredMimeType: file.type, fileName: file.name } };
 };
 
 const readUploadPayload = async (request: Request): Promise<UploadPayloadResult> => {
@@ -153,7 +110,7 @@ const readUploadPayload = async (request: Request): Promise<UploadPayloadResult>
   const body = await readBoundedBody(request, maximumBodyBytes);
   if (body === null) return { ok: false, status: 413, error: "media_too_large" };
 
-  if (multipart) return parseMultipartPayload(body, contentType);
+  if (multipart) return await parseMultipartPayload(body, contentType);
 
   const declaredMimeType = request.headers.get("Content-Type") ?? "";
   const fileName = request.headers.get("X-File-Name") ?? "media";
@@ -278,7 +235,7 @@ export const createOverlayAlertsRoutes = (options: {
       context.req.param("id"),
       context.req.param("sha256"),
     );
-    return asset === null ? context.json({ error: "media_not_found" }, 404) : mediaAssetResponse(asset);
+    return asset === null ? context.json({ error: "media_not_found" }, 404) : mediaAssetResponse(asset, context.req.raw);
   });
 
   return routes;

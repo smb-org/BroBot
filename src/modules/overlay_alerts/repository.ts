@@ -80,15 +80,21 @@ export const getMediaAssetForDelivery = async (
 };
 
 /** D1's row limit is 2 MiB; stored assets are capped at 1 MiB plus small metadata. */
-export const mediaAssetResponse = (asset: StoredMediaAsset): Response => {
+export const mediaAssetResponse = (asset: StoredMediaAsset, request?: Request): Response => {
+  // Bearer-token delivery is content-addressed, so a private year-long cache is safe. Cookie delivery
+  // (request given) must re-check the session on every use, so it revalidates with the hash as ETag.
+  const etag = `"${asset.sha256}"`;
+  const headers: Record<string, string> = {
+    "Content-Type": asset.mimeType,
+    "X-Content-Type-Options": "nosniff",
+    ...(request === undefined
+      ? { "Cache-Control": "private, max-age=31536000, immutable", Vary: "Authorization" }
+      : { "Cache-Control": "private, no-cache", ETag: etag }),
+  };
+  if (request?.headers.get("If-None-Match")?.split(",").some((value) => value.trim() === etag) === true) {
+    return new Response(null, { status: 304, headers });
+  }
   const body = new ArrayBuffer(asset.data.byteLength);
   new Uint8Array(body).set(asset.data);
-  return new Response(body, {
-    headers: {
-      "Content-Type": asset.mimeType,
-      "Cache-Control": "private, max-age=31536000, immutable",
-      Vary: "Authorization",
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
+  return new Response(body, { headers });
 };

@@ -1,3 +1,5 @@
+// @vitest-environment node
+// jsdom replaces File and Blob, which breaks the runtime multipart parser these routes use.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 
@@ -245,6 +247,20 @@ describe("overlay alert media routes", () => {
     await expect(response.json()).resolves.toMatchObject({ asset: { mimeType: canonical } });
   });
 
+  it.each([["with", "\r\n"], ["without", ""]] as const)("accepts a multipart body %s a trailing CRLF", async (_label, ending) => {
+    const boundary = "media-ending-boundary";
+    const prefix = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="end.png"\r\nContent-Type: image/png\r\n\r\n`;
+    const suffix = `\r\n--${boundary}--${ending}`;
+    const encoder = new TextEncoder();
+    const body = new Blob([encoder.encode(prefix), fixtureBytes["image/png"], encoder.encode(suffix)]);
+    const response = await createApp().fetch(new Request(
+      "http://localhost/api/channels/" + channelId + "/modules/overlay_alerts/media",
+      { method: "POST", headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` }, body: await body.arrayBuffer() },
+    ), { DB: database as unknown as D1Database });
+
+    expect(response.status).toBe(201);
+  });
+
   it("rejects a channel upload after the two hundred asset limit", async () => {
     const insert = database.sqlite.prepare(
       "INSERT INTO media_assets (channel_id, id, kind, mime_type, byte_size, sha256, file_name, data, created_at) VALUES (?, ?, 'image', 'image/png', 1, ?, 'seed.png', ?, ?)",
@@ -278,9 +294,21 @@ describe("overlay alert media routes", () => {
     expect(response.status).toBe(200);
     expect([...bytes]).toEqual([...fixtureBytes["image/png"]]);
     expect(response.headers.get("Content-Type")).toBe("image/png");
-    expect(response.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
-    expect(response.headers.get("Vary")).toBe("Authorization");
+    expect(response.headers.get("Cache-Control")).toBe("private, no-cache");
+    expect(response.headers.get("ETag")).toBe(`"${created.sha256}"`);
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    const url = "http://localhost/api/channels/" + channelId + "/modules/overlay_alerts" + path;
+    const revalidated = await createApp().fetch(
+      new Request(url, { headers: { "If-None-Match": `"${created.sha256}"` } }),
+      { DB: database as unknown as D1Database },
+    );
+    expect(revalidated.status).toBe(304);
+    expect((await revalidated.arrayBuffer()).byteLength).toBe(0);
+    const stale = await createApp().fetch(
+      new Request(url, { headers: { "If-None-Match": '"other"' } }),
+      { DB: database as unknown as D1Database },
+    );
+    expect(stale.status).toBe(200);
     expect((await request("/media/" + created.id + "/" + "0".repeat(64))).status).toBe(404);
 
     const foreign = await createApp().fetch(new Request(
