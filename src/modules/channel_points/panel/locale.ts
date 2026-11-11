@@ -87,7 +87,7 @@ const createTexts = (language: ModuleLanguage) => {
     maxPerStream: de ? "Maximal pro Stream" : "Maximum per stream",
     maxPerUserPerStream: de ? "Maximal pro Person und Stream" : "Maximum per person per stream",
     cooldown: de ? "Cooldown pro Belohnung" : "Reward cooldown",
-    seconds: de ? "s" : "s",
+    seconds: "s",
     perStreamUnit: de ? "× pro Stream" : "× per stream",
     perPersonUnit: de ? "× pro Person" : "× per person",
     action: de ? "Aktion" : "Action",
