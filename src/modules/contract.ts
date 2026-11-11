@@ -1290,6 +1290,8 @@ export interface PointRoundAttackResult {
 export interface ModulePointsAccess {
   /** Optional stable request identity for operations whose persisted result contains server-generated metadata. */
   apply: (operationId: string, kind: PointsKind, movements: PointsMovement[], result: unknown, payloadIdentity?: unknown) => Promise<PointsApplyResult>;
+  /** Reads one operation in this module's ledger namespace without paging through account history. */
+  getOperation: (operationId: string) => Promise<{ kind: string; result: unknown } | null>;
   /** Runs an instant game settlement against the actor balance and jackpot snapshot in one ledger transaction. */
   settle: (
     operationId: string,

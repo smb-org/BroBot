@@ -265,6 +265,7 @@ import {
   pointAuditWrittenSync,
   pointBalance,
   pointHistory,
+  pointOperation,
   pointPayloadHash,
   pointCooldownRemainingSync,
   settlePointOperationSync,
@@ -5288,6 +5289,7 @@ export class ChannelObject extends DurableObject<Env> {
     return {
       apply: (operationId, kind, movements, result, payloadIdentity) =>
         this.applyPointOperation(moduleId, operationId, kind, movements, result, payloadIdentity),
+      getOperation: (operationId) => this.getPointOperation(moduleId, operationId),
       settle: (operationId, kind, actor, stake, params, options) =>
         this.settlePointOperation(moduleId, operationId, kind, actor, stake, params, options),
       touchAccount: (accountId, login, startBonus) => this.touchPointAccount(moduleId, accountId, login, startBonus),
@@ -5629,6 +5631,15 @@ export class ChannelObject extends DurableObject<Env> {
     await this.ensurePointsInitialized();
     assertPointAccountId(accountId);
     return pointHistory(this.ctx.storage.sql, accountId, cursor, limit);
+  }
+
+  public async getPointOperation(
+    moduleId: string,
+    operationId: string,
+  ): Promise<Awaited<ReturnType<ModulePointsAccess["getOperation"]>>> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    return pointOperation(this.ctx.storage.sql, moduleId, operationId);
   }
 
   public async pointSummary(_moduleId: string): Promise<Awaited<ReturnType<ModulePointsAccess["summary"]>>> {

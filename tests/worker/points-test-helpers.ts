@@ -23,6 +23,7 @@ export interface PointsWorkerObject {
     result: unknown;
     balances: Record<string, number>;
   }>;
+  getPointOperation(moduleId: string, operationId: string): Promise<{ kind: string; result: unknown } | null>;
   settlePointOperation(moduleId: string, operationId: string, kind: string, actor: { accountId: string; login: string }, stake: number,
     params: unknown, options: { payloadIdentity: unknown; cooldown?: { key: string; seconds: number } }): Promise<{
       replayed: boolean;
