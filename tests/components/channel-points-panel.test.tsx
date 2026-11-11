@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { PanelApiError } from "../../src/contracts/panel-error";
 import { UiProvider } from "../../src/dashboard/ui";
+import { runDashboardNavigationGuards } from "../../src/dashboard/ui/navigation-guard";
 import { MODULES } from "../../src/modules/registry";
 import type { BotModule } from "../../src/modules/contract";
 import type { ChannelPointsRedemption, ChannelPointsReward } from "../../src/modules/channel_points/contracts";
@@ -234,6 +235,22 @@ describe("channel points panel", () => {
     resolveSave(reward({ title: "Gespeicherter Entwurf" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Neue Belohnung" })).not.toBeInTheDocument());
     expect(await screen.findByText("Gespeicherter Entwurf")).toBeVisible();
+  });
+
+  it("blocks the confirmation's Save while the editor's own save is pending", async () => {
+    mocks.createReward.mockImplementation(() => new Promise<ChannelPointsReward>(() => undefined));
+    const dialog = await openNewReward();
+    fireEvent.change(within(dialog).getByLabelText("Titel"), { target: { value: "Langsamer Entwurf" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Speichern" }));
+    await waitFor(() => expect(mocks.createReward).toHaveBeenCalledTimes(1));
+
+    runDashboardNavigationGuards(() => undefined, () => undefined);
+    const confirmation = await screen.findByRole("dialog", { name: "Änderungen verwerfen?" });
+    const save = within(confirmation).getByRole("button", { name: "Speichern" });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    await new Promise((resolve) => { setTimeout(resolve, 20); });
+    expect(mocks.createReward).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a disabled action provider visible with its disabled reason", async () => {

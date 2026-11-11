@@ -556,7 +556,7 @@ export default function RewardEditorDialog({ language, reward, moduleAvailabilit
       cancelLabel={labels.continueEditing}
       alternative={{ label: labels.save, onClick: () => { void draftGuard.saveAndSwitch(); } }}
       danger
-      pending={draftGuard.saving}
+      pending={pending || draftGuard.saving}
       {...(draftGuard.saveError === undefined ? {} : { error: draftGuard.saveError })}
       onCancel={draftGuard.continueEditing}
       onConfirm={draftGuard.discardAndSwitch}
