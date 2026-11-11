@@ -1087,6 +1087,19 @@ export const pointHistory = (
   };
 };
 
+export const pointOperation = (
+  sql: PointsSql,
+  moduleId: string,
+  operationId: string,
+): { kind: string; result: unknown } | null => {
+  const operation = sql.exec<{ kind: string; result_json: string }>(
+    "SELECT kind, result_json FROM point_operations WHERE operation_id = ? AND module_id = ?",
+    operationId,
+    moduleId,
+  ).toArray()[0];
+  return operation === undefined ? null : { kind: operation.kind, result: JSON.parse(operation.result_json) as unknown };
+};
+
 export const pointSummary = (sql: PointsSql): Awaited<ReturnType<ModulePointsAccess["summary"]>> => {
   const house = sql.exec<{ balance: number }>("SELECT balance FROM point_accounts WHERE account_id = '__house'").toArray()[0]?.balance ?? 0;
   const jackpots = sql.exec<{ account_id: string; balance: number }>(
