@@ -43,7 +43,8 @@ const createTexts = (language: ModuleLanguage) => {
     moreActions: (title: string) => de ? `Weitere Aktionen für ${title}` : `More actions for ${title}`,
     edit: de ? "Bearbeiten" : "Edit",
     delete: de ? "Löschen" : "Delete",
-    recreate: de ? "Neu auf Twitch anlegen" : "Recreate on Twitch",
+    recreateShort: de ? "Neu anlegen" : "Recreate",
+    recreateReward: (title: string) => de ? `${title} auf Twitch neu anlegen` : `Recreate ${title} on Twitch`,
     deleteTitle: (title: string) => de ? `Belohnung „${title}“ löschen?` : `Delete “${title}”?`,
     deleteDescription: (title: string) => de
       ? `Die Belohnung „${title}“ wird auch auf Twitch gelöscht.`
@@ -87,7 +88,8 @@ const createTexts = (language: ModuleLanguage) => {
     maxPerUserPerStream: de ? "Maximal pro Person und Stream" : "Maximum per person per stream",
     cooldown: de ? "Cooldown pro Belohnung" : "Reward cooldown",
     seconds: de ? "s" : "s",
-    times: "×",
+    perStreamUnit: de ? "× pro Stream" : "× per stream",
+    perPersonUnit: de ? "× pro Person" : "× per person",
     action: de ? "Aktion" : "Action",
     mode: de ? "Ablauf" : "Mode",
     inputLockReason: de
@@ -125,7 +127,7 @@ const createTexts = (language: ModuleLanguage) => {
     counter: (count: number, maximum: number) => `${String(count)} / ${String(maximum)}`,
     chatMessage: de ? "Chat-Nachricht" : "Chat message",
     insertPlaceholder: (name: string) => de ? `Platzhalter ${name} einfügen` : `Insert ${name} placeholder`,
-    placeholders: de ? "Platzhalter" : "Placeholders",
+    placeholders: de ? "Platzhalter einfügen" : "Insert placeholders",
     previous: de ? "Zurück" : "Previous",
     next: de ? "Weiter" : "Next",
   };

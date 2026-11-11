@@ -435,10 +435,11 @@ export default function RewardEditorDialog({ language, reward, moduleAvailabilit
           />
           {draft.value.maxPerStreamEnabled ? <UnitInput
             label={labels.maxPerStream}
+            ariaLabel={labels.maxPerStream}
             value={draft.value.maxPerStream}
             min={1}
             max={1_000_000}
-            unit={labels.times}
+            unit={labels.perStreamUnit}
             {...(errors.maxPerStream === undefined ? {} : { error: errors.maxPerStream })}
             onChange={(maxPerStream) => update((current) => ({ ...current, maxPerStream }))}
           /> : null}
@@ -451,10 +452,11 @@ export default function RewardEditorDialog({ language, reward, moduleAvailabilit
           />
           {draft.value.maxPerUserPerStreamEnabled ? <UnitInput
             label={labels.maxPerUserPerStream}
+            ariaLabel={labels.maxPerUserPerStream}
             value={draft.value.maxPerUserPerStream}
             min={1}
             max={1_000_000}
-            unit={labels.times}
+            unit={labels.perPersonUnit}
             {...(errors.maxPerUserPerStream === undefined ? {} : { error: errors.maxPerUserPerStream })}
             onChange={(maxPerUserPerStream) => update((current) => ({ ...current, maxPerUserPerStream }))}
           /> : null}
@@ -467,6 +469,7 @@ export default function RewardEditorDialog({ language, reward, moduleAvailabilit
           />
           {draft.value.globalCooldownEnabled ? <UnitInput
             label={labels.cooldown}
+            ariaLabel={labels.cooldown}
             value={draft.value.globalCooldownSeconds}
             min={1}
             max={604_800}

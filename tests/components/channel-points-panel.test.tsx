@@ -143,6 +143,9 @@ describe("channel points panel", () => {
     expect(await screen.findByText("Auf Twitch aktiv")).toBeVisible();
     expect(screen.getByText("Wird angelegt")).toBeVisible();
     expect(screen.getByText("Auf Twitch gelöscht")).toBeVisible();
+    expect(screen.queryByRole("switch", { name: "Gelöscht aktiv" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Gelöscht auf Twitch neu anlegen" }));
+    await waitFor(() => expect(mocks.recreateReward).toHaveBeenCalled());
 
     cleanup();
     mocks.loadState.mockResolvedValue(state({ moduleEnabled: false, rewards: [reward({ title: "Modul aus" })] }));
@@ -185,7 +188,8 @@ describe("channel points panel", () => {
     fireEvent.click(within(dialog).getByRole("switch", { name: "Cooldown pro Belohnung" }));
     expect(within(dialog).getByRole("spinbutton", { name: "Cooldown pro Belohnung" })).toBeInTheDocument();
     expect(within(dialog).getByText("s", { selector: ".unit-input__unit" })).toBeVisible();
-    expect(within(dialog).getAllByText("×", { selector: ".unit-input__unit" })).toHaveLength(2);
+    expect(within(dialog).getByText("× pro Stream", { selector: ".unit-input__unit" })).toBeInTheDocument();
+    expect(within(dialog).getByText("× pro Person", { selector: ".unit-input__unit" })).toBeInTheDocument();
   });
 
   it("keeps a disabled action provider visible with its disabled reason", async () => {

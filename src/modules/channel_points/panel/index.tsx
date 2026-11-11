@@ -145,7 +145,6 @@ function RewardRow({
   const status = rewardState(reward, moduleEnabled, language);
   const menuItems = [
     { label: labels.edit, onSelect: () => onEdit(reward) },
-    ...(reward.twitchState === "deleted_on_twitch" ? [{ label: labels.recreate, onSelect: () => onRecreate(reward) }] : []),
     { divider: true as const },
     { label: labels.delete, danger: true, onSelect: () => onDelete(reward) },
   ];
@@ -161,13 +160,15 @@ function RewardRow({
       </div>
       <Badge tone={status.tone}>{status.label}</Badge>
       {canManage ? <div className="channel-points-reward-row__controls">
-        <SwitchRow
-          label={labels.active}
-          ariaLabel={labels.activeReward(reward.title)}
-          checked={reward.enabled}
-          disabled={reward.twitchState === "creating" || reward.twitchState === "deleted_on_twitch"}
-          onChange={(enabled) => onToggle(reward, enabled)}
-        />
+        {reward.twitchState === "deleted_on_twitch"
+          ? <Button size="compact" ariaLabel={labels.recreateReward(reward.title)} onClick={() => onRecreate(reward)}>{labels.recreateShort}</Button>
+          : <SwitchRow
+            label={labels.active}
+            ariaLabel={labels.activeReward(reward.title)}
+            checked={reward.enabled}
+            disabled={reward.twitchState === "creating"}
+            onChange={(enabled) => onToggle(reward, enabled)}
+          />}
         <ActionMenu label={labels.moreActions(reward.title)} items={menuItems} />
       </div> : null}
     </article>
@@ -395,7 +396,7 @@ export default function ChannelPointsPanel({
       <Badge tone={fixedStatusUnavailable ? "amber" : "green"}>
         {fixedStatusUnavailable ? labels.unavailable : labels.available}
       </Badge>
-      <span>{fixedStatus || "\u00a0"}</span>
+      <span title={fixedStatus}>{fixedStatus || "\u00a0"}</span>
       {stateQuery.isError ? <Button size="compact" icon="reload" onClick={() => { void stateQuery.refetch(); }}>{labels.retry}</Button> : null}
     </div>
 

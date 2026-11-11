@@ -1,6 +1,6 @@
 import { useRef, type ReactElement } from "react";
 
-import { Button, Field } from "../../../dashboard/ui";
+import { Field } from "../../../dashboard/ui";
 import { channelPointsPanelTexts } from "./locale";
 
 type Language = "de" | "en";
@@ -41,15 +41,16 @@ export default function ChatMessageEditor({ config, onChange, language }: ChatMe
       {...(message.trim().length === 0 ? { error: labels.required } : {})}
       onChange={changeMessage}
     />
-    <div className="channel-points-chat-editor__placeholders" role="group" aria-label={labels.placeholders}>
-      {placeholders.map((placeholder) => <Button
+    <span className="ui-field__label" id="channel-points-placeholders-label">{labels.placeholders}</span>
+    <div className="channel-points-chat-editor__placeholders" role="group" aria-labelledby="channel-points-placeholders-label">
+      {placeholders.map((placeholder) => <button
         key={placeholder}
-        size="compact"
-        variant="subtle"
-        className="channel-points-token"
-        ariaLabel={labels.insertPlaceholder(placeholder)}
+        type="button"
+        className="ui-token-chip"
+        aria-label={labels.insertPlaceholder(placeholder)}
+        onMouseDown={(event) => event.preventDefault()}
         onClick={() => insert(placeholder)}
-      >{placeholder}</Button>)}
+      ><code>{placeholder}</code></button>)}
     </div>
   </div>;
 }
