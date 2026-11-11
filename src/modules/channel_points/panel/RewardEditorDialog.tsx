@@ -3,6 +3,7 @@ import { createElement, lazy, Suspense, useEffect, useMemo, useState, type Compo
 import { PanelApiError } from "../../../contracts/panel-error";
 import {
   ColorField,
+  ConfirmDialog,
   Dialog,
   Field,
   FieldError,
@@ -251,7 +252,7 @@ export interface RewardEditorDialogProperties {
 export default function RewardEditorDialog({ language, reward, moduleAvailability, channelPointsActions, onClose, onSave, onReadinessError }: RewardEditorDialogProperties): ReactElement {
   const labels = channelPointsPanelTexts[language];
   const initial = reward === null ? newDraft() : draftFromReward(reward);
-  const draft = useDraft(initial, reward === null);
+  const draft = useDraft(initial);
   const [attempted, setAttempted] = useState(false);
   const [serverErrors, setServerErrors] = useState<Partial<Record<EditorField, string>>>({});
   const [saveError, setSaveError] = useState<string | undefined>();
@@ -362,6 +363,7 @@ export default function RewardEditorDialog({ language, reward, moduleAvailabilit
   };
 
   const update = (next: (current: RewardDraft) => RewardDraft): void => {
+    if (pending) return;
     clearErrors();
     draft.setValue(next);
   };
@@ -388,159 +390,176 @@ export default function RewardEditorDialog({ language, reward, moduleAvailabilit
   const valid = parsed.success && Object.keys(localErrorsFor(draft.value, labels)).length === 0 &&
     selectedAction !== undefined && selectedProviderEnabled && actionConfigResult?.success === true;
 
-  return <Dialog opened title={title} onClose={requestClose} pending={pending} className="channel-points-editor-dialog">
-    <div className="channel-points-editor">
-      <div className="channel-points-editor__fields">
-        <Field
-          label={labels.title}
-          value={draft.value.title}
-          maxLength={45}
-          countLabel={labels.counter}
-          {...(errors.title === undefined ? {} : { error: errors.title })}
-          onChange={(value) => update((current) => ({ ...current, title: value }))}
-        />
-        <Field
-          label={labels.prompt}
-          value={draft.value.prompt}
-          maxLength={200}
-          countLabel={labels.counter}
-          {...(errors.prompt === undefined ? {} : { error: errors.prompt })}
-          onChange={(value) => update((current) => ({ ...current, prompt: value }))}
-        />
-        <UnitInput
-          label={labels.cost}
-          value={draft.value.cost}
-          min={1}
-          max={1_000_000}
-          unit={labels.points}
-          {...(errors.cost === undefined ? {} : { error: errors.cost })}
-          onChange={(cost) => update((current) => ({ ...current, cost }))}
-        />
-        <ColorField
-          id="channel-points-background-color"
-          label={labels.backgroundColor}
-          value={draft.value.backgroundColor ?? undefined}
-          unsetLabel={labels.unsetColor}
-          clearLabel={labels.clearColor}
-          onChange={(backgroundColor) => update((current) => ({ ...current, backgroundColor: backgroundColor ?? null }))}
-        />
-      </div>
+  return <>
+    <Dialog opened title={title} onClose={requestClose} pending={pending} className="channel-points-editor-dialog">
+      <div className="channel-points-editor">
+        <fieldset className="channel-points-editor__form" disabled={pending} aria-label={title}>
+          <div className="channel-points-editor__fields">
+            <Field
+              label={labels.title}
+              value={draft.value.title}
+              maxLength={45}
+              countLabel={labels.counter}
+              {...(errors.title === undefined ? {} : { error: errors.title })}
+              onChange={(value) => update((current) => ({ ...current, title: value }))}
+            />
+            <Field
+              label={labels.prompt}
+              value={draft.value.prompt}
+              maxLength={200}
+              countLabel={labels.counter}
+              {...(errors.prompt === undefined ? {} : { error: errors.prompt })}
+              onChange={(value) => update((current) => ({ ...current, prompt: value }))}
+            />
+            <UnitInput
+              label={labels.cost}
+              value={draft.value.cost}
+              min={1}
+              max={1_000_000}
+              unit={labels.points}
+              {...(errors.cost === undefined ? {} : { error: errors.cost })}
+              onChange={(cost) => update((current) => ({ ...current, cost }))}
+            />
+            <ColorField
+              id="channel-points-background-color"
+              label={labels.backgroundColor}
+              value={draft.value.backgroundColor ?? undefined}
+              unsetLabel={labels.unsetColor}
+              clearLabel={labels.clearColor}
+              onChange={(backgroundColor) => update((current) => ({ ...current, backgroundColor: backgroundColor ?? null }))}
+            />
+          </div>
 
-      <div className="channel-points-editor__limits">
-        <div className="channel-points-limit">
+          <div className="channel-points-editor__limits">
+            <div className="channel-points-limit">
+              <SwitchRow
+                label={labels.maxPerStream}
+                checked={draft.value.maxPerStreamEnabled}
+                onChange={(maxPerStreamEnabled) => update((current) => ({ ...current, maxPerStreamEnabled }))}
+              />
+              {draft.value.maxPerStreamEnabled ? <UnitInput
+                label={labels.maxPerStream}
+                ariaLabel={labels.maxPerStream}
+                value={draft.value.maxPerStream}
+                min={1}
+                max={1_000_000}
+                unit={labels.perStreamUnit}
+                {...(errors.maxPerStream === undefined ? {} : { error: errors.maxPerStream })}
+                onChange={(maxPerStream) => update((current) => ({ ...current, maxPerStream }))}
+              /> : null}
+            </div>
+            <div className="channel-points-limit">
+              <SwitchRow
+                label={labels.maxPerUserPerStream}
+                checked={draft.value.maxPerUserPerStreamEnabled}
+                onChange={(maxPerUserPerStreamEnabled) => update((current) => ({ ...current, maxPerUserPerStreamEnabled }))}
+              />
+              {draft.value.maxPerUserPerStreamEnabled ? <UnitInput
+                label={labels.maxPerUserPerStream}
+                ariaLabel={labels.maxPerUserPerStream}
+                value={draft.value.maxPerUserPerStream}
+                min={1}
+                max={1_000_000}
+                unit={labels.perPersonUnit}
+                {...(errors.maxPerUserPerStream === undefined ? {} : { error: errors.maxPerUserPerStream })}
+                onChange={(maxPerUserPerStream) => update((current) => ({ ...current, maxPerUserPerStream }))}
+              /> : null}
+            </div>
+            <div className="channel-points-limit">
+              <SwitchRow
+                label={labels.cooldown}
+                checked={draft.value.globalCooldownEnabled}
+                onChange={(globalCooldownEnabled) => update((current) => ({ ...current, globalCooldownEnabled }))}
+              />
+              {draft.value.globalCooldownEnabled ? <UnitInput
+                label={labels.cooldown}
+                ariaLabel={labels.cooldown}
+                value={draft.value.globalCooldownSeconds}
+                min={1}
+                max={604_800}
+                unit={labels.seconds}
+                {...(errors.globalCooldownSeconds === undefined ? {} : { error: errors.globalCooldownSeconds })}
+                onChange={(globalCooldownSeconds) => update((current) => ({ ...current, globalCooldownSeconds }))}
+              /> : null}
+            </div>
+          </div>
+
           <SwitchRow
-            label={labels.maxPerStream}
-            checked={draft.value.maxPerStreamEnabled}
-            onChange={(maxPerStreamEnabled) => update((current) => ({ ...current, maxPerStreamEnabled }))}
+            label={labels.userInput}
+            checked={draft.value.isUserInputRequired || selectedAction?.requiresUserInput === true}
+            onChange={(isUserInputRequired) => update((current) => ({ ...current, isUserInputRequired }))}
+            {...(selectedAction?.requiresUserInput === true ? { lockedReason: labels.inputLockReason } : {})}
           />
-          {draft.value.maxPerStreamEnabled ? <UnitInput
-            label={labels.maxPerStream}
-            ariaLabel={labels.maxPerStream}
-            value={draft.value.maxPerStream}
-            min={1}
-            max={1_000_000}
-            unit={labels.perStreamUnit}
-            {...(errors.maxPerStream === undefined ? {} : { error: errors.maxPerStream })}
-            onChange={(maxPerStream) => update((current) => ({ ...current, maxPerStream }))}
-          /> : null}
-        </div>
-        <div className="channel-points-limit">
-          <SwitchRow
-            label={labels.maxPerUserPerStream}
-            checked={draft.value.maxPerUserPerStreamEnabled}
-            onChange={(maxPerUserPerStreamEnabled) => update((current) => ({ ...current, maxPerUserPerStreamEnabled }))}
-          />
-          {draft.value.maxPerUserPerStreamEnabled ? <UnitInput
-            label={labels.maxPerUserPerStream}
-            ariaLabel={labels.maxPerUserPerStream}
-            value={draft.value.maxPerUserPerStream}
-            min={1}
-            max={1_000_000}
-            unit={labels.perPersonUnit}
-            {...(errors.maxPerUserPerStream === undefined ? {} : { error: errors.maxPerUserPerStream })}
-            onChange={(maxPerUserPerStream) => update((current) => ({ ...current, maxPerUserPerStream }))}
-          /> : null}
-        </div>
-        <div className="channel-points-limit">
-          <SwitchRow
-            label={labels.cooldown}
-            checked={draft.value.globalCooldownEnabled}
-            onChange={(globalCooldownEnabled) => update((current) => ({ ...current, globalCooldownEnabled }))}
-          />
-          {draft.value.globalCooldownEnabled ? <UnitInput
-            label={labels.cooldown}
-            ariaLabel={labels.cooldown}
-            value={draft.value.globalCooldownSeconds}
-            min={1}
-            max={604_800}
-            unit={labels.seconds}
-            {...(errors.globalCooldownSeconds === undefined ? {} : { error: errors.globalCooldownSeconds })}
-            onChange={(globalCooldownSeconds) => update((current) => ({ ...current, globalCooldownSeconds }))}
-          /> : null}
-        </div>
-      </div>
 
-      <SwitchRow
-        label={labels.userInput}
-        checked={draft.value.isUserInputRequired || selectedAction?.requiresUserInput === true}
-        onChange={(isUserInputRequired) => update((current) => ({ ...current, isUserInputRequired }))}
-        {...(selectedAction?.requiresUserInput === true ? { lockedReason: labels.inputLockReason } : {})}
-      />
+          <div className="channel-points-editor__action">
+            <Select
+              label={labels.action}
+              value={actionKey(draft.value.actionModuleId, draft.value.actionId)}
+              options={actionOptions}
+              {...(errors.action === undefined ? {} : { error: errors.action })}
+              onChange={setAction}
+            />
+            <div className="channel-points-editor__action-config">
+              {selectedAction === undefined
+                ? <p className="channel-points-editor__note">{labels.actionUnknown}</p>
+                : selectedProviderEnabled
+                  ? selectedAction.editor === undefined
+                    ? <p className="channel-points-editor__note">{labels.noActionSettings}</p>
+                    : <LazyActionEditor
+                      action={selectedAction}
+                      config={draft.value.actionConfig}
+                      language={language}
+                      onChange={(actionConfig) => update((current) => ({ ...current, actionConfig: recordValue(actionConfig) }))}
+                    />
+                  : <p className="channel-points-editor__note">{selectedProviderReason}</p>}
+              <FieldError message={actionConfigError} />
+            </div>
+          </div>
 
-      <div className="channel-points-editor__action">
-        <Select
-          label={labels.action}
-          value={actionKey(draft.value.actionModuleId, draft.value.actionId)}
-          options={actionOptions}
-          {...(errors.action === undefined ? {} : { error: errors.action })}
-          onChange={setAction}
+          <SegmentChoice
+            label={labels.mode}
+            value={draft.value.mode}
+            onChange={(mode) => update((current) => ({ ...current, mode }))}
+            options={[
+              { value: "auto", label: labels.modeAutomatic, description: labels.modeAutomaticDescription },
+              { value: "queue", label: labels.modeQueue, description: labels.modeQueueDescription },
+            ]}
+            reserveError
+          />
+        </fieldset>
+
+        <SaveStatus
+          persistent
+          dirty={draft.dirty}
+          pending={pending}
+          saved={saved}
+          {...(saveError === undefined ? {} : { error: saveError })}
+          invalid={attempted && !valid}
+          invalidMessage={labels.invalidReward}
+          discardDisabled={pending}
+          onSave={() => { void saveAndClose(); }}
+          onInvalidSave={() => setAttempted(true)}
+          onDiscard={() => { draft.reset(); setAttempted(false); clearErrors(); }}
+          saveLabel={labels.save}
+          discardLabel={labels.discard}
+          savedLabel={labels.saved}
+          pendingLabel={labels.saving}
         />
-        <div className="channel-points-editor__action-config">
-          {selectedAction === undefined
-            ? <p className="channel-points-editor__note">{labels.actionUnknown}</p>
-            : selectedProviderEnabled
-              ? selectedAction.editor === undefined
-                ? <p className="channel-points-editor__note">{labels.noActionSettings}</p>
-                : <LazyActionEditor
-                  action={selectedAction}
-                  config={draft.value.actionConfig}
-                  language={language}
-                  onChange={(actionConfig) => update((current) => ({ ...current, actionConfig: recordValue(actionConfig) }))}
-                />
-              : <p className="channel-points-editor__note">{selectedProviderReason}</p>}
-          <FieldError message={actionConfigError} />
-        </div>
+        <div className="sr-only" aria-live="polite">{saveError ?? ""}</div>
       </div>
-
-      <SegmentChoice
-        label={labels.mode}
-        value={draft.value.mode}
-        onChange={(mode) => update((current) => ({ ...current, mode }))}
-        options={[
-          { value: "auto", label: labels.modeAutomatic, description: labels.modeAutomaticDescription },
-          { value: "queue", label: labels.modeQueue, description: labels.modeQueueDescription },
-        ]}
-        reserveError
-      />
-
-      <SaveStatus
-        persistent
-        dirty={draft.dirty}
-        pending={pending}
-        saved={saved}
-        {...(saveError === undefined ? {} : { error: saveError })}
-        invalid={attempted && !valid}
-        invalidMessage={labels.invalidReward}
-        discardDisabled={pending}
-        onSave={() => { void saveAndClose(); }}
-        onInvalidSave={() => setAttempted(true)}
-        onDiscard={() => { draft.reset(); setAttempted(false); clearErrors(); }}
-        saveLabel={labels.save}
-        discardLabel={labels.discard}
-        savedLabel={labels.saved}
-        pendingLabel={labels.saving}
-      />
-      <div className="sr-only" aria-live="polite">{saveError ?? ""}</div>
-    </div>
-  </Dialog>;
+    </Dialog>
+    <ConfirmDialog
+      opened={draftGuard.confirmOpen}
+      title={labels.discardChangesTitle}
+      description={labels.discardChangesDescription}
+      confirmLabel={labels.discard}
+      cancelLabel={labels.continueEditing}
+      alternative={{ label: labels.save, onClick: () => { void draftGuard.saveAndSwitch(); } }}
+      danger
+      pending={draftGuard.saving}
+      {...(draftGuard.saveError === undefined ? {} : { error: draftGuard.saveError })}
+      onCancel={draftGuard.continueEditing}
+      onConfirm={draftGuard.discardAndSwitch}
+    />
+  </>;
 }

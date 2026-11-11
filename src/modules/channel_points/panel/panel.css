@@ -119,6 +119,7 @@
 
   .channel-points-editor-dialog { width: min(780px, calc(100vw - 32px)); }
   .channel-points-editor { display: flex; max-height: min(82dvh, 860px); flex-direction: column; gap: var(--s3); overflow: auto; }
+  .channel-points-editor__form { display: flex; min-width: 0; flex-direction: column; gap: var(--s3); margin: 0; padding: 0; border: 0; }
   .channel-points-editor__fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); }
   .channel-points-editor__limits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
   .channel-points-editor :is(.ui-field, .unit-input, .ui-select, .segment-choice-field) { gap: 4px; }

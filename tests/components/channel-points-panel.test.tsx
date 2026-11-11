@@ -192,6 +192,50 @@ describe("channel points panel", () => {
     expect(within(dialog).getByText("× pro Person", { selector: ".unit-input__unit" })).toBeInTheDocument();
   });
 
+  it("closes an untouched new reward without asking for confirmation", async () => {
+    const dialog = await openNewReward();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Schließen" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Neue Belohnung" })).not.toBeInTheDocument());
+    expect(screen.queryByRole("dialog", { name: "Änderungen verwerfen?" })).not.toBeInTheDocument();
+  });
+
+  it("confirms close and Escape for dirty rewards, preserving edits on continue and discarding on confirm", async () => {
+    const dialog = await openNewReward();
+    const title = within(dialog).getByLabelText("Titel");
+    fireEvent.change(title, { target: { value: "Entwurf behalten" } });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Schließen" }));
+    let confirmation = await screen.findByRole("dialog", { name: "Änderungen verwerfen?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Weiter bearbeiten" }));
+    expect(within(dialog).getByLabelText("Titel")).toHaveValue("Entwurf behalten");
+
+    fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
+    confirmation = await screen.findByRole("dialog", { name: "Änderungen verwerfen?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Verwerfen" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Neue Belohnung" })).not.toBeInTheDocument());
+  });
+
+  it("disables reward fields and action settings during save, then closes with the saved reward", async () => {
+    let resolveSave: (saved: ChannelPointsReward) => void = () => { throw new Error("Save has not started"); };
+    mocks.createReward.mockImplementation(() => new Promise<ChannelPointsReward>((resolve) => { resolveSave = resolve; }));
+    const dialog = await openNewReward();
+    const title = within(dialog).getByLabelText("Titel");
+    fireEvent.change(title, { target: { value: "Gespeicherter Entwurf" } });
+    const chatMessage = await within(dialog).findByLabelText("Chat-Nachricht");
+    const insertPlaceholder = within(dialog).getByRole("button", { name: "Platzhalter {user} einfügen" });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Speichern" }));
+    await waitFor(() => expect(title).toBeDisabled());
+    expect(chatMessage).toBeDisabled();
+    expect(insertPlaceholder).toBeDisabled();
+    expect(mocks.createReward).toHaveBeenCalledWith("channel-demo", expect.objectContaining({ title: "Gespeicherter Entwurf" }));
+
+    mocks.loadState.mockResolvedValue(state({ rewards: [reward({ title: "Gespeicherter Entwurf" })] }));
+    resolveSave(reward({ title: "Gespeicherter Entwurf" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Neue Belohnung" })).not.toBeInTheDocument());
+    expect(await screen.findByText("Gespeicherter Entwurf")).toBeVisible();
+  });
+
   it("keeps a disabled action provider visible with its disabled reason", async () => {
     mocks.loadModuleAvailability.mockResolvedValue(moduleAvailability(["channel_points"]));
     const dialog = await openNewReward();
