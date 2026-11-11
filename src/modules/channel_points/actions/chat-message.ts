@@ -11,6 +11,7 @@ export const chatMessageAction: ChannelPointsActionDefinition<typeof chatMessage
   id: "chat-message",
   name: { de: "Chat-Nachricht", en: "Chat message" },
   configSchema: chatMessageConfigSchema,
+  editor: () => import("../panel/chat-message-editor"),
   execute: async (context, { redemption, config, operationId }) => {
     if (context.sendChat === undefined) {
       return { refund: { de: "Der Chat-Sender ist nicht verfügbar.", en: "The chat sender is unavailable." } };

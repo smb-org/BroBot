@@ -2047,6 +2047,12 @@ export interface ChannelPointsActionDefinition<ConfigSchema extends z.ZodType = 
   ) => Promise<"fulfilled" | { refund: { de: string; en: string } } | "pending">;
 }
 
+/** A registered channel-points action with the id of its owning module. */
+export interface RegisteredChannelPointsAction {
+  moduleId: string;
+  definition: ChannelPointsActionDefinition;
+}
+
 /** Shared props for lazily loaded panel views. */
 export interface ModulePanelProperties {
   channelId: string;
@@ -2062,6 +2068,8 @@ export interface ModulePanelProperties {
   canManage?: boolean;
   /** May the view execute operational controls available to every channel role? */
   canOperate?: boolean;
+  /** Registered channel-points actions available to action pickers. */
+  channelPointsActions?: readonly RegisteredChannelPointsAction[];
   /** Active state used by settings surfaces that also mount a module panel. */
   moduleActive?: boolean;
   /** Generic data-source conditions available to text-block editors. */
