@@ -51,7 +51,9 @@ const isOverlayChangedPayload = (value: unknown): boolean => isRecord(value) &&
 const realtimeUrl = (elementId: string | null): string => {
   const url = new URL("/ws/overlay", window.location.href);
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  if (elementId !== null) url.searchParams.set("elementId", elementId);
+  // Always identify the view explicitly; the server ignores sockets without a selection for alert presence.
+  if (elementId === null) url.searchParams.set("view", "composition");
+  else url.searchParams.set("elementId", elementId);
   return url.toString();
 };
 

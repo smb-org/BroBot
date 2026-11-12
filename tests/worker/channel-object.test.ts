@@ -132,7 +132,7 @@ const socketFor = (principal: RealtimePanelPrincipal): SocketDouble => ({
 const overlaySocketFor = (
   input: Omit<RealtimeOverlayPrincipal, "overlayId"> & { overlayId?: string | null },
 ): SocketDouble => {
-  const principal: RealtimeOverlayPrincipal = { ...input, overlayId: input.overlayId ?? null, elementId: input.elementId ?? null };
+  const principal: RealtimeOverlayPrincipal = { ...input, overlayId: input.overlayId ?? null };
   let attachment: unknown = { ...principal };
   return {
     tags: ["kind:overlay", `token:${principal.tokenId}`,
@@ -1041,14 +1041,14 @@ describe("ChannelObject realtime path", () => {
 
   it("counts only overlay sockets that render an enabled alert element", async () => {
     const element = { overlay_id: "overlay-a", element_id: "alert-a", in_composition: 1 };
-    const enqueue = async (elementId: string | null, alertElement: typeof element): Promise<string> => {
+    const enqueue = async (elementId: string | null | undefined, alertElement: typeof element): Promise<string> => {
       const socket = overlaySocketFor({
         v: 1,
         kind: "overlay",
         channelId: "kanal-a",
         tokenId: "token-a",
         overlayId: "overlay-a",
-        elementId,
+        ...(elementId === undefined ? {} : { elementId }),
         expiresAt: null,
       });
       const object = objectFor([socket], undefined, undefined, "kanal-a", [alertElement]);
@@ -1064,6 +1064,8 @@ describe("ChannelObject realtime path", () => {
     await expect(enqueue("score-a", element)).resolves.toBe("not_connected");
     await expect(enqueue("alert-a", { ...element, in_composition: 0 })).resolves.toBe("enqueued");
     await expect(enqueue(null, element)).resolves.toBe("enqueued");
+    // An older client reconnects without any view selection and must not count as an alert socket.
+    await expect(enqueue(undefined, element)).resolves.toBe("not_connected");
   });
 
   it("publishes a list once and routes variable changes to both client kinds", async () => {

@@ -79,7 +79,7 @@ test("a sandboxed opaque-origin embed loads bootstrap and applies a realtime upd
       body: JSON.stringify(bootstrap),
     });
   });
-  await page.routeWebSocket("**/ws/overlay", (socket) => {
+  await page.routeWebSocket(/\/ws\/overlay(\?.*)?$/u, (socket) => {
     realtimeSeen = true;
     expect(socket.protocols()).toContain("brobot.v1");
     expect(socket.protocols()).toContain("brobot.token.e2e-token");
