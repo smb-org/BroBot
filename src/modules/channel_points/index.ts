@@ -61,11 +61,11 @@ export const channelPointsModule: BotModule<typeof settingsSchema> = {
   actions: [{
     id: "queue",
     name: CHANNEL_POINTS_QUEUE_ACTION_NAME,
-    icon: "counter",
+    icon: "queue",
     conditions: ["moduleEnabled", queueAvailability],
     requiredRole: "operator",
     hideUntilAvailable: true,
-    content: { presentation: "dialog", hideSubmit: true, load: () => import("./panel/queue-action-content") },
+    content: { presentation: "dialog", hideSubmit: true, dismissAsClose: true, load: () => import("./panel/queue-action-content") },
     execute: () => Promise.resolve(),
   }],
   channelPointsActions: [chatMessageAction],

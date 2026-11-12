@@ -2091,7 +2091,7 @@ export interface ModulePanelProperties {
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
 }
 
-type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "duel" | "quiz" | "skip-forward" | "player-pause" | "player-play" | "square" | "counter" | "test-message" | "marker" | "timer";
+type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vote" | "boss" | "blitz" | "duel" | "quiz" | "skip-forward" | "player-pause" | "player-play" | "square" | "counter" | "test-message" | "marker" | "timer" | "queue";
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
@@ -2167,6 +2167,8 @@ export interface ModuleImmediateActionDefinition {
     requiresReadiness?: boolean;
     /** The content renders its own context-specific action buttons. */
     hideSubmit?: boolean;
+    /** Label the footer dismiss button "Close" instead of "Cancel" when there is nothing to cancel. */
+    dismissAsClose?: boolean;
     load: () => Promise<{ default: ComponentType<ModuleImmediateActionContentProperties> }>;
   };
 }

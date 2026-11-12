@@ -14,10 +14,6 @@ const createTexts = (language: ChannelPointsQueueLanguage) => {
     run: de ? "Ausführen" : "Run",
     refund: de ? "Erstatten" : "Refund",
     pending: de ? "Wird verarbeitet …" : "Processing …",
-    time: de ? "Zeit" : "Time",
-    viewer: de ? "Zuschauer" : "Viewer",
-    reward: de ? "Belohnung" : "Reward",
-    input: de ? "Eingabe" : "Input",
     count: (count: number) => de ? `${String(count)} wartend` : `${String(count)} waiting`,
     alreadyProcessed: de
       ? "Diese Einlösung wurde bereits verarbeitet."

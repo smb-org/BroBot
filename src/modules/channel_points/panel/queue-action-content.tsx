@@ -83,11 +83,12 @@ export default function ChannelPointsQueueActionContent({ channelId, language, c
             key={item.redemptionId}
           >
             <div className="channel-points-queue__identity">
-              <span className="channel-points-queue__time" title={item.redeemedAt}>{labels.time}: {formattedTime}</span>
-              <strong className="channel-points-queue__viewer" title={item.userName}>{item.userName}</strong>
-              <span className="channel-points-queue__reward" title={item.rewardTitle}>{item.rewardTitle}</span>
-              <span className="channel-points-queue__input-label">{labels.input}</span>
-              <span className="channel-points-queue__input" title={item.userInput}>{item.userInput || " "}</span>
+              <div className="channel-points-queue__head">
+                <strong className="channel-points-queue__viewer" title={item.userName}>{item.userName}</strong>
+                <span className="channel-points-queue__reward" title={item.rewardTitle}>{item.rewardTitle}</span>
+                <span className="channel-points-queue__time" title={item.redeemedAt}>{formattedTime}</span>
+              </div>
+              {item.userInput === "" ? null : <span className="channel-points-queue__input" title={item.userInput}>{item.userInput}</span>}
             </div>
             <div className="channel-points-queue__actions">
               {canOperate === true ? <>

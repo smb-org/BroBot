@@ -57,7 +57,7 @@ const roleReason = (requiredRole: ChannelRole): string => {
   return texts.operatorOnly;
 };
 
-const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, botConnected, role, moduleEnabled, availabilityRetryGeneration, onAvailabilityStateChange, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
+const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, botConnected, role, moduleEnabled, availabilityRetryGeneration, onAvailabilityStateChange, onHiddenChange, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
@@ -68,6 +68,7 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
   moduleEnabled: boolean;
   availabilityRetryGeneration: number;
   onAvailabilityStateChange: (actionKey: string, stale: boolean) => void;
+  onHiddenChange: (actionKey: string, hidden: boolean) => void;
   onActionStart?: (moduleId: string, actionId: string) => number;
   onActionResult?: (moduleId: string, result: ModuleImmediateActionResult, observedAt: number) => void;
   onActionFailure?: (moduleId: string, actionId: string, observedAt: number) => void;
@@ -200,6 +201,10 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
 
   const hideAction = action.hideUntilAvailable === true && (!shouldCheckConditions ||
     sharedCondition === undefined || sharedStateQuery.isPending || sharedStateQuery.isError || availability?.visible !== true);
+  useEffect(() => {
+    onHiddenChange(actionKey, hideAction);
+    return () => { onHiddenChange(actionKey, false); };
+  }, [actionKey, hideAction, onHiddenChange]);
   // Hidden actions render nothing; they sort last in the grid, so nothing shifts when they appear.
   if (hideAction) return null;
 
@@ -425,7 +430,7 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
     {contentReadinessReason === null ? null : <span className="sr-only" id={contentReadinessReasonId}>{contentReadinessReason}</span>}
     <p className={`live-action-frame__error${error === null ? "" : " has-error"}`} aria-live="polite" role="status">{error === null ? "\u00a0" : feedbackMessage(error)}</p>
     <footer className="live-action-frame__footer" ref={setFooterElement}>
-      <Button variant="subtle" disabled={busy} onClick={close}>{texts.streamManager.actionCancel}</Button>
+      <Button variant="subtle" disabled={busy} onClick={close}>{action.content?.dismissAsClose === true ? dashboardCommonTexts().close : texts.streamManager.actionCancel}</Button>
       {action.content?.hideSubmit === true ? null : <Button variant="primary" type="submit" disabled={disabled || busy || contentLoading || contentFailed || !contentReady}
         {...(contentReadinessReason === null ? {} : { describedBy: contentReadinessReasonId, title: contentReadinessReason })}>
         {busy ? texts.streamManager.actionRunning : texts.streamManager.actionRun}
@@ -513,7 +518,17 @@ export const ImmediateActions = ({ channelId, viewerUserId, streamState, botConn
       .map((action) => ({ moduleId: module.id, action, moduleEnabled }));
     // Conditionally hidden actions sort last, so their appearing shifts no other cockpit action.
   }).sort((a, b) => Number(a.action.hideUntilAvailable === true) - Number(b.action.hideUntilAvailable === true));
-  const count = texts.streamManager.actionCount(actions.length);
+  const [hiddenActionKeys, setHiddenActionKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const onHiddenChange = useCallback((actionKey: string, hidden: boolean): void => {
+    setHiddenActionKeys((current) => {
+      if (hidden === current.has(actionKey)) return current;
+      const next = new Set(current);
+      if (hidden) next.add(actionKey);
+      else next.delete(actionKey);
+      return next;
+    });
+  }, []);
+  const count = texts.streamManager.actionCount(actions.filter(({ moduleId, action }) => !hiddenActionKeys.has(`${moduleId}:${action.id}`)).length);
   const [staleActionKeys, setStaleActionKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [availabilityRetryGeneration, setAvailabilityRetryGeneration] = useState(0);
   const onAvailabilityStateChange = useCallback((actionKey: string, stale: boolean): void => {
@@ -540,7 +555,7 @@ export const ImmediateActions = ({ channelId, viewerUserId, streamState, botConn
     </header>
     <div className="live-cockpit-actions__grid" role="group" aria-label={texts.streamManager.immediateActions}>
       {modulesLoaded
-        ? actions.map(({ moduleId, action, moduleEnabled }) => <ActionButton key={`${channelId}:${moduleId}:${action.id}`} action={action} moduleId={moduleId} channelId={channelId} {...(viewerUserId === undefined ? {} : { viewerUserId })} streamState={streamState} botConnected={botConnected} role={role} moduleEnabled={moduleEnabled} availabilityRetryGeneration={availabilityRetryGeneration} onAvailabilityStateChange={onAvailabilityStateChange}
+        ? actions.map(({ moduleId, action, moduleEnabled }) => <ActionButton key={`${channelId}:${moduleId}:${action.id}`} action={action} moduleId={moduleId} channelId={channelId} {...(viewerUserId === undefined ? {} : { viewerUserId })} streamState={streamState} botConnected={botConnected} role={role} moduleEnabled={moduleEnabled} availabilityRetryGeneration={availabilityRetryGeneration} onAvailabilityStateChange={onAvailabilityStateChange} onHiddenChange={onHiddenChange}
           {...(onActionStart === undefined ? {} : { onActionStart })}
           {...(onActionResult === undefined ? {} : { onActionResult })}
           {...(onActionFailure === undefined ? {} : { onActionFailure })}
