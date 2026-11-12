@@ -18,6 +18,7 @@ const iconNames: Readonly<Record<IconName, true>> = {
   shoutout: true,
   clip: true,
   timer: true,
+  queue: true,
   boss: true,
   blitz: true,
   duel: true,

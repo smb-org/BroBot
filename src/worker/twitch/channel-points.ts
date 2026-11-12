@@ -228,9 +228,9 @@ export const updateRedemptionStatus = async (
 ): Promise<ChannelPointsHelixResult<unknown[]>> => {
   if (redemptionIds.length < 1 || redemptionIds.length > 50) return { ok: false, reason: "invalid_input" };
   const url = new URL(REDEMPTIONS_URL);
-  for (const id of redemptionIds) url.searchParams.append("id", id);
   url.searchParams.set("broadcaster_id", broadcasterId);
   url.searchParams.set("reward_id", rewardId);
+  for (const id of redemptionIds) url.searchParams.append("id", id);
   return request({
     environment, broadcasterId, scope: "channel:manage:redemptions", url: url.toString(), method: "PATCH",
     body: { status }, schema: emptyResponseSchema, authorize, fetcher,

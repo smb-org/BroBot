@@ -147,6 +147,25 @@
   .channel-points-chat-editor { display: flex; flex-direction: column; gap: var(--s2); }
   .channel-points-chat-editor__placeholders { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1); }
 
+  .channel-points-queue { display: flex; min-width: 0; flex-direction: column; gap: var(--s2); }
+  .channel-points-queue__toolbar { display: flex; min-height: 28px; align-items: center; justify-content: space-between; gap: var(--s2); }
+  .channel-points-queue__toolbar h2 { margin: 0; color: var(--text); font-size: var(--text-section-title); font-weight: 600; }
+  .channel-points-queue__toolbar > span { color: var(--text-2); font-size: var(--text-field-label); white-space: nowrap; }
+  .channel-points-queue__status { min-height: 18px; overflow: hidden; color: var(--text-2); font-size: var(--text-field-label); line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-points-queue__list { display: flex; height: min(50dvh, 420px); min-height: 180px; flex-direction: column; overflow: auto; border-top: 1px solid var(--line); }
+  .channel-points-queue__empty { display: grid; min-height: 100%; place-items: center; margin: 0; color: var(--text-3); text-align: center; }
+  .channel-points-queue__entry { display: grid; min-height: 84px; flex: none; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; gap: var(--s2); padding: var(--s2) var(--s1); border-bottom: 1px solid var(--line); }
+  .channel-points-queue__entry.is-pending { background: var(--surface); }
+  .channel-points-queue__identity { display: flex; min-width: 0; flex-direction: column; gap: var(--s1); }
+  .channel-points-queue__head { display: flex; min-width: 0; align-items: baseline; gap: var(--s2); }
+  .channel-points-queue__viewer, .channel-points-queue__reward, .channel-points-queue__time, .channel-points-queue__input { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .channel-points-queue__viewer { flex: 0 1 auto; color: var(--text); }
+  .channel-points-queue__reward { flex: 1 1 0; color: var(--text-2); }
+  .channel-points-queue__time { flex: none; margin-left: auto; color: var(--text-3); font-size: var(--text-field-label); }
+  .channel-points-queue__input { color: var(--text-2); font-size: var(--text-field-label); }
+  .channel-points-queue__actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: var(--s1); }
+  .channel-points-queue__pending { min-height: 18px; grid-column: 1 / -1; color: var(--text-2); font-size: var(--text-field-label); line-height: 18px; }
+
   @media (max-width: 768px) {
     .module-detail:has(.channel-points-panel) { height: calc(100dvh - var(--app-shell-header-height) - 40px); }
     .channel-points-reward-row { grid-template-columns: minmax(0, 1fr) max-content; gap: var(--s2); }
@@ -166,5 +185,8 @@
     .channel-points-panel__toolbar { width: 100%; justify-content: flex-start; }
     .channel-points-panel__toolbar > .ui-button { flex: 1 1 auto; }
     .channel-points-editor__fields, .channel-points-editor__limits { grid-template-columns: minmax(0, 1fr); }
+    .channel-points-queue__entry { grid-template-columns: minmax(0, 1fr); }
+    .channel-points-queue__actions { justify-content: stretch; }
+    .channel-points-queue__actions > .ui-button { flex: 1 1 120px; }
   }
 }

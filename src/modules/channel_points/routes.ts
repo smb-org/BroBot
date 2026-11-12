@@ -99,6 +99,59 @@ channelPointsRoutes.get("/redemptions", async (context) => {
   return context.json(page);
 });
 
+channelPointsRoutes.get("/queue", async (context) => {
+  const records = await createChannelPointsRepository(context.env.DB).listQueuedRedemptions(channelIdFrom(context), 100);
+  const { MODULES } = await import("../registry");
+  const items = records.map(({ redemption, actionModuleId, actionId }) => {
+    const actionName = MODULES.find(({ id }) => id === actionModuleId)?.channelPointsActions
+      ?.find(({ id }) => id === actionId)?.name ?? null;
+    return { ...redemption, actionName };
+  });
+  return context.json({ items, count: items.length });
+});
+
+const queueOperationResponse = (context: RouteContext, result: unknown): Response => {
+  if (!isRecord(result)) return context.json({ error: "channel_points_unknown_status" }, 502);
+  if (result.ok === true && (result.status === "pending" || result.status === "fulfilled" || result.status === "refunded")) {
+    return context.json({ ok: true, status: result.status });
+  }
+  if (result.error === "channel_points_redemption_not_queued") {
+    return context.json({
+      error: result.error,
+      status: typeof result.status === "string" ? result.status : null,
+    }, 409);
+  }
+  if (result.error === "channel_points_module_disabled") {
+    return context.json({ error: result.error }, 409);
+  }
+  if (result.error === "channel_points_already_resolved_on_twitch") {
+    return context.json({ error: result.error, status: result.status }, 409);
+  }
+  if (result.error === "channel_points_twitch_status_unavailable") {
+    return context.json({ error: result.error }, 503);
+  }
+  if (result.error === "channel_points_redemption_missing_on_twitch") {
+    return context.json({ error: result.error }, 409);
+  }
+  if (typeof result.reason === "string") return reasonResponse(context, result.reason as ChannelPointsHelixReason);
+  return context.json({ error: "channel_points_unknown_status" }, 502);
+};
+
+const operateOnRedemption = async (context: RouteContext, operation: "run" | "refund"): Promise<Response> => {
+  const denied = requireOperator(context);
+  if (denied !== null) return denied;
+  const result = await runLifecycle(context, channelIdFrom(context), {
+    kind: operation === "run" ? "redemption.run" : "redemption.refund",
+    actor: context.get("actor"),
+    now: nowIso(),
+    id: context.req.param("redemptionId"),
+  });
+  return queueOperationResponse(context, result);
+};
+
+channelPointsRoutes.post("/redemptions/:redemptionId/run", (context) => operateOnRedemption(context, "run"));
+channelPointsRoutes.post("/redemptions/:redemptionId/refund", (context) => operateOnRedemption(context, "refund"));
+
 channelPointsRoutes.post("/rewards", async (context) => {
   const denied = requireManager(context);
   if (denied !== null) return denied;

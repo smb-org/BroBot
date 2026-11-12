@@ -203,8 +203,8 @@ describe("channel points Helix wrapper", () => {
       "FULFILLED", () => Promise.resolve(true), capture.fetcher,
     );
     expectRequest(capture.calls, 0, "PATCH", [
-      ["id", "redemption_one"], ["id", "redemption_two"],
       ["broadcaster_id", "channel_fictional"], ["reward_id", "reward_fictional"],
+      ["id", "redemption_one"], ["id", "redemption_two"],
     ], { status: "FULFILLED" });
     expect(result).toEqual({ ok: true, data: [] });
   });

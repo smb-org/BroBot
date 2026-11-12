@@ -1,5 +1,6 @@
 import { PanelApiError } from "../../../contracts/panel-error";
 import type {
+  ChannelPointsQueueItem,
   ChannelPointsRedemption,
   ChannelPointsReward,
   ChannelPointsRewardInput,
@@ -49,6 +50,11 @@ export interface ChannelPointsHistoryPage {
   cursor: string | null;
 }
 
+interface ChannelPointsQueue {
+  items: ChannelPointsQueueItem[];
+  count: number;
+}
+
 export interface ChannelPointsModuleAvailability {
   id: string;
   enabled: boolean;
@@ -69,6 +75,20 @@ export const loadChannelPointsRedemptions = async (
     `${basePath(channelId)}/redemptions${search}`, signal === undefined ? {} : { signal },
   ));
 };
+
+export const loadChannelPointsQueue = async (channelId: string, signal?: AbortSignal): Promise<ChannelPointsQueue> =>
+  readJson<ChannelPointsQueue>(await fetch(
+    `${basePath(channelId)}/queue`, signal === undefined ? {} : { signal },
+  ));
+
+export const operateOnChannelPointsRedemption = async (
+  channelId: string,
+  redemptionId: string,
+  operation: "run" | "refund",
+): Promise<{ ok: true; status: "pending" | "fulfilled" | "refunded" }> =>
+  request<{ ok: true; status: "pending" | "fulfilled" | "refunded" }>(
+    channelId, `/redemptions/${encodeURIComponent(redemptionId)}/${operation}`, "POST",
+  );
 
 export const loadChannelPointsModuleAvailability = async (
   channelId: string,
