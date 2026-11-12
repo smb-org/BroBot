@@ -2095,6 +2095,8 @@ type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vot
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
+  /** Whether a cockpit action with hideUntilAvailable should currently appear. */
+  visible?: boolean;
   link?: { href: string; label: Readonly<Record<ModuleLanguage, string>> };
   /** Used for short countdowns such as an open voting round. */
   until?: number;
@@ -2125,6 +2127,8 @@ export type ModuleImmediateActionCondition = "streamLive" | "moduleEnabled" | {
 export interface ModuleImmediateActionContentProperties {
   channelId: string;
   language: ModuleLanguage;
+  /** Whether the current viewer may operate rows inside readable action content. */
+  canOperate?: boolean;
   onDraftChange?: (dirty: boolean) => void;
   onReadinessChange?: (ready: boolean, reason: string | null) => void;
   /** Lets dialog content provide a context-specific button that still runs through the action result path. */
@@ -2154,6 +2158,8 @@ export interface ModuleImmediateActionDefinition {
   icon: ModuleImmediateActionIcon;
   conditions: readonly ModuleImmediateActionCondition[];
   requiredRole: ChannelRole;
+  /** Hide this action while its custom availability query is unresolved or reports visible=false. */
+  hideUntilAvailable?: boolean;
   execute: (properties: ModuleImmediateActionExecutionProperties) => Promise<ModuleImmediateActionResult> | Promise<void>;
   errorMessage?: Readonly<Record<ModuleLanguage, string>>;
   content?: {

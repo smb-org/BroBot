@@ -40,6 +40,10 @@ const deletedRewardReason = {
   de: "Diese Belohnung wurde auf Twitch gelöscht. Twitch erstattet nicht erfüllte Einlösungen automatisch.",
   en: "This reward was deleted on Twitch. Twitch automatically refunds its unfulfilled redemptions.",
 };
+const operatorRefundReason = {
+  de: "Von einem Bediener erstattet.",
+  en: "Refunded by operator.",
+};
 export type ChannelPointsMutationAuthorization = () => Promise<boolean>;
 interface ChannelPointsReconcileFailure {
   rewardId: string;
@@ -91,7 +95,7 @@ const applyOutcome = async (
   outcome: ChannelPointsActionOutcome,
   now: string,
   authorize: ChannelPointsMutationAuthorization,
-): Promise<void> => {
+): Promise<{ ok: true; status: "pending" | "fulfilled" | "refunded" } | { ok: false; reason: ChannelPointsHelixReason }> => {
   const repository = createChannelPointsRepository(environment.DB);
   const transition = channelPointsActionTransition("auto", outcome);
   const recorded = await repository.updateRedemption(channelId, redemptionId, {
@@ -100,7 +104,8 @@ const applyOutcome = async (
     outcomeReason: transition.outcomeReason ?? null,
     claimedAt: transition.status === "pending" || transition.status === "running" ? now : null,
   }, ["running"], now);
-  if (!recorded || transition.pendingTwitchStatus === undefined) return;
+  if (!recorded) return { ok: false, reason: "precondition_failed" };
+  if (transition.pendingTwitchStatus === undefined) return { ok: true, status: "pending" };
   const patched = await sendStatus(environment, channelId, twitchRewardId, redemptionId, transition.pendingTwitchStatus, authorize);
   const finishedAt = new Date().toISOString();
   if (patched === "success") {
@@ -110,6 +115,7 @@ const applyOutcome = async (
       outcomeReason: transition.outcomeReason ?? null,
       claimedAt: null,
     }, ["running"], finishedAt);
+    return { ok: true, status: transition.pendingTwitchStatus === "FULFILLED" ? "fulfilled" : "refunded" };
   } else {
     await repository.updateRedemption(channelId, redemptionId, {
       status: "failed_to_update",
@@ -117,6 +123,7 @@ const applyOutcome = async (
       outcomeReason: transition.outcomeReason ?? null,
       claimedAt: finishedAt,
     }, ["running"], finishedAt);
+    return { ok: false, reason: patched };
   }
 };
 
@@ -302,13 +309,13 @@ const runClaimedAction = async (
   row: ChannelPointsRedemption,
   context: ModuleExecutionContext | null,
   authorize: ChannelPointsMutationAuthorization,
-): Promise<void> => {
+): Promise<Awaited<ReturnType<typeof applyOutcome>>> => {
   const redemption = {
     id: row.redemptionId, rewardId: row.twitchRewardId, rewardTitle: row.rewardTitle, userId: row.userId,
     userLogin: row.userLogin, userName: row.userName, userInput: row.userInput, redeemedAt: row.redeemedAt,
   };
   const outcome = await actionOutcome(environment, channelId, reward, redemption, context);
-  await applyOutcome(environment, channelId, row.twitchRewardId, row.redemptionId, outcome, new Date().toISOString(), authorize);
+  return await applyOutcome(environment, channelId, row.twitchRewardId, row.redemptionId, outcome, new Date().toISOString(), authorize);
 };
 
 const sendPendingTwitchPatch = async (
@@ -565,6 +572,8 @@ type LifecycleActor = ModuleMutationActor;
 type ChannelPointsLifecycleInvocation =
   | { kind: "event"; event: ModuleEvent }
   | { kind: "reconcile"; actor: LifecycleActor; now: string; force: boolean }
+  | { kind: "redemption.run"; actor: LifecycleActor; now: string; id: string }
+  | { kind: "redemption.refund"; actor: LifecycleActor; now: string; id: string }
   | { kind: "reward.create"; actor: LifecycleActor; now: string; id: string; reward: ChannelPointsRewardInput }
   | { kind: "reward.update"; actor: LifecycleActor; now: string; id: string; reward: ChannelPointsRewardInput }
   | { kind: "reward.delete"; actor: LifecycleActor; now: string; id: string }
@@ -610,6 +619,64 @@ const moduleIsEnabled = async (db: D1Database, channelId: string): Promise<boole
   (await db.prepare("SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = ?")
     .bind(channelId, "channel_points").first<{ enabled: number }>())?.enabled === 1;
 
+type QueueOperationResult =
+  | { ok: true; status: "pending" | "fulfilled" | "refunded" }
+  | { ok: false; error: "channel_points_module_disabled" | "channel_points_redemption_not_queued"; status?: ChannelPointsRedemptionStatus | null }
+  | { ok: false; reason: ChannelPointsHelixReason };
+
+const performQueueOperation = async (
+  environment: Env,
+  channelId: string,
+  invocation: Extract<ChannelPointsLifecycleInvocation, { kind: "redemption.run" | "redemption.refund" }>,
+  authorizeMutation: AuthorizeModuleMutation,
+): Promise<QueueOperationResult> => {
+  const db = environment.DB;
+  const authorize = authorizeCurrentMutation(db, channelId, invocation.actor, authorizeMutation);
+  if (!await authorize()) return { ok: false, reason: "precondition_failed" };
+  const repository = createChannelPointsRepository(db);
+  const current = await repository.getRedemption(channelId, invocation.id);
+  if (current?.status !== "queued") {
+    return {
+      ok: false,
+      error: "channel_points_redemption_not_queued",
+      status: current?.status ?? null,
+    };
+  }
+  if (!await moduleIsEnabled(db, channelId)) return { ok: false, error: "channel_points_module_disabled" };
+
+  const now = invocation.now;
+  const claimGuard = mutationGuardFor(channelId, invocation.actor, new Date().toISOString(), authorizeMutation);
+  const claimed = await repository.claimRedemption(
+    channelId, invocation.id, ["queued"], expiredBeforeFor(now), now, claimGuard,
+  );
+  if (!claimed) {
+    if (!await authorize()) return { ok: false, reason: "precondition_failed" };
+    const current = await repository.getRedemption(channelId, invocation.id);
+    return {
+      ok: false,
+      error: "channel_points_redemption_not_queued",
+      status: current?.status ?? null,
+    };
+  }
+
+  const redemption = await repository.getRedemption(channelId, invocation.id);
+  if (redemption === null || redemption.status !== "running") {
+    return {
+      ok: false,
+      error: "channel_points_redemption_not_queued",
+      status: redemption?.status ?? null,
+    };
+  }
+  if (invocation.kind === "redemption.refund") {
+    return await applyOutcome(environment, channelId, redemption.twitchRewardId, redemption.redemptionId,
+      { refund: operatorRefundReason }, now, authorize);
+  }
+
+  const reward = await repository.getReward(channelId, redemption.rewardId);
+  if (reward === null) return { ok: false, reason: "unknown_status" };
+  return await runClaimedAction(environment, channelId, reward, redemption, null, authorize);
+};
+
 type RewardOperationResult =
   | { ok: true; reward: ChannelPointsReward }
   | { ok: true }
@@ -619,7 +686,7 @@ type RewardOperationResult =
 const performRewardMutation = async (
   environment: Env,
   channelId: string,
-  invocation: Exclude<ChannelPointsLifecycleInvocation, { kind: "event" | "reconcile" | "activation" }>,
+  invocation: Exclude<ChannelPointsLifecycleInvocation, { kind: "event" | "reconcile" | "activation" | "redemption.run" | "redemption.refund" }>,
   authorizeManagementMutation: AuthorizeModuleMutation,
 ): Promise<RewardOperationResult> => {
   const repository = createChannelPointsRepository(environment.DB);
@@ -779,6 +846,10 @@ const decodeLifecycleInvocation = (value: unknown): ChannelPointsLifecycleInvoca
   if (value.kind === "reconcile" && actor !== null && typeof value.now === "string") {
     return { kind: "reconcile", actor, now: value.now, force: value.force === true };
   }
+  if ((value.kind === "redemption.run" || value.kind === "redemption.refund") && actor !== null &&
+      typeof value.id === "string" && typeof value.now === "string") {
+    return { kind: value.kind, actor, id: value.id, now: value.now };
+  }
   if (value.kind === "reward.delete" && actor !== null && typeof value.id === "string" && typeof value.now === "string") {
     return { kind: "reward.delete", actor, id: value.id, now: value.now };
   }
@@ -818,6 +889,9 @@ export const channelPointsLifecycleAlarm: ModuleAlarmDefinition = {
       return await reconcileChannelPoints(environment, channelId, invocation.now, {
         force: invocation.force, authorize,
       });
+    }
+    if (invocation.kind === "redemption.run" || invocation.kind === "redemption.refund") {
+      return await performQueueOperation(environment, channelId, invocation, context.authorizeMutation);
     }
     return await performRewardMutation(environment, channelId, invocation, context.authorizeManagementMutation);
   },

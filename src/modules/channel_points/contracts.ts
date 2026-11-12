@@ -2,6 +2,10 @@ import { z } from "zod";
 
 export const CHANNEL_POINTS_MODULE_ID = "channel_points";
 export const CHANNEL_POINTS_MAX_REWARDS = 50;
+export const CHANNEL_POINTS_QUEUE_ACTION_NAME = {
+  de: "Kanalpunkte-Warteschlange",
+  en: "Channel points queue",
+} as const;
 
 export const channelPointsRewardInputSchema = z.object({
   title: z.string().trim().min(1).max(45),
@@ -49,6 +53,10 @@ export interface ChannelPointsRedemption {
   outcomeReason: { de: string; en: string } | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ChannelPointsQueueItem extends ChannelPointsRedemption {
+  actionName: Readonly<Record<"de" | "en", string>> | null;
 }
 
 export type ChannelPointsHelixReason =

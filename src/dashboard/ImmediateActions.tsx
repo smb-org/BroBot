@@ -19,6 +19,7 @@ type CustomCondition = Extract<ModuleImmediateActionCondition, { check: unknown 
 
 interface ActionAvailabilityResult {
   reason: Readonly<Record<"de" | "en", string>> | null;
+  visible?: boolean;
   link?: { href: string; label: Readonly<Record<"de" | "en", string>> };
   until?: number;
   pollId?: string;
@@ -38,6 +39,7 @@ interface ActionFeedback {
 // legacy checks keep the previous 4 s connected cadence because they have no revision guarantee.
 const REVISION_COVERED_ACTION_QUERIES = new Set([
   "chat_voting:live",
+  "channel_points:action-availability-queue",
   "text_commands:counter-availability",
   "timers:upcoming",
   "votekick:panel",
@@ -70,7 +72,7 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
   onActionResult?: (moduleId: string, result: ModuleImmediateActionResult, observedAt: number) => void;
   onActionFailure?: (moduleId: string, actionId: string, observedAt: number) => void;
   onFeedbackMessage?: (message: string, link?: { href: string; label: string }, tone?: ModuleImmediateActionResult["tone"]) => void;
-}): ReactElement => {
+}): ReactElement | null => {
   const language = dashboardLanguage();
   const texts = dashboardTexts();
   const staticAvailability = evaluateImmediateActionAvailability(action.conditions, streamState, moduleEnabled);
@@ -196,8 +198,13 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
             ? activeConditionState.reason[language]
             : activeConditionState.reason[language].replace("{time}", remainingTime(activeConditionState.until, now));
 
+  const hideAction = action.hideUntilAvailable === true && (!shouldCheckConditions ||
+    sharedCondition === undefined || sharedStateQuery.isPending || sharedStateQuery.isError || availability?.visible !== true);
+  // Hidden actions render nothing; they sort last in the grid, so nothing shifts when they appear.
+  if (hideAction) return null;
+
   return <ActionFrame action={action} moduleId={moduleId} channelId={channelId} {...(viewerUserId === undefined ? {} : { viewerUserId })} language={language} pollId={activeConditionState.pollId}
-    disabled={lockReason !== null} reason={lockReason} availabilityStale={activeConditionState.stale}
+    canOperate={meetsRole} disabled={lockReason !== null} reason={lockReason} availabilityStale={activeConditionState.stale}
     availabilityConfirmations={availabilityConfirmations}
     availabilityLink={shouldCheckConditions && activeConditionState.reason !== null ? activeConditionState.link : null}
     {...(onFeedbackMessage === undefined ? {} : { onFeedbackMessage })}
@@ -206,13 +213,14 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
     {...(onActionFailure === undefined ? {} : { onActionFailure })} />;
 };
 
-const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, pollId, disabled, reason, availabilityStale, availabilityConfirmations, availabilityLink, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
+const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, pollId, canOperate, disabled, reason, availabilityStale, availabilityConfirmations, availabilityLink, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
   viewerUserId?: string | null;
   language: "de" | "en";
   pollId: string | null;
+  canOperate: boolean;
   disabled: boolean;
   reason: string | null;
   availabilityStale: boolean;
@@ -410,7 +418,7 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
           <p>{texts.streamManager.actionLoadFailed}</p>
           <Button size="compact" variant="neutral" onClick={retryModuleChunkLoad}>{dashboardCommonTexts().retry}</Button>
         </div>
-        : Content === null ? null : <fieldset disabled={busy} className="live-action-frame__fields"><Content channelId={channelId} language={language} onDraftChange={setDraftDirty}
+        : Content === null ? null : <fieldset disabled={busy} className="live-action-frame__fields"><Content channelId={channelId} language={language} canOperate={canOperate} onDraftChange={setDraftDirty}
           onActionExecute={run} footerElement={footerElement}
           {...(requiresContentReadiness ? { onReadinessChange: reportContentReadiness } : {})} /></fieldset>}
     </div>
@@ -503,7 +511,8 @@ export const ImmediateActions = ({ channelId, viewerUserId, streamState, botConn
     return module.actions
       .filter((action) => moduleEnabled || action.conditions.includes("moduleEnabled"))
       .map((action) => ({ moduleId: module.id, action, moduleEnabled }));
-  });
+    // Conditionally hidden actions sort last, so their appearing shifts no other cockpit action.
+  }).sort((a, b) => Number(a.action.hideUntilAvailable === true) - Number(b.action.hideUntilAvailable === true));
   const count = texts.streamManager.actionCount(actions.length);
   const [staleActionKeys, setStaleActionKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [availabilityRetryGeneration, setAvailabilityRetryGeneration] = useState(0);

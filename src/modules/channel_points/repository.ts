@@ -53,10 +53,22 @@ export interface ChannelPointsRepository {
   }, now: string): Promise<boolean>;
   getRedemption(channelId: string, id: string): Promise<ChannelPointsRedemption | null>;
   updateRedemption(channelId: string, id: string, change: { status: ChannelPointsRedemptionStatus; pendingTwitchStatus?: TwitchRedemptionStatus | null; outcomeReason?: { de: string; en: string } | null; claimedAt?: string | null }, fromStatuses: readonly ChannelPointsRedemptionStatus[], now: string): Promise<boolean>;
-  claimRedemption(channelId: string, id: string, fromStatuses: readonly ChannelPointsRedemptionStatus[], expiredBefore: string, now: string): Promise<boolean>;
+  claimRedemption(
+    channelId: string,
+    id: string,
+    fromStatuses: readonly ChannelPointsRedemptionStatus[],
+    expiredBefore: string,
+    now: string,
+    guard?: { sql: string; values: readonly (string | number | null)[] },
+  ): Promise<boolean>;
   reclaimRunningRedemption(channelId: string, id: string, expiredBefore: string, now: string): Promise<boolean>;
   claimFailedPatch(channelId: string, id: string, expiredBefore: string, now: string): Promise<boolean>;
   listRedemptions(channelId: string, cursor: string | null, limit: number): Promise<{ items: ChannelPointsRedemption[]; cursor: string | null }>;
+  listQueuedRedemptions(channelId: string, limit: number): Promise<Array<{
+    redemption: ChannelPointsRedemption;
+    actionModuleId: string;
+    actionId: string;
+  }>>;
   listRetryable(channelId: string, expiredBefore: string): Promise<ChannelPointsRedemption[]>;
   listOpenRedemptions(channelId: string, expiredBefore: string): Promise<ChannelPointsRedemption[]>;
   persistReconcileTime(channelId: string, now: string): Promise<void>;
@@ -187,11 +199,17 @@ export const createChannelPointsRepository = (db: D1Database): ChannelPointsRepo
         change.claimedAt ?? null, now, channelId, id, ...fromStatuses).run();
     return result.meta.changes > 0;
   },
-  async claimRedemption(channelId, id, fromStatuses, expiredBefore, now) {
+  async claimRedemption(channelId, id, fromStatuses, expiredBefore, now, guard) {
     if (fromStatuses.length === 0) return false;
     const placeholders = fromStatuses.map(() => "?").join(",");
-    const result = await db.prepare(`UPDATE channel_points_redemptions SET status='running',pending_twitch_status=NULL,claimed_at=?,updated_at=? WHERE channel_id=? AND redemption_id=? AND status IN (${placeholders}) AND (status NOT IN ('pending','queued') OR claimed_at IS NULL OR claimed_at<=?)`)
-      .bind(now, now, channelId, id, ...fromStatuses, expiredBefore).run();
+    const authorization = guard === undefined ? "" :
+      " AND EXISTS (SELECT channel_id FROM channels WHERE channel_id=? " + guard.sql + ")";
+    const result = await db.prepare(`UPDATE channel_points_redemptions
+      SET status='running',pending_twitch_status=NULL,claimed_at=?,updated_at=?
+      WHERE channel_id=? AND redemption_id=? AND status IN (${placeholders})
+        AND (status NOT IN ('pending','queued') OR claimed_at IS NULL OR claimed_at<=?)${authorization}`)
+      .bind(now, now, channelId, id, ...fromStatuses, expiredBefore,
+        ...(guard === undefined ? [] : [channelId, ...guard.values])).run();
     return result.meta.changes > 0;
   },
   async reclaimRunningRedemption(channelId, id, expiredBefore, now) {
@@ -215,6 +233,21 @@ export const createChannelPointsRepository = (db: D1Database): ChannelPointsRepo
     const items = rows.results.slice(0, limit).map(redemptionFromRow);
     const last = items.at(-1);
     return { items, cursor: hasMore && last !== undefined ? last.redeemedAt + "~" + last.redemptionId : null };
+  },
+  async listQueuedRedemptions(channelId, limit) {
+    const rows = await db.prepare(`SELECT redemptions.*, rewards.action_module_id, rewards.action_id
+      FROM channel_points_redemptions AS redemptions
+      LEFT JOIN channel_points_rewards AS rewards
+        ON rewards.channel_id=redemptions.channel_id AND rewards.id=redemptions.reward_id
+      WHERE redemptions.channel_id=? AND redemptions.status='queued'
+      ORDER BY redemptions.redeemed_at ASC,redemptions.redemption_id ASC
+      LIMIT ?`)
+      .bind(channelId, limit).all<RedemptionRow & { action_module_id: string | null; action_id: string | null }>();
+    return rows.results.map((row) => ({
+      redemption: redemptionFromRow(row),
+      actionModuleId: row.action_module_id ?? "",
+      actionId: row.action_id ?? "",
+    }));
   },
   async listRetryable(channelId, expiredBefore) {
     const rows = await db.prepare("SELECT * FROM channel_points_redemptions WHERE channel_id=? AND (status='received' OR (status IN ('pending','running','failed_to_update') AND (claimed_at IS NULL OR claimed_at<=?) AND (status!='failed_to_update' OR pending_twitch_status IS NOT NULL))) ORDER BY redeemed_at")
