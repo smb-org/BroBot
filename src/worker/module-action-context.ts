@@ -22,6 +22,10 @@ export const createModuleActionExecutionContext = (
     ballots: moduleBallots(environment.CHANNEL, channelId, moduleId),
     points: modulePoints(environment.CHANNEL, channelId, moduleId),
     tempVips: moduleTempVips(environment.CHANNEL, channelId),
+    overlayAlertQueue: {
+      enqueue: (operationId, alert) => object.enqueueOverlayAlert(operationId, alert),
+      advance: () => object.advanceOverlayAlertQueue(),
+    },
     sendChat: (text, operationId) => object.sendModuleChatMessage(moduleId, operationId, text),
     streamState: async (): Promise<ModuleStreamState> => {
       const state = await readChannelStreamState(environment.DB, channelId);

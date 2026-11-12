@@ -10,6 +10,7 @@ interface OverlayCanvasProperties {
   language: OverlayLanguage;
   variables: Readonly<Record<string, number>>;
   elementId: string | null;
+  mediaAccessToken?: string;
 }
 
 interface ElementBoundaryProperties {
@@ -41,6 +42,7 @@ const renderElement = (
   language: OverlayLanguage,
   variables: Readonly<Record<string, number>>,
   isolated: boolean,
+  mediaAccessToken?: string,
 ): ReactElement | null => {
   const scale = element.scalePercent / 100;
   // Width must stay intrinsic and independent of `left`/`x` in the composition: an absolutely
@@ -73,6 +75,7 @@ const renderElement = (
         state={element.state ?? null}
         now={Date.now()}
         language={language}
+        {...(mediaAccessToken === undefined ? {} : { mediaAccessToken })}
       /></Suspense>
     </div>;
   }
@@ -96,7 +99,7 @@ const renderElement = (
 };
 
 /** Draws the stored composition, or the same element at its standalone origin. */
-export const OverlayCanvas = ({ overlay, language, variables, elementId }: OverlayCanvasProperties): ReactElement | null => {
+export const OverlayCanvas = ({ overlay, language, variables, elementId, mediaAccessToken }: OverlayCanvasProperties): ReactElement | null => {
   const isolatedElement = elementId === null
     ? null
     : overlay.elements.find((element) => element.id === elementId) ?? null;
@@ -128,7 +131,7 @@ export const OverlayCanvas = ({ overlay, language, variables, elementId }: Overl
         isolatedElement !== null,
       ]);
       return <ElementErrorBoundary key={resetKey}>
-      {renderElement(element, language, variables, isolatedElement !== null)}
+      {renderElement(element, language, variables, isolatedElement !== null, mediaAccessToken)}
       </ElementErrorBoundary>;
     })}
   </div>;

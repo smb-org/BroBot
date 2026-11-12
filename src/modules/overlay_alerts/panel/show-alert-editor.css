@@ -1,0 +1,26 @@
+.overlay-alert-action-editor {
+  display: grid;
+  gap: var(--s3);
+  min-width: 0;
+}
+
+.overlay-alert-action-editor__media-link {
+  justify-self: start;
+  color: var(--color-accent-text);
+  font-size: var(--text-status-label);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.overlay-alert-action-editor__status {
+  min-height: 18px;
+  color: var(--color-error-text);
+  font-size: var(--text-status-label);
+}
+
+.overlay-alert-action-editor__placeholders {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1);
+}

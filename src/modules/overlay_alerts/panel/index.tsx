@@ -135,6 +135,7 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canMana
   const [dragging, setDragging] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<MediaAssetMetadata | null>(null);
+  const [inUseRewards, setInUseRewards] = useState<readonly string[] | null>(null);
 
   const upload = async (file: File | undefined): Promise<void> => {
     if (file === undefined || !canManage || pending) return;
@@ -164,8 +165,17 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canMana
       setConfirming(null);
       setStatus(labels.deleteSuccess);
     } catch (error) {
-      setStatus(error instanceof PanelApiError && error.code === "media_in_use" ? labels.mediaInUse : labels.deleteFailed);
-      setConfirming(null);
+      const rewards = error instanceof PanelApiError && error.code === "media_in_use" &&
+        typeof error.details === "object" && error.details !== null &&
+        Array.isArray((error.details as { rewards?: unknown }).rewards) &&
+        (error.details as { rewards: unknown[] }).rewards.every((reward) => typeof reward === "string")
+        ? (error.details as { rewards: string[] }).rewards
+        : [];
+      if (rewards.length > 0) setInUseRewards(rewards);
+      else {
+        setStatus(error instanceof PanelApiError && error.code === "media_in_use" ? labels.mediaInUse : labels.deleteFailed);
+        setConfirming(null);
+      }
     } finally {
       setPending(false);
     }
@@ -242,13 +252,18 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canMana
     <ConfirmDialog
       opened={confirming !== null}
       title={labels.deleteTitle}
-      description={labels.deleteDescription(confirming?.fileName ?? "")}
-      confirmLabel={labels.delete}
+      description={inUseRewards !== null
+        ? labels.mediaInUseDescription(confirming?.fileName ?? "", inUseRewards)
+        : labels.deleteDescription(confirming?.fileName ?? "")}
+      confirmLabel={inUseRewards === null ? labels.delete : labels.close}
       cancelLabel={labels.cancel}
-      danger
+      danger={inUseRewards === null}
       pending={pending}
-      onCancel={() => setConfirming(null)}
-      onConfirm={() => { void deleteAsset(); }}
+      onCancel={() => { setConfirming(null); setInUseRewards(null); }}
+      onConfirm={() => {
+        if (inUseRewards !== null) { setConfirming(null); setInUseRewards(null); }
+        else void deleteAsset();
+      }}
     />
   </div>;
 }

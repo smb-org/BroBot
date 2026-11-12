@@ -285,6 +285,22 @@ describe("overlay alert media routes", () => {
     await expect(response.json()).resolves.toEqual({ error: "media_in_use" });
   });
 
+  it("blocks deletion when a reward references the media and returns its title", async () => {
+    const created = await readMediaAsset(await upload());
+    await database.prepare(
+      `INSERT INTO channel_points_rewards (
+        channel_id, id, twitch_reward_id, title, cost, is_user_input_required,
+        action_module_id, action_id, action_config_json, mode, enabled, twitch_state, created_at, updated_at
+      ) VALUES (?, 'reward_media_reference', 'twitch_media_reference', 'Einblendung testen', 100, 0,
+        'overlay_alerts', 'show-alert', ?, 'auto', 1, 'active', ?, ?)`,
+    ).bind(channelId, JSON.stringify({ imageAssetId: created.id }), now, now).run();
+
+    const response = await request("/media/" + created.id, { method: "DELETE" });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "media_in_use", rewards: ["Einblendung testen"] });
+  });
+
   it("serves immutable bytes only for the matching hash and channel", async () => {
     const created = await readMediaAsset(await upload());
     const path = "/media/" + created.id + "/" + created.sha256;

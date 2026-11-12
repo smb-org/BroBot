@@ -491,5 +491,6 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
     language={bootstrap.language}
     variables={bootstrap.variables}
     elementId={elementId}
+    mediaAccessToken={token}
   />;
 };

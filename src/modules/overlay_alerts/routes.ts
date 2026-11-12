@@ -117,18 +117,24 @@ const readUploadPayload = async (request: Request): Promise<UploadPayloadResult>
   return { ok: true, payload: { bytes: body, declaredMimeType, fileName } };
 };
 
-const isMediaInUse = (channelId: string, id: string): Promise<boolean> => {
-  // Alert actions will add channel-scoped references in the follow-up issue.
-  void channelId;
-  void id;
-  return Promise.resolve(false);
+const mediaInUseRewardNames = async (db: D1Database, channelId: string, id: string): Promise<string[]> => {
+  const result = await db.prepare(
+    `SELECT title FROM channel_points_rewards
+      WHERE channel_id = ? AND action_module_id = 'overlay_alerts' AND action_id = 'show-alert'
+        AND (json_extract(action_config_json, '$.imageAssetId') = ?
+          OR json_extract(action_config_json, '$.soundAssetId') = ?)
+      ORDER BY title COLLATE NOCASE, id`,
+  ).bind(channelId, id, id).all<{ title: string }>();
+  return result.results.map(({ title }) => title);
 };
 
 export const createOverlayAlertsRoutes = (options: {
+  mediaInUseRewardNames?: (channelId: string, id: string) => Promise<readonly string[]>;
+  /** Kept for existing route tests and callers that only need to simulate a guard. */
   isMediaInUse?: (channelId: string, id: string) => Promise<boolean>;
 } = {}): Hono<ModuleRouteEnvironment> => {
   const routes = new Hono<ModuleRouteEnvironment>();
-  const checkMediaInUse = options.isMediaInUse ?? isMediaInUse;
+  const listMediaInUseRewardNames = options.mediaInUseRewardNames;
 
   routes.get("/media", async (context) => {
     const assets = await listMediaAssets(context.env.DB, channelIdFrom(context));
@@ -202,7 +208,13 @@ export const createOverlayAlertsRoutes = (options: {
     const id = context.req.param("id");
     const asset = await findMediaAsset(context.env.DB, channelId, id);
     if (asset === null) return context.json({ error: "media_not_found" }, 404);
-    if (await checkMediaInUse(channelId, id)) return context.json({ error: "media_in_use" }, 409);
+    const rewardNames = listMediaInUseRewardNames === undefined
+      ? await mediaInUseRewardNames(context.env.DB, channelId, id)
+      : await listMediaInUseRewardNames(channelId, id);
+    const legacyGuardBlocked = options.isMediaInUse === undefined ? false : await options.isMediaInUse(channelId, id);
+    if (rewardNames.length > 0 || legacyGuardBlocked) {
+      return context.json({ error: "media_in_use", ...(rewardNames.length === 0 ? {} : { rewards: rewardNames }) }, 409);
+    }
 
     const now = nowIso();
     if (!await currentManagerCanMutate(context, channelId, now)) {
@@ -210,7 +222,16 @@ export const createOverlayAlertsRoutes = (options: {
     }
     const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
     const mutation = context.env.DB.prepare(
-      `DELETE FROM media_assets WHERE channel_id = ? AND id = ? ${authorization.sql} RETURNING id`,
+      `DELETE FROM media_assets
+        WHERE channel_id = ? AND id = ? ${authorization.sql}
+          AND NOT EXISTS (
+            SELECT 1 FROM channel_points_rewards AS reward
+             WHERE reward.channel_id = media_assets.channel_id
+               AND reward.action_module_id = 'overlay_alerts' AND reward.action_id = 'show-alert'
+               AND (json_extract(reward.action_config_json, '$.imageAssetId') = media_assets.id
+                 OR json_extract(reward.action_config_json, '$.soundAssetId') = media_assets.id)
+          )
+        RETURNING id`,
     ).bind(channelId, id, ...authorization.values);
     const audit = context.get("prepareModuleAudit")({
       channelId,
@@ -221,6 +242,8 @@ export const createOverlayAlertsRoutes = (options: {
     }, now);
     const [result] = await context.env.DB.batch([mutation, audit]);
     if ((result?.meta.changes ?? 0) === 0) {
+      const usedBy = await mediaInUseRewardNames(context.env.DB, channelId, id);
+      if (usedBy.length > 0) return context.json({ error: "media_in_use", rewards: usedBy }, 409);
       return await findMediaAsset(context.env.DB, channelId, id) === null
         ? context.json({ error: "media_not_found" }, 404)
         : context.json({ error: "media_management_denied" }, 403);

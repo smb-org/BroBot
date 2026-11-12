@@ -1421,6 +1421,7 @@ export const dispatchEventSubNotification = async (
         channelLanguage,
         readChannelVariables: channelVariables,
       });
+        const moduleChannelNamespace = environment.CHANNEL;
         const moduleExecutionContext: ModuleExecutionContext = {
             DB: environment.DB,
             environment: environment as unknown as Env,
@@ -1429,6 +1430,14 @@ export const dispatchEventSubNotification = async (
             ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),
             points,
             tempVips: moduleTempVips(environment.CHANNEL, event.channelId),
+            ...(moduleChannelNamespace === undefined ? {} : {
+              overlayAlertQueue: {
+                enqueue: (operationId, alert) => moduleChannelNamespace.get(moduleChannelNamespace.idFromName(event.channelId))
+                  .enqueueOverlayAlert(operationId, alert),
+                advance: () => moduleChannelNamespace.get(moduleChannelNamespace.idFromName(event.channelId))
+                  .advanceOverlayAlertQueue(),
+              },
+            }),
             readChannelBlockedTerms: channelBlockedTerms,
             botUserId,
             lookupUserByLogin: async (login) => {

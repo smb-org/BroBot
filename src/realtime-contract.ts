@@ -36,6 +36,7 @@ type KnownModuleOverlayRealtimeMessageType = keyof ModuleOverlayRealtimePayloads
   | `modul.chat_voting.${string}`
   | `modul.belabox.${string}`
   | `modul.votekick.${string}`
+  | `modul.overlay_alerts.${string}`
   | `modul.text_commands.${string}`;
 export type RealtimeMessageType = FixedRealtimeMessageType | KnownModuleOverlayRealtimeMessageType;
 
