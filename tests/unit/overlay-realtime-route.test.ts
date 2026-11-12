@@ -110,6 +110,49 @@ describe("overlay realtime route", () => {
     });
   });
 
+  it("leaves the selection unset for older clients and drops invalid selections without refusing the socket", async () => {
+    const state = await setup();
+    database = state.database;
+    await insertToken(state.database, "kanal-a");
+
+    for (const search of ["", "?elementId=bad%20id", "?view=other"]) {
+      const response = await realtimeRouter.fetch(overlayRequest(token, {
+        url: `https://brobot.example/ws/overlay${search}`,
+      }), state.env);
+      expect(response.status).toBe(200);
+      expect(JSON.parse(state.forwarded()?.headers.get("X-BroBot-Principal") ?? "null")).not.toHaveProperty("elementId");
+    }
+  });
+
+  it("marks an explicit composition view with a null element selection", async () => {
+    const state = await setup();
+    database = state.database;
+    await insertToken(state.database, "kanal-a");
+
+    const response = await realtimeRouter.fetch(overlayRequest(token, {
+      url: "https://brobot.example/ws/overlay?view=composition",
+    }), state.env);
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(state.forwarded()?.headers.get("X-BroBot-Principal") ?? "null")).toMatchObject({ elementId: null });
+  });
+
+  it("forwards the selected standalone element with its overlay principal", async () => {
+    const state = await setup();
+    database = state.database;
+    await insertToken(state.database, "kanal-a");
+
+    const response = await realtimeRouter.fetch(overlayRequest(token, {
+      url: "https://brobot.example/ws/overlay?elementId=alert-element",
+    }), state.env);
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(state.forwarded()?.headers.get("X-BroBot-Principal") ?? "null")).toMatchObject({
+      overlayId: null,
+      elementId: "alert-element",
+    });
+  });
+
   it("accepts an opaque null Origin for token-authenticated overlay sockets", async () => {
     const state = await setup();
     database = state.database;

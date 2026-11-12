@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type DragEvent, type Dispatch, type ReactE
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ConfirmDialog, FilePicker, Icon } from "../../../dashboard/ui";
+import { Button, ConfirmDialog, Dialog, FilePicker, Icon } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { MediaAssetMetadata } from "../contracts";
 import { overlayAlertsPanelTexts } from "./locale";
@@ -81,9 +81,9 @@ function MediaRow({
     audio.play().catch(clearIfActive);
   };
 
-  return <li className="overlay-alerts-media-row">
+  return <li className="overlay-alerts-media-row" aria-label={asset.kind === "image" ? labels.preview(asset.fileName) : undefined}>
     {asset.kind === "image"
-      ? <img className="overlay-alerts-media-row__preview" src={url} alt={labels.preview(asset.fileName)} loading="lazy" />
+      ? <img className="overlay-alerts-media-row__preview" src={url} alt="" loading="lazy" />
       : <div className="overlay-alerts-media-row__sound" aria-hidden="true"><Icon name="volume-3" size={20} /></div>}
     <div className="overlay-alerts-media-row__details">
       <strong className="overlay-alerts-media-row__name" title={asset.fileName}>{asset.fileName}</strong>
@@ -135,6 +135,7 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canMana
   const [dragging, setDragging] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<MediaAssetMetadata | null>(null);
+  const [inUseRewards, setInUseRewards] = useState<readonly string[] | null>(null);
 
   const upload = async (file: File | undefined): Promise<void> => {
     if (file === undefined || !canManage || pending) return;
@@ -164,8 +165,17 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canMana
       setConfirming(null);
       setStatus(labels.deleteSuccess);
     } catch (error) {
-      setStatus(error instanceof PanelApiError && error.code === "media_in_use" ? labels.mediaInUse : labels.deleteFailed);
-      setConfirming(null);
+      const rewards = error instanceof PanelApiError && error.code === "media_in_use" &&
+        typeof error.details === "object" && error.details !== null &&
+        Array.isArray((error.details as { rewards?: unknown }).rewards) &&
+        (error.details as { rewards: unknown[] }).rewards.every((reward) => typeof reward === "string")
+        ? (error.details as { rewards: string[] }).rewards
+        : [];
+      if (rewards.length > 0) setInUseRewards(rewards);
+      else {
+        setStatus(error instanceof PanelApiError && error.code === "media_in_use" ? labels.mediaInUse : labels.deleteFailed);
+        setConfirming(null);
+      }
     } finally {
       setPending(false);
     }
@@ -240,7 +250,7 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canMana
     </section>
 
     <ConfirmDialog
-      opened={confirming !== null}
+      opened={confirming !== null && inUseRewards === null}
       title={labels.deleteTitle}
       description={labels.deleteDescription(confirming?.fileName ?? "")}
       confirmLabel={labels.delete}
@@ -250,5 +260,15 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canMana
       onCancel={() => setConfirming(null)}
       onConfirm={() => { void deleteAsset(); }}
     />
+    <Dialog
+      opened={inUseRewards !== null}
+      title={labels.mediaInUseTitle}
+      onClose={() => { setConfirming(null); setInUseRewards(null); }}
+    >
+      <p className="ui-dialog__description">{labels.mediaInUseDescription(confirming?.fileName ?? "", inUseRewards ?? [])}</p>
+      <div className="ui-confirm-dialog__actions">
+        <Button variant="primary" autoFocus onClick={() => { setConfirming(null); setInUseRewards(null); }}>{labels.close}</Button>
+      </div>
+    </Dialog>
   </div>;
 }

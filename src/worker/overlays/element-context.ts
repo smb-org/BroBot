@@ -35,10 +35,17 @@ export const createOverlaySnapshotContext = (
   env: Env,
   channelId: string,
   now: number,
+  moduleId = "quiz",
 ): ModuleOverlaySnapshotContext => ({
   kind: "snapshot",
   now,
   readSnapshot: async () => {
+    if (moduleId === "overlay_alerts") {
+      const channelObject = env.CHANNEL.get(env.CHANNEL.idFromName(channelId)) as unknown as {
+        readOverlayAlertQueueSnapshot: () => Promise<JsonObject | null>;
+      };
+      return await channelObject.readOverlayAlertQueueSnapshot();
+    }
     const channelObject = env.CHANNEL.get(env.CHANNEL.idFromName(channelId)) as unknown as {
       readQuizOverlaySnapshot: () => Promise<ModuleQuizOverlaySnapshot | null>;
     };

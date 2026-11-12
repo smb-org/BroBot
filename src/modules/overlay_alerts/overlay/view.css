@@ -1,0 +1,42 @@
+@layer components.overlay {
+  .overlay-alert {
+    box-sizing: border-box;
+    display: flex;
+    width: 640px;
+    height: 220px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px 18px;
+    overflow: hidden;
+    border-radius: 12px;
+    background: rgb(16 20 27 / 84%);
+    color: var(--overlay-alert-text-color);
+    font-family: Archivo, system-ui, sans-serif;
+  }
+
+  .overlay-alert__image {
+    display: block;
+    max-width: 100%;
+    max-height: 144px;
+    object-fit: contain;
+  }
+
+  .overlay-alert__text {
+    display: -webkit-box;
+    width: 100%;
+    max-height: calc(var(--overlay-alert-font-size) * 2.5);
+    margin: 0;
+    overflow: hidden;
+    color: inherit;
+    font-size: var(--overlay-alert-font-size);
+    font-weight: 700;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    text-align: center;
+    white-space: pre-wrap;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}

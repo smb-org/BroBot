@@ -31,6 +31,7 @@ interface ActionEditorProperties {
   config: Readonly<Record<string, unknown>>;
   onChange: (config: Readonly<Record<string, unknown>>) => void;
   language: Language;
+  channelId?: string;
 }
 type ActionEditorLoader = NonNullable<ChannelPointsAction["editor"]>;
 const lazyActionEditors = new WeakMap<ActionEditorLoader, LazyExoticComponent<ComponentType<ActionEditorProperties>>>();
@@ -226,20 +227,23 @@ function LazyActionEditor({
   config,
   onChange,
   language,
+  channelId,
 }: {
   action: ChannelPointsAction;
   config: Readonly<Record<string, unknown>>;
   onChange: (config: Readonly<Record<string, unknown>>) => void;
   language: Language;
+  channelId?: string;
 }): ReactElement {
   const Editor = action.editor === undefined ? null : getLazyActionEditor(action.editor);
   if (Editor === null) return <p className="channel-points-editor__note">{channelPointsPanelTexts[language].noActionSettings}</p>;
   return <Suspense fallback={<div className="channel-points-editor__action-loading" role="status">{channelPointsPanelTexts[language].loading}</div>}>
-    {createElement(Editor, { config, onChange, language })}
+    {createElement(Editor, { config, onChange, language, ...(channelId === undefined ? {} : { channelId }) })}
   </Suspense>;
 }
 
 export interface RewardEditorDialogProperties {
+  channelId?: string;
   language: Language;
   reward: ChannelPointsReward | null;
   channelPointsActions: readonly RegisteredChannelPointsAction[];
@@ -249,7 +253,7 @@ export interface RewardEditorDialogProperties {
   onReadinessError: (message: string) => void;
 }
 
-export default function RewardEditorDialog({ language, reward, moduleAvailability, channelPointsActions, onClose, onSave, onReadinessError }: RewardEditorDialogProperties): ReactElement {
+export default function RewardEditorDialog({ channelId, language, reward, moduleAvailability, channelPointsActions, onClose, onSave, onReadinessError }: RewardEditorDialogProperties): ReactElement {
   const labels = channelPointsPanelTexts[language];
   const initial = reward === null ? newDraft() : draftFromReward(reward);
   const draft = useDraft(initial);
@@ -509,6 +513,7 @@ export default function RewardEditorDialog({ language, reward, moduleAvailabilit
                       action={selectedAction}
                       config={draft.value.actionConfig}
                       language={language}
+                      {...(channelId === undefined ? {} : { channelId })}
                       onChange={(actionConfig) => update((current) => ({ ...current, actionConfig: recordValue(actionConfig) }))}
                     />
                   : <p className="channel-points-editor__note">{selectedProviderReason}</p>}

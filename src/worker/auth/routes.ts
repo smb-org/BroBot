@@ -316,7 +316,7 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
         const snapshotOnly = declarations.some(({ initialStateNeedsSnapshotContext }) => initialStateNeedsSnapshotContext === true) &&
           !declarations.some(({ initialStateNeedsContext }) => initialStateNeedsContext === true);
         const moduleContext = snapshotOnly
-          ? createOverlaySnapshotContext(context.env, record.channelId, contextNow)
+          ? createOverlaySnapshotContext(context.env, record.channelId, contextNow, moduleId)
           : await createOverlayElementContext(context.env, record.channelId, moduleId, record.language, contextNow);
         return [moduleId, moduleContext] as const;
       }),

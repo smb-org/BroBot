@@ -471,6 +471,7 @@ export default function ChannelPointsPanel({
 
     {editor === null ? null : <RewardEditorDialog
       key={editor.reward?.id ?? "create"}
+      channelId={channelId}
       language={activeLanguage}
       reward={activeReward}
       channelPointsActions={channelPointsActions}

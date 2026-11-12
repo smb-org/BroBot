@@ -226,7 +226,25 @@ export interface ModuleOverlayElementProps {
   config: Readonly<Record<string, unknown>>;
   state: Readonly<Record<string, unknown>> | null;
   now: number;
+  /** Bearer credential used by overlay elements that fetch protected media. */
+  mediaAccessToken?: string;
   language?: "de" | "en";
+}
+
+export interface ModuleOverlayAlertQueueItem {
+  imageUrl?: string;
+  soundUrl?: string;
+  text: string;
+  durationSeconds: number;
+  volumePercent: number;
+}
+
+interface ModuleOverlayAlertQueueAccess {
+  enqueue: (
+    operationId: string,
+    alert: ModuleOverlayAlertQueueItem,
+  ) => Promise<"enqueued" | "duplicate" | "not_connected">;
+  advance: () => Promise<void>;
 }
 
 export interface ModuleOverlayTemplateValue {
@@ -651,6 +669,8 @@ export interface ModuleExecutionContext {
     delivery: "sent" | "rejected" | "ambiguous" | "not_attempted";
     reason: string | null;
   }>;
+  /** Enqueues one durable, idempotent overlay alert and reports live element presence. */
+  overlayAlertQueue?: ModuleOverlayAlertQueueAccess;
   /** Returns the same host context with module-owned ledgers bound to another registered module. */
   forModule?: (moduleId: string) => ModuleExecutionContext;
   authorizeMutation: AuthorizeModuleMutation;
@@ -893,6 +913,8 @@ export interface ModuleAlarmContext {
     elementKind: string,
     payload: Readonly<Record<string, unknown>>,
   ) => Promise<void>;
+  /** Advances the durable overlay alert queue after the current display duration. */
+  overlayAlertQueue?: Pick<ModuleOverlayAlertQueueAccess, "advance">;
   /** Sends scheduled output with an occurrence claim; automated output uses the shared channel limit by default. */
   sendChat: (
     text: string,
@@ -2019,6 +2041,7 @@ interface ChannelPointsActionEditorProperties {
   config: Readonly<Record<string, unknown>>;
   onChange: (config: Readonly<Record<string, unknown>>) => void;
   language: ModuleLanguage;
+  channelId?: string;
 }
 
 /** A reusable action that a channel-points reward can execute. */

@@ -57,6 +57,8 @@ Sichtbarkeit werden im gespeicherten Overlay verwaltet.
    nicht sichtbar“ ausgeschaltet; die Quelle aktualisiert sich selbst.
 4. Lass OBS-„Benutzerdefiniertes CSS“ leer. Passe die Darstellung stattdessen
    im CSS des gespeicherten Overlays an. Die Seite bleibt transparent.
+5. Aktiviere in den Eigenschaften der Browserquelle **„Audio über OBS steuern“**,
+   damit OBS den Sound der Einblendungen übernimmt.
 
 ### StreamElements und Sound Alerts
 

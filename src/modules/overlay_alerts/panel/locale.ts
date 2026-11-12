@@ -16,6 +16,10 @@ export const overlayAlertsPanelTexts = {
     delete: "Löschen",
     deleteTitle: "Datei löschen?",
     deleteDescription: (fileName: string) => `„${fileName}“ wird aus der Medienbibliothek gelöscht.`,
+    mediaInUseDescription: (fileName: string, rewards: readonly string[]) =>
+      `„${fileName}“ wird in diesen Belohnungen verwendet: ${rewards.join(", ")}. Entferne die Datei zuerst dort.`,
+    mediaInUseTitle: "Datei wird noch verwendet",
+    close: "Schließen",
     cancel: "Abbrechen",
     deleteSuccess: "Datei gelöscht.",
     uploadSuccess: "Datei hochgeladen.",
@@ -46,6 +50,10 @@ export const overlayAlertsPanelTexts = {
     delete: "Delete",
     deleteTitle: "Delete file?",
     deleteDescription: (fileName: string) => `“${fileName}” will be removed from the media library.`,
+    mediaInUseDescription: (fileName: string, rewards: readonly string[]) =>
+      `“${fileName}” is used by these rewards: ${rewards.join(", ")}. Remove it from those rewards first.`,
+    mediaInUseTitle: "File still in use",
+    close: "Close",
     cancel: "Cancel",
     deleteSuccess: "File deleted.",
     uploadSuccess: "File uploaded.",

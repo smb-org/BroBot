@@ -174,6 +174,7 @@ const objectFor = (
   database?: D1Database,
   values = new Map<string, unknown>(),
   channelId = "kanal-a",
+  overlayAlertElements: readonly { overlay_id: string; element_id: string; in_composition: number }[] = [],
 ): ChannelObject => {
   let transactionQueue = Promise.resolve();
   const chatterRows = new Map<string, { hmac: string; first_seen_at: string; last_seen_at: string }>();
@@ -474,6 +475,9 @@ const objectFor = (
       return prepared;
     }),
     all: vi.fn(() => {
+      if (/^\s*SELECT element\.overlay_id, element\.element_id, element\.in_composition/iu.test(preparedQuery)) {
+        return Promise.resolve({ results: overlayAlertElements });
+      }
       if (!/^\s*SELECT session\.session_id, session\.user_id, member\.role/iu.test(preparedQuery)) {
         return Promise.resolve({ results: [] });
       }
@@ -1033,6 +1037,35 @@ describe("ChannelObject realtime path", () => {
     expect(panel.send.mock.calls).toHaveLength(1);
     expect(overlay.send.mock.calls).toHaveLength(0);
     expect(typeOfSerializedMessage(panel.send.mock.calls[0]?.[0] ?? "")).toBe("stream.state.changed");
+  });
+
+  it("counts only overlay sockets that render an enabled alert element", async () => {
+    const element = { overlay_id: "overlay-a", element_id: "alert-a", in_composition: 1 };
+    const enqueue = async (elementId: string | null | undefined, alertElement: typeof element): Promise<string> => {
+      const socket = overlaySocketFor({
+        v: 1,
+        kind: "overlay",
+        channelId: "kanal-a",
+        tokenId: "token-a",
+        overlayId: "overlay-a",
+        ...(elementId === undefined ? {} : { elementId }),
+        expiresAt: null,
+      });
+      const object = objectFor([socket], undefined, undefined, "kanal-a", [alertElement]);
+      const internals = object as unknown as {
+        scheduleOverlayAlertQueue: () => Promise<void>;
+        deliverPendingOverlayAlertQueue: () => Promise<void>;
+      };
+      internals.scheduleOverlayAlertQueue = vi.fn().mockResolvedValue(undefined);
+      internals.deliverPendingOverlayAlertQueue = vi.fn().mockResolvedValue(undefined);
+      return object.enqueueOverlayAlert("alert-operation", { text: "Hello", durationSeconds: 5, volumePercent: 0 });
+    };
+
+    await expect(enqueue("score-a", element)).resolves.toBe("not_connected");
+    await expect(enqueue("alert-a", { ...element, in_composition: 0 })).resolves.toBe("enqueued");
+    await expect(enqueue(null, element)).resolves.toBe("enqueued");
+    // An older client reconnects without any view selection and must not count as an alert socket.
+    await expect(enqueue(undefined, element)).resolves.toBe("not_connected");
   });
 
   it("publishes a list once and routes variable changes to both client kinds", async () => {

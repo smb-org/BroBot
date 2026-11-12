@@ -1,4 +1,4 @@
-import { createCipheriv, createHmac, randomBytes } from "node:crypto";
+import { createCipheriv, createHash, createHmac, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -149,6 +149,49 @@ export const seedE2EOverlay = (channelId = e2eChannelId): void => {
   };
   applyMigrations();
   wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes", "--persist-to", e2eWorkerPersist, "--command", sql]);
+};
+
+/** Seeds one real alert element, media asset, and channel-points reward for the worker-backed alert flow. */
+export const seedE2EOverlayAlert = (imageBytes: Uint8Array, soundBytes: Uint8Array): void => {
+  seedE2EOverlay();
+  const createdAt = new Date().toISOString();
+  const png = Buffer.from(imageBytes);
+  const wav = Buffer.from(soundBytes);
+  const sha256 = createHash("sha256").update(png).digest("hex");
+  const soundSha256 = createHash("sha256").update(wav).digest("hex");
+  const sql = `
+    INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+      VALUES ('${e2eChannelId}', 'channel_points', 1, '{}'), ('${e2eChannelId}', 'overlay_alerts', 1, '{}');
+    INSERT INTO overlay_elements
+      (element_id, channel_id, overlay_id, kind, label, config_json, x, y, scale_percent, z, in_composition)
+      VALUES ('element-alert-e2e', '${e2eChannelId}', 'overlay-e2e', 'overlay_alerts.alert', 'Alert',
+        '{"fontSize":32,"textColor":"#ffffff"}', 640, 400, 100, 10, 1);
+    INSERT INTO media_assets
+      (channel_id, id, kind, mime_type, byte_size, sha256, file_name, data, created_at)
+      VALUES ('${e2eChannelId}', 'image-alert-e2e', 'image', 'image/png', ${String(png.byteLength)},
+        '${sha256}', 'alert.png', X'${png.toString("hex")}', '${createdAt}');
+    INSERT INTO media_assets
+      (channel_id, id, kind, mime_type, byte_size, sha256, file_name, data, created_at)
+      VALUES ('${e2eChannelId}', 'sound-alert-e2e', 'sound', 'audio/wav', ${String(wav.byteLength)},
+        '${soundSha256}', 'alert.wav', X'${wav.toString("hex")}', '${createdAt}');
+    INSERT INTO channel_points_rewards
+      (channel_id, id, twitch_reward_id, title, prompt, cost, is_user_input_required, action_module_id,
+       action_id, action_config_json, mode, enabled, twitch_state, created_at, updated_at)
+      VALUES ('${e2eChannelId}', 'reward-alert-e2e', 'twitch-reward-alert-e2e', 'Einblendung testen',
+        'Schreibe einen Gruß', 100, 1, 'overlay_alerts', 'show-alert',
+        '{"imageAssetId":"image-alert-e2e","soundAssetId":"sound-alert-e2e","text":"{user}: {input}","durationSeconds":15,"volumePercent":0}',
+        'auto', 1, 'active', '${createdAt}', '${createdAt}');
+  `;
+  const result = spawnSync("./node_modules/.bin/wrangler", [
+    "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes",
+    "--persist-to", e2eWorkerPersist, "--command", sql,
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
+  });
+  if (result.status !== 0) {
+    throw new Error(`Overlay alert e2e setup failed.\n${result.stdout}\n${result.stderr}`);
+  }
 };
 
 export const seedE2ETestArea = (channelId = e2eChannelId): void => {

@@ -61,12 +61,14 @@ const principalForPanel = (
 const principalForOverlay = (
   record: NonNullable<Awaited<ReturnType<typeof authenticateOverlayToken>>>,
   overlayId: string | null,
+  elementId: string | null | undefined,
 ): RealtimeOverlayPrincipal => ({
   v: 1,
   kind: "overlay",
   channelId: record.channelId,
   tokenId: record.tokenId,
   overlayId,
+  ...(elementId === undefined ? {} : { elementId }),
   expiresAt: record.expiresAt,
 });
 
@@ -136,7 +138,15 @@ realtimeRouter.get("/ws/overlay", async (context) => {
   if (record === null) return context.json({ error: "overlay_token_invalid" satisfies ApiErrorCode }, 401);
 
   const overlayId = await getOverlayBindingForToken(context.env.DB, record.channelId, record.tokenId);
-  const principal = principalForOverlay(record, overlayId);
+  // Older clients send neither parameter and an invalid selection is dropped: both stay undefined,
+  // so the socket works but never counts as an alert socket.
+  const requestedElementId = context.req.query("elementId");
+  const elementId = context.req.query("view") === "composition"
+    ? null
+    : requestedElementId !== undefined && /^[A-Za-z0-9_-]{1,64}$/u.test(requestedElementId)
+      ? requestedElementId
+      : undefined;
+  const principal = principalForOverlay(record, overlayId, elementId);
   const objectId = context.env.CHANNEL.idFromName(principal.channelId);
   const object = context.env.CHANNEL.get(objectId);
   return object.fetch(internalChannelRequest(principal));

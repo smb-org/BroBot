@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { POINTS_CANCELLATION_NOTICE_ALARM_PREFIX } from "../../src/worker/durable/points";
-import type { ModuleAlarmContext, ModuleQuizOverlaySnapshot, PointResolvedRound, StoredPointWelcome } from "../../src/modules/contract";
+import type { JsonObject, ModuleAlarmContext, ModuleOverlayAlertQueueItem, ModuleQuizOverlaySnapshot, PointResolvedRound, StoredPointWelcome } from "../../src/modules/contract";
 
 const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
   query: "?raw",
@@ -18,6 +18,9 @@ interface PointMovement {
 
 export interface PointsWorkerObject {
   alarm(): Promise<void>;
+  enqueueOverlayAlert(operationId: string, alert: ModuleOverlayAlertQueueItem): Promise<"enqueued" | "duplicate" | "not_connected">;
+  advanceOverlayAlertQueue(): Promise<void>;
+  readOverlayAlertQueueSnapshot(): Promise<JsonObject | null>;
   applyPointOperation(moduleId: string, operationId: string, kind: string, movements: PointMovement[], result: unknown, identity?: unknown): Promise<{
     replayed: boolean;
     result: unknown;

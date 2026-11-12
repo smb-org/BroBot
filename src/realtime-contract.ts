@@ -36,6 +36,7 @@ type KnownModuleOverlayRealtimeMessageType = keyof ModuleOverlayRealtimePayloads
   | `modul.chat_voting.${string}`
   | `modul.belabox.${string}`
   | `modul.votekick.${string}`
+  | `modul.overlay_alerts.${string}`
   | `modul.text_commands.${string}`;
 export type RealtimeMessageType = FixedRealtimeMessageType | KnownModuleOverlayRealtimeMessageType;
 
@@ -158,6 +159,8 @@ export type RealtimeOverlayPrincipal = {
   channelId: string;
   tokenId: string;
   overlayId: string | null;
+  /** Standalone element selection; null means composition, and absence means a pre-selection socket. */
+  elementId?: string | null;
   expiresAt: string | null;
 };
 

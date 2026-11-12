@@ -76,6 +76,8 @@ import type {
   ModuleAlarmDefinition,
   ModuleAlarmIdentity,
   ModuleAlarmPlan,
+  JsonObject,
+  ModuleOverlayAlertQueueItem,
   ModuleAction,
   ModuleBallotAccess,
   ModuleChatDelivery,
@@ -162,6 +164,13 @@ import { fetchLiveChattersTotal, fetchLiveViewerCount } from "../twitch/aggregat
 import { fetchStreamClips as fetchTwitchStreamClips } from "../twitch/stream-clips";
 import { TWITCH_RATE_LIMIT_COOLDOWN_MS } from "../twitch/rate-limit";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
+import {
+  advanceOverlayAlertQueue as advanceAlertQueueState,
+  emptyOverlayAlertQueueState,
+  enqueueOverlayAlert as enqueueAlertInState,
+  parseOverlayAlertQueueState,
+  type OverlayAlertQueueState,
+} from "../../modules/overlay_alerts/overlay/state";
 import {
   notifyCommittedResources,
   panelResourceChangedMessage,
@@ -349,6 +358,7 @@ const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
 const QUIZ_OVERLAY_SNAPSHOT_KEY = "module:quiz:storage:overlay-snapshot";
 const QUIZ_OVERLAY_RETRY_ALARM_KEY = "module:quiz:overlay-retry";
 const QUIZ_OVERLAY_RETRY_ALARM_HANDLER = "module:quiz:session-control";
+const OVERLAY_ALERTS_SNAPSHOT_KEY = "module:overlay_alerts:storage:queue-snapshot";
 const CHAT_ACTIVITY_COUNT_KEY = "channel:chat_activity_count";
 const TIMER_MIRROR_RETRY_DELAY_MS = 5_000;
 const MAX_TIMER_SKIP_PREPARATION_ATTEMPTS = 3;
@@ -658,6 +668,11 @@ type QuizOverlaySnapshotWrite = {
   payload: Readonly<Record<string, unknown>>;
   includeDisabledModule?: boolean;
 } | { broadcastSequence: number };
+type StoredOverlayAlertQueueSnapshot = {
+  state: OverlayAlertQueueState;
+  lastBroadcastRevision: number;
+  pendingBroadcastRevision: number | null;
+};
 type ModuleAlarmPlanFenceRecord = {
   identity: ModuleAlarmIdentity | null;
   planSequence: number;
@@ -762,6 +777,8 @@ const isRealtimePrincipal = (value: unknown): value is RealtimePrincipal => {
   if (value.kind === "overlay") {
     return isNonEmptyString(value.tokenId) &&
       (value.overlayId === null || isNonEmptyString(value.overlayId)) &&
+      (value.elementId === undefined || value.elementId === null ||
+        typeof value.elementId === "string" && /^[A-Za-z0-9_-]{1,64}$/u.test(value.elementId)) &&
       (value.expiresAt === null || isNonEmptyString(value.expiresAt));
   }
   return false;
@@ -1089,6 +1106,162 @@ export class ChannelObject extends DurableObject<Env> {
       await this.scheduleQuizOverlaySnapshotRetry();
       throw error;
     }
+  }
+
+  private storedOverlayAlertQueueSnapshotSync(): StoredOverlayAlertQueueSnapshot | null {
+    const stored = this.ctx.storage.kv.get(OVERLAY_ALERTS_SNAPSHOT_KEY);
+    if (!isRecord(stored)) return null;
+    const state = parseOverlayAlertQueueState(stored.state);
+    if (state === null || !Number.isSafeInteger(stored.lastBroadcastRevision) ||
+        (stored.pendingBroadcastRevision !== null && !Number.isSafeInteger(stored.pendingBroadcastRevision))) return null;
+    return {
+      state,
+      lastBroadcastRevision: Number(stored.lastBroadcastRevision),
+      pendingBroadcastRevision: stored.pendingBroadcastRevision === null ? null : Number(stored.pendingBroadcastRevision),
+    };
+  }
+
+  private writeOverlayAlertQueueStateSync(state: OverlayAlertQueueState): StoredOverlayAlertQueueSnapshot {
+    const previous = this.storedOverlayAlertQueueSnapshotSync();
+    const next: StoredOverlayAlertQueueSnapshot = {
+      state,
+      lastBroadcastRevision: previous?.lastBroadcastRevision ?? 0,
+      pendingBroadcastRevision: state.revision,
+    };
+    this.ctx.storage.kv.put(OVERLAY_ALERTS_SNAPSHOT_KEY, next);
+    return next;
+  }
+
+  /** Returns the latest queue state for the bearer-authenticated overlay bootstrap. */
+  public readOverlayAlertQueueSnapshot(): Promise<JsonObject | null> {
+    const snapshot = this.storedOverlayAlertQueueSnapshotSync();
+    return Promise.resolve(snapshot === null ? null : {
+      revision: snapshot.state.revision,
+      serverNow: snapshot.state.serverNow,
+      current: snapshot.state.current,
+    } as unknown as JsonObject);
+  }
+
+  private async connectedOverlayAlertIds(): Promise<string[]> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return [];
+    const recipients = await this.env.DB.prepare(
+      `SELECT element.overlay_id, element.element_id, element.in_composition
+         FROM overlay_elements AS element
+         JOIN channel_modules AS module
+           ON module.channel_id = element.channel_id AND module.module_id = 'overlay_alerts' AND module.enabled = 1
+        WHERE element.channel_id = ? AND element.kind = 'overlay_alerts.alert'
+        ORDER BY element.overlay_id, element.element_id`,
+    ).bind(channelId).all<{ overlay_id: string; element_id: string; in_composition: number }>();
+    const connectedIds = new Set<string>();
+    for (const recipient of recipients.results) {
+      const connected = this.ctx.getWebSockets(`overlay:${recipient.overlay_id}`).some((webSocket) => {
+        const principal = readAttachment(webSocket);
+        return principal?.kind === "overlay" && principal.overlayId === recipient.overlay_id &&
+          (principal.elementId === recipient.element_id ||
+            principal.elementId === null && recipient.in_composition === 1);
+      });
+      if (connected) connectedIds.add(recipient.overlay_id);
+    }
+    return [...connectedIds];
+  }
+
+  private async scheduleOverlayAlertQueue(state: OverlayAlertQueueState): Promise<void> {
+    const key = "module:overlay_alerts:queue";
+    if (state.current === null) {
+      await this.clearAlarmEntry(key);
+      return;
+    }
+    await this.scheduleAlarmEntry(key, key, Date.parse(state.current.endsAt));
+  }
+
+  private async deliverPendingOverlayAlertQueue(): Promise<void> {
+    const snapshot = this.storedOverlayAlertQueueSnapshotSync();
+    const pendingRevision = snapshot?.pendingBroadcastRevision;
+    if (snapshot === null || pendingRevision === null || pendingRevision === undefined) return;
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Overlay alert delivery requires a named Durable Object.");
+    try {
+      const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, "overlay_alerts", {
+        kind: "overlay",
+        type: "state_changed",
+        elementKind: "overlay_alerts.alert",
+        payload: { revision: pendingRevision },
+      });
+      if (prepared.outcome === "rejected") throw new Error("overlay_alert_message_rejected");
+      if (prepared.outcome === "ready") await this.publish([prepared.message]);
+      this.ctx.storage.transactionSync(() => {
+        const current = this.storedOverlayAlertQueueSnapshotSync();
+        if (current === null || current.state.revision < pendingRevision) return;
+        this.ctx.storage.kv.put(OVERLAY_ALERTS_SNAPSHOT_KEY, {
+          ...current,
+          lastBroadcastRevision: Math.max(current.lastBroadcastRevision, pendingRevision),
+          pendingBroadcastRevision: current.state.revision > pendingRevision
+            ? current.state.revision
+            : null,
+        } satisfies StoredOverlayAlertQueueSnapshot);
+      });
+    } catch (error: unknown) {
+      await this.scheduleAlarmEntry(
+        "module:overlay_alerts:queue",
+        "module:overlay_alerts:queue",
+        Date.now() + POINTS_ANNOUNCE_RETRY_MS,
+      );
+      throw error;
+    }
+  }
+
+  /** Enqueues once by operation id and only accepts new alerts while an enabled element is live. */
+  public async enqueueOverlayAlert(
+    operationId: string,
+    alert: ModuleOverlayAlertQueueItem,
+  ): Promise<"enqueued" | "duplicate" | "not_connected"> {
+    if (typeof operationId !== "string" || operationId.length === 0 || operationId.length > 128) {
+      throw new Error("invalid_overlay_alert_operation");
+    }
+    const payload = parseOverlayAlertQueueState({
+      revision: 0,
+      serverNow: new Date().toISOString(),
+      current: null,
+      queue: [{ operationId, ...alert }],
+      operationIds: [],
+    })?.queue[0];
+    if (payload === undefined) throw new Error("invalid_overlay_alert");
+    const connectedIds = await this.connectedOverlayAlertIds();
+    const result = this.ctx.storage.transactionSync(() => {
+      const current = this.storedOverlayAlertQueueSnapshotSync();
+      const state = current?.state ?? emptyOverlayAlertQueueState(Date.now());
+      if (state.operationIds.includes(operationId)) return { state, outcome: "duplicate" as const };
+      if (connectedIds.length === 0) return { state, outcome: "not_connected" as const };
+      const enqueued = enqueueAlertInState(state, payload, Date.now(), true);
+      if (enqueued.outcome !== "enqueued") return { state, outcome: enqueued.outcome };
+      this.writeOverlayAlertQueueStateSync(enqueued.state);
+      return { state: enqueued.state, outcome: "enqueued" as const };
+    });
+    if (result.outcome === "not_connected") return result.outcome;
+    if (result.outcome === "duplicate") {
+      await this.deliverPendingOverlayAlertQueue();
+      return result.outcome;
+    }
+    await this.scheduleOverlayAlertQueue(result.state);
+    await this.deliverPendingOverlayAlertQueue();
+    return "enqueued";
+  }
+
+  /** Advances an expired alert or resumes the durable queue when an overlay reconnects. */
+  public async advanceOverlayAlertQueue(): Promise<void> {
+    await this.deliverPendingOverlayAlertQueue();
+    // Nothing was ever queued for this channel, so there is nothing to advance or resume.
+    if (this.storedOverlayAlertQueueSnapshotSync() === null) return;
+    const connected = (await this.connectedOverlayAlertIds()).length > 0;
+    const current = this.storedOverlayAlertQueueSnapshotSync();
+    const previousState = current?.state ?? emptyOverlayAlertQueueState(Date.now());
+    const nextState = advanceAlertQueueState(previousState, Date.now(), connected);
+    if (nextState !== previousState && nextState.revision !== previousState.revision) {
+      this.ctx.storage.transactionSync(() => { this.writeOverlayAlertQueueStateSync(nextState); });
+    }
+    await this.scheduleOverlayAlertQueue(nextState);
+    if (nextState.revision !== previousState.revision) await this.deliverPendingOverlayAlertQueue();
   }
 
   private async ensurePointsInitialized(): Promise<void> {
@@ -3705,6 +3878,9 @@ export class ChannelObject extends DurableObject<Env> {
         },
         deliverPending: () => this.deliverPendingQuizOverlaySnapshot(),
       },
+      ...(moduleId === "overlay_alerts" ? {
+        overlayAlertQueue: { advance: () => this.advanceOverlayAlertQueue() },
+      } : {}),
       decoratePointWelcome: (action, accountId, claimId, attributions) => this.appendPointRoundWelcome(
         action,
         MODULES.find((candidate) => candidate.id === moduleId),
@@ -8320,6 +8496,13 @@ export class ChannelObject extends DurableObject<Env> {
       closeSocket(pair[1], OVERLAY_ACCESS_BOUND_CLOSE_CODE, OVERLAY_ACCESS_BOUND_CLOSE_REASON);
     } else {
       pair[1].send(JSON.stringify(envelopeFor(ownChannelId, "system.hello")));
+      if (principal.kind === "overlay") {
+        try {
+          await this.advanceOverlayAlertQueue();
+        } catch (error: unknown) {
+          console.warn("Overlay alert queue could not be resumed after reconnect.", error);
+        }
+      }
       if (principal.kind === "panel") {
         try {
           const revisions = await readPanelResourceRevisions(this.env.DB, ownChannelId);

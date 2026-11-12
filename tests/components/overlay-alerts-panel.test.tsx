@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 const mocks = vi.hoisted(() => ({
   loadMediaAssets: vi.fn(),
@@ -76,7 +76,7 @@ describe("overlay alert media panel", () => {
 
     expect(await screen.findByRole("heading", { name: "Medien" })).toBeVisible();
     expect(await screen.findByText("sample.png")).toBeVisible();
-    expect(screen.getByAltText("Vorschau: sample.png")).toBeVisible();
+    expect(screen.getByRole("listitem", { name: "Vorschau: sample.png" })).toBeVisible();
     expect(screen.getByText("chime.wav")).toBeVisible();
     expect(screen.getByText("Bild · 128 B")).toBeVisible();
     expect(screen.getByText("Sound · 118 KB")).toBeVisible();
@@ -144,5 +144,23 @@ describe("overlay alert media panel", () => {
     expect(screen.queryByRole("button", { name: "Datei hochladen" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Löschen: sample.png" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Löschen: chime.wav" })).not.toBeInTheDocument();
+  });
+
+  it("shows the referencing reward names when deletion is blocked", async () => {
+    mocks.deleteMediaAsset.mockRejectedValue(new PanelApiError(409, "media_in_use", {
+      error: "media_in_use",
+      rewards: ["Einblendung im Stream", "Community-Wunsch"],
+    }));
+    mount(true);
+    await screen.findByText("sample.png");
+    fireEvent.click(screen.getByRole("button", { name: "Löschen: sample.png" }));
+    fireEvent.click(screen.getByRole("button", { name: "Löschen" }));
+
+    expect(await screen.findByText(
+      "„sample.png“ wird in diesen Belohnungen verwendet: Einblendung im Stream, Community-Wunsch. Entferne die Datei zuerst dort.",
+    )).toBeVisible();
+    const notice = screen.getByRole("dialog", { name: "Datei wird noch verwendet" });
+    expect(within(notice).getAllByRole("button", { name: "Schließen" }).length).toBeGreaterThan(0);
+    expect(within(notice).queryByRole("button", { name: "Abbrechen" })).toBeNull();
   });
 });

@@ -56,6 +56,17 @@ describe("overlay realtime client", () => {
     expect(socket?.url.startsWith("ws://")).toBe(true);
     expect(socket?.url).not.toContain("z".repeat(43));
     expect(socket?.protocols).toEqual([REALTIME_PROTOCOL, `${OVERLAY_TOKEN_SUBPROTOCOL_PREFIX}${"z".repeat(43)}`]);
+    expect(new URL(socket?.url ?? "https://invalid.example").searchParams.get("view")).toBe("composition");
+    stop();
+  });
+
+  it("sends the standalone element selection with its overlay socket", () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+
+    const stop = connectOverlayRealtime("z".repeat(43), undefined, {}, { elementId: "alert-element" });
+
+    expect(new URL(FakeWebSocket.instances[0]?.url ?? "https://invalid.example").searchParams.get("elementId"))
+      .toBe("alert-element");
     stop();
   });
 
