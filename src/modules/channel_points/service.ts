@@ -44,6 +44,10 @@ const operatorRefundReason = {
   de: "Von einem Bediener erstattet.",
   en: "Refunded by operator.",
 };
+const missingTwitchRedemptionReason = {
+  de: "Diese Einlösung wurde auf Twitch nicht gefunden.",
+  en: "This redemption could not be found on Twitch.",
+};
 export type ChannelPointsMutationAuthorization = () => Promise<boolean>;
 interface ChannelPointsReconcileFailure {
   rewardId: string;
@@ -622,6 +626,8 @@ const moduleIsEnabled = async (db: D1Database, channelId: string): Promise<boole
 type QueueOperationResult =
   | { ok: true; status: "pending" | "fulfilled" | "refunded" }
   | { ok: false; error: "channel_points_module_disabled" | "channel_points_redemption_not_queued"; status?: ChannelPointsRedemptionStatus | null }
+  | { ok: false; error: "channel_points_already_resolved_on_twitch"; status: "fulfilled" | "refunded" }
+  | { ok: false; error: "channel_points_twitch_status_unavailable" | "channel_points_redemption_missing_on_twitch" }
   | { ok: false; reason: ChannelPointsHelixReason };
 
 const performQueueOperation = async (
@@ -648,6 +654,9 @@ const performQueueOperation = async (
   const claimGuard = mutationGuardFor(channelId, invocation.actor, new Date().toISOString(), authorizeMutation);
   const claimed = await repository.claimRedemption(
     channelId, invocation.id, ["queued"], expiredBeforeFor(now), now, claimGuard,
+    invocation.kind === "redemption.refund"
+      ? { pendingTwitchStatus: "CANCELED", outcomeReason: operatorRefundReason }
+      : undefined,
   );
   if (!claimed) {
     if (!await authorize()) return { ok: false, reason: "precondition_failed" };
@@ -670,6 +679,44 @@ const performQueueOperation = async (
   if (invocation.kind === "redemption.refund") {
     return await applyOutcome(environment, channelId, redemption.twitchRewardId, redemption.redemptionId,
       { refund: operatorRefundReason }, now, authorize);
+  }
+
+  const helix = await loadHelix();
+  let statusResult: Awaited<ReturnType<typeof helix.listRedemptionsByIds>>;
+  try {
+    statusResult = await helix.listRedemptionsByIds(
+      environment, channelId, redemption.twitchRewardId, [redemption.redemptionId], authorize,
+    );
+  } catch {
+    await repository.updateRedemption(channelId, redemption.redemptionId, {
+      status: "queued", pendingTwitchStatus: null, outcomeReason: null, claimedAt: null,
+    }, ["running"], now);
+    return { ok: false, error: "channel_points_twitch_status_unavailable" };
+  }
+  if (!statusResult.ok) {
+    if (statusResult.reason === "not_found") {
+      await confirmTwitchRewardDeleted(environment, channelId, redemption.twitchRewardId, now);
+      return { ok: false, error: "channel_points_redemption_missing_on_twitch" };
+    }
+    await repository.updateRedemption(channelId, redemption.redemptionId, {
+      status: "queued", pendingTwitchStatus: null, outcomeReason: null, claimedAt: null,
+    }, ["running"], now);
+    return { ok: false, error: "channel_points_twitch_status_unavailable" };
+  }
+  const remoteRedemption = statusResult.data.find(({ id }) => id === redemption.redemptionId);
+  if (remoteRedemption === undefined) {
+    await repository.updateRedemption(channelId, redemption.redemptionId, {
+      status: "orphaned", pendingTwitchStatus: null, outcomeReason: missingTwitchRedemptionReason, claimedAt: null,
+    }, ["running"], now);
+    return { ok: false, error: "channel_points_redemption_missing_on_twitch" };
+  }
+  const remoteStatus = helixRedemptionStatus(remoteRedemption.status);
+  if (remoteStatus !== "unfulfilled") {
+    const status = remoteStatus === "fulfilled" ? "fulfilled" : "refunded";
+    await repository.updateRedemption(channelId, redemption.redemptionId, {
+      status, pendingTwitchStatus: null, outcomeReason: redemption.outcomeReason, claimedAt: null,
+    }, ["running"], now);
+    return { ok: false, error: "channel_points_already_resolved_on_twitch", status };
   }
 
   const reward = await repository.getReward(channelId, redemption.rewardId);

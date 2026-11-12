@@ -169,4 +169,23 @@ describe("channel-points cockpit queue", () => {
 
     await waitFor(() => expect(toastsSnapshot().at(-1)?.message).toBe("Diese Einlösung wurde bereits verarbeitet."));
   });
+
+  it("maps a Twitch-resolved redemption to a localized error toast", async () => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith("/queue")) return jsonResponse({ items: [earlyItem] });
+      if (url === "/api/csrf") return jsonResponse({ token: "csrf-fixture" });
+      if (url.endsWith("/redemption_early/run") && init?.method === "POST") {
+        return jsonResponse({ error: "channel_points_already_resolved_on_twitch", status: "refunded" }, 409);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderQueueContent();
+
+    const row = await screen.findByRole("article", { name: "Viewer Early" });
+    fireEvent.click(within(row).getByRole("button", { name: "Ausführen" }));
+
+    await waitFor(() => expect(toastsSnapshot().at(-1)?.message)
+      .toBe("Diese Einlösung wurde auf Twitch bereits verarbeitet."));
+  });
 });

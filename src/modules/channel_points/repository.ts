@@ -60,6 +60,7 @@ export interface ChannelPointsRepository {
     expiredBefore: string,
     now: string,
     guard?: { sql: string; values: readonly (string | number | null)[] },
+    intent?: { pendingTwitchStatus: TwitchRedemptionStatus; outcomeReason: { de: string; en: string } },
   ): Promise<boolean>;
   reclaimRunningRedemption(channelId: string, id: string, expiredBefore: string, now: string): Promise<boolean>;
   claimFailedPatch(channelId: string, id: string, expiredBefore: string, now: string): Promise<boolean>;
@@ -199,16 +200,18 @@ export const createChannelPointsRepository = (db: D1Database): ChannelPointsRepo
         change.claimedAt ?? null, now, channelId, id, ...fromStatuses).run();
     return result.meta.changes > 0;
   },
-  async claimRedemption(channelId, id, fromStatuses, expiredBefore, now, guard) {
+  async claimRedemption(channelId, id, fromStatuses, expiredBefore, now, guard, intent) {
     if (fromStatuses.length === 0) return false;
     const placeholders = fromStatuses.map(() => "?").join(",");
     const authorization = guard === undefined ? "" :
       " AND EXISTS (SELECT channel_id FROM channels WHERE channel_id=? " + guard.sql + ")";
     const result = await db.prepare(`UPDATE channel_points_redemptions
-      SET status='running',pending_twitch_status=NULL,claimed_at=?,updated_at=?
+      SET status='running',pending_twitch_status=?,outcome_reason_json=?,claimed_at=?,updated_at=?
       WHERE channel_id=? AND redemption_id=? AND status IN (${placeholders})
         AND (status NOT IN ('pending','queued') OR claimed_at IS NULL OR claimed_at<=?)${authorization}`)
-      .bind(now, now, channelId, id, ...fromStatuses, expiredBefore,
+      .bind(intent?.pendingTwitchStatus ?? null,
+        intent === undefined ? null : JSON.stringify(intent.outcomeReason),
+        now, now, channelId, id, ...fromStatuses, expiredBefore,
         ...(guard === undefined ? [] : [channelId, ...guard.values])).run();
     return result.meta.changes > 0;
   },

@@ -18,6 +18,15 @@ const createTexts = (language: ChannelPointsQueueLanguage) => {
     alreadyProcessed: de
       ? "Diese Einlösung wurde bereits verarbeitet."
       : "This redemption has already been processed.",
+    alreadyResolvedOnTwitch: de
+      ? "Diese Einlösung wurde auf Twitch bereits verarbeitet."
+      : "This redemption has already been resolved on Twitch.",
+    twitchStatusUnavailable: de
+      ? "Der Twitch-Status konnte nicht geprüft werden. Bitte versuche es erneut."
+      : "The Twitch status could not be checked. Please try again.",
+    redemptionMissingOnTwitch: de
+      ? "Diese Einlösung wurde auf Twitch nicht gefunden."
+      : "This redemption could not be found on Twitch.",
     moduleDisabled: de ? "Kanalpunkte sind derzeit deaktiviert." : "Channel points are currently disabled.",
     operationDenied: de
       ? "Du darfst diese Einlösung nicht bedienen."
@@ -47,6 +56,9 @@ export const channelPointsQueueErrorMessage = (error: unknown, language: Channel
   if (!(error instanceof PanelApiError) || error.code === null) return labels.requestFailed;
   switch (error.code) {
     case "channel_points_redemption_not_queued": return labels.alreadyProcessed;
+    case "channel_points_already_resolved_on_twitch": return labels.alreadyResolvedOnTwitch;
+    case "channel_points_twitch_status_unavailable": return labels.twitchStatusUnavailable;
+    case "channel_points_redemption_missing_on_twitch": return labels.redemptionMissingOnTwitch;
     case "channel_points_module_disabled": return labels.moduleDisabled;
     case "channel_points_operation_denied": return labels.operationDenied;
     case "channel_points_precondition_failed": return labels.operationDenied;

@@ -33,6 +33,25 @@ vi.mock("../../src/worker/module-action-context", () => ({
 
 const channelId = "channel_points";
 const now = "2026-11-10T12:00:00.000Z";
+const helixRedemption = (id: string, status: "UNFULFILLED" | "FULFILLED" | "CANCELED", rewardId = "reward_twitch") => ({
+  id,
+  broadcaster_id: channelId,
+  broadcaster_login: "points_demo",
+  broadcaster_name: "Points Demo",
+  user_id: "viewer_one",
+  user_login: "viewer_demo",
+  user_name: "Viewer Demo",
+  user_input: "hello",
+  status,
+  redeemed_at: now,
+  reward: { id: rewardId, title: "Fictional reward", prompt: "Say hello", cost: 1 },
+});
+const manageableReward = {
+  id: "reward_twitch", title: "Fictional reward", prompt: "Say hello", cost: 1, is_enabled: true,
+  background_color: "#9147FF", is_user_input_required: false, global_cooldown_seconds: null,
+  max_per_stream: null, max_per_user_per_stream: null, is_paused: false, is_in_stock: true,
+  should_redemptions_skip_request_queue: false,
+};
 const routeEnvironment = (database: TestD1Database): Env => {
   const environment: Partial<Env> = { DB: database as unknown as D1Database };
   return environment as Env;
@@ -107,7 +126,11 @@ describe("channel points routes", () => {
     mocks.updateRedemptionStatus.mockReset().mockResolvedValue({ ok: true, data: [] });
     mocks.delete.mockReset().mockResolvedValue({ ok: true, data: [] });
     mocks.manageable.mockReset().mockResolvedValue({ ok: true, data: [] });
-    mocks.byIds.mockReset().mockResolvedValue({ ok: true, data: [] });
+    mocks.byIds.mockReset().mockImplementation((_environment, _broadcasterId, rewardId, redemptionIds) =>
+      Promise.resolve({
+        ok: true,
+        data: (redemptionIds as string[]).map((id) => helixRedemption(id, "UNFULFILLED", String(rewardId))),
+      }));
     mocks.unfulfilled.mockReset().mockResolvedValue({ ok: true, data: [] });
     mocks.sendChat.mockReset().mockResolvedValue({ sent: true, delivery: "sent", reason: null });
   });
@@ -155,9 +178,133 @@ describe("channel points routes", () => {
     expect(await response.json()).toEqual({ ok: true, status: "fulfilled" });
     expect(mocks.sendChat).toHaveBeenCalledTimes(1);
     expect(mocks.sendChat).toHaveBeenCalledWith("Hello", "redemption_run");
+    expect(mocks.byIds).toHaveBeenCalledWith(
+      expect.anything(), channelId, "reward_twitch", ["redemption_run"], expect.any(Function),
+    );
     expect(mocks.updateRedemptionStatus).toHaveBeenCalledWith(
       expect.anything(), channelId, "reward_twitch", ["redemption_run"], "FULFILLED", expect.any(Function),
     );
+  });
+
+  it("does not run a queued redemption Twitch already canceled", async () => {
+    database = createDatabase();
+    seedQueuedRedemption("redemption_twitch_canceled");
+    mocks.byIds.mockResolvedValueOnce({
+      ok: true,
+      data: [helixRedemption("redemption_twitch_canceled", "CANCELED")],
+    });
+
+    const response = await makeApp(database, "operator").request(
+      "/api/channels/channel_points/modules/channel_points/redemptions/redemption_twitch_canceled/run",
+      { method: "POST" }, routeEnvironment(database),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "channel_points_already_resolved_on_twitch", status: "refunded" });
+    expect(mocks.sendChat).not.toHaveBeenCalled();
+    expect(mocks.updateRedemptionStatus).not.toHaveBeenCalled();
+    expect(database.sqlite.prepare(
+      "SELECT status FROM channel_points_redemptions WHERE channel_id=? AND redemption_id=?",
+    ).get(channelId, "redemption_twitch_canceled")).toMatchObject({ status: "refunded" });
+  });
+
+  it("does not run a queued redemption Twitch already fulfilled", async () => {
+    database = createDatabase();
+    seedQueuedRedemption("redemption_twitch_fulfilled");
+    mocks.byIds.mockResolvedValueOnce({
+      ok: true,
+      data: [helixRedemption("redemption_twitch_fulfilled", "FULFILLED")],
+    });
+
+    const response = await makeApp(database, "operator").request(
+      "/api/channels/channel_points/modules/channel_points/redemptions/redemption_twitch_fulfilled/run",
+      { method: "POST" }, routeEnvironment(database),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "channel_points_already_resolved_on_twitch", status: "fulfilled" });
+    expect(mocks.sendChat).not.toHaveBeenCalled();
+    expect(mocks.updateRedemptionStatus).not.toHaveBeenCalled();
+    expect(database.sqlite.prepare(
+      "SELECT status FROM channel_points_redemptions WHERE channel_id=? AND redemption_id=?",
+    ).get(channelId, "redemption_twitch_fulfilled")).toMatchObject({ status: "fulfilled" });
+  });
+
+  it("releases a queued redemption when the Twitch status lookup fails", async () => {
+    database = createDatabase();
+    seedQueuedRedemption("redemption_twitch_unavailable");
+    mocks.byIds.mockResolvedValueOnce({ ok: false, reason: "network" });
+
+    const response = await makeApp(database, "operator").request(
+      "/api/channels/channel_points/modules/channel_points/redemptions/redemption_twitch_unavailable/run",
+      { method: "POST" }, routeEnvironment(database),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "channel_points_twitch_status_unavailable" });
+    expect(mocks.sendChat).not.toHaveBeenCalled();
+    expect(database.sqlite.prepare(
+      "SELECT status,claimed_at FROM channel_points_redemptions WHERE channel_id=? AND redemption_id=?",
+    ).get(channelId, "redemption_twitch_unavailable")).toMatchObject({ status: "queued", claimed_at: null });
+  });
+
+  it("orphans a queued redemption missing from Twitch without running it", async () => {
+    database = createDatabase();
+    seedQueuedRedemption("redemption_twitch_missing");
+    mocks.byIds.mockResolvedValueOnce({ ok: true, data: [] });
+
+    const response = await makeApp(database, "operator").request(
+      "/api/channels/channel_points/modules/channel_points/redemptions/redemption_twitch_missing/run",
+      { method: "POST" }, routeEnvironment(database),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "channel_points_redemption_missing_on_twitch" });
+    expect(mocks.sendChat).not.toHaveBeenCalled();
+    expect(database.sqlite.prepare(
+      "SELECT status FROM channel_points_redemptions WHERE channel_id=? AND redemption_id=?",
+    ).get(channelId, "redemption_twitch_missing")).toMatchObject({ status: "orphaned" });
+  });
+
+  it("reconciles an interrupted refund by patching CANCELED without running the action", async () => {
+    database = createDatabase();
+    seedQueuedRedemption("redemption_refund_interrupted");
+    mocks.manageable.mockResolvedValue({ ok: true, data: [manageableReward] });
+    database.sqlite.exec("CREATE TRIGGER fail_refund_outcome BEFORE UPDATE ON channel_points_redemptions " +
+      "WHEN OLD.status='running' AND NEW.status='running' " +
+      "BEGIN SELECT RAISE(FAIL, 'injected refund outcome write failure'); END");
+
+    const refundResponse = await makeApp(database, "operator").request(
+      "/api/channels/channel_points/modules/channel_points/redemptions/redemption_refund_interrupted/refund",
+      { method: "POST" }, routeEnvironment(database),
+    );
+
+    expect(refundResponse.status).toBe(500);
+    expect(database.sqlite.prepare(
+      "SELECT status,pending_twitch_status,outcome_reason_json FROM channel_points_redemptions WHERE channel_id=? AND redemption_id=?",
+    ).get(channelId, "redemption_refund_interrupted")).toMatchObject({
+      status: "running",
+      pending_twitch_status: "CANCELED",
+      outcome_reason_json: JSON.stringify({ de: "Von einem Bediener erstattet.", en: "Refunded by operator." }),
+    });
+
+    database.sqlite.exec("DROP TRIGGER fail_refund_outcome");
+    database.sqlite.prepare(
+      "UPDATE channel_points_redemptions SET claimed_at=? WHERE channel_id=? AND redemption_id=?",
+    ).run("2026-11-10T11:57:00.000Z", channelId, "redemption_refund_interrupted");
+    const reconcileResponse = await makeApp(database, "operator").request(
+      "/api/channels/channel_points/modules/channel_points/reconcile",
+      { method: "POST", body: JSON.stringify({ force: true }) }, routeEnvironment(database),
+    );
+
+    expect(reconcileResponse.status).toBe(200);
+    expect(mocks.sendChat).not.toHaveBeenCalled();
+    expect(mocks.updateRedemptionStatus).toHaveBeenCalledWith(
+      expect.anything(), channelId, "reward_twitch", ["redemption_refund_interrupted"], "CANCELED", expect.any(Function),
+    );
+    expect(database.sqlite.prepare(
+      "SELECT status,pending_twitch_status FROM channel_points_redemptions WHERE channel_id=? AND redemption_id=?",
+    ).get(channelId, "redemption_refund_interrupted")).toMatchObject({ status: "refunded", pending_twitch_status: null });
   });
 
   it("refunds a queued redemption with the operator reason", async () => {

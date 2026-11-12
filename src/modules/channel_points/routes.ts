@@ -124,6 +124,15 @@ const queueOperationResponse = (context: RouteContext, result: unknown): Respons
   if (result.error === "channel_points_module_disabled") {
     return context.json({ error: result.error }, 409);
   }
+  if (result.error === "channel_points_already_resolved_on_twitch") {
+    return context.json({ error: result.error, status: result.status }, 409);
+  }
+  if (result.error === "channel_points_twitch_status_unavailable") {
+    return context.json({ error: result.error }, 503);
+  }
+  if (result.error === "channel_points_redemption_missing_on_twitch") {
+    return context.json({ error: result.error }, 409);
+  }
   if (typeof result.reason === "string") return reasonResponse(context, result.reason as ChannelPointsHelixReason);
   return context.json({ error: "channel_points_unknown_status" }, 502);
 };
