@@ -1,4 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { deflateSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 
 import {
@@ -12,9 +13,75 @@ test.use({ locale: "de-DE", timezoneId: "Europe/Berlin" });
 
 const channelId = "channel-e2e";
 
+const pngCrc32 = (bytes: Buffer): number => {
+  let checksum = 0xffffffff;
+  for (const byte of bytes) {
+    checksum ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      checksum = (checksum >>> 1) ^ ((checksum & 1) === 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (checksum ^ 0xffffffff) >>> 0;
+};
+
+const pngChunk = (name: string, data: Buffer): Buffer => {
+  const type = Buffer.from(name, "ascii");
+  const contents = Buffer.concat([type, data]);
+  const length = Buffer.alloc(4);
+  const checksum = Buffer.alloc(4);
+  length.writeUInt32BE(data.byteLength);
+  checksum.writeUInt32BE(pngCrc32(contents));
+  return Buffer.concat([length, contents, checksum]);
+};
+
+const createTwoByTwoPng = (): Buffer => {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(2, 0);
+  header.writeUInt32BE(2, 4);
+  header[8] = 8;
+  header[9] = 6;
+  const pixels = Buffer.from([
+    0, 255, 0, 0, 255, 0, 255, 0, 255,
+    0, 0, 0, 255, 255, 255, 255, 0, 255,
+  ]);
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(pixels)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+};
+
+const createSilentWav = (): Buffer => {
+  const samples = Buffer.alloc(800, 128);
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + samples.byteLength, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(8_000, 24);
+  header.writeUInt32LE(8_000, 28);
+  header.writeUInt16LE(1, 32);
+  header.writeUInt16LE(8, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(samples.byteLength, 40);
+  return Buffer.concat([header, samples]);
+};
+
 test("a channel-points redemption shows its seeded alert in the connected overlay", async ({ page }) => {
   test.setTimeout(60_000);
-  seedE2EOverlayAlert();
+  seedE2EOverlayAlert(createTwoByTwoPng(), createSilentWav());
+
+  await page.addInitScript(() => {
+    const trackedWindow = window as Window & { __cspViolations?: string[] };
+    trackedWindow.__cspViolations = [];
+    window.addEventListener("securitypolicyviolation", (event) => {
+      trackedWindow.__cspViolations?.push(`${event.violatedDirective}: ${event.blockedURI}`);
+    });
+  });
 
   let connected = false;
   page.on("websocket", (socket) => {
@@ -79,5 +146,11 @@ test("a channel-points redemption shows its seeded alert in the connected overla
   expect(response.status()).toBe(204);
 
   await expect(page.getByText("Viewer Demo: Bitte grüße den Chat", { exact: true })).toBeVisible();
-  await expect(page.locator(".overlay-alert__image")).toBeVisible();
+  const image = page.locator(".overlay-alert__image");
+  await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
+  const audio = page.locator(".overlay-alert audio");
+  await expect.poll(() => audio.getAttribute("src")).toMatch(/^blob:/u);
+  await expect.poll(() => audio.evaluate((element: HTMLAudioElement) => element.readyState > 0 || element.error !== null))
+    .toBe(true);
+  expect(await page.evaluate(() => (window as Window & { __cspViolations?: string[] }).__cspViolations ?? [])).toEqual([]);
 });

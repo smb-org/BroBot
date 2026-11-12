@@ -777,6 +777,8 @@ const isRealtimePrincipal = (value: unknown): value is RealtimePrincipal => {
   if (value.kind === "overlay") {
     return isNonEmptyString(value.tokenId) &&
       (value.overlayId === null || isNonEmptyString(value.overlayId)) &&
+      (value.elementId === undefined || value.elementId === null ||
+        typeof value.elementId === "string" && /^[A-Za-z0-9_-]{1,64}$/u.test(value.elementId)) &&
       (value.expiresAt === null || isNonEmptyString(value.expiresAt));
   }
   return false;
@@ -1144,15 +1146,24 @@ export class ChannelObject extends DurableObject<Env> {
     const channelId = this.ownChannelId();
     if (channelId === null) return [];
     const recipients = await this.env.DB.prepare(
-      `SELECT DISTINCT element.overlay_id
+      `SELECT element.overlay_id, element.element_id, element.in_composition
          FROM overlay_elements AS element
          JOIN channel_modules AS module
            ON module.channel_id = element.channel_id AND module.module_id = 'overlay_alerts' AND module.enabled = 1
-        WHERE element.channel_id = ? AND element.kind = 'overlay_alerts.alert' AND element.in_composition = 1
-        ORDER BY element.overlay_id`,
-    ).bind(channelId).all<{ overlay_id: string }>();
-    return recipients.results.flatMap(({ overlay_id }) =>
-      this.ctx.getWebSockets(`overlay:${overlay_id}`).length > 0 ? [overlay_id] : []);
+        WHERE element.channel_id = ? AND element.kind = 'overlay_alerts.alert'
+        ORDER BY element.overlay_id, element.element_id`,
+    ).bind(channelId).all<{ overlay_id: string; element_id: string; in_composition: number }>();
+    const connectedIds = new Set<string>();
+    for (const recipient of recipients.results) {
+      const connected = this.ctx.getWebSockets(`overlay:${recipient.overlay_id}`).some((webSocket) => {
+        const principal = readAttachment(webSocket);
+        return principal?.kind === "overlay" && principal.overlayId === recipient.overlay_id &&
+          (principal.elementId === recipient.element_id ||
+            principal.elementId === null && recipient.in_composition === 1);
+      });
+      if (connected) connectedIds.add(recipient.overlay_id);
+    }
+    return [...connectedIds];
   }
 
   private async scheduleOverlayAlertQueue(state: OverlayAlertQueueState): Promise<void> {

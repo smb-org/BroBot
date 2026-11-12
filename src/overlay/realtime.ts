@@ -31,6 +31,7 @@ export interface OverlayRealtimeCallbacks {
 
 export interface OverlayRealtimeOptions {
   bootstrapUrl?: string;
+  elementId?: string | null;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -47,9 +48,10 @@ const isOverlayChangedPayload = (value: unknown): boolean => isRecord(value) &&
   typeof value.overlayId === "string" && value.overlayId.length > 0 &&
   typeof value.revision === "number" && Number.isSafeInteger(value.revision) && value.revision >= 1;
 
-const realtimeUrl = (): string => {
+const realtimeUrl = (elementId: string | null): string => {
   const url = new URL("/ws/overlay", window.location.href);
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  if (elementId !== null) url.searchParams.set("elementId", elementId);
   return url.toString();
 };
 
@@ -182,7 +184,7 @@ export const connectOverlayRealtime = (
 
     let activeSocket: WebSocket;
     try {
-      activeSocket = new WebSocketConstructor(realtimeUrl(), [
+      activeSocket = new WebSocketConstructor(realtimeUrl(options.elementId ?? null), [
         REALTIME_PROTOCOL,
         `${OVERLAY_TOKEN_SUBPROTOCOL_PREFIX}${token}`,
       ]);

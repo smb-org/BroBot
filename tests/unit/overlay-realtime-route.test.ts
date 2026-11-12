@@ -106,7 +106,24 @@ describe("overlay realtime route", () => {
       channelId: "kanal-b",
       tokenId: "token-kanal-b",
       overlayId: "overlay-b",
+      elementId: null,
       expiresAt: null,
+    });
+  });
+
+  it("forwards the selected standalone element with its overlay principal", async () => {
+    const state = await setup();
+    database = state.database;
+    await insertToken(state.database, "kanal-a");
+
+    const response = await realtimeRouter.fetch(overlayRequest(token, {
+      url: "https://brobot.example/ws/overlay?elementId=alert-element",
+    }), state.env);
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(state.forwarded()?.headers.get("X-BroBot-Principal") ?? "null")).toMatchObject({
+      overlayId: null,
+      elementId: "alert-element",
     });
   });
 

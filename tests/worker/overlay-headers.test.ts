@@ -10,7 +10,8 @@ const overlayCspFor = (publicOrigin: string): string => {
     "form-action 'none'",
     `script-src ${url.origin}`,
     `style-src ${url.origin} 'unsafe-inline'`,
-    `img-src ${url.origin} https://static-cdn.jtvnw.net https://cdn.7tv.app`,
+    `img-src ${url.origin} https://static-cdn.jtvnw.net https://cdn.7tv.app blob:`,
+    "media-src 'self' blob:",
     `font-src ${url.origin}`,
     `connect-src ${url.origin} ${websocketScheme}//${url.host}`,
   ].join("; ");
@@ -23,7 +24,8 @@ describe("overlay document security headers", () => {
     const response = await exports.default.fetch(new Request(`http://localhost${path}`));
 
     expect(response.headers.get("content-security-policy")).toBe(overlayCspFor(publicOrigin));
-    expect(response.headers.get("content-security-policy")).toContain(`img-src ${new URL(publicOrigin).origin} https://static-cdn.jtvnw.net https://cdn.7tv.app`);
+    expect(response.headers.get("content-security-policy")).toContain(`img-src ${new URL(publicOrigin).origin} https://static-cdn.jtvnw.net https://cdn.7tv.app blob:`);
+    expect(response.headers.get("content-security-policy")).toContain("media-src 'self' blob:");
     expect(response.headers.get("content-security-policy")).not.toContain("frame-ancestors");
     expect(response.headers.get("x-frame-options")).toBeNull();
     expect(response.headers.get("content-type")).toContain("text/html");

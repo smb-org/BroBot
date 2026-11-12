@@ -3,11 +3,13 @@ export const overlayAlertsActionTexts = {
     name: "Einblendung zeigen",
     invalidConfig: "Die Einblendung ist ungültig oder verweist auf nicht verfügbare Medien.",
     overlayNotConnected: "Overlay nicht verbunden.",
+    emptyAlert: "Einblendung hätte keinen Inhalt.",
   },
   en: {
     name: "Show alert",
     invalidConfig: "This alert is invalid or refers to unavailable media.",
     overlayNotConnected: "Overlay not connected.",
+    emptyAlert: "Alert would be empty.",
   },
 } as const;
 

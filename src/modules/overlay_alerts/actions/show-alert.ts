@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { ChannelPointsActionDefinition } from "../../contract";
 import { findMediaAsset } from "../repository";
-import { renderOverlayAlertText } from "../overlay/state";
+import { parseOverlayAlertPayload, renderOverlayAlertText } from "../overlay/state";
 import { overlayAlertsActionTexts } from "../locale";
 
 export const showAlertConfigSchema = z.object({
@@ -17,7 +17,7 @@ export const showAlertConfigSchema = z.object({
   }
 });
 
-const refund = (reason: "invalidConfig" | "overlayNotConnected") => ({
+const refund = (reason: "invalidConfig" | "overlayNotConnected" | "emptyAlert") => ({
   refund: {
     de: overlayAlertsActionTexts.de[reason],
     en: overlayAlertsActionTexts.en[reason],
@@ -61,16 +61,21 @@ export const showAlertAction: ChannelPointsActionDefinition<typeof showAlertConf
       userInput: redemption.userInput,
       rewardTitle: redemption.rewardTitle,
     });
+    if (image === null && sound === null && renderedText.trim().length === 0) return refund("emptyAlert");
+    const payload = {
+      ...(image === null ? {} : { imageUrl: mediaPath(image.id, image.sha256) }),
+      ...(sound === null ? {} : { soundUrl: mediaPath(sound.id, sound.sha256) }),
+      text: renderedText,
+      durationSeconds,
+      volumePercent,
+    };
+    if (parseOverlayAlertPayload({ operationId, ...payload }) === null) return refund("invalidConfig");
     try {
-      const outcome = await enqueue(operationId, {
-        ...(image === null ? {} : { imageUrl: mediaPath(image.id, image.sha256) }),
-        ...(sound === null ? {} : { soundUrl: mediaPath(sound.id, sound.sha256) }),
-        text: renderedText,
-        durationSeconds,
-        volumePercent,
-      });
+      const outcome = await enqueue(operationId, payload);
       return outcome === "not_connected" ? refund("overlayNotConnected") : "fulfilled";
-    } catch {
+    } catch (error: unknown) {
+      if (error instanceof Error && (error.message === "invalid_overlay_alert" ||
+          error.message === "invalid_overlay_alert_operation")) return refund("invalidConfig");
       return "pending";
     }
   },

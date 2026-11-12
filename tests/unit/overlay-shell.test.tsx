@@ -350,7 +350,7 @@ describe("OverlayShell and OverlayCanvas", () => {
       "fictional-token",
       expect.any(Function),
       expect.any(Object),
-      { bootstrapUrl: "/api/overlay/bootstrap" },
+      { bootstrapUrl: "/api/overlay/bootstrap", elementId: null },
     );
     expect(container.querySelector(".brobot-overlay")).toHaveStyle({ width: "1920px", height: "1080px" });
     expect(container.querySelector('[data-element="element-first"]')).toHaveStyle({ left: "20px", top: "30px", zIndex: "4", width: "max-content" });

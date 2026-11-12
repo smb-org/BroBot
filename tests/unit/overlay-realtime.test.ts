@@ -59,6 +59,16 @@ describe("overlay realtime client", () => {
     stop();
   });
 
+  it("sends the standalone element selection with its overlay socket", () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+
+    const stop = connectOverlayRealtime("z".repeat(43), undefined, {}, { elementId: "alert-element" });
+
+    expect(new URL(FakeWebSocket.instances[0]?.url ?? "https://invalid.example").searchParams.get("elementId"))
+      .toBe("alert-element");
+    stop();
+  });
+
   it("reconnects with exponential backoff after a transient close", async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, "random").mockReturnValue(0.5);

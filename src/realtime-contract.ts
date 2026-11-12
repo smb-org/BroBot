@@ -159,6 +159,8 @@ export type RealtimeOverlayPrincipal = {
   channelId: string;
   tokenId: string;
   overlayId: string | null;
+  /** Standalone element selection; null means composition, and absence means a pre-selection socket. */
+  elementId?: string | null;
   expiresAt: string | null;
 };
 

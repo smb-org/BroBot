@@ -81,6 +81,30 @@ describe("overlay alert channel-points action", () => {
     await expectRefund(execute({ text: "x".repeat(201), durationSeconds: 5, volumePercent: 80 }));
   });
 
+  it("refunds alerts whose rendered text is empty or whitespace-only", async () => {
+    const channelId = `alert-empty-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const enqueue = vi.fn().mockResolvedValue("enqueued");
+    const context = {
+      ...createModuleActionExecutionContext(worker, channelId, "overlay_alerts"),
+      overlayAlertQueue: { enqueue },
+    } as unknown as ModuleExecutionContext;
+    const noInputRedemption = { ...redemption, userInput: "" };
+
+    for (const text of ["{input}", " \n{input}\t "]) {
+      await expect(showAlertAction.execute(context, {
+        redemption: noInputRedemption,
+        config: { text, durationSeconds: 5, volumePercent: 80 },
+        operationId: `empty-${String(text.length)}`,
+      })).resolves.toEqual({ refund: {
+        de: "Einblendung hätte keinen Inhalt.",
+        en: "Alert would be empty.",
+      } });
+    }
+
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   it("refunds when no connected alert element is reported by the Durable Object", async () => {
     const channelId = `alert-offline-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);

@@ -457,7 +457,7 @@ export const OverlayShell = ({ token, elementId }: OverlayShellProperties): Reac
           bootstrapRef.current = next;
           setBootstrap(next);
         },
-      }, { bootstrapUrl: bootstrapUrlFor(elementId) });
+      }, { bootstrapUrl: bootstrapUrlFor(elementId), elementId });
     };
 
     void load();
