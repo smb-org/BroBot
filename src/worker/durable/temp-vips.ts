@@ -20,6 +20,8 @@ import { TEMP_VIP_MINIMUM_DURATION_MS } from "../../modules/temp_vips/domain";
 const TEMP_VIP_MUTATIONS_PER_WINDOW = 10;
 const TEMP_VIP_MUTATION_WINDOW_MS = 10_000;
 const TEMP_VIP_OPERATION_RETENTION_MS = 24 * 60 * 60_000;
+/** Channel points grants stay journaled longer so a late redemption reconciliation replays instead of re-granting. */
+const TEMP_VIP_CHANNEL_POINTS_RETENTION_MS = 30 * 24 * 60 * 60_000;
 const TEMP_VIP_LIFECYCLE_RETENTION_MS = 7 * 24 * 60 * 60_000;
 const TEMP_VIP_CALLER_WAIT_MS = 10_000;
 const TEMP_VIP_RECOVERY_MS = 60_000;
@@ -545,7 +547,13 @@ export class TempVipStore {
 
   private pruneOperationsSync(now: string): void {
     const cutoff = utc(parseTime(now) - TEMP_VIP_OPERATION_RETENTION_MS);
-    this.sql.exec("DELETE FROM temp_vip_ops WHERE status = 'done' AND finished_at <= ?", cutoff);
+    const pointsCutoff = utc(parseTime(now) - TEMP_VIP_CHANNEL_POINTS_RETENTION_MS);
+    this.sql.exec(
+      `DELETE FROM temp_vip_ops
+        WHERE status = 'done' AND finished_at <= ?
+          AND (finished_at <= ? OR NOT (kind = 'grant' AND json_extract(payload_json, '$.request.source') = 'channel_points'))`,
+      cutoff, pointsCutoff,
+    );
     this.sql.exec(
       `DELETE FROM temp_vip_lifecycle_watermarks
         WHERE retain_until <= ?
@@ -826,7 +834,10 @@ export class TempVipStore {
           operation.kind === "end" || operation.kind === "expire")) {
       const deferredAt = this.now();
       this.transaction(() => {
-        if (this.hasLaterReleaseSync(operation)) {
+        const request = payload.request as { source?: string };
+        if (operation.kind === "grant" && request.source === "channel_points") {
+          this.finishSync(operation.operation_id, { status: "rejected", reason: "scope_missing" }, deferredAt, operation.attempts);
+        } else if (this.hasLaterReleaseSync(operation)) {
           this.finishSync(operation.operation_id, { status: "superseded" }, deferredAt, operation.attempts);
         } else {
           this.setNeedsReconcileSync(operation.operation_id, true);
@@ -1936,8 +1947,10 @@ export class TempVipStore {
     const nowMs = parseTime(now);
     const managed = await this.mode() === "managed";
     const deadlines: number[] = [];
-    const operations = this.sql.exec<Pick<TempVipOperationSql, "status" | "next_attempt_at" | "finished_at">>(
-      `SELECT candidate.status, candidate.next_attempt_at, candidate.finished_at FROM temp_vip_ops AS candidate
+    const operations = this.sql.exec<Pick<TempVipOperationSql, "status" | "next_attempt_at" | "finished_at"> & { long_retention: number }>(
+      `SELECT candidate.status, candidate.next_attempt_at, candidate.finished_at,
+          (candidate.kind = 'grant' AND json_extract(candidate.payload_json, '$.request.source') = 'channel_points') AS long_retention
+        FROM temp_vip_ops AS candidate
         WHERE (candidate.status != 'done' AND ${userOrderAvailable})
            OR (candidate.status = 'done' AND candidate.finished_at IS NOT NULL)`,
       now,
@@ -1950,7 +1963,10 @@ export class TempVipStore {
           ? parseTime(operation.next_attempt_at)
           : nowMs + (runnerActive ? TEMP_VIP_QUEUED_RECOVERY_MS : 1),
       );
-      else if (operation.finished_at !== null) deadlines.push(parseTime(operation.finished_at) + TEMP_VIP_OPERATION_RETENTION_MS);
+      else if (operation.finished_at !== null) {
+        deadlines.push(parseTime(operation.finished_at) +
+          (operation.long_retention === 1 ? TEMP_VIP_CHANNEL_POINTS_RETENTION_MS : TEMP_VIP_OPERATION_RETENTION_MS));
+      }
     }
     const rows = managed ? this.sql.exec<TempVipRowSql>(
       "SELECT * FROM temp_vips WHERE classification = 'temporary' AND expires_at IS NOT NULL",
@@ -2052,6 +2068,19 @@ export class TempVipStore {
       source: request.source,
     };
     return this.enqueueAndWait(operationId, "grant", request.person.userId, request.person.login, payload);
+  }
+
+  public async replayGrant(operationIdValue: string, userId: string): Promise<ModuleTempVipResult | null> {
+    const operationId = operationKey(operationIdValue);
+    const existing = this.sql.exec<TempVipOperationSql>(
+      "SELECT * FROM temp_vip_ops WHERE operation_id = ?",
+      operationId,
+    ).toArray()[0];
+    if (existing === undefined) return null;
+    if (existing.kind !== "grant" || existing.user_id !== userId) throw new Error("operation_conflict");
+    if (existing.status === "done") return this.pendingResult(operationId);
+    await this.rearm();
+    return existing.status === "running" ? this.pendingResult(operationId) : this.waitForOperation(operationId);
   }
 
   public async extend(request: ModuleTempVipExtendRequest): Promise<ModuleTempVipResult> {

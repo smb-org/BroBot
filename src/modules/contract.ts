@@ -1546,6 +1546,8 @@ export interface ModuleTempVipAccess {
   classify: (request: ModuleTempVipClassifyRequest) => Promise<ModuleTempVipResult>;
   handleModeration: (event: ModuleTempVipModerationEvent) => Promise<ModuleTempVipResult>;
   grant: (request: ModuleTempVipGrantRequest) => Promise<ModuleTempVipResult>;
+  /** Reads and, when due, resumes a grant operation already journaled under this id. */
+  replayGrant: (operationId: string, userId: string) => Promise<ModuleTempVipResult | null>;
   extend: (request: ModuleTempVipExtendRequest) => Promise<ModuleTempVipResult>;
   importExisting: (request: ModuleTempVipImportRequest) => Promise<ModuleTempVipResult>;
   replayImport: (operationId: string, userId: string, expiresAt: string) => Promise<ModuleTempVipResult | null>;
