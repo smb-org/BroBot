@@ -105,7 +105,8 @@ test.describe("English cockpit status labels", () => {
       channelBotStatus: "disconnected",
       location: null,
       modules: [{ id: "belabox", enabled: true, settings: "{}" }],
-      belaboxStatus: { bitrateKbps: 500 },
+      // A long bitrate keeps the second label wide enough that it cannot share a line with the first at 768px.
+      belaboxStatus: { bitrateKbps: 1_000_000 },
     });
 
     const warningSlot = page.locator(".live-cockpit__warning-slot");
@@ -120,7 +121,7 @@ test.describe("English cockpit status labels", () => {
       await expect(warningSlot).toHaveAttribute("data-warning-count", "1");
       await expect(warning).toBeVisible();
       await expect(indicators.nth(0)).toContainText("Bot · Not connected");
-      await expect(indicators.nth(1)).toContainText("BELABOX · connected · 500 kbps");
+      await expect(indicators.nth(1)).toContainText("BELABOX · connected · 1,000,000 kbps");
       await expect(indicators.nth(2)).toContainText("Overlays · Not set up");
       await waitForWebFonts(page);
 
@@ -181,6 +182,15 @@ test.describe("English cockpit status labels", () => {
       expect(layoutWithWarning.indicatorOverlaps, `Warning should not overlap indicators at ${String(width)}px`)
         .toEqual([false, false, false]);
       if (width === 768) {
+        const wrapMargin = await page.evaluate(() => {
+          const [first, second] = Array.from(document.querySelectorAll<HTMLElement>(".live-cockpit-header__indicators .status-led"));
+          const container = first?.parentElement;
+          if (first === undefined || second === undefined || container === null || container === undefined) return Number.NaN;
+          const gap = Number.parseFloat(getComputedStyle(container).columnGap) || 0;
+          // Positive: the first two indicators cannot share a line, so the wrap does not depend on font metrics.
+          return first.getBoundingClientRect().width + gap + second.getBoundingClientRect().width - container.getBoundingClientRect().width;
+        });
+        expect(wrapMargin, "test data no longer forces wrapping: the first two indicators would fit on one line").toBeGreaterThanOrEqual(24);
         expect(layoutWithWarning.indicatorLineCount).toBe(3);
         layoutWithWarningAt768 = { headerBottom: layoutWithWarning.headerBottom, wallTop: layoutWithWarning.wallTop };
       }
@@ -193,7 +203,7 @@ test.describe("English cockpit status labels", () => {
     await page.reload();
     await expect(warningSlot).toHaveAttribute("data-warning-count", "0");
     // Wait for the same indicator texts as in the warning state so wrapping matches.
-    await expect(indicators.nth(1)).toContainText("BELABOX · connected · 500 kbps");
+    await expect(indicators.nth(1)).toContainText("BELABOX · connected · 1,000,000 kbps");
     await expect(indicators.nth(2)).toContainText("Overlays · Not set up");
     const layoutWithoutWarning = await page.evaluate(() => {
       const header = document.querySelector<HTMLElement>(".live-cockpit-header");
