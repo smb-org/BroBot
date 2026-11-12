@@ -76,7 +76,7 @@ describe("overlay alert media panel", () => {
 
     expect(await screen.findByRole("heading", { name: "Medien" })).toBeVisible();
     expect(await screen.findByText("sample.png")).toBeVisible();
-    expect(screen.getByAltText("Vorschau: sample.png")).toBeVisible();
+    expect(screen.getByRole("listitem", { name: "Vorschau: sample.png" })).toBeVisible();
     expect(screen.getByText("chime.wav")).toBeVisible();
     expect(screen.getByText("Bild · 128 B")).toBeVisible();
     expect(screen.getByText("Sound · 118 KB")).toBeVisible();
@@ -157,8 +157,10 @@ describe("overlay alert media panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Löschen" }));
 
     expect(await screen.findByText(
-      "„sample.png“ wird in diesen Prämien verwendet: Einblendung im Stream, Community-Wunsch. Entferne die Datei zuerst aus den Prämien.",
+      "„sample.png“ wird in diesen Belohnungen verwendet: Einblendung im Stream, Community-Wunsch. Entferne die Datei zuerst dort.",
     )).toBeVisible();
-    expect(within(screen.getByRole("dialog")).getByText("Schließen")).toBeVisible();
+    const notice = screen.getByRole("dialog", { name: "Datei wird noch verwendet" });
+    expect(within(notice).getAllByRole("button", { name: "Schließen" }).length).toBeGreaterThan(0);
+    expect(within(notice).queryByRole("button", { name: "Abbrechen" })).toBeNull();
   });
 });

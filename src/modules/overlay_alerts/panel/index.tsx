@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type DragEvent, type Dispatch, type ReactE
 
 import { PanelApiError } from "../../../contracts/panel-error";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ConfirmDialog, FilePicker, Icon } from "../../../dashboard/ui";
+import { Button, ConfirmDialog, Dialog, FilePicker, Icon } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import type { MediaAssetMetadata } from "../contracts";
 import { overlayAlertsPanelTexts } from "./locale";
@@ -81,9 +81,9 @@ function MediaRow({
     audio.play().catch(clearIfActive);
   };
 
-  return <li className="overlay-alerts-media-row">
+  return <li className="overlay-alerts-media-row" aria-label={asset.kind === "image" ? labels.preview(asset.fileName) : undefined}>
     {asset.kind === "image"
-      ? <img className="overlay-alerts-media-row__preview" src={url} alt={labels.preview(asset.fileName)} loading="lazy" />
+      ? <img className="overlay-alerts-media-row__preview" src={url} alt="" loading="lazy" />
       : <div className="overlay-alerts-media-row__sound" aria-hidden="true"><Icon name="volume-3" size={20} /></div>}
     <div className="overlay-alerts-media-row__details">
       <strong className="overlay-alerts-media-row__name" title={asset.fileName}>{asset.fileName}</strong>
@@ -250,20 +250,25 @@ export default function OverlayAlertsPanel({ channelId, language = "de", canMana
     </section>
 
     <ConfirmDialog
-      opened={confirming !== null}
+      opened={confirming !== null && inUseRewards === null}
       title={labels.deleteTitle}
-      description={inUseRewards !== null
-        ? labels.mediaInUseDescription(confirming?.fileName ?? "", inUseRewards)
-        : labels.deleteDescription(confirming?.fileName ?? "")}
-      confirmLabel={inUseRewards === null ? labels.delete : labels.close}
+      description={labels.deleteDescription(confirming?.fileName ?? "")}
+      confirmLabel={labels.delete}
       cancelLabel={labels.cancel}
-      danger={inUseRewards === null}
+      danger
       pending={pending}
-      onCancel={() => { setConfirming(null); setInUseRewards(null); }}
-      onConfirm={() => {
-        if (inUseRewards !== null) { setConfirming(null); setInUseRewards(null); }
-        else void deleteAsset();
-      }}
+      onCancel={() => setConfirming(null)}
+      onConfirm={() => { void deleteAsset(); }}
     />
+    <Dialog
+      opened={inUseRewards !== null}
+      title={labels.mediaInUseTitle}
+      onClose={() => { setConfirming(null); setInUseRewards(null); }}
+    >
+      <p className="ui-dialog__description">{labels.mediaInUseDescription(confirming?.fileName ?? "", inUseRewards ?? [])}</p>
+      <div className="ui-confirm-dialog__actions">
+        <Button variant="primary" autoFocus onClick={() => { setConfirming(null); setInUseRewards(null); }}>{labels.close}</Button>
+      </div>
+    </Dialog>
   </div>;
 }
