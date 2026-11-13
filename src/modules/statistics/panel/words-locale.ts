@@ -20,7 +20,7 @@ export interface StatisticsWordsPanelTexts {
   removeIgnoredWord: (word: string) => string;
   ignoredWordsMessages: ChipsInputMessages;
   ignoredWordsLimit: string;
-  wordCommandSettingsButton: string;
+  wordCommandSettingsButton: (token: string) => string;
   wordCommandSettingsTitle: string;
   wordCommandSettingsDescription: string;
   wordCommandEnabled: string;
@@ -86,7 +86,7 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsWordsPanelTexts>> = {
       duplicateWarning: (entry) => `${entry} ist bereits ausgeblendet.`,
     },
     ignoredWordsLimit: "Wörter dürfen höchstens 40 Zeichen lang sein.",
-    wordCommandSettingsButton: "Wortbefehl-Einstellungen",
+    wordCommandSettingsButton: (token) => `Befehl ${token}`,
     wordCommandSettingsTitle: "Wortbefehl",
     wordCommandSettingsDescription: "Aktiviere den Chatbefehl und lege Zugriffsstatus sowie Abklingzeiten fest.",
     wordCommandEnabled: "Wortbefehl aktivieren",
@@ -150,7 +150,7 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsWordsPanelTexts>> = {
       duplicateWarning: (entry) => `${entry} is already hidden.`,
     },
     ignoredWordsLimit: "Words can be up to 40 characters long.",
-    wordCommandSettingsButton: "Word command settings",
+    wordCommandSettingsButton: (token) => `Command ${token}`,
     wordCommandSettingsTitle: "Word command",
     wordCommandSettingsDescription: "Enable the chat command and set its access level and cooldowns.",
     wordCommandEnabled: "Enable word command",

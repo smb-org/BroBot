@@ -63,9 +63,10 @@ export const statisticsModule: BotModule<typeof settingsSchema> = {
   chatCommands: wordCountChatCommand,
   chatCommandNames: (settings) => {
     const parsed = statisticsSettingsSchema.safeParse(settings);
-    return parsed.success ? [parsed.data.wordCommand.command] : [];
+    return parsed.success && parsed.data.wordCommand.enabled ? [parsed.data.wordCommand.command] : [];
   },
   chatCommandSettingsFields: ["wordCommand.command"],
+  chatCommandSettingsEnabledField: "wordCommand.enabled",
   routes: statisticsRoutes,
   panel: () => import("./panel").then((panel) => ({ default: panel.StatisticsPanel })),
   eventSubTypes: ["channel.chat.message", "stream.online", "stream.offline", "channel.update"],

@@ -95,5 +95,14 @@ describe("statistics window domain", () => {
       chatter_user_login: "fictional_viewer",
       message: { text: "hello", fragments: [{ type: "text", text: "hello world" }] },
     })).toBe(false);
+
+    const leadingWhitespaceCommand = {
+      chatter_user_login: "fictional_viewer",
+      message: { text: " !wort faaak", fragments: [{ type: "text", text: " !wort faaak" }] },
+    };
+    expect(statisticsWordsExcluded(leadingWhitespaceCommand)).toBe(true);
+    expect(tokenizeStatisticsWordDetails(statisticsWordsExcluded(leadingWhitespaceCommand)
+      ? []
+      : statisticsTextFragments(leadingWhitespaceCommand))).toEqual(new Map());
   });
 });

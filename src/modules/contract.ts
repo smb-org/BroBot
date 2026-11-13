@@ -1044,10 +1044,11 @@ interface ModuleStatisticsChat {
   pruneExpiredWindows: (now: number) => Promise<void>;
   hasWindows: () => Promise<boolean>;
   flushWordCounts: () => Promise<void>;
-  /** Flushes the live buffer and reads one word's full stream count and unmerged batches together. */
+  /** Reads one word's persisted stream count, unmerged batches, and live buffered count together. */
   readWordCountForLookup?: (streamId: string, word: string) => Promise<{
     batches: readonly { batch: number; words: readonly ModuleStatisticsWordCount[] }[];
     streamWord: ModuleStatisticsWordCount | null;
+    bufferedWord: ModuleStatisticsWordCount | null;
   }>;
   markWordStreamEnded: (streamId: string, endedAt: string) => Promise<void>;
   reconcileWordStreams: (streamState: ModuleStatisticsStreamState, streamId: string | null, observedAt: number) => Promise<void>;
@@ -1394,6 +1395,8 @@ export interface ModulePointsAccess {
   markAuditWritten: (operationId: string) => Promise<void>;
   pendingAudits: () => Promise<{ operationId: string; detail: unknown }[]>;
   claimCooldown: (key: string, seconds: number) => Promise<boolean>;
+  /** Atomically checks every cooldown and claims all of them only if none is active. */
+  claimCooldowns: (claims: readonly { key: string; seconds: number }[]) => Promise<boolean>;
   rounds: {
     open: (roundId: string, data: unknown, quizOverlaySnapshot?: Readonly<Record<string, unknown>>) => Promise<ModuleQuizOverlaySnapshot | undefined>;
     openWithStake: (
@@ -2501,6 +2504,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   chatCommandNames?: (settings: unknown) => readonly string[];
   /** Settings field paths that store configurable command tokens for SQL write guards. */
   chatCommandSettingsFields?: readonly string[];
+  /** When set, configured command tokens are reserved only while this boolean settings field is true. */
+  chatCommandSettingsEnabledField?: string;
   /** Command tokens inserted by onEnable and included in activation collision guards. */
   onEnableCommandTokens?: readonly string[];
   /** The module is always enabled for every released channel and cannot be disabled. */

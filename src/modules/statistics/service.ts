@@ -19,7 +19,9 @@ import {
   STATISTICS_WORD_STREAM_MERGE_LIMIT,
   STATISTICS_WINDOW_MILLISECONDS,
   foldStatisticsWord,
+  normalizeStatisticsCommandPrefix,
   statisticsWindowStartMs,
+  tokenizeStatisticsWordDetails,
   type StatisticsWordCountValue,
 } from "./domain";
 
@@ -104,19 +106,28 @@ const processStatisticsWordCommand = async (
   if (typeof sourceBroadcasterUserId === "string" && sourceBroadcasterUserId !== event.channelId) return emptyResult();
   if (!chatStatusMeetsMinimumTier(event.chatStatus, event.settings.wordCommand.minimumChatStatus)) return emptyResult();
 
-  const [command, argument] = messageText.trim().split(/\s+/u);
-  if (command?.toLowerCase() !== event.settings.wordCommand.command || argument === undefined || argument.length === 0) {
+  const normalizedMessage = normalizeStatisticsCommandPrefix(messageText);
+  const [command, ...argumentParts] = normalizedMessage.trim().split(/\s+/u);
+  if (command?.toLowerCase() !== event.settings.wordCommand.command || argumentParts.length === 0) {
     return emptyResult();
   }
-  const word = foldStatisticsWord(argument);
-  if (word.length === 0) return emptyResult();
+  const argument = argumentParts.join(" ");
+  if (argument.normalize("NFKC").startsWith("!")) return emptyResult();
+  const tokenizedWords = tokenizeStatisticsWordDetails([argument]);
+  if (tokenizedWords.size !== 1) return emptyResult();
+  const tokenEntry = tokenizedWords.entries().next().value;
+  if (tokenEntry === undefined) return emptyResult();
+  const [word, token] = tokenEntry;
 
-  if (event.settings.wordCommand.cooldownSeconds > 0 &&
-      !await context.points.claimCooldown("word-command:global", event.settings.wordCommand.cooldownSeconds)) {
-    return emptyResult();
-  }
-  if (event.settings.wordCommand.userCooldownSeconds > 0 &&
-      !await context.points.claimCooldown(`word-command:user:${userId}`, event.settings.wordCommand.userCooldownSeconds)) {
+  const cooldowns = [
+    ...(event.settings.wordCommand.cooldownSeconds > 0
+      ? [{ key: "word-command:global", seconds: event.settings.wordCommand.cooldownSeconds }]
+      : []),
+    ...(event.settings.wordCommand.userCooldownSeconds > 0
+      ? [{ key: `word-command:user:${userId}`, seconds: event.settings.wordCommand.userCooldownSeconds }]
+      : []),
+  ];
+  if (cooldowns.length > 0 && !await context.points.claimCooldowns(cooldowns)) {
     return emptyResult();
   }
 
@@ -128,10 +139,11 @@ const processStatisticsWordCommand = async (
   const readWordCountForLookup = context.statisticsChat?.readWordCountForLookup;
   if (runningStreamId !== null && readWordCountForLookup === undefined) return emptyResult();
   const wordLookup = runningStreamId === null || readWordCountForLookup === undefined
-    ? { batches: [], streamWord: null } as const
+    ? { batches: [], streamWord: null, bufferedWord: null } as const
     : await readWordCountForLookup(runningStreamId, word);
   const pendingBatches = wordLookup.batches;
   const streamWord = wordLookup.streamWord;
+  const bufferedWord = wordLookup.bufferedWord;
 
   const baselineStatement = context.DB.prepare(
     `SELECT word, total_count, last_seen_at, display_word
@@ -167,13 +179,17 @@ const processStatisticsWordCommand = async (
     for (const row of batch.words) addStatisticsWordCount(pendingCounts, row);
   }
   if (streamWord !== null) addStatisticsWordCount(fullStreamCounts, streamWord);
+  if (bufferedWord !== null) {
+    addStatisticsWordCount(pendingCounts, bufferedWord);
+    addStatisticsWordCount(fullStreamCounts, bufferedWord);
+  }
 
   const hiddenBefore = new Date(Date.now() - STATISTICS_WORD_RARE_HIDE_MILLISECONDS).toISOString();
   const count = calculateStatisticsWordCount(word, baselineCounts, pendingCounts, "total", hiddenBefore, fullStreamCounts);
   const ignoredWords = new Set(event.settings.ignoredWords.map(foldStatisticsWord));
   const language = await context.channelLanguage();
   const text = count.count === 0 || count.hiddenByRarity || ignoredWords.has(word)
-    ? unknownWordReply(language, argument)
+    ? unknownWordReply(language, token.displayWord)
     : wordCommandReply(language, count.displayWord, streamIsLive, count.streamCount, count.totalCount);
   return {
     actions: [{ kind: "chat", text, replyToMessageId: messageId, automated: false }],

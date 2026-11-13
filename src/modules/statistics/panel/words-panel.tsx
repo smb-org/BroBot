@@ -148,11 +148,11 @@ export function StatisticsWordsPanel({ channelId, language = "de", canManage = f
   const hiddenButton = <Button variant="neutral" icon="eye-off" ariaHasPopup="dialog" ariaExpanded={settingsDialog === "ignoredWords"} onClick={() => { setSettingsDialog("ignoredWords"); }}>
     {labels.hiddenWordsButton(formatNumber.format(hiddenCount))}
   </Button>;
+  const wordCommand = settingsDraft.value.wordCommand;
   const wordCommandButton = <Button variant="neutral" icon="tabMessages" ariaHasPopup="dialog" ariaExpanded={settingsDialog === "wordCommand"} onClick={() => { setSettingsDialog("wordCommand"); }}>
-    {labels.wordCommandSettingsButton}
+    {labels.wordCommandSettingsButton(wordCommand.command)}
   </Button>;
   const headerButtons = <div className="statistics-words__header-buttons">{hiddenButton}{wordCommandButton}</div>;
-  const wordCommand = settingsDraft.value.wordCommand;
   const validCommandToken = /^![a-z0-9_]{2,24}$/u.test(wordCommand.command);
   const settingsDisabled = !canManage || settingsPending || settingsQuery.data === undefined;
   const statusOptions = [

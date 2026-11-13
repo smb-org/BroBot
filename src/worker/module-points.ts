@@ -31,6 +31,7 @@ export const modulePoints = (
       markAuditWritten: () => unavailable(),
       pendingAudits: () => unavailable(),
       claimCooldown: () => unavailable(),
+      claimCooldowns: () => unavailable(),
       rounds: {
         open: () => unavailable(),
         openWithStake: () => unavailable(),
@@ -106,6 +107,7 @@ export const modulePoints = (
     markAuditWritten: (operationId) => object.markPointAuditWritten(moduleId, operationId),
     pendingAudits: () => object.pendingPointAudits(moduleId),
     claimCooldown: (key, seconds) => object.claimPointCooldown(moduleId, key, seconds),
+    claimCooldowns: (claims) => object.claimPointCooldowns(moduleId, claims),
     rounds: {
       open: (roundId, data, overlayPayload) => object.openGameRound(moduleId, roundId, data, overlayPayload),
       openWithStake: (roundId, data, operationId, accountId, login, stake, cooldown) =>

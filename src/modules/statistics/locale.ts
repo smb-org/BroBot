@@ -6,6 +6,6 @@ export const wordCommandTexts = {
   },
   argumentHint: { de: "Das gezählte Wort.", en: "The word to look up." },
   unknownReply: (language: "de" | "en", word: string): string => language === "de"
-    ? `${word} wurde noch nicht gezählt`
-    : `${word} has not been counted yet`,
+    ? `Noch nicht gezählt: ${word}`
+    : `Not counted yet: ${word}`,
 } as const;

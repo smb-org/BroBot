@@ -173,7 +173,7 @@ describe("statistics words page", () => {
   it("saves the word command settings explicitly", async () => {
     const { fetchMock } = renderPanel();
     await screen.findByText("hello");
-    fireEvent.click(screen.getByRole("button", { name: "Word command settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Command !wort" }));
 
     expect(screen.getByRole("textbox", { name: "Command token" })).toHaveProperty("value", "!wort");
     fireEvent.click(screen.getByRole("switch", { name: "Enable word command" }));

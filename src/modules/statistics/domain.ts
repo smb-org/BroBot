@@ -147,6 +147,9 @@ export const statisticsTextFragments = (payload: Readonly<Record<string, unknown
 export const foldStatisticsWord = (word: string): string =>
   word.normalize("NFKC").toLowerCase().replace(/(\p{L})\1+/gu, "$1");
 
+/** Removes leading whitespace before both command parsing and command-word exclusion. */
+export const normalizeStatisticsCommandPrefix = (text: string): string => text.trimStart();
+
 export interface StatisticsWordToken {
   count: number;
   displayWord: string;
@@ -183,7 +186,7 @@ export const tokenizeStatisticsWords = (textFragments: readonly string[]): Map<s
 /** Commands and known chat bots stay in activity totals but do not contribute word counts. */
 export const statisticsWordsExcluded = (payload: Readonly<Record<string, unknown>>): boolean => {
   const message = recordValue(payload.message);
-  if (typeof message?.text === "string" && message.text.startsWith("!")) return true;
+  if (typeof message?.text === "string" && normalizeStatisticsCommandPrefix(message.text).startsWith("!")) return true;
   return typeof payload.chatter_user_login === "string" &&
     STATISTICS_CHAT_BOT_LOGINS.has(payload.chatter_user_login.toLowerCase());
 };

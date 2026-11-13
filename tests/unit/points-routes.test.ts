@@ -79,6 +79,7 @@ const createHarness = (options: { role?: "manager" | "operator"; failFirstAudit?
     markAuditWritten: vi.fn((operationId: string) => { pending.delete(operationId); return Promise.resolve(); }),
     pendingAudits: vi.fn(() => Promise.resolve([...pending].map(([operationId, detail]) => ({ operationId, detail })))),
     claimCooldown: vi.fn(() => Promise.resolve(true)),
+    claimCooldowns: vi.fn(() => Promise.resolve(true)),
     rounds: {} as ModulePointsAccess["rounds"],
   } satisfies ModulePointsAccess;
   const auditWriter = vi.fn<ModuleRouteEnvironment["Variables"]["writeModuleAudit"]>(async (

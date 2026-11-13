@@ -365,7 +365,10 @@ describe("statistics timeline intake", () => {
       userCooldownSeconds: 30,
       minimumChatStatus: "everyone",
     });
-    expect(statisticsModule.chatCommandNames?.(defaults)).toEqual(["!wort"]);
+    expect(statisticsModule.chatCommandNames?.(defaults)).toEqual([]);
+
+    const enabled = statisticsSettingsSchema.parse({ wordCommand: { enabled: true } });
+    expect(statisticsModule.chatCommandNames?.(enabled)).toEqual(["!wort"]);
 
     const configured = statisticsSettingsSchema.parse({
       wordCommand: { enabled: true, command: "!frequenz", minimumChatStatus: "subscriber" },

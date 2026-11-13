@@ -37,6 +37,14 @@ export const moduleCommandCollisionWriteGuard = (
     if (module.id === options.excludeModuleId) continue;
     const predicates: string[] = [];
     const predicateValues: unknown[] = [];
+    const enabledField = module.chatCommandSettingsEnabledField;
+    const enabledPredicate = enabledField !== undefined &&
+      /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$/u.test(enabledField)
+      ? `AND json_extract(
+           CASE WHEN json_valid(active.settings) THEN active.settings ELSE '{}' END,
+           '$.${enabledField}'
+         ) = 1`
+      : "";
     const staticTokens = module.chatCommandSettingsFields === undefined
       ? normalizedTokens((module.chatCommands ?? []).map(({ name }) => name))
       : [];
@@ -59,7 +67,7 @@ export const moduleCommandCollisionWriteGuard = (
       predicateValues.push(candidateJson);
     }
     if (predicates.length === 0) continue;
-    conditions.push(`(active.module_id = ? AND (${predicates.join(" OR ")}))`);
+    conditions.push(`(active.module_id = ? ${enabledPredicate} AND (${predicates.join(" OR ")}))`);
     values.push(module.id, ...predicateValues);
   }
   if (conditions.length === 0) return { sql: "", values: [] };

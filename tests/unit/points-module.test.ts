@@ -49,6 +49,7 @@ const makeContext = (overrides: Record<string, unknown> = {}) => {
     markAuditWritten: vi.fn(),
     pendingAudits: vi.fn(),
     claimCooldown: vi.fn(),
+    claimCooldowns: vi.fn(),
     rounds: {},
   };
   const context = {
