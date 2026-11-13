@@ -6,7 +6,12 @@ import type { ModuleRouteEnvironment } from "../contract";
 import type { StatisticsBitrateWindow, StatisticsStreamWindow, StatisticsTimelineEvent, StatisticsTrendsWeeks } from "./contracts";
 import { decodeStreamCursor, deriveStreamEvents, encodeStreamCursor, groupStatisticsWindows, matchBitrateWindows, paginateStreamSummaries } from "./streams-domain";
 import { STATISTICS_CHAT_FILLER_WORDS } from "./filler-words";
-import { foldStatisticsWord } from "./domain";
+import {
+  addStatisticsWordCount,
+  calculateStatisticsWordCount,
+  foldStatisticsWord,
+  STATISTICS_WORD_RARE_HIDE_MILLISECONDS,
+} from "./domain";
 import { statisticsSettingsSchema } from "./contracts";
 import { deriveStatisticsTrends } from "./trends-domain";
 
@@ -346,35 +351,9 @@ statisticsRoutes.get("/words", async (context) => {
     }
   }
 
-  const counts = new Map<string, { displayWord: string; count: number; lastSeenAt: string }>();
-  const hiddenBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000).toISOString();
-  const addBaselineWord = (
-    word: string,
-    displayWord: string,
-    count: number,
-    lastSeenAt: string,
-  ): void => {
-    const key = foldStatisticsWord(word);
-    const current = counts.get(key) ?? {
-      displayWord: displayWord.length > 0 ? displayWord : word,
-      count: 0,
-      lastSeenAt,
-    };
-    current.count += count;
-    if (current.lastSeenAt < lastSeenAt) current.lastSeenAt = lastSeenAt;
-    counts.set(key, current);
-  };
-  const addPendingWord = (word: string, displayWord: string, count: number, lastSeenAt: string): void => {
-    const key = foldStatisticsWord(word);
-    const current = counts.get(key) ?? {
-      displayWord: displayWord.length > 0 ? displayWord : word,
-      count: 0,
-      lastSeenAt,
-    };
-    current.count += count;
-    if (current.lastSeenAt < lastSeenAt) current.lastSeenAt = lastSeenAt;
-    counts.set(key, current);
-  };
+  const baselineCounts = new Map<string, { displayWord: string; count: number; lastSeenAt: string }>();
+  const streamCounts = new Map<string, { displayWord: string; count: number; lastSeenAt: string }>();
+  const hiddenBefore = new Date(Date.now() - STATISTICS_WORD_RARE_HIDE_MILLISECONDS).toISOString();
 
   if (query.data.scope === "stream") {
     const streamState = await context.env.DB.prepare(
@@ -386,7 +365,7 @@ statisticsRoutes.get("/words", async (context) => {
       ? null
       : await channelObject.readStatisticsWordStreamCounts(streamState?.state === "online" ? streamState.stream_id ?? undefined : undefined);
     for (const row of stream?.words ?? []) {
-      addPendingWord(row.word, row.displayWord || row.word, row.count, row.lastSeenAt);
+      addStatisticsWordCount(streamCounts, row);
     }
   } else {
     const streamState = await context.env.DB.prepare(
@@ -429,18 +408,23 @@ statisticsRoutes.get("/words", async (context) => {
     const baselineRows = [...baselineResult.results, ...rareBaselineCandidates].sort((left, right) =>
       right.total_count - left.total_count || (left.word < right.word ? -1 : left.word > right.word ? 1 : 0));
     for (const row of baselineRows) {
-      addBaselineWord(row.word, row.display_word, row.total_count, row.last_seen_at);
+      addStatisticsWordCount(baselineCounts, {
+        word: row.word,
+        displayWord: row.display_word,
+        count: row.total_count,
+        lastSeenAt: row.last_seen_at,
+      });
     }
     for (const row of pendingRows) {
-      addPendingWord(row.word, row.displayWord || row.word, row.count, row.lastSeenAt);
+      addStatisticsWordCount(streamCounts, row);
     }
   }
 
   const fillerWords = new Set(STATISTICS_CHAT_FILLER_WORDS.map(foldStatisticsWord));
-  const sourceWords = [...counts].flatMap(([word, value]) =>
-    query.data.scope === "total" && value.count < 3 && value.lastSeenAt < hiddenBefore
-      ? []
-      : [{ word, ...value }]);
+  const wordKeys = new Set([...baselineCounts.keys(), ...streamCounts.keys()]);
+  const sourceWords = [...wordKeys]
+    .map((word) => calculateStatisticsWordCount(word, baselineCounts, streamCounts, query.data.scope, hiddenBefore))
+    .filter((word) => word.count > 0 && !word.hiddenByRarity);
   const totalCount = sourceWords.reduce((sum, word) => sum + word.count, 0);
   const maxCount = sourceWords.reduce((maximum, word) => Math.max(maximum, word.count), 0);
   const visibleWords = sourceWords.filter(({ word }) =>

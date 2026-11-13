@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   countStatisticsEmotes,
   foldStatisticsWord,
+  addStatisticsWordCount,
+  calculateStatisticsWordCount,
   statisticsTextFragments,
   statisticsWordsExcluded,
   statisticsWindowStart,
   tokenizeStatisticsWordDetails,
+  type StatisticsWordCountValue,
 } from "../../src/modules/statistics/domain";
 
 describe("statistics window domain", () => {
@@ -39,6 +42,29 @@ describe("statistics window domain", () => {
       .toEqual(["fak", "fak", "fak", "fak", "a", "ä"]);
   });
 
+  it("shares stream, total, display and rare-word calculations for one folded word", () => {
+    const baseline = new Map<string, StatisticsWordCountValue>();
+    const stream = new Map<string, StatisticsWordCountValue>();
+    addStatisticsWordCount(baseline, {
+      word: "fak", displayWord: "Faaak", count: 3_765, lastSeenAt: "2026-10-25T11:00:00.000Z",
+    });
+    addStatisticsWordCount(stream, {
+      word: "fak", displayWord: "Fak", count: 47, lastSeenAt: "2026-10-25T12:00:00.000Z",
+    });
+
+    expect(calculateStatisticsWordCount("FAAAK", baseline, stream, "total", "2026-10-18T00:00:00.000Z"))
+      .toMatchObject({ word: "fak", displayWord: "Faaak", streamCount: 47, totalCount: 3_812, count: 3_812, hiddenByRarity: false });
+    expect(calculateStatisticsWordCount("fak", baseline, stream, "stream", "2026-10-18T00:00:00.000Z"))
+      .toMatchObject({ displayWord: "Fak", streamCount: 47, count: 47 });
+
+    const rare = new Map<string, StatisticsWordCountValue>();
+    addStatisticsWordCount(rare, {
+      word: "rareword", displayWord: "RareWord", count: 2, lastSeenAt: "2026-10-17T23:59:00.000Z",
+    });
+    expect(calculateStatisticsWordCount("rareword", rare, new Map(), "total", "2026-10-18T00:00:00.000Z").hiddenByRarity)
+      .toBe(true);
+  });
+
   it("keeps the first display spelling while counting emotes with typed words once per message", () => {
     const details = tokenizeStatisticsWordDetails(statisticsTextFragments({
       chatter_user_login: "viewer",
@@ -55,8 +81,11 @@ describe("statistics window domain", () => {
 
   it("excludes command messages and known bot logins from word counting", () => {
     expect(statisticsWordsExcluded({
-      chatter_user_login: "viewer",
-      message: { text: "!hello", fragments: [{ type: "text", text: "!hello world" }] },
+      chatter_user_id: "fictional-viewer-1",
+      chatter_user_login: "frostfern",
+      chatter_user_name: "Frost Fern",
+      message: { text: "!wort faaak", fragments: [{ type: "text", text: "!wort faaak" }] },
+      badges: [{ set_id: "subscriber" }],
     })).toBe(true);
     expect(statisticsWordsExcluded({
       chatter_user_login: "NIGHTBOT",
@@ -66,5 +95,14 @@ describe("statistics window domain", () => {
       chatter_user_login: "fictional_viewer",
       message: { text: "hello", fragments: [{ type: "text", text: "hello world" }] },
     })).toBe(false);
+
+    const leadingWhitespaceCommand = {
+      chatter_user_login: "fictional_viewer",
+      message: { text: " !wort faaak", fragments: [{ type: "text", text: " !wort faaak" }] },
+    };
+    expect(statisticsWordsExcluded(leadingWhitespaceCommand)).toBe(true);
+    expect(tokenizeStatisticsWordDetails(statisticsWordsExcluded(leadingWhitespaceCommand)
+      ? []
+      : statisticsTextFragments(leadingWhitespaceCommand))).toEqual(new Map());
   });
 });

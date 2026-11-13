@@ -256,6 +256,7 @@ import {
   assertPointRoundId,
   cancelPointRoundsSync,
   claimPointCooldownSync,
+  claimPointCooldownsSync,
   completePointRoundCancellationNoticeSync,
   creditPointActivitySync,
   creditPointSafetyNetSync,
@@ -5120,6 +5121,70 @@ export class ChannelObject extends DurableObject<Env> {
     return [...batches].map(([batch, words]) => ({ batch, words }));
   }
 
+  /** Reads one word's persisted counts and in-memory count without flushing buffered words. */
+  public readStatisticsWordCountForLookup(
+    streamId: string,
+    word: string,
+  ): Promise<{
+    batches: readonly StatisticsWordBatchCounts[];
+    streamWord: ModuleStatisticsWordCount | null;
+    bufferedWord: ModuleStatisticsWordCount | null;
+  }> {
+    const foldedWord = foldStatisticsWord(word);
+    if (foldedWord.length === 0) return Promise.resolve({ batches: [], streamWord: null, bufferedWord: null });
+    this.ensureStatisticsSchema();
+    const batchRows = this.ctx.storage.sql.exec<{
+      batch: number;
+      word: string;
+      display_word: string;
+      count: number;
+      last_seen_at: string;
+    }>(
+      `SELECT counts.batch, counts.word, counts.display_word, counts.count, counts.last_seen_at
+         FROM ${STATISTICS_WORD_COUNT_TABLE} AS counts
+        WHERE counts.stream_id = ? AND counts.word = ?
+        ORDER BY counts.batch ASC`,
+      streamId,
+      foldedWord,
+    ).toArray();
+    const streamRow = this.ctx.storage.sql.exec<{
+      word: string;
+      display_word: string;
+      count: number;
+      last_seen_at: string;
+    }>(
+      `SELECT totals.word, totals.display_word, totals.count, totals.last_seen_at
+         FROM statistics_word_stream_totals AS totals
+        WHERE totals.stream_id = ? AND totals.word = ?`,
+      streamId,
+      foldedWord,
+    ).toArray()[0];
+    const buffered = this.statisticsWordCounts.get(`${streamId}\u0000${foldedWord}`);
+    return Promise.resolve({
+      batches: batchRows.map((row) => ({
+        batch: row.batch,
+        words: [{
+          word: row.word,
+          displayWord: row.display_word || row.word,
+          count: row.count,
+          lastSeenAt: row.last_seen_at,
+        }],
+      })),
+      streamWord: streamRow === undefined ? null : {
+        word: streamRow.word,
+        displayWord: streamRow.display_word || streamRow.word,
+        count: streamRow.count,
+        lastSeenAt: streamRow.last_seen_at,
+      },
+      bufferedWord: buffered === undefined ? null : {
+        word: buffered.word,
+        displayWord: buffered.displayWord,
+        count: buffered.count,
+        lastSeenAt: buffered.lastSeenAt,
+      },
+    });
+  }
+
   /** Reads the requested stream or, while offline, its most recent unexpired retained word buffer. */
   public async readStatisticsWordStreamCounts(
     streamId?: string,
@@ -5878,6 +5943,7 @@ export class ChannelObject extends DurableObject<Env> {
       markAuditWritten: (operationId) => this.markPointAuditWritten(moduleId, operationId),
       pendingAudits: () => this.pendingPointAudits(moduleId),
       claimCooldown: (key, seconds) => this.claimPointCooldown(moduleId, key, seconds),
+      claimCooldowns: (claims) => this.claimPointCooldowns(moduleId, claims),
       rounds: {
         open: (roundId, data, overlayPayload) => this.openGameRound(moduleId, roundId, data, overlayPayload),
         openWithStake: (roundId, data, operationId, accountId, login, stake, cooldown) =>
@@ -6250,6 +6316,15 @@ export class ChannelObject extends DurableObject<Env> {
     await this.ensurePointRoundRecovery();
     await this.ensurePointsInitialized();
     return this.ctx.storage.transactionSync(() => claimPointCooldownSync(this.ctx.storage.sql, moduleId, key, seconds, Date.now()));
+  }
+
+  public async claimPointCooldowns(
+    moduleId: string,
+    claims: readonly { key: string; seconds: number }[],
+  ): Promise<boolean> {
+    await this.ensurePointRoundRecovery();
+    await this.ensurePointsInitialized();
+    return this.ctx.storage.transactionSync(() => claimPointCooldownsSync(this.ctx.storage.sql, moduleId, claims, Date.now()));
   }
 
   /** Reads a cooldown for dry-run explanations without initializing points or changing stored state. */

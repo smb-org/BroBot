@@ -1,8 +1,18 @@
 import { z } from "zod";
 
+import { MODULE_TEMPLATE_MINIMUM_TIERS } from "../contract";
 import { foldStatisticsWord } from "./domain";
 
+const statisticsWordCommandSchema = z.object({
+  enabled: z.boolean().default(false),
+  command: z.string().trim().toLowerCase().regex(/^![a-z0-9_]{2,24}$/u, "invalid_command").default("!wort"),
+  cooldownSeconds: z.number().int().min(0).max(3_600).default(10),
+  userCooldownSeconds: z.number().int().min(0).max(3_600).default(30),
+  minimumChatStatus: z.enum(MODULE_TEMPLATE_MINIMUM_TIERS).default("everyone"),
+}).prefault({});
+
 export const statisticsSettingsSchema = z.object({
+  wordCommand: statisticsWordCommandSchema,
   ignoredWords: z.array(
     z.string()
       .transform((word) => word.normalize("NFKC").toLowerCase().trim())

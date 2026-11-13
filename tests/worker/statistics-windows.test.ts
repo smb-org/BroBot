@@ -3,7 +3,11 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { statisticsTextFragments } from "../../src/modules/statistics/domain";
+import { statisticsSettingsSchema } from "../../src/modules/statistics/contracts";
+import { statisticsModule } from "../../src/modules/statistics";
 import { mergeStatisticsWordBatch } from "../../src/modules/statistics/service";
+import { ChannelObject } from "../../src/worker/durable/ChannelObject";
+import { dispatchEventSubNotification } from "../../src/worker/dispatch";
 import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
 import { notifyModuleScheduleInputsChanged } from "../../src/worker/module-schedules";
 import { insertPointChannel, runMigrations } from "./points-test-helpers";
@@ -42,6 +46,14 @@ interface StatisticsWordObject {
     batch: number;
     words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
   }[]>;
+  readStatisticsWordCountForLookup(streamId: string, word: string): Promise<{
+    batches: readonly {
+      batch: number;
+      words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
+    }[];
+    streamWord: { word: string; displayWord: string; count: number; lastSeenAt: string } | null;
+    bufferedWord: { word: string; displayWord: string; count: number; lastSeenAt: string } | null;
+  }>;
   markStatisticsWordStreamEnded(streamId: string, endedAt: string): Promise<void>;
   listMergeableStatisticsWordBuckets(
     streamState: "online" | "offline" | "unknown",
@@ -122,7 +134,48 @@ describe("statistics windows in the channel object", () => {
       await state.storage.deleteAlarm();
     })));
     stubs.clear();
+    vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("executes a leading-space word command without counting either command token", async () => {
+    const channelId = `statistics-leading-command-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const streamId = `word-stream-leading-command-${crypto.randomUUID()}`;
+    const userId = `fictional-viewer-${crypto.randomUUID()}`;
+    const messageId = `fictional-message-${crypto.randomUUID()}`;
+    const receivedAt = iso(Date.now());
+    await writeEventSubStreamState(worker.DB, channelId, "online", receivedAt, receivedAt, streamId);
+    const settings = statisticsSettingsSchema.parse({ wordCommand: { enabled: true } });
+    await worker.DB.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'statistics', 1, ?, 1)",
+    ).bind(channelId, JSON.stringify(settings)).run();
+    const stub = statisticsObject(channelId);
+    const object = stub as unknown as StatisticsWordObject;
+    const recordChatActivity = vi.spyOn(ChannelObject.prototype, "recordChatActivity");
+    const readWordCount = vi.spyOn(ChannelObject.prototype, "readStatisticsWordCountForLookup");
+    const text = " !wort faaak";
+
+    await dispatchEventSubNotification(worker, {
+      channelId,
+      subscriptionType: "channel.chat.message",
+      triggerId: messageId,
+      receivedAt,
+      payload: {
+        broadcaster_user_id: channelId,
+        broadcaster_user_login: "statisticschannel",
+        chatter_user_id: userId,
+        chatter_user_login: "frostfern",
+        chatter_user_name: "Frost Fern",
+        message_id: messageId,
+        message: { text, fragments: [{ type: "text", text }] },
+        badges: [],
+      },
+    }, () => Promise.resolve(new Response(null, { status: 200 })), [statisticsModule]);
+
+    expect(recordChatActivity).toHaveBeenCalledWith(userId, true, expect.objectContaining({ textFragments: [] }));
+    expect(readWordCount).toHaveBeenCalledWith(streamId, "fak");
+    await expect(object.readStatisticsWordCountsByBatch(streamId)).resolves.toEqual([]);
   });
 
   it("writes an offline window with absolute totals and raises it for a late message", async () => {
@@ -422,6 +475,19 @@ describe("statistics windows in the channel object", () => {
         { word: "fak", displayWord: "faaak", count: 7, lastSeenAt: "2026-10-25T12:01:00.000Z" },
       ],
     }]);
+    await expect(object.readStatisticsWordCountForLookup(streamId, "FAAAK")).resolves.toEqual({
+      batches: [{
+        batch: 1,
+        words: [{ word: "fak", displayWord: "faaak", count: 7, lastSeenAt: "2026-10-25T12:01:00.000Z" }],
+      }],
+      streamWord: {
+        word: "fak",
+        displayWord: "faaak",
+        count: 7,
+        lastSeenAt: "2026-10-25T12:01:00.000Z",
+      },
+      bufferedWord: null,
+    });
     await object.recordChatActivity(null, false, {
       windowStart: iso(pastWindowStart()),
       receivedAt: "2026-10-25T12:02:00.000Z",
@@ -453,6 +519,36 @@ describe("statistics windows in the channel object", () => {
       ],
       version: 2,
     });
+  });
+
+  it("adds only the requested buffered word to a persisted lookup without flushing others", async () => {
+    const channelId = `statistics-word-lookup-buffer-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const stub = statisticsObject(channelId);
+    const object = stub as unknown as StatisticsWordObject;
+    const streamId = `word-stream-lookup-buffer-${crypto.randomUUID()}`;
+    const receivedAt = iso(Date.now());
+
+    await object.recordChatActivity(null, false, {
+      windowStart: iso(pastWindowStart()), receivedAt, emotes: 0, streamId, textFragments: ["faaak"],
+    });
+    await runWindowAlarm(stub);
+    await object.recordChatActivity(null, false, {
+      windowStart: iso(pastWindowStart()), receivedAt, emotes: 0, streamId, textFragments: ["faaak spareword"],
+    });
+
+    await expect(object.readStatisticsWordCountForLookup(streamId, "fak")).resolves.toMatchObject({
+      streamWord: { word: "fak", count: 1 },
+      bufferedWord: { word: "fak", count: 1 },
+    });
+    await expect(object.readStatisticsWordCountForLookup(streamId, "spareword")).resolves.toMatchObject({
+      streamWord: null,
+      bufferedWord: { word: "spareword", count: 1 },
+    });
+    await expect(runInDurableObject(stub, (_object, state) => state.storage.sql.exec<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM statistics_word_counts WHERE stream_id = ? AND word = 'spareword'",
+      streamId,
+    ).one().count)).resolves.toBe(0);
   });
 
   it("sums each legacy spelling across batches before choosing the display spelling", async () => {

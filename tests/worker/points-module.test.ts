@@ -56,6 +56,7 @@ const contextFor = (object: PointsWorkerObject, live: "online" | "offline" = "on
     markAuditWritten: (operationId) => object.markPointAuditWritten(moduleId, operationId),
     pendingAudits: () => object.pendingPointAudits(moduleId),
     claimCooldown: (key, seconds) => object.claimPointCooldown(moduleId, key, seconds),
+    claimCooldowns: (claims) => object.claimPointCooldowns(moduleId, claims),
     rounds: {} as ModulePointsAccess["rounds"],
   };
   return {

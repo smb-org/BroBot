@@ -21,7 +21,7 @@ const event = (messageId: string, text = "!heist 75"): ModuleEvent<typeof settin
 const openRound = { roundId: "heist-fictional", state: "open" as const, deadlineAt: now + 30_000, data: {} };
 
 const contextWith = (rounds: Record<string, unknown>): ModuleExecutionContext => ({
-  points: { claimCooldown: () => Promise.resolve(true), rounds },
+  points: { claimCooldown: () => Promise.resolve(true), claimCooldowns: () => Promise.resolve(true), rounds },
   scheduleAlarm: () => Promise.resolve(),
   channelLanguage: () => Promise.resolve("en"),
 }) as unknown as ModuleExecutionContext;

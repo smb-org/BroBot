@@ -122,6 +122,7 @@ export interface PointsWorkerObject {
   markPointAuditWritten(moduleId: string, operationId: string): Promise<void>;
   pendingPointAudits(moduleId: string): Promise<Array<{ operationId: string; detail: unknown }>>;
   claimPointCooldown(moduleId: string, key: string, seconds: number): Promise<boolean>;
+  claimPointCooldowns(moduleId: string, claims: readonly { key: string; seconds: number }[]): Promise<boolean>;
 }
 
 const database = (env as unknown as { DB: D1Database }).DB;

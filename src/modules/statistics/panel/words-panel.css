@@ -7,6 +7,12 @@
     font-size: var(--text-body);
   }
 
+  .statistics-words__header-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-s2);
+  }
+
   .statistics-words__dialog { width: min(560px, calc(100vw - 32px)); box-sizing: border-box; }
 
   .statistics-words__dialog-body {
@@ -20,6 +26,27 @@
     color: var(--color-text-3);
     font-size: 12px;
     line-height: 1.35;
+  }
+
+  .statistics-words__word-command-fields {
+    display: grid;
+    min-width: 0;
+    gap: var(--spacing-s3);
+  }
+
+  .statistics-words__word-command-fields .ui-switch-row {
+    min-height: 42px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: var(--spacing-s2) var(--spacing-s3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-well);
+  }
+
+  .statistics-words__number-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--spacing-s3);
   }
 
   /* Reserved so a load error never pushes the field down. */
@@ -300,6 +327,7 @@
   }
 
   @media (max-width: 639px) {
+    .statistics-words__number-fields { grid-template-columns: minmax(0, 1fr); }
     .statistics-words__controls { grid-template-columns: minmax(0, 1fr); gap: var(--spacing-s2); }
     .statistics-words__search,
     .statistics-words__scope,

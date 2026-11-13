@@ -1371,6 +1371,9 @@ export const dispatchEventSubNotification = async (
           markWordStreamEnded: (streamId: string, endedAt: string) =>
             channelNamespace.get(channelNamespace.idFromName(event.channelId))
               .markStatisticsWordStreamEnded(streamId, endedAt),
+          readWordCountForLookup: (streamId: string, word: string) =>
+            channelNamespace.get(channelNamespace.idFromName(event.channelId))
+              .readStatisticsWordCountForLookup(streamId, word),
         }
         : undefined;
       const moduleEvent: ModuleEvent = {

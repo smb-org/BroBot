@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   insertPointChannel,
@@ -484,6 +484,26 @@ describe("points ledger in the worker Durable Object", () => {
 
     expect(results.filter(Boolean)).toHaveLength(1);
     expect(now()).toBeGreaterThan(0);
+  });
+
+  it("does not claim the global cooldown when the user's cooldown blocks the request", async () => {
+    const channelId = `points-cooldown-pair-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    const object = pointObject(channelId);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const claimsFor = (userId: string) => [
+        { key: "word-command:global", seconds: 10 },
+        { key: `word-command:user:${userId}`, seconds: 30 },
+      ];
+
+      await expect(object.claimPointCooldowns("statistics", claimsFor("viewer-a"))).resolves.toBe(true);
+      vi.setSystemTime(Date.now() + 11_000);
+      await expect(object.claimPointCooldowns("statistics", claimsFor("viewer-a"))).resolves.toBe(false);
+      await expect(object.claimPointCooldowns("statistics", claimsFor("viewer-b"))).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it(`keeps admin audit details pending until the host marks them written (${testCard("admin operation audit state forms a durable outbox", "a pending correction disappears before its host audit is written")})`, async () => {

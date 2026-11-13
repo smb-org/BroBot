@@ -12,7 +12,10 @@ const objectValue = (value: unknown): Record<string, unknown> | null =>
 
 const configuredThreshold = (command: ModuleChatCommandDeclaration, settings: unknown): ModuleChatCommandThreshold => {
   if (command.minimumChatStatusSetting === undefined) return command.minimumChatStatus;
-  const value = objectValue(settings)?.[command.minimumChatStatusSetting];
+  const value = command.minimumChatStatusSetting.split(".").reduce<unknown>(
+    (current, key) => objectValue(current)?.[key],
+    settings,
+  );
   if (value === "viewer") return "everyone";
   return value === "subscriber" || value === "vip" || value === "moderator" || value === "broadcaster"
     ? value

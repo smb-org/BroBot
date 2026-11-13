@@ -6,7 +6,8 @@ import { createSessionCookie } from "../../src/worker/auth/session";
 import { listAllBroadcasterScopes } from "../../src/worker/module-scopes";
 import { panelRouter } from "../../src/worker/panel/routes";
 import * as eventsubMaintenance from "../../src/worker/eventsub-subscriptions";
-import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
+import { statisticsSettingsSchema } from "../../src/modules/statistics/contracts";
+import { insertAppAccessToken, insertChannel,insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const environmentKeys = {
@@ -318,7 +319,7 @@ describe("Panel read endpoints", () => {
         { moduleId: "currency", settings: "{}" },
         { moduleId: "api_source", settings: "{}" },
         { moduleId: "channel_events", settings: "{}" },
-        { moduleId: "statistics", settings: "{\"ignoredWords\":[]}" },
+        { moduleId: "statistics", settings: JSON.stringify(statisticsSettingsSchema.parse({})) },
       ],
     });
   });
@@ -1008,7 +1009,7 @@ describe("Panel read endpoints", () => {
       { moduleId: "currency", settings: "{}" },
       { moduleId: "api_source", settings: "{}" },
       { moduleId: "channel_events", settings: "{}" },
-      { moduleId: "statistics", settings: "{\"ignoredWords\":[]}" },
+      { moduleId: "statistics", settings: JSON.stringify(statisticsSettingsSchema.parse({})) },
     ]);
     expect(body.tokens).toEqual({
       botExpiresAt: "2026-09-19T00:00:00.000Z",

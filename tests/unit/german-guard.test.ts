@@ -39,6 +39,7 @@ const ALLOWLIST: Record<string, string> = {
   "src/modules/duel/panel/settings-editor-locale.ts": "Bilingual DE/EN duel settings editor catalogue; only its de values are German.",
   "src/modules/heist/locale.ts": "Bilingual DE/EN heist module catalogue; only its de values are German.",
   "src/modules/heist/panel/settings-editor-locale.ts": "Bilingual DE/EN heist settings editor catalogue; only its de values are German.",
+  "src/modules/statistics/locale.ts": "Bilingual DE/EN word-command texts; only its German halves are German.",
   "src/modules/statistics/stop-words.ts": "German and English stop-word list for the word-frequency baseline; its German half is German by design.",
   "src/modules/overlay_alerts/panel/locale.ts": "Bilingual DE/EN overlay-alerts panel text catalogue; only its German half is German.",
   "src/modules/overlay_alerts/locale.ts": "Bilingual DE/EN overlay-alert action and editor catalogue; only its German half is German.",

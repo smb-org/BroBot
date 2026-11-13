@@ -313,6 +313,12 @@ const hasSchemaException = (query: SqlContractQuery): boolean => schemaException
   exception.fileName === query.fileName && query.sql.includes(exception.tableName));
 
 describe("SQL contract", () => {
+  it("guards nested configurable chat command fields", () => {
+    const guard = moduleCommandCollisionWriteGuard("channel-id", ["!custom-word"], MODULES);
+
+    expect(guard.sql).toContain("'$.wordCommand.command'");
+  });
+
   it("rebuilds the timeline with raid kinds while preserving rows and constraints", () => {
     const database = new DatabaseSync(":memory:");
     try {

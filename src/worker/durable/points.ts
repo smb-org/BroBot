@@ -1547,6 +1547,21 @@ export const claimPointCooldownSync = (sql: PointsSql, moduleId: string, key: st
   return true;
 };
 
+export const claimPointCooldownsSync = (
+  sql: PointsSql,
+  moduleId: string,
+  claims: readonly { key: string; seconds: number }[],
+  now: number,
+): boolean => {
+  if (moduleId.length === 0 || !Number.isFinite(now)) throw new Error("invalid_cooldown");
+  for (const { key, seconds } of claims) {
+    if (key.length === 0 || !Number.isSafeInteger(seconds) || seconds < 0) throw new Error("invalid_cooldown");
+    if (pointCooldownRemainingSync(sql, moduleId, key, now) > 0) return false;
+  }
+  for (const { key, seconds } of claims) claimPointCooldownSync(sql, moduleId, key, seconds, now);
+  return true;
+};
+
 /** Reads a cooldown without initializing the points schema or modifying its deadline. */
 export const pointCooldownRemainingSync = (sql: PointsSql, moduleId: string, key: string, now: number): number => {
   if (moduleId.length === 0 || key.length === 0 || !Number.isFinite(now)) throw new Error("invalid_cooldown");

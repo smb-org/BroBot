@@ -1,10 +1,25 @@
 import type { BotModule } from "../contract";
 import { statisticsModuleCatalog } from "./catalog";
+import { wordCommandTexts } from "./locale";
 import { statisticsRoutes } from "./routes";
 import { handleStatisticsWindowAlarm, processStatisticsEvent, reconcileStatisticsSchedule } from "./service";
 import { statisticsSettingsSchema } from "./contracts";
 
 const settingsSchema = statisticsSettingsSchema;
+
+const wordCountChatCommand = [{
+  name: "!wort",
+  syntax: "!wort <Wort>",
+  syntaxByLanguage: { de: "!wort <Wort>", en: "!wort <word>" },
+  description: wordCommandTexts.description,
+  arguments: [{
+    name: "Wort",
+    nameByLanguage: { de: "Wort", en: "word" },
+    hint: wordCommandTexts.argumentHint,
+  }],
+  minimumChatStatus: "everyone",
+  minimumChatStatusSetting: "wordCommand.minimumChatStatus",
+}] as const;
 
 export const statisticsModule: BotModule<typeof settingsSchema> = {
   id: "statistics",
@@ -45,6 +60,13 @@ export const statisticsModule: BotModule<typeof settingsSchema> = {
   ],
   settingsSchema,
   defaultSettings: statisticsSettingsSchema.parse({}),
+  chatCommands: wordCountChatCommand,
+  chatCommandNames: (settings) => {
+    const parsed = statisticsSettingsSchema.safeParse(settings);
+    return parsed.success && parsed.data.wordCommand.enabled ? [parsed.data.wordCommand.command] : [];
+  },
+  chatCommandSettingsFields: ["wordCommand.command"],
+  chatCommandSettingsEnabledField: "wordCommand.enabled",
   routes: statisticsRoutes,
   panel: () => import("./panel").then((panel) => ({ default: panel.StatisticsPanel })),
   eventSubTypes: ["channel.chat.message", "stream.online", "stream.offline", "channel.update"],

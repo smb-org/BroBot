@@ -7,6 +7,7 @@ import { textFingerprint } from "../../src/text";
 import { createTextBlockRepository } from "../../src/modules/text_library/adapters/d1";
 import { createTextLibraryService } from "../../src/modules/text_library/service";
 import { duelSettingsForLanguage } from "../../src/modules/duel/contracts";
+import { statisticsSettingsSchema } from "../../src/modules/statistics/contracts";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { createReadInterleavingDatabase, TestD1Database } from "./test-d1";
 
@@ -1015,6 +1016,44 @@ describe("Text commands panel", () => {
     await expect(response.json()).resolves.toEqual({ error: "module_command_collision", command: "!duel" });
     await expect(database.prepare("SELECT enabled FROM text_commands WHERE channel_id = 'kanal-a' AND command_name = 'duel'").first())
       .resolves.toEqual({ enabled: 0 });
+  });
+
+  it("allows editing a custom !wort command while the statistics word command is off", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-1");
+    await insertMember(database, "kanal-a", "user-1", "manager");
+    const settings = statisticsSettingsSchema.parse({ wordCommand: { enabled: false, command: "!wort" } });
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES ('kanal-a', 'statistics', 1, ?, 1)",
+    ).bind(JSON.stringify(settings)).run();
+    const environment = environmentFor(database);
+
+    const created = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands", "POST", {
+        name: "wort", text: "Custom word reply", cooldownSeconds: 0,
+      }),
+      environment,
+    );
+    expect(created.status).toBe(201);
+
+    const edited = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/text_commands/commands/wort", "PATCH", {
+        text: "Updated custom word reply",
+        aliases: [],
+      }),
+      environment,
+    );
+    expect(edited.status).toBe(200);
+
+    const enabled = await panelRouter.fetch(
+      await requestFor("user-1", "/api/channels/kanal-a/modules/statistics/settings", "PATCH", {
+        revision: 1,
+        settings: { wordCommand: { enabled: true, command: "!wort" } },
+      }),
+      environment,
+    );
+    expect(enabled.status).toBe(409);
+    await expect(enabled.json()).resolves.toEqual({ error: "module_command_collision", command: "!wort" });
   });
 
   it("keeps malformed legacy module settings from breaking atomic command writes", async () => {

@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { StatisticsWordsPanel } from "../../src/modules/statistics/panel/words-panel";
+import type { StatisticsSettings } from "../../src/modules/statistics/contracts";
 import { foldStatisticsWord } from "../../src/modules/statistics/domain";
 
 const words = [
@@ -15,6 +16,13 @@ const words = [
 const renderPanel = (sourceWords = words, initialIgnoredWords: string[] = []) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   let ignoredWords = [...initialIgnoredWords];
+  let wordCommand: StatisticsSettings["wordCommand"] = {
+    enabled: false,
+    command: "!wort",
+    cooldownSeconds: 10,
+    userCooldownSeconds: 30,
+    minimumChatStatus: "everyone" as const,
+  };
   let revision = 1;
   const fetchMock = vi.fn<typeof fetch>().mockImplementation((input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -22,12 +30,13 @@ const renderPanel = (sourceWords = words, initialIgnoredWords: string[] = []) =>
     if (parsedUrl.pathname.endsWith("/settings")) {
       if (init?.method === "PATCH") {
         const body = typeof init.body === "string"
-          ? JSON.parse(init.body) as { settings: { ignoredWords: string[] } }
-          : { settings: { ignoredWords: [] } };
+          ? JSON.parse(init.body) as { settings: { ignoredWords: string[]; wordCommand: StatisticsSettings["wordCommand"] } }
+          : { settings: { ignoredWords: [], wordCommand } };
         ignoredWords = body.settings.ignoredWords;
+        wordCommand = body.settings.wordCommand;
         revision += 1;
       }
-      return Promise.resolve(new Response(JSON.stringify({ settings: { ignoredWords }, revision }), {
+      return Promise.resolve(new Response(JSON.stringify({ settings: { ignoredWords, wordCommand }, revision }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }));
@@ -159,6 +168,35 @@ describe("statistics words page", () => {
     await waitFor(() => expect(screen.queryByText("hello", { selector: ".statistics-words__word" })).toBeNull());
     expect(screen.getByRole("button", { name: "Remove hello" })).toBeTruthy();
     expect(screen.getByText("Hidden · 3")).toBeTruthy();
+  });
+
+  it("saves the word command settings explicitly", async () => {
+    const { fetchMock } = renderPanel();
+    await screen.findByText("hello");
+    fireEvent.click(screen.getByRole("button", { name: "Command !wort" }));
+
+    expect(screen.getByRole("textbox", { name: "Command token" })).toHaveProperty("value", "!wort");
+    fireEvent.click(screen.getByRole("switch", { name: "Enable word command" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Global cooldown" }), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Minimum chat status" }));
+    const subscribers = await screen.findByRole("option", { name: "Subscribers" });
+    fireEvent.pointerDown(subscribers, { pointerId: 1, pointerType: "mouse", button: 0 });
+    fireEvent.click(subscribers);
+
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+    const saved = fetchMock.mock.calls.flatMap(([, init]) => init?.method === "PATCH" && typeof init.body === "string"
+      ? [JSON.parse(init.body) as { settings: { wordCommand: StatisticsSettings["wordCommand"] } }]
+      : []).at(-1);
+    expect(saved?.settings.wordCommand).toMatchObject({
+      enabled: true,
+      command: "!wort",
+      cooldownSeconds: 12,
+      userCooldownSeconds: 30,
+      minimumChatStatus: "subscriber",
+    });
   });
 
   it("asks before closing the ignore dialog with unsaved changes", async () => {
