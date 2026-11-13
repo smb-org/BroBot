@@ -179,13 +179,34 @@ describe("statistics words route", () => {
     expect(body.words.map(({ word }) => word)).toEqual(["keep"]);
   });
 
+  it("matches folded search and ignored words against an upgraded folded key", async () => {
+    const { database, fetch } = await setup();
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, settings) VALUES (?, 'statistics', ?)`,
+    ).bind(CHANNEL_ID, JSON.stringify({ ignoredWords: ["fak"] })).run();
+    await database.prepare(
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
+       VALUES (?, 'fak', 'FAAAK', 8, '2026-10-25T12:00:00.000Z')`,
+    ).bind(CHANNEL_ID).run();
+
+    const hiddenResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words?search=FAAAK`);
+    const hidden = await hiddenResponse.json<{ words: unknown[]; total: number; totalCount: number }>();
+    await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = 'statistics'")
+      .bind(JSON.stringify({ ignoredWords: [] }), CHANNEL_ID).run();
+    const visibleResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words?search=FAAAK`);
+    const visible = await visibleResponse.json<{ words: Array<{ word: string; count: number }>; total: number }>();
+
+    expect(hidden).toMatchObject({ words: [], total: 0, totalCount: 8 });
+    expect(visible).toMatchObject({ total: 1, words: [{ word: "FAAAK", count: 8 }] });
+  });
+
   it("separates stream totals from baseline totals across merged and pending batches", async () => {
     const streamId = "statistics-words-live-stream";
     const firstStreamWord = { word: "helo", displayWord: "HELLO", count: 5, lastSeenAt: "2026-10-25T12:00:00.000Z" };
     const streamWords = [
       firstStreamWord,
       { word: "helo", displayWord: "hello", count: 3, lastSeenAt: "2026-10-25T12:01:00.000Z" },
-      { word: "streamword", displayWord: "StreamWord", count: 2, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+      { word: "streamword", displayWord: "BatchWord", count: 2, lastSeenAt: "2026-10-25T12:01:00.000Z" },
     ];
     const channelObject = {
       readStatisticsWordCountsByBatch: () => Promise.resolve([
@@ -220,12 +241,12 @@ describe("statistics words route", () => {
     const stream = await streamResponse.json<{ words: Array<{ word: string; count: number }>; totalCount: number }>();
 
     expect(both.words).toEqual(expect.arrayContaining([
-      expect.objectContaining({ word: "HELLO", count: 15 }),
+      expect.objectContaining({ word: "hello", count: 15 }),
       expect.objectContaining({ word: "StreamWord", count: 2 }),
     ]));
     expect(both.totalCount).toBe(21);
     expect(total.words).toEqual(expect.arrayContaining([
-      expect.objectContaining({ word: "HELLO", count: 10 }),
+      expect.objectContaining({ word: "hello", count: 10 }),
       expect.objectContaining({ word: "StreamWord", count: 2 }),
     ]));
     expect(total.totalCount).toBe(16);

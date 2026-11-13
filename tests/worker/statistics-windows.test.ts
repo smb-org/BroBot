@@ -306,6 +306,174 @@ describe("statistics windows in the channel object", () => {
     expect(words).toHaveLength(6);
   });
 
+  it("keeps at most four display spellings per folded word and flushes each once", async () => {
+    const channelId = "statistics-word-display-variant-cap";
+    await insertPointChannel(channelId);
+    const stub = statisticsObject(channelId);
+    const streamId = "word-stream-display-cap";
+    const receivedAt = iso(Date.now());
+    const internal = await runInDurableObject(stub, (instance, state) => {
+      const object = instance as unknown as {
+        recordStatisticsWordCountsSync: (id: string, fragments: readonly string[], time: string) => void;
+        statisticsWordCounts: Map<string, { displayCounts: Map<string, number> }>;
+      };
+      const base = "bcdfghjklmnpqr";
+      state.storage.transactionSync(() => {
+        for (let index = 0; index < 10_000; index += 1) {
+          const spelling = Array.from(base, (letter, bit) =>
+            (index & (1 << bit)) === 0 ? letter : letter.toUpperCase()).join("");
+          object.recordStatisticsWordCountsSync(streamId, [spelling], receivedAt);
+        }
+      });
+      return object.statisticsWordCounts.get(`${streamId}\u0000${base}`)?.displayCounts.size;
+    });
+
+    expect(internal).toBe(4);
+    await expect((stub as unknown as StatisticsWordObject).readStatisticsWordStreamCounts(streamId)).resolves.toMatchObject({
+      words: [{ word: "bcdfghjklmnpqr", count: 10_000 }],
+    });
+    await (stub as unknown as StatisticsWordObject).readStatisticsWordStreamCounts(streamId);
+    await expect(runInDurableObject(stub, (_object, state) => ({
+      bucketCount: state.storage.sql.exec<{ count: number }>(
+        "SELECT count FROM statistics_word_counts WHERE stream_id = ? AND word = 'bcdfghjklmnpqr'",
+        streamId,
+      ).one().count,
+      batchVariants: state.storage.sql.exec<{ count: number; total: number }>(
+        `SELECT COUNT(*) AS count, COALESCE(SUM(count), 0) AS total
+           FROM statistics_word_displays WHERE stream_id = ? AND word = 'bcdfghjklmnpqr'`,
+        streamId,
+      ).one(),
+      streamVariants: state.storage.sql.exec<{ count: number; total: number }>(
+        `SELECT COUNT(*) AS count, COALESCE(SUM(count), 0) AS total
+           FROM statistics_word_stream_displays WHERE stream_id = ? AND word = 'bcdfghjklmnpqr'`,
+        streamId,
+      ).one(),
+    }))).resolves.toEqual({
+      bucketCount: 10_000,
+      batchVariants: { count: 4, total: 4 },
+      streamVariants: { count: 4, total: 4 },
+    });
+  });
+
+  it("folds populated legacy word tables before recording the schema version", async () => {
+    const channelId = "statistics-word-populated-upgrade";
+    await insertPointChannel(channelId);
+    const stub = statisticsObject(channelId);
+    const streamId = "word-stream-populated-upgrade";
+    await runInDurableObject(stub, (_object, state) => {
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_counts (
+          stream_id TEXT NOT NULL, batch INTEGER NOT NULL, word TEXT NOT NULL, count INTEGER NOT NULL,
+          last_seen_at TEXT NOT NULL, last_increment_at INTEGER NOT NULL,
+          PRIMARY KEY (stream_id, batch, word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_seen (
+          stream_id TEXT NOT NULL, word TEXT NOT NULL, PRIMARY KEY (stream_id, word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_stream_totals (
+          stream_id TEXT NOT NULL, word TEXT NOT NULL, count INTEGER NOT NULL, last_seen_at TEXT NOT NULL,
+          PRIMARY KEY (stream_id, word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_displays (
+          stream_id TEXT NOT NULL, batch INTEGER NOT NULL, word TEXT NOT NULL, display_word TEXT NOT NULL,
+          count INTEGER NOT NULL, PRIMARY KEY (stream_id, batch, word, display_word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_stream_displays (
+          stream_id TEXT NOT NULL, word TEXT NOT NULL, display_word TEXT NOT NULL, count INTEGER NOT NULL,
+          PRIMARY KEY (stream_id, word, display_word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO statistics_word_counts VALUES
+           (?, 1, 'faaak', 5, '2026-10-25T12:00:00.000Z', 1),
+           (?, 1, 'fak', 2, '2026-10-25T12:01:00.000Z', 2)` ,
+        streamId,
+        streamId,
+      );
+      state.storage.sql.exec(
+        "INSERT INTO statistics_word_seen VALUES (?, 'faaak'), (?, 'fak')",
+        streamId,
+        streamId,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO statistics_word_stream_totals VALUES
+           (?, 'faaak', 5, '2026-10-25T12:00:00.000Z'),
+           (?, 'fak', 2, '2026-10-25T12:01:00.000Z')`,
+        streamId,
+        streamId,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO statistics_word_displays VALUES
+           (?, 1, 'faaak', 'faaak', 5), (?, 1, 'fak', 'fak', 2)`,
+        streamId,
+        streamId,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO statistics_word_stream_displays VALUES
+           (?, 'faaak', 'faaak', 5), (?, 'fak', 'fak', 2)`,
+        streamId,
+        streamId,
+      );
+    });
+
+    const object = stub as unknown as StatisticsWordObject;
+    await object.recordChatActivity(null, false, {
+      windowStart: iso(pastWindowStart()),
+      receivedAt: "2026-10-25T12:02:00.000Z",
+      emotes: 0,
+      streamId,
+      textFragments: ["FAAK"],
+    });
+    await runWindowAlarm(stub);
+
+    await expect(object.readStatisticsWordCounts(streamId)).resolves.toEqual([
+      { word: "fak", count: 8, lastSeenAt: "2026-10-25T12:02:00.000Z" },
+    ]);
+    await expect(runInDurableObject(stub, (_object, state) => ({
+      seen: state.storage.sql.exec<{ word: string }>(
+        "SELECT word FROM statistics_word_seen WHERE stream_id = ?", streamId,
+      ).toArray(),
+      total: state.storage.sql.exec<{ word: string; count: number; last_seen_at: string }>(
+        "SELECT word, count, last_seen_at FROM statistics_word_stream_totals WHERE stream_id = ?", streamId,
+      ).toArray(),
+      batchDisplays: state.storage.sql.exec<{ word: string; display_word: string; count: number }>(
+        `SELECT word, display_word, count FROM statistics_word_displays
+          WHERE stream_id = ? AND batch = 1 ORDER BY count DESC, display_word ASC`,
+        streamId,
+      ).toArray(),
+      streamDisplays: state.storage.sql.exec<{ word: string; display_word: string; count: number }>(
+        `SELECT word, display_word, count FROM statistics_word_stream_displays
+          WHERE stream_id = ? ORDER BY count DESC, display_word ASC`,
+        streamId,
+      ).toArray(),
+      version: state.storage.sql.exec<{ version: number }>(
+        "SELECT version FROM statistics_word_schema_version",
+      ).one().version,
+    }))).resolves.toEqual({
+      seen: [{ word: "fak" }],
+      total: [{ word: "fak", count: 8, last_seen_at: "2026-10-25T12:02:00.000Z" }],
+      batchDisplays: [
+        { word: "fak", display_word: "faaak", count: 5 },
+        { word: "fak", display_word: "fak", count: 2 },
+        { word: "fak", display_word: "FAAK", count: 1 },
+      ],
+      streamDisplays: [
+        { word: "fak", display_word: "faaak", count: 5 },
+        { word: "fak", display_word: "fak", count: 2 },
+        { word: "fak", display_word: "FAAK", count: 1 },
+      ],
+      version: 1,
+    });
+  });
+
   it("treats a word buffered after the alarm's flush as fresh activity before sealing a bucket", async () => {
     const channelId = "statistics-word-buffered-idle";
     await insertPointChannel(channelId);
@@ -412,7 +580,7 @@ describe("statistics windows in the channel object", () => {
       .resolves.toEqual([{ word: "activeword", count: 4, lastSeenAt: iso(Date.now()) }]);
   });
 
-  it("merges an idle ended bucket and keeps later counts for the next batch", async () => {
+  it("merges idle ended buckets and keeps recent rare counts across later batches", async () => {
     const channelId = "statistics-word-merge-success";
     await insertPointChannel(channelId);
     const object = statisticsObject(channelId) as unknown as StatisticsWordObject;
@@ -430,7 +598,7 @@ describe("statistics windows in the channel object", () => {
     await expect(worker.DB.prepare(
       `SELECT total_count FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word = ?`,
-    ).bind(channelId, "bonjour").first()).resolves.toBeNull(); // pruned: fewer than 3 in total
+    ).bind(channelId, "bonjour").first()).resolves.toEqual({ total_count: 1 });
     await expect(object.readStatisticsWordCounts(streamId)).resolves.toEqual([]);
     await expect(object.readStatisticsWordStreamCounts(streamId)).resolves.toMatchObject({
       words: [
@@ -460,7 +628,7 @@ describe("statistics windows in the channel object", () => {
     await expect(worker.DB.prepare(
       `SELECT total_count FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word = ?`,
-    ).bind(channelId, "bonjour").first()).resolves.toBeNull(); // both batches merged, 2 < 3 so pruned
+    ).bind(channelId, "bonjour").first()).resolves.toEqual({ total_count: 2 });
     await expect(worker.DB.prepare(
       "SELECT COUNT(*) AS count FROM channel_word_frequency_streams WHERE channel_id = ? AND stream_id = ?",
     ).bind(channelId, streamId).first()).resolves.toEqual({ count: 2 });

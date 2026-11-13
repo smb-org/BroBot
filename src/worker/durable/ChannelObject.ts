@@ -120,6 +120,7 @@ import type {
 } from "../../modules/contract";
 import {
   admitStatisticsWordCounts,
+  foldStatisticsWord,
   STATISTICS_WORD_STREAM_IDLE_MILLISECONDS,
   STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS,
   STATISTICS_WINDOW_MILLISECONDS,
@@ -422,6 +423,7 @@ const STATISTICS_WORD_STREAM_TABLE = "statistics_word_streams";
 const STATISTICS_CLIP_IMPORT_TABLE = "statistics_clip_imports";
 const STATISTICS_WORD_COUNT_TABLE = "statistics_word_counts";
 const STATISTICS_WORD_SEEN_TABLE = "statistics_word_seen";
+const STATISTICS_WORD_DISPLAY_VARIANT_LIMIT = 4;
 const STATISTICS_WINDOW_RETENTION_MS = 60 * 60 * 1_000;
 const EVENTSUB_MESSAGE_ID_TABLE = "eventsub_message_ids";
 const EVENTSUB_MESSAGE_ID_RETENTION_MS = EVENTSUB_REPLAY_WINDOW_MILLISECONDS + 2 * EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS;
@@ -1532,22 +1534,195 @@ export class ChannelObject extends DurableObject<Env> {
       "SELECT version FROM statistics_word_schema_version WHERE version = 1",
     ).toArray()[0];
     if (schemaVersion === undefined) {
-      // Upgrade older object-local buckets into the retained stream view once.
-      this.ctx.storage.sql.exec(
-        `INSERT OR IGNORE INTO statistics_word_stream_totals (stream_id, word, count, last_seen_at)
-         SELECT stream_id, word, SUM(count), MAX(last_seen_at)
-           FROM ${STATISTICS_WORD_COUNT_TABLE} GROUP BY stream_id, word`,
-      );
-      this.ctx.storage.sql.exec(
-        `INSERT OR IGNORE INTO statistics_word_stream_displays (stream_id, word, display_word, count)
-         SELECT stream_id, word, word, SUM(count)
-           FROM ${STATISTICS_WORD_COUNT_TABLE} GROUP BY stream_id, word`,
-      );
-      this.ctx.storage.sql.exec(
-        `INSERT OR IGNORE INTO statistics_word_displays (stream_id, batch, word, display_word, count)
-         SELECT stream_id, batch, word, word, count FROM ${STATISTICS_WORD_COUNT_TABLE}`,
-      );
-      this.ctx.storage.sql.exec("INSERT OR IGNORE INTO statistics_word_schema_version (version) VALUES (1)");
+      this.ctx.storage.transactionSync(() => {
+        const replaceRows = (deleteSql: string, insertSql: string, rows: readonly unknown[]): void => {
+          this.ctx.storage.sql.exec(deleteSql);
+          for (let offset = 0; offset < rows.length; offset += 100) {
+            this.ctx.storage.sql.exec(insertSql, JSON.stringify(rows.slice(offset, offset + 100)));
+          }
+        };
+        const foldWord = (word: string): string => foldStatisticsWord(word);
+
+        const buckets = new Map<string, {
+          streamId: string;
+          batch: number;
+          word: string;
+          count: number;
+          lastSeenAt: string;
+          lastIncrementAt: number;
+        }>();
+        for (const row of this.ctx.storage.sql.exec<{
+          stream_id: string;
+          batch: number;
+          word: string;
+          count: number;
+          last_seen_at: string;
+          last_increment_at: number;
+        }>(`SELECT stream_id, batch, word, count, last_seen_at, last_increment_at FROM ${STATISTICS_WORD_COUNT_TABLE}`).toArray()) {
+          const word = foldWord(row.word);
+          const key = JSON.stringify([row.stream_id, row.batch, word]);
+          const current = buckets.get(key);
+          buckets.set(key, {
+            streamId: row.stream_id,
+            batch: row.batch,
+            word,
+            count: (current?.count ?? 0) + row.count,
+            lastSeenAt: current === undefined || current.lastSeenAt < row.last_seen_at
+              ? row.last_seen_at
+              : current.lastSeenAt,
+            lastIncrementAt: Math.max(current?.lastIncrementAt ?? row.last_increment_at, row.last_increment_at),
+          });
+        }
+        replaceRows(
+          `DELETE FROM ${STATISTICS_WORD_COUNT_TABLE}`,
+          `INSERT INTO ${STATISTICS_WORD_COUNT_TABLE}
+             (stream_id, batch, word, count, last_seen_at, last_increment_at)
+           SELECT json_extract(value, '$.streamId'), CAST(json_extract(value, '$.batch') AS INTEGER),
+                  json_extract(value, '$.word'), CAST(json_extract(value, '$.count') AS INTEGER),
+                  json_extract(value, '$.lastSeenAt'), CAST(json_extract(value, '$.lastIncrementAt') AS INTEGER)
+             FROM json_each(?) WHERE 1`,
+          [...buckets.values()],
+        );
+
+        const seen = new Map<string, { streamId: string; word: string }>();
+        for (const row of this.ctx.storage.sql.exec<{ stream_id: string; word: string }>(
+          `SELECT stream_id, word FROM ${STATISTICS_WORD_SEEN_TABLE}`,
+        ).toArray()) {
+          const word = foldWord(row.word);
+          seen.set(JSON.stringify([row.stream_id, word]), { streamId: row.stream_id, word });
+        }
+        replaceRows(
+          `DELETE FROM ${STATISTICS_WORD_SEEN_TABLE}`,
+          `INSERT INTO ${STATISTICS_WORD_SEEN_TABLE} (stream_id, word)
+           SELECT json_extract(value, '$.streamId'), json_extract(value, '$.word')
+             FROM json_each(?) WHERE 1`,
+          [...seen.values()],
+        );
+
+        const totals = new Map<string, {
+          streamId: string;
+          word: string;
+          count: number;
+          lastSeenAt: string;
+        }>();
+        for (const row of this.ctx.storage.sql.exec<{
+          stream_id: string;
+          word: string;
+          count: number;
+          last_seen_at: string;
+        }>("SELECT stream_id, word, count, last_seen_at FROM statistics_word_stream_totals").toArray()) {
+          const word = foldWord(row.word);
+          const key = JSON.stringify([row.stream_id, word]);
+          const current = totals.get(key);
+          totals.set(key, {
+            streamId: row.stream_id,
+            word,
+            count: (current?.count ?? 0) + row.count,
+            lastSeenAt: current === undefined || current.lastSeenAt < row.last_seen_at
+              ? row.last_seen_at
+              : current.lastSeenAt,
+          });
+        }
+        replaceRows(
+          "DELETE FROM statistics_word_stream_totals",
+          `INSERT INTO statistics_word_stream_totals (stream_id, word, count, last_seen_at)
+           SELECT json_extract(value, '$.streamId'), json_extract(value, '$.word'),
+                  CAST(json_extract(value, '$.count') AS INTEGER), json_extract(value, '$.lastSeenAt')
+             FROM json_each(?) WHERE 1`,
+          [...totals.values()],
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT OR IGNORE INTO statistics_word_stream_totals (stream_id, word, count, last_seen_at)
+           SELECT stream_id, word, SUM(count), MAX(last_seen_at)
+             FROM ${STATISTICS_WORD_COUNT_TABLE} GROUP BY stream_id, word`,
+        );
+
+        const batchDisplays = new Map<string, {
+          streamId: string;
+          batch: number;
+          word: string;
+          displayWord: string;
+          count: number;
+        }>();
+        for (const row of this.ctx.storage.sql.exec<{
+          stream_id: string;
+          batch: number;
+          word: string;
+          display_word: string;
+          count: number;
+        }>("SELECT stream_id, batch, word, display_word, count FROM statistics_word_displays").toArray()) {
+          const word = foldWord(row.word);
+          const key = JSON.stringify([row.stream_id, row.batch, word, row.display_word]);
+          const current = batchDisplays.get(key);
+          batchDisplays.set(key, {
+            streamId: row.stream_id,
+            batch: row.batch,
+            word,
+            displayWord: row.display_word,
+            count: (current?.count ?? 0) + row.count,
+          });
+        }
+        replaceRows(
+          "DELETE FROM statistics_word_displays",
+          `INSERT INTO statistics_word_displays (stream_id, batch, word, display_word, count)
+           SELECT json_extract(value, '$.streamId'), CAST(json_extract(value, '$.batch') AS INTEGER),
+                  json_extract(value, '$.word'), json_extract(value, '$.displayWord'),
+                  CAST(json_extract(value, '$.count') AS INTEGER)
+             FROM json_each(?) WHERE 1`,
+          [...batchDisplays.values()],
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO statistics_word_displays (stream_id, batch, word, display_word, count)
+           SELECT counts.stream_id, counts.batch, counts.word, counts.word, counts.count
+             FROM ${STATISTICS_WORD_COUNT_TABLE} AS counts
+            WHERE NOT EXISTS (
+              SELECT 1 FROM statistics_word_displays AS displays
+               WHERE displays.stream_id = counts.stream_id AND displays.batch = counts.batch AND displays.word = counts.word
+            )`,
+        );
+
+        const streamDisplays = new Map<string, {
+          streamId: string;
+          word: string;
+          displayWord: string;
+          count: number;
+        }>();
+        for (const row of this.ctx.storage.sql.exec<{
+          stream_id: string;
+          word: string;
+          display_word: string;
+          count: number;
+        }>("SELECT stream_id, word, display_word, count FROM statistics_word_stream_displays").toArray()) {
+          const word = foldWord(row.word);
+          const key = JSON.stringify([row.stream_id, word, row.display_word]);
+          const current = streamDisplays.get(key);
+          streamDisplays.set(key, {
+            streamId: row.stream_id,
+            word,
+            displayWord: row.display_word,
+            count: (current?.count ?? 0) + row.count,
+          });
+        }
+        replaceRows(
+          "DELETE FROM statistics_word_stream_displays",
+          `INSERT INTO statistics_word_stream_displays (stream_id, word, display_word, count)
+           SELECT json_extract(value, '$.streamId'), json_extract(value, '$.word'),
+                  json_extract(value, '$.displayWord'), CAST(json_extract(value, '$.count') AS INTEGER)
+             FROM json_each(?) WHERE 1`,
+          [...streamDisplays.values()],
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO statistics_word_stream_displays (stream_id, word, display_word, count)
+           SELECT totals.stream_id, totals.word, totals.word, totals.count
+             FROM statistics_word_stream_totals AS totals
+            WHERE NOT EXISTS (
+              SELECT 1 FROM statistics_word_stream_displays AS displays
+               WHERE displays.stream_id = totals.stream_id AND displays.word = totals.word
+            )`,
+        );
+
+        this.ctx.storage.sql.exec("INSERT OR IGNORE INTO statistics_word_schema_version (version) VALUES (1)");
+      });
     }
     this.statisticsSchemaReady = true;
   }
@@ -4435,7 +4610,10 @@ export class ChannelObject extends DurableObject<Env> {
         buffered.lastSeenAt = buffered.lastSeenAt < lastSeenAt ? lastSeenAt : buffered.lastSeenAt;
         buffered.lastIncrementAt = now;
         const displayWord = details.get(word)?.displayWord ?? word;
-        buffered.displayCounts.set(displayWord, (buffered.displayCounts.get(displayWord) ?? 0) + count);
+        if (buffered.displayCounts.has(displayWord) ||
+            buffered.displayCounts.size < STATISTICS_WORD_DISPLAY_VARIANT_LIMIT) {
+          buffered.displayCounts.set(displayWord, (buffered.displayCounts.get(displayWord) ?? 0) + count);
+        }
       } else {
         const displayWord = details.get(word)?.displayWord ?? word;
         this.statisticsWordCounts.set(key, {

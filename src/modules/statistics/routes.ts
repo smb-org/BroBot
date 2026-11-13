@@ -389,22 +389,22 @@ statisticsRoutes.get("/words", async (context) => {
     const [baselineResult, mergedBatchResult] = mergedBatchStatement === null
       ? [await baselineStatement.all<WordFrequencyRow>(), null] as const
       : await context.env.DB.batch([baselineStatement, mergedBatchStatement]) as [D1Result<WordFrequencyRow>, D1Result<{ batch: number }>];
+    const baselineWords = new Set<string>();
     for (const row of baselineResult.results) {
-      addWord(foldStatisticsWord(row.word), row.display_word, row.total_count, row.last_seen_at, false);
+      const word = foldStatisticsWord(row.word);
+      baselineWords.add(word);
+      addWord(word, row.display_word, row.total_count, row.last_seen_at, false);
     }
     const mergedBatches = new Set(mergedBatchResult?.results.map(({ batch }) => batch) ?? []);
-    const pendingWords = new Set<string>();
     for (const batch of pendingBatches) {
       if (mergedBatches.has(batch.batch)) continue;
       for (const row of batch.words) {
-        pendingWords.add(row.word);
-        addWord(row.word, row.displayWord ?? row.word, row.count, row.lastSeenAt, true);
+        addWord(row.word, row.displayWord ?? row.word, row.count, row.lastSeenAt, false);
       }
     }
-    for (const word of pendingWords) {
+    for (const [word, displayWord] of streamDisplayWords) {
       const count = counts.get(word);
-      const displayWord = streamDisplayWords.get(word);
-      if (count !== undefined && displayWord !== undefined) count.displayWord = displayWord;
+      if (count !== undefined && !baselineWords.has(word)) count.displayWord = displayWord;
     }
   }
 
