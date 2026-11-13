@@ -75,6 +75,7 @@ export default function ChannelPointsQueueActionContent({ channelId, language, c
         ? <p className="channel-points-queue__empty">{loading ? labels.loading : failed ? labels.loadFailed : labels.empty}</p>
         : items.map((item) => {
           const pending = pendingIds.has(item.redemptionId);
+          const queued = item.status === "queued";
           const formattedTime = formatQueueTime(item.redeemedAt, language);
           return <article
             className={`channel-points-queue__entry${pending ? " is-pending" : ""}`}
@@ -92,10 +93,12 @@ export default function ChannelPointsQueueActionContent({ channelId, language, c
             </div>
             <div className="channel-points-queue__actions">
               {canOperate === true ? <>
+                {/* A pending redemption has no run action; the hidden twin keeps the refund button in place. */}
                 <Button
                   variant="primary"
                   size="compact"
-                  disabled={pending}
+                  className={queued ? "" : "channel-points-queue__run-slot"}
+                  disabled={pending || !queued}
                   onClick={() => { void operate(item.redemptionId, "run"); }}
                 >{labels.run}</Button>
                 <Button

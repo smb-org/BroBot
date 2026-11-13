@@ -641,7 +641,10 @@ const performQueueOperation = async (
   if (!await authorize()) return { ok: false, reason: "precondition_failed" };
   const repository = createChannelPointsRepository(db);
   const current = await repository.getRedemption(channelId, invocation.id);
-  if (current?.status !== "queued") {
+  const claimableStatuses: readonly ChannelPointsRedemptionStatus[] = invocation.kind === "redemption.refund"
+    ? ["queued", "pending"]
+    : ["queued"];
+  if (current === null || !claimableStatuses.includes(current.status)) {
     return {
       ok: false,
       error: "channel_points_redemption_not_queued",
@@ -653,7 +656,8 @@ const performQueueOperation = async (
   const now = invocation.now;
   const claimGuard = mutationGuardFor(channelId, invocation.actor, new Date().toISOString(), authorizeMutation);
   const claimed = await repository.claimRedemption(
-    channelId, invocation.id, ["queued"], expiredBeforeFor(now), now, claimGuard,
+    channelId, invocation.id, claimableStatuses,
+    invocation.kind === "redemption.refund" ? now : expiredBeforeFor(now), now, claimGuard,
     invocation.kind === "redemption.refund"
       ? { pendingTwitchStatus: "CANCELED", outcomeReason: operatorRefundReason }
       : undefined,

@@ -14,6 +14,8 @@ type VipHttpReason =
   | "no_slots"
   | "already_vip"
   | "moderator"
+  | "broadcaster_required"
+  | "user_not_found"
   | "community_gate"
   | "rate_limited"
   | "invalid_response"
@@ -51,6 +53,11 @@ export const mapVipHttpStatus = (
   if ((operation === "add" || operation === "remove") && status === 204) return { reason: "success", ambiguous: false };
   if (operation === "get" && status === 200) return { reason: "success", ambiguous: false };
   if (operation === "remove" && status === 404) return { reason: "not_vip", ambiguous: false };
+  if (operation === "add" && status === 400 && (message ?? "").toLowerCase().includes("already a vip")) {
+    return { reason: "already_vip", ambiguous: false };
+  }
+  if (status === 403) return { reason: "broadcaster_required", ambiguous: false };
+  if (operation === "add" && status === 404) return { reason: "user_not_found", ambiguous: false };
   if (status === 409) return { reason: "no_slots", ambiguous: false };
   if (status === 422) {
     const normalized = (message ?? "").toLowerCase();

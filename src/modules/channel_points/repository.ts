@@ -242,7 +242,7 @@ export const createChannelPointsRepository = (db: D1Database): ChannelPointsRepo
       FROM channel_points_redemptions AS redemptions
       LEFT JOIN channel_points_rewards AS rewards
         ON rewards.channel_id=redemptions.channel_id AND rewards.id=redemptions.reward_id
-      WHERE redemptions.channel_id=? AND redemptions.status='queued'
+      WHERE redemptions.channel_id=? AND redemptions.status IN ('queued','pending')
       ORDER BY redemptions.redeemed_at ASC,redemptions.redemption_id ASC
       LIMIT ?`)
       .bind(channelId, limit).all<RedemptionRow & { action_module_id: string | null; action_id: string | null }>();

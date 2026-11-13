@@ -7,6 +7,7 @@ import { processTempVipsChatMessage } from "./service";
 import { dryRunTempVipsChatMessage } from "./dry-run";
 import { formatTempVipResult } from "./panel/result-message";
 import { loadTempVipActionReadiness, type TempVipActionReadiness } from "./panel/service";
+import { grantVipAction } from "./actions/grant-vip";
 
 const broadcasterVipPermission: ModuleImmediateActionCondition = {
   query: {
@@ -43,6 +44,7 @@ export const tempVipsModule: BotModule<typeof tempVipsSettingsSchema> = {
   pauseSafeEventSubTypes: ["channel.vip.remove", "channel.moderate"],
   settingsSchema: tempVipsSettingsSchema,
   defaultSettings: DEFAULT_TEMP_VIPS_SETTINGS,
+  channelPointsActions: [grantVipAction],
   handleEvent: processTempVipsChatMessage,
   dryRunChatMessage: dryRunTempVipsChatMessage,
   settingsEditor: () => import("./panel/settings-editor"),

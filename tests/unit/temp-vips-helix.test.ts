@@ -8,6 +8,10 @@ import {
 describe("temporary VIP Helix outcomes", () => {
   it.each([
     ["add", 204, null, "success"],
+    ["add", 400, "That user is already a VIP", "already_vip"],
+    ["add", 400, "Invalid user ID", "unknown_status"],
+    ["add", 403, "The user is not the broadcaster", "broadcaster_required"],
+    ["add", 404, "User not found", "user_not_found"],
     ["add", 409, null, "no_slots"],
     ["add", 422, "That user is already a VIP", "already_vip"],
     ["add", 422, "That user is a moderator", "moderator"],
