@@ -23,7 +23,7 @@ const retryableReasons = new Set(["network", "rate_limited", "not_connected", "t
 
 const mapResult = (result: ModuleTempVipResult) => {
   if (result.status === "granted" || result.status === "extended") return "fulfilled" as const;
-  if (result.status === "queued" || result.status === "busy") return "pending" as const;
+  if (result.status === "queued" || result.status === "busy" || result.status === "superseded") return "pending" as const;
   if (result.status === "module_disabled") return refund("moduleDisabled");
   if (result.status === "maximum_exceeded") return refund("maximumExceeded");
   if (result.status === "permanent_vip" || result.status === "unclassified_vip" ||
@@ -104,8 +104,5 @@ export const grantVipAction: ChannelPointsActionDefinition<typeof grantVipConfig
     } catch {
       return "pending";
     }
-  },
-  abandon: async (context, { operationId }) => {
-    await context.tempVips.abandon(operationId);
   },
 };

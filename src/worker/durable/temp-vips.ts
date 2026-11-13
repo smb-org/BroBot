@@ -55,6 +55,7 @@ export interface TempVipStoreOptions {
   scheduleAlarm: (deadline: number | null) => Promise<void>;
   isModuleEnabled?: () => Promise<boolean>;
   isManaged?: () => Promise<boolean>;
+  isChannelPointsRedemptionOpen?: (redemptionId: string) => Promise<boolean | null>;
   commitModuleDisable?: (request: {
     actor: { userId: string; sessionId: string };
     expectedRevision: number;
@@ -123,7 +124,6 @@ interface OperationPayload {
   retryNow?: boolean;
   mutationAttempted?: boolean;
   mutationAmbiguous?: boolean;
-  abandonRequested?: boolean;
 }
 
 type TempVipStoredResult = ModuleTempVipResult & {
@@ -566,26 +566,11 @@ export class TempVipStore {
   }
 
   private updatePayloadSync(operation: TempVipOperationSql, payload: OperationPayload): void {
-    const current = this.sql.exec<Pick<TempVipOperationSql, "payload_json">>(
-      "SELECT payload_json FROM temp_vip_ops WHERE operation_id = ? AND status = 'running'",
-      operation.operation_id,
-    ).toArray()[0];
-    if (current !== undefined && decodePayload(current.payload_json).abandonRequested === true) {
-      payload.abandonRequested = true;
-    }
     this.sql.exec(
       "UPDATE temp_vip_ops SET payload_json = ? WHERE operation_id = ? AND status = 'running'",
       JSON.stringify(payload),
       operation.operation_id,
     );
-  }
-
-  private operationPayloadSync(operationId: string): OperationPayload | null {
-    const row = this.sql.exec<Pick<TempVipOperationSql, "payload_json">>(
-      "SELECT payload_json FROM temp_vip_ops WHERE operation_id = ?",
-      operationId,
-    ).toArray()[0];
-    return row === undefined ? null : decodePayload(row.payload_json);
   }
 
   private finishSync(operationId: string, result: TempVipStoredResult, now: string, attempts?: number): void {
@@ -809,7 +794,7 @@ export class TempVipStore {
                 current.kind === "end" || current.kind === "expire") {
               this.setNeedsReconcileSync(current.operation_id, true);
             }
-            if (payload.abandonRequested !== true && this.shouldSupersedeForLaterReleaseSync(current)) {
+            if (this.shouldSupersedeForLaterReleaseSync(current)) {
               this.finishSync(current.operation_id, { status: "superseded" }, now, current.attempts + 1);
             } else {
               if (current.kind === "grant" && payload.mutationAttempted === true) payload.mutationAmbiguous = true;
@@ -843,6 +828,10 @@ export class TempVipStore {
       await this.processDisableModule(operation, payload);
       return;
     }
+
+    const request = payload.request as { source?: string };
+    if (operation.kind === "grant" && request.source === "channel_points" &&
+        await this.processClosedChannelPointsGrant(operation, payload, row, claimed.needsReconcile)) return;
 
     if (isCreationOperation(operation.kind) && this.options.isModuleEnabled !== undefined &&
         !await this.options.isModuleEnabled()) {
@@ -1353,41 +1342,6 @@ export class TempVipStore {
   ): Promise<void> {
     const request = payload.request as unknown as Omit<ModuleTempVipGrantRequest, "operationId">;
     const now = this.now();
-    if (payload.abandonRequested === true) {
-      const mayHaveMutated = payload.mutationAmbiguous === true ||
-        (payload.mutationAttempted === undefined &&
-          (needsReconcile || operation.attempts > 0 && payload.stage === "post"));
-      if (!mayHaveMutated) {
-        this.transaction(() => {
-          this.finishSync(operation.operation_id, { status: "superseded" }, now, operation.attempts);
-        });
-        return;
-      }
-
-      const lookup = await this.safeGet(request.person.userId);
-      const checkedAt = this.now();
-      if (!lookup.ok) {
-        this.transaction(() => {
-          this.setNeedsReconcileSync(operation.operation_id, true);
-          this.requeueSync(operation, payload, checkedAt, TEMP_VIP_RETRY_MS, operation.attempts + 1);
-        });
-        return;
-      }
-      this.transaction(() => {
-        this.advanceTwitchStateSync(operation.user_id, checkedAt, checkedAt);
-        if (lookup.isVip && row === null) {
-          const result = this.createGrantSync(operation, request, payload.intentAt ?? checkedAt, checkedAt);
-          this.finishCreationSync(operation, result, checkedAt, operation.attempts + 1);
-        } else if (lookup.isVip) {
-          this.finishSync(operation.operation_id, { status: "superseded" }, checkedAt, operation.attempts + 1);
-        } else {
-          this.setNeedsReconcileSync(operation.operation_id, true);
-          this.requeueSync(operation, { ...payload, mutationAmbiguous: true }, checkedAt,
-            TEMP_VIP_RETRY_MS, operation.attempts + 1);
-        }
-      });
-      return;
-    }
     if (row !== null) {
       const refusal = rowActionRefusal(row);
       if (refusal !== null) {
@@ -1507,23 +1461,8 @@ export class TempVipStore {
     const mutationAmbiguous = added.ambiguous === true || added.reason === "network" || added.reason === "unknown_status";
     if (mutationAmbiguous || added.reason === "rate_limited") {
       nextPayload = { ...nextPayload, mutationAmbiguous };
-      const latestPayload = this.operationPayloadSync(operation.operation_id);
-      if (added.reason === "rate_limited" && latestPayload?.abandonRequested === true) {
-        this.transaction(() => {
-          this.finishSync(operation.operation_id, { status: "superseded" }, completedAt, operation.attempts + 1);
-        });
-      } else {
-        if (latestPayload?.abandonRequested === true) nextPayload.abandonRequested = true;
-        if (mutationAmbiguous && nextPayload.abandonRequested === true) {
-          this.transaction(() => {
-            this.setNeedsReconcileSync(operation.operation_id, true);
-            this.requeueSync(operation, nextPayload, completedAt, TEMP_VIP_RETRY_MS, operation.attempts + 1);
-          });
-        } else {
-          this.requeueOperation(operation, nextPayload, completedAt, TEMP_VIP_RETRY_MS,
-            operation.attempts + 1, mutationAmbiguous);
-        }
-      }
+      this.requeueOperation(operation, nextPayload, completedAt, TEMP_VIP_RETRY_MS,
+        operation.attempts + 1, mutationAmbiguous);
       return;
     }
     const result: ModuleTempVipResult = added.reason === "already_vip"
@@ -1928,26 +1867,104 @@ export class TempVipStore {
     return result;
   }
 
+  private async channelPointsRedemptionOpen(redemptionId: string): Promise<boolean | null> {
+    try {
+      return await this.options.isChannelPointsRedemptionOpen?.(redemptionId) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private requeueChannelPointsGrant(
+    operation: TempVipOperationSql,
+    payload: OperationPayload,
+    now: string,
+    attempts: number,
+    needsReconcile: boolean,
+  ): void {
+    this.transaction(() => {
+      if (needsReconcile) this.setNeedsReconcileSync(operation.operation_id, true);
+      this.requeueSync(operation, payload, now, TEMP_VIP_RETRY_MS, attempts);
+    });
+  }
+
+  private async processClosedChannelPointsGrant(
+    operation: TempVipOperationSql,
+    payload: OperationPayload,
+    row: TempVipRowSql | null,
+    needsReconcile: boolean,
+  ): Promise<boolean> {
+    const request = payload.request as unknown as Omit<ModuleTempVipGrantRequest, "operationId">;
+    const redemptionOpen = await this.channelPointsRedemptionOpen(operation.operation_id);
+    if (redemptionOpen === true) return false;
+
+    const legacyAttempted = payload.mutationAttempted === undefined &&
+      (needsReconcile || operation.attempts > 0 && payload.stage === "post");
+    const mutationAttempted = payload.mutationAttempted === true || legacyAttempted;
+    if (redemptionOpen === null) {
+      this.requeueChannelPointsGrant(operation, payload, this.now(), operation.attempts + 1,
+        mutationAttempted || needsReconcile);
+      return true;
+    }
+    if (!mutationAttempted) {
+      this.transaction(() => {
+        this.finishSync(operation.operation_id, { status: "superseded" }, this.now(), operation.attempts);
+      });
+      return true;
+    }
+
+    const lookup = await this.safeGet(request.person.userId);
+    const checkedAt = this.now();
+    if (!lookup.ok) {
+      this.requeueChannelPointsGrant(operation, payload, checkedAt, operation.attempts + 1, true);
+      return true;
+    }
+    if (lookup.isVip && row === null) {
+      this.transaction(() => {
+        this.advanceTwitchStateSync(operation.user_id, checkedAt, checkedAt);
+        const result = this.createGrantSync(operation, request, payload.intentAt ?? checkedAt, checkedAt);
+        this.finishCreationSync(operation, result, checkedAt, operation.attempts + 1);
+      });
+      return true;
+    }
+    const mutationAmbiguous = payload.mutationAmbiguous === true ||
+      (payload.mutationAmbiguous === undefined && (needsReconcile || legacyAttempted));
+    if (!lookup.isVip && mutationAmbiguous) {
+      this.requeueChannelPointsGrant(operation, payload, checkedAt, operation.attempts + 1, true);
+      return true;
+    }
+    this.transaction(() => {
+      this.finishSync(operation.operation_id, { status: "superseded" }, checkedAt, operation.attempts + 1);
+    });
+    return true;
+  }
+
+  private async beforeAddAttempt(operation: TempVipOperationSql, payload: OperationPayload): Promise<boolean> {
+    const request = payload.request as { source?: string };
+    if (operation.kind === "grant" && request.source === "channel_points") {
+      const redemptionOpen = await this.channelPointsRedemptionOpen(operation.operation_id);
+      if (redemptionOpen !== true) {
+        const mutationAttempted = payload.mutationAttempted === true ||
+          (payload.mutationAttempted === undefined &&
+            (operation.needs_reconcile === 1 || operation.attempts > 0 && payload.stage === "post"));
+        const now = this.now();
+        this.transaction(() => {
+          if (redemptionOpen === false && !mutationAttempted) {
+            this.finishSync(operation.operation_id, { status: "superseded" }, now, operation.attempts);
+          } else {
+            if (mutationAttempted) this.setNeedsReconcileSync(operation.operation_id, true);
+            this.requeueSync(operation, payload, now, TEMP_VIP_RETRY_MS, operation.attempts + 1);
+          }
+        });
+        return false;
+      }
+    }
+    return await this.beforeMutationAttempt(operation, payload);
+  }
+
   private beforeMutationAttempt(operation: TempVipOperationSql, payload: OperationPayload): Promise<boolean> {
     const now = this.now();
     const slot = this.transaction(() => {
-      const current = this.sql.exec<Pick<TempVipOperationSql, "payload_json"> & { needs_reconcile: number }>(
-        "SELECT payload_json, needs_reconcile FROM temp_vip_ops WHERE operation_id = ? AND status = 'running'",
-        operation.operation_id,
-      ).toArray()[0];
-      const currentPayload = current === undefined ? null : decodePayload(current.payload_json);
-      if (currentPayload?.abandonRequested === true) {
-        const mayHaveMutated = currentPayload.mutationAmbiguous === true ||
-          (currentPayload.mutationAmbiguous === undefined && current?.needs_reconcile === 1);
-        if (mayHaveMutated) {
-          currentPayload.mutationAmbiguous = true;
-          this.setNeedsReconcileSync(operation.operation_id, true);
-          this.requeueSync(operation, currentPayload, now, TEMP_VIP_RETRY_MS, operation.attempts);
-        } else {
-          this.finishSync(operation.operation_id, { status: "superseded" }, now, operation.attempts);
-        }
-        return { allowed: false, retryAt: null };
-      }
       const nowMs = parseTime(now);
       this.sql.exec("DELETE FROM temp_vip_mutation_attempts WHERE attempted_at <= ?", nowMs - TEMP_VIP_MUTATION_WINDOW_MS);
       const attempts = this.sql.exec<{ count: number; earliest: number | null }>(
@@ -2022,7 +2039,7 @@ export class TempVipStore {
     operation: TempVipOperationSql,
     payload: OperationPayload,
   ): Promise<Awaited<ReturnType<TempVipTwitch["add"]>>> {
-    try { return await this.options.twitch.add(userId, () => this.beforeMutationAttempt(operation, payload)); }
+    try { return await this.options.twitch.add(userId, () => this.beforeAddAttempt(operation, payload)); }
     catch { return { ok: false, reason: "network", ambiguous: true }; }
   }
 
@@ -2187,39 +2204,6 @@ export class TempVipStore {
     if (existing.status === "done") return this.pendingResult(operationId);
     await this.rearm();
     return existing.status === "running" ? this.pendingResult(operationId) : this.waitForOperation(operationId);
-  }
-
-  public async abandon(operationIdValue: string): Promise<void> {
-    const operationId = operationKey(operationIdValue);
-    const now = this.now();
-    const abandoned = this.transaction(() => {
-      const operation = this.sql.exec<TempVipOperationSql>(
-        "SELECT * FROM temp_vip_ops WHERE operation_id = ?",
-        operationId,
-      ).toArray()[0];
-      if (operation === undefined || (operation.status !== "queued" && operation.status !== "running") ||
-          operation.kind !== "grant") return false;
-
-      const payload = decodePayload(operation.payload_json);
-      const request = payload.request as { source?: string };
-      if (request.source !== "channel_points") return false;
-      const mayHaveMutated = payload.mutationAmbiguous === true ||
-        (payload.mutationAmbiguous === undefined &&
-          (operation.needs_reconcile === 1 || operation.status === "running" && payload.mutationAttempted === true ||
-            payload.mutationAttempted === undefined && operation.attempts > 0 && payload.stage === "post"));
-      if (mayHaveMutated || operation.status === "running") {
-        payload.abandonRequested = true;
-        this.sql.exec(
-          "UPDATE temp_vip_ops SET payload_json = ? WHERE operation_id = ? AND status IN ('queued', 'running')",
-          JSON.stringify(payload), operationId,
-        );
-        return operation.status === "queued";
-      }
-
-      this.finishSync(operationId, { status: "superseded" }, now, operation.attempts);
-      return true;
-    });
-    if (abandoned) await this.rearm();
   }
 
   public async extend(request: ModuleTempVipExtendRequest): Promise<ModuleTempVipResult> {

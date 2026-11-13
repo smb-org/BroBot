@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   byIds: vi.fn(),
   unfulfilled: vi.fn(),
   sendChat: vi.fn(),
-  abandonTempVip: vi.fn(),
 }));
 vi.mock("../../src/worker/twitch/channel-points", () => ({
   createCustomReward: mocks.create,
@@ -29,10 +28,7 @@ vi.mock("../../src/worker/twitch/channel-points", () => ({
   listUnfulfilledRedemptions: mocks.unfulfilled,
 }));
 vi.mock("../../src/worker/module-action-context", () => ({
-  createModuleActionExecutionContext: vi.fn(() => ({
-    sendChat: mocks.sendChat,
-    tempVips: { abandon: mocks.abandonTempVip },
-  })),
+  createModuleActionExecutionContext: vi.fn(() => ({ sendChat: mocks.sendChat })),
 }));
 
 const channelId = "channel_points";
@@ -137,7 +133,6 @@ describe("channel points routes", () => {
       }));
     mocks.unfulfilled.mockReset().mockResolvedValue({ ok: true, data: [] });
     mocks.sendChat.mockReset().mockResolvedValue({ sent: true, delivery: "sent", reason: null });
-    mocks.abandonTempVip.mockReset().mockResolvedValue(undefined);
   });
 
   const seedQueuedRedemption = (id: string, redeemedAt = now): void => {
@@ -371,7 +366,6 @@ describe("channel points routes", () => {
     expect(mocks.updateRedemptionStatus).toHaveBeenCalledWith(
       expect.anything(), channelId, "reward_twitch", ["redemption_pending_vip_refund"], "CANCELED", expect.any(Function),
     );
-    expect(mocks.abandonTempVip).toHaveBeenCalledWith("redemption_pending_vip_refund");
     expect(database.sqlite.prepare(
       "SELECT status FROM channel_points_redemptions WHERE channel_id=? AND redemption_id=?",
     ).get(channelId, "redemption_pending_vip_refund")).toMatchObject({ status: "refunded" });

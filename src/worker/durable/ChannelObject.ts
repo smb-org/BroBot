@@ -5252,6 +5252,18 @@ export class ChannelObject extends DurableObject<Env> {
         add: (userId, beforeAttempt) => addChannelVip(this.env, channelId, userId, fetch, beforeAttempt),
         remove: (userId, beforeAttempt) => removeChannelVip(this.env, channelId, userId, fetch, beforeAttempt),
       },
+      isChannelPointsRedemptionOpen: async (redemptionId) => {
+        try {
+          const redemption = await this.env.DB.prepare(
+            "SELECT status, pending_twitch_status FROM channel_points_redemptions WHERE channel_id = ? AND redemption_id = ?",
+          ).bind(channelId, redemptionId).first<{ status: string; pending_twitch_status: string | null }>();
+          return redemption !== null && redemption.pending_twitch_status === null &&
+            (redemption.status === "received" || redemption.status === "running" ||
+              redemption.status === "queued" || redemption.status === "pending");
+        } catch {
+          return null;
+        }
+      },
       isModuleEnabled: async () => {
         const module = await this.env.DB.prepare(
           "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'temp_vips'",
@@ -5370,10 +5382,6 @@ export class ChannelObject extends DurableObject<Env> {
     const result = await store.replayGrant(operationId, userId);
     if (result !== null) await this.flushTempVipOutbox(store);
     return result;
-  }
-
-  public async abandonTempVipGrant(operationId: string): Promise<void> {
-    await this.tempVipStore().abandon(operationId);
   }
 
   public async extendTempVip(request: ModuleTempVipExtendRequest): Promise<ModuleTempVipResult> {
