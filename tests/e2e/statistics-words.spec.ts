@@ -40,9 +40,21 @@ test("opens the channel word list, hides fillers, and searches the seeded words"
   await expect(wordsLink).toBeVisible();
   await wordsLink.click();
   await expect(wordsLink).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "Words" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Words", exact: true })).toBeVisible();
   await expect(page.getByText("halloween", { exact: true })).toBeVisible();
   await expect(page.getByText("lol", { exact: true })).toHaveCount(0);
+
+  const streamResponse = page.waitForResponse((response) =>
+    new URL(response.url()).pathname.endsWith("/modules/statistics/words")
+    && new URL(response.url()).searchParams.get("scope") === "stream");
+  await page.getByRole("button", { name: "This stream" }).click();
+  expect((await streamResponse).status()).toBe(200);
+  await expect(page.getByRole("button", { name: "This stream" })).toHaveAttribute("aria-pressed", "true");
+
+  // The total view is already cached from the first load, so switching back may not hit the network.
+  await page.getByRole("button", { name: "Total" }).click();
+  await expect(page.getByRole("button", { name: "Total" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("halloween", { exact: true })).toBeVisible();
 
   const fillerToggle = page.getByRole("switch", { name: "Hide filler words" });
   await fillerToggle.click();

@@ -7,6 +7,7 @@ import { requireChannelAuthorization } from "../../src/worker/auth/guards";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
+import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
 
 const CHANNEL_ID = "statistics-words-channel";
 const USER_ID = "statistics-words-user";
@@ -22,6 +23,10 @@ beforeEach(() => {
 const setup = async (
   member = true,
   wrapDatabase: (inner: TestD1Database) => D1Database = (inner) => inner as unknown as D1Database,
+  channelObject: unknown = {
+    readStatisticsWordCountsByBatch: () => Promise.resolve([]),
+    readStatisticsWordStreamCounts: () => Promise.resolve(null),
+  },
 ): Promise<{ database: TestD1Database; fetch: (path: string) => Promise<Response> }> => {
   const database = new TestD1Database();
   databases.push(database);
@@ -34,9 +39,10 @@ const setup = async (
   app.route("/channels/:channelId/modules/statistics", statisticsRoutes);
   const environment = {
     DB: wrapDatabase(database),
+    CHANNEL: { idFromName: (name: string) => name, get: () => channelObject },
     SESSION_COOKIE_KEYS: cookieKeys,
     SESSION_ENCRYPTION_KEYS: encryptionKeys,
-  } as Env;
+  } as unknown as Env;
   return {
     database,
     fetch: async (path) => await app.fetch(new Request(`https://brobot.example${path}`, {
@@ -108,6 +114,107 @@ describe("statistics words route", () => {
     const body = await response.json<{ words: Array<{ word: string; rank: number }>; total: number }>();
 
     expect(body).toMatchObject({ total: 1, words: [{ word: "hallway", rank: 1 }] });
+  });
+
+  it("folds repeated letters in search and returns the selected display spelling", async () => {
+    const { database, fetch } = await setup();
+    await database.prepare(
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
+       VALUES (?, 'faaak', 'Faaak', 2, '2026-10-25T12:00:00.000Z'),
+              (?, 'faak', 'Faak', 3, '2026-10-25T12:01:00.000Z'),
+              (?, 'fak', 'fak', 1, '2026-10-25T12:02:00.000Z')`,
+    ).bind(CHANNEL_ID, CHANNEL_ID, CHANNEL_ID).run();
+
+    const response = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words?search=FAAAAK`);
+    const body = await response.json<{ words: Array<{ word: string; count: number }>; total: number }>();
+
+    expect(body).toEqual({
+      words: [{ rank: 1, word: "Faak", count: 6, share: 1, lastSeenAt: "2026-10-25T12:02:00.000Z" }],
+      page: 1,
+      pageSize: 100,
+      total: 1,
+      totalPages: 1,
+      totalCount: 6,
+      maxCount: 6,
+    });
+  });
+
+  it("hides ignored words on read without deleting their stored counts", async () => {
+    const { database, fetch } = await setup();
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, settings) VALUES (?, 'statistics', ?)`,
+    ).bind(CHANNEL_ID, JSON.stringify({ ignoredWords: ["FAAAK"] })).run();
+    await database.prepare(
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
+       VALUES (?, 'faaak', 'Faaak', 5, '2026-10-25T12:00:00.000Z')`,
+    ).bind(CHANNEL_ID).run();
+
+    const hiddenResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words`);
+    const hidden = await hiddenResponse.json<{ words: unknown[]; total: number; totalCount: number }>();
+    await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = 'statistics'")
+      .bind(JSON.stringify({ ignoredWords: [] }), CHANNEL_ID).run();
+    const restoredResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words`);
+    const restored = await restoredResponse.json<{ words: Array<{ word: string }>; total: number; totalCount: number }>();
+
+    expect(hidden).toEqual({ words: [], page: 1, pageSize: 100, total: 0, totalPages: 0, totalCount: 5, maxCount: 5 });
+    expect(restored).toMatchObject({ total: 1, totalCount: 5, words: [{ word: "Faaak" }] });
+  });
+
+  it("separates stream totals from baseline totals across merged and pending batches", async () => {
+    const streamId = "statistics-words-live-stream";
+    const firstStreamWord = { word: "helo", displayWord: "HELLO", count: 5, lastSeenAt: "2026-10-25T12:00:00.000Z" };
+    const streamWords = [
+      firstStreamWord,
+      { word: "helo", displayWord: "hello", count: 3, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+      { word: "streamword", displayWord: "StreamWord", count: 2, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+    ];
+    const channelObject = {
+      readStatisticsWordCountsByBatch: () => Promise.resolve([
+        { batch: 1, words: [firstStreamWord] },
+        { batch: 2, words: streamWords.slice(1) },
+      ]),
+      readStatisticsWordStreamCounts: () => Promise.resolve({
+        streamId,
+        words: [
+          { word: "helo", displayWord: "HELLO", count: 8, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+          { word: "streamword", displayWord: "StreamWord", count: 2, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+        ],
+      }),
+    };
+    const { database, fetch } = await setup(true, (inner) => inner as unknown as D1Database, channelObject);
+    await writeEventSubStreamState(database as unknown as D1Database, CHANNEL_ID, "online", "2026-10-25T12:00:00.000Z", "2026-10-25T12:00:00.000Z", streamId);
+    await database.prepare(
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
+       VALUES (?, 'helo', 'hello', 7, '2026-10-25T11:00:00.000Z'),
+              (?, 'baseword', 'baseword', 4, '2026-10-25T11:00:00.000Z')`,
+    ).bind(CHANNEL_ID, CHANNEL_ID).run();
+
+    const withBothBatches = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words?scope=total`);
+    const both = await withBothBatches.json<{ words: Array<{ word: string; count: number }>; totalCount: number }>();
+    await database.prepare(
+      `INSERT INTO channel_word_frequency_streams (channel_id, stream_id, batch, merged_at)
+       VALUES (?, ?, 1, '2026-10-25T12:02:00.000Z')`,
+    ).bind(CHANNEL_ID, streamId).run();
+    const afterBatchMerge = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words?scope=total`);
+    const total = await afterBatchMerge.json<{ words: Array<{ word: string; count: number }>; totalCount: number }>();
+    const streamResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words?scope=stream`);
+    const stream = await streamResponse.json<{ words: Array<{ word: string; count: number }>; totalCount: number }>();
+
+    expect(both.words).toEqual(expect.arrayContaining([
+      expect.objectContaining({ word: "HELLO", count: 15 }),
+      expect.objectContaining({ word: "StreamWord", count: 2 }),
+    ]));
+    expect(both.totalCount).toBe(21);
+    expect(total.words).toEqual(expect.arrayContaining([
+      expect.objectContaining({ word: "HELLO", count: 10 }),
+      expect.objectContaining({ word: "StreamWord", count: 2 }),
+    ]));
+    expect(total.totalCount).toBe(16);
+    expect(stream.words).toEqual(expect.arrayContaining([
+      expect.objectContaining({ word: "HELLO", count: 8 }),
+      expect.objectContaining({ word: "StreamWord", count: 2 }),
+    ]));
+    expect(stream.totalCount).toBe(10);
   });
 
   it("hides additional chat fillers by default and includes them when requested", async () => {

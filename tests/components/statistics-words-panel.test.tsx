@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { StatisticsWordsPanel } from "../../src/modules/statistics/panel/words-panel";
+import { foldStatisticsWord } from "../../src/modules/statistics/domain";
 
 const words = [
   { word: "hello", count: 10, lastSeenAt: "2026-10-25T12:00:00.000Z" },
@@ -11,18 +12,40 @@ const words = [
   { word: "lol", count: 5, lastSeenAt: "2026-10-25T09:00:00.000Z" },
 ];
 
-const renderPanel = (sourceWords = words) => {
+const renderPanel = (sourceWords = words, initialIgnoredWords: string[] = []) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const fetchMock = vi.fn<typeof fetch>().mockImplementation((input) => {
+  let ignoredWords = [...initialIgnoredWords];
+  let revision = 1;
+  const fetchMock = vi.fn<typeof fetch>().mockImplementation((input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     const parsedUrl = new URL(url, window.location.origin);
+    if (parsedUrl.pathname.endsWith("/settings")) {
+      if (init?.method === "PATCH") {
+        const body = typeof init.body === "string"
+          ? JSON.parse(init.body) as { settings: { ignoredWords: string[] } }
+          : { settings: { ignoredWords: [] } };
+        ignoredWords = body.settings.ignoredWords;
+        revision += 1;
+      }
+      return Promise.resolve(new Response(JSON.stringify({ settings: { ignoredWords }, revision }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
+    if (parsedUrl.pathname === "/api/csrf") {
+      return Promise.resolve(new Response(JSON.stringify({ token: "csrf-test-token" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
     const parameters = parsedUrl.searchParams;
-    const search = (parameters.get("search") ?? "").normalize("NFKC").toLowerCase();
+    const search = foldStatisticsWord(parameters.get("search") ?? "");
     const hideFillers = parameters.get("hideFillers") !== "false";
     const page = Number(parameters.get("page") ?? "1");
     const filtered = sourceWords
       .filter(({ word }) => !hideFillers || word !== "lol")
-      .filter(({ word }) => word.includes(search))
+      .filter(({ word }) => !ignoredWords.includes(foldStatisticsWord(word)))
+      .filter(({ word }) => foldStatisticsWord(word).includes(search))
       .sort((left, right) => right.count - left.count || left.word.localeCompare(right.word));
     const totalCount = sourceWords.reduce((sum, word) => sum + word.count, 0);
     const response = {
@@ -45,7 +68,7 @@ const renderPanel = (sourceWords = words) => {
   });
   vi.stubGlobal("fetch", fetchMock);
   const rendered = render(<QueryClientProvider client={queryClient}>
-    <StatisticsWordsPanel channelId="channel-1" language="en" />
+    <StatisticsWordsPanel channelId="channel-1" language="en" canManage />
   </QueryClientProvider>);
   return { ...rendered, queryClient, fetchMock };
 };
@@ -97,6 +120,37 @@ describe("statistics words page", () => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       return new URL(url, window.location.origin).searchParams.get("hideFillers") === "false";
     })).toBe(true));
+  });
+
+  it("switches between total and current-stream scopes", async () => {
+    const { fetchMock } = renderPanel();
+    await screen.findByText("hello");
+    const streamChoice = screen.getByRole("button", { name: "This stream" });
+    expect(screen.getByRole("button", { name: "Total" }).getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(streamChoice);
+
+    await waitFor(() => expect(streamChoice.getAttribute("aria-pressed")).toBe("true"));
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      return new URL(url, window.location.origin).searchParams.get("scope") === "stream";
+    })).toBe(true);
+  });
+
+  it("saves hidden words explicitly and restores the filtered list only after save", async () => {
+    const { fetchMock } = renderPanel();
+    await screen.findByText("hello");
+    const entry = screen.getByRole("textbox", { name: "Add or remove words" });
+    fireEvent.change(entry, { target: { value: "HELLO" } });
+    fireEvent.keyDown(entry, { key: "Enter" });
+
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+    expect(await screen.findByText("hello")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+    await waitFor(() => expect(screen.queryByText("hello")).toBeNull());
+    expect(screen.getByRole("button", { name: "Remove helo" })).toBeTruthy();
   });
 
   it("loads the next page and updates the visible range", async () => {

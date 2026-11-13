@@ -1,12 +1,32 @@
 import type { ModuleLanguage } from "../../contract";
+import type { ChipsInputMessages } from "../../../dashboard/ui";
 
 export interface StatisticsWordsPanelTexts {
   title: string;
   search: string;
   clearSearch: string;
   searchPlaceholder: string;
+  scope: string;
+  thisStream: string;
+  totalScope: string;
   hideFillers: string;
   privacyNote: string;
+  ignoredWordsTitle: string;
+  ignoredWordsDescription: string;
+  ignoredWordsLabel: string;
+  ignoredWordsPlaceholder: string;
+  ignoredWordsList: string;
+  removeIgnoredWord: (word: string) => string;
+  ignoredWordsMessages: ChipsInputMessages;
+  ignoredWordsLimit: string;
+  save: string;
+  discard: string;
+  saved: string;
+  saving: string;
+  settingsSaveError: string;
+  settingsConflict: string;
+  settingsLoadError: string;
+  retrySettings: string;
   pageSummary: (start: string, end: string, total: string) => string;
   previousPage: string;
   nextPage: string;
@@ -31,8 +51,31 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsWordsPanelTexts>> = {
     search: "Wörter suchen",
     clearSearch: "Suche löschen",
     searchPlaceholder: "Wort suchen",
+    scope: "Zeitraum",
+    thisStream: "Dieser Stream",
+    totalScope: "Insgesamt",
     hideFillers: "Füllwörter ausblenden",
-    privacyNote: "Kanalweit, ohne Zuordnung zu Personen oder Nachrichten. Höchstens 5.000 Wörter.",
+    privacyNote: "Kanalweit, ohne Zuordnung zu Personen oder Nachrichten.",
+    ignoredWordsTitle: "Ausgeblendete Wörter",
+    ignoredWordsDescription: "Ausgeblendete Wörter bleiben gespeichert und erscheinen wieder, wenn du sie entfernst.",
+    ignoredWordsLabel: "Wörter hinzufügen oder entfernen",
+    ignoredWordsPlaceholder: "Wort eingeben und Enter drücken",
+    ignoredWordsList: "Ausgeblendete Wörter",
+    removeIgnoredWord: (word) => `${word} entfernen`,
+    ignoredWordsMessages: {
+      countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
+      atLimitHint: "Du kannst höchstens 200 Wörter ausblenden.",
+      duplicateWarning: (entry) => `${entry} ist bereits ausgeblendet.`,
+    },
+    ignoredWordsLimit: "Wörter dürfen höchstens 40 Zeichen lang sein.",
+    save: "Speichern",
+    discard: "Verwerfen",
+    saved: "Einstellungen gespeichert.",
+    saving: "Speichern …",
+    settingsSaveError: "Die Wörter konnten nicht gespeichert werden.",
+    settingsConflict: "Die Einstellungen wurden zwischenzeitlich geändert. Bitte neu laden.",
+    settingsLoadError: "Die ausgeblendeten Wörter konnten nicht geladen werden.",
+    retrySettings: "Erneut laden",
     pageSummary: (start, end, total) => `${start}–${end} von ${total}`,
     previousPage: "Vorherige Seite",
     nextPage: "Nächste Seite",
@@ -55,8 +98,31 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsWordsPanelTexts>> = {
     search: "Search words",
     clearSearch: "Clear search",
     searchPlaceholder: "Search for a word",
+    scope: "Range",
+    thisStream: "This stream",
+    totalScope: "Total",
     hideFillers: "Hide filler words",
-    privacyNote: "Channel-wide, with no link to people or messages. At most 5,000 words.",
+    privacyNote: "Channel-wide, with no link to people or messages.",
+    ignoredWordsTitle: "Hidden words",
+    ignoredWordsDescription: "Hidden words stay stored and return to the list when you remove them here.",
+    ignoredWordsLabel: "Add or remove words",
+    ignoredWordsPlaceholder: "Enter a word and press Enter",
+    ignoredWordsList: "Hidden words",
+    removeIgnoredWord: (word) => `Remove ${word}`,
+    ignoredWordsMessages: {
+      countLabel: (count, maximum) => `${String(count)} / ${String(maximum)}`,
+      atLimitHint: "You can hide up to 200 words.",
+      duplicateWarning: (entry) => `${entry} is already hidden.`,
+    },
+    ignoredWordsLimit: "Words can be up to 40 characters long.",
+    save: "Save",
+    discard: "Discard",
+    saved: "Settings saved.",
+    saving: "Saving …",
+    settingsSaveError: "Could not save hidden words.",
+    settingsConflict: "Settings changed while you were editing. Reload and try again.",
+    settingsLoadError: "Could not load hidden words.",
+    retrySettings: "Reload",
     pageSummary: (start, end, total) => `${start}–${end} of ${total}`,
     previousPage: "Previous page",
     nextPage: "Next page",

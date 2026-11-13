@@ -1298,8 +1298,52 @@ describe("dispatch and execution", () => {
         receivedAt: "2026-09-19T12:07:41.000Z",
         emotes: 2,
         streamId: "live-1",
-        textFragments: ["hi"],
+        textFragments: ["hi", "Kappa", "Pog"],
       });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps command and known bot messages out of the word buffer", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await writeEventSubStreamState(
+        database as unknown as D1Database,
+        "kanal-a",
+        "online",
+        NOW,
+        NOW,
+        "live-words",
+      );
+      const runtime = environment(database);
+      const send = (triggerId: string, login: string, messageText: string) => dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId,
+        payload: {
+          chatter_user_id: `user-${triggerId}`,
+          chatter_user_login: login,
+          message: {
+            text: messageText,
+            fragments: [{ type: "text", text: messageText }, { type: "emote", text: "KEKW" }],
+          },
+        },
+        receivedAt: "2026-09-19T12:07:41.000Z",
+      }, vi.fn<typeof fetch>(), [statisticsModule]);
+
+      await send("command", "viewer", "!hello world");
+      await send("known-bot", "Nightbot", "hello world");
+      await send("human", "fictional_viewer", "hello world");
+
+      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        recordChatActivity: ReturnType<typeof vi.fn>;
+      };
+      expect(object.recordChatActivity).toHaveBeenCalledTimes(3);
+      expect(object.recordChatActivity).toHaveBeenNthCalledWith(1, "user-command", true, expect.objectContaining({ textFragments: [] }));
+      expect(object.recordChatActivity).toHaveBeenNthCalledWith(2, "user-known-bot", true, expect.objectContaining({ textFragments: [] }));
+      expect(object.recordChatActivity).toHaveBeenNthCalledWith(3, "user-human", true, expect.objectContaining({ textFragments: ["hello world", "KEKW"] }));
     } finally {
       database.close();
     }

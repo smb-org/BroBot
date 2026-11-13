@@ -1,10 +1,12 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
-import { useModuleQuery } from "../../../dashboard/data/module-query";
-import { Field, Icon, SwitchRow } from "../../../dashboard/ui";
+import { dashboardTexts } from "../../../dashboard/locale";
+import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { Button, ChipsInput, ConfirmDialog, Field, Icon, SaveStatus, SegmentChoice, SwitchRow, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
+import { foldStatisticsWord } from "../domain";
 import type { StatisticsWordsResponse } from "../contracts";
-import { loadStatisticsWords } from "./service";
+import { loadStatisticsSettings, loadStatisticsWords, saveStatisticsSettings, statisticsSettingsErrorCode, type StatisticsSettingsState } from "./service";
 import { statisticsWordsPanelTexts } from "./words-locale";
 import "./words-panel.css";
 
@@ -38,12 +40,37 @@ const shareFormatter = (language: "de" | "en"): Intl.NumberFormat => new Intl.Nu
 
 const skeletonRows = Array.from({ length: 12 }, (_unused, index) => index);
 
-export function StatisticsWordsPanel({ channelId, language = "de" }: ModulePanelProperties): ReactElement {
+export function StatisticsWordsPanel({ channelId, language = "de", canManage = false }: ModulePanelProperties): ReactElement {
   const labels = statisticsWordsPanelTexts(language);
+  const queryClient = useDashboardQueryClient();
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [hideFillers, setHideFillers] = useState(true);
+  const [scope, setScope] = useState<"stream" | "total">("total");
   const [page, setPage] = useState(1);
+  const {
+    accept: acceptIgnoredWords,
+    dirty: ignoredWordsDirty,
+    reset: resetIgnoredWords,
+    setValue: setIgnoredWords,
+    value: ignoredWordsDraft,
+  } = useDraft({ ignoredWords: [] as string[] });
+  const settingsRevision = useRef<number | undefined>(undefined);
+  const [settingsPending, setSettingsPending] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [settingsSaveError, setSettingsSaveError] = useState<string>();
+  const settingsQuery = useModuleQuery<StatisticsSettingsState>(
+    channelId,
+    "statistics",
+    "words-settings",
+    (signal) => loadStatisticsSettings(channelId, signal),
+  );
+
+  useEffect(() => {
+    if (settingsQuery.data === undefined || ignoredWordsDirty) return;
+    acceptIgnoredWords(settingsQuery.data.settings);
+    settingsRevision.current = settingsQuery.data.revision;
+  }, [acceptIgnoredWords, ignoredWordsDirty, settingsQuery.data]);
 
   useEffect(() => {
     // An unchanged search must not reset the page: on mount the first run would otherwise jump back to page 1.
@@ -55,14 +82,14 @@ export function StatisticsWordsPanel({ channelId, language = "de" }: ModulePanel
     return () => window.clearTimeout(timer);
   }, [searchDraft, search]);
 
-  const queryPart = `words:${JSON.stringify([page, search, hideFillers])}`;
-  const query = useModuleQuery<StatisticsWordsResponse>(
+  const queryPart = `words:${JSON.stringify([page, search, hideFillers, scope])}`;
+  const wordsQuery = useModuleQuery<StatisticsWordsResponse>(
     channelId,
     "statistics",
     queryPart,
-    (signal) => loadStatisticsWords(channelId, page, search, hideFillers, signal),
+    (signal) => loadStatisticsWords(channelId, page, search, hideFillers, signal, scope),
   );
-  const data = query.data;
+  const data = wordsQuery.data;
   const rows = data?.words ?? [];
   const maxCount = data?.maxCount ?? 0;
   const formatNumber = numberFormatter(language);
@@ -74,8 +101,97 @@ export function StatisticsWordsPanel({ channelId, language = "de" }: ModulePanel
     : labels.pageSummary(formatNumber.format(start), formatNumber.format(end), formatNumber.format(data.total));
   const emptyTitle = data?.totalCount === 0 ? labels.emptyTitle : labels.noMatchesTitle;
   const emptyDescription = data?.totalCount === 0 ? labels.emptyDescription : labels.noMatchesDescription;
+  const updateIgnoredWords = (values: string[]): void => {
+    setSettingsSaved(false);
+    setSettingsSaveError(undefined);
+    setIgnoredWords({ ignoredWords: values });
+  };
+  const discardIgnoredWords = useCallback((): void => {
+    resetIgnoredWords();
+    setSettingsSaved(false);
+    setSettingsSaveError(undefined);
+  }, [resetIgnoredWords]);
+  const saveIgnoredWords = async (): Promise<string | null> => {
+    const baselineRevision = settingsRevision.current;
+    if (!canManage || !ignoredWordsDirty || settingsPending || baselineRevision === undefined) return null;
+    setSettingsPending(true);
+    setSettingsSaved(false);
+    setSettingsSaveError(undefined);
+    try {
+      const settings = { ignoredWords: ignoredWordsDraft.ignoredWords };
+      const result = await runModuleQueryWrite(
+        queryClient,
+        channelId,
+        "statistics",
+        "words-settings",
+        (revision) => saveStatisticsSettings(channelId, revision ?? baselineRevision, settings),
+        {
+          baselineRevision,
+          updateCache: (_current, saved) => saved,
+          relatedParts: [{ moduleId: "statistics", part: queryPart }],
+        },
+      );
+      acceptIgnoredWords(result.settings);
+      settingsRevision.current = result.revision;
+      setSettingsSaved(true);
+      return null;
+    } catch (error: unknown) {
+      const message = statisticsSettingsErrorCode(error) === "conflict" ? labels.settingsConflict : labels.settingsSaveError;
+      setSettingsSaveError(message);
+      return message;
+    } finally {
+      setSettingsPending(false);
+    }
+  };
+  const draftGuard = useDraftGuard(ignoredWordsDirty, saveIgnoredWords, discardIgnoredWords);
+  useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
+  const navigationLabels = dashboardTexts(language).module;
 
   return <section className="statistics-words" aria-label={labels.title}>
+    <section className="statistics-words__ignored" aria-labelledby="statistics-words-ignored-title">
+      <header className="statistics-words__ignored-heading">
+        <div>
+          <h2 id="statistics-words-ignored-title">{labels.ignoredWordsTitle}</h2>
+          <p>{labels.ignoredWordsDescription}</p>
+        </div>
+        {settingsQuery.isError ? <div className="statistics-words__settings-error" role="alert">
+          <span>{labels.settingsLoadError}</span>
+          <Button variant="subtle" onClick={() => { void settingsQuery.refetch(); }}>{labels.retrySettings}</Button>
+        </div> : <span aria-hidden="true">&nbsp;</span>}
+      </header>
+      <div aria-busy={settingsQuery.isLoading} className="statistics-words__ignored-input">
+        <ChipsInput
+          label={labels.ignoredWordsLabel}
+          values={ignoredWordsDraft.ignoredWords}
+          onChange={updateIgnoredWords}
+          placeholder={labels.ignoredWordsPlaceholder}
+          normalize={foldStatisticsWord}
+          validate={(word) => Array.from(word).length <= 40 ? null : labels.ignoredWordsLimit}
+          removeLabel={labels.removeIgnoredWord}
+          disabled={!canManage || settingsPending || settingsQuery.data === undefined}
+          messages={labels.ignoredWordsMessages}
+          listLabel={labels.ignoredWordsList}
+          max={200}
+        />
+      </div>
+      <div className="statistics-words__save">
+        <SaveStatus
+          persistent
+          dirty={ignoredWordsDirty}
+          pending={settingsPending}
+          saved={settingsSaved}
+          {...(settingsSaveError === undefined ? {} : { error: settingsSaveError })}
+          saveDisabled={!canManage || settingsQuery.data === undefined}
+          discardDisabled={settingsQuery.data === undefined}
+          onSave={() => { void saveIgnoredWords(); }}
+          onDiscard={discardIgnoredWords}
+          saveLabel={labels.save}
+          discardLabel={labels.discard}
+          savedLabel={labels.saved}
+          pendingLabel={labels.saving}
+        />
+      </div>
+    </section>
     <div className="statistics-words__controls">
       <Field
         className="statistics-words__search"
@@ -87,6 +203,21 @@ export function StatisticsWordsPanel({ channelId, language = "de" }: ModulePanel
         placeholder={labels.searchPlaceholder}
         onChange={(value) => setSearchDraft(value.slice(0, 80))}
       />
+      <div className="statistics-words__scope">
+        <SegmentChoice
+          label={labels.scope}
+          size="compact"
+          value={scope}
+          options={[
+            { value: "stream", label: labels.thisStream },
+            { value: "total", label: labels.totalScope },
+          ]}
+          onChange={(next) => {
+            setScope(next);
+            setPage(1);
+          }}
+        />
+      </div>
       <div className="statistics-words__filler-toggle">
         <SwitchRow
           label={labels.hideFillers}
@@ -106,7 +237,7 @@ export function StatisticsWordsPanel({ channelId, language = "de" }: ModulePanel
         <button
           type="button"
           aria-label={labels.previousPage}
-          disabled={page <= 1 || query.isFetching}
+          disabled={page <= 1 || wordsQuery.isFetching}
           onClick={() => setPage((current) => Math.max(1, current - 1))}
         >
           <Icon name="chevron-left" size={20} />
@@ -114,14 +245,14 @@ export function StatisticsWordsPanel({ channelId, language = "de" }: ModulePanel
         <button
           type="button"
           aria-label={labels.nextPage}
-          disabled={data === undefined || page >= data.totalPages || query.isFetching}
+          disabled={data === undefined || page >= data.totalPages || wordsQuery.isFetching}
           onClick={() => setPage((current) => current + 1)}
         >
           <Icon name="chevron-right" size={20} />
         </button>
       </div>
     </div>
-    <div className="statistics-words__table-scroll" aria-busy={query.isLoading}>
+    <div className="statistics-words__table-scroll" aria-busy={wordsQuery.isLoading}>
       <table className="statistics-words__table" aria-label={labels.title} aria-describedby="statistics-words-rank-context">
         <colgroup>
           <col className="statistics-words__column--rank" />
@@ -140,17 +271,17 @@ export function StatisticsWordsPanel({ channelId, language = "de" }: ModulePanel
           </tr>
         </thead>
         <tbody>
-          {query.isLoading ? skeletonRows.map((row) => <tr key={row} aria-hidden="true">
+          {wordsQuery.isLoading ? skeletonRows.map((row) => <tr key={row} aria-hidden="true">
             <td><span className="statistics-words__skeleton statistics-words__skeleton--short" /></td>
             <td><span className="statistics-words__skeleton" /></td>
             <td><span className="statistics-words__skeleton statistics-words__skeleton--short" /></td>
             <td><span className="statistics-words__skeleton statistics-words__skeleton--bar" /></td>
             <td className="statistics-words__last-seen"><span className="statistics-words__skeleton statistics-words__skeleton--short" /></td>
-          </tr>) : query.isError ? <tr>
+          </tr>) : wordsQuery.isError ? <tr>
             <td colSpan={5} className="statistics-words__empty-cell">
               <div className="statistics-words__empty" role="alert">
                 <strong>{labels.loadError}</strong>
-                <button type="button" onClick={() => { void query.refetch(); }}>{labels.retry}</button>
+                <button type="button" onClick={() => { void wordsQuery.refetch(); }}>{labels.retry}</button>
               </div>
             </td>
           </tr> : rows.length === 0 ? <tr>
@@ -190,5 +321,18 @@ export function StatisticsWordsPanel({ channelId, language = "de" }: ModulePanel
       </table>
     </div>
     <span className="sr-only" id="statistics-words-rank-context">{labels.rankContext}</span>
+    <ConfirmDialog
+      opened={draftGuard.confirmOpen}
+      title={navigationLabels.unsavedChangesTitle}
+      description={navigationLabels.unsavedChangesDescription}
+      confirmLabel={navigationLabels.discardAndSwitch}
+      cancelLabel={navigationLabels.continueEditing}
+      onConfirm={draftGuard.discardAndSwitch}
+      onCancel={draftGuard.continueEditing}
+      {...(canManage ? { alternative: { label: navigationLabels.saveAndSwitch, onClick: () => { void draftGuard.saveAndSwitch(); } } } : {})}
+      pending={draftGuard.saving || settingsPending}
+      {...(draftGuard.saveError === undefined ? {} : { error: draftGuard.saveError })}
+      danger
+    />
   </section>;
 }

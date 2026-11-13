@@ -1,3 +1,14 @@
+import { z } from "zod";
+
+import { foldStatisticsWord } from "./domain";
+
+export const statisticsSettingsSchema = z.object({
+  ignoredWords: z.array(z.string().trim().min(1).max(40)).max(200).default([])
+    .transform((words) => [...new Set(words.map(foldStatisticsWord))]),
+});
+
+export type StatisticsSettings = z.output<typeof statisticsSettingsSchema>;
+
 export interface StatisticsStreamWindow {
   windowStart: string;
   streamId: string | null;

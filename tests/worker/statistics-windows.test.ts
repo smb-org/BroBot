@@ -34,6 +34,14 @@ interface StatisticsWordObject {
     statistics: { windowStart: string; receivedAt: string; emotes: number; streamId: string; textFragments: readonly string[] },
   ): Promise<number>;
   readStatisticsWordCounts(streamId: string): Promise<Array<{ word: string; count: number; lastSeenAt: string }>>;
+  readStatisticsWordStreamCounts(streamId?: string): Promise<{
+    streamId: string;
+    words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
+  } | null>;
+  readStatisticsWordCountsByBatch(streamId: string): Promise<readonly {
+    batch: number;
+    words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
+  }[]>;
   markStatisticsWordStreamEnded(streamId: string, endedAt: string): Promise<void>;
   listMergeableStatisticsWordBuckets(
     streamState: "online" | "offline" | "unknown",
@@ -191,7 +199,7 @@ describe("statistics windows in the channel object", () => {
     });
     await runInDurableObject(stub, (_object, state) => {
       state.storage.sql.exec(
-        `INSERT INTO statistics_word_streams (stream_id, distinct_words, ended_at, expires_at, current_batch)
+        `INSERT OR REPLACE INTO statistics_word_streams (stream_id, distinct_words, ended_at, expires_at, current_batch)
          VALUES (?, 20000, NULL, ?, 1)`,
         streamId,
         Date.now() + 24 * 60 * 60_000,
@@ -352,7 +360,8 @@ describe("statistics windows in the channel object", () => {
       const original = sql.exec.bind(sql);
       let most = 0;
       sql.exec = (...args: unknown[]) => {
-        if (/statistics_word/u.test(String(args[0]))) most = Math.max(most, args.length - 1);
+        // Only the per-message lookups count; the stream-row upsert is a fixed-size write.
+        if (/^\s*SELECT\b/iu.test(String(args[0])) && /statistics_word/u.test(String(args[0]))) most = Math.max(most, args.length - 1);
         return original(...args);
       };
       try {
@@ -421,8 +430,14 @@ describe("statistics windows in the channel object", () => {
     await expect(worker.DB.prepare(
       `SELECT total_count FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word = ?`,
-    ).bind(channelId, "bonjour").first()).resolves.toEqual({ total_count: 1 });
+    ).bind(channelId, "bonjour").first()).resolves.toBeNull(); // pruned: fewer than 3 in total
     await expect(object.readStatisticsWordCounts(streamId)).resolves.toEqual([]);
+    await expect(object.readStatisticsWordStreamCounts(streamId)).resolves.toMatchObject({
+      words: [
+        { word: "bonjour", count: 1 },
+        { word: "monde", count: 1 },
+      ],
+    });
     await expect(object.hasStatisticsWordStreams()).resolves.toBe(true);
 
     const lateAt = Date.now();
@@ -445,7 +460,7 @@ describe("statistics windows in the channel object", () => {
     await expect(worker.DB.prepare(
       `SELECT total_count FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word = ?`,
-    ).bind(channelId, "bonjour").first()).resolves.toEqual({ total_count: 2 });
+    ).bind(channelId, "bonjour").first()).resolves.toBeNull(); // both batches merged, 2 < 3 so pruned
     await expect(worker.DB.prepare(
       "SELECT COUNT(*) AS count FROM channel_word_frequency_streams WHERE channel_id = ? AND stream_id = ?",
     ).bind(channelId, streamId).first()).resolves.toEqual({ count: 2 });
@@ -473,7 +488,7 @@ describe("statistics windows in the channel object", () => {
     await expect(object.hasStatisticsWordStreams()).resolves.toBe(false);
   });
 
-  it("counts words from text fragments only and persists nothing but anonymous word counts", async () => {
+  it("counts text and emote fragments and persists only anonymous word counts", async () => {
     const channelId = "statistics-word-privacy";
     await insertPointChannel(channelId);
     const stub = statisticsObject(channelId);
@@ -505,7 +520,8 @@ describe("statistics windows in the channel object", () => {
 
     await expect(object.readStatisticsWordCounts("word-stream-privacy")).resolves.toEqual([
       { word: "again", count: 1, lastSeenAt: iso(windowStart + 30_000) },
-      { word: "hello", count: 1, lastSeenAt: iso(windowStart + 30_000) },
+      { word: "helo", count: 1, lastSeenAt: iso(windowStart + 30_000) },
+      { word: "kapaemote", count: 1, lastSeenAt: iso(windowStart + 30_000) },
       { word: "world", count: 1, lastSeenAt: iso(windowStart + 30_000) },
     ]);
     const stored = await runInDurableObject(stub, (_object, state) => JSON.stringify([
@@ -513,9 +529,82 @@ describe("statistics windows in the channel object", () => {
       ...state.storage.sql.exec("SELECT * FROM statistics_word_counts").toArray(),
       ...state.storage.sql.exec("SELECT * FROM statistics_word_seen").toArray(),
     ]));
-    for (const forbidden of ["KappaEmote", "mentioneduser", "Cheer100", "typedmention", "colonemote", "secretlink", "user-id-4711", "Hello world"]) {
+    for (const forbidden of ["mentioneduser", "Cheer100", "typedmention", "colonemote", "secretlink", "user-id-4711", "Hello world"]) {
       expect(stored.toLowerCase()).not.toContain(forbidden.toLowerCase());
     }
+  });
+
+  it("folds stretch spellings and retains the most frequent display spelling for the stream", async () => {
+    const channelId = "statistics-word-fold-display";
+    await insertPointChannel(channelId);
+    const object = statisticsObject(channelId) as unknown as StatisticsWordObject;
+    const streamId = "word-stream-fold-display";
+    const windowStart = currentWindowStart();
+    const record = (text: string) => object.recordChatActivity(null, false, {
+      windowStart: iso(windowStart), receivedAt: iso(windowStart + 30_000), emotes: 0, streamId, textFragments: [text],
+    });
+
+    await record("Faaak");
+    await record("faaak");
+    await record("FAAAK");
+    await record("fak");
+    await runWindowAlarm(statisticsObject(channelId));
+
+    await expect(object.readStatisticsWordStreamCounts(streamId)).resolves.toEqual({
+      streamId,
+      words: [{ word: "fak", displayWord: "faaak", count: 4, lastSeenAt: iso(windowStart + 30_000) }],
+    });
+  });
+
+  it("counts an emote once when it shares a folded word with typed text and keeps its display case", async () => {
+    const channelId = "statistics-word-emote-fold";
+    await insertPointChannel(channelId);
+    const object = statisticsObject(channelId) as unknown as StatisticsWordObject;
+    const streamId = "word-stream-emote-fold";
+    const windowStart = currentWindowStart();
+    const payload = {
+      chatter_user_login: "fictional_viewer",
+      message: { text: "KEKW kekw KEKW", fragments: [
+        { type: "text", text: "KEKW kekw" },
+        { type: "emote", text: "KEKW", emote: { id: "25", emote_set_id: "0", owner_id: "1" } },
+      ] },
+    };
+    await object.recordChatActivity(null, false, {
+      windowStart: iso(windowStart),
+      receivedAt: iso(windowStart + 30_000),
+      emotes: 1,
+      streamId,
+      textFragments: statisticsTextFragments(payload),
+    });
+    await runWindowAlarm(statisticsObject(channelId));
+
+    await expect(object.readStatisticsWordStreamCounts(streamId)).resolves.toMatchObject({
+      words: [{ word: "kekw", displayWord: "KEKW", count: 1 }],
+    });
+  });
+
+  it("selects the latest retained stream even when that stream has no countable words", async () => {
+    const channelId = "statistics-word-empty-latest-stream";
+    await insertPointChannel(channelId);
+    const object = statisticsObject(channelId) as unknown as StatisticsWordObject;
+    const olderStreamId = "word-stream-older";
+    const latestStreamId = "word-stream-latest-empty";
+    const receivedAt = Date.now();
+    await object.recordChatActivity(null, false, {
+      windowStart: iso(currentWindowStart()),
+      receivedAt: iso(receivedAt),
+      emotes: 0,
+      streamId: olderStreamId,
+      textFragments: ["olderword"],
+    });
+    await runWindowAlarm(statisticsObject(channelId));
+    await object.markStatisticsWordStreamEnded(olderStreamId, iso(receivedAt));
+
+    const latestAt = receivedAt + 1_000;
+    vi.setSystemTime(latestAt);
+    await object.markStatisticsWordStreamEnded(latestStreamId, iso(latestAt));
+
+    await expect(object.readStatisticsWordStreamCounts()).resolves.toEqual({ streamId: latestStreamId, words: [] });
   });
 
   it("merges a stream into the real D1 baseline once and trims it to 5,000 words", async () => {

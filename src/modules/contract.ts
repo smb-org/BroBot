@@ -963,6 +963,7 @@ export interface ModuleStatisticsWordCount {
   word: string;
   count: number;
   lastSeenAt: string;
+  displayWord?: string;
 }
 
 export interface ModuleStatisticsWordBucket {

@@ -622,7 +622,7 @@ describe("statistics window alarm", () => {
     await expect(database.prepare(
       `SELECT total_count FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word = ?`,
-    ).bind(CHANNEL_ID, "hallo").first()).resolves.toEqual({ total_count: 4 });
+    ).bind(CHANNEL_ID, "halo").first()).resolves.toEqual({ total_count: 4 });
     expect(chat.calls.deleteWordBucket).toHaveBeenCalledWith({ streamId: STREAM_ID, batch: 1 });
     expect(chat.wordStreams.get(STREAM_ID)?.words).toEqual([]);
   });
@@ -704,7 +704,7 @@ describe("statistics window alarm", () => {
     chat.calls.listMergeableWordBuckets.mockResolvedValue(buckets);
     chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve([{
       word: bucket.batch === 1 ? "firstword" : "laterword",
-      count: 1,
+      count: 3,
       lastSeenAt: WINDOW_END,
     }]));
     const { context } = createContext(database, chat);

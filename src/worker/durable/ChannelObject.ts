@@ -124,7 +124,7 @@ import {
   STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS,
   STATISTICS_WINDOW_MILLISECONDS,
   statisticsWindowStartMs,
-  tokenizeStatisticsWords,
+  tokenizeStatisticsWordDetails,
   type StatisticsChatActivity,
 } from "../../modules/statistics/domain";
 import {
@@ -580,7 +580,20 @@ type BufferedStatisticsWordCount = {
   count: number;
   lastSeenAt: string;
   lastIncrementAt: number;
+  displayCounts: Map<string, number>;
 };
+
+interface StatisticsWordDisplayCount {
+  word: string;
+  displayWord: string;
+  count: number;
+  lastSeenAt: string;
+}
+
+interface StatisticsWordBatchCounts {
+  batch: number;
+  words: readonly StatisticsWordDisplayCount[];
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1474,6 +1487,68 @@ export class ChannelObject extends DurableObject<Env> {
       `CREATE INDEX IF NOT EXISTS statistics_word_counts_top_idx
        ON ${STATISTICS_WORD_COUNT_TABLE} (stream_id, batch, count DESC, word ASC)`,
     );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS statistics_word_displays (
+        stream_id TEXT NOT NULL,
+        batch INTEGER NOT NULL,
+        word TEXT NOT NULL,
+        display_word TEXT NOT NULL,
+        count INTEGER NOT NULL CHECK (count > 0),
+        PRIMARY KEY (stream_id, batch, word, display_word)
+      ) WITHOUT ROWID`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE INDEX IF NOT EXISTS statistics_word_displays_top_idx
+       ON statistics_word_displays (stream_id, batch, word, count DESC, display_word ASC)`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS statistics_word_stream_totals (
+        stream_id TEXT NOT NULL,
+        word TEXT NOT NULL,
+        count INTEGER NOT NULL CHECK (count > 0),
+        last_seen_at TEXT NOT NULL,
+        PRIMARY KEY (stream_id, word)
+      ) WITHOUT ROWID`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS statistics_word_stream_displays (
+        stream_id TEXT NOT NULL,
+        word TEXT NOT NULL,
+        display_word TEXT NOT NULL,
+        count INTEGER NOT NULL CHECK (count > 0),
+        PRIMARY KEY (stream_id, word, display_word)
+      ) WITHOUT ROWID`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE INDEX IF NOT EXISTS statistics_word_stream_displays_top_idx
+       ON statistics_word_stream_displays (stream_id, word, count DESC, display_word ASC)`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS statistics_word_schema_version (
+        version INTEGER PRIMARY KEY
+      ) WITHOUT ROWID`,
+    );
+    const schemaVersion = this.ctx.storage.sql.exec<{ version: number }>(
+      "SELECT version FROM statistics_word_schema_version WHERE version = 1",
+    ).toArray()[0];
+    if (schemaVersion === undefined) {
+      // Upgrade older object-local buckets into the retained stream view once.
+      this.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO statistics_word_stream_totals (stream_id, word, count, last_seen_at)
+         SELECT stream_id, word, SUM(count), MAX(last_seen_at)
+           FROM ${STATISTICS_WORD_COUNT_TABLE} GROUP BY stream_id, word`,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO statistics_word_stream_displays (stream_id, word, display_word, count)
+         SELECT stream_id, word, word, SUM(count)
+           FROM ${STATISTICS_WORD_COUNT_TABLE} GROUP BY stream_id, word`,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO statistics_word_displays (stream_id, batch, word, display_word, count)
+         SELECT stream_id, batch, word, word, count FROM ${STATISTICS_WORD_COUNT_TABLE}`,
+      );
+      this.ctx.storage.sql.exec("INSERT OR IGNORE INTO statistics_word_schema_version (version) VALUES (1)");
+    }
     this.statisticsSchemaReady = true;
   }
 
@@ -4229,6 +4304,27 @@ export class ChannelObject extends DurableObject<Env> {
       now,
     );
     this.ctx.storage.sql.exec(
+      `DELETE FROM statistics_word_displays
+        WHERE stream_id IN (
+          SELECT stream_id FROM ${STATISTICS_WORD_STREAM_TABLE} WHERE expires_at <= ?
+        )`,
+      now,
+    );
+    this.ctx.storage.sql.exec(
+      `DELETE FROM statistics_word_stream_totals
+        WHERE stream_id IN (
+          SELECT stream_id FROM ${STATISTICS_WORD_STREAM_TABLE} WHERE expires_at <= ?
+        )`,
+      now,
+    );
+    this.ctx.storage.sql.exec(
+      `DELETE FROM statistics_word_stream_displays
+        WHERE stream_id IN (
+          SELECT stream_id FROM ${STATISTICS_WORD_STREAM_TABLE} WHERE expires_at <= ?
+        )`,
+      now,
+    );
+    this.ctx.storage.sql.exec(
       `DELETE FROM ${STATISTICS_WORD_SEEN_TABLE}
         WHERE stream_id IN (
           SELECT stream_id FROM ${STATISTICS_WORD_STREAM_TABLE} WHERE expires_at <= ?
@@ -4255,9 +4351,7 @@ export class ChannelObject extends DurableObject<Env> {
     textFragments: readonly string[],
     receivedAt: string,
   ): void {
-    if (streamId === null || streamId.length === 0 || textFragments.length === 0) return;
-    const counts = tokenizeStatisticsWords(textFragments);
-    if (counts.size === 0) return;
+    if (streamId === null || streamId.length === 0) return;
 
     const now = Date.now();
     const receivedAtMs = Date.parse(receivedAt);
@@ -4274,6 +4368,40 @@ export class ChannelObject extends DurableObject<Env> {
     if (stream !== undefined && stream.expires_at <= now ||
         stream === undefined && memoryEndedAt !== undefined &&
           memoryEndedAt + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS <= now) return;
+
+    const endedAt = memoryEndedAt === undefined ? null : new Date(memoryEndedAt).toISOString();
+    const expiresAt = memoryEndedAt === undefined
+      ? now + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS
+      : memoryEndedAt + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS;
+    this.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO ${STATISTICS_WORD_STREAM_TABLE}
+         (stream_id, distinct_words, ended_at, expires_at, current_batch)
+       VALUES (?, 0, ?, ?, 1)`,
+      streamId,
+      endedAt,
+      expiresAt,
+    );
+    if (endedAt === null) {
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_WORD_STREAM_TABLE} SET expires_at = MAX(expires_at, ?)
+          WHERE stream_id = ? AND ended_at IS NULL`,
+        expiresAt,
+        streamId,
+      );
+    } else {
+      this.ctx.storage.sql.exec(
+        `UPDATE ${STATISTICS_WORD_STREAM_TABLE} SET ended_at = ?, expires_at = ?
+          WHERE stream_id = ? AND ended_at IS NULL`,
+        endedAt,
+        expiresAt,
+        streamId,
+      );
+    }
+
+    if (textFragments.length === 0) return;
+    const details = tokenizeStatisticsWordDetails(textFragments);
+    const counts = new Map([...details].map(([word, token]) => [word, token.count]));
+    if (counts.size === 0) return;
     const bufferedWords = this.statisticsWordWordsByStream.get(streamId) ?? new Set<string>();
     // Only this message's (at most 20) words are looked up; the stream-wide buffer is never copied.
     const existingWords = new Set<string>();
@@ -4306,8 +4434,18 @@ export class ChannelObject extends DurableObject<Env> {
         buffered.count += count;
         buffered.lastSeenAt = buffered.lastSeenAt < lastSeenAt ? lastSeenAt : buffered.lastSeenAt;
         buffered.lastIncrementAt = now;
+        const displayWord = details.get(word)?.displayWord ?? word;
+        buffered.displayCounts.set(displayWord, (buffered.displayCounts.get(displayWord) ?? 0) + count);
       } else {
-        this.statisticsWordCounts.set(key, { streamId, word, count, lastSeenAt, lastIncrementAt: now });
+        const displayWord = details.get(word)?.displayWord ?? word;
+        this.statisticsWordCounts.set(key, {
+          streamId,
+          word,
+          count,
+          lastSeenAt,
+          lastIncrementAt: now,
+          displayCounts: new Map([[displayWord, count]]),
+        });
       }
       bufferedWords.add(word);
     }
@@ -4389,6 +4527,40 @@ export class ChannelObject extends DurableObject<Env> {
             currentBatch,
             payload,
           );
+          this.ctx.storage.sql.exec(
+            `INSERT INTO statistics_word_stream_totals (stream_id, word, count, last_seen_at)
+             SELECT ?, json_extract(value, '$.word'), CAST(json_extract(value, '$.count') AS INTEGER),
+                    json_extract(value, '$.lastSeenAt') FROM json_each(?) WHERE 1
+             ON CONFLICT (stream_id, word) DO UPDATE SET
+               count = statistics_word_stream_totals.count + excluded.count,
+               last_seen_at = MAX(statistics_word_stream_totals.last_seen_at, excluded.last_seen_at)`,
+            streamId,
+            payload,
+          );
+          const displayRows = chunk.flatMap(({ word, displayCounts }) =>
+            [...displayCounts].map(([displayWord, count]) => ({ word, displayWord, count })));
+          for (let displayOffset = 0; displayOffset < displayRows.length; displayOffset += 100) {
+            const displayPayload = JSON.stringify(displayRows.slice(displayOffset, displayOffset + 100));
+            this.ctx.storage.sql.exec(
+              `INSERT INTO statistics_word_displays (stream_id, batch, word, display_word, count)
+               SELECT ?, ?, json_extract(value, '$.word'), json_extract(value, '$.displayWord'),
+                      CAST(json_extract(value, '$.count') AS INTEGER) FROM json_each(?) WHERE 1
+               ON CONFLICT (stream_id, batch, word, display_word) DO UPDATE SET
+                 count = statistics_word_displays.count + excluded.count`,
+              streamId,
+              currentBatch,
+              displayPayload,
+            );
+            this.ctx.storage.sql.exec(
+              `INSERT INTO statistics_word_stream_displays (stream_id, word, display_word, count)
+               SELECT ?, json_extract(value, '$.word'), json_extract(value, '$.displayWord'),
+                      CAST(json_extract(value, '$.count') AS INTEGER) FROM json_each(?) WHERE 1
+               ON CONFLICT (stream_id, word, display_word) DO UPDATE SET
+                 count = statistics_word_stream_displays.count + excluded.count`,
+              streamId,
+              displayPayload,
+            );
+          }
         }
         this.ctx.storage.sql.exec(
           `UPDATE ${STATISTICS_WORD_STREAM_TABLE}
@@ -4633,6 +4805,14 @@ export class ChannelObject extends DurableObject<Env> {
     this.statisticsWordStreamEndedAt.set(streamId, endedAtMs);
     this.ensureStatisticsSchema();
     this.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO ${STATISTICS_WORD_STREAM_TABLE}
+         (stream_id, distinct_words, ended_at, expires_at, current_batch)
+       VALUES (?, 0, ?, ?, 1)`,
+      streamId,
+      endedAtMs,
+      endedAtMs + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS,
+    );
+    this.ctx.storage.sql.exec(
       `UPDATE ${STATISTICS_WORD_STREAM_TABLE}
           SET ended_at = COALESCE(ended_at, ?),
               expires_at = COALESCE(ended_at, ?) + ?
@@ -4751,10 +4931,17 @@ export class ChannelObject extends DurableObject<Env> {
         word: string;
         count: number;
         last_seen_at: string;
+        display_word: string | null;
       }>(
-        `SELECT word, count, last_seen_at FROM ${STATISTICS_WORD_COUNT_TABLE}
-          WHERE stream_id = ? AND batch = ?
-          ORDER BY count DESC, word ASC LIMIT 1000`,
+        `SELECT counts.word, counts.count, counts.last_seen_at,
+                (SELECT display_word FROM statistics_word_displays AS displays
+                  WHERE displays.stream_id = counts.stream_id AND displays.batch = counts.batch AND displays.word = counts.word
+                  ORDER BY displays.count DESC, displays.display_word COLLATE NOCASE ASC,
+                           (displays.display_word = lower(displays.display_word)) DESC,
+                           displays.display_word ASC LIMIT 1) AS display_word
+           FROM ${STATISTICS_WORD_COUNT_TABLE} AS counts
+          WHERE counts.stream_id = ? AND counts.batch = ?
+          ORDER BY counts.count DESC, counts.word ASC LIMIT 1000`,
         bucket.streamId,
         bucket.batch,
       ).toArray();
@@ -4767,18 +4954,30 @@ export class ChannelObject extends DurableObject<Env> {
           bucket.batch,
         );
       }
-      return wordRows.map(({ word, count, last_seen_at: lastSeenAt }) => ({ word, count, lastSeenAt }));
+      return wordRows.map(({ word, count, last_seen_at: lastSeenAt, display_word: displayWord }) => ({
+        word,
+        count,
+        lastSeenAt,
+        displayWord: displayWord ?? word,
+      }));
     });
     return Promise.resolve(rows);
   }
 
   public deleteStatisticsWordBucket(bucket: ModuleStatisticsWordBucket): Promise<void> {
     this.ensureStatisticsSchema();
-    this.ctx.storage.sql.exec(
-      `DELETE FROM ${STATISTICS_WORD_COUNT_TABLE} WHERE stream_id = ? AND batch = ?`,
-      bucket.streamId,
-      bucket.batch,
-    );
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `DELETE FROM statistics_word_displays WHERE stream_id = ? AND batch = ?`,
+        bucket.streamId,
+        bucket.batch,
+      );
+      this.ctx.storage.sql.exec(
+        `DELETE FROM ${STATISTICS_WORD_COUNT_TABLE} WHERE stream_id = ? AND batch = ?`,
+        bucket.streamId,
+        bucket.batch,
+      );
+    });
     return Promise.resolve();
   }
 
@@ -4793,6 +4992,91 @@ export class ChannelObject extends DurableObject<Env> {
       streamId,
     ).toArray();
     return Promise.resolve(rows.map(({ word, count, last_seen_at: lastSeenAt }) => ({ word, count, lastSeenAt })));
+  }
+
+  /** Flushes the live buffer and returns the unmerged counts grouped by batch for total-view reconciliation. */
+  public async readStatisticsWordCountsByBatch(streamId: string): Promise<readonly StatisticsWordBatchCounts[]> {
+    await this.flushStatisticsWordCounts();
+    this.ensureStatisticsSchema();
+    const rows = this.ctx.storage.sql.exec<{
+      batch: number;
+      word: string;
+      count: number;
+      last_seen_at: string;
+      display_word: string | null;
+    }>(
+      `SELECT counts.batch, counts.word, counts.count, counts.last_seen_at,
+              (SELECT display_word FROM statistics_word_displays AS displays
+                WHERE displays.stream_id = counts.stream_id AND displays.batch = counts.batch AND displays.word = counts.word
+                ORDER BY displays.count DESC, displays.display_word COLLATE NOCASE ASC,
+                         (displays.display_word = lower(displays.display_word)) DESC,
+                         displays.display_word ASC LIMIT 1) AS display_word
+         FROM ${STATISTICS_WORD_COUNT_TABLE} AS counts
+        WHERE counts.stream_id = ?
+        ORDER BY counts.batch ASC, counts.count DESC, counts.word ASC`,
+      streamId,
+    ).toArray();
+    const batches = new Map<number, StatisticsWordDisplayCount[]>();
+    for (const row of rows) {
+      const words = batches.get(row.batch) ?? [];
+      words.push({
+        word: row.word,
+        displayWord: row.display_word ?? row.word,
+        count: row.count,
+        lastSeenAt: row.last_seen_at,
+      });
+      batches.set(row.batch, words);
+    }
+    return [...batches].map(([batch, words]) => ({ batch, words }));
+  }
+
+  /** Reads the requested stream or, while offline, its most recent unexpired retained word buffer. */
+  public async readStatisticsWordStreamCounts(
+    streamId?: string,
+  ): Promise<{ streamId: string; words: readonly StatisticsWordDisplayCount[] } | null> {
+    await this.flushStatisticsWordCounts();
+    this.ensureStatisticsSchema();
+    const now = Date.now();
+    const selected = streamId === undefined
+      ? this.ctx.storage.sql.exec<{ stream_id: string }>(
+        `SELECT stream_id FROM ${STATISTICS_WORD_STREAM_TABLE}
+          WHERE expires_at > ?
+          ORDER BY CASE WHEN ended_at IS NULL THEN 0 ELSE 1 END ASC, ended_at DESC, stream_id DESC
+          LIMIT 1`,
+        now,
+      ).toArray()[0]?.stream_id
+      : this.ctx.storage.sql.exec<{ stream_id: string }>(
+        `SELECT stream_id FROM ${STATISTICS_WORD_STREAM_TABLE} WHERE stream_id = ? AND expires_at > ?`,
+        streamId,
+        now,
+      ).toArray()[0]?.stream_id;
+    if (selected === undefined) return null;
+    const rows = this.ctx.storage.sql.exec<{
+      word: string;
+      count: number;
+      last_seen_at: string;
+      display_word: string | null;
+    }>(
+      `SELECT totals.word, totals.count, totals.last_seen_at,
+              (SELECT display_word FROM statistics_word_stream_displays AS displays
+                WHERE displays.stream_id = totals.stream_id AND displays.word = totals.word
+                ORDER BY displays.count DESC, displays.display_word COLLATE NOCASE ASC,
+                         (displays.display_word = lower(displays.display_word)) DESC,
+                         displays.display_word ASC LIMIT 1) AS display_word
+         FROM statistics_word_stream_totals AS totals
+        WHERE totals.stream_id = ?
+        ORDER BY totals.count DESC, totals.word ASC LIMIT 20000`,
+      selected,
+    ).toArray();
+    return {
+      streamId: selected,
+      words: rows.map(({ word, display_word: displayWord, count, last_seen_at: lastSeenAt }) => ({
+        word,
+        displayWord: displayWord ?? word,
+        count,
+        lastSeenAt,
+      })),
+    };
   }
 
   public pruneExpiredStatisticsWordStreams(now: number): Promise<void> {

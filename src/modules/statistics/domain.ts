@@ -5,6 +5,12 @@ export const STATISTICS_WINDOW_MILLISECONDS = STATISTICS_WINDOW_SECONDS * 1_000;
 const STATISTICS_WORD_STREAM_DISTINCT_LIMIT = 20_000;
 const STATISTICS_WORD_MESSAGE_DISTINCT_LIMIT = 20;
 const STATISTICS_WORD_TOKEN_LENGTH_LIMIT = 40;
+const STATISTICS_CHAT_BOT_LOGINS = new Set([
+  "nightbot", "streamelements", "streamlabs", "moobot", "fossabot", "wizebot", "sery_bot",
+]);
+const STATISTICS_FOLDED_STOP_WORDS = new Set([...STATISTICS_STOP_WORDS].map((word) =>
+  word.normalize("NFKC").toLowerCase().replace(/(\p{L})\1+/gu, "$1"),
+));
 export const STATISTICS_WORD_STREAM_MERGE_LIMIT = 1_000;
 export const STATISTICS_WORD_BASELINE_LIMIT = 5_000;
 export const STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS = 24 * 60 * 60 * 1_000;
@@ -51,21 +57,30 @@ const recordValue = (value: unknown): Record<string, unknown> | null =>
     ? value as Record<string, unknown>
     : null;
 
-/** Returns only plain text fragments; emotes, mentions and cheer fragments never enter word counting. */
+/** Returns text and emote-name fragments; mentions, cheers and links never enter word counting. */
 export const statisticsTextFragments = (payload: Readonly<Record<string, unknown>>): string[] => {
   const message = recordValue(payload.message);
   if (message === null || !Array.isArray(message.fragments)) return [];
   return message.fragments.flatMap((fragment): string[] => {
     const value = recordValue(fragment);
-    return value?.type === "text" && typeof value.text === "string" ? [value.text] : [];
+    return (value?.type === "text" || value?.type === "emote") && typeof value.text === "string" ? [value.text] : [];
   });
 };
 
-/** Tokenises text for the anonymous per-stream word-frequency baseline. */
-export const tokenizeStatisticsWords = (textFragments: readonly string[]): Map<string, number> => {
-  const counts = new Map<string, number>();
+/** Folds a normalized word key by reducing every run of the same Unicode letter to one letter. */
+export const foldStatisticsWord = (word: string): string =>
+  word.normalize("NFKC").toLowerCase().replace(/(\p{L})\1+/gu, "$1");
+
+export interface StatisticsWordToken {
+  count: number;
+  displayWord: string;
+}
+
+/** Tokenises one message while retaining its first observed spelling for the stream's display tracker. */
+export const tokenizeStatisticsWordDetails = (textFragments: readonly string[]): Map<string, StatisticsWordToken> => {
+  const words = new Map<string, StatisticsWordToken>();
   fragments: for (const fragment of textFragments) {
-    const text = fragment.normalize("NFKC").toLowerCase()
+    const text = fragment.normalize("NFKC")
       .replace(/(?:https?:\/\/|www\.)[^\s]+/gu, " ")
       .replace(/@[\p{L}\p{M}\p{N}_-]+/gu, " ")
       .replace(/:[\p{L}\p{M}\p{N}_+-]+:/gu, " ");
@@ -74,14 +89,27 @@ export const tokenizeStatisticsWords = (textFragments: readonly string[]): Map<s
       if (trimmed.length === 0 || /[./]/u.test(trimmed)) continue;
       for (const token of trimmed.match(/(?:\p{L}[\p{L}\p{M}\p{N}]*|\p{N}+)/gu) ?? []) {
         const length = Array.from(token).length;
-        if (length < 3 || length > STATISTICS_WORD_TOKEN_LENGTH_LIMIT ||
-            /^\p{N}+$/u.test(token) || STATISTICS_STOP_WORDS.has(token) || counts.has(token)) continue;
-        if (counts.size === STATISTICS_WORD_MESSAGE_DISTINCT_LIMIT) break fragments;
-        counts.set(token, 1);
+        const word = foldStatisticsWord(token);
+        if (length < 3 || length > STATISTICS_WORD_TOKEN_LENGTH_LIMIT || Array.from(word).length < 3 ||
+            /^\p{N}+$/u.test(token) || STATISTICS_FOLDED_STOP_WORDS.has(word) || words.has(word)) continue;
+        if (words.size === STATISTICS_WORD_MESSAGE_DISTINCT_LIMIT) break fragments;
+        words.set(word, { count: 1, displayWord: token });
       }
     }
   }
-  return counts;
+  return words;
+};
+
+/** Tokenises text for the anonymous per-stream word-frequency baseline. */
+export const tokenizeStatisticsWords = (textFragments: readonly string[]): Map<string, number> =>
+  new Map([...tokenizeStatisticsWordDetails(textFragments)].map(([word, token]) => [word, token.count]));
+
+/** Commands and known chat bots stay in activity totals but do not contribute word counts. */
+export const statisticsWordsExcluded = (payload: Readonly<Record<string, unknown>>): boolean => {
+  const message = recordValue(payload.message);
+  if (typeof message?.text === "string" && message.text.startsWith("!")) return true;
+  return typeof payload.chatter_user_login === "string" &&
+    STATISTICS_CHAT_BOT_LOGINS.has(payload.chatter_user_login.toLowerCase());
 };
 
 export const countStatisticsEmotes = (payload: Readonly<Record<string, unknown>>): number => {
