@@ -403,11 +403,6 @@ describe("statistics windows in the channel object", () => {
         streamId,
       );
       expect(state.storage.sql.exec<{ name: string }>(
-        `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (
-           'statistics_word_spellings', 'statistics_word_stream_spellings'
-         )`,
-      ).toArray()).toEqual([]);
-      expect(state.storage.sql.exec<{ name: string }>(
         `SELECT name FROM pragma_table_info('statistics_word_counts') WHERE name = 'display_word'`,
       ).toArray()).toEqual([]);
       expect(state.storage.sql.exec<{ name: string }>(
@@ -456,8 +451,45 @@ describe("statistics windows in the channel object", () => {
         { word: "bak", display_word: "baaaak", count: 8, last_seen_at: "2026-10-25T12:01:00.000Z" },
         { word: "fak", display_word: "faaak", count: 8, last_seen_at: "2026-10-25T12:02:00.000Z" },
       ],
-      version: 3,
+      version: 2,
     });
+  });
+
+  it("sums each legacy spelling across batches before choosing the display spelling", async () => {
+    const channelId = "statistics-word-summed-upgrade";
+    await insertPointChannel(channelId);
+    const stub = statisticsObject(channelId);
+    const streamId = "word-stream-summed-upgrade";
+    await runInDurableObject(stub, (_object, state) => {
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_counts (
+          stream_id TEXT NOT NULL, batch INTEGER NOT NULL, word TEXT NOT NULL, count INTEGER NOT NULL,
+          last_seen_at TEXT NOT NULL, last_increment_at INTEGER NOT NULL,
+          PRIMARY KEY (stream_id, batch, word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_seen (
+          stream_id TEXT NOT NULL, word TEXT NOT NULL, PRIMARY KEY (stream_id, word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO statistics_word_counts VALUES
+           (?, 1, 'faaak', 4, '2026-10-25T12:00:00.000Z', 1),
+           (?, 1, 'fak', 5, '2026-10-25T12:00:00.000Z', 2),
+           (?, 2, 'faaak', 4, '2026-10-25T12:01:00.000Z', 3)`,
+        streamId,
+        streamId,
+        streamId,
+      );
+    });
+
+    await (stub as unknown as StatisticsWordObject).readStatisticsWordCounts(streamId);
+    await expect(runInDurableObject(stub, (_object, state) => state.storage.sql.exec<{
+      word: string; display_word: string; count: number;
+    }>(
+      "SELECT word, display_word, count FROM statistics_word_stream_totals WHERE stream_id = ?", streamId,
+    ).toArray())).resolves.toEqual([{ word: "fak", display_word: "faaak", count: 13 }]);
   });
 
   it("treats a word buffered after the alarm's flush as fresh activity before sealing a bucket", async () => {

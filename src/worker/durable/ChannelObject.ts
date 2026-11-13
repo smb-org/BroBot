@@ -424,7 +424,7 @@ const STATISTICS_WORD_STREAM_TABLE = "statistics_word_streams";
 const STATISTICS_CLIP_IMPORT_TABLE = "statistics_clip_imports";
 const STATISTICS_WORD_COUNT_TABLE = "statistics_word_counts";
 const STATISTICS_WORD_SEEN_TABLE = "statistics_word_seen";
-const STATISTICS_WORD_SCHEMA_VERSION = 3;
+const STATISTICS_WORD_SCHEMA_VERSION = 2;
 const STATISTICS_WINDOW_RETENTION_MS = 60 * 60 * 1_000;
 const EVENTSUB_MESSAGE_ID_TABLE = "eventsub_message_ids";
 const EVENTSUB_MESSAGE_ID_RETENTION_MS = EVENTSUB_REPLAY_WINDOW_MILLISECONDS + 2 * EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS;
@@ -1531,19 +1531,28 @@ export class ChannelObject extends DurableObject<Env> {
             this.ctx.storage.sql.exec(insertSql, JSON.stringify(rows.slice(offset, offset + 100)));
           }
         };
-        const pickDisplay = (current: { displayWord: string; displayCount: number }, candidate: string, count: number): void => {
-          if (count > current.displayCount || count === current.displayCount && candidate < current.displayWord) {
-            current.displayWord = candidate;
-            current.displayCount = count;
+        // Sums each original spelling over all rows it appears in; the display
+        // spelling is chosen only afterwards (highest sum, ties: smallest).
+        const addVariant = (current: { variants: Map<string, number> }, candidate: string, count: number): void => {
+          current.variants.set(candidate, (current.variants.get(candidate) ?? 0) + count);
+        };
+        const displayOf = (current: { variants: Map<string, number> }): string => {
+          let best = "";
+          let bestCount = 0;
+          for (const [candidate, count] of current.variants) {
+            if (count > bestCount || count === bestCount && candidate < best) {
+              best = candidate;
+              bestCount = count;
+            }
           }
+          return best;
         };
         type FoldedWord = {
           streamId: string;
           word: string;
           count: number;
           lastSeenAt: string;
-          displayWord: string;
-          displayCount: number;
+          variants: Map<string, number>;
         };
         const buckets = new Map<string, FoldedWord & { batch: number; lastIncrementAt: number }>();
         const totalsFromCounts = new Map<string, FoldedWord>();
@@ -1568,13 +1577,12 @@ export class ChannelObject extends DurableObject<Env> {
             count: 0,
             lastSeenAt: row.last_seen_at,
             lastIncrementAt: row.last_increment_at,
-            displayWord,
-            displayCount: 0,
+            variants: new Map<string, number>(),
           };
           bucket.count += row.count;
           if (bucket.lastSeenAt < row.last_seen_at) bucket.lastSeenAt = row.last_seen_at;
           bucket.lastIncrementAt = Math.max(bucket.lastIncrementAt, row.last_increment_at);
-          pickDisplay(bucket, displayWord, row.count);
+          addVariant(bucket, displayWord, row.count);
           buckets.set(bucketKey, bucket);
 
           const totalKey = JSON.stringify([row.stream_id, word]);
@@ -1583,12 +1591,11 @@ export class ChannelObject extends DurableObject<Env> {
             word,
             count: 0,
             lastSeenAt: row.last_seen_at,
-            displayWord,
-            displayCount: 0,
+            variants: new Map<string, number>(),
           };
           total.count += row.count;
           if (total.lastSeenAt < row.last_seen_at) total.lastSeenAt = row.last_seen_at;
-          pickDisplay(total, displayWord, row.count);
+          addVariant(total, displayWord, row.count);
           totalsFromCounts.set(totalKey, total);
         }
         replaceRows(
@@ -1600,8 +1607,14 @@ export class ChannelObject extends DurableObject<Env> {
                   json_extract(value, '$.lastSeenAt'), CAST(json_extract(value, '$.lastIncrementAt') AS INTEGER),
                   json_extract(value, '$.displayWord')
              FROM json_each(?) WHERE 1`,
-          [...buckets.values()].map(({ streamId, batch, word, count, lastSeenAt, lastIncrementAt, displayWord }) => ({
-            streamId, batch, word, count, lastSeenAt, lastIncrementAt, displayWord,
+          [...buckets.values()].map((bucket) => ({
+            streamId: bucket.streamId,
+            batch: bucket.batch,
+            word: bucket.word,
+            count: bucket.count,
+            lastSeenAt: bucket.lastSeenAt,
+            lastIncrementAt: bucket.lastIncrementAt,
+            displayWord: displayOf(bucket),
           })),
         );
 
@@ -1641,12 +1654,11 @@ export class ChannelObject extends DurableObject<Env> {
             word,
             count: 0,
             lastSeenAt: row.last_seen_at,
-            displayWord,
-            displayCount: 0,
+            variants: new Map<string, number>(),
           };
           current.count += row.count;
           if (current.lastSeenAt < row.last_seen_at) current.lastSeenAt = row.last_seen_at;
-          pickDisplay(current, displayWord, row.count);
+          addVariant(current, displayWord, row.count);
           totals.set(key, current);
         }
         for (const [key, total] of totalsFromCounts) {
@@ -1659,13 +1671,15 @@ export class ChannelObject extends DurableObject<Env> {
                   CAST(json_extract(value, '$.count') AS INTEGER), json_extract(value, '$.lastSeenAt'),
                   json_extract(value, '$.displayWord')
              FROM json_each(?) WHERE 1`,
-          [...totals.values()].map(({ streamId, word, count, lastSeenAt, displayWord }) => ({
-            streamId, word, count, lastSeenAt, displayWord,
+          [...totals.values()].map((total) => ({
+            streamId: total.streamId,
+            word: total.word,
+            count: total.count,
+            lastSeenAt: total.lastSeenAt,
+            displayWord: displayOf(total),
           })),
         );
 
-        this.ctx.storage.sql.exec("DROP TABLE IF EXISTS statistics_word_spellings");
-        this.ctx.storage.sql.exec("DROP TABLE IF EXISTS statistics_word_stream_spellings");
         this.ctx.storage.sql.exec(
           "INSERT OR IGNORE INTO statistics_word_schema_version (version) VALUES (?)",
           STATISTICS_WORD_SCHEMA_VERSION,
