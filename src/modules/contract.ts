@@ -963,7 +963,12 @@ export interface ModuleStatisticsWordCount {
   word: string;
   count: number;
   lastSeenAt: string;
-  displayWord?: string;
+  spellings: readonly { spelling: string; count: number }[];
+}
+
+export interface ModuleStatisticsPreparedWordBucket {
+  words: readonly ModuleStatisticsWordCount[];
+  pruneRareWords: boolean;
 }
 
 export interface ModuleStatisticsWordBucket {
@@ -1052,7 +1057,7 @@ interface ModuleStatisticsChat {
     streamState: ModuleStatisticsStreamState,
     streamId: string | null,
     idleBefore: number,
-  ) => Promise<readonly ModuleStatisticsWordCount[]>;
+  ) => Promise<ModuleStatisticsPreparedWordBucket | null>;
   deleteWordBucket: (bucket: ModuleStatisticsWordBucket) => Promise<void>;
   pruneExpiredWordStreams: (now: number) => Promise<void>;
   hasWordStreams: () => Promise<boolean>;

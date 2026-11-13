@@ -86,29 +86,37 @@ describe("statistics word baseline merge", () => {
     const channelId = "word-baseline-fold-legacy";
     await insertChannel(database, channelId);
     await database.prepare(
-      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
-       VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)`,
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+       VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)`,
     ).bind(
-      channelId, "faaak", "faaak", 2, "2026-10-25T12:00:00.000Z",
-      channelId, "faak", "faak", 3, "2026-10-25T12:01:00.000Z",
-      channelId, "fak", "fak", 1, "2026-10-25T12:02:00.000Z",
-      channelId, "rareword", "rareword", 1, "2026-10-17T12:02:00.000Z",
+      channelId, "faaak", 5, "2026-10-25T12:00:00.000Z",
+      channelId, "fak", 2, "2026-10-25T12:01:00.000Z",
+      channelId, "rareword", 1, "2026-10-17T12:02:00.000Z",
+      channelId, "unusedword", 1, "2026-10-17T12:02:00.000Z",
     ).run();
 
     await mergeStatisticsWordBatch(database as unknown as D1Database, channelId, "fold-stream", 1, [
-      { word: "fak", displayWord: "FAAAK", count: 3, lastSeenAt: "2026-10-25T12:05:00.000Z" },
-      { word: "freshword", displayWord: "freshword", count: 1, lastSeenAt: "2026-10-25T12:05:00.000Z" },
-    ], "2026-10-25T12:06:00.000Z");
+      { word: "fak", spellings: [{ spelling: "FAAAK", count: 3 }], count: 3, lastSeenAt: "2026-10-25T12:05:00.000Z" },
+      { word: "freshword", spellings: [{ spelling: "freshword", count: 1 }], count: 1, lastSeenAt: "2026-10-25T12:05:00.000Z" },
+    ], "2026-10-25T12:06:00.000Z", true);
     await mergeStatisticsWordBatch(database as unknown as D1Database, channelId, "fold-stream", 1, [
-      { word: "fak", displayWord: "FAAAK", count: 3, lastSeenAt: "2026-10-25T12:05:00.000Z" },
+      { word: "fak", spellings: [{ spelling: "FAAAK", count: 3 }], count: 3, lastSeenAt: "2026-10-25T12:05:00.000Z" },
     ], "2026-10-25T12:07:00.000Z");
 
     await expect(database.prepare(
-      `SELECT word, display_word, total_count FROM channel_word_frequency_baseline
+      `SELECT word, total_count FROM channel_word_frequency_baseline
         WHERE channel_id = ? ORDER BY word`,
     ).bind(channelId).all()).resolves.toMatchObject({ results: [
-      { word: "fak", display_word: "faak", total_count: 9 },
+      { word: "fak", total_count: 10 },
       { word: "freshword", total_count: 1 },
+    ] });
+    await expect(database.prepare(
+      `SELECT spelling, count FROM channel_word_spellings
+        WHERE channel_id = ? AND word = 'fak' ORDER BY count DESC, spelling ASC`,
+    ).bind(channelId).all()).resolves.toMatchObject({ results: [
+      { spelling: "faaak", count: 5 },
+      { spelling: "FAAAK", count: 3 },
+      { spelling: "fak", count: 2 },
     ] });
   });
 
@@ -117,14 +125,14 @@ describe("statistics word baseline merge", () => {
     const channelId = "word-baseline-prune-rare";
     await insertChannel(database, channelId);
     await database.prepare(
-      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
-       VALUES (?, 'oldrare', 'oldrare', 2, '2026-10-17T12:00:00.000Z')`,
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+       VALUES (?, 'oldrare', 2, '2026-10-17T12:00:00.000Z')`,
     ).bind(channelId).run();
 
     await mergeStatisticsWordBatch(database as unknown as D1Database, channelId, "prune-stream", 1, [
-      { word: "newrare", displayWord: "newrare", count: 2, lastSeenAt: "2026-10-25T12:05:00.000Z" },
-      { word: "keptword", displayWord: "keptword", count: 3, lastSeenAt: "2026-10-25T12:05:00.000Z" },
-    ], "2026-10-25T12:06:00.000Z");
+      { word: "newrare", spellings: [{ spelling: "newrare", count: 2 }], count: 2, lastSeenAt: "2026-10-25T12:05:00.000Z" },
+      { word: "keptword", spellings: [{ spelling: "keptword", count: 3 }], count: 3, lastSeenAt: "2026-10-25T12:05:00.000Z" },
+    ], "2026-10-25T12:06:00.000Z", true);
 
     await expect(database.prepare(
       "SELECT word FROM channel_word_frequency_baseline WHERE channel_id = ? ORDER BY word",
@@ -137,10 +145,10 @@ describe("statistics word baseline merge", () => {
     await insertChannel(database, channelId);
 
     await mergeStatisticsWordBatch(database as unknown as D1Database, channelId, "same-stream", 1, [
-      { word: "bonjour", count: 2, lastSeenAt: "2026-10-25T12:00:00.000Z" },
+      { word: "bonjour", count: 2, lastSeenAt: "2026-10-25T12:00:00.000Z", spellings: [{ spelling: "bonjour", count: 2 }] },
     ], "2026-10-25T12:05:00.000Z");
     await mergeStatisticsWordBatch(database as unknown as D1Database, channelId, "same-stream", 2, [
-      { word: "bonjour", count: 2, lastSeenAt: "2026-10-25T12:10:00.000Z" },
+      { word: "bonjour", count: 2, lastSeenAt: "2026-10-25T12:10:00.000Z", spellings: [{ spelling: "bonjour", count: 2 }] },
     ], "2026-10-25T12:15:00.000Z");
 
     await expect(database.prepare(
@@ -161,8 +169,8 @@ describe("statistics word baseline merge", () => {
       "current-live-stream",
     );
     await database.prepare(
-      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
-       VALUES (?, 'liveword', 'liveword', 2, '2026-10-25T11:30:00.000Z')`,
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+       VALUES (?, 'liveword', 2, '2026-10-25T11:30:00.000Z')`,
     ).bind(channelId).run();
 
     await expect(mergeStatisticsWordBatch(
@@ -179,42 +187,89 @@ describe("statistics word baseline merge", () => {
     ).bind(channelId).first()).resolves.toEqual({ total_count: 2 });
   });
 
-  it("keeps the baseline spelling when a less common spelling appears in a later batch", async () => {
+  it("adds exact spelling counts across batches so a repeated challenger becomes the winner", async () => {
     const database = new TestD1Database();
-    const channelId = "word-baseline-display-count";
+    const channelId = "word-baseline-spelling-challenger";
     await insertChannel(database, channelId);
     await database.prepare(
       `INSERT INTO channel_word_frequency_baseline
-         (channel_id, word, display_word, display_count, total_count, last_seen_at)
-       VALUES (?, 'bonjour', 'Bonjour', 100, 100, '2026-10-25T12:00:00.000Z')`,
+         (channel_id, word, total_count, last_seen_at)
+       VALUES (?, 'bonjour', 10, '2026-10-25T12:00:00.000Z')`,
+    ).bind(channelId).run();
+    await database.prepare(
+      "INSERT INTO channel_word_frequency_baseline_folded (channel_id, folded_at) VALUES (?, '2026-10-25T12:00:00.000Z')",
+    ).bind(channelId).run();
+    await database.prepare(
+      "INSERT INTO channel_word_spellings (channel_id, word, spelling, count) VALUES (?, 'bonjour', 'Bonjour', 10)",
     ).bind(channelId).run();
 
-    await mergeStatisticsWordBatch(database as unknown as D1Database, channelId, "display-stream", 1, [
-      { word: "bonjour", displayWord: "BONJOUR", count: 3, lastSeenAt: "2026-10-25T12:05:00.000Z" },
+    await mergeStatisticsWordBatch(database as unknown as D1Database, channelId, "spelling-stream", 1, [
+      { word: "bonjour", spellings: [{ spelling: "BONJOUR", count: 6 }], count: 6, lastSeenAt: "2026-10-25T12:05:00.000Z" },
     ], "2026-10-25T12:06:00.000Z");
+    await mergeStatisticsWordBatch(database as unknown as D1Database, channelId, "spelling-stream", 2, [
+      { word: "bonjour", spellings: [{ spelling: "BONJOUR", count: 6 }], count: 6, lastSeenAt: "2026-10-25T12:10:00.000Z" },
+    ], "2026-10-25T12:11:00.000Z");
 
     await expect(database.prepare(
-      "SELECT display_word, display_count FROM channel_word_frequency_baseline WHERE channel_id = ? AND word = 'bonjour'",
-    ).bind(channelId).first()).resolves.toEqual({ display_word: "Bonjour", display_count: 100 });
+      `SELECT spelling, count FROM channel_word_spellings
+        WHERE channel_id = ? AND word = 'bonjour' ORDER BY count DESC, spelling ASC`,
+    ).bind(channelId).all()).resolves.toMatchObject({ results: [
+      { spelling: "BONJOUR", count: 12 },
+      { spelling: "Bonjour", count: 10 },
+    ] });
   });
 
-  it("adds matching spelling counts to the baseline display count", async () => {
+  it("persists every spelling counter from one mixed-spelling batch", async () => {
     const database = new TestD1Database();
-    const channelId = "word-baseline-display-count-match";
+    const channelId = "word-baseline-mixed-spellings";
     await insertChannel(database, channelId);
-    await database.prepare(
-      `INSERT INTO channel_word_frequency_baseline
-         (channel_id, word, display_word, display_count, total_count, last_seen_at)
-       VALUES (?, 'bonjour', 'Bonjour', 100, 100, '2026-10-25T12:00:00.000Z')`,
-    ).bind(channelId).run();
-
-    await mergeStatisticsWordBatch(database as unknown as D1Database, channelId, "display-stream", 1, [
-      { word: "bonjour", displayWord: "Bonjour", count: 5, lastSeenAt: "2026-10-25T12:05:00.000Z" },
+    await mergeStatisticsWordBatch(database as unknown as D1Database, channelId, "mixed-stream", 1, [
+      {
+        word: "bonjour",
+        spellings: [{ spelling: "Bonjour", count: 2 }, { spelling: "BONJOUR", count: 3 }],
+        count: 5,
+        lastSeenAt: "2026-10-25T12:05:00.000Z",
+      },
     ], "2026-10-25T12:06:00.000Z");
 
     await expect(database.prepare(
-      "SELECT display_word, display_count FROM channel_word_frequency_baseline WHERE channel_id = ? AND word = 'bonjour'",
-    ).bind(channelId).first()).resolves.toEqual({ display_word: "Bonjour", display_count: 105 });
+      `SELECT spelling, count FROM channel_word_spellings
+        WHERE channel_id = ? AND word = 'bonjour' ORDER BY spelling ASC`,
+    ).bind(channelId).all()).resolves.toMatchObject({ results: [
+      { spelling: "BONJOUR", count: 3 },
+      { spelling: "Bonjour", count: 2 },
+    ] });
+  });
+
+  it("keeps only the four most frequent baseline spellings with alphabetical tie breaks", async () => {
+    const database = new TestD1Database();
+    const channelId = "word-baseline-spelling-cap";
+    await insertChannel(database, channelId);
+
+    await mergeStatisticsWordBatch(database as unknown as D1Database, channelId, "spelling-cap-stream", 1, [
+      {
+        word: "bonjour",
+        spellings: [
+          { spelling: "A", count: 4 },
+          { spelling: "B", count: 4 },
+          { spelling: "C", count: 3 },
+          { spelling: "D", count: 2 },
+          { spelling: "E", count: 1 },
+        ],
+        count: 14,
+        lastSeenAt: "2026-10-25T12:05:00.000Z",
+      },
+    ], "2026-10-25T12:06:00.000Z");
+
+    await expect(database.prepare(
+      `SELECT spelling, count FROM channel_word_spellings
+        WHERE channel_id = ? AND word = 'bonjour' ORDER BY count DESC, spelling ASC`,
+    ).bind(channelId).all()).resolves.toMatchObject({ results: [
+      { spelling: "A", count: 4 },
+      { spelling: "B", count: 4 },
+      { spelling: "C", count: 3 },
+      { spelling: "D", count: 2 },
+    ] });
   });
 
   it("does not double-count a batch when D1 committed but the response was lost", async () => {
@@ -301,6 +356,10 @@ describe("statistics word baseline merge", () => {
          (channel_id, word, total_count, last_seen_at)
        SELECT ?, 'word' || printf('%05d', value), value + 1, '2026-10-25T12:00:00.000Z' FROM sequence`,
     ).bind("word-baseline-channel-cap").run();
+    await database.prepare(
+      `INSERT INTO channel_word_spellings (channel_id, word, spelling, count)
+       VALUES (?, 'word00000', 'Word00000', 1)`,
+    ).bind("word-baseline-channel-cap").run();
 
     await mergeStatisticsWordBatch(
       database as unknown as D1Database,
@@ -317,6 +376,9 @@ describe("statistics word baseline merge", () => {
     await expect(database.prepare(
       "SELECT word FROM channel_word_frequency_baseline WHERE channel_id = ? AND word = ?",
     ).bind("word-baseline-channel-cap", "word00000").first()).resolves.toBeNull();
+    await expect(database.prepare(
+      "SELECT spelling FROM channel_word_spellings WHERE channel_id = ? AND word = 'word00000'",
+    ).bind("word-baseline-channel-cap").first()).resolves.toBeNull();
     await expect(database.prepare(
       "SELECT total_count FROM channel_word_frequency_baseline WHERE channel_id = ? AND word = ?",
     ).bind("word-baseline-channel-cap", "freshword").first()).resolves.toEqual({ total_count: 10 });

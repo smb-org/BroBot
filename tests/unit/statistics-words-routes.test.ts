@@ -117,13 +117,27 @@ describe("statistics words route", () => {
     expect(body).toMatchObject({ total: 1, words: [{ word: "hallway", rank: 1 }] });
   });
 
+  it("shows the original word of a baseline row without spelling rows", async () => {
+    const { database, fetch } = await setup();
+    await putWord(database, "halloween", 12);
+
+    const response = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words`);
+    const body = await response.json<{ words: Array<{ word: string; count: number }> }>();
+
+    expect(body.words).toMatchObject([{ word: "halloween", count: 12 }]);
+  });
+
   it("folds repeated letters in search and returns the selected display spelling", async () => {
     const { database, fetch } = await setup();
     await database.prepare(
-      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
-       VALUES (?, 'faaak', 'Faaak', 2, '2026-10-25T12:00:00.000Z'),
-              (?, 'faak', 'Faak', 3, '2026-10-25T12:01:00.000Z'),
-              (?, 'fak', 'fak', 1, '2026-10-25T12:02:00.000Z')`,
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+       VALUES (?, 'faaak', 2, '2026-10-25T12:00:00.000Z'),
+              (?, 'faak', 3, '2026-10-25T12:01:00.000Z'),
+              (?, 'fak', 1, '2026-10-25T12:02:00.000Z')`,
+    ).bind(CHANNEL_ID, CHANNEL_ID, CHANNEL_ID).run();
+    await database.prepare(
+      `INSERT INTO channel_word_spellings (channel_id, word, spelling, count)
+       VALUES (?, 'faaak', 'Faaak', 2), (?, 'faak', 'Faak', 3), (?, 'fak', 'fak', 1)`,
     ).bind(CHANNEL_ID, CHANNEL_ID, CHANNEL_ID).run();
 
     const response = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words?search=FAAAAK`);
@@ -146,8 +160,11 @@ describe("statistics words route", () => {
       `INSERT INTO channel_modules (channel_id, module_id, settings) VALUES (?, 'statistics', ?)`,
     ).bind(CHANNEL_ID, JSON.stringify({ ignoredWords: ["FAAAK"] })).run();
     await database.prepare(
-      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
-       VALUES (?, 'faaak', 'Faaak', 5, '2026-10-25T12:00:00.000Z')`,
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+       VALUES (?, 'faaak', 5, '2026-10-25T12:00:00.000Z')`,
+    ).bind(CHANNEL_ID).run();
+    await database.prepare(
+      "INSERT INTO channel_word_spellings (channel_id, word, spelling, count) VALUES (?, 'faaak', 'Faaak', 5)",
     ).bind(CHANNEL_ID).run();
 
     const hiddenResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words`);
@@ -164,13 +181,18 @@ describe("statistics words route", () => {
   it("keeps ignored words as typed and still hides rows by their folded key", async () => {
     const { database, fetch } = await setup();
     expect(statisticsSettingsSchema.parse({ ignoredWords: ["GG", "g", "xdd", " Lol "] }).ignoredWords).toEqual(["gg", "xdd", "lol"]);
+    const expandedLigature = statisticsSettingsSchema.safeParse({ ignoredWords: ["ﬃ".repeat(14)] });
+    expect(expandedLigature.success).toBe(false);
+    const normalizedWords = statisticsSettingsSchema.parse({ ignoredWords: ["ﬃ".repeat(13)] });
+    expect(statisticsSettingsSchema.parse(normalizedWords)).toEqual(normalizedWords);
+    expect(normalizedWords.ignoredWords).toEqual(["ffi".repeat(13)]);
     await database.prepare(
       `INSERT INTO channel_modules (channel_id, module_id, settings) VALUES (?, 'statistics', ?)`,
     ).bind(CHANNEL_ID, JSON.stringify({ ignoredWords: ["xdd", "gg"] })).run();
     await database.prepare(
-      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
-       VALUES (?, 'xd', 'xd', 5, '2026-10-25T12:00:00.000Z'), (?, 'g', 'g', 4, '2026-10-25T12:00:00.000Z'),
-              (?, 'keep', 'keep', 3, '2026-10-25T12:00:00.000Z')`,
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+       VALUES (?, 'xd', 5, '2026-10-25T12:00:00.000Z'), (?, 'g', 4, '2026-10-25T12:00:00.000Z'),
+              (?, 'keep', 3, '2026-10-25T12:00:00.000Z')`,
     ).bind(CHANNEL_ID, CHANNEL_ID, CHANNEL_ID).run();
 
     const response = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words`);
@@ -185,8 +207,11 @@ describe("statistics words route", () => {
       `INSERT INTO channel_modules (channel_id, module_id, settings) VALUES (?, 'statistics', ?)`,
     ).bind(CHANNEL_ID, JSON.stringify({ ignoredWords: ["fak"] })).run();
     await database.prepare(
-      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
-       VALUES (?, 'fak', 'FAAAK', 8, '2026-10-25T12:00:00.000Z')`,
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+       VALUES (?, 'fak', 8, '2026-10-25T12:00:00.000Z')`,
+    ).bind(CHANNEL_ID).run();
+    await database.prepare(
+      "INSERT INTO channel_word_spellings (channel_id, word, spelling, count) VALUES (?, 'fak', 'FAAAK', 8)",
     ).bind(CHANNEL_ID).run();
 
     const hiddenResponse = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words?search=FAAAK`);
@@ -202,11 +227,13 @@ describe("statistics words route", () => {
 
   it("separates stream totals from baseline totals across merged and pending batches", async () => {
     const streamId = "statistics-words-live-stream";
-    const firstStreamWord = { word: "helo", displayWord: "HELLO", count: 5, lastSeenAt: "2026-10-25T12:00:00.000Z" };
+    const firstStreamWord = {
+      word: "helo", spellings: [{ spelling: "HELLO", count: 5 }], count: 5, lastSeenAt: "2026-10-25T12:00:00.000Z",
+    };
     const streamWords = [
       firstStreamWord,
-      { word: "helo", displayWord: "hello", count: 3, lastSeenAt: "2026-10-25T12:01:00.000Z" },
-      { word: "streamword", displayWord: "BatchWord", count: 2, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+      { word: "helo", spellings: [{ spelling: "hello", count: 3 }], count: 3, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+      { word: "streamword", spellings: [{ spelling: "BatchWord", count: 2 }], count: 2, lastSeenAt: "2026-10-25T12:01:00.000Z" },
     ];
     const channelObject = {
       readStatisticsWordCountsByBatch: () => Promise.resolve([
@@ -216,17 +243,21 @@ describe("statistics words route", () => {
       readStatisticsWordStreamCounts: () => Promise.resolve({
         streamId,
         words: [
-          { word: "helo", displayWord: "HELLO", count: 8, lastSeenAt: "2026-10-25T12:01:00.000Z" },
-          { word: "streamword", displayWord: "StreamWord", count: 2, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+          { word: "helo", displayWord: "HELLO", spellings: [{ spelling: "HELLO", count: 5 }, { spelling: "hello", count: 3 }], count: 8, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+          { word: "streamword", displayWord: "StreamWord", spellings: [{ spelling: "StreamWord", count: 2 }], count: 2, lastSeenAt: "2026-10-25T12:01:00.000Z" },
         ],
       }),
     };
     const { database, fetch } = await setup(true, (inner) => inner as unknown as D1Database, channelObject);
     await writeEventSubStreamState(database as unknown as D1Database, CHANNEL_ID, "online", "2026-10-25T12:00:00.000Z", "2026-10-25T12:00:00.000Z", streamId);
     await database.prepare(
-      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
-       VALUES (?, 'helo', 'hello', 7, '2026-10-25T11:00:00.000Z'),
-              (?, 'baseword', 'baseword', 4, '2026-10-25T11:00:00.000Z')`,
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+       VALUES (?, 'helo', 7, '2026-10-25T11:00:00.000Z'),
+              (?, 'baseword', 4, '2026-10-25T11:00:00.000Z')`,
+    ).bind(CHANNEL_ID, CHANNEL_ID).run();
+    await database.prepare(
+      `INSERT INTO channel_word_spellings (channel_id, word, spelling, count)
+       VALUES (?, 'helo', 'hello', 7), (?, 'baseword', 'baseword', 4)`,
     ).bind(CHANNEL_ID, CHANNEL_ID).run();
 
     const withBothBatches = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words?scope=total`);
@@ -242,12 +273,12 @@ describe("statistics words route", () => {
 
     expect(both.words).toEqual(expect.arrayContaining([
       expect.objectContaining({ word: "hello", count: 15 }),
-      expect.objectContaining({ word: "StreamWord", count: 2 }),
+      expect.objectContaining({ word: "BatchWord", count: 2 }),
     ]));
     expect(both.totalCount).toBe(21);
     expect(total.words).toEqual(expect.arrayContaining([
       expect.objectContaining({ word: "hello", count: 10 }),
-      expect.objectContaining({ word: "StreamWord", count: 2 }),
+      expect.objectContaining({ word: "BatchWord", count: 2 }),
     ]));
     expect(total.totalCount).toBe(16);
     expect(stream.words).toEqual(expect.arrayContaining([
@@ -255,6 +286,34 @@ describe("statistics words route", () => {
       expect.objectContaining({ word: "StreamWord", count: 2 }),
     ]));
     expect(stream.totalCount).toBe(10);
+  });
+
+  it("shows a pending spelling when its count overtakes the baseline spelling", async () => {
+    const pending = {
+      word: "bonjour",
+      spellings: [{ spelling: "BONJOUR", count: 100 }],
+      count: 100,
+      lastSeenAt: "2026-10-25T12:01:00.000Z",
+    };
+    const channelObject = {
+      readStatisticsWordCountsByBatch: () => Promise.resolve([{ batch: 1, words: [pending] }]),
+      readStatisticsWordStreamCounts: () => Promise.resolve({ streamId: "total-route-live", words: [pending] }),
+    };
+    const { database, fetch } = await setup(true, (inner) => inner as unknown as D1Database, channelObject);
+    await writeEventSubStreamState(database as unknown as D1Database, CHANNEL_ID, "online", "2026-10-25T12:00:00.000Z", "2026-10-25T12:00:00.000Z", "total-route-live");
+    await database.prepare(
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
+       VALUES (?, 'bonjour', 3, '2026-10-25T11:00:00.000Z')`,
+    ).bind(CHANNEL_ID).run();
+    await database.prepare(
+      `INSERT INTO channel_word_spellings (channel_id, word, spelling, count)
+       VALUES (?, 'bonjour', 'Bonjour', 3)`,
+    ).bind(CHANNEL_ID).run();
+
+    const response = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words?scope=total`);
+    const body = await response.json<{ words: Array<{ word: string; count: number }> }>();
+
+    expect(body.words).toEqual([{ rank: 1, word: "BONJOUR", count: 103, share: 1, lastSeenAt: "2026-10-25T12:01:00.000Z" }]);
   });
 
   it("hides additional chat fillers by default and includes them when requested", async () => {

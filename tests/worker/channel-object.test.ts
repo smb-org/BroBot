@@ -455,7 +455,7 @@ const objectFor = (
     if (/^\s*SELECT hmac FROM active_chatters\b/iu.test(query)) {
       return { toArray: () => [...chatterRows.values()].map(({ hmac }) => ({ hmac })), one: () => undefined };
     }
-    if (/^\s*(?:INSERT OR IGNORE INTO|UPDATE) statistics_word_streams\b|^\s*SELECT distinct_words, expires_at FROM statistics_word_streams\b/iu.test(query)) {
+    if (/^\s*(?:INSERT OR IGNORE INTO|UPDATE) statistics_word_streams\b|^\s*SELECT distinct_words, expires_at(?:, current_batch)? FROM statistics_word_streams\b/iu.test(query)) {
       return { toArray: () => [], one: () => undefined };
     }
     if (/^\s*SELECT version FROM statistics_word_schema_version\b/iu.test(query)) {

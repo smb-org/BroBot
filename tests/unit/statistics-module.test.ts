@@ -127,9 +127,15 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       streamId: string | null, idleBefore: number) => {
       const stream = wordStreams.get(bucket.streamId);
       if (stream === undefined || streamState !== "offline" && bucket.streamId === streamId ||
-          (stream.lastIncrementAt ?? Date.parse(WINDOW_END) - 15 * 60_000) > idleBefore) return Promise.resolve([]);
+          (stream.lastIncrementAt ?? Date.parse(WINDOW_END) - 15 * 60_000) > idleBefore) return Promise.resolve(null);
       if ((stream.batch ?? 1) === bucket.batch) stream.batch = bucket.batch + 1;
-      return Promise.resolve(stream.words.map((word) => ({ ...word })));
+      return Promise.resolve({
+        words: stream.words.map((word) => ({
+          ...word,
+          spellings: [{ spelling: word.word, count: word.count }],
+        })),
+        pruneRareWords: streamState === "offline",
+      });
     }),
     deleteWordBucket: vi.fn((bucket: { streamId: string; batch: number }) => {
       const stream = wordStreams.get(bucket.streamId);
@@ -702,11 +708,15 @@ describe("statistics window alarm", () => {
     chat.wordStreams.set(STREAM_ID, { words: [], endedAt: WINDOW_END, expiresAt: Date.parse(WINDOW_END) + 24 * 60 * 60_000 });
     const buckets = [{ streamId: STREAM_ID, batch: 1 }, { streamId: STREAM_ID, batch: 2 }];
     chat.calls.listMergeableWordBuckets.mockResolvedValue(buckets);
-    chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve([{
-      word: bucket.batch === 1 ? "firstword" : "laterword",
-      count: 3,
-      lastSeenAt: WINDOW_END,
-    }]));
+    chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve({
+      words: [{
+        word: bucket.batch === 1 ? "firstword" : "laterword",
+        spellings: [{ spelling: bucket.batch === 1 ? "firstword" : "laterword", count: 3 }],
+        count: 3,
+        lastSeenAt: WINDOW_END,
+      }],
+      pruneRareWords: false,
+    }));
     const { context } = createContext(database, chat);
     let batchCalls = 0;
     context.DB = {
@@ -741,11 +751,15 @@ describe("statistics window alarm", () => {
     chat.wordStreams.set(STREAM_ID, { words: [], endedAt: WINDOW_END, expiresAt: Date.parse(WINDOW_END) + 24 * 60 * 60_000 });
     const buckets = [{ streamId: STREAM_ID, batch: 1 }, { streamId: STREAM_ID, batch: 2 }];
     chat.calls.listMergeableWordBuckets.mockResolvedValue(buckets);
-    chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve([{
-      word: bucket.batch === 1 ? "firstword" : "laterword",
-      count: 1,
-      lastSeenAt: WINDOW_END,
-    }]));
+    chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve({
+      words: [{
+        word: bucket.batch === 1 ? "firstword" : "laterword",
+        spellings: [{ spelling: bucket.batch === 1 ? "firstword" : "laterword", count: 1 }],
+        count: 1,
+        lastSeenAt: WINDOW_END,
+      }],
+      pruneRareWords: false,
+    }));
     const { context } = createContext(database, chat);
     let attempts = 0;
     context.DB = {

@@ -65,25 +65,41 @@ interface BitrateWindowRow {
 
 interface WordFrequencyRow {
   word: string;
-  display_word: string;
   total_count: number;
   last_seen_at: string;
+}
+
+interface WordSpellingRow {
+  word: string;
+  spelling: string;
+  count: number;
+}
+
+interface StatisticsWordSpellingCount {
+  spelling: string;
+  count: number;
 }
 
 interface StatisticsWordObject {
   readStatisticsWordCountsByBatch: (streamId: string) => Promise<readonly {
     batch: number;
-    words: readonly { word: string; displayWord?: string; count: number; lastSeenAt: string }[];
+    words: readonly { word: string; spellings: readonly StatisticsWordSpellingCount[]; count: number; lastSeenAt: string }[];
   }[]>;
   readStatisticsWordStreamCounts: (streamId?: string) => Promise<{
     streamId: string;
-    words: readonly { word: string; displayWord?: string; count: number; lastSeenAt: string }[];
+    words: readonly {
+      word: string;
+      displayWord?: string;
+      spellings?: readonly StatisticsWordSpellingCount[];
+      count: number;
+      lastSeenAt: string;
+    }[];
   } | null>;
 }
 
 interface StatisticsWordBatchCounts {
   batch: number;
-  words: readonly { word: string; displayWord?: string; count: number; lastSeenAt: string }[];
+  words: readonly { word: string; spellings: readonly StatisticsWordSpellingCount[]; count: number; lastSeenAt: string }[];
 }
 
 const statisticsWindow = (row: StreamWindowRow): StatisticsStreamWindow => ({
@@ -341,14 +357,25 @@ statisticsRoutes.get("/words", async (context) => {
     }
   }
 
-  const counts = new Map<string, { displayWord: string; count: number; lastSeenAt: string }>();
-  const addWord = (word: string, displayWord: string, count: number, lastSeenAt: string, replaceDisplay: boolean): void => {
-    const current = counts.get(word);
-    counts.set(word, {
-      displayWord: replaceDisplay || current === undefined ? displayWord : current.displayWord,
-      count: (current?.count ?? 0) + count,
-      lastSeenAt: current === undefined || current.lastSeenAt < lastSeenAt ? lastSeenAt : current.lastSeenAt,
-    });
+  const counts = new Map<string, { spellings: Map<string, number>; count: number; lastSeenAt: string }>();
+  const addWord = (
+    word: string,
+    count: number,
+    lastSeenAt: string,
+    spellings: readonly StatisticsWordSpellingCount[] | undefined,
+    fallbackSpelling = word,
+  ): void => {
+    const current = counts.get(word) ?? { spellings: new Map<string, number>(), count: 0, lastSeenAt };
+    current.count += count;
+    if (current.lastSeenAt < lastSeenAt) current.lastSeenAt = lastSeenAt;
+    const variants = spellings?.filter(({ spelling, count: spellingCount }) =>
+      spelling.length > 0 && Number.isSafeInteger(spellingCount) && spellingCount > 0) ?? [];
+    for (const { spelling, count: spellingCount } of variants.length === 0
+      ? [{ spelling: fallbackSpelling, count }]
+      : variants) {
+      current.spellings.set(spelling, (current.spellings.get(spelling) ?? 0) + spellingCount);
+    }
+    counts.set(word, current);
   };
 
   if (query.data.scope === "stream") {
@@ -361,7 +388,8 @@ statisticsRoutes.get("/words", async (context) => {
       ? null
       : await channelObject.readStatisticsWordStreamCounts(streamState?.state === "online" ? streamState.stream_id ?? undefined : undefined);
     for (const row of stream?.words ?? []) {
-      addWord(row.word, row.displayWord ?? row.word, row.count, row.lastSeenAt, true);
+      addWord(foldStatisticsWord(row.word), row.count, row.lastSeenAt, row.spellings,
+        row.displayWord ?? foldStatisticsWord(row.word));
     }
   } else {
     const streamState = await context.env.DB.prepare(
@@ -369,47 +397,56 @@ statisticsRoutes.get("/words", async (context) => {
     ).bind(channelId).first<{ state: string; stream_id: string | null }>();
     const runningStreamId = streamState?.state === "online" ? streamState.stream_id : null;
     let pendingBatches: StatisticsWordBatchCounts[] = [];
-    let streamDisplayWords = new Map<string, string>();
     if (runningStreamId !== null) {
       const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)) as unknown as StatisticsWordObject;
       pendingBatches = [...await channelObject.readStatisticsWordCountsByBatch(runningStreamId)];
-      const stream = await channelObject.readStatisticsWordStreamCounts(runningStreamId);
-      streamDisplayWords = new Map((stream?.words ?? []).map(({ word, displayWord }) => [word, displayWord ?? word]));
     }
     const baselineStatement = context.env.DB.prepare(
-      `SELECT word, COALESCE(NULLIF(display_word, ''), word) AS display_word,
-              total_count, last_seen_at
+      `SELECT word, total_count, last_seen_at
          FROM channel_word_frequency_baseline WHERE channel_id = ?
         ORDER BY total_count DESC, word ASC`,
+    ).bind(channelId);
+    const baselineSpellingsStatement = context.env.DB.prepare(
+      `SELECT word, spelling, count FROM channel_word_spellings WHERE channel_id = ?`,
     ).bind(channelId);
     const mergedBatchStatement = runningStreamId === null ? null : context.env.DB.prepare(
       `SELECT batch FROM channel_word_frequency_streams
         WHERE channel_id = ? AND stream_id = ? AND merged_at IS NOT NULL`,
     ).bind(channelId, runningStreamId);
-    const [baselineResult, mergedBatchResult] = mergedBatchStatement === null
-      ? [await baselineStatement.all<WordFrequencyRow>(), null] as const
-      : await context.env.DB.batch([baselineStatement, mergedBatchStatement]) as [D1Result<WordFrequencyRow>, D1Result<{ batch: number }>];
-    const baselineWords = new Set<string>();
+    const readStatements = mergedBatchStatement === null
+      ? [baselineStatement, baselineSpellingsStatement]
+      : [baselineStatement, baselineSpellingsStatement, mergedBatchStatement];
+    const readResults = await context.env.DB.batch(readStatements);
+    const baselineResult = readResults[0] as D1Result<WordFrequencyRow>;
+    const baselineSpellingsResult = readResults[1] as D1Result<WordSpellingRow>;
+    const mergedBatchResult = mergedBatchStatement === null
+      ? null
+      : readResults[2] as D1Result<{ batch: number }>;
+    const baselineSpellingsByWord = new Map<string, StatisticsWordSpellingCount[]>();
+    for (const row of baselineSpellingsResult.results) {
+      const wordSpellings = baselineSpellingsByWord.get(row.word) ?? [];
+      wordSpellings.push({ spelling: row.spelling, count: row.count });
+      baselineSpellingsByWord.set(row.word, wordSpellings);
+    }
     for (const row of baselineResult.results) {
       const word = foldStatisticsWord(row.word);
-      baselineWords.add(word);
-      addWord(word, row.display_word, row.total_count, row.last_seen_at, false);
+      addWord(word, row.total_count, row.last_seen_at, baselineSpellingsByWord.get(row.word), row.word);
     }
     const mergedBatches = new Set(mergedBatchResult?.results.map(({ batch }) => batch) ?? []);
     for (const batch of pendingBatches) {
       if (mergedBatches.has(batch.batch)) continue;
       for (const row of batch.words) {
-        addWord(row.word, row.displayWord ?? row.word, row.count, row.lastSeenAt, false);
+        addWord(foldStatisticsWord(row.word), row.count, row.lastSeenAt, row.spellings);
       }
-    }
-    for (const [word, displayWord] of streamDisplayWords) {
-      const count = counts.get(word);
-      if (count !== undefined && !baselineWords.has(word)) count.displayWord = displayWord;
     }
   }
 
   const fillerWords = new Set(STATISTICS_CHAT_FILLER_WORDS.map(foldStatisticsWord));
-  const sourceWords = [...counts].map(([word, value]) => ({ word, ...value }));
+  const sourceWords = [...counts].map(([word, value]) => {
+    const spellings = [...value.spellings];
+    spellings.sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0));
+    return { word, ...value, displayWord: spellings[0]?.[0] ?? word };
+  });
   const totalCount = sourceWords.reduce((sum, word) => sum + word.count, 0);
   const maxCount = sourceWords.reduce((maximum, word) => Math.max(maximum, word.count), 0);
   const visibleWords = sourceWords.filter(({ word }) =>

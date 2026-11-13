@@ -3,14 +3,17 @@ import { z } from "zod";
 import { foldStatisticsWord } from "./domain";
 
 export const statisticsSettingsSchema = z.object({
-  ignoredWords: z.array(z.string().trim().min(1).max(40)).max(200).default([])
-    // Words are stored as typed (NFKC, lowercase); the first spelling per folded key wins. Matching folds on read.
+  ignoredWords: z.array(
+    z.string()
+      .transform((word) => word.normalize("NFKC").toLowerCase().trim())
+      .pipe(z.string().min(1).max(40)),
+  ).max(200).default([])
+    // The first normalized spelling per folded key wins. Matching folds on read.
     .transform((words) => {
       const byKey = new Map<string, string>();
       for (const word of words) {
-        const typed = word.normalize("NFKC").toLowerCase();
-        const key = foldStatisticsWord(typed);
-        if (!byKey.has(key)) byKey.set(key, typed);
+        const key = foldStatisticsWord(word);
+        if (!byKey.has(key)) byKey.set(key, word);
       }
       return [...byKey.values()];
     }),
