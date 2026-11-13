@@ -961,8 +961,13 @@ export interface ModuleStatisticsWindow {
 
 export interface ModuleStatisticsWordCount {
   word: string;
+  displayWord: string;
   count: number;
   lastSeenAt: string;
+}
+
+export interface ModuleStatisticsPreparedWordBucket {
+  words: readonly ModuleStatisticsWordCount[];
 }
 
 export interface ModuleStatisticsWordBucket {
@@ -1051,7 +1056,7 @@ interface ModuleStatisticsChat {
     streamState: ModuleStatisticsStreamState,
     streamId: string | null,
     idleBefore: number,
-  ) => Promise<readonly ModuleStatisticsWordCount[]>;
+  ) => Promise<ModuleStatisticsPreparedWordBucket | null>;
   deleteWordBucket: (bucket: ModuleStatisticsWordBucket) => Promise<void>;
   pruneExpiredWordStreams: (now: number) => Promise<void>;
   hasWordStreams: () => Promise<boolean>;
@@ -2101,6 +2106,8 @@ export interface ModulePanelProperties {
   textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
   /** Last known status of the bot's moderator role in this channel. */
   botIsModerator?: boolean | null;
+  /** Slot in the page header's action row; a panel may portal page-level buttons into it. */
+  headerActionsTarget?: HTMLElement | null;
   /** Called by the host when an inspector is closed. */
   onCloseInspector?: () => void;
   /** Deep-link target set by the host (command palette, #164) -- a module reads

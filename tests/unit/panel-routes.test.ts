@@ -318,7 +318,7 @@ describe("Panel read endpoints", () => {
         { moduleId: "currency", settings: "{}" },
         { moduleId: "api_source", settings: "{}" },
         { moduleId: "channel_events", settings: "{}" },
-        { moduleId: "statistics", settings: "{}" },
+        { moduleId: "statistics", settings: "{\"ignoredWords\":[]}" },
       ],
     });
   });
@@ -1008,7 +1008,7 @@ describe("Panel read endpoints", () => {
       { moduleId: "currency", settings: "{}" },
       { moduleId: "api_source", settings: "{}" },
       { moduleId: "channel_events", settings: "{}" },
-      { moduleId: "statistics", settings: "{}" },
+      { moduleId: "statistics", settings: "{\"ignoredWords\":[]}" },
     ]);
     expect(body.tokens).toEqual({
       botExpiresAt: "2026-09-19T00:00:00.000Z",

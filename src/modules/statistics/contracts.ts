@@ -1,3 +1,26 @@
+import { z } from "zod";
+
+import { foldStatisticsWord } from "./domain";
+
+export const statisticsSettingsSchema = z.object({
+  ignoredWords: z.array(
+    z.string()
+      .transform((word) => word.normalize("NFKC").toLowerCase().trim())
+      .pipe(z.string().min(1).max(40)),
+  ).max(200).default([])
+    // The first normalized spelling per folded key wins. Matching folds on read.
+    .transform((words) => {
+      const byKey = new Map<string, string>();
+      for (const word of words) {
+        const key = foldStatisticsWord(word);
+        if (!byKey.has(key)) byKey.set(key, word);
+      }
+      return [...byKey.values()];
+    }),
+});
+
+export type StatisticsSettings = z.output<typeof statisticsSettingsSchema>;
+
 export interface StatisticsStreamWindow {
   windowStart: string;
   streamId: string | null;
@@ -141,8 +164,8 @@ export interface StatisticsWordsResponse {
   /** Number of words after search and filler filters. */
   total: number;
   totalPages: number;
-  /** Sum of all stored counts, before search and filler filters. */
+  /** Sum of words visible after rare-word hiding, before search and filler filters. */
   totalCount: number;
-  /** Highest count among all stored words, used to scale the share bars. */
+  /** Highest visible count, used to scale the share bars. */
   maxCount: number;
 }

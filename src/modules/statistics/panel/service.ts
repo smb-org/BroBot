@@ -1,11 +1,13 @@
 import { PanelApiError } from "../../../contracts/panel-error";
 import type {
+  StatisticsSettings,
   StatisticsStreamDetailResponse,
   StatisticsStreamListResponse,
   StatisticsTrendsResponse,
   StatisticsTrendsWeeks,
   StatisticsWordsResponse,
 } from "../contracts";
+import { statisticsSettingsSchema } from "../contracts";
 
 const modulePath = (channelId: string): string =>
   `/api/channels/${encodeURIComponent(channelId)}/modules/statistics/streams`;
@@ -56,14 +58,51 @@ export const loadStatisticsWords = async (
   search: string,
   hideFillers: boolean,
   signal: AbortSignal,
+  scope: "stream" | "total" = "total",
 ): Promise<StatisticsWordsResponse> => {
   const query = new URLSearchParams({
     page: String(page),
     search,
     hideFillers: String(hideFillers),
+    scope,
   });
   return readJson<StatisticsWordsResponse>(await fetch(
     `/api/channels/${encodeURIComponent(channelId)}/modules/statistics/words?${query.toString()}`,
     { signal },
   ));
 };
+
+const settingsPath = (channelId: string): string =>
+  `/api/channels/${encodeURIComponent(channelId)}/modules/statistics/settings`;
+
+export interface StatisticsSettingsState {
+  settings: StatisticsSettings;
+  revision: number;
+}
+
+export const loadStatisticsSettings = async (
+  channelId: string,
+  signal?: AbortSignal,
+): Promise<StatisticsSettingsState> => {
+  const result = await readJson<{ settings: unknown; revision: number }>(await fetch(
+    settingsPath(channelId), signal === undefined ? undefined : { signal },
+  ));
+  return { ...result, settings: statisticsSettingsSchema.parse(result.settings) };
+};
+
+export const saveStatisticsSettings = async (
+  channelId: string,
+  revision: number,
+  settings: StatisticsSettings,
+): Promise<StatisticsSettingsState> => {
+  const { token } = await readJson<{ token: string }>(await fetch("/api/csrf"));
+  const result = await readJson<{ settings: unknown; revision: number }>(await fetch(settingsPath(channelId), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+    body: JSON.stringify({ revision, settings }),
+  }));
+  return { ...result, settings: statisticsSettingsSchema.parse(result.settings) };
+};
+
+export const statisticsSettingsErrorCode = (error: unknown): "conflict" | "save" =>
+  error instanceof PanelApiError && error.status === 409 ? "conflict" : "save";

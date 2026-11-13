@@ -76,6 +76,7 @@ const iconNames: Readonly<Record<IconName, true>> = {
   "chevron-right": true,
   info: true,
   eye: true,
+  "eye-off": true,
   cause: true,
   edit: true,
   more: true,

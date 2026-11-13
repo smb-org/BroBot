@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { countStatisticsEmotes, statisticsWindowStart } from "../../src/modules/statistics/domain";
+import {
+  countStatisticsEmotes,
+  foldStatisticsWord,
+  statisticsTextFragments,
+  statisticsWordsExcluded,
+  statisticsWindowStart,
+  tokenizeStatisticsWordDetails,
+} from "../../src/modules/statistics/domain";
 
 describe("statistics window domain", () => {
   it("aligns five-minute windows to UTC epoch multiples of 300 s", () => {
@@ -25,5 +32,39 @@ describe("statistics window domain", () => {
       },
     })).toBe(2);
     expect(countStatisticsEmotes({ message: { fragments: [{ type: "text", text: "hello" }] } })).toBe(0);
+  });
+
+  it("folds repeated Unicode letters after compatibility normalization and lowercasing", () => {
+    expect(["faaak", "FAAAK", "faak", "fak", "ＡＡＡ", "äää"].map(foldStatisticsWord))
+      .toEqual(["fak", "fak", "fak", "fak", "a", "ä"]);
+  });
+
+  it("keeps the first display spelling while counting emotes with typed words once per message", () => {
+    const details = tokenizeStatisticsWordDetails(statisticsTextFragments({
+      chatter_user_login: "viewer",
+      message: { fragments: [
+        { type: "text", text: "KEKW kekw" },
+        { type: "emote", text: "KEKW", emote: { id: "25", emote_set_id: "0", owner_id: "1" } },
+        { type: "text", text: "Faaak FAak" },
+      ] },
+    }));
+
+    expect(details.get("kekw")).toEqual({ count: 1, displayWord: "KEKW" });
+    expect(details.get("fak")).toEqual({ count: 1, displayWord: "Faaak" });
+  });
+
+  it("excludes command messages and known bot logins from word counting", () => {
+    expect(statisticsWordsExcluded({
+      chatter_user_login: "viewer",
+      message: { text: "!hello", fragments: [{ type: "text", text: "!hello world" }] },
+    })).toBe(true);
+    expect(statisticsWordsExcluded({
+      chatter_user_login: "NIGHTBOT",
+      message: { text: "hello", fragments: [{ type: "text", text: "hello world" }] },
+    })).toBe(true);
+    expect(statisticsWordsExcluded({
+      chatter_user_login: "fictional_viewer",
+      message: { text: "hello", fragments: [{ type: "text", text: "hello world" }] },
+    })).toBe(false);
   });
 });

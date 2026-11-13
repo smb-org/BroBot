@@ -127,9 +127,14 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       streamId: string | null, idleBefore: number) => {
       const stream = wordStreams.get(bucket.streamId);
       if (stream === undefined || streamState !== "offline" && bucket.streamId === streamId ||
-          (stream.lastIncrementAt ?? Date.parse(WINDOW_END) - 15 * 60_000) > idleBefore) return Promise.resolve([]);
+          (stream.lastIncrementAt ?? Date.parse(WINDOW_END) - 15 * 60_000) > idleBefore) return Promise.resolve(null);
       if ((stream.batch ?? 1) === bucket.batch) stream.batch = bucket.batch + 1;
-      return Promise.resolve(stream.words.map((word) => ({ ...word })));
+      return Promise.resolve({
+        words: stream.words.map((word) => ({
+          ...word,
+          displayWord: word.word,
+        })),
+      });
     }),
     deleteWordBucket: vi.fn((bucket: { streamId: string; batch: number }) => {
       const stream = wordStreams.get(bucket.streamId);
@@ -622,12 +627,12 @@ describe("statistics window alarm", () => {
     await expect(database.prepare(
       `SELECT total_count FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word = ?`,
-    ).bind(CHANNEL_ID, "hallo").first()).resolves.toEqual({ total_count: 4 });
+    ).bind(CHANNEL_ID, "halo").first()).resolves.toEqual({ total_count: 4 });
     expect(chat.calls.deleteWordBucket).toHaveBeenCalledWith({ streamId: STREAM_ID, batch: 1 });
     expect(chat.wordStreams.get(STREAM_ID)?.words).toEqual([]);
   });
 
-  it("keeps the bucket when D1 reports the stream live between the state read and the merge", async () => {
+  it("merges a prepared bucket when D1 reports the stream live during the merge", async () => {
     database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);
     await writeStreamState(database, "offline", WINDOW_END);
@@ -652,16 +657,16 @@ describe("statistics window alarm", () => {
     await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
 
     await expect(database.prepare(
-      "SELECT COUNT(*) AS count FROM channel_word_frequency_baseline WHERE channel_id = ?",
-    ).bind(CHANNEL_ID).first()).resolves.toEqual({ count: 0 });
+      "SELECT total_count FROM channel_word_frequency_baseline WHERE channel_id = ? AND word = 'livewords'",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ total_count: 4 });
     await expect(database.prepare(
       "SELECT COUNT(*) AS count FROM channel_word_frequency_streams WHERE channel_id = ?",
-    ).bind(CHANNEL_ID).first()).resolves.toEqual({ count: 0 });
-    expect(chat.calls.deleteWordBucket).not.toHaveBeenCalled();
-    expect(chat.wordStreams.get(STREAM_ID)?.words).toHaveLength(1);
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ count: 1 });
+    expect(chat.calls.deleteWordBucket).toHaveBeenCalledWith({ streamId: STREAM_ID, batch: 1 });
+    expect(chat.wordStreams.get(STREAM_ID)?.words).toEqual([]);
   });
 
-  it("keeps the bucket when D1 turns online without a stream id between the state read and the merge", async () => {
+  it("merges a prepared bucket when D1 turns online without a stream id during the merge", async () => {
     database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);
     await writeStreamState(database, "offline", WINDOW_END);
@@ -685,16 +690,16 @@ describe("statistics window alarm", () => {
     await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
 
     await expect(database.prepare(
-      "SELECT COUNT(*) AS count FROM channel_word_frequency_baseline WHERE channel_id = ?",
-    ).bind(CHANNEL_ID).first()).resolves.toEqual({ count: 0 });
+      "SELECT total_count FROM channel_word_frequency_baseline WHERE channel_id = ? AND word = 'unknownstream'",
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ total_count: 4 });
     await expect(database.prepare(
       "SELECT COUNT(*) AS count FROM channel_word_frequency_streams WHERE channel_id = ?",
-    ).bind(CHANNEL_ID).first()).resolves.toEqual({ count: 0 });
-    expect(chat.calls.deleteWordBucket).not.toHaveBeenCalled();
-    expect(chat.wordStreams.get(STREAM_ID)?.words).toHaveLength(1);
+    ).bind(CHANNEL_ID).first()).resolves.toEqual({ count: 1 });
+    expect(chat.calls.deleteWordBucket).toHaveBeenCalledWith({ streamId: STREAM_ID, batch: 1 });
+    expect(chat.wordStreams.get(STREAM_ID)?.words).toEqual([]);
   });
 
-  it("does not let a later batch overtake a batch refused because the stream is live", async () => {
+  it("merges later ready batches while D1 reports the stream live", async () => {
     database = new TestD1Database();
     await insertChannel(database, CHANNEL_ID);
     await writeStreamState(database, "offline", WINDOW_END);
@@ -702,11 +707,14 @@ describe("statistics window alarm", () => {
     chat.wordStreams.set(STREAM_ID, { words: [], endedAt: WINDOW_END, expiresAt: Date.parse(WINDOW_END) + 24 * 60 * 60_000 });
     const buckets = [{ streamId: STREAM_ID, batch: 1 }, { streamId: STREAM_ID, batch: 2 }];
     chat.calls.listMergeableWordBuckets.mockResolvedValue(buckets);
-    chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve([{
-      word: bucket.batch === 1 ? "firstword" : "laterword",
-      count: 1,
-      lastSeenAt: WINDOW_END,
-    }]));
+    chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve({
+      words: [{
+        word: bucket.batch === 1 ? "firstword" : "laterword",
+        displayWord: bucket.batch === 1 ? "firstword" : "laterword",
+        count: 3,
+        lastSeenAt: WINDOW_END,
+      }],
+    }));
     const { context } = createContext(database, chat);
     let batchCalls = 0;
     context.DB = {
@@ -725,16 +733,8 @@ describe("statistics window alarm", () => {
 
     await windowAlarm().handle(context, "window", Date.parse(WINDOW_END));
 
-    // Batch 1 was refused, so batch 2 is not even attempted in this run.
-    expect(batchCalls).toBe(1);
-    expect(chat.calls.prepareWordBucketForMerge).toHaveBeenCalledTimes(1);
-    expect(chat.calls.deleteWordBucket).not.toHaveBeenCalled();
-
-    await database.prepare(
-      "UPDATE channel_stream_state SET state = 'offline', stream_id = NULL, started_at = NULL WHERE channel_id = ?",
-    ).bind(CHANNEL_ID).run();
-    await windowAlarm().handle(context, "window", Date.parse(WINDOW_END) + 300_000);
-
+    expect(batchCalls).toBe(2);
+    expect(chat.calls.prepareWordBucketForMerge).toHaveBeenCalledTimes(2);
     expect(chat.calls.deleteWordBucket.mock.calls.map(([bucket]) => bucket.batch)).toEqual([1, 2]);
     await expect(database.prepare(
       "SELECT word FROM channel_word_frequency_baseline WHERE channel_id = ? ORDER BY word",
@@ -749,11 +749,14 @@ describe("statistics window alarm", () => {
     chat.wordStreams.set(STREAM_ID, { words: [], endedAt: WINDOW_END, expiresAt: Date.parse(WINDOW_END) + 24 * 60 * 60_000 });
     const buckets = [{ streamId: STREAM_ID, batch: 1 }, { streamId: STREAM_ID, batch: 2 }];
     chat.calls.listMergeableWordBuckets.mockResolvedValue(buckets);
-    chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve([{
-      word: bucket.batch === 1 ? "firstword" : "laterword",
-      count: 1,
-      lastSeenAt: WINDOW_END,
-    }]));
+    chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve({
+      words: [{
+        word: bucket.batch === 1 ? "firstword" : "laterword",
+        displayWord: bucket.batch === 1 ? "firstword" : "laterword",
+        count: 1,
+        lastSeenAt: WINDOW_END,
+      }],
+    }));
     const { context } = createContext(database, chat);
     let attempts = 0;
     context.DB = {

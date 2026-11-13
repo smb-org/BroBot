@@ -34,7 +34,7 @@ import type { TemplateVariable } from "../template";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../modules/contract";
 import { chatOutputSuppressionReason } from "./chat-output-gate";
 import { createModuleExternalFetchBudget } from "./external-fetch-budget";
-import { countStatisticsEmotes, statisticsTextFragments, statisticsWindowStart } from "../modules/statistics/domain";
+import { countStatisticsEmotes, statisticsTextFragments, statisticsWindowStart, statisticsWordsExcluded } from "../modules/statistics/domain";
 import { botAccessTokenFor } from "./twitch/bot-access";
 import { moduleBallots } from "./module-ballots";
 import { modulePoints } from "./module-points";
@@ -1064,7 +1064,7 @@ export const dispatchEventSubNotification = async (
               receivedAt: event.receivedAt,
               emotes: countStatisticsEmotes(event.payload),
               streamId: dispatchState.streamId,
-              textFragments: statisticsTextFragments(event.payload),
+              textFragments: statisticsWordsExcluded(event.payload) ? [] : statisticsTextFragments(event.payload),
             });
           }
         }

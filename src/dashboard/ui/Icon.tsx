@@ -1,5 +1,5 @@
 import {
-  AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpDown, ArrowUpRight, BellRing, Bookmark, Braces, Check, ChevronLeft, ChevronRight, Clock, Cloud, CloudFog, CloudLightning, CloudMoon, CloudRain, CloudSnow, CloudSun, Copy, Crown, Diamond, ExternalLink, Eye, Film, GripVertical, Image, Info, KeyRound, Layers,
+  AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpDown, ArrowUpRight, BellRing, Bookmark, Braces, Check, ChevronLeft, ChevronRight, Clock, Cloud, CloudFog, CloudLightning, CloudMoon, CloudRain, CloudSnow, CloudSun, Copy, Crown, Diamond, ExternalLink, Eye, EyeOff, Film, GripVertical, Image, Info, KeyRound, Layers,
   ListChecks, ListOrdered, Lock, MapPin, Megaphone, MessageSquareText, Minus, MoreVertical, Pause, Pencil, Play, Plus, Radio, RadioTower, RefreshCw, Search, Settings, SkipForward,
   SlidersHorizontal, Square, Star, Sun, Moon, Timer, Wind, Sword, Trash2, Type, User, UserMinus, UserPlus, Users, Video, Volume2, VolumeX, Vote, X, Zap,
 } from "lucide-react";
@@ -31,6 +31,7 @@ const glyphs = {
   "chevron-right": ChevronRight,
   info: Info,
   eye: Eye,
+  "eye-off": EyeOff,
   cause: Info,
   edit: Pencil,
   more: MoreVertical,

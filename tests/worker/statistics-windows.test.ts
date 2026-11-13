@@ -34,6 +34,14 @@ interface StatisticsWordObject {
     statistics: { windowStart: string; receivedAt: string; emotes: number; streamId: string; textFragments: readonly string[] },
   ): Promise<number>;
   readStatisticsWordCounts(streamId: string): Promise<Array<{ word: string; count: number; lastSeenAt: string }>>;
+  readStatisticsWordStreamCounts(streamId?: string): Promise<{
+    streamId: string;
+    words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
+  } | null>;
+  readStatisticsWordCountsByBatch(streamId: string): Promise<readonly {
+    batch: number;
+    words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
+  }[]>;
   markStatisticsWordStreamEnded(streamId: string, endedAt: string): Promise<void>;
   listMergeableStatisticsWordBuckets(
     streamState: "online" | "offline" | "unknown",
@@ -45,7 +53,7 @@ interface StatisticsWordObject {
     streamState: "online" | "offline" | "unknown",
     streamId: string | null,
     idleBefore: number,
-  ): Promise<Array<{ word: string; count: number; lastSeenAt: string }>>;
+  ): Promise<{ words: Array<{ word: string; displayWord: string; count: number; lastSeenAt: string }> } | null>;
   deleteStatisticsWordBucket(bucket: { streamId: string; batch: number }): Promise<void>;
   pruneExpiredStatisticsWordStreams(now: number): Promise<void>;
   hasStatisticsWordStreams(): Promise<boolean>;
@@ -191,7 +199,7 @@ describe("statistics windows in the channel object", () => {
     });
     await runInDurableObject(stub, (_object, state) => {
       state.storage.sql.exec(
-        `INSERT INTO statistics_word_streams (stream_id, distinct_words, ended_at, expires_at, current_batch)
+        `INSERT OR REPLACE INTO statistics_word_streams (stream_id, distinct_words, ended_at, expires_at, current_batch)
          VALUES (?, 20000, NULL, ?, 1)`,
         streamId,
         Date.now() + 24 * 60 * 60_000,
@@ -298,6 +306,192 @@ describe("statistics windows in the channel object", () => {
     expect(words).toHaveLength(6);
   });
 
+  it("keeps one first-seen display spelling in the buffer across later variants", async () => {
+    const channelId = "statistics-word-first-display";
+    await insertPointChannel(channelId);
+    const stub = statisticsObject(channelId);
+    const streamId = "word-stream-first-display";
+    const receivedAt = iso(Date.now());
+    const base = "bcdfghjklmnpqr";
+    const variants = Array.from({ length: 10 }, (_unused, index) =>
+      Array.from(base, (letter, bit) => (index & (1 << bit)) === 0 ? letter : letter.toUpperCase()).join(""));
+    const object = stub as unknown as StatisticsWordObject;
+    const recordVariants = (variantList: readonly string[]) => runInDurableObject(stub, (instance, state) => {
+      const object = instance as unknown as {
+        recordStatisticsWordCountsSync: (id: string, fragments: readonly string[], time: string) => void;
+        statisticsWordCounts: Map<string, { displayWord: string; count: number }>;
+      };
+      state.storage.transactionSync(() => {
+        for (const spelling of variantList) object.recordStatisticsWordCountsSync(streamId, [spelling], receivedAt);
+      });
+      const buffered = object.statisticsWordCounts.get(`${streamId}\u0000${base}`);
+      return buffered === undefined ? null : { displayWord: buffered.displayWord, count: buffered.count };
+    });
+
+    expect(await recordVariants(variants.slice(0, 4))).toEqual({ displayWord: variants[0], count: 4 });
+    const beforeFlush = await recordVariants(Array.from({ length: 100 }, (_unused, index) => variants[index % variants.length] ?? base));
+    expect(beforeFlush).toEqual({ displayWord: variants[0], count: 104 });
+    await expect(object.readStatisticsWordStreamCounts(streamId)).resolves.toMatchObject({
+      words: [{ word: base, displayWord: variants[0], count: 104 }],
+    });
+    const nextBuffer = await recordVariants(Array.from({ length: 100 }, (_unused, index) => variants[(index + 1) % variants.length] ?? base));
+    expect(nextBuffer).toEqual({ displayWord: variants[1], count: 100 });
+    await expect(object.readStatisticsWordStreamCounts(streamId)).resolves.toMatchObject({
+      words: [{ word: base, displayWord: variants[0], count: 204 }],
+    });
+    await expect(runInDurableObject(stub, (_object, state) => {
+      const row = state.storage.sql.exec<{ display_word: string }>(
+        "SELECT display_word FROM statistics_word_stream_totals WHERE stream_id = ? AND word = ?",
+        streamId,
+        base,
+      ).one();
+      return row;
+    })).resolves.toEqual({ display_word: variants[0] });
+  });
+
+  it("folds legacy word tables and keeps the highest-count original spelling", async () => {
+    const channelId = "statistics-word-populated-upgrade";
+    await insertPointChannel(channelId);
+    const stub = statisticsObject(channelId);
+    const streamId = "word-stream-populated-upgrade";
+    await runInDurableObject(stub, (_object, state) => {
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_counts (
+          stream_id TEXT NOT NULL, batch INTEGER NOT NULL, word TEXT NOT NULL, count INTEGER NOT NULL,
+          last_seen_at TEXT NOT NULL, last_increment_at INTEGER NOT NULL,
+          PRIMARY KEY (stream_id, batch, word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_seen (
+          stream_id TEXT NOT NULL, word TEXT NOT NULL, PRIMARY KEY (stream_id, word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_stream_totals (
+          stream_id TEXT NOT NULL, word TEXT NOT NULL, count INTEGER NOT NULL, last_seen_at TEXT NOT NULL,
+          PRIMARY KEY (stream_id, word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO statistics_word_counts VALUES
+           (?, 1, 'faaak', 5, '2026-10-25T12:00:00.000Z', 1),
+           (?, 1, 'fak', 2, '2026-10-25T12:01:00.000Z', 2),
+           (?, 1, 'baaaak', 4, '2026-10-25T12:00:00.000Z', 3),
+           (?, 1, 'bak', 4, '2026-10-25T12:01:00.000Z', 4)`,
+        streamId,
+        streamId,
+        streamId,
+        streamId,
+      );
+      state.storage.sql.exec(
+        "INSERT INTO statistics_word_seen VALUES (?, 'faaak'), (?, 'fak'), (?, 'baaaak'), (?, 'bak')",
+        streamId,
+        streamId,
+        streamId,
+        streamId,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO statistics_word_stream_totals VALUES
+           (?, 'faaak', 5, '2026-10-25T12:00:00.000Z'),
+           (?, 'fak', 2, '2026-10-25T12:01:00.000Z'),
+           (?, 'baaaak', 4, '2026-10-25T12:00:00.000Z'),
+           (?, 'bak', 4, '2026-10-25T12:01:00.000Z')`,
+        streamId,
+        streamId,
+        streamId,
+        streamId,
+      );
+      expect(state.storage.sql.exec<{ name: string }>(
+        `SELECT name FROM pragma_table_info('statistics_word_counts') WHERE name = 'display_word'`,
+      ).toArray()).toEqual([]);
+      expect(state.storage.sql.exec<{ name: string }>(
+        `SELECT name FROM pragma_table_info('statistics_word_stream_totals') WHERE name = 'display_word'`,
+      ).toArray()).toEqual([]);
+    });
+
+    const object = stub as unknown as StatisticsWordObject;
+    await expect(object.readStatisticsWordCounts(streamId)).resolves.toEqual([
+      { word: "bak", count: 8, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+      { word: "fak", count: 7, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+    ]);
+    await expect(object.readStatisticsWordCountsByBatch(streamId)).resolves.toEqual([{
+      batch: 1,
+      words: [
+        { word: "bak", displayWord: "baaaak", count: 8, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+        { word: "fak", displayWord: "faaak", count: 7, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+      ],
+    }]);
+    await object.recordChatActivity(null, false, {
+      windowStart: iso(pastWindowStart()),
+      receivedAt: "2026-10-25T12:02:00.000Z",
+      emotes: 0,
+      streamId,
+      textFragments: ["FAAK"],
+    });
+    await runWindowAlarm(stub);
+
+    await expect(object.readStatisticsWordCounts(streamId)).resolves.toEqual([
+      { word: "bak", count: 8, lastSeenAt: "2026-10-25T12:01:00.000Z" },
+      { word: "fak", count: 8, lastSeenAt: "2026-10-25T12:02:00.000Z" },
+    ]);
+    await expect(runInDurableObject(stub, (_object, state) => ({
+      seen: state.storage.sql.exec<{ word: string }>(
+        "SELECT word FROM statistics_word_seen WHERE stream_id = ? ORDER BY word", streamId,
+      ).toArray(),
+      total: state.storage.sql.exec<{ word: string; display_word: string; count: number; last_seen_at: string }>(
+        "SELECT word, display_word, count, last_seen_at FROM statistics_word_stream_totals WHERE stream_id = ? ORDER BY word", streamId,
+      ).toArray(),
+      version: state.storage.sql.exec<{ version: number }>(
+        "SELECT version FROM statistics_word_schema_version",
+      ).one().version,
+    }))).resolves.toEqual({
+      seen: [{ word: "bak" }, { word: "fak" }],
+      total: [
+        { word: "bak", display_word: "baaaak", count: 8, last_seen_at: "2026-10-25T12:01:00.000Z" },
+        { word: "fak", display_word: "faaak", count: 8, last_seen_at: "2026-10-25T12:02:00.000Z" },
+      ],
+      version: 2,
+    });
+  });
+
+  it("sums each legacy spelling across batches before choosing the display spelling", async () => {
+    const channelId = "statistics-word-summed-upgrade";
+    await insertPointChannel(channelId);
+    const stub = statisticsObject(channelId);
+    const streamId = "word-stream-summed-upgrade";
+    await runInDurableObject(stub, (_object, state) => {
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_counts (
+          stream_id TEXT NOT NULL, batch INTEGER NOT NULL, word TEXT NOT NULL, count INTEGER NOT NULL,
+          last_seen_at TEXT NOT NULL, last_increment_at INTEGER NOT NULL,
+          PRIMARY KEY (stream_id, batch, word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `CREATE TABLE statistics_word_seen (
+          stream_id TEXT NOT NULL, word TEXT NOT NULL, PRIMARY KEY (stream_id, word)
+        ) WITHOUT ROWID`,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO statistics_word_counts VALUES
+           (?, 1, 'faaak', 4, '2026-10-25T12:00:00.000Z', 1),
+           (?, 1, 'fak', 5, '2026-10-25T12:00:00.000Z', 2),
+           (?, 2, 'faaak', 4, '2026-10-25T12:01:00.000Z', 3)`,
+        streamId,
+        streamId,
+        streamId,
+      );
+    });
+
+    await (stub as unknown as StatisticsWordObject).readStatisticsWordCounts(streamId);
+    await expect(runInDurableObject(stub, (_object, state) => state.storage.sql.exec<{
+      word: string; display_word: string; count: number;
+    }>(
+      "SELECT word, display_word, count FROM statistics_word_stream_totals WHERE stream_id = ?", streamId,
+    ).toArray())).resolves.toEqual([{ word: "fak", display_word: "faaak", count: 13 }]);
+  });
+
   it("treats a word buffered after the alarm's flush as fresh activity before sealing a bucket", async () => {
     const channelId = "statistics-word-buffered-idle";
     await insertPointChannel(channelId);
@@ -321,7 +515,7 @@ describe("statistics windows in the channel object", () => {
 
     await expect(object.listMergeableStatisticsWordBuckets("offline", null, idleBefore())).resolves.toEqual([]);
     await expect(object.prepareStatisticsWordBucketForMerge({ streamId, batch: 1 }, "offline", null, idleBefore()))
-      .resolves.toEqual([]);
+      .resolves.toBeNull();
     // The batch was not sealed, so nothing rotated and the next flush stays in batch 1.
     await runWindowAlarm(stub);
     await expect(object.listMergeableStatisticsWordBuckets("offline", null, idleBefore())).resolves.toEqual([]);
@@ -352,7 +546,8 @@ describe("statistics windows in the channel object", () => {
       const original = sql.exec.bind(sql);
       let most = 0;
       sql.exec = (...args: unknown[]) => {
-        if (/statistics_word/u.test(String(args[0]))) most = Math.max(most, args.length - 1);
+        // Only the per-message lookups count; the stream-row upsert is a fixed-size write.
+        if (/^\s*SELECT\b/iu.test(String(args[0])) && /statistics_word/u.test(String(args[0]))) most = Math.max(most, args.length - 1);
         return original(...args);
       };
       try {
@@ -365,8 +560,8 @@ describe("statistics windows in the channel object", () => {
       }
       return most;
     });
-    // Stream id plus the one word that is not already buffered; buffered words never reach SQL.
-    expect(maxBindings).toBeLessThanOrEqual(2);
+    // Stream id, current batch and the one word that is not already buffered; buffered words never reach SQL.
+    expect(maxBindings).toBeLessThanOrEqual(3);
 
     await runWindowAlarm(stub);
     const counts = await object.readStatisticsWordCounts(streamId);
@@ -403,7 +598,7 @@ describe("statistics windows in the channel object", () => {
       .resolves.toEqual([{ word: "activeword", count: 4, lastSeenAt: iso(Date.now()) }]);
   });
 
-  it("merges an idle ended bucket and keeps later counts for the next batch", async () => {
+  it("merges idle ended buckets once across later batches", async () => {
     const channelId = "statistics-word-merge-success";
     await insertPointChannel(channelId);
     const object = statisticsObject(channelId) as unknown as StatisticsWordObject;
@@ -423,6 +618,12 @@ describe("statistics windows in the channel object", () => {
         WHERE channel_id = ? AND word = ?`,
     ).bind(channelId, "bonjour").first()).resolves.toEqual({ total_count: 1 });
     await expect(object.readStatisticsWordCounts(streamId)).resolves.toEqual([]);
+    await expect(object.readStatisticsWordStreamCounts(streamId)).resolves.toMatchObject({
+      words: [
+        { word: "bonjour", count: 1 },
+        { word: "monde", count: 1 },
+      ],
+    });
     await expect(object.hasStatisticsWordStreams()).resolves.toBe(true);
 
     const lateAt = Date.now();
@@ -473,7 +674,7 @@ describe("statistics windows in the channel object", () => {
     await expect(object.hasStatisticsWordStreams()).resolves.toBe(false);
   });
 
-  it("counts words from text fragments only and persists nothing but anonymous word counts", async () => {
+  it("counts text and emote fragments and persists only anonymous word counts", async () => {
     const channelId = "statistics-word-privacy";
     await insertPointChannel(channelId);
     const stub = statisticsObject(channelId);
@@ -505,7 +706,8 @@ describe("statistics windows in the channel object", () => {
 
     await expect(object.readStatisticsWordCounts("word-stream-privacy")).resolves.toEqual([
       { word: "again", count: 1, lastSeenAt: iso(windowStart + 30_000) },
-      { word: "hello", count: 1, lastSeenAt: iso(windowStart + 30_000) },
+      { word: "helo", count: 1, lastSeenAt: iso(windowStart + 30_000) },
+      { word: "kapaemote", count: 1, lastSeenAt: iso(windowStart + 30_000) },
       { word: "world", count: 1, lastSeenAt: iso(windowStart + 30_000) },
     ]);
     const stored = await runInDurableObject(stub, (_object, state) => JSON.stringify([
@@ -513,9 +715,60 @@ describe("statistics windows in the channel object", () => {
       ...state.storage.sql.exec("SELECT * FROM statistics_word_counts").toArray(),
       ...state.storage.sql.exec("SELECT * FROM statistics_word_seen").toArray(),
     ]));
-    for (const forbidden of ["KappaEmote", "mentioneduser", "Cheer100", "typedmention", "colonemote", "secretlink", "user-id-4711", "Hello world"]) {
+    for (const forbidden of ["mentioneduser", "Cheer100", "typedmention", "colonemote", "secretlink", "user-id-4711", "Hello world"]) {
       expect(stored.toLowerCase()).not.toContain(forbidden.toLowerCase());
     }
+  });
+
+  it("counts an emote once when it shares a folded word with typed text and keeps its display case", async () => {
+    const channelId = "statistics-word-emote-fold";
+    await insertPointChannel(channelId);
+    const object = statisticsObject(channelId) as unknown as StatisticsWordObject;
+    const streamId = "word-stream-emote-fold";
+    const windowStart = currentWindowStart();
+    const payload = {
+      chatter_user_login: "fictional_viewer",
+      message: { text: "KEKW kekw KEKW", fragments: [
+        { type: "text", text: "KEKW kekw" },
+        { type: "emote", text: "KEKW", emote: { id: "25", emote_set_id: "0", owner_id: "1" } },
+      ] },
+    };
+    await object.recordChatActivity(null, false, {
+      windowStart: iso(windowStart),
+      receivedAt: iso(windowStart + 30_000),
+      emotes: 1,
+      streamId,
+      textFragments: statisticsTextFragments(payload),
+    });
+    await runWindowAlarm(statisticsObject(channelId));
+
+    await expect(object.readStatisticsWordStreamCounts(streamId)).resolves.toMatchObject({
+      words: [{ word: "kekw", displayWord: "KEKW", count: 1 }],
+    });
+  });
+
+  it("selects the latest retained stream even when that stream has no countable words", async () => {
+    const channelId = "statistics-word-empty-latest-stream";
+    await insertPointChannel(channelId);
+    const object = statisticsObject(channelId) as unknown as StatisticsWordObject;
+    const olderStreamId = "word-stream-older";
+    const latestStreamId = "word-stream-latest-empty";
+    const receivedAt = Date.now();
+    await object.recordChatActivity(null, false, {
+      windowStart: iso(currentWindowStart()),
+      receivedAt: iso(receivedAt),
+      emotes: 0,
+      streamId: olderStreamId,
+      textFragments: ["olderword"],
+    });
+    await runWindowAlarm(statisticsObject(channelId));
+    await object.markStatisticsWordStreamEnded(olderStreamId, iso(receivedAt));
+
+    const latestAt = receivedAt + 1_000;
+    vi.setSystemTime(latestAt);
+    await object.markStatisticsWordStreamEnded(latestStreamId, iso(latestAt));
+
+    await expect(object.readStatisticsWordStreamCounts()).resolves.toEqual({ streamId: latestStreamId, words: [] });
   });
 
   it("merges a stream into the real D1 baseline once and trims it to 5,000 words", async () => {
@@ -528,7 +781,7 @@ describe("statistics windows in the channel object", () => {
        INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at)
        SELECT ?, 'seed' || printf('%05d', value), value + 2, '2026-10-25T12:00:00.000Z' FROM sequence`,
     ).bind(channelId).run();
-    const words = [{ word: "freshword", count: 3, lastSeenAt: "2026-10-25T12:05:00.000Z" }];
+    const words = [{ word: "freshword", displayWord: "FreshWord", count: 3, lastSeenAt: "2026-10-25T12:05:00.000Z" }];
 
     await mergeStatisticsWordBatch(worker.DB, channelId, "d1-stream", 1, words, "2026-10-25T12:06:00.000Z");
     await mergeStatisticsWordBatch(worker.DB, channelId, "d1-stream", 1, words, "2026-10-25T12:07:00.000Z");

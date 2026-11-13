@@ -455,6 +455,15 @@ const objectFor = (
     if (/^\s*SELECT hmac FROM active_chatters\b/iu.test(query)) {
       return { toArray: () => [...chatterRows.values()].map(({ hmac }) => ({ hmac })), one: () => undefined };
     }
+    if (/^\s*(?:INSERT OR IGNORE INTO|UPDATE) statistics_word_streams\b|^\s*SELECT distinct_words, expires_at(?:, current_batch)? FROM statistics_word_streams\b/iu.test(query)) {
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*PRAGMA table_info\(statistics_word_(?:counts|stream_totals)\)/iu.test(query)) {
+      return { toArray: () => [{ name: "display_word" }], one: () => ({ name: "display_word" }) };
+    }
+    if (/^\s*SELECT version FROM statistics_word_schema_version\b/iu.test(query)) {
+      return { toArray: () => [{ version: 1 }], one: () => ({ version: 1 }) };
+    }
     throw new Error(`Unexpected Durable Object SQL query: ${query}`);
   });
   let platformAlarm: number | null = null;
@@ -583,6 +592,7 @@ const objectFor = (
   (object as unknown as { timerScheduleInitialization: Promise<void> | null }).timerScheduleInitialization = Promise.resolve();
   (object as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
   (object as unknown as { timerOccurrenceQueues: Map<string, Promise<void>> }).timerOccurrenceQueues = new Map();
+  (object as unknown as { statisticsWordStreamEndedAt: Map<string, number> }).statisticsWordStreamEndedAt = new Map();
   return object;
 };
 

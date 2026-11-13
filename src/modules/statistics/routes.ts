@@ -6,11 +6,13 @@ import type { ModuleRouteEnvironment } from "../contract";
 import type { StatisticsBitrateWindow, StatisticsStreamWindow, StatisticsTimelineEvent, StatisticsTrendsWeeks } from "./contracts";
 import { decodeStreamCursor, deriveStreamEvents, encodeStreamCursor, groupStatisticsWindows, matchBitrateWindows, paginateStreamSummaries } from "./streams-domain";
 import { STATISTICS_CHAT_FILLER_WORDS } from "./filler-words";
+import { foldStatisticsWord } from "./domain";
+import { statisticsSettingsSchema } from "./contracts";
 import { deriveStatisticsTrends } from "./trends-domain";
 
 const WINDOW_MILLISECONDS = 5 * 60_000;
 const WORD_PAGE_SIZE = 100;
-const WORD_MAX_PAGE = 50;
+const WORD_MAX_PAGE = 250;
 const WORD_MAX_SEARCH_LENGTH = 80;
 
 const listParamsSchema = z.object({ channelId: z.string().trim().min(1).max(128) });
@@ -28,6 +30,7 @@ const wordsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(WORD_MAX_PAGE).default(1),
   search: z.string().trim().max(WORD_MAX_SEARCH_LENGTH).default(""),
   hideFillers: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
+  scope: z.enum(["stream", "total"]).default("total"),
 });
 
 interface StreamCandidateRow {
@@ -64,15 +67,28 @@ interface WordFrequencyRow {
   word: string;
   total_count: number;
   last_seen_at: string;
+  display_word: string;
 }
 
-interface WordFrequencyTotalsRow {
-  total_count: number;
-  max_count: number;
+interface StatisticsWordObject {
+  readStatisticsWordCountsByBatch: (streamId: string) => Promise<readonly {
+    batch: number;
+    words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
+  }[]>;
+  readStatisticsWordStreamCounts: (streamId?: string) => Promise<{
+    streamId: string;
+    words: readonly {
+      word: string;
+      displayWord: string;
+      count: number;
+      lastSeenAt: string;
+    }[];
+  } | null>;
 }
 
-interface WordFrequencyCountRow {
-  total: number;
+interface StatisticsWordBatchCounts {
+  batch: number;
+  words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
 }
 
 const statisticsWindow = (row: StreamWindowRow): StatisticsStreamWindow => ({
@@ -309,52 +325,137 @@ statisticsRoutes.get("/words", async (context) => {
     ...(context.req.query("page") === undefined ? {} : { page: context.req.query("page") }),
     search: context.req.query("search") ?? "",
     hideFillers: context.req.query("hideFillers") ?? "true",
+    scope: context.req.query("scope") ?? "total",
   });
   if (!params.success || !query.success) return context.json({ error: "statistics_words_query_invalid" }, 400);
 
   const { channelId } = params.data;
-  const search = query.data.search.normalize("NFKC").toLowerCase();
-  // Static SQL: an empty search or a disabled filler filter switches its condition off.
-  const filters = [
-    channelId, search, search, query.data.hideFillers ? 1 : 0, JSON.stringify(STATISTICS_CHAT_FILLER_WORDS),
-  ];
+  const search = foldStatisticsWord(query.data.search);
   const offset = (query.data.page - 1) * WORD_PAGE_SIZE;
-  // One batch is one D1 transaction: count, totals and page share a snapshot, so a
-  // baseline merge in between cannot push a share above 100 %.
-  const [countResult, totalResult, wordRows] = await context.env.DB.batch([
-    context.env.DB.prepare(
-      `SELECT COUNT(*) AS total
+  const settingsRow = await context.env.DB.prepare(
+    "SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'statistics'",
+  ).bind(channelId).first<{ settings: string }>();
+  let ignoredWords = new Set<string>();
+  if (settingsRow !== null) {
+    try {
+      const parsed: unknown = JSON.parse(settingsRow.settings);
+      const settings = statisticsSettingsSchema.safeParse(parsed);
+      if (settings.success) ignoredWords = new Set(settings.data.ignoredWords.map(foldStatisticsWord));
+    } catch {
+      // Invalid legacy settings leave the list visible and remain repairable through module settings.
+    }
+  }
+
+  const counts = new Map<string, { displayWord: string; count: number; lastSeenAt: string }>();
+  const hiddenBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000).toISOString();
+  const addBaselineWord = (
+    word: string,
+    displayWord: string,
+    count: number,
+    lastSeenAt: string,
+  ): void => {
+    const key = foldStatisticsWord(word);
+    const current = counts.get(key) ?? {
+      displayWord: displayWord.length > 0 ? displayWord : word,
+      count: 0,
+      lastSeenAt,
+    };
+    current.count += count;
+    if (current.lastSeenAt < lastSeenAt) current.lastSeenAt = lastSeenAt;
+    counts.set(key, current);
+  };
+  const addPendingWord = (word: string, displayWord: string, count: number, lastSeenAt: string): void => {
+    const key = foldStatisticsWord(word);
+    const current = counts.get(key) ?? {
+      displayWord: displayWord.length > 0 ? displayWord : word,
+      count: 0,
+      lastSeenAt,
+    };
+    current.count += count;
+    if (current.lastSeenAt < lastSeenAt) current.lastSeenAt = lastSeenAt;
+    counts.set(key, current);
+  };
+
+  if (query.data.scope === "stream") {
+    const streamState = await context.env.DB.prepare(
+      "SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?",
+    ).bind(channelId).first<{ state: string; stream_id: string | null }>();
+    const onlineWithoutId = streamState?.state === "online" && streamState.stream_id === null;
+    const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)) as unknown as StatisticsWordObject;
+    const stream = onlineWithoutId
+      ? null
+      : await channelObject.readStatisticsWordStreamCounts(streamState?.state === "online" ? streamState.stream_id ?? undefined : undefined);
+    for (const row of stream?.words ?? []) {
+      addPendingWord(row.word, row.displayWord || row.word, row.count, row.lastSeenAt);
+    }
+  } else {
+    const streamState = await context.env.DB.prepare(
+      "SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?",
+    ).bind(channelId).first<{ state: string; stream_id: string | null }>();
+    const runningStreamId = streamState?.state === "online" ? streamState.stream_id : null;
+    let pendingBatches: StatisticsWordBatchCounts[] = [];
+    if (runningStreamId !== null) {
+      const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)) as unknown as StatisticsWordObject;
+      pendingBatches = [...await channelObject.readStatisticsWordCountsByBatch(runningStreamId)];
+    }
+    const baselineStatement = context.env.DB.prepare(
+      `SELECT word, total_count, last_seen_at, display_word
          FROM channel_word_frequency_baseline
-        WHERE channel_id = ?
-          AND (? = '' OR instr(word, ?) > 0)
-          AND (? = 0 OR word NOT IN (SELECT value FROM json_each(?)))`,
-    ).bind(...filters),
-    context.env.DB.prepare(
-      `SELECT COALESCE(SUM(total_count), 0) AS total_count,
-              COALESCE(MAX(total_count), 0) AS max_count
+        WHERE channel_id = ? AND NOT (total_count < 3 AND last_seen_at < ?)
+        ORDER BY total_count DESC, word ASC`,
+    ).bind(channelId, hiddenBefore);
+    const rareBaselineCandidatesStatement = context.env.DB.prepare(
+      `SELECT word, total_count, last_seen_at, display_word
          FROM channel_word_frequency_baseline
-        WHERE channel_id = ?`,
-    ).bind(channelId),
-    context.env.DB.prepare(
-      `SELECT word, total_count, last_seen_at
-         FROM channel_word_frequency_baseline
-        WHERE channel_id = ?
-          AND (? = '' OR instr(word, ?) > 0)
-          AND (? = 0 OR word NOT IN (SELECT value FROM json_each(?)))
-        ORDER BY total_count DESC, word ASC
-        LIMIT ? OFFSET ?`,
-    ).bind(...filters, WORD_PAGE_SIZE, offset),
-  ]) as [D1Result<WordFrequencyCountRow>, D1Result<WordFrequencyTotalsRow>, D1Result<WordFrequencyRow>];
-  const total = countResult.results[0]?.total ?? 0;
-  const totalCount = totalResult.results[0]?.total_count ?? 0;
-  const maxCount = totalResult.results[0]?.max_count ?? 0;
+        WHERE channel_id = ? AND total_count < 3 AND last_seen_at < ?
+        ORDER BY total_count DESC, word ASC`,
+    ).bind(channelId, hiddenBefore);
+    const mergedBatchStatement = runningStreamId === null ? null : context.env.DB.prepare(
+      `SELECT batch FROM channel_word_frequency_streams
+        WHERE channel_id = ? AND stream_id = ? AND merged_at IS NOT NULL`,
+    ).bind(channelId, runningStreamId);
+    const readStatements = [baselineStatement, rareBaselineCandidatesStatement,
+      ...(mergedBatchStatement === null ? [] : [mergedBatchStatement])];
+    const readResults = await context.env.DB.batch(readStatements);
+    const baselineResult = readResults[0] as D1Result<WordFrequencyRow>;
+    const rareBaselineCandidates = (readResults[1] as D1Result<WordFrequencyRow>).results;
+    const mergedBatchResult = mergedBatchStatement === null
+      ? null
+      : readResults[2] as D1Result<{ batch: number }>;
+    const mergedBatches = new Set(mergedBatchResult?.results.map(({ batch }) => batch) ?? []);
+    const pendingRows = pendingBatches
+      .filter(({ batch }) => !mergedBatches.has(batch))
+      .flatMap(({ words }) => [...words]);
+    const baselineRows = [...baselineResult.results, ...rareBaselineCandidates].sort((left, right) =>
+      right.total_count - left.total_count || (left.word < right.word ? -1 : left.word > right.word ? 1 : 0));
+    for (const row of baselineRows) {
+      addBaselineWord(row.word, row.display_word, row.total_count, row.last_seen_at);
+    }
+    for (const row of pendingRows) {
+      addPendingWord(row.word, row.displayWord || row.word, row.count, row.lastSeenAt);
+    }
+  }
+
+  const fillerWords = new Set(STATISTICS_CHAT_FILLER_WORDS.map(foldStatisticsWord));
+  const sourceWords = [...counts].flatMap(([word, value]) =>
+    query.data.scope === "total" && value.count < 3 && value.lastSeenAt < hiddenBefore
+      ? []
+      : [{ word, ...value }]);
+  const totalCount = sourceWords.reduce((sum, word) => sum + word.count, 0);
+  const maxCount = sourceWords.reduce((maximum, word) => Math.max(maximum, word.count), 0);
+  const visibleWords = sourceWords.filter(({ word }) =>
+    (search.length === 0 || word.includes(search)) && !ignoredWords.has(word) &&
+    (!query.data.hideFillers || !fillerWords.has(word)));
+  visibleWords.sort((left, right) => right.count - left.count || (left.word < right.word ? -1 : left.word > right.word ? 1 : 0));
+  const total = visibleWords.length;
+  const wordRows = visibleWords.slice(offset, offset + WORD_PAGE_SIZE);
   return context.json({
-    words: wordRows.results.map((row, index) => ({
+    words: wordRows.map((row, index) => ({
       rank: offset + index + 1,
-      word: row.word,
-      count: row.total_count,
-      share: totalCount === 0 ? 0 : row.total_count / totalCount,
-      lastSeenAt: row.last_seen_at,
+      word: row.displayWord,
+      count: row.count,
+      share: totalCount === 0 ? 0 : row.count / totalCount,
+      lastSeenAt: row.lastSeenAt,
     })),
     page: query.data.page,
     pageSize: WORD_PAGE_SIZE,

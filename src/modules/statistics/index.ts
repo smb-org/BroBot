@@ -1,11 +1,10 @@
-import { z } from "zod";
-
 import type { BotModule } from "../contract";
 import { statisticsModuleCatalog } from "./catalog";
 import { statisticsRoutes } from "./routes";
 import { handleStatisticsWindowAlarm, processStatisticsEvent, reconcileStatisticsSchedule } from "./service";
+import { statisticsSettingsSchema } from "./contracts";
 
-const settingsSchema = z.object({});
+const settingsSchema = statisticsSettingsSchema;
 
 export const statisticsModule: BotModule<typeof settingsSchema> = {
   id: "statistics",
@@ -17,6 +16,7 @@ export const statisticsModule: BotModule<typeof settingsSchema> = {
     en: statisticsModuleCatalog.en.mandatoryReason,
   },
   needsActiveChatters: true,
+  panelManagesSettings: true,
   navigationEntries: [
     {
       id: "streams",
@@ -44,7 +44,7 @@ export const statisticsModule: BotModule<typeof settingsSchema> = {
     },
   ],
   settingsSchema,
-  defaultSettings: {},
+  defaultSettings: statisticsSettingsSchema.parse({}),
   routes: statisticsRoutes,
   panel: () => import("./panel").then((panel) => ({ default: panel.StatisticsPanel })),
   eventSubTypes: ["channel.chat.message", "stream.online", "stream.offline", "channel.update"],
