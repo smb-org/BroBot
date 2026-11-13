@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext, ModuleTimelineEvent } from "../../src/modules/contract";
 import { statisticsModule } from "../../src/modules/statistics";
+import { statisticsSettingsSchema } from "../../src/modules/statistics/contracts";
 import { processStatisticsEvent, reconcileStatisticsSchedule } from "../../src/modules/statistics/service";
+import { moduleChatCommandsForSettings } from "../../src/dashboard/module-how-to-play-model";
 import { insertChannel } from "./fixtures";
 import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 import { writeEventSubStreamState } from "../../src/worker/db/stream-state";
@@ -352,6 +354,27 @@ describe("statistics timeline intake", () => {
   it("subscribes to channel updates without requiring a broadcaster scope", () => {
     expect(statisticsModule.eventSubTypes).toContain("channel.update");
     expect(statisticsModule.broadcasterScopes ?? []).toEqual([]);
+  });
+
+  it("defaults the word command off and exposes its configured token and minimum status in help", () => {
+    const defaults = statisticsSettingsSchema.parse({});
+    expect(defaults.wordCommand).toEqual({
+      enabled: false,
+      command: "!wort",
+      cooldownSeconds: 10,
+      userCooldownSeconds: 30,
+      minimumChatStatus: "everyone",
+    });
+    expect(statisticsModule.chatCommandNames?.(defaults)).toEqual(["!wort"]);
+
+    const configured = statisticsSettingsSchema.parse({
+      wordCommand: { enabled: true, command: "!frequenz", minimumChatStatus: "subscriber" },
+    });
+    expect(moduleChatCommandsForSettings(statisticsModule, configured, "en")).toMatchObject([{
+      name: "!frequenz",
+      syntax: "!frequenz <word>",
+      minimumChatStatus: "subscriber",
+    }]);
   });
 });
 

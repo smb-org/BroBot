@@ -7,13 +7,20 @@ import type {
   ModuleTimelineEvent,
   ModuleStatisticsWindow,
 } from "../contract";
+import { chatStatusMeetsMinimumTier } from "../contract";
+import { statisticsSettingsSchema, type StatisticsSettings } from "./contracts";
+import { wordCommandTexts } from "./locale";
 import {
+  addStatisticsWordCount,
+  calculateStatisticsWordCount,
   STATISTICS_WORD_BASELINE_LIMIT,
+  STATISTICS_WORD_RARE_HIDE_MILLISECONDS,
   STATISTICS_WORD_STREAM_IDLE_MILLISECONDS,
   STATISTICS_WORD_STREAM_MERGE_LIMIT,
   STATISTICS_WINDOW_MILLISECONDS,
   foldStatisticsWord,
   statisticsWindowStartMs,
+  type StatisticsWordCountValue,
 } from "./domain";
 
 const EMOTE_SPIKE_BASELINE_WINDOWS = 12;
@@ -27,6 +34,11 @@ interface StoredStreamState {
 }
 
 const emptyResult = (): ModuleResult => ({ actions: [], diagnostics: [] });
+
+const recordValue = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 
 const textValue = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
@@ -44,6 +56,129 @@ const sampledCount = async (read: (() => Promise<number | null>) | undefined): P
   } catch {
     return null;
   }
+};
+
+interface StatisticsWordBaselineRow {
+  word: string;
+  total_count: number;
+  last_seen_at: string;
+  display_word: string;
+}
+
+interface StatisticsWordCommandStreamState {
+  state: string;
+  stream_id: string | null;
+}
+
+const wordCommandReply = (
+  language: "de" | "en",
+  word: string,
+  streamIsLive: boolean,
+  streamCount: number,
+  totalCount: number,
+): string => {
+  const number = new Intl.NumberFormat(language === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 });
+  if (streamIsLive) return language === "de"
+    ? `${word}: in diesem Stream ${number.format(streamCount)}×, insgesamt ${number.format(totalCount)}×`
+    : `${word}: ${number.format(streamCount)}× this stream, ${number.format(totalCount)}× in total`;
+  return language === "de"
+    ? `${word}: insgesamt ${number.format(totalCount)}×`
+    : `${word}: ${number.format(totalCount)}× in total`;
+};
+
+const unknownWordReply = wordCommandTexts.unknownReply;
+
+const processStatisticsWordCommand = async (
+  event: ModuleEvent<StatisticsSettings>,
+  context: ModuleExecutionContext,
+): Promise<ModuleResult> => {
+  if (!event.settings.wordCommand.enabled) return emptyResult();
+  const payload = event.payload;
+  const userId = payload.chatter_user_id;
+  const messageId = payload.message_id;
+  const messageText = recordValue(payload.message)?.text;
+  if (typeof userId !== "string" || typeof messageId !== "string" || messageId.length === 0 ||
+      typeof messageText !== "string") return emptyResult();
+  if (await context.botUserId?.() === userId) return emptyResult();
+  const sourceBroadcasterUserId = payload.source_broadcaster_user_id;
+  if (typeof sourceBroadcasterUserId === "string" && sourceBroadcasterUserId !== event.channelId) return emptyResult();
+  if (!chatStatusMeetsMinimumTier(event.chatStatus, event.settings.wordCommand.minimumChatStatus)) return emptyResult();
+
+  const [command, argument] = messageText.trim().split(/\s+/u);
+  if (command?.toLowerCase() !== event.settings.wordCommand.command || argument === undefined || argument.length === 0) {
+    return emptyResult();
+  }
+  const word = foldStatisticsWord(argument);
+  if (word.length === 0) return emptyResult();
+
+  if (event.settings.wordCommand.cooldownSeconds > 0 &&
+      !await context.points.claimCooldown("word-command:global", event.settings.wordCommand.cooldownSeconds)) {
+    return emptyResult();
+  }
+  if (event.settings.wordCommand.userCooldownSeconds > 0 &&
+      !await context.points.claimCooldown(`word-command:user:${userId}`, event.settings.wordCommand.userCooldownSeconds)) {
+    return emptyResult();
+  }
+
+  const streamState = await context.DB.prepare(
+    "SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?",
+  ).bind(event.channelId).first<StatisticsWordCommandStreamState>();
+  const streamIsLive = streamState?.state === "online";
+  const runningStreamId = streamState?.state === "online" ? streamState.stream_id : null;
+  const readWordCountForLookup = context.statisticsChat?.readWordCountForLookup;
+  if (runningStreamId !== null && readWordCountForLookup === undefined) return emptyResult();
+  const wordLookup = runningStreamId === null || readWordCountForLookup === undefined
+    ? { batches: [], streamWord: null } as const
+    : await readWordCountForLookup(runningStreamId, word);
+  const pendingBatches = wordLookup.batches;
+  const streamWord = wordLookup.streamWord;
+
+  const baselineStatement = context.DB.prepare(
+    `SELECT word, total_count, last_seen_at, display_word
+       FROM channel_word_frequency_baseline WHERE channel_id = ?
+      ORDER BY total_count DESC, word ASC`,
+  ).bind(event.channelId);
+  const mergedBatchStatement = runningStreamId === null ? null : context.DB.prepare(
+    `SELECT batch FROM channel_word_frequency_streams
+      WHERE channel_id = ? AND stream_id = ? AND merged_at IS NOT NULL`,
+  ).bind(event.channelId, runningStreamId);
+  const readResults = await context.DB.batch([
+    baselineStatement,
+    ...(mergedBatchStatement === null ? [] : [mergedBatchStatement]),
+  ]);
+  const baselineRows = (readResults[0] as D1Result<StatisticsWordBaselineRow>).results;
+  const mergedBatches = new Set(mergedBatchStatement === null
+    ? []
+    : (readResults[1] as D1Result<{ batch: number }>).results.map(({ batch }) => batch));
+
+  const baselineCounts = new Map<string, StatisticsWordCountValue>();
+  const pendingCounts = new Map<string, StatisticsWordCountValue>();
+  const fullStreamCounts = new Map<string, StatisticsWordCountValue>();
+  for (const row of baselineRows) {
+    addStatisticsWordCount(baselineCounts, {
+      word: row.word,
+      displayWord: row.display_word,
+      count: row.total_count,
+      lastSeenAt: row.last_seen_at,
+    });
+  }
+  for (const batch of pendingBatches) {
+    if (mergedBatches.has(batch.batch)) continue;
+    for (const row of batch.words) addStatisticsWordCount(pendingCounts, row);
+  }
+  if (streamWord !== null) addStatisticsWordCount(fullStreamCounts, streamWord);
+
+  const hiddenBefore = new Date(Date.now() - STATISTICS_WORD_RARE_HIDE_MILLISECONDS).toISOString();
+  const count = calculateStatisticsWordCount(word, baselineCounts, pendingCounts, "total", hiddenBefore, fullStreamCounts);
+  const ignoredWords = new Set(event.settings.ignoredWords.map(foldStatisticsWord));
+  const language = await context.channelLanguage();
+  const text = count.count === 0 || count.hiddenByRarity || ignoredWords.has(word)
+    ? unknownWordReply(language, argument)
+    : wordCommandReply(language, count.displayWord, streamIsLive, count.streamCount, count.totalCount);
+  return {
+    actions: [{ kind: "chat", text, replyToMessageId: messageId, automated: false }],
+    diagnostics: [],
+  };
 };
 
 const writeAbsoluteWindow = async (
@@ -299,6 +434,12 @@ export const processStatisticsEvent = async (
       await context.scheduleAlarm("window", "window", nextBoundary(Date.now()));
     }
     return emptyResult();
+  }
+  if (event.subscriptionType === "channel.chat.message") {
+    const settings = statisticsSettingsSchema.safeParse(event.settings);
+    return settings.success
+      ? await processStatisticsWordCommand({ ...event, settings: settings.data }, context)
+      : emptyResult();
   }
   return emptyResult();
 };

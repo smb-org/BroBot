@@ -42,6 +42,13 @@ interface StatisticsWordObject {
     batch: number;
     words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
   }[]>;
+  readStatisticsWordCountForLookup(streamId: string, word: string): Promise<{
+    batches: readonly {
+      batch: number;
+      words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
+    }[];
+    streamWord: { word: string; displayWord: string; count: number; lastSeenAt: string } | null;
+  }>;
   markStatisticsWordStreamEnded(streamId: string, endedAt: string): Promise<void>;
   listMergeableStatisticsWordBuckets(
     streamState: "online" | "offline" | "unknown",
@@ -422,6 +429,18 @@ describe("statistics windows in the channel object", () => {
         { word: "fak", displayWord: "faaak", count: 7, lastSeenAt: "2026-10-25T12:01:00.000Z" },
       ],
     }]);
+    await expect(object.readStatisticsWordCountForLookup(streamId, "FAAAK")).resolves.toEqual({
+      batches: [{
+        batch: 1,
+        words: [{ word: "fak", displayWord: "faaak", count: 7, lastSeenAt: "2026-10-25T12:01:00.000Z" }],
+      }],
+      streamWord: {
+        word: "fak",
+        displayWord: "faaak",
+        count: 7,
+        lastSeenAt: "2026-10-25T12:01:00.000Z",
+      },
+    });
     await object.recordChatActivity(null, false, {
       windowStart: iso(pastWindowStart()),
       receivedAt: "2026-10-25T12:02:00.000Z",

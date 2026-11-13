@@ -20,6 +20,22 @@ export interface StatisticsWordsPanelTexts {
   removeIgnoredWord: (word: string) => string;
   ignoredWordsMessages: ChipsInputMessages;
   ignoredWordsLimit: string;
+  wordCommandSettingsButton: string;
+  wordCommandSettingsTitle: string;
+  wordCommandSettingsDescription: string;
+  wordCommandEnabled: string;
+  wordCommandEnabledDescription: string;
+  wordCommandToken: string;
+  wordCommandTokenHint: string;
+  wordCommandTokenError: string;
+  wordCommandCooldown: string;
+  wordCommandUserCooldown: string;
+  wordCommandMinimumStatus: string;
+  chatStatusEveryone: string;
+  chatStatusSubscriber: string;
+  chatStatusVip: string;
+  chatStatusModerator: string;
+  chatStatusBroadcaster: string;
   save: string;
   discard: string;
   saved: string;
@@ -70,13 +86,29 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsWordsPanelTexts>> = {
       duplicateWarning: (entry) => `${entry} ist bereits ausgeblendet.`,
     },
     ignoredWordsLimit: "Wörter dürfen höchstens 40 Zeichen lang sein.",
+    wordCommandSettingsButton: "Wortbefehl-Einstellungen",
+    wordCommandSettingsTitle: "Wortbefehl",
+    wordCommandSettingsDescription: "Aktiviere den Chatbefehl und lege Zugriffsstatus sowie Abklingzeiten fest.",
+    wordCommandEnabled: "Wortbefehl aktivieren",
+    wordCommandEnabledDescription: "Erlaubt den Chatbefehl, der Wortzählungen anzeigt.",
+    wordCommandToken: "Befehl",
+    wordCommandTokenHint: "Ein einzelner Befehl wie !wort.",
+    wordCommandTokenError: "Verwende ! gefolgt von 2 bis 24 Buchstaben, Zahlen oder Unterstrichen.",
+    wordCommandCooldown: "Globale Abklingzeit",
+    wordCommandUserCooldown: "Abklingzeit pro Person",
+    wordCommandMinimumStatus: "Mindeststatus im Chat",
+    chatStatusEveryone: "Alle",
+    chatStatusSubscriber: "Abonnenten",
+    chatStatusVip: "VIPs",
+    chatStatusModerator: "Moderatoren",
+    chatStatusBroadcaster: "Broadcaster",
     save: "Speichern",
     discard: "Verwerfen",
     saved: "Einstellungen gespeichert.",
     saving: "Speichern …",
-    settingsSaveError: "Die Wörter konnten nicht gespeichert werden.",
+    settingsSaveError: "Die Einstellungen konnten nicht gespeichert werden.",
     settingsConflict: "Die Einstellungen wurden zwischenzeitlich geändert. Bitte neu laden.",
-    settingsLoadError: "Die ausgeblendeten Wörter konnten nicht geladen werden.",
+    settingsLoadError: "Die Einstellungen konnten nicht geladen werden.",
     retrySettings: "Erneut laden",
     pageSummary: (start, end, total) => `${start}–${end} von ${total}`,
     previousPage: "Vorherige Seite",
@@ -118,13 +150,29 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsWordsPanelTexts>> = {
       duplicateWarning: (entry) => `${entry} is already hidden.`,
     },
     ignoredWordsLimit: "Words can be up to 40 characters long.",
+    wordCommandSettingsButton: "Word command settings",
+    wordCommandSettingsTitle: "Word command",
+    wordCommandSettingsDescription: "Enable the chat command and set its access level and cooldowns.",
+    wordCommandEnabled: "Enable word command",
+    wordCommandEnabledDescription: "Allows chat to request word counts.",
+    wordCommandToken: "Command token",
+    wordCommandTokenHint: "One command token, such as !wort.",
+    wordCommandTokenError: "Use ! followed by 2 to 24 letters, numbers, or underscores.",
+    wordCommandCooldown: "Global cooldown",
+    wordCommandUserCooldown: "Per-user cooldown",
+    wordCommandMinimumStatus: "Minimum chat status",
+    chatStatusEveryone: "Everyone",
+    chatStatusSubscriber: "Subscribers",
+    chatStatusVip: "VIPs",
+    chatStatusModerator: "Moderators",
+    chatStatusBroadcaster: "Broadcaster",
     save: "Save",
     discard: "Discard",
     saved: "Settings saved.",
     saving: "Saving …",
-    settingsSaveError: "Could not save hidden words.",
+    settingsSaveError: "Could not save settings.",
     settingsConflict: "Settings changed while you were editing. Reload and try again.",
-    settingsLoadError: "Could not load hidden words.",
+    settingsLoadError: "Could not load settings.",
     retrySettings: "Reload",
     pageSummary: (start, end, total) => `${start}–${end} of ${total}`,
     previousPage: "Previous page",

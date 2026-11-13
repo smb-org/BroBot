@@ -48,7 +48,7 @@ export const moduleCommandCollisionWriteGuard = (
       predicateValues.push(candidateJson, ...staticTokens);
     }
     for (const field of module.chatCommandSettingsFields ?? []) {
-      if (!/^[A-Za-z][A-Za-z0-9_]*$/u.test(field)) continue;
+      if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$/u.test(field)) continue;
       predicates.push(`EXISTS (
         SELECT 1 FROM json_each(?) AS candidate
          WHERE candidate.value = lower(json_extract(

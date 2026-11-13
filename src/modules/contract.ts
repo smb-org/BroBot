@@ -697,7 +697,7 @@ export interface ModuleExecutionContext {
   /** Stream identity captured before an accepted offline transition changed channel state. */
   streamSession?: { streamId: string | null; startedAt: string | null };
   /** Marks this stream's anonymous word counts as ended after an accepted offline transition. */
-  statisticsChat?: Pick<ModuleStatisticsChat, "markWordStreamEnded">;
+  statisticsChat?: Pick<ModuleStatisticsChat, "markWordStreamEnded" | "readWordCountForLookup">;
   streamState: () => Promise<ModuleStreamState>;
   /** Monotonic count of accepted chat messages kept in this channel object. */
   chatActivityCount: () => Promise<number>;
@@ -1044,6 +1044,11 @@ interface ModuleStatisticsChat {
   pruneExpiredWindows: (now: number) => Promise<void>;
   hasWindows: () => Promise<boolean>;
   flushWordCounts: () => Promise<void>;
+  /** Flushes the live buffer and reads one word's full stream count and unmerged batches together. */
+  readWordCountForLookup?: (streamId: string, word: string) => Promise<{
+    batches: readonly { batch: number; words: readonly ModuleStatisticsWordCount[] }[];
+    streamWord: ModuleStatisticsWordCount | null;
+  }>;
   markWordStreamEnded: (streamId: string, endedAt: string) => Promise<void>;
   reconcileWordStreams: (streamState: ModuleStatisticsStreamState, streamId: string | null, observedAt: number) => Promise<void>;
   listMergeableWordBuckets: (
@@ -2494,7 +2499,7 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   chatCommands?: readonly ModuleChatCommandDeclaration[];
   /** Effective command tokens for settings-configurable command modules. */
   chatCommandNames?: (settings: unknown) => readonly string[];
-  /** Root settings fields that store the configurable command tokens for SQL write guards. */
+  /** Settings field paths that store configurable command tokens for SQL write guards. */
   chatCommandSettingsFields?: readonly string[];
   /** Command tokens inserted by onEnable and included in activation collision guards. */
   onEnableCommandTokens?: readonly string[];

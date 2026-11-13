@@ -485,7 +485,16 @@ const expectedModuleSettings = {
   },
   sun: {},
   moon: {},
-  statistics: { ignoredWords: [] },
+  statistics: {
+    wordCommand: {
+      enabled: false,
+      command: "!wort",
+      cooldownSeconds: 10,
+      userCooldownSeconds: 30,
+      minimumChatStatus: "everyone",
+    },
+    ignoredWords: [],
+  },
   points: { currencyName: "Punkte", startBonus: 100, activityAmount: 5, windowMinutes: 10, dailyCap: 150, safetyNetEnabled: true, safetyNetAmount: 50, safetyNetThreshold: "min_stake" },
   weather: {},
   currency: {},
