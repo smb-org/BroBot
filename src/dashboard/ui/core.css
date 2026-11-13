@@ -865,6 +865,8 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .module-detail-heading .page-header__save .ui-save-bar__actions { flex: none; }
 .page-header__page-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .page-header__page-actions > * { min-width: 0; max-width: 100%; }
+/* Slot a panel portals its page-level buttons into; it adds no box of its own, so the buttons join the action row. */
+.page-header__panel-actions { display: contents; }
 /* The chat commands button is the rightmost page action on desktop, so it sits at the same spot on every page; other actions (Info, tabs) stay to its left. */
 .page-header__page-actions > .chat-commands-help__trigger { order: 99; }
 .page-header__overflow-trigger { flex: none; }

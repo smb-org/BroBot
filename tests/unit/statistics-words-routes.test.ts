@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
 import type { ModuleRouteEnvironment } from "../../src/modules/contract";
+import { statisticsSettingsSchema } from "../../src/modules/statistics/contracts";
 import { statisticsRoutes } from "../../src/modules/statistics/routes";
 import { requireChannelAuthorization } from "../../src/worker/auth/guards";
 import { createSessionCookie } from "../../src/worker/auth/session";
@@ -158,6 +159,24 @@ describe("statistics words route", () => {
 
     expect(hidden).toEqual({ words: [], page: 1, pageSize: 100, total: 0, totalPages: 0, totalCount: 5, maxCount: 5 });
     expect(restored).toMatchObject({ total: 1, totalCount: 5, words: [{ word: "Faaak" }] });
+  });
+
+  it("keeps ignored words as typed and still hides rows by their folded key", async () => {
+    const { database, fetch } = await setup();
+    expect(statisticsSettingsSchema.parse({ ignoredWords: ["GG", "g", "xdd", " Lol "] }).ignoredWords).toEqual(["gg", "xdd", "lol"]);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, settings) VALUES (?, 'statistics', ?)`,
+    ).bind(CHANNEL_ID, JSON.stringify({ ignoredWords: ["xdd", "gg"] })).run();
+    await database.prepare(
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, display_word, total_count, last_seen_at)
+       VALUES (?, 'xd', 'xd', 5, '2026-10-25T12:00:00.000Z'), (?, 'g', 'g', 4, '2026-10-25T12:00:00.000Z'),
+              (?, 'keep', 'keep', 3, '2026-10-25T12:00:00.000Z')`,
+    ).bind(CHANNEL_ID, CHANNEL_ID, CHANNEL_ID).run();
+
+    const response = await fetch(`/channels/${CHANNEL_ID}/modules/statistics/words`);
+    const body = await response.json<{ words: Array<{ word: string }> }>();
+
+    expect(body.words.map(({ word }) => word)).toEqual(["keep"]);
   });
 
   it("separates stream totals from baseline totals across merged and pending batches", async () => {

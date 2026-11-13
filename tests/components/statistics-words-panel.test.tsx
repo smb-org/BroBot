@@ -44,7 +44,7 @@ const renderPanel = (sourceWords = words, initialIgnoredWords: string[] = []) =>
     const page = Number(parameters.get("page") ?? "1");
     const filtered = sourceWords
       .filter(({ word }) => !hideFillers || word !== "lol")
-      .filter(({ word }) => !ignoredWords.includes(foldStatisticsWord(word)))
+      .filter(({ word }) => !ignoredWords.map(foldStatisticsWord).includes(foldStatisticsWord(word)))
       .filter(({ word }) => foldStatisticsWord(word).includes(search))
       .sort((left, right) => right.count - left.count || left.word.localeCompare(right.word));
     const totalCount = sourceWords.reduce((sum, word) => sum + word.count, 0);
@@ -137,20 +137,42 @@ describe("statistics words page", () => {
     })).toBe(true);
   });
 
-  it("saves hidden words explicitly and restores the filtered list only after save", async () => {
-    const { fetchMock } = renderPanel();
+  it("hides the ignore list behind a header button with the saved count and keeps the typed spelling", async () => {
+    const { fetchMock } = renderPanel(words, ["gg", "xdd"]);
     await screen.findByText("hello");
-    const entry = screen.getByRole("textbox", { name: "Add or remove words" });
+    expect(screen.queryByRole("textbox", { name: "Add or remove words" })).toBeNull();
+    const button = await screen.findByRole("button", { name: "Hidden · 2" });
+    fireEvent.click(button);
+
+    const entry = await screen.findByRole("textbox", { name: "Add or remove words" });
+    expect(screen.getByRole("button", { name: "Remove gg" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove xdd" })).toBeTruthy();
     fireEvent.change(entry, { target: { value: "HELLO" } });
     fireEvent.keyDown(entry, { key: "Enter" });
 
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
-    expect(await screen.findByText("hello")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove hello" })).toBeTruthy();
+    expect(await screen.findByText("hello", { selector: ".statistics-words__word" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
-    await waitFor(() => expect(screen.queryByText("hello")).toBeNull());
-    expect(screen.getByRole("button", { name: "Remove helo" })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("hello", { selector: ".statistics-words__word" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Remove hello" })).toBeTruthy();
+    expect(screen.getByText("Hidden · 3")).toBeTruthy();
+  });
+
+  it("asks before closing the ignore dialog with unsaved changes", async () => {
+    renderPanel();
+    await screen.findByText("hello");
+    fireEvent.click(screen.getByRole("button", { name: /^Hidden/u }));
+    const entry = await screen.findByRole("textbox", { name: "Add or remove words" });
+    fireEvent.change(entry, { target: { value: "gg" } });
+    fireEvent.keyDown(entry, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: /^(Close|Schließen)$/u }));
+
+    expect(await screen.findByText("Continue editing")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Continue editing" }));
+    expect(screen.getByRole("button", { name: "Remove gg" })).toBeTruthy();
   });
 
   it("loads the next page and updates the visible range", async () => {

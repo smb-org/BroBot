@@ -7,33 +7,23 @@
     font-size: var(--text-body);
   }
 
-  .statistics-words__ignored {
+  .statistics-words__dialog { width: min(560px, calc(100vw - 32px)); box-sizing: border-box; }
+
+  .statistics-words__dialog-body {
     display: grid;
     min-width: 0;
     gap: var(--spacing-s2);
   }
 
-  .statistics-words__ignored-heading {
-    display: flex;
-    min-height: 38px;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--spacing-s3);
-  }
-
-  .statistics-words__ignored-heading h2 {
+  .statistics-words__dialog-description {
     margin: 0;
-    color: var(--color-text);
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  .statistics-words__ignored-heading p {
-    margin: 2px 0 0;
     color: var(--color-text-3);
     font-size: 12px;
     line-height: 1.35;
   }
+
+  /* Reserved so a load error never pushes the field down. */
+  .statistics-words__settings-error-slot { min-height: 28px; }
 
   .statistics-words__settings-error {
     display: flex;
@@ -318,8 +308,6 @@
     .statistics-words__paging { grid-column: 1 / -1; }
     .statistics-words__filler-toggle { font-size: 12px; }
     .statistics-words__filler-toggle .ui-switch-row__copy strong { font-size: 12px; }
-    .statistics-words__ignored-heading { align-items: flex-start; flex-direction: column; }
-    .statistics-words__settings-error { min-height: 28px; }
     .statistics-words__scope .segment-choice { width: 100%; }
     .statistics-words__privacy-note { align-items: flex-start; }
     .statistics-words__paging { gap: var(--spacing-s1); }

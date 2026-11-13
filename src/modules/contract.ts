@@ -2102,6 +2102,8 @@ export interface ModulePanelProperties {
   textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
   /** Last known status of the bot's moderator role in this channel. */
   botIsModerator?: boolean | null;
+  /** Slot in the page header's action row; a panel may portal page-level buttons into it. */
+  headerActionsTarget?: HTMLElement | null;
   /** Called by the host when an inspector is closed. */
   onCloseInspector?: () => void;
   /** Deep-link target set by the host (command palette, #164) -- a module reads

@@ -335,7 +335,7 @@ statisticsRoutes.get("/words", async (context) => {
     try {
       const parsed: unknown = JSON.parse(settingsRow.settings);
       const settings = statisticsSettingsSchema.safeParse(parsed);
-      if (settings.success) ignoredWords = new Set(settings.data.ignoredWords);
+      if (settings.success) ignoredWords = new Set(settings.data.ignoredWords.map(foldStatisticsWord));
     } catch {
       // Invalid legacy settings leave the list visible and remain repairable through module settings.
     }

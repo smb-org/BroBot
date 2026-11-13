@@ -12,6 +12,7 @@ export interface StatisticsWordsPanelTexts {
   hideFillers: string;
   privacyNote: string;
   ignoredWordsTitle: string;
+  hiddenWordsButton: (count: string) => string;
   ignoredWordsDescription: string;
   ignoredWordsLabel: string;
   ignoredWordsPlaceholder: string;
@@ -57,6 +58,7 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsWordsPanelTexts>> = {
     hideFillers: "Füllwörter ausblenden",
     privacyNote: "Kanalweit, ohne Zuordnung zu Personen oder Nachrichten.",
     ignoredWordsTitle: "Ausgeblendete Wörter",
+    hiddenWordsButton: (count) => `Ausgeblendet · ${count}`,
     ignoredWordsDescription: "Ausgeblendete Wörter bleiben gespeichert und erscheinen wieder, wenn du sie entfernst.",
     ignoredWordsLabel: "Wörter hinzufügen oder entfernen",
     ignoredWordsPlaceholder: "Wort eingeben und Enter drücken",
@@ -104,6 +106,7 @@ const texts: Readonly<Record<ModuleLanguage, StatisticsWordsPanelTexts>> = {
     hideFillers: "Hide filler words",
     privacyNote: "Channel-wide, with no link to people or messages.",
     ignoredWordsTitle: "Hidden words",
+    hiddenWordsButton: (count) => `Hidden · ${count}`,
     ignoredWordsDescription: "Hidden words stay stored and return to the list when you remove them here.",
     ignoredWordsLabel: "Add or remove words",
     ignoredWordsPlaceholder: "Enter a word and press Enter",

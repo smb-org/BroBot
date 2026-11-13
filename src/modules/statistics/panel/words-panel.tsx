@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { createPortal } from "react-dom";
 
 import { dashboardTexts } from "../../../dashboard/locale";
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { Button, ChipsInput, ConfirmDialog, Field, Icon, SaveStatus, SegmentChoice, SwitchRow, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { Button, ChipsInput, ConfirmDialog, Dialog, Field, Icon, SaveStatus, SegmentChoice, SwitchRow, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
-import { foldStatisticsWord } from "../domain";
 import type { StatisticsWordsResponse } from "../contracts";
 import { loadStatisticsSettings, loadStatisticsWords, saveStatisticsSettings, statisticsSettingsErrorCode, type StatisticsSettingsState } from "./service";
 import { statisticsWordsPanelTexts } from "./words-locale";
@@ -38,10 +38,14 @@ const shareFormatter = (language: "de" | "en"): Intl.NumberFormat => new Intl.Nu
   { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 },
 );
 
+/** Chips keep the typed spelling; the server and the list filter fold it only when matching. */
+const typedStatisticsWord = (word: string): string => word.normalize("NFKC").toLowerCase();
+
 const skeletonRows = Array.from({ length: 12 }, (_unused, index) => index);
 
-export function StatisticsWordsPanel({ channelId, language = "de", canManage = false }: ModulePanelProperties): ReactElement {
+export function StatisticsWordsPanel({ channelId, language = "de", canManage = false, headerActionsTarget }: ModulePanelProperties): ReactElement {
   const labels = statisticsWordsPanelTexts(language);
+  const [ignoreOpen, setIgnoreOpen] = useState(false);
   const queryClient = useDashboardQueryClient();
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
@@ -146,52 +150,57 @@ export function StatisticsWordsPanel({ channelId, language = "de", canManage = f
   const draftGuard = useDraftGuard(ignoredWordsDirty, saveIgnoredWords, discardIgnoredWords);
   useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
   const navigationLabels = dashboardTexts(language).module;
+  const closeIgnoreDialog = (): void => { draftGuard.guardSwitch(() => { setIgnoreOpen(false); }); };
+  const hiddenCount = settingsQuery.data?.settings.ignoredWords.length ?? 0;
+  const hiddenButton = <Button variant="neutral" icon="eye-off" ariaHasPopup="dialog" ariaExpanded={ignoreOpen} onClick={() => { setIgnoreOpen(true); }}>
+    {labels.hiddenWordsButton(formatNumber.format(hiddenCount))}
+  </Button>;
 
   return <section className="statistics-words" aria-label={labels.title}>
-    <section className="statistics-words__ignored" aria-labelledby="statistics-words-ignored-title">
-      <header className="statistics-words__ignored-heading">
-        <div>
-          <h2 id="statistics-words-ignored-title">{labels.ignoredWordsTitle}</h2>
-          <p>{labels.ignoredWordsDescription}</p>
+    {headerActionsTarget === undefined ? hiddenButton : headerActionsTarget === null ? null : createPortal(hiddenButton, headerActionsTarget)}
+    <Dialog opened={ignoreOpen} title={labels.ignoredWordsTitle} onClose={closeIgnoreDialog} pending={settingsPending} className="statistics-words__dialog">
+      <div className="statistics-words__dialog-body">
+        <p className="statistics-words__dialog-description">{labels.ignoredWordsDescription}</p>
+        <div className="statistics-words__settings-error-slot">
+          {settingsQuery.isError ? <div className="statistics-words__settings-error" role="alert">
+            <span>{labels.settingsLoadError}</span>
+            <Button variant="subtle" onClick={() => { void settingsQuery.refetch(); }}>{labels.retrySettings}</Button>
+          </div> : null}
         </div>
-        {settingsQuery.isError ? <div className="statistics-words__settings-error" role="alert">
-          <span>{labels.settingsLoadError}</span>
-          <Button variant="subtle" onClick={() => { void settingsQuery.refetch(); }}>{labels.retrySettings}</Button>
-        </div> : <span aria-hidden="true">&nbsp;</span>}
-      </header>
-      <div aria-busy={settingsQuery.isLoading} className="statistics-words__ignored-input">
-        <ChipsInput
-          label={labels.ignoredWordsLabel}
-          values={ignoredWordsDraft.ignoredWords}
-          onChange={updateIgnoredWords}
-          placeholder={labels.ignoredWordsPlaceholder}
-          normalize={foldStatisticsWord}
-          validate={(word) => Array.from(word).length <= 40 ? null : labels.ignoredWordsLimit}
-          removeLabel={labels.removeIgnoredWord}
-          disabled={!canManage || settingsPending || settingsQuery.data === undefined}
-          messages={labels.ignoredWordsMessages}
-          listLabel={labels.ignoredWordsList}
-          max={200}
-        />
+        <div aria-busy={settingsQuery.isLoading} className="statistics-words__ignored-input">
+          <ChipsInput
+            label={labels.ignoredWordsLabel}
+            values={ignoredWordsDraft.ignoredWords}
+            onChange={updateIgnoredWords}
+            placeholder={labels.ignoredWordsPlaceholder}
+            normalize={typedStatisticsWord}
+            validate={(word) => Array.from(word).length <= 40 ? null : labels.ignoredWordsLimit}
+            removeLabel={labels.removeIgnoredWord}
+            disabled={!canManage || settingsPending || settingsQuery.data === undefined}
+            messages={labels.ignoredWordsMessages}
+            listLabel={labels.ignoredWordsList}
+            max={200}
+          />
+        </div>
+        <div className="statistics-words__save">
+          <SaveStatus
+            persistent
+            dirty={ignoredWordsDirty}
+            pending={settingsPending}
+            saved={settingsSaved}
+            {...(settingsSaveError === undefined ? {} : { error: settingsSaveError })}
+            saveDisabled={!canManage || settingsQuery.data === undefined}
+            discardDisabled={settingsQuery.data === undefined}
+            onSave={() => { void saveIgnoredWords(); }}
+            onDiscard={discardIgnoredWords}
+            saveLabel={labels.save}
+            discardLabel={labels.discard}
+            savedLabel={labels.saved}
+            pendingLabel={labels.saving}
+          />
+        </div>
       </div>
-      <div className="statistics-words__save">
-        <SaveStatus
-          persistent
-          dirty={ignoredWordsDirty}
-          pending={settingsPending}
-          saved={settingsSaved}
-          {...(settingsSaveError === undefined ? {} : { error: settingsSaveError })}
-          saveDisabled={!canManage || settingsQuery.data === undefined}
-          discardDisabled={settingsQuery.data === undefined}
-          onSave={() => { void saveIgnoredWords(); }}
-          onDiscard={discardIgnoredWords}
-          saveLabel={labels.save}
-          discardLabel={labels.discard}
-          savedLabel={labels.saved}
-          pendingLabel={labels.saving}
-        />
-      </div>
-    </section>
+    </Dialog>
     <div className="statistics-words__controls">
       <Field
         className="statistics-words__search"

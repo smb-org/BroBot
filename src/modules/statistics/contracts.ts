@@ -4,7 +4,16 @@ import { foldStatisticsWord } from "./domain";
 
 export const statisticsSettingsSchema = z.object({
   ignoredWords: z.array(z.string().trim().min(1).max(40)).max(200).default([])
-    .transform((words) => [...new Set(words.map(foldStatisticsWord))]),
+    // Words are stored as typed (NFKC, lowercase); the first spelling per folded key wins. Matching folds on read.
+    .transform((words) => {
+      const byKey = new Map<string, string>();
+      for (const word of words) {
+        const typed = word.normalize("NFKC").toLowerCase();
+        const key = foldStatisticsWord(typed);
+        if (!byKey.has(key)) byKey.set(key, typed);
+      }
+      return [...byKey.values()];
+    }),
 });
 
 export type StatisticsSettings = z.output<typeof statisticsSettingsSchema>;
