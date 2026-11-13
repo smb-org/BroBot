@@ -1548,6 +1548,8 @@ export interface ModuleTempVipAccess {
   grant: (request: ModuleTempVipGrantRequest) => Promise<ModuleTempVipResult>;
   /** Reads and, when due, resumes a grant operation already journaled under this id. */
   replayGrant: (operationId: string, userId: string) => Promise<ModuleTempVipResult | null>;
+  /** Stops a queued grant that can no longer proceed after its redemption is refunded. */
+  abandon: (operationId: string) => Promise<void>;
   extend: (request: ModuleTempVipExtendRequest) => Promise<ModuleTempVipResult>;
   importExisting: (request: ModuleTempVipImportRequest) => Promise<ModuleTempVipResult>;
   replayImport: (operationId: string, userId: string, expiresAt: string) => Promise<ModuleTempVipResult | null>;
@@ -2070,6 +2072,17 @@ export interface ChannelPointsActionDefinition<ConfigSchema extends z.ZodType = 
       operationId: string;
     },
   ) => Promise<"fulfilled" | { refund: { de: string; en: string } } | "pending">;
+  /** Abandons durable work after a pending redemption is refunded, when supported. */
+  abandon?: (
+    context: ModuleExecutionContext,
+    input: {
+      redemption: {
+        id: string; rewardId: string; rewardTitle: string; userId: string; userLogin: string;
+        userName: string; userInput: string; redeemedAt: string;
+      };
+      operationId: string;
+    },
+  ) => Promise<void>;
 }
 
 /** A registered channel-points action with the id of its owning module. */

@@ -164,6 +164,43 @@ const actionOutcome = async (
   }
 };
 
+type ChannelPointsActionRedemption = NonNullable<ReturnType<typeof redemptionFromEventSub>>;
+
+const actionRedemptionFromRow = (row: ChannelPointsRedemption): ChannelPointsActionRedemption => ({
+  id: row.redemptionId,
+  rewardId: row.twitchRewardId,
+  rewardTitle: row.rewardTitle,
+  userId: row.userId,
+  userLogin: row.userLogin,
+  userName: row.userName,
+  userInput: row.userInput,
+  redeemedAt: row.redeemedAt,
+});
+
+const abandonPendingAction = async (
+  environment: Env,
+  channelId: string,
+  redemption: ChannelPointsActionRedemption,
+  context: ModuleExecutionContext | null,
+): Promise<void> => {
+  try {
+    const repository = createChannelPointsRepository(environment.DB);
+    const reward = await repository.getRewardByTwitchId(channelId, redemption.rewardId);
+    if (reward === null) return;
+    const { MODULES } = await import("../registry");
+    const provider = MODULES.find((module) => module.id === reward.actionModuleId);
+    const action = provider?.channelPointsActions?.find((item) => item.id === reward.actionId);
+    if (provider === undefined || action?.abandon === undefined) return;
+    const actionContext = context === null
+      ? (await loadActionContext()).createModuleActionExecutionContext(environment, channelId, provider.id)
+      : provider.id === "channel_points" ? context : context.forModule?.(provider.id);
+    if (actionContext === undefined) return;
+    await action.abandon(actionContext, { redemption, operationId: redemption.id });
+  } catch (error: unknown) {
+    console.warn("Channel-points action abandonment failed.", channelId, redemption.id, error);
+  }
+};
+
 const persistFromAction = async (
   environment: Env,
   channelId: string,
@@ -217,6 +254,7 @@ const persistTwitchTerminalStatus = async (
   redemption: NonNullable<ReturnType<typeof redemptionFromEventSub>>,
   status: NormalizedTwitchRedemptionStatus | null,
   now: string,
+  context: ModuleExecutionContext | null,
 ): Promise<void> => {
   if (status !== "fulfilled" && status !== "canceled") return;
   const repository = createChannelPointsRepository(environment.DB);
@@ -248,12 +286,15 @@ const persistTwitchTerminalStatus = async (
     de: [current.outcomeReason?.de, mismatchReason.de].filter(Boolean).join(" "),
     en: [current.outcomeReason?.en, mismatchReason.en].filter(Boolean).join(" "),
   };
-  await repository.updateRedemption(channelId, redemption.id, {
+  const updated = await repository.updateRedemption(channelId, redemption.id, {
     status: status === "fulfilled" ? "fulfilled" : "refunded",
     pendingTwitchStatus: null,
     outcomeReason,
     claimedAt: null,
   }, redemptionStatuses, now);
+  if (updated && status === "canceled") {
+    await abandonPendingAction(environment, channelId, redemption, context);
+  }
 };
 
 const processChannelPointsEventInLane = async (
@@ -271,7 +312,7 @@ const processChannelPointsEventInLane = async (
   } else if (event.subscriptionType === "channel.channel_points_custom_reward_redemption.update") {
     const redemption = redemptionFromEventSub(event.payload);
     if (redemption !== null) await persistTwitchTerminalStatus(
-      environment, event.channelId, redemption, eventSubRedemptionStatus(event.payload["status"]), now,
+      environment, event.channelId, redemption, eventSubRedemptionStatus(event.payload["status"]), now, context,
     );
   } else if (event.subscriptionType === "channel.channel_points_custom_reward.update") {
     const reward = rewardSnapshotFromEventSub(event.payload);
@@ -335,12 +376,15 @@ const sendPendingTwitchPatch = async (
   const repository = createChannelPointsRepository(environment.DB);
   const finishedAt = new Date().toISOString();
   if (patched === "success") {
-    await repository.updateRedemption(channelId, row.redemptionId, {
+    const updated = await repository.updateRedemption(channelId, row.redemptionId, {
       status: pendingStatus === "FULFILLED" ? "fulfilled" : "refunded",
       pendingTwitchStatus: null,
       outcomeReason: row.outcomeReason,
       claimedAt: null,
     }, [expectedStatus], finishedAt);
+    if (updated && pendingStatus === "CANCELED") {
+      await abandonPendingAction(environment, channelId, actionRedemptionFromRow(row), null);
+    }
     return;
   }
   await repository.updateRedemption(channelId, row.redemptionId, {
@@ -511,9 +555,12 @@ export const reconcileChannelPoints = async (
             de: [row.outcomeReason?.de, mismatchReason.de].filter(Boolean).join(" "),
             en: [row.outcomeReason?.en, mismatchReason.en].filter(Boolean).join(" "),
           };
-          await repository.updateRedemption(channelId, row.redemptionId, {
+          const updated = await repository.updateRedemption(channelId, row.redemptionId, {
             status: terminalStatus, pendingTwitchStatus: null, outcomeReason, claimedAt: null,
           }, redemptionStatuses, now);
+          if (updated && status === "canceled") {
+            await abandonPendingAction(environment, channelId, actionRedemptionFromRow(row), options.context ?? null);
+          }
         }
       } catch {
         fail(twitchRewardId, "unknown_status");
@@ -641,7 +688,13 @@ const performQueueOperation = async (
   if (!await authorize()) return { ok: false, reason: "precondition_failed" };
   const repository = createChannelPointsRepository(db);
   const current = await repository.getRedemption(channelId, invocation.id);
-  if (current?.status !== "queued") {
+  const claimableStatuses: readonly ChannelPointsRedemptionStatus[] = invocation.kind === "redemption.refund"
+    ? ["queued", "pending"]
+    : ["queued"];
+  const canClaimCurrent = current !== null && (invocation.kind === "redemption.refund"
+    ? current.status === "queued" || current.status === "pending"
+    : current.status === "queued");
+  if (!canClaimCurrent) {
     return {
       ok: false,
       error: "channel_points_redemption_not_queued",
@@ -653,7 +706,8 @@ const performQueueOperation = async (
   const now = invocation.now;
   const claimGuard = mutationGuardFor(channelId, invocation.actor, new Date().toISOString(), authorizeMutation);
   const claimed = await repository.claimRedemption(
-    channelId, invocation.id, ["queued"], expiredBeforeFor(now), now, claimGuard,
+    channelId, invocation.id, claimableStatuses,
+    invocation.kind === "redemption.refund" ? now : expiredBeforeFor(now), now, claimGuard,
     invocation.kind === "redemption.refund"
       ? { pendingTwitchStatus: "CANCELED", outcomeReason: operatorRefundReason }
       : undefined,
@@ -677,8 +731,12 @@ const performQueueOperation = async (
     };
   }
   if (invocation.kind === "redemption.refund") {
-    return await applyOutcome(environment, channelId, redemption.twitchRewardId, redemption.redemptionId,
+    const result = await applyOutcome(environment, channelId, redemption.twitchRewardId, redemption.redemptionId,
       { refund: operatorRefundReason }, now, authorize);
+    if (result.ok && result.status === "refunded") {
+      await abandonPendingAction(environment, channelId, actionRedemptionFromRow(current), null);
+    }
+    return result;
   }
 
   const helix = await loadHelix();
@@ -713,9 +771,12 @@ const performQueueOperation = async (
   const remoteStatus = helixRedemptionStatus(remoteRedemption.status);
   if (remoteStatus !== "unfulfilled") {
     const status = remoteStatus === "fulfilled" ? "fulfilled" : "refunded";
-    await repository.updateRedemption(channelId, redemption.redemptionId, {
+    const updated = await repository.updateRedemption(channelId, redemption.redemptionId, {
       status, pendingTwitchStatus: null, outcomeReason: redemption.outcomeReason, claimedAt: null,
     }, ["running"], now);
+    if (updated && status === "refunded") {
+      await abandonPendingAction(environment, channelId, actionRedemptionFromRow(redemption), null);
+    }
     return { ok: false, error: "channel_points_already_resolved_on_twitch", status };
   }
 

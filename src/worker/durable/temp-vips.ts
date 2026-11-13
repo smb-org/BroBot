@@ -121,6 +121,9 @@ interface OperationPayload {
   intentAt?: string | null;
   precondition?: "not_vip";
   retryNow?: boolean;
+  mutationAttempted?: boolean;
+  mutationAmbiguous?: boolean;
+  abandonRequested?: boolean;
 }
 
 type TempVipStoredResult = ModuleTempVipResult & {
@@ -372,7 +375,7 @@ const backoffDelay = (attempts: number): number =>
   REMOVAL_RETRY_DELAYS_MS[Math.min(Math.max(0, attempts - 1), REMOVAL_RETRY_DELAYS_MS.length - 1)] ?? 60 * 60_000;
 
 const makePayload = (request: Record<string, unknown>, stage = "initial", intentAt: string | null = null): string =>
-  JSON.stringify({ request, stage, intentAt } satisfies OperationPayload);
+  JSON.stringify({ request, stage, intentAt, mutationAttempted: false, mutationAmbiguous: false } satisfies OperationPayload);
 
 const isCreationOperation = (kind: TempVipOperationKind): boolean =>
   kind === "grant" || kind === "extend" || kind === "import" || kind === "record_intent" ||
@@ -563,11 +566,26 @@ export class TempVipStore {
   }
 
   private updatePayloadSync(operation: TempVipOperationSql, payload: OperationPayload): void {
+    const current = this.sql.exec<Pick<TempVipOperationSql, "payload_json">>(
+      "SELECT payload_json FROM temp_vip_ops WHERE operation_id = ? AND status = 'running'",
+      operation.operation_id,
+    ).toArray()[0];
+    if (current !== undefined && decodePayload(current.payload_json).abandonRequested === true) {
+      payload.abandonRequested = true;
+    }
     this.sql.exec(
       "UPDATE temp_vip_ops SET payload_json = ? WHERE operation_id = ? AND status = 'running'",
       JSON.stringify(payload),
       operation.operation_id,
     );
+  }
+
+  private operationPayloadSync(operationId: string): OperationPayload | null {
+    const row = this.sql.exec<Pick<TempVipOperationSql, "payload_json">>(
+      "SELECT payload_json FROM temp_vip_ops WHERE operation_id = ?",
+      operationId,
+    ).toArray()[0];
+    return row === undefined ? null : decodePayload(row.payload_json);
   }
 
   private finishSync(operationId: string, result: TempVipStoredResult, now: string, attempts?: number): void {
@@ -735,6 +753,9 @@ export class TempVipStore {
       const needsReconcile = operation.needs_reconcile === 1 || interrupted;
       const attempts = interrupted ? Math.max(1, operation.attempts + 1) : operation.attempts;
       const payload = decodePayload(operation.payload_json);
+      if (interrupted && operation.kind === "grant" && payload.mutationAttempted === true) {
+        payload.mutationAmbiguous = true;
+      }
       const row = rowFor(this.sql, operation.user_id);
 
       if (operation.kind === "grant" && payload.stage === "initial") {
@@ -783,14 +804,16 @@ export class TempVipStore {
             claimed.operation.operation_id,
           ).toArray()[0];
           if (current?.status === "running") {
+            const payload = decodePayload(current.payload_json);
             if (current.kind === "grant" || current.kind === "extend" || current.kind === "import" ||
                 current.kind === "end" || current.kind === "expire") {
               this.setNeedsReconcileSync(current.operation_id, true);
             }
-            if (this.shouldSupersedeForLaterReleaseSync(current)) {
+            if (payload.abandonRequested !== true && this.shouldSupersedeForLaterReleaseSync(current)) {
               this.finishSync(current.operation_id, { status: "superseded" }, now, current.attempts + 1);
             } else {
-              this.requeueSync(current, decodePayload(current.payload_json), now, TEMP_VIP_RETRY_MS, current.attempts + 1);
+              if (current.kind === "grant" && payload.mutationAttempted === true) payload.mutationAmbiguous = true;
+              this.requeueSync(current, payload, now, TEMP_VIP_RETRY_MS, current.attempts + 1);
             }
           }
         });
@@ -836,7 +859,15 @@ export class TempVipStore {
       this.transaction(() => {
         const request = payload.request as { source?: string };
         if (operation.kind === "grant" && request.source === "channel_points") {
-          this.finishSync(operation.operation_id, { status: "rejected", reason: "scope_missing" }, deferredAt, operation.attempts);
+          const mutationAttempted = payload.mutationAttempted === true ||
+            (payload.mutationAttempted === undefined &&
+              (claimed.needsReconcile || operation.attempts > 0 && payload.stage === "post"));
+          if (!mutationAttempted) {
+            this.finishSync(operation.operation_id, { status: "rejected", reason: "scope_missing" }, deferredAt, operation.attempts);
+          } else {
+            this.setNeedsReconcileSync(operation.operation_id, true);
+            this.requeueSync(operation, payload, deferredAt, TEMP_VIP_OBSERVE_DEFER_MS, operation.attempts);
+          }
         } else if (this.hasLaterReleaseSync(operation)) {
           this.finishSync(operation.operation_id, { status: "superseded" }, deferredAt, operation.attempts);
         } else {
@@ -1322,6 +1353,41 @@ export class TempVipStore {
   ): Promise<void> {
     const request = payload.request as unknown as Omit<ModuleTempVipGrantRequest, "operationId">;
     const now = this.now();
+    if (payload.abandonRequested === true) {
+      const mayHaveMutated = payload.mutationAmbiguous === true ||
+        (payload.mutationAttempted === undefined &&
+          (needsReconcile || operation.attempts > 0 && payload.stage === "post"));
+      if (!mayHaveMutated) {
+        this.transaction(() => {
+          this.finishSync(operation.operation_id, { status: "superseded" }, now, operation.attempts);
+        });
+        return;
+      }
+
+      const lookup = await this.safeGet(request.person.userId);
+      const checkedAt = this.now();
+      if (!lookup.ok) {
+        this.transaction(() => {
+          this.setNeedsReconcileSync(operation.operation_id, true);
+          this.requeueSync(operation, payload, checkedAt, TEMP_VIP_RETRY_MS, operation.attempts + 1);
+        });
+        return;
+      }
+      this.transaction(() => {
+        this.advanceTwitchStateSync(operation.user_id, checkedAt, checkedAt);
+        if (lookup.isVip && row === null) {
+          const result = this.createGrantSync(operation, request, payload.intentAt ?? checkedAt, checkedAt);
+          this.finishCreationSync(operation, result, checkedAt, operation.attempts + 1);
+        } else if (lookup.isVip) {
+          this.finishSync(operation.operation_id, { status: "superseded" }, checkedAt, operation.attempts + 1);
+        } else {
+          this.setNeedsReconcileSync(operation.operation_id, true);
+          this.requeueSync(operation, { ...payload, mutationAmbiguous: true }, checkedAt,
+            TEMP_VIP_RETRY_MS, operation.attempts + 1);
+        }
+      });
+      return;
+    }
     if (row !== null) {
       const refusal = rowActionRefusal(row);
       if (refusal !== null) {
@@ -1398,7 +1464,9 @@ export class TempVipStore {
         });
         return;
       }
+      nextPayload = { ...payload };
       this.transaction(() => {
+        this.updatePayloadSync(operation, nextPayload);
         this.setNeedsReconcileSync(operation.operation_id, false);
       });
     } else if (row === null && payload.precondition !== "not_vip") {
@@ -1436,8 +1504,26 @@ export class TempVipStore {
       return;
     }
     if (added.reason === "precondition_failed") return;
-    if (added.ambiguous === true || added.reason === "network" || added.reason === "rate_limited" || added.reason === "unknown_status") {
-      this.requeueOperation(operation, nextPayload, completedAt, TEMP_VIP_RETRY_MS, operation.attempts + 1, true);
+    const mutationAmbiguous = added.ambiguous === true || added.reason === "network" || added.reason === "unknown_status";
+    if (mutationAmbiguous || added.reason === "rate_limited") {
+      nextPayload = { ...nextPayload, mutationAmbiguous };
+      const latestPayload = this.operationPayloadSync(operation.operation_id);
+      if (added.reason === "rate_limited" && latestPayload?.abandonRequested === true) {
+        this.transaction(() => {
+          this.finishSync(operation.operation_id, { status: "superseded" }, completedAt, operation.attempts + 1);
+        });
+      } else {
+        if (latestPayload?.abandonRequested === true) nextPayload.abandonRequested = true;
+        if (mutationAmbiguous && nextPayload.abandonRequested === true) {
+          this.transaction(() => {
+            this.setNeedsReconcileSync(operation.operation_id, true);
+            this.requeueSync(operation, nextPayload, completedAt, TEMP_VIP_RETRY_MS, operation.attempts + 1);
+          });
+        } else {
+          this.requeueOperation(operation, nextPayload, completedAt, TEMP_VIP_RETRY_MS,
+            operation.attempts + 1, mutationAmbiguous);
+        }
+      }
       return;
     }
     const result: ModuleTempVipResult = added.reason === "already_vip"
@@ -1845,6 +1931,23 @@ export class TempVipStore {
   private beforeMutationAttempt(operation: TempVipOperationSql, payload: OperationPayload): Promise<boolean> {
     const now = this.now();
     const slot = this.transaction(() => {
+      const current = this.sql.exec<Pick<TempVipOperationSql, "payload_json"> & { needs_reconcile: number }>(
+        "SELECT payload_json, needs_reconcile FROM temp_vip_ops WHERE operation_id = ? AND status = 'running'",
+        operation.operation_id,
+      ).toArray()[0];
+      const currentPayload = current === undefined ? null : decodePayload(current.payload_json);
+      if (currentPayload?.abandonRequested === true) {
+        const mayHaveMutated = currentPayload.mutationAmbiguous === true ||
+          (currentPayload.mutationAmbiguous === undefined && current?.needs_reconcile === 1);
+        if (mayHaveMutated) {
+          currentPayload.mutationAmbiguous = true;
+          this.setNeedsReconcileSync(operation.operation_id, true);
+          this.requeueSync(operation, currentPayload, now, TEMP_VIP_RETRY_MS, operation.attempts);
+        } else {
+          this.finishSync(operation.operation_id, { status: "superseded" }, now, operation.attempts);
+        }
+        return { allowed: false, retryAt: null };
+      }
       const nowMs = parseTime(now);
       this.sql.exec("DELETE FROM temp_vip_mutation_attempts WHERE attempted_at <= ?", nowMs - TEMP_VIP_MUTATION_WINDOW_MS);
       const attempts = this.sql.exec<{ count: number; earliest: number | null }>(
@@ -1860,6 +1963,9 @@ export class TempVipStore {
         return { allowed: false, retryAt };
       }
       this.sql.exec("INSERT INTO temp_vip_mutation_attempts (attempted_at) VALUES (?)", nowMs);
+      payload.mutationAmbiguous = false;
+      payload.mutationAttempted = true;
+      this.updatePayloadSync(operation, payload);
       return { allowed: true, retryAt: null };
     });
     return Promise.resolve(slot.allowed);
@@ -2081,6 +2187,39 @@ export class TempVipStore {
     if (existing.status === "done") return this.pendingResult(operationId);
     await this.rearm();
     return existing.status === "running" ? this.pendingResult(operationId) : this.waitForOperation(operationId);
+  }
+
+  public async abandon(operationIdValue: string): Promise<void> {
+    const operationId = operationKey(operationIdValue);
+    const now = this.now();
+    const abandoned = this.transaction(() => {
+      const operation = this.sql.exec<TempVipOperationSql>(
+        "SELECT * FROM temp_vip_ops WHERE operation_id = ?",
+        operationId,
+      ).toArray()[0];
+      if (operation === undefined || (operation.status !== "queued" && operation.status !== "running") ||
+          operation.kind !== "grant") return false;
+
+      const payload = decodePayload(operation.payload_json);
+      const request = payload.request as { source?: string };
+      if (request.source !== "channel_points") return false;
+      const mayHaveMutated = payload.mutationAmbiguous === true ||
+        (payload.mutationAmbiguous === undefined &&
+          (operation.needs_reconcile === 1 || operation.status === "running" && payload.mutationAttempted === true ||
+            payload.mutationAttempted === undefined && operation.attempts > 0 && payload.stage === "post"));
+      if (mayHaveMutated || operation.status === "running") {
+        payload.abandonRequested = true;
+        this.sql.exec(
+          "UPDATE temp_vip_ops SET payload_json = ? WHERE operation_id = ? AND status IN ('queued', 'running')",
+          JSON.stringify(payload), operationId,
+        );
+        return operation.status === "queued";
+      }
+
+      this.finishSync(operationId, { status: "superseded" }, now, operation.attempts);
+      return true;
+    });
+    if (abandoned) await this.rearm();
   }
 
   public async extend(request: ModuleTempVipExtendRequest): Promise<ModuleTempVipResult> {

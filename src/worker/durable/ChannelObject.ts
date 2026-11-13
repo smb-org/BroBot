@@ -5372,6 +5372,10 @@ export class ChannelObject extends DurableObject<Env> {
     return result;
   }
 
+  public async abandonTempVipGrant(operationId: string): Promise<void> {
+    await this.tempVipStore().abandon(operationId);
+  }
+
   public async extendTempVip(request: ModuleTempVipExtendRequest): Promise<ModuleTempVipResult> {
     const store = this.tempVipStore();
     const result = await store.extend(request);

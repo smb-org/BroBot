@@ -105,4 +105,7 @@ export const grantVipAction: ChannelPointsActionDefinition<typeof grantVipConfig
       return "pending";
     }
   },
+  abandon: async (context, { operationId }) => {
+    await context.tempVips.abandon(operationId);
+  },
 };

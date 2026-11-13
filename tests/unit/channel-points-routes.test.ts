@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   byIds: vi.fn(),
   unfulfilled: vi.fn(),
   sendChat: vi.fn(),
+  abandonTempVip: vi.fn(),
 }));
 vi.mock("../../src/worker/twitch/channel-points", () => ({
   createCustomReward: mocks.create,
@@ -28,7 +29,10 @@ vi.mock("../../src/worker/twitch/channel-points", () => ({
   listUnfulfilledRedemptions: mocks.unfulfilled,
 }));
 vi.mock("../../src/worker/module-action-context", () => ({
-  createModuleActionExecutionContext: vi.fn(() => ({ sendChat: mocks.sendChat })),
+  createModuleActionExecutionContext: vi.fn(() => ({
+    sendChat: mocks.sendChat,
+    tempVips: { abandon: mocks.abandonTempVip },
+  })),
 }));
 
 const channelId = "channel_points";
@@ -133,6 +137,7 @@ describe("channel points routes", () => {
       }));
     mocks.unfulfilled.mockReset().mockResolvedValue({ ok: true, data: [] });
     mocks.sendChat.mockReset().mockResolvedValue({ sent: true, delivery: "sent", reason: null });
+    mocks.abandonTempVip.mockReset().mockResolvedValue(undefined);
   });
 
   const seedQueuedRedemption = (id: string, redeemedAt = now): void => {
@@ -143,6 +148,21 @@ describe("channel points routes", () => {
       (channel_id,redemption_id,reward_id,twitch_reward_id,reward_title,user_id,user_login,user_name,user_input,redeemed_at,status,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,'queued',?,?)`)
       .run(channelId, id, "reward_local", "reward_twitch", "Fictional reward", "viewer_one", "viewer_demo", "Viewer Demo", "hello", redeemedAt, redeemedAt, redeemedAt);
+  };
+
+  const seedPendingVipAction = (id: string): void => {
+    if (database === null) throw new Error("The route database has not been initialized.");
+    database.sqlite.prepare(
+      `INSERT INTO channel_modules (channel_id,module_id,enabled,settings)
+       VALUES (?,'temp_vips',1,'{"defaultDurationDays":7,"maximumDurationDays":90,"announceExpiry":false}')`,
+    ).run(channelId);
+    database.sqlite.prepare(`UPDATE channel_points_rewards
+      SET action_module_id='temp_vips',action_id='grant-vip',action_config_json='{"durationDays":7}'
+      WHERE channel_id=? AND id=?`).run(channelId, "reward_local");
+    database.sqlite.prepare(`INSERT INTO channel_points_redemptions
+      (channel_id,redemption_id,reward_id,twitch_reward_id,reward_title,user_id,user_login,user_name,user_input,redeemed_at,status,claimed_at,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?,?,?)`)
+      .run(channelId, id, "reward_local", "reward_twitch", "Fictional reward", "viewer_one", "viewer_demo", "Viewer Demo", "hello", now, now, now, now);
   };
 
   it("lists queued redemptions for read-only members oldest first with their action name", async () => {
@@ -326,6 +346,35 @@ describe("channel points routes", () => {
     ).get(channelId, "redemption_refund")).toMatchObject({
       status: "refunded", outcome_reason_json: JSON.stringify({ de: "Von einem Bediener erstattet.", en: "Refunded by operator." }),
     });
+  });
+
+  it("lets an operator refund a pending VIP action from the cockpit queue", async () => {
+    database = createDatabase();
+    seedPendingVipAction("redemption_pending_vip_refund");
+
+    const app = makeApp(database, "operator");
+    const queueResponse = await app.request(
+      "/api/channels/channel_points/modules/channel_points/queue",
+      {}, routeEnvironment(database),
+    );
+    expect(await queueResponse.json()).toMatchObject({
+      items: [{ redemptionId: "redemption_pending_vip_refund", status: "pending" }],
+    });
+
+    const response = await app.request(
+      "/api/channels/channel_points/modules/channel_points/redemptions/redemption_pending_vip_refund/refund",
+      { method: "POST" }, routeEnvironment(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, status: "refunded" });
+    expect(mocks.updateRedemptionStatus).toHaveBeenCalledWith(
+      expect.anything(), channelId, "reward_twitch", ["redemption_pending_vip_refund"], "CANCELED", expect.any(Function),
+    );
+    expect(mocks.abandonTempVip).toHaveBeenCalledWith("redemption_pending_vip_refund");
+    expect(database.sqlite.prepare(
+      "SELECT status FROM channel_points_redemptions WHERE channel_id=? AND redemption_id=?",
+    ).get(channelId, "redemption_pending_vip_refund")).toMatchObject({ status: "refunded" });
   });
 
   it("does not execute a queue redemption twice when two runs race", async () => {

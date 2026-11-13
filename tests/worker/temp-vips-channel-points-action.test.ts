@@ -6,8 +6,27 @@ import type { ModuleExecutionContext, ModuleTempVipResult } from "../../src/modu
 import { DEFAULT_TEMP_VIPS_SETTINGS } from "../../src/modules/temp_vips/contracts";
 import { tempVipsChannelPointsActionTexts as localeTexts } from "../../src/modules/temp_vips/locale";
 import { grantVipAction } from "../../src/modules/temp_vips/actions/grant-vip";
+import { createChannelPointsRepository } from "../../src/modules/channel_points/repository";
+import {
+  channelPointsLifecycleAlarm,
+  processChannelPointsEvent,
+} from "../../src/modules/channel_points/service";
+import type { ChannelPointsRewardInput } from "../../src/modules/channel_points/contracts";
+import type { ModuleEvent } from "../../src/modules/contract";
 import { TempVipStore, type TempVipStoreOptions, type TempVipTwitch } from "../../src/worker/durable/temp-vips";
+import { authorizeModuleMutation } from "../../src/worker/module-authorization";
 import { runMigrations } from "./points-test-helpers";
+
+const mocks = vi.hoisted(() => ({
+  channelPointsUpdate: vi.fn(),
+  actionContext: { current: undefined as ModuleExecutionContext | undefined },
+}));
+vi.mock("../../src/worker/twitch/channel-points", () => ({
+  updateRedemptionStatus: mocks.channelPointsUpdate,
+}));
+vi.mock("../../src/worker/module-action-context", () => ({
+  createModuleActionExecutionContext: () => mocks.actionContext.current,
+}));
 
 type RefundKey = keyof typeof localeTexts.en.refundReasons;
 // Refund outcomes carry both languages; expose them under the name the assertions below read.
@@ -56,6 +75,94 @@ const redemption = (userId = "vip_viewer") => ({
   userInput: "",
   redeemedAt: baseNow,
 });
+
+const channelPointsGrantReward: ChannelPointsRewardInput = {
+  title: "Temporary VIP",
+  prompt: null,
+  cost: 100,
+  backgroundColor: null,
+  isUserInputRequired: false,
+  globalCooldownSeconds: null,
+  maxPerStream: null,
+  maxPerUserPerStream: null,
+  actionModuleId: "temp_vips",
+  actionId: "grant-vip",
+  actionConfig: { durationDays: 7 },
+  mode: "auto",
+  enabled: true,
+};
+
+const channelPointsRedemptionEvent = (
+  channelId: string,
+  id: string,
+  status: "unfulfilled" | "canceled",
+): ModuleEvent => ({
+  channelId,
+  subscriptionType: status === "unfulfilled"
+    ? "channel.channel_points_custom_reward_redemption.add"
+    : "channel.channel_points_custom_reward_redemption.update",
+  triggerId: `event_${id}_${status}`,
+  payload: {
+    id,
+    broadcaster_user_id: channelId,
+    broadcaster_user_login: channelId,
+    broadcaster_user_name: channelId,
+    user_id: "vip_viewer",
+    user_login: "viewer_demo",
+    user_name: "Viewer Demo",
+    user_input: "",
+    status,
+    redeemed_at: baseNow,
+    reward: {
+      id: "reward_vip",
+      title: "Temporary VIP",
+      prompt: null,
+      cost: 100,
+      is_user_input_required: false,
+    },
+  },
+  settings: {},
+  receivedAt: baseNow,
+  eventSubTimestamp: baseNow,
+  actor: null,
+  chatStatus: null,
+});
+
+const addChannelPointsGrantReward = async (channelId: string): Promise<void> => {
+  await database.prepare(
+    "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'channel_points', 1, '{}')",
+  ).bind(channelId).run();
+  await database.prepare(
+    "INSERT INTO channel_members (channel_id,user_id,role,created_at,updated_at) VALUES (?,?,?,?,?)",
+  ).bind(channelId, channelId, "broadcaster", baseNow, baseNow).run();
+  await createChannelPointsRepository(database).insertReward(
+    channelId, channelPointsGrantReward, "reward_local_vip", "reward_vip", baseNow,
+  );
+};
+
+const tempVipActionContext = (
+  channelId: string,
+  store: TempVipStore,
+): ModuleExecutionContext => ({
+  DB: database,
+  channelId,
+  tempVips: {
+    mode: () => store.mode(),
+    replayGrant: (operationId, userId) => store.replayGrant(operationId, userId),
+    grant: (request) => store.grant(request),
+    abandon: (operationId) => (store as TempVipStore & { abandon: (id: string) => Promise<void> }).abandon(operationId),
+  } as ModuleExecutionContext["tempVips"],
+} as unknown as ModuleExecutionContext);
+
+const createWorkerActionContext = (
+  channelId: string,
+  moduleContext: ModuleExecutionContext,
+): ModuleExecutionContext => ({
+  DB: database,
+  environment: env as unknown as Env,
+  channelId,
+  forModule: (moduleId: string) => moduleId === "temp_vips" ? moduleContext : undefined,
+} as unknown as ModuleExecutionContext);
 
 const runAction = async (
   channelId: string,
@@ -254,6 +361,178 @@ describe("temporary VIP channel-points action on local D1", () => {
       results: [{ status: "rejected", reason: "scope_missing" }],
     });
     expect(add).not.toHaveBeenCalled();
+  });
+
+  it("keeps a timed-out grant pending through scope loss and reconciles it after reconnect", async () => {
+    const channelId = await createChannel();
+    const get = vi.fn()
+      .mockResolvedValueOnce({ ok: true as const, isVip: false })
+      .mockResolvedValue({ ok: true as const, isVip: true });
+    // The real Twitch client runs the mutation gate before the POST; the mock must too.
+    const add = vi.fn(async (_userId: string, beforeAttempt: () => Promise<boolean>) => {
+      await beforeAttempt();
+      return { ok: false as const, reason: "network" as const, ambiguous: true };
+    });
+    const twitch = { get, add };
+
+    await expect(runAction(channelId, { twitch })).resolves.toMatchObject({ outcome: "pending", vipCount: 0 });
+    await runInDurableObject(namespace.get(namespace.idFromName(channelId)), (_instance, state) => {
+      state.storage.sql.exec("UPDATE temp_vip_ops SET next_attempt_at = ? WHERE operation_id = ?", baseNow, "redemption_vip");
+    });
+
+    await expect(runAction(channelId, { managed: false, reportedMode: "managed", twitch }))
+      .resolves.toMatchObject({ outcome: "pending", vipCount: 0 });
+    await runInDurableObject(namespace.get(namespace.idFromName(channelId)), (_instance, state) => {
+      state.storage.sql.exec("UPDATE temp_vip_ops SET next_attempt_at = ? WHERE operation_id = ?", baseNow, "redemption_vip");
+    });
+
+    await expect(runAction(channelId, { twitch })).resolves.toMatchObject({
+      outcome: "fulfilled",
+      results: [{ status: "granted" }],
+      vipCount: 1,
+    });
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it("abandons a rate-limited VIP operation when Twitch cancels the redemption", async () => {
+    const channelId = await createChannel();
+    await addChannelPointsGrantReward(channelId);
+    const add = vi.fn()
+      .mockResolvedValueOnce({ ok: false as const, reason: "rate_limited" })
+      .mockResolvedValue({ ok: true as const });
+
+    await runInDurableObject(namespace.get(namespace.idFromName(channelId)), async (_instance, state) => {
+      const store = new TempVipStore(state.storage, {
+        channelId,
+        now: () => baseNow,
+        scheduleAlarm: vi.fn().mockResolvedValue(undefined),
+        isModuleEnabled: () => Promise.resolve(true),
+        isManaged: () => Promise.resolve(true),
+        twitch: {
+          get: vi.fn().mockResolvedValue({ ok: true, isVip: false }),
+          add,
+          remove: vi.fn().mockResolvedValue({ ok: true }),
+        },
+      } satisfies TempVipStoreOptions);
+      const moduleContext = tempVipActionContext(channelId, store);
+      const actionContext = createWorkerActionContext(channelId, moduleContext);
+      mocks.actionContext.current = moduleContext;
+
+      await processChannelPointsEvent(channelPointsRedemptionEvent(channelId, "redemption_event_cancel", "unfulfilled"), actionContext);
+      await expect(createChannelPointsRepository(database).getRedemption(channelId, "redemption_event_cancel"))
+        .resolves.toMatchObject({ status: "pending" });
+      await processChannelPointsEvent(channelPointsRedemptionEvent(channelId, "redemption_event_cancel", "canceled"), actionContext);
+      await expect(createChannelPointsRepository(database).getRedemption(channelId, "redemption_event_cancel"))
+        .resolves.toMatchObject({ status: "refunded" });
+
+      state.storage.sql.exec(
+        "UPDATE temp_vip_ops SET next_attempt_at = ? WHERE operation_id = ?",
+        baseNow,
+        "redemption_event_cancel",
+      );
+      await store.runExpiry(baseNow);
+      expect(add).toHaveBeenCalledTimes(1);
+      expect(state.storage.sql.exec<{ status: string }>(
+        "SELECT status FROM temp_vip_ops WHERE operation_id = ?",
+        "redemption_event_cancel",
+      ).one().status).toBe("done");
+    });
+  });
+
+  it("abandons a pending VIP operation when an operator refunds the redemption", async () => {
+    const channelId = await createChannel();
+    await addChannelPointsGrantReward(channelId);
+    const add = vi.fn()
+      .mockResolvedValueOnce({ ok: false as const, reason: "rate_limited" })
+      .mockResolvedValue({ ok: true as const });
+    mocks.channelPointsUpdate.mockReset().mockResolvedValue({ ok: true, data: [] });
+
+    await runInDurableObject(namespace.get(namespace.idFromName(channelId)), async (_instance, state) => {
+      const store = new TempVipStore(state.storage, {
+        channelId,
+        now: () => baseNow,
+        scheduleAlarm: vi.fn().mockResolvedValue(undefined),
+        isModuleEnabled: () => Promise.resolve(true),
+        isManaged: () => Promise.resolve(true),
+        twitch: {
+          get: vi.fn().mockResolvedValue({ ok: true, isVip: false }),
+          add,
+          remove: vi.fn().mockResolvedValue({ ok: true }),
+        },
+      } satisfies TempVipStoreOptions);
+      const moduleContext = tempVipActionContext(channelId, store);
+      const actionContext = createWorkerActionContext(channelId, moduleContext);
+      mocks.actionContext.current = moduleContext;
+
+      await processChannelPointsEvent(channelPointsRedemptionEvent(channelId, "redemption_operator_refund", "unfulfilled"), actionContext);
+      const result = await channelPointsLifecycleAlarm.handle({
+        DB: database,
+        environment: env as unknown as Env,
+        authorizeMutation: authorizeModuleMutation,
+        authorizeManagementMutation: authorizeModuleMutation,
+        channelId,
+      } as never, "channel-points", Date.parse(baseNow), undefined, {
+        kind: "redemption.refund",
+        actor: { userId: channelId },
+        // The pending claim is stamped with the wall clock, so the refund must not predate it.
+        now: new Date().toISOString(),
+        id: "redemption_operator_refund",
+      });
+
+      expect(result).toEqual({ ok: true, status: "refunded" });
+      await expect(createChannelPointsRepository(database).getRedemption(channelId, "redemption_operator_refund"))
+        .resolves.toMatchObject({ status: "refunded" });
+      state.storage.sql.exec(
+        "UPDATE temp_vip_ops SET next_attempt_at = ? WHERE operation_id = ?",
+        baseNow,
+        "redemption_operator_refund",
+      );
+      await store.runExpiry(baseNow);
+      expect(add).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("reconciles an ambiguous VIP POST after Twitch cancels the redemption", async () => {
+    const channelId = await createChannel();
+    await addChannelPointsGrantReward(channelId);
+    const get = vi.fn()
+      .mockResolvedValueOnce({ ok: true as const, isVip: false })
+      .mockResolvedValue({ ok: true as const, isVip: true });
+    const add = vi.fn().mockResolvedValue({ ok: false as const, reason: "network", ambiguous: true });
+
+    await runInDurableObject(namespace.get(namespace.idFromName(channelId)), async (_instance, state) => {
+      const store = new TempVipStore(state.storage, {
+        channelId,
+        now: () => baseNow,
+        scheduleAlarm: vi.fn().mockResolvedValue(undefined),
+        isModuleEnabled: () => Promise.resolve(true),
+        isManaged: () => Promise.resolve(true),
+        twitch: {
+          get,
+          add,
+          remove: vi.fn().mockResolvedValue({ ok: true }),
+        },
+      } satisfies TempVipStoreOptions);
+      const moduleContext = tempVipActionContext(channelId, store);
+      const actionContext = createWorkerActionContext(channelId, moduleContext);
+      mocks.actionContext.current = moduleContext;
+
+      await processChannelPointsEvent(channelPointsRedemptionEvent(channelId, "redemption_ambiguous_cancel", "unfulfilled"), actionContext);
+      await processChannelPointsEvent(channelPointsRedemptionEvent(channelId, "redemption_ambiguous_cancel", "canceled"), actionContext);
+      state.storage.sql.exec(
+        "UPDATE temp_vip_ops SET next_attempt_at = ? WHERE operation_id = ?",
+        baseNow,
+        "redemption_ambiguous_cancel",
+      );
+      await store.runExpiry(baseNow);
+
+      expect(add).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledTimes(2);
+      expect(await store.list()).toMatchObject([{ userId: "vip_viewer", classification: "temporary" }]);
+      await expect(createChannelPointsRepository(database).getRedemption(channelId, "redemption_ambiguous_cancel"))
+        .resolves.toMatchObject({ status: "refunded" });
+    });
   });
 
   it.each([
