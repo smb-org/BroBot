@@ -961,14 +961,13 @@ export interface ModuleStatisticsWindow {
 
 export interface ModuleStatisticsWordCount {
   word: string;
+  displayWord: string;
   count: number;
   lastSeenAt: string;
-  spellings: readonly { spelling: string; count: number }[];
 }
 
 export interface ModuleStatisticsPreparedWordBucket {
   words: readonly ModuleStatisticsWordCount[];
-  pruneRareWords: boolean;
 }
 
 export interface ModuleStatisticsWordBucket {

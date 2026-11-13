@@ -164,8 +164,8 @@ export interface StatisticsWordsResponse {
   /** Number of words after search and filler filters. */
   total: number;
   totalPages: number;
-  /** Sum of all stored counts, before search and filler filters. */
+  /** Sum of words visible after rare-word hiding, before search and filler filters. */
   totalCount: number;
-  /** Highest count among all stored words, used to scale the share bars. */
+  /** Highest visible count, used to scale the share bars. */
   maxCount: number;
 }

@@ -132,9 +132,8 @@ const createStatisticsChat = (initial: WindowState[] = []) => {
       return Promise.resolve({
         words: stream.words.map((word) => ({
           ...word,
-          spellings: [{ spelling: word.word, count: word.count }],
+          displayWord: word.word,
         })),
-        pruneRareWords: streamState === "offline",
       });
     }),
     deleteWordBucket: vi.fn((bucket: { streamId: string; batch: number }) => {
@@ -711,11 +710,10 @@ describe("statistics window alarm", () => {
     chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve({
       words: [{
         word: bucket.batch === 1 ? "firstword" : "laterword",
-        spellings: [{ spelling: bucket.batch === 1 ? "firstword" : "laterword", count: 3 }],
+        displayWord: bucket.batch === 1 ? "firstword" : "laterword",
         count: 3,
         lastSeenAt: WINDOW_END,
       }],
-      pruneRareWords: false,
     }));
     const { context } = createContext(database, chat);
     let batchCalls = 0;
@@ -754,11 +752,10 @@ describe("statistics window alarm", () => {
     chat.calls.prepareWordBucketForMerge.mockImplementation((bucket) => Promise.resolve({
       words: [{
         word: bucket.batch === 1 ? "firstword" : "laterword",
-        spellings: [{ spelling: bucket.batch === 1 ? "firstword" : "laterword", count: 1 }],
+        displayWord: bucket.batch === 1 ? "firstword" : "laterword",
         count: 1,
         lastSeenAt: WINDOW_END,
       }],
-      pruneRareWords: false,
     }));
     const { context } = createContext(database, chat);
     let attempts = 0;

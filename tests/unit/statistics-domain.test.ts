@@ -39,7 +39,7 @@ describe("statistics window domain", () => {
       .toEqual(["fak", "fak", "fak", "fak", "a", "ä"]);
   });
 
-  it("keeps the most frequent display spelling while counting emotes with typed words once per message", () => {
+  it("keeps the first display spelling while counting emotes with typed words once per message", () => {
     const details = tokenizeStatisticsWordDetails(statisticsTextFragments({
       chatter_user_login: "viewer",
       message: { fragments: [

@@ -1674,7 +1674,6 @@ describe("panel resource revisions", () => {
         "channel_game_history",
         "channel_statistics",
         "channel_word_frequency_baseline",
-        "channel_word_spellings",
         "channel_word_frequency_streams",
         "channel_timeline_events",
         "channel_word_frequency_baseline_folded",

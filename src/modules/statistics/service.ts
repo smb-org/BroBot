@@ -73,11 +73,7 @@ const writeAbsoluteWindow = async (
   ).run();
 };
 
-/**
- * Merges one word bucket into the channel baseline in a single D1 batch and returns whether the bucket
- * is now confirmed merged (this batch or an earlier attempt). Rare rows are pruned only after they have been
- * quiet for seven days, so late batches and concurrent live streams do not make recent counts disposable.
- */
+/** Merges one word bucket into the channel baseline in a single D1 batch. */
 export const mergeStatisticsWordBatch = async (
   db: D1Database,
   channelId: string,
@@ -85,50 +81,36 @@ export const mergeStatisticsWordBatch = async (
   batch: number,
   wordCounts: readonly {
     word: string;
+    displayWord: string;
     count: number;
     lastSeenAt: string;
-    spellings?: readonly { spelling: string; count: number }[];
   }[],
   mergedAt: string,
-  pruneRareWords = false,
 ): Promise<boolean> => {
   const countsByWord = new Map<string, {
     word: string;
+    displayWord: string;
     count: number;
     lastSeenAt: string;
-    spellings: Map<string, number>;
   }>();
   for (const entry of wordCounts) {
     const word = foldStatisticsWord(entry.word);
     if (word.length === 0 || !Number.isSafeInteger(entry.count) || entry.count <= 0) continue;
     const current = countsByWord.get(word) ?? {
       word,
+      displayWord: entry.displayWord.length > 0 ? entry.displayWord : entry.word,
       count: 0,
       lastSeenAt: entry.lastSeenAt,
-      spellings: new Map<string, number>(),
     };
     current.count += entry.count;
     if (current.lastSeenAt < entry.lastSeenAt) current.lastSeenAt = entry.lastSeenAt;
-    const spellingEntries = entry.spellings;
-    const spellings = spellingEntries !== undefined && spellingEntries.length > 0
-      ? spellingEntries
-      : [{ spelling: entry.word, count: entry.count }];
-    for (const spelling of spellings) {
-      if (spelling.spelling.length === 0 || !Number.isSafeInteger(spelling.count) || spelling.count <= 0) continue;
-      current.spellings.set(spelling.spelling, (current.spellings.get(spelling.spelling) ?? 0) + spelling.count);
-    }
     countsByWord.set(word, current);
   }
-  const normalizedWords = [...countsByWord.values()].map(({ spellings, ...entry }) => ({
-    ...entry,
-    spellings: [...spellings].map(([spelling, count]) => ({ spelling, count })),
-  }));
-  const topWords = normalizedWords
+  const topWords = [...countsByWord.values()]
     .sort((left, right) => right.count - left.count || (left.word < right.word ? -1 : left.word > right.word ? 1 : 0))
     .slice(0, STATISTICS_WORD_STREAM_MERGE_LIMIT);
   if (topWords.length === 0) return false;
 
-  const quietBefore = new Date(Date.parse(mergedAt) - 7 * 24 * 60 * 60 * 1_000).toISOString();
   const foldStatements = await legacyStatisticsWordBaselineFoldStatements(db, channelId, mergedAt);
 
   const results = await db.batch([
@@ -139,9 +121,9 @@ export const mergeStatisticsWordBatch = async (
     ).bind(channelId, streamId, batch),
     db.prepare(
       `INSERT INTO channel_word_frequency_baseline
-         (channel_id, word, total_count, last_seen_at)
+         (channel_id, word, total_count, last_seen_at, display_word)
        SELECT ?, json_extract(value, '$.word'), CAST(json_extract(value, '$.count') AS INTEGER),
-              json_extract(value, '$.lastSeenAt')
+              json_extract(value, '$.lastSeenAt'), json_extract(value, '$.displayWord')
          FROM json_each(?)
         WHERE EXISTS (
           SELECT 1 FROM channel_word_frequency_streams
@@ -149,37 +131,10 @@ export const mergeStatisticsWordBatch = async (
         )
        ON CONFLICT (channel_id, word) DO UPDATE SET
          total_count = channel_word_frequency_baseline.total_count + excluded.total_count,
-         last_seen_at = MAX(channel_word_frequency_baseline.last_seen_at, excluded.last_seen_at)`,
+         last_seen_at = MAX(channel_word_frequency_baseline.last_seen_at, excluded.last_seen_at),
+         display_word = CASE WHEN channel_word_frequency_baseline.display_word = ''
+                             THEN excluded.display_word ELSE channel_word_frequency_baseline.display_word END`,
     ).bind(channelId, JSON.stringify(topWords), channelId, streamId, batch),
-    db.prepare(
-      `INSERT INTO channel_word_spellings (channel_id, word, spelling, count)
-       SELECT ?, json_extract(word.value, '$.word'), json_extract(spelling.value, '$.spelling'),
-              CAST(json_extract(spelling.value, '$.count') AS INTEGER)
-         FROM json_each(?) AS word, json_each(word.value, '$.spellings') AS spelling
-        WHERE EXISTS (
-          SELECT 1 FROM channel_word_frequency_streams
-           WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL
-        )
-       ON CONFLICT (channel_id, word, spelling) DO UPDATE SET
-         count = channel_word_spellings.count + excluded.count`,
-    ).bind(channelId, JSON.stringify(topWords), channelId, streamId, batch),
-    db.prepare(
-      `DELETE FROM channel_word_spellings
-        WHERE channel_id = ? AND (channel_id, word, spelling) IN (
-          SELECT channel_id, word, spelling FROM (
-            SELECT channel_id, word, spelling,
-                   ROW_NUMBER() OVER (PARTITION BY word ORDER BY count DESC, spelling ASC) AS position
-              FROM channel_word_spellings WHERE channel_id = ?
-          ) WHERE position > 4
-        )`,
-    ).bind(channelId, channelId),
-    db.prepare(
-      `DELETE FROM channel_word_frequency_baseline
-        WHERE channel_id = ? AND total_count < 3 AND last_seen_at < ? AND ? = 1 AND EXISTS (
-          SELECT 1 FROM channel_word_frequency_streams
-           WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL
-        )`,
-    ).bind(channelId, quietBefore, Number(pruneRareWords), channelId, streamId, batch),
     db.prepare(
       `DELETE FROM channel_word_frequency_baseline
         WHERE channel_id = ? AND word NOT IN (
@@ -189,13 +144,6 @@ export const mergeStatisticsWordBatch = async (
            LIMIT ?
         )`,
     ).bind(channelId, channelId, STATISTICS_WORD_BASELINE_LIMIT),
-    db.prepare(
-      `DELETE FROM channel_word_spellings
-        WHERE channel_id = ? AND NOT EXISTS (
-          SELECT 1 FROM channel_word_frequency_baseline
-           WHERE channel_id = ? AND word = channel_word_spellings.word
-        )`,
-    ).bind(channelId, channelId),
     db.prepare(
       `UPDATE channel_word_frequency_streams SET merged_at = ?
         WHERE channel_id = ? AND stream_id = ? AND batch = ? AND merged_at IS NULL`,
@@ -233,20 +181,31 @@ const legacyStatisticsWordBaselineFoldStatements = async (
     word: string;
     totalCount: number;
     lastSeenAt: string;
-    spellings: Map<string, number>;
+    displayWord: string;
+    displayCount: number;
   }>();
   for (const row of existing.results) {
     const word = foldStatisticsWord(row.word);
     if (word.length === 0 || row.total_count <= 0) continue;
-    const value = folded.get(word) ?? { word, totalCount: 0, lastSeenAt: row.last_seen_at, spellings: new Map<string, number>() };
+    const value = folded.get(word) ?? {
+      word,
+      totalCount: 0,
+      lastSeenAt: row.last_seen_at,
+      displayWord: row.word,
+      displayCount: 0,
+    };
     value.totalCount += row.total_count;
     if (value.lastSeenAt < row.last_seen_at) value.lastSeenAt = row.last_seen_at;
-    value.spellings.set(row.word, (value.spellings.get(row.word) ?? 0) + row.total_count);
+    if (row.total_count > value.displayCount ||
+        row.total_count === value.displayCount && row.word < value.displayWord) {
+      value.displayWord = row.word;
+      value.displayCount = row.total_count;
+    }
     folded.set(word, value);
   }
-  const rows = [...folded.values()].map(({ word, totalCount, lastSeenAt }) => ({ word, totalCount, lastSeenAt }));
-  const spellingRows = [...folded.values()].flatMap(({ word, spellings }) =>
-    [...spellings].map(([spelling, count]) => ({ word, spelling, count })));
+  const rows = [...folded.values()].map(({ word, totalCount, lastSeenAt, displayWord }) => ({
+    word, totalCount, lastSeenAt, displayWord,
+  }));
   return [
     db.prepare(
       "INSERT OR IGNORE INTO channel_word_frequency_baseline_folded (channel_id, folded_at) VALUES (?, NULL)",
@@ -258,28 +217,18 @@ const legacyStatisticsWordBaselineFoldStatements = async (
     ).bind(channelId, channelId),
     db.prepare(
       `INSERT INTO channel_word_frequency_baseline
-         (channel_id, word, total_count, last_seen_at)
+         (channel_id, word, total_count, last_seen_at, display_word)
        SELECT ?, json_extract(value, '$.word'), CAST(json_extract(value, '$.totalCount') AS INTEGER),
-              json_extract(value, '$.lastSeenAt')
+              json_extract(value, '$.lastSeenAt'), json_extract(value, '$.displayWord')
          FROM json_each(?)
         WHERE EXISTS (
           SELECT 1 FROM channel_word_frequency_baseline_folded WHERE channel_id = ? AND folded_at IS NULL
         )
        ON CONFLICT (channel_id, word) DO UPDATE SET
          total_count = excluded.total_count,
-         last_seen_at = excluded.last_seen_at`,
+         last_seen_at = excluded.last_seen_at,
+         display_word = excluded.display_word`,
     ).bind(channelId, JSON.stringify(rows), channelId),
-    db.prepare(
-      `INSERT INTO channel_word_spellings (channel_id, word, spelling, count)
-       SELECT ?, json_extract(value, '$.word'), json_extract(value, '$.spelling'),
-              CAST(json_extract(value, '$.count') AS INTEGER)
-         FROM json_each(?)
-        WHERE EXISTS (
-          SELECT 1 FROM channel_word_frequency_baseline_folded WHERE channel_id = ? AND folded_at IS NULL
-        )
-       ON CONFLICT (channel_id, word, spelling) DO UPDATE SET
-         count = channel_word_spellings.count + excluded.count`,
-    ).bind(channelId, JSON.stringify(spellingRows), channelId),
     db.prepare(
       "UPDATE channel_word_frequency_baseline_folded SET folded_at = ? WHERE channel_id = ? AND folded_at IS NULL",
     ).bind(foldedAt, channelId),
@@ -555,7 +504,6 @@ export const handleStatisticsWindowAlarm = async (
           bucket.batch,
           prepared.words,
           new Date(now).toISOString(),
-          prepared.pruneRareWords,
         );
         // A refused merge (stream turned live meanwhile) keeps the bucket for a later alarm and blocks
         // the stream's later batches so they cannot overtake it and reorder the capped baseline.

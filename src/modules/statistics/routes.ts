@@ -67,30 +67,19 @@ interface WordFrequencyRow {
   word: string;
   total_count: number;
   last_seen_at: string;
-}
-
-interface WordSpellingRow {
-  word: string;
-  spelling: string;
-  count: number;
-}
-
-interface StatisticsWordSpellingCount {
-  spelling: string;
-  count: number;
+  display_word: string;
 }
 
 interface StatisticsWordObject {
   readStatisticsWordCountsByBatch: (streamId: string) => Promise<readonly {
     batch: number;
-    words: readonly { word: string; spellings: readonly StatisticsWordSpellingCount[]; count: number; lastSeenAt: string }[];
+    words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
   }[]>;
   readStatisticsWordStreamCounts: (streamId?: string) => Promise<{
     streamId: string;
     words: readonly {
       word: string;
-      displayWord?: string;
-      spellings?: readonly StatisticsWordSpellingCount[];
+      displayWord: string;
       count: number;
       lastSeenAt: string;
     }[];
@@ -99,7 +88,7 @@ interface StatisticsWordObject {
 
 interface StatisticsWordBatchCounts {
   batch: number;
-  words: readonly { word: string; spellings: readonly StatisticsWordSpellingCount[]; count: number; lastSeenAt: string }[];
+  words: readonly { word: string; displayWord: string; count: number; lastSeenAt: string }[];
 }
 
 const statisticsWindow = (row: StreamWindowRow): StatisticsStreamWindow => ({
@@ -357,25 +346,34 @@ statisticsRoutes.get("/words", async (context) => {
     }
   }
 
-  const counts = new Map<string, { spellings: Map<string, number>; count: number; lastSeenAt: string }>();
-  const addWord = (
+  const counts = new Map<string, { displayWord: string; count: number; lastSeenAt: string }>();
+  const hiddenBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000).toISOString();
+  const addBaselineWord = (
     word: string,
+    displayWord: string,
     count: number,
     lastSeenAt: string,
-    spellings: readonly StatisticsWordSpellingCount[] | undefined,
-    fallbackSpelling = word,
   ): void => {
-    const current = counts.get(word) ?? { spellings: new Map<string, number>(), count: 0, lastSeenAt };
+    const key = foldStatisticsWord(word);
+    const current = counts.get(key) ?? {
+      displayWord: displayWord.length > 0 ? displayWord : word,
+      count: 0,
+      lastSeenAt,
+    };
     current.count += count;
     if (current.lastSeenAt < lastSeenAt) current.lastSeenAt = lastSeenAt;
-    const variants = spellings?.filter(({ spelling, count: spellingCount }) =>
-      spelling.length > 0 && Number.isSafeInteger(spellingCount) && spellingCount > 0) ?? [];
-    for (const { spelling, count: spellingCount } of variants.length === 0
-      ? [{ spelling: fallbackSpelling, count }]
-      : variants) {
-      current.spellings.set(spelling, (current.spellings.get(spelling) ?? 0) + spellingCount);
-    }
-    counts.set(word, current);
+    counts.set(key, current);
+  };
+  const addPendingWord = (word: string, displayWord: string, count: number, lastSeenAt: string): void => {
+    const key = foldStatisticsWord(word);
+    const current = counts.get(key) ?? {
+      displayWord: displayWord.length > 0 ? displayWord : word,
+      count: 0,
+      lastSeenAt,
+    };
+    current.count += count;
+    if (current.lastSeenAt < lastSeenAt) current.lastSeenAt = lastSeenAt;
+    counts.set(key, current);
   };
 
   if (query.data.scope === "stream") {
@@ -388,8 +386,7 @@ statisticsRoutes.get("/words", async (context) => {
       ? null
       : await channelObject.readStatisticsWordStreamCounts(streamState?.state === "online" ? streamState.stream_id ?? undefined : undefined);
     for (const row of stream?.words ?? []) {
-      addWord(foldStatisticsWord(row.word), row.count, row.lastSeenAt, row.spellings,
-        row.displayWord ?? foldStatisticsWord(row.word));
+      addPendingWord(row.word, row.displayWord || row.word, row.count, row.lastSeenAt);
     }
   } else {
     const streamState = await context.env.DB.prepare(
@@ -402,51 +399,48 @@ statisticsRoutes.get("/words", async (context) => {
       pendingBatches = [...await channelObject.readStatisticsWordCountsByBatch(runningStreamId)];
     }
     const baselineStatement = context.env.DB.prepare(
-      `SELECT word, total_count, last_seen_at
-         FROM channel_word_frequency_baseline WHERE channel_id = ?
+      `SELECT word, total_count, last_seen_at, display_word
+         FROM channel_word_frequency_baseline
+        WHERE channel_id = ? AND NOT (total_count < 3 AND last_seen_at < ?)
         ORDER BY total_count DESC, word ASC`,
-    ).bind(channelId);
-    const baselineSpellingsStatement = context.env.DB.prepare(
-      `SELECT word, spelling, count FROM channel_word_spellings WHERE channel_id = ?`,
-    ).bind(channelId);
+    ).bind(channelId, hiddenBefore);
+    const rareBaselineCandidatesStatement = context.env.DB.prepare(
+      `SELECT word, total_count, last_seen_at, display_word
+         FROM channel_word_frequency_baseline
+        WHERE channel_id = ? AND total_count < 3 AND last_seen_at < ?
+        ORDER BY total_count DESC, word ASC`,
+    ).bind(channelId, hiddenBefore);
     const mergedBatchStatement = runningStreamId === null ? null : context.env.DB.prepare(
       `SELECT batch FROM channel_word_frequency_streams
         WHERE channel_id = ? AND stream_id = ? AND merged_at IS NOT NULL`,
     ).bind(channelId, runningStreamId);
-    const readStatements = mergedBatchStatement === null
-      ? [baselineStatement, baselineSpellingsStatement]
-      : [baselineStatement, baselineSpellingsStatement, mergedBatchStatement];
+    const readStatements = [baselineStatement, rareBaselineCandidatesStatement,
+      ...(mergedBatchStatement === null ? [] : [mergedBatchStatement])];
     const readResults = await context.env.DB.batch(readStatements);
     const baselineResult = readResults[0] as D1Result<WordFrequencyRow>;
-    const baselineSpellingsResult = readResults[1] as D1Result<WordSpellingRow>;
+    const rareBaselineCandidates = (readResults[1] as D1Result<WordFrequencyRow>).results;
     const mergedBatchResult = mergedBatchStatement === null
       ? null
       : readResults[2] as D1Result<{ batch: number }>;
-    const baselineSpellingsByWord = new Map<string, StatisticsWordSpellingCount[]>();
-    for (const row of baselineSpellingsResult.results) {
-      const wordSpellings = baselineSpellingsByWord.get(row.word) ?? [];
-      wordSpellings.push({ spelling: row.spelling, count: row.count });
-      baselineSpellingsByWord.set(row.word, wordSpellings);
-    }
-    for (const row of baselineResult.results) {
-      const word = foldStatisticsWord(row.word);
-      addWord(word, row.total_count, row.last_seen_at, baselineSpellingsByWord.get(row.word), row.word);
-    }
     const mergedBatches = new Set(mergedBatchResult?.results.map(({ batch }) => batch) ?? []);
-    for (const batch of pendingBatches) {
-      if (mergedBatches.has(batch.batch)) continue;
-      for (const row of batch.words) {
-        addWord(foldStatisticsWord(row.word), row.count, row.lastSeenAt, row.spellings);
-      }
+    const pendingRows = pendingBatches
+      .filter(({ batch }) => !mergedBatches.has(batch))
+      .flatMap(({ words }) => [...words]);
+    const baselineRows = [...baselineResult.results, ...rareBaselineCandidates].sort((left, right) =>
+      right.total_count - left.total_count || (left.word < right.word ? -1 : left.word > right.word ? 1 : 0));
+    for (const row of baselineRows) {
+      addBaselineWord(row.word, row.display_word, row.total_count, row.last_seen_at);
+    }
+    for (const row of pendingRows) {
+      addPendingWord(row.word, row.displayWord || row.word, row.count, row.lastSeenAt);
     }
   }
 
   const fillerWords = new Set(STATISTICS_CHAT_FILLER_WORDS.map(foldStatisticsWord));
-  const sourceWords = [...counts].map(([word, value]) => {
-    const spellings = [...value.spellings];
-    spellings.sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0));
-    return { word, ...value, displayWord: spellings[0]?.[0] ?? word };
-  });
+  const sourceWords = [...counts].flatMap(([word, value]) =>
+    query.data.scope === "total" && value.count < 3 && value.lastSeenAt < hiddenBefore
+      ? []
+      : [{ word, ...value }]);
   const totalCount = sourceWords.reduce((sum, word) => sum + word.count, 0);
   const maxCount = sourceWords.reduce((maximum, word) => Math.max(maximum, word.count), 0);
   const visibleWords = sourceWords.filter(({ word }) =>

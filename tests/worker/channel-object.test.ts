@@ -458,6 +458,9 @@ const objectFor = (
     if (/^\s*(?:INSERT OR IGNORE INTO|UPDATE) statistics_word_streams\b|^\s*SELECT distinct_words, expires_at(?:, current_batch)? FROM statistics_word_streams\b/iu.test(query)) {
       return { toArray: () => [], one: () => undefined };
     }
+    if (/^\s*PRAGMA table_info\(statistics_word_(?:counts|stream_totals)\)/iu.test(query)) {
+      return { toArray: () => [{ name: "display_word" }], one: () => ({ name: "display_word" }) };
+    }
     if (/^\s*SELECT version FROM statistics_word_schema_version\b/iu.test(query)) {
       return { toArray: () => [{ version: 1 }], one: () => ({ version: 1 }) };
     }
