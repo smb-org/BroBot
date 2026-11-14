@@ -358,6 +358,11 @@ Kanalvorgabe gilt `source_only`. In Panels bietet `ChatTargetField` das
 Zielmenü (zweisprachig, mit Infoknopf); in
 `SettingsEditorSpec` gibt es dafür ein eigenes Bauteil.
 
+Für ein manuell gewähltes Twitch-Konto verwenden Host und Modulpanels
+`TwitchUserField` aus dem Dashboard-UI-Seam. Das Feld liefert eine aufgelöste
+Identität mit Twitch-ID und Login; Modulservices erhalten diese Werte über
+ihren eigenen Contract statt selbst nach dem Login zu suchen.
+
 ```ts
 return { actions: [{ kind: "chat", text, target: "source_only" }], diagnostics: [] };
 ```

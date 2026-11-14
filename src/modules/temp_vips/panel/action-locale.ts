@@ -3,7 +3,10 @@ import type { ModuleLanguage } from "../../contract";
 export const tempVipsCockpitActionTexts: Readonly<Record<ModuleLanguage, {
   name: string;
   error: string;
+  run: string;
+  running: string;
   login: string;
+  loginHint: string;
   duration: string;
   durationHint: string;
   loadFailed: string;
@@ -14,7 +17,10 @@ export const tempVipsCockpitActionTexts: Readonly<Record<ModuleLanguage, {
   de: {
     name: "VIP vergeben",
     error: "Das VIP konnte nicht vergeben werden.",
+    run: "Ausführen",
+    running: "Wird ausgeführt …",
     login: "Twitch-Name",
+    loginHint: "Nutzer auswählen oder einen Login eingeben.",
     duration: "Dauer",
     durationHint: "Die VIP-Zeit beginnt nach der Bestätigung durch Twitch.",
     loadFailed: "Dauer-Einstellungen konnten nicht geladen werden.",
@@ -25,7 +31,10 @@ export const tempVipsCockpitActionTexts: Readonly<Record<ModuleLanguage, {
   en: {
     name: "Grant VIP",
     error: "The VIP could not be granted.",
+    run: "Run",
+    running: "Running …",
     login: "Twitch login",
+    loginHint: "Choose a user or enter a login.",
     duration: "Duration",
     durationHint: "VIP time starts after Twitch confirms the grant.",
     loadFailed: "Duration settings could not be loaded.",

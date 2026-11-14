@@ -326,6 +326,7 @@ Die Namen in der Tabelle bezeichnen gewünschte UI-Rollen, keine vorhandenen Dat
 | **RoleThreshold** | Mindestrolle für Chataktionen | Select „Mindestrolle“ plus Zeile mit eingeschlossenen Rollen | Modulinterne Rollenlisten |
 | **ChatPreview** | „Vorschau“ mit Beispieldaten | zwei reservierte Zeilen, nur Anzeige | echte Nachrichten |
 | **ChatTargetField** | Ein gemeinsames „Chat-Ziel“-Feld | Portal-Popover mit Auswahl und Erklärung je Ziel | andere Auswahlen |
+| **TwitchUserField** | Twitch-Konto wählen oder einen Login exakt auflösen | Label über dem Eingabefeld; Vorschläge als Portal-Overlay; feste Statuszeile; Combobox-Tastatursteuerung | Chat-Ziele oder Mehrfachauswahl |
 | **DataTable** | Protokoll, Kanalereignisse und Live-Ereignisse | eine Filterzeile; Zeit, Modul, Wer/Was, Art; relative Zeit bleibt sichtbar | Formulare |
 | **ChatCommandsHelp** | Chatbefehle und Start-/Mitspielhinweise für jede Modulseite | „Chatbefehle · n“ im Seitenkopf; Start-Hinweise oben im Popover, danach Befehlsbeschreibung, Mindestrolle, Argumente und Kopieraktion | zusätzliche Hilfe-Blöcke auf Modulseiten |
 | **TokenChip** | Sichtbarer Vorlagen-Token | kompakte Chipdarstellung, z. B. `{api.sonnenuntergang}` | Fließtext |

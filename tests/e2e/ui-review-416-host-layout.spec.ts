@@ -29,7 +29,7 @@ const mockDashboard = async (page: Page, role: string, modules: unknown[]): Prom
       timeZone: "Europe/Berlin", revision: 1, location: null, locationRevision: 1,
       defaultChatTarget: "source_only", defaultChatTargetRevision: 1,
     }));
-    if (path === `/api/channels/${channelId}/members/search`) return route.fulfill(json({ user: null }));
+    if (path === `/api/channels/${channelId}/twitch/user-suggestions`) return route.fulfill(json({ users: [], partial: false }));
     if (path === `/api/channels/${channelId}/members`) return route.fulfill(json({ members: [], nextCursor: null, broadcasterCount: 0, viewerUserId: "viewer" }));
     if (path === `/api/channels/${channelId}/modules` && method === "GET") return route.fulfill(json({ modules }));
     if (path === `/api/channels/${channelId}/revisions`) return route.fulfill(json({ revisions: {} }));

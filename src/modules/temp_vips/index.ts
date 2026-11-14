@@ -1,4 +1,4 @@
-import type { BotModule, ModuleImmediateActionCondition } from "../contract";
+import type { BotModule, ModuleImmediateActionCondition, ModuleTempVipPerson } from "../contract";
 import { DEFAULT_TEMP_VIPS_SETTINGS, TEMP_VIPS_MODULE_ID, tempVipsSettingsSchema } from "./contracts";
 import { tempVipsRoutes } from "./routes";
 import { tempVipsCockpitActionTexts } from "./panel/action-locale";
@@ -57,20 +57,26 @@ export const tempVipsModule: BotModule<typeof tempVipsSettingsSchema> = {
     icon: "timer",
     conditions: ["moduleEnabled", broadcasterVipPermission],
     requiredRole: "operator",
-    content: { presentation: "dialog", requiresReadiness: true, load: () => import("./panel/cockpit-action-content") },
+    content: { presentation: "dialog", requiresReadiness: true, hideSubmit: true, load: () => import("./panel/cockpit-action-content") },
     errorMessage: {
       de: tempVipsCockpitActionTexts.de.error,
       en: tempVipsCockpitActionTexts.en.error,
     },
     execute: async ({ channelId, formData }) => {
+      const userId = formData.get("userId");
       const login = formData.get("login");
+      const displayName = formData.get("displayName");
       const durationDays = Number(formData.get("durationDays"));
-      if (typeof login !== "string" || login.trim().length === 0 || !Number.isSafeInteger(durationDays) || durationDays < 1) {
-        throw new Error("A Twitch login and positive duration are required.");
+      if (typeof userId !== "string" || !/^[A-Za-z0-9_-]{1,32}$/u.test(userId) ||
+          typeof login !== "string" || !/^[A-Za-z0-9_]{1,25}$/u.test(login) ||
+          typeof displayName !== "string" || displayName.trim().length === 0 ||
+          !Number.isSafeInteger(durationDays) || durationDays < 1) {
+        throw new Error("A resolved Twitch user and positive duration are required.");
       }
+      const person: ModuleTempVipPerson = { userId, login, displayName };
       const result = await (await import("./panel/service")).grantTempVip(
         channelId,
-        login,
+        person,
         durationDays * 24 * 60 * 60 * 1_000,
       );
       const timeZone = formData.get("timeZone");

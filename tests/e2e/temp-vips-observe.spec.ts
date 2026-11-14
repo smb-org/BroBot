@@ -122,9 +122,13 @@ const mockObserveDashboard = async (page: Page): Promise<void> => {
     if (url.pathname === `/api/channels/${channelId}/modules/temp_vips/vips`) {
       return route.fulfill(json({ rows, settings, timeZone: "Europe/Berlin", mode: "observe", now }));
     }
+    if (url.pathname === `/api/channels/${channelId}/twitch/user-suggestions`) {
+      const login = (url.searchParams.get("q") ?? "").toLowerCase();
+      return route.fulfill(json({ users: login.length === 0 ? [] : [{ userId: `user_${login}`, login, displayName: login, profileImageUrl: null }], partial: false }));
+    }
     if (url.pathname === `/api/channels/${channelId}/modules/temp_vips/vips/observed` && method === "POST") {
-      const body = request.postDataJSON() as { login: string };
-      const row = personRow(body.login, "unclassified", null);
+      const body = request.postDataJSON() as { userId: string; login: string; displayName: string };
+      const row = { ...personRow(body.login, "unclassified", null), userId: body.userId, displayName: body.displayName };
       rows = [...rows, row];
       return route.fulfill(json({ status: "observed_added", row }));
     }
@@ -183,7 +187,7 @@ for (const width of widths) {
 
     await page.getByRole("button", { name: "VIP per Login ergänzen" }).click();
     const addDialog = page.getByRole("dialog", { name: "VIP per Login ergänzen" });
-    await addDialog.getByRole("textbox", { name: "Name" }).fill(`sternchen${String(width)}`);
+    await addDialog.getByRole("combobox", { name: "Name" }).fill(`sternchen${String(width)}`);
     await addDialog.getByRole("button", { name: "VIP per Login ergänzen" }).click();
     await expect(addDialog).toBeHidden();
     await expect(page.locator(".temp-vips-row").filter({ hasText: `@sternchen${String(width)}` })).toContainText("Neu · nicht eingestuft");

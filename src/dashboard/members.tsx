@@ -18,7 +18,6 @@ import {
   addChannelMember,
   PanelApiError,
   removeChannelMember,
-  searchTwitchUser,
   updateChannelMemberRole,
 } from "./api";
 
@@ -453,9 +452,9 @@ const MembersPageContent = ({
       />
       <MemberInviteDialog
         opened={grantOpen}
+        channelId={channelId}
         roles={availableRoles}
         defaultRole="operator"
-        onSearch={(login) => searchTwitchUser(channelId, login).then((response) => response.user)}
         onGrant={async (userId, role) => {
           await queryClient.cancelQueries(queryFilter);
           await addChannelMember(channelId, userId, role);

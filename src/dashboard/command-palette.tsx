@@ -12,7 +12,7 @@ import { loadUpcomingTimers } from "../modules/timers/panel/service";
 import { timersQuickActionTexts } from "../modules/timers/panel/quick-action-locale";
 import { canManage, hasRequiredChannelRole, type ChannelRole } from "../contracts/values";
 import type { PanelChannelControls, PanelModuleState } from "../panel-contract";
-import { PanelApiError, createClip, fetchStreamMarkerAvailability, fetchChannelVariables, sendManualShoutout, setChannelControl, startCommercial, type PanelChannelVariable } from "./api";
+import { PanelApiError, createClip, fetchStreamMarkerAvailability, fetchChannelVariables, resolveTwitchUserLogin, sendManualShoutout, setChannelControl, startCommercial, type PanelChannelVariable } from "./api";
 import { dispatchDashboardAuthenticationRequired } from "./data/events";
 import { queryKeys } from "./data/keys";
 import { evaluateImmediateActionAvailability } from "./immediate-action-availability";
@@ -536,7 +536,12 @@ export const ChannelCommandPalette = ({ open, onOpenChange, channelId, ownRole, 
         icon: "shoutout",
         disabled: shoutout.disabledReason !== null || shoutoutLogin.length === 0,
         disabledReason: shoutout.disabledReason ?? texts.commandPalette.shoutoutMissingLogin,
-        onTrigger: () => { void sendManualShoutout(channelId, shoutoutLogin); },
+        onTrigger: () => {
+          void resolveTwitchUserLogin(channelId, shoutoutLogin).then((user) => sendManualShoutout(channelId, user)).catch((error: unknown) => {
+            notify({ tone: "error", message: error instanceof PanelApiError ? apiErrorText(error.code, texts.streamManager.actionFailed) : texts.streamManager.actionFailed });
+            if (error instanceof PanelApiError && error.status === 401) dispatchDashboardAuthenticationRequired();
+          });
+        },
       });
     }
     if (counterAvailability.offered && counterAction !== undefined) {

@@ -164,8 +164,8 @@ describe("members list permissions", () => {
       const pathname = input instanceof Request
         ? new URL(input.url).pathname
         : new URL(String(input), "https://brobot.example").pathname;
-      if (pathname === "/api/channels/channel-a/members/search") {
-        return Promise.resolve(Response.json({ user: { userId: "user-new", login: "new_helper", displayName: "New Helper", profileImageUrl: null } }));
+      if (pathname === "/api/channels/channel-a/twitch/user-suggestions") {
+        return Promise.resolve(Response.json({ users: [{ userId: "user-new", login: "new_helper", displayName: "New Helper", profileImageUrl: null }], partial: false }));
       }
       if (pathname === "/api/csrf") return Promise.resolve(Response.json({ token: "csrf-token" }));
       if (pathname === "/api/channels/channel-a/members" && init?.method === "POST") {
@@ -179,7 +179,7 @@ describe("members list permissions", () => {
     fireEvent.click(screen.getByRole("button", { name: membersTexts().grantAccessTitle }));
     const dialog = await screen.findByRole("dialog", { name: membersTexts().grantAccessTitle });
     expect(within(dialog).getByRole("heading", { name: "Person finden" })).toBeVisible();
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "Twitch-Name" }), { target: { value: "new_helper" } });
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Twitch-Name" }), { target: { value: "new_helper" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Suchen" }));
 
     expect(await within(dialog).findByRole("heading", { name: "Rolle vergeben" })).toBeVisible();
@@ -195,11 +195,11 @@ describe("members list permissions", () => {
     });
   });
 
-  it("submits one Twitch search when Enter is pressed in the invite step", async () => {
+  it("resolves one Twitch user when Enter is pressed in the invite step", async () => {
     const fetcher = vi.fn<typeof fetch>((input) => {
       const url = input instanceof Request ? input.url : String(input);
-      if (url.includes("/members/search?")) {
-        return Promise.resolve(Response.json({ user: { userId: "user-new", login: "new_helper", displayName: "New Helper", profileImageUrl: null } }));
+      if (url.includes("/twitch/user-suggestions?")) {
+        return Promise.resolve(Response.json({ users: [{ userId: "user-new", login: "new_helper", displayName: "New Helper", profileImageUrl: null }], partial: false }));
       }
       return Promise.resolve(Response.json({ members: [], nextCursor: null, broadcasterCount: 1, viewerUserId: "viewer" }));
     });
@@ -208,7 +208,7 @@ describe("members list permissions", () => {
 
     fireEvent.click(screen.getByRole("button", { name: membersTexts().grantAccessTitle }));
     const dialog = await screen.findByRole("dialog", { name: membersTexts().grantAccessTitle });
-    const input = within(dialog).getByRole("textbox", { name: "Twitch-Name" });
+    const input = within(dialog).getByRole("combobox", { name: "Twitch-Name" });
     fireEvent.change(input, { target: { value: "new_helper" } });
     fireEvent.keyDown(input, { key: "Enter", code: "Enter", charCode: 13 });
 
@@ -216,7 +216,7 @@ describe("members list permissions", () => {
     await waitFor(() => {
       const searches = fetcher.mock.calls.filter(([request]) => {
         const url = request instanceof Request ? request.url : request instanceof URL ? request.href : request;
-        return url.includes("/members/search?");
+        return url.includes("/twitch/user-suggestions?");
       });
       expect(searches).toHaveLength(1);
     });

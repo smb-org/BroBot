@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement, type SyntheticEvent } from "react";
 import { PanelApiError } from "../../../contracts/panel-error";
 import { formatNumber } from "../../../dashboard/locale";
-import { Button, ConfirmDialog, Dialog, Field, Icon, SegmentChoice, Tabs, UnitInput, notify } from "../../../dashboard/ui";
+import { Button, ConfirmDialog, Dialog, Field, Icon, SegmentChoice, Tabs, TwitchUserField, UnitInput, notify, type TwitchUserFieldHandle } from "../../../dashboard/ui";
 import { useModuleQuery } from "../../../dashboard/data";
-import type { ModulePanelProperties, ModuleTempVipPerson, ModuleTempVipResult, ModuleTempVipRow } from "../../contract";
+import type { ModulePanelProperties, ModuleTempVipPerson, PanelTwitchUser, ModuleTempVipResult, ModuleTempVipRow } from "../../contract";
 import type { TempVipsSettings } from "../contracts";
 import {
   endTempVip,
@@ -74,6 +74,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [login, setLogin] = useState("");
+  const [resolvedPerson, setResolvedPerson] = useState<PanelTwitchUser | null>(null);
   const [durationDays, setDurationDays] = useState<number | "">(settings.defaultDurationDays);
   const [timeEntryMode, setTimeEntryMode] = useState<TimeEntryMode>("duration");
   const [expiryInput, setExpiryInput] = useState("");
@@ -89,6 +90,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
   const [localNow, setLocalNow] = useState(() => Date.now());
   const [tab, setTab] = useState<"vips" | "settings">("vips");
   const pageRef = useRef<HTMLElement | null>(null);
+  const userField = useRef<TwitchUserFieldHandle>(null);
 
   // Below 769px the settings editor (a sibling in the module view) is shown or hidden by this attribute;
   // it stays mounted so unsaved drafts survive tab switches.
@@ -137,6 +139,8 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
     setDialogError(null);
     setPageFeedback(null);
     setLogin("");
+    setResolvedPerson(null);
+    userField.current?.clear();
     setDurationDays(next.kind === "extend" || next.kind === "classifyTemporary"
       ? settings.defaultDurationDays : Math.min(settings.defaultDurationDays, settings.maximumDurationDays));
     setTimeEntryMode("duration");
@@ -151,6 +155,8 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
     if (pending) return;
     setDialog(null);
     setDialogError(null);
+    setResolvedPerson(null);
+    userField.current?.clear();
   };
 
   const submitDialog = async (event: SyntheticEvent<HTMLFormElement>): Promise<void> => {
@@ -174,7 +180,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
       setDialogError(labels.maximumExceeded);
       return;
     }
-    if ((dialog.kind === "grant" || dialog.kind === "manualAdd") && login.trim().length === 0) {
+    if ((dialog.kind === "grant" || dialog.kind === "manualAdd") && login.length === 0) {
       setDialogError(labels.userNotFound);
       return;
     }
@@ -185,10 +191,17 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
 
     setPending(true);
     try {
+      const targetPerson = dialog.kind === "grant" || dialog.kind === "manualAdd"
+        ? await userField.current?.resolve() ?? null
+        : null;
+      if ((dialog.kind === "grant" || dialog.kind === "manualAdd") && targetPerson === null) {
+        setDialogError(labels.userNotFound);
+        return;
+      }
       const result = dialog.kind === "grant"
-        ? await grantTempVip(channelId, login.trim(), durationMs as number)
+        ? await grantTempVip(channelId, targetPerson as ModuleTempVipPerson, durationMs as number)
         : dialog.kind === "manualAdd"
-          ? await addObservedTempVip(channelId, login.trim())
+          ? await addObservedTempVip(channelId, targetPerson as ModuleTempVipPerson)
         : dialog.kind === "takeover" && selectedVip !== null
           ? await importTempVip(channelId, selectedVip.userId, dateEntry ? { expiresAtLocal: expiryInputValue } : durationMs as number)
           : dialog.kind === "extend"
@@ -210,6 +223,7 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
           : formatTempVipResult(result, language, query.data?.timeZone ?? "UTC");
       setPageFeedback(success);
       notify({ tone: result.status === "queued" ? "info" : "success", message: success });
+      setResolvedPerson(null);
       setDialog(null);
       await query.refetch();
     } catch (error) {
@@ -394,14 +408,15 @@ export default function TempVipsPanel({ channelId, language = "de", canOperate =
     <Dialog opened={dialog !== null} title={dialogTitle} onClose={dismissDialog} pending={pending} className="temp-vips-dialog">
       <form className="temp-vips-dialog__form" onSubmit={(event) => { void submitDialog(event); }}>
         {dialog?.kind === "grant" || dialog?.kind === "manualAdd" ? <>
-          <Field
+          <TwitchUserField
+            ref={userField}
+            channelId={channelId}
             label={labels.name}
             hint={labels.loginHint}
-            value={login}
-            onChange={setLogin}
-            placeholder="@pixelpilz"
-            autoComplete="off"
-            spellCheck={false}
+            value={resolvedPerson}
+            onChange={setResolvedPerson}
+            onLoginChange={setLogin}
+            placeholder="chatfreund"
             disabled={pending}
             required
           />

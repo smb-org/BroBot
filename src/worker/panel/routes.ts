@@ -44,6 +44,7 @@ import { overlayRouter } from "./overlay-routes";
 import { overlayAccessRouter } from "./overlay-access-routes";
 import { channelLocationRouter } from "./channel-location-routes";
 import { quickActionRouter } from "./quick-action-routes";
+import { twitchUserRouter } from "./twitch-user-routes";
 import { EVENT_TONES, MANAGING_ROLES, canManage, type EventCode, type EventTone } from "../../contracts/values";
 import { auditSubjectUserId, isAuditArea } from "../../dashboard/audit/areas";
 import { apiErrorDetail } from "../../modules/contract";
@@ -241,6 +242,7 @@ panelRouter.route("/", overlayRouter);
 panelRouter.route("/", overlayAccessRouter);
 panelRouter.route("/", channelLocationRouter);
 panelRouter.route("/", quickActionRouter);
+panelRouter.route("/", twitchUserRouter);
 
 panelRouter.get("/api/channels/:channelId/settings", requireChannelAuthorization(), async (context) => {
   const row = await context.env.DB.prepare(
@@ -570,9 +572,6 @@ panelRouter.get(
   },
 );
 
-const isShoutoutLogin = (value: string | undefined): value is string =>
-  value !== undefined && value.trim().length > 0 && value.trim().length <= 25 && !/\s/.test(value.trim());
-
 const shoutoutStatusFor = (reason: ShoutoutSendResult["reason"]): 400 | 403 | 404 | 429 | 502 | 503 => {
   if (reason === "rate_limited") return 429;
   if (reason === "network_error" || reason === "app_token_unavailable" || reason === "bot_identity_missing") return 503;
@@ -583,9 +582,8 @@ const shoutoutStatusFor = (reason: ShoutoutSendResult["reason"]): 400 | 403 | 40
 
 /**
  * Immediate action, open to any channel member (0006's "Betrieblich" tier,
- * same reasoning as commercial/clip above). Host-level: it resolves a login
- * to a Twitch user id, then reuses the same `sendShoutout` the raid module
- * triggers automatically.
+ * same reasoning as commercial/clip above). The dashboard sends the resolved
+ * Twitch identity, then this route reuses the raid module's `sendShoutout`.
  */
 panelRouter.post(
   "/api/channels/:channelId/shoutout",
@@ -598,26 +596,20 @@ panelRouter.post(
     const triggerId = `shoutout:${crypto.randomUUID()}`;
     const now = nowIso();
     const body: unknown = await context.req.json().catch(() => null);
+    const userId = body !== null && typeof body === "object" && "userId" in body && typeof body.userId === "string"
+      ? body.userId
+      : undefined;
     const login = body !== null && typeof body === "object" && "login" in body && typeof body.login === "string"
       ? body.login
       : undefined;
-    if (!isShoutoutLogin(login)) return context.json({ error: "twitch_login_invalid" }, 400);
-
-    let targetUserId: string;
-    let targetLogin: string;
-    try {
-      const user = await fetchTwitchUserByLogin(fetch, context.env, login.trim());
-      if (user === null) return context.json({ error: "twitch_user_not_found" }, 404);
-      targetUserId = user.userId;
-      targetLogin = user.login;
-    } catch {
-      return context.json({ error: "twitch_user_search_failed" }, 502);
+    if (userId === undefined || !/^[A-Za-z0-9_-]{1,32}$/u.test(userId) || login === undefined || !/^[A-Za-z0-9_]{1,25}$/u.test(login)) {
+      return context.json({ error: "twitch_user_invalid" }, 400);
     }
 
-    const result = await sendShoutout(context.env, channelId, targetUserId, fetch);
+    const result = await sendShoutout(context.env, channelId, userId, fetch);
     await writeModuleDiagnostics(context.env.DB, channelId, "host", triggerId, context.get("actor").userId, [
       result.sent
-        ? { code: "host.shoutout.sent" satisfies EventCode, detail: { ...result.detail, toLogin: targetLogin } }
+        ? { code: "host.shoutout.sent" satisfies EventCode, detail: { ...result.detail, toLogin: login } }
         : { code: "host.shoutout.failed" satisfies EventCode, detail: { cause: result.reason, ...result.detail } },
     ], now);
 

@@ -27,7 +27,7 @@ const PickerTargetContext = createContext<RefCallback<HTMLElement> | null>(null)
 interface InlineSuggestionPickerControls {
   activeIndex: number;
   activeOptionId: string | undefined;
-  handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
+  handleKeyDown: (event: KeyboardEvent<HTMLElement>) => boolean;
   close: () => void;
 }
 
@@ -107,7 +107,7 @@ export function InlineSuggestionPicker<Option extends { name: string }>({
     setActiveSelection({ groupKey, index: 0 });
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>): boolean => {
     if (!open) return false;
     if (event.key === "Escape") {
       event.preventDefault();

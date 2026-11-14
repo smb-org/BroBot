@@ -27,6 +27,8 @@ export { Section } from "./Section";
 export { RuleNote } from "./RuleNote";
 export { ActionMenu } from "./ActionMenu";
 export { ChatTargetField } from "./ChatTargetField";
+export { TwitchUserField } from "./TwitchUserField";
+export type { TwitchUserFieldHandle } from "./TwitchUserField";
 
 export { Sidebar } from "./Sidebar";
 export type { SidebarEntry, SidebarGroup } from "./Sidebar";

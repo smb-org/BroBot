@@ -1,13 +1,14 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { HelixRequest, ModuleRouteEnvironment, ModuleTempVipRouteAccess } from "../../src/modules/contract";
+import type { ModuleRouteEnvironment, ModuleTempVipRouteAccess } from "../../src/modules/contract";
 import { tempVipsRoutes } from "../../src/modules/temp_vips/routes";
 
 const channelId = "channel_demo";
 const operationId = "01234567-89ab-42cd-8abc-0123456789ab";
 const minimumDurationMs = 10 * 60_000;
 const fixedNow = "2026-11-01T12:00:00.000Z";
+const person = { userId: "user_demo", login: "pixelpilz", displayName: "Pixelpilz" };
 const row = {
   userId: "user_demo",
   login: "pixelpilz",
@@ -49,14 +50,6 @@ const createHarness = (role: string = "operator", mode: "observe" | "managed" | 
       if (targetChannelId !== channelId) throw new Error("unexpected channel");
       return access;
     });
-    context.set("measureServerTiming", (_phase, run) => run());
-    context.set("getAppAccessToken", () => Promise.resolve("app_token_demo"));
-    const helixRequest = (() => Promise.resolve({
-      ok: true,
-      status: 200,
-      data: { data: [{ id: "user_demo", login: "pixelpilz", display_name: "Pixelpilz" }] },
-    })) as HelixRequest;
-    context.set("helixRequest", helixRequest);
     await next();
   });
   app.route(`/api/channels/:channelId/modules/temp_vips`, tempVipsRoutes);
@@ -117,10 +110,10 @@ describe("temporary VIP routes", () => {
     await expect(response.json()).resolves.toMatchObject({ status: "ended" });
   });
 
-  it("lets an operator add an observed VIP by login without reading the VIP list", async () => {
+  it("lets an operator add an observed VIP by resolved user without reading the VIP list", async () => {
     const harness = createHarness("operator", "observe");
 
-    const response = await harness.request("/vips/observed", { operationId, login: "@pixelpilz" });
+    const response = await harness.request("/vips/observed", { operationId, ...person });
 
     expect(response.status).toBe(200);
     expect(harness.access.addObserved).toHaveBeenCalledWith(expect.objectContaining({
@@ -203,7 +196,7 @@ describe("temporary VIP routes", () => {
   it("blocks observed VIP actions when the module is disabled", async () => {
     const harness = createHarness("operator", "inactive");
 
-    const response = await harness.request("/vips/observed", { operationId, login: "pixelpilz" });
+    const response = await harness.request("/vips/observed", { operationId, ...person });
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "temp_vips_module_disabled" });
@@ -215,7 +208,7 @@ describe("temporary VIP routes", () => {
     vi.setSystemTime(new Date(fixedNow));
     const harness = createHarness();
     const path = action === "grant" ? "/vips/grant" : action === "import" ? "/vips/import" : "/vips/user_demo/extend";
-    const target = action === "grant" ? { login: "pixelpilz" } : action === "import" ? { userId: "user_demo" } : {};
+    const target = action === "grant" ? person : action === "import" ? { userId: "user_demo" } : {};
 
     for (const durationMs of [0, minimumDurationMs - 1]) {
       const response = await harness.request(path, { operationId, ...target, durationMs });
@@ -232,7 +225,7 @@ describe("temporary VIP routes", () => {
     vi.setSystemTime(new Date(fixedNow));
     const harness = createHarness();
     const path = action === "grant" ? "/vips/grant" : action === "import" ? "/vips/import" : "/vips/user_demo/extend";
-    const target = action === "grant" ? { login: "pixelpilz" } : action === "import" ? { userId: "user_demo" } : {};
+    const target = action === "grant" ? person : action === "import" ? { userId: "user_demo" } : {};
 
     const response = await harness.request(path, { operationId, ...target, durationMs: minimumDurationMs });
 

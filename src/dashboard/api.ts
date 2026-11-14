@@ -19,6 +19,7 @@ import type {
   PanelModulesResponse,
   PanelSystemResponse,
   PanelTwitchUser,
+  PanelTwitchUserSuggestionsResponse,
 } from "../panel-contract";
 import type { ChannelControlDuration, ChannelRole, ChatOutputTarget, OverlayElementKind } from "../contracts/values";
 import type { ModuleActivationResult, ModuleRegisteredTemplateVariable } from "../modules/contract";
@@ -286,16 +287,43 @@ export const fetchChannels = (signal?: AbortSignal): Promise<PanelChannelsRespon
 export const getPlatformOverview = (): Promise<PanelPlatformOverviewResponse> =>
   requestJson<PanelPlatformOverviewResponse>("/api/platform");
 
-export const searchPlatformUser = (login: string): Promise<{ user: PanelTwitchUser }> =>
-  requestJson<{ user: PanelTwitchUser }>(`/api/platform/users?${new URLSearchParams({ login }).toString()}`);
+export const fetchPlatformTwitchUserSuggestions = (
+  query: string,
+  signal?: AbortSignal,
+): Promise<PanelTwitchUserSuggestionsResponse> => requestJson<PanelTwitchUserSuggestionsResponse>(
+  `/api/platform/twitch/user-suggestions?${new URLSearchParams({ q: query }).toString()}`,
+  requestOptions(signal),
+);
+
+export const fetchTwitchUserSuggestions = (
+  channelId: string,
+  query: string,
+  signal?: AbortSignal,
+): Promise<PanelTwitchUserSuggestionsResponse> => requestJson<PanelTwitchUserSuggestionsResponse>(
+  `${channelPath(channelId, "twitch/user-suggestions")}?${new URLSearchParams({ q: query }).toString()}`,
+  requestOptions(signal),
+);
+
+export const resolveTwitchUserLogin = async (
+  channelId: string,
+  rawLogin: string,
+  signal?: AbortSignal,
+): Promise<PanelTwitchUser> => {
+  const login = rawLogin.replace(/\s+/gu, "").replace(/^@/u, "");
+  if (!/^[A-Za-z0-9_]{1,25}$/u.test(login)) throw new PanelApiError(400, "twitch_user_query_invalid");
+  const result = await fetchTwitchUserSuggestions(channelId, login, signal);
+  const exact = result.users.find((user) => user.login.toLowerCase() === login.toLowerCase());
+  if (exact === undefined) throw new PanelApiError(404, "twitch_user_not_found");
+  return exact;
+};
 
 export const releasePlatformChannel = (
-  login: string,
+  user: PanelTwitchUser,
   fullConsent: boolean,
 ): Promise<{ channel: PanelPlatformOverviewResponse["channels"][number] }> => requestMutation(
   "/api/platform/channels",
   "POST",
-  { login, fullConsent: fullConsent },
+  { user, fullConsent: fullConsent },
 );
 
 export const setPlatformFullConsent = (
@@ -546,18 +574,6 @@ export const fetchModules = (
   requestOptions(signal),
 );
 
-export const searchTwitchUser = async (
-  channelId: string,
-  login: string,
-  signal?: AbortSignal,
-): Promise<{ user: PanelTwitchUser }> => {
-  const params = new URLSearchParams({ login });
-  return requestJson<{ user: PanelTwitchUser }>(
-    `${memberPath(channelId)}/search?${params.toString()}`,
-    requestOptions(signal),
-  );
-};
-
 const requestMutation = <T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE" | "PUT",
@@ -791,11 +807,11 @@ export const startCommercial = (
 
 export const sendManualShoutout = (
   channelId: string,
-  login: string,
+  user: Pick<PanelTwitchUser, "userId" | "login" | "displayName">,
 ): Promise<{ sent: true }> => requestMutation(
   channelPath(channelId, "shoutout"),
   "POST",
-  { login },
+  user,
 );
 
 export const createClip = (

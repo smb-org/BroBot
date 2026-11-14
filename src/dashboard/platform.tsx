@@ -20,14 +20,16 @@ import {
   getPlatformMembers,
   getPlatformOverview,
   PanelApiError,
+  fetchPlatformTwitchUserSuggestions,
   setPlatformFullConsent,
-  searchPlatformUser,
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
-import { Badge, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, ListPaginationFooter, LoadState as LoadStateView, LoadStateLines, notify, PageHeader, Select, SubInspector, SwitchRow, Tabs, useInspectorSelection, type SelectOption } from "./ui";
+import { Badge, Button, ConfirmDialog, Field, FormDialog, InspectorActions, InspectorFieldRow, InspectorHeading, InspectorSection, ListDetail, ListPaginationFooter, LoadState as LoadStateView, LoadStateLines, notify, PageHeader, Select, SubInspector, SwitchRow, Tabs, TwitchUserField, useInspectorSelection, type SelectOption, type TwitchUserFieldHandle } from "./ui";
 import { MemberGrantEditor } from "./member-grant-editor";
 import { StateRow, type StateTone } from "./module-panels";
+
+const loadPlatformUser = (query: string, signal: AbortSignal) => fetchPlatformTwitchUserSuggestions(query, signal);
 
 interface PlatformPageProperties {
   onAuthenticationRequired: () => void;
@@ -230,6 +232,7 @@ const ChannelInspector = ({
       <section className="config-section platform-inspector-section" aria-label={texts.addMember}>
         <div className="section-heading"><h3>{texts.addMember}</h3></div>
         <MemberGrantEditor
+          channelId={channel.channelId}
           roles={["manager", "operator"]}
           defaultRole="operator"
           texts={{
@@ -237,8 +240,6 @@ const ChannelInspector = ({
             title: texts.addMember,
             searchLabel: texts.twitchLogin,
             searchHint: texts.twitchLoginHint,
-            searchButton: texts.search,
-            searchingButton: texts.searching,
             roleLabel: texts.role,
             roleHint: texts.roleHint,
             saveLabel: texts.add,
@@ -246,7 +247,7 @@ const ChannelInspector = ({
             confirmDescription: texts.addMemberConfirmDescription,
             confirmButton: texts.addMemberConfirmButton,
           }}
-          onSearch={(login) => searchPlatformUser(login).then((response) => response.user)}
+          loadSuggestions={loadPlatformUser}
           onGrant={(userId, role) => addPlatformMember(channel.channelId, userId, role as "manager" | "operator").then(() => undefined)}
           errorText={(error) => errorText(error, texts.error)}
           onGranted={() => { void loadMembers(); }}
@@ -310,38 +311,38 @@ const ChannelRelease = ({
   const texts = platformTexts();
   const common = dashboardCommonTexts();
   const [login, setLogin] = useState("");
-  const [searchInProgress, setSearchInProgress] = useState(false);
-  const [searchError, setSearchError] = useState<string | undefined>(undefined);
+  const [resolving, setResolving] = useState(false);
   const [found, setFound] = useState<PanelTwitchUser | null>(null);
   const [fullConsent, setFullConsent] = useState(true);
   const [confirmation, setConfirmation] = useState(false);
   const [releaseInProgress, setReleaseInProgress] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>(undefined);
+  const userField = useRef<TwitchUserFieldHandle>(null);
 
   const close = (): void => {
-    if (searchInProgress || releaseInProgress) return;
+    if (resolving || releaseInProgress) return;
     setConfirmation(false);
-    setSearchError(undefined);
     setActionError(undefined);
     setFound(null);
     setLogin("");
+    userField.current?.clear();
     onClose();
   };
 
-  const searchUser = async (): Promise<void> => {
-    const trimmed = login.trim();
-    if (searchInProgress || trimmed.length === 0) return;
-    setSearchInProgress(true);
-    setSearchError(undefined);
-    setFound(null);
+  const resolveUser = async (): Promise<void> => {
+    if (resolving || login.length === 0) return;
+    setResolving(true);
     try {
-      setFound((await searchPlatformUser(trimmed)).user);
-      setFullConsent(true);
+      const user = await userField.current?.resolve() ?? null;
+      if (user !== null) {
+        setFound(user);
+        setFullConsent(true);
+        setConfirmation(true);
+      }
     } catch (error: unknown) {
-      setSearchError(errorText(error, texts.error));
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
     } finally {
-      setSearchInProgress(false);
+      setResolving(false);
     }
   };
 
@@ -350,10 +351,11 @@ const ChannelRelease = ({
     setReleaseInProgress(true);
     setActionError(undefined);
     try {
-      await releasePlatformChannel(found.login, fullConsent);
+      await releasePlatformChannel(found, fullConsent);
       setConfirmation(false);
       setFound(null);
       setLogin("");
+      userField.current?.clear();
       await onReload();
       notify({ tone: "success", message: common.saved });
       onClose();
@@ -371,18 +373,26 @@ const ChannelRelease = ({
       <FormDialog
         opened={opened}
         title={texts.releaseChannel}
-        pending={searchInProgress || releaseInProgress}
-        confirmDisabled={found === null}
+        pending={resolving || releaseInProgress}
+        confirmDisabled={login.length === 0 || releaseInProgress}
         {...(actionError === undefined ? {} : { error: actionError })}
-        onConfirm={() => { if (found !== null) setConfirmation(true); }}
+        onConfirm={() => { if (found !== null) setConfirmation(true); else void resolveUser(); }}
         onCancel={close}
         confirmLabel={texts.releaseChannel}
         cancelLabel={common.cancel}
       >
-        <div className="form-row platform-channel-release__search">
-          <Field label={texts.twitchLogin} hint={texts.twitchLoginHint} prefix="@" value={login} onChange={(value) => { setLogin(value); setSearchError(undefined); }} {...(searchError === undefined ? {} : { error: searchError })} disabled={searchInProgress || releaseInProgress} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); void searchUser(); }} />
-          <Button className="platform-channel-release__search-button" variant="neutral" disabled={searchInProgress || releaseInProgress || login.trim().length === 0} onClick={() => { void searchUser(); }}>{searchInProgress ? texts.searching : texts.search}</Button>
-        </div>
+        <TwitchUserField
+          ref={userField}
+          label={texts.twitchLogin}
+          hint={texts.twitchLoginHint}
+          value={found}
+          onChange={setFound}
+          onLoginChange={setLogin}
+          onLookupError={(error) => { if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired(); }}
+          loadSuggestions={loadPlatformUser}
+          placeholder="beispielkanal"
+          disabled={resolving || releaseInProgress}
+        />
         <div className="platform-channel-release__result-slot">
           {found === null ? null : (
             <div className="member-grant-editor__result">

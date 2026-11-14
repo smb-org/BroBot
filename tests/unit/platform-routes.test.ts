@@ -10,7 +10,7 @@ import {
 } from "../../src/worker/platform/repository";
 import { platformRouter } from "../../src/worker/platform/routes";
 import { MODULES } from "../../src/modules/registry";
-import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
+import { insertAppAccessToken, insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
 import { createReadBarrierDatabase, TestD1Database } from "./test-d1";
 
 const environmentKey = {
@@ -94,10 +94,12 @@ describe("Platform admin level", () => {
   let database: TestD1Database;
   let environment: Env;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     database = new TestD1Database();
     environment = environmentFor(database);
     vi.stubGlobal("fetch", vi.fn());
+    const tokenCiphertext = await encryptJson({ token: "app-token" }, parseKeyRing(environmentKey.SESSION_ENCRYPTION_KEYS));
+    await insertAppAccessToken(database, tokenCiphertext, "2099-09-19T00:00:00.000Z", "2026-09-18T00:00:00.000Z", "2026-09-18T00:00:00.000Z");
   });
 
   afterEach(() => {
@@ -117,7 +119,7 @@ describe("Platform admin level", () => {
     await expect(response.json()).resolves.toEqual({ error: "platform_access_denied" });
   });
 
-  it("returns the cross-channel overview and searches users via Helix", async () => {
+  it("returns the cross-channel overview and suggests exact and channel-search users via Helix", async () => {
     await setPlatform(database);
     await insertChannel(database, "kanal-a", "Alpha");
     await insertChannel(database, "kanal-b", "Beta");
@@ -128,9 +130,14 @@ describe("Platform admin level", () => {
     await database.prepare("UPDATE channels SET full_consent = 1 WHERE channel_id = ?").bind("kanal-a").run();
     await insertLoginIdentityAndSession(database, "kanal-a");
     await setBotIdentity(database);
-    vi.mocked(fetch).mockResolvedValueOnce(responseFromHelix([
-      { id: "user-7", login: "neuerkanal", display_name: "Neuer Kanal" },
-    ]));
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(responseFromHelix([
+        { id: "user-7", login: "beispielkanal", display_name: "Beispielkanal", profile_image_url: null },
+      ]))
+      .mockResolvedValueOnce(responseFromHelix([
+        { id: "user-7", broadcaster_login: "beispielkanal", display_name: "Beispielkanal", thumbnail_url: null, is_live: false },
+        { id: "user-8", broadcaster_login: "beispielkanal_live", display_name: "Beispielkanal Live", thumbnail_url: "https://static.example/beispielkanal-live.png", is_live: true },
+      ]));
 
     const overviewResponse = await platformRouter.fetch(
       await requestFor(platformId, "/api/platform"),
@@ -140,7 +147,7 @@ describe("Platform admin level", () => {
       channels: Array<Record<string, unknown>>;
     }>();
     const searchResponse = await platformRouter.fetch(
-      await requestFor(platformId, "/api/platform/users?login=neuerkanal"),
+      await requestFor(platformId, "/api/platform/twitch/user-suggestions?q=beispielkanal"),
       environment,
     );
 
@@ -165,20 +172,21 @@ describe("Platform admin level", () => {
     ]);
     expect(searchResponse.status).toBe(200);
     await expect(searchResponse.json()).resolves.toEqual({
-      user: { userId: "user-7", login: "neuerkanal", displayName: "Neuer Kanal", profileImageUrl: null },
+      users: [
+        { userId: "user-7", login: "beispielkanal", displayName: "Beispielkanal", profileImageUrl: null },
+        { userId: "user-8", login: "beispielkanal_live", displayName: "Beispielkanal Live", profileImageUrl: "https://static.example/beispielkanal-live.png", isLive: true },
+      ],
+      partial: false,
     });
   });
 
   it("provisions every default-enabled module as an enabled row on release", async () => {
     await setPlatform(database);
     await setBotIdentity(database);
-    vi.mocked(fetch).mockResolvedValueOnce(responseFromHelix([
-      { id: "kanal-8", login: "kanal-acht", display_name: "Kanal Acht" },
-    ]));
 
     const response = await platformRouter.fetch(
       await requestFor(platformId, "/api/platform/channels", "POST", {
-        login: "kanal-acht",
+        user: { userId: "kanal-8", login: "beispielkanal8", displayName: "Beispielkanal 8", profileImageUrl: null },
         fullConsent: true,
       }),
       environment,
@@ -210,13 +218,10 @@ describe("Platform admin level", () => {
   it("creates the channel, broadcaster row, and platform-admin audit entry in one batch on approval", async () => {
     await setPlatform(database);
     await setBotIdentity(database);
-    vi.mocked(fetch).mockResolvedValueOnce(responseFromHelix([
-      { id: "kanal-7", login: "kanal-sieben", display_name: "Kanal Sieben" },
-    ]));
 
     const response = await platformRouter.fetch(
       await requestFor(platformId, "/api/platform/channels", "POST", {
-        login: "kanal-sieben",
+        user: { userId: "kanal-7", login: "beispielkanal7", displayName: "Beispielkanal 7", profileImageUrl: null },
         fullConsent: true,
       }),
       environment,
@@ -229,7 +234,7 @@ describe("Platform admin level", () => {
     ).bind("kanal-7").first();
 
     expect(response.status).toBe(201);
-    expect(channel).toEqual({ channel_id: "kanal-7", login: "kanal-sieben", full_consent: 1 });
+    expect(channel).toEqual({ channel_id: "kanal-7", login: "beispielkanal7", full_consent: 1 });
     expect(member).toEqual({ channel_id: "kanal-7", user_id: "kanal-7", role: "broadcaster" });
     await expect(leseAudit(database)).resolves.toEqual([
       {

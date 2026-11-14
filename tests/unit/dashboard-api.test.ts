@@ -10,9 +10,9 @@ import {
   fetchChannelVariableAvailability,
   fetchEvents,
   fetchMembers,
+  fetchTwitchUserSuggestions,
   removeChannelMember,
   refreshModeratorStatus,
-  searchTwitchUser,
   updateChannelMemberRole,
   PanelApiError,
   requestJson,
@@ -85,24 +85,18 @@ describe("dashboard API request boundary", () => {
     );
   });
 
-  it("loads members and looks up a Twitch user, scoped to the channel", async () => {
+  it("loads Twitch user suggestions with an abortable channel-scoped request", async () => {
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ members: [] }))
-      .mockResolvedValueOnce(jsonResponse({ user: { userId: "123", login: "neue-person", displayName: "Neue Person" } }));
+      .mockResolvedValueOnce(jsonResponse({ users: [], partial: false }));
     vi.stubGlobal("fetch", fetcher);
 
-    await fetchMembers("kanal-a");
-    await searchTwitchUser("kanal-a", "neue-person");
+    const controller = new AbortController();
+    await fetchTwitchUserSuggestions("kanal-a", "chatfreund", controller.signal);
 
     expect(fetcher).toHaveBeenNthCalledWith(
       1,
-      new URL("/api/channels/kanal-a/members", window.location.origin),
-      { credentials: "same-origin" },
-    );
-    expect(fetcher).toHaveBeenNthCalledWith(
-      2,
-      new URL("/api/channels/kanal-a/members/search?login=neue-person", window.location.origin),
-      { credentials: "same-origin" },
+      new URL("/api/channels/kanal-a/twitch/user-suggestions?q=chatfreund", window.location.origin),
+      { credentials: "same-origin", signal: controller.signal },
     );
   });
 

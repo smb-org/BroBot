@@ -187,7 +187,7 @@ describe("Platform level", () => {
     expect(link).toHaveValue("http://localhost:3000/auth/login?channel=alpha_login");
   });
 
-  it("marks the member-search field with an @ prefix and puts a hidden lucide icon on the copy action", async () => {
+  it("shows the shared Twitch user field and puts a hidden lucide icon on the copy action", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -195,9 +195,8 @@ describe("Platform level", () => {
 
     fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
     const inspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
-    const search = within(inspector).getByRole("textbox", { name: "Twitch-Login" });
+    const search = within(inspector).getByRole("combobox", { name: "Twitch-Login" });
     expect(search).toHaveAccessibleName("Twitch-Login");
-    expect(search.closest(".ui-field")?.querySelector(".ui-field__prefix")).toHaveTextContent("@");
 
     const copy = within(inspector).getByRole("button", { name: "Link kopieren" });
     expect(copy).toHaveAccessibleName("Link kopieren");
@@ -355,7 +354,7 @@ describe("Platform level", () => {
       if (url.pathname === "/api/platform") return Promise.resolve(response({ channels: [freigegeben] }));
       if (url.pathname === "/api/platform/audit") return Promise.resolve(response({ entries: [], nextCursor: null }));
       if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(response(members));
-      if (url.pathname === "/api/platform/users") return Promise.resolve(response({ user: { userId: "789", login: "beta_login", displayName: "Beta" } }));
+      if (url.pathname === "/api/platform/twitch/user-suggestions") return Promise.resolve(response({ users: [{ userId: "789", login: "beta_login", displayName: "Beta", profileImageUrl: null }], partial: false }));
       if (url.pathname === "/api/csrf") return Promise.resolve(response({ token: "csrf" }));
       if (url.pathname === "/api/platform/channels" && init?.method === "POST") return Promise.resolve(response({ channel: freigegeben }));
       return Promise.resolve(response({}, 404));
@@ -368,8 +367,8 @@ describe("Platform level", () => {
     const plus = await screen.findByRole("button", { name: "Kanal freigeben" });
     fireEvent.click(plus);
     const freigabe = await screen.findByRole("dialog", { name: "Kanal freigeben" });
-    fireEvent.change(within(freigabe).getByRole("textbox", { name: "Twitch-Login" }), { target: { value: "beta_login" } });
-    fireEvent.click(within(freigabe).getByRole("button", { name: "Nutzer suchen" }));
+    fireEvent.change(within(freigabe).getByRole("combobox", { name: "Twitch-Login" }), { target: { value: "beta_login" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Beta/u }));
     expect(await within(freigabe).findByText(/Beta/)).toBeInTheDocument();
     fireEvent.click(within(freigabe).getByRole("button", { name: "Kanal freigeben" }));
     fireEvent.click(await screen.findByRole("button", { name: "Endgültig freigeben" }));

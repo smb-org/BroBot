@@ -81,7 +81,7 @@ export interface PlatformTexts {
   error: string;
   releaseChannel: string;
   twitchLogin: string;
-  /** Hint under the `Field` that searches a Twitch login, for both releasing a channel and adding a member (3.0). */
+  /** Hint under the shared Twitch user field for release and member grant forms. */
   twitchLoginHint: string;
   search: string;
   searching: string;
@@ -154,7 +154,7 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     error: "Die Betreiberdaten konnten nicht geladen werden.",
     releaseChannel: "Kanal freigeben",
     twitchLogin: "Twitch-Login",
-    twitchLoginHint: "Genau wie auf Twitch, ohne @.",
+    twitchLoginHint: "Login eingeben oder Vorschlag wählen; ein führendes @ wird entfernt.",
     search: "Nutzer suchen",
     searching: "Suche läuft …",
     userFound: "Gefundener Nutzer",
@@ -228,7 +228,7 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     error: "Operator data could not be loaded.",
     releaseChannel: "Release channel",
     twitchLogin: "Twitch login",
-    twitchLoginHint: "Exactly as on Twitch, without @.",
+    twitchLoginHint: "Enter a login or choose a suggestion; a leading @ is removed.",
     search: "Find user",
     searching: "Searching …",
     userFound: "Found user",
@@ -374,7 +374,7 @@ export interface MembersTexts {
 const membersCatalog: LocaleCatalog<MembersTexts> = {
   de: {
     managementLocked: "Nur Broadcaster und Verwalter dürfen Mitglieder ändern.", grantAccessTitle: "Zugriff vergeben",
-    twitchName: "Twitch-Name", twitchNameHint: "Genau wie auf Twitch, ohne @.", search: "Suchen", searching: "Suche läuft …", title: "Mitglieder", searchMembers: "Mitglieder suchen", description: "Verwalte, wer auf diesen Kanal zugreifen darf.", countSuffix: (count) => count === 1 ? "Mitglied" : "Mitglieder", filteredSuffix: (count) => count === 1 ? "Mitglied" : "Mitglieder", name: "Name",
+    twitchName: "Twitch-Name", twitchNameHint: "Login eingeben oder Vorschlag wählen; ein führendes @ wird entfernt.", search: "Suchen", searching: "Suche läuft …", title: "Mitglieder", searchMembers: "Mitglieder suchen", description: "Verwalte, wer auf diesen Kanal zugreifen darf.", countSuffix: (count) => count === 1 ? "Mitglied" : "Mitglieder", filteredSuffix: (count) => count === 1 ? "Mitglied" : "Mitglieder", name: "Name",
     role: "Rolle", roleHint: "Bestimmt, was diese Person im Kanal darf.", accessSince: "Zugriff seit", memberRowDescription: (identity, date) => `${identity} · Zugriff seit ${date}`, editMember: (name) => `Mitglied bearbeiten: ${name}`, remove: "Entziehen",
     removeConfirmTitle: (name) => `Zugriff für ${name} entziehen?`,
     lastBroadcaster: "Der letzte Broadcaster kann nicht herabgestuft oder entfernt werden.", broadcasterRoleLocked: "Nur ein Broadcaster darf die Broadcaster-Rolle ändern oder entziehen.", unresolvable: "Nicht auflösbar", twitchId: (userId) => `Twitch-ID ${userId}`,
@@ -422,7 +422,7 @@ const membersCatalog: LocaleCatalog<MembersTexts> = {
   },
   en: {
     managementLocked: "Only broadcasters and managers may change members.", grantAccessTitle: "Grant access", twitchName: "Twitch name",
-    twitchNameHint: "Exactly as on Twitch, without @.", search: "Search", searching: "Searching …", title: "Members", searchMembers: "Search members", description: "Manage who can access this channel.", countSuffix: (count) => count === 1 ? "member" : "members", filteredSuffix: (count) => count === 1 ? "member" : "members", name: "Name", role: "Role",
+    twitchNameHint: "Enter a login or choose a suggestion; a leading @ is removed.", search: "Search", searching: "Searching …", title: "Members", searchMembers: "Search members", description: "Manage who can access this channel.", countSuffix: (count) => count === 1 ? "member" : "members", filteredSuffix: (count) => count === 1 ? "member" : "members", name: "Name", role: "Role",
     roleHint: "Determines what this person can do in the channel.", accessSince: "Access since", memberRowDescription: (identity, date) => `${identity} · access since ${date}`,
     editMember: (name) => `Edit member: ${name}`, remove: "Remove", removeConfirmTitle: (name) => `Remove access for ${name}?`, lastBroadcaster: "The last broadcaster cannot be demoted or removed.", broadcasterRoleLocked: "Only a broadcaster may change or remove the broadcaster role.", unresolvable: "Unresolvable",
     twitchId: (userId) => `Twitch ID ${userId}`, roleFor: (name) => `Role for ${name}`, removeAccessFor: (name) => `Remove access for ${name}`,

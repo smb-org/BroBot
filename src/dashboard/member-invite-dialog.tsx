@@ -7,13 +7,13 @@ import { PanelApiError } from "./api";
 import { roleDescription, roleLabel, membersTexts } from "./labels";
 import { dashboardCommonTexts } from "./locale";
 import { MemberAvatar } from "./member-avatar";
-import { Button, ChoiceCards, ConfirmDialog, Field, StepDialog, registerDashboardNavigationGuard, useDraftGuard } from "./ui";
+import { Button, ChoiceCards, ConfirmDialog, StepDialog, TwitchUserField, registerDashboardNavigationGuard, useDraftGuard, type TwitchUserFieldHandle } from "./ui";
 
 interface MemberInviteDialogProperties {
   opened: boolean;
+  channelId: string;
   roles: readonly ChannelRole[];
   defaultRole: ChannelRole;
-  onSearch: (login: string) => Promise<PanelTwitchUser>;
   onGrant: (userId: string, role: ChannelRole) => Promise<void>;
   errorText: (error: unknown) => string;
   onGranted: () => void;
@@ -25,9 +25,9 @@ const INVITE_STEP_COUNT = 3;
 
 export function MemberInviteDialog({
   opened,
+  channelId,
   roles,
   defaultRole,
-  onSearch,
   onGrant,
   errorText,
   onGranted,
@@ -44,6 +44,7 @@ export function MemberInviteDialog({
   const [granting, setGranting] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const searchGeneration = useRef(0);
+  const userField = useRef<TwitchUserFieldHandle>(null);
 
   const discardDraft = (): void => {
     searchGeneration.current += 1;
@@ -52,6 +53,7 @@ export function MemberInviteDialog({
     setFound(null);
     setRole(defaultRole);
     setError(undefined);
+    userField.current?.clear();
   };
 
   const draftDirty = opened && (login.trim().length > 0 || found !== null || step > 0);
@@ -70,15 +72,15 @@ export function MemberInviteDialog({
   const requestClose = (): void => { draftGuard.guardSwitch(close); };
 
   const search = async (): Promise<void> => {
-    const normalizedLogin = login.trim().replace(/^@/u, "");
-    if (normalizedLogin.length === 0 || searching) return;
+    if (login.length === 0 || searching) return;
     const generation = ++searchGeneration.current;
     setSearching(true);
     setError(undefined);
     setFound(null);
     try {
-      const user = await onSearch(normalizedLogin);
+      const user = await userField.current?.resolve() ?? null;
       if (generation !== searchGeneration.current) return;
+      if (user === null) return;
       setFound(user);
       setRole(defaultRole);
       setStep(1);
@@ -89,6 +91,11 @@ export function MemberInviteDialog({
     } finally {
       if (generation === searchGeneration.current) setSearching(false);
     }
+  };
+
+  const handleLookupError = (caught: unknown): void => {
+    setError(errorText(caught));
+    if (caught instanceof PanelApiError && caught.status === 401) onAuthenticationRequired();
   };
 
   const grant = async (): Promise<void> => {
@@ -152,14 +159,17 @@ export function MemberInviteDialog({
   >
     <div className="member-invite-dialog">
       {step === 0 ? <>
-        <Field
+        <TwitchUserField
+          ref={userField}
+          channelId={channelId}
           label={texts.twitchName}
           hint={texts.twitchNameHint}
-          prefix="@"
-          value={login}
-          onChange={(value) => { setLogin(value); setFound(null); setError(undefined); }}
+          value={found}
+          onChange={(value) => { setFound(value); setError(undefined); }}
+          onLoginChange={setLogin}
+          onLookupError={handleLookupError}
+          placeholder="chatfreund"
           disabled={searching}
-          {...(error === undefined ? {} : { error })}
         />
         <p className="member-invite-dialog__error" role={error === undefined ? undefined : "alert"}>{error ?? "\u00a0"}</p>
       </> : found === null ? <p role="alert">{texts.changeFailed}</p> : <>

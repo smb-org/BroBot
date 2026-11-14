@@ -1,11 +1,11 @@
-import { useState, type ReactElement } from "react";
+import { useRef, useState, type ReactElement } from "react";
 
-import type { PanelTwitchUser } from "../panel-contract";
+import type { PanelTwitchUser, PanelTwitchUserSuggestionsResponse } from "../panel-contract";
 import type { ChannelRole } from "../contracts/values";
 import { PanelApiError } from "./api";
 import { roleDescription, roleLabel } from "./labels";
 import { dashboardCommonTexts } from "./locale";
-import { Button, ChoiceCards, ConfirmDialog, EditorShell, Field } from "./ui";
+import { ChoiceCards, ConfirmDialog, EditorShell, TwitchUserField, type TwitchUserFieldHandle } from "./ui";
 import { MemberAvatar } from "./member-avatar";
 
 interface MemberGrantEditorTexts {
@@ -13,8 +13,6 @@ interface MemberGrantEditorTexts {
   title: string;
   searchLabel: string;
   searchHint: string;
-  searchButton: string;
-  searchingButton: string;
   roleLabel: string;
   roleHint: string;
   saveLabel: string;
@@ -27,10 +25,11 @@ interface MemberGrantEditorTexts {
 }
 
 export interface MemberGrantEditorProps {
+  channelId: string;
   roles: readonly ChannelRole[];
   defaultRole: ChannelRole;
   texts: MemberGrantEditorTexts;
-  onSearch: (login: string) => Promise<PanelTwitchUser>;
+  loadSuggestions?: (query: string, signal: AbortSignal) => Promise<PanelTwitchUserSuggestionsResponse>;
   onGrant: (userId: string, role: ChannelRole) => Promise<void>;
   errorText: (error: unknown) => string;
   onGranted: () => void;
@@ -52,10 +51,11 @@ export interface MemberGrantEditorProps {
  * different search/grant calls.
  */
 export function MemberGrantEditor({
+  channelId,
   roles,
   defaultRole,
   texts,
-  onSearch,
+  loadSuggestions,
   onGrant,
   errorText,
   onGranted,
@@ -64,35 +64,36 @@ export function MemberGrantEditor({
 }: MemberGrantEditorProps): ReactElement {
   const common = dashboardCommonTexts();
   const [login, setLogin] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | undefined>(undefined);
   const [found, setFound] = useState<PanelTwitchUser | null>(null);
   const [role, setRole] = useState<ChannelRole>(defaultRole);
   const [pending, setPending] = useState(false);
   const [grantError, setGrantError] = useState<string | undefined>(undefined);
   const [confirmOpen, setConfirmOpen] = useState(false);
-
-  const runSearch = async (): Promise<void> => {
-    const trimmed = login.trim();
-    if (searching || trimmed.length === 0) return;
-    setSearching(true);
-    setSearchError(undefined);
-    setFound(null);
-    try {
-      const user = await onSearch(trimmed);
-      setFound(user);
-      setRole(defaultRole);
-    } catch (error: unknown) {
-      setSearchError(errorText(error));
-      if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
-    } finally {
-      setSearching(false);
-    }
-  };
+  const [resolving, setResolving] = useState(false);
+  const userField = useRef<TwitchUserFieldHandle>(null);
 
   const discard = (): void => {
     setFound(null);
-    setSearchError(undefined);
+    setLogin("");
+    userField.current?.clear();
+  };
+
+  const handleLookupError = (error: unknown): void => {
+    if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
+  };
+
+  const resolveForGrant = async (): Promise<void> => {
+    if (resolving) return;
+    setResolving(true);
+    try {
+      const user = await userField.current?.resolve() ?? null;
+      if (user === null) return;
+      setFound(user);
+      setRole(defaultRole);
+      setConfirmOpen(true);
+    } finally {
+      setResolving(false);
+    }
   };
 
   const confirmGrant = async (): Promise<void> => {
@@ -104,6 +105,7 @@ export function MemberGrantEditor({
       setConfirmOpen(false);
       setFound(null);
       setLogin("");
+      userField.current?.clear();
       setRole(defaultRole);
       onGranted();
       onClose?.();
@@ -129,19 +131,19 @@ export function MemberGrantEditor({
           content: (
             <>
               <div className="form-row">
-                <Field
+                <TwitchUserField
+                  ref={userField}
+                  channelId={channelId}
                   label={texts.searchLabel}
                   hint={texts.searchHint}
-                  prefix="@"
-                  value={login}
-                  onChange={setLogin}
-                  {...(searchError === undefined ? {} : { error: searchError })}
-                  disabled={searching}
-                  onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); void runSearch(); }}
+                  value={found}
+                  onChange={setFound}
+                  onLoginChange={setLogin}
+                  onLookupError={handleLookupError}
+                  {...(loadSuggestions === undefined ? {} : { loadSuggestions })}
+                  placeholder="chatfreund"
+                  disabled={resolving}
                 />
-                <Button variant="neutral" disabled={searching || login.trim().length === 0} onClick={() => { void runSearch(); }}>
-                  {searching ? texts.searchingButton : texts.searchButton}
-                </Button>
               </div>
               {found === null ? null : (
                 <div className="member-grant-editor__result">
@@ -158,10 +160,10 @@ export function MemberGrantEditor({
             </>
           ),
         }]}
-        dirty={found !== null}
-        pending={pending}
+        dirty={found !== null || login.length > 0}
+        pending={pending || resolving}
         {...(grantError === undefined ? {} : { error: grantError })}
-        onSave={() => { if (found !== null) setConfirmOpen(true); }}
+        onSave={() => { void resolveForGrant(); }}
         onDiscard={discard}
         saveLabel={texts.saveLabel}
         discardLabel={common.discard}

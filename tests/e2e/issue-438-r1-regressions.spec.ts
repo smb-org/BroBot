@@ -15,7 +15,7 @@ const members = [
   { userId: "owner-438", login: "demo-kanal", displayName: "Demo Kanal", profileImageUrl: null, role: "broadcaster", joinedAt: "2024-01-10T14:15:00.000Z" },
   { userId: "owner-two-438", login: "second_owner", displayName: "Second Broadcaster", profileImageUrl: null, role: "broadcaster", joinedAt: "2024-02-10T14:15:00.000Z" },
 ] as const;
-const inviteUser = { userId: "invitee-438", login: "lena_luchs", displayName: "Lena Luchs", profileImageUrl: null };
+const inviteUser = { userId: "invitee-438", login: "chatfreund", displayName: "Chatfreund", profileImageUrl: null };
 const viewports = [
   { width: 1920, height: 1080 },
   { width: 1440, height: 900 },
@@ -151,7 +151,7 @@ const installIssue438Mocks = async (page: Page, options: Issue438MockOptions = {
     }
     if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/modules/text_commands/commands`) return route.fulfill(json({ commands: [] }));
     if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/variables`) return route.fulfill(json({ variables: [] }));
-    if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/members/search`) return route.fulfill(json({ user: inviteUser }));
+    if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/twitch/user-suggestions`) return route.fulfill(json({ users: [inviteUser], partial: false }));
     if (matchedChannelId !== undefined && path === `/api/channels/${matchedChannelId}/members` && method === "GET") {
       if (options.membersError) return route.fulfill(json({ error: "member_list_failed" }, 503));
       return route.fulfill(json({ members, nextCursor: null, broadcasterCount: 2, viewerUserId: "viewer-438" }));
@@ -373,7 +373,8 @@ test("issue 438 layout regressions stay aligned at the requested viewports", asy
     await page.getByRole("button", { name: "Zugriff vergeben" }).click();
     const dialog = page.locator(".ui-step-dialog");
     const personStepHeight = (await box(dialog)).height;
-    await page.getByRole("textbox", { name: "Twitch-Name" }).fill("lena_luchs");
+    await page.getByRole("combobox", { name: "Twitch-Name" }).fill("chatfreund");
+    await page.getByRole("option", { name: /Chatfreund/u }).click();
     await page.getByRole("button", { name: "Suchen" }).click();
     await expect(page.getByRole("heading", { name: "Rolle vergeben" })).toBeVisible();
     expect(Math.abs((await box(dialog)).height - personStepHeight)).toBeLessThanOrEqual(1);
@@ -471,7 +472,7 @@ test("member role edits and invite dismissal use the dashboard draft guard", asy
   await page.getByRole("button", { name: "Verwerfen", exact: true }).click();
 
   await page.getByRole("button", { name: "Zugriff vergeben" }).click();
-  await page.getByRole("textbox", { name: "Twitch-Name" }).fill("lena_luchs");
+  await page.getByRole("combobox", { name: "Twitch-Name" }).fill("chatfreund");
   await page.getByRole("button", { name: "Suchen" }).click();
   await expect(page.getByRole("heading", { name: "Rolle vergeben" })).toBeVisible();
   await page.getByRole("button", { name: "Abbrechen" }).click();

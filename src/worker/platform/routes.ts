@@ -12,7 +12,9 @@ import {
   type ChannelMemberRecord,
 } from "../db/channel-members";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
-import { fetchTwitchUserByLogin, type TwitchUser } from "../shoutout";
+import { type TwitchUser } from "../shoutout";
+import { getAppAccessToken } from "../app-token";
+import { helixRequest } from "../twitch/helix";
 import { measureServerTiming } from "../server-timing";
 import {
   changePlatformMember,
@@ -59,13 +61,72 @@ const readJson = async (request: Request): Promise<JsonRecord | null> => {
   }
 };
 
-const readLogin = (value: string | undefined): string | null => {
-  const login = value?.trim() ?? "";
-  return login.length > 0 && login.length <= 25 && !/\s/.test(login) ? login : null;
-};
-
 const readUserId = (value: unknown): string | null =>
   typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : null;
+
+interface PlatformUserSuggestion extends TwitchUser {
+  isLive?: boolean;
+}
+
+interface CachedPlatformUserSuggestions {
+  expiresAt: number;
+  response: { users: readonly PlatformUserSuggestion[]; partial: boolean };
+}
+
+interface HelixUsersResponse { data?: unknown }
+interface HelixChannelsResponse { data?: unknown }
+
+const PLATFORM_USER_SUGGESTION_TTL_MS = 60_000;
+const PLATFORM_USER_SUGGESTION_CACHE_LIMIT = 1_000;
+const PLATFORM_USER_SUGGESTION_LIMIT = 8;
+const PLATFORM_USER_LOGIN_PATTERN = /^[A-Za-z0-9_]{1,25}$/u;
+const platformUserSuggestionCache = new Map<string, CachedPlatformUserSuggestions>();
+
+const platformSuggestionFromHelixUser = (value: unknown): PlatformUserSuggestion | null => {
+  if (!isJsonRecord(value) || typeof value.id !== "string" || typeof value.login !== "string" || typeof value.display_name !== "string") return null;
+  return {
+    userId: value.id,
+    login: value.login,
+    displayName: value.display_name,
+    profileImageUrl: typeof value.profile_image_url === "string" && value.profile_image_url.length > 0 ? value.profile_image_url : null,
+  };
+};
+
+const platformSuggestionFromHelixChannel = (value: unknown): PlatformUserSuggestion | null => {
+  if (!isJsonRecord(value) || typeof value.id !== "string" || typeof value.broadcaster_login !== "string" || typeof value.display_name !== "string") return null;
+  return {
+    userId: value.id,
+    login: value.broadcaster_login,
+    displayName: value.display_name,
+    profileImageUrl: typeof value.thumbnail_url === "string" && value.thumbnail_url.length > 0 ? value.thumbnail_url : null,
+    ...(typeof value.is_live === "boolean" ? { isLive: value.is_live } : {}),
+  };
+};
+
+const readPlatformSuggestionCache = (query: string, now: number): CachedPlatformUserSuggestions | null => {
+  const key = query.toLowerCase();
+  const entry = platformUserSuggestionCache.get(key);
+  if (entry === undefined) return null;
+  if (entry.expiresAt <= now) {
+    platformUserSuggestionCache.delete(key);
+    return null;
+  }
+  return entry;
+};
+
+const writePlatformSuggestionCache = (query: string, response: CachedPlatformUserSuggestions["response"], now: number): void => {
+  for (const [key, entry] of platformUserSuggestionCache) {
+    if (entry.expiresAt <= now) platformUserSuggestionCache.delete(key);
+  }
+  const key = query.toLowerCase();
+  platformUserSuggestionCache.delete(key);
+  while (platformUserSuggestionCache.size >= PLATFORM_USER_SUGGESTION_CACHE_LIMIT) {
+    const oldestKey = platformUserSuggestionCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    platformUserSuggestionCache.delete(oldestKey);
+  }
+  platformUserSuggestionCache.set(key, { expiresAt: now + PLATFORM_USER_SUGGESTION_TTL_MS, response });
+};
 
 const readRole = (value: unknown): ChannelRole | null =>
   typeof value === "string" && roles.includes(value as ChannelRole)
@@ -113,34 +174,73 @@ platformRouter.use("/api/platform/*", requirePlatform());
 platformRouter.get("/api/platform", async (context) =>
   context.json({ channels: await listPlatformChannels(context.env.DB) }));
 
-platformRouter.get("/api/platform/users", async (context) => {
-  const login = readLogin(context.req.query("login"));
-  if (login === null) return context.json({ error: "twitch_login_invalid" }, 400);
+platformRouter.get("/api/platform/twitch/user-suggestions", async (context) => {
+  const query = context.req.query("q") ?? "";
+  if (!PLATFORM_USER_LOGIN_PATTERN.test(query)) return context.json({ error: "twitch_user_query_invalid" }, 400);
+  const now = Date.now();
+  const cached = readPlatformSuggestionCache(query, now);
+  if (cached !== null) return context.json(cached.response);
+
+  let partial = false;
+  let exactUsers: Array<PlatformUserSuggestion | null> = [];
+  let channelUsers: Array<PlatformUserSuggestion | null> = [];
   try {
-    const user = await fetchTwitchUserByLogin(fetch, context.env, login);
-    return user === null
-      ? context.json({ error: "twitch_user_not_found" }, 404)
-      : context.json({ user: user });
+    const accessToken = await getAppAccessToken(context.env, new Date(now).toISOString(), fetch);
+    const [exactResult, searchResult] = await Promise.all([
+      helixRequest<HelixUsersResponse>({
+        url: "https://api.twitch.tv/helix/users",
+        query: { login: query },
+        accessToken,
+        clientId: context.env.TWITCH_CLIENT_ID,
+        fetcher: fetch,
+      }),
+      helixRequest<HelixChannelsResponse>({
+        url: "https://api.twitch.tv/helix/search/channels",
+        query: { query, first: "8" },
+        accessToken,
+        clientId: context.env.TWITCH_CLIENT_ID,
+        fetcher: fetch,
+      }),
+    ]);
+    if (exactResult.ok && Array.isArray(exactResult.data.data)) exactUsers = exactResult.data.data.map(platformSuggestionFromHelixUser);
+    else partial = true;
+    if (searchResult.ok && Array.isArray(searchResult.data.data)) channelUsers = searchResult.data.data.map(platformSuggestionFromHelixChannel);
+    else partial = true;
   } catch {
-    return context.json({ error: "twitch_user_search_failed" }, 502);
+    partial = true;
   }
+
+  const users: PlatformUserSuggestion[] = [];
+  const seen = new Set<string>();
+  for (const candidate of [...exactUsers, ...channelUsers]) {
+    if (candidate === null || seen.has(candidate.userId)) continue;
+    seen.add(candidate.userId);
+    users.push(candidate);
+    if (users.length >= PLATFORM_USER_SUGGESTION_LIMIT) break;
+  }
+  const response = { users, partial };
+  writePlatformSuggestionCache(query, response, now);
+  return context.json(response);
 });
 
 platformRouter.post("/api/platform/channels", async (context) => {
   const body = await readJson(context.req.raw);
-  const login = typeof body?.login === "string" ? readLogin(body.login) : null;
+  const userValue = body?.user;
+  const user: TwitchUser | null = isJsonRecord(userValue) &&
+      readUserId(userValue.userId) !== null && typeof userValue.login === "string" && PLATFORM_USER_LOGIN_PATTERN.test(userValue.login) &&
+      typeof userValue.displayName === "string" && userValue.displayName.trim().length > 0 && userValue.displayName.length <= 100 &&
+      (userValue.profileImageUrl === null || typeof userValue.profileImageUrl === "string")
+    ? {
+      userId: userValue.userId as string,
+      login: userValue.login,
+      displayName: userValue.displayName,
+      profileImageUrl: userValue.profileImageUrl,
+    }
+    : null;
   const fullConsent = readBoolean(body?.fullConsent);
-  if (login === null || fullConsent === null) {
+  if (user === null || fullConsent === null) {
     return context.json({ error: "release_input_invalid" }, 400);
   }
-
-  let user: TwitchUser | null;
-  try {
-    user = await fetchTwitchUserByLogin(fetch, context.env, login);
-  } catch {
-    return context.json({ error: "twitch_user_search_failed" }, 502);
-  }
-  if (user === null) return context.json({ error: "twitch_user_not_found" }, 404);
 
   try {
     const released = await releasePlatformChannel(
