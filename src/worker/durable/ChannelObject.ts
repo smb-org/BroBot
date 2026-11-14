@@ -945,6 +945,7 @@ export class ChannelObject extends DurableObject<Env> {
     promise: Promise<Map<string, StatisticsWordCountValue>>;
   } | null = null;
   private statisticsWordCounterPublishQueue: Promise<void> = Promise.resolve();
+  private statisticsWordRankingRetryNotBefore = 0;
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
   private timerScheduleInputGeneration = 0;
@@ -5039,8 +5040,15 @@ export class ChannelObject extends DurableObject<Env> {
     await this.withStatisticsWordCounterPublishQueue(async () => {
       const trackedWords = words.length === 0 ? new Set<string>() : await this.readStatisticsWordCounterTrackedWords();
       const changedWords = words.filter((word) => trackedWords.has(word));
-      const activeRankingScopes = await this.readStatisticsWordRankingScopes();
-      const rankingPending = (refreshRanking || words.length > 0) && activeRankingScopes.size > 0;
+      let activeRankingScopes = new Set<StatisticsWordRankingScope>();
+      let rankingScopesReadFailed = false;
+      try {
+        activeRankingScopes = await this.readStatisticsWordRankingScopes();
+      } catch {
+        rankingScopesReadFailed = true;
+      }
+      const rankingPending = (refreshRanking || words.length > 0) &&
+        (activeRankingScopes.size > 0 || rankingScopesReadFailed);
       if (changedWords.length === 0 && !rankingPending) return;
       const stored = await this.ctx.storage.get(STATISTICS_WORD_COUNTER_PENDING_KEY);
       const pending = new Set(Array.isArray(stored)
@@ -5064,15 +5072,26 @@ export class ChannelObject extends DurableObject<Env> {
       ? stored.filter((word): word is string => typeof word === "string")
       : [])];
     const rankingRequested = await this.ctx.storage.get<boolean>(STATISTICS_WORD_RANKING_PENDING_KEY) === true;
-    const rankingScopes = rankingRequested ? [...await this.readStatisticsWordRankingScopes()] : [];
-    if (rankingRequested && rankingScopes.length === 0) await this.ctx.storage.delete(STATISTICS_WORD_RANKING_PENDING_KEY);
+    let rankingScopes: StatisticsWordRankingScope[] = [];
+    let rankingScopeReadFailed = false;
+    if (rankingRequested) {
+      try {
+        rankingScopes = [...await this.readStatisticsWordRankingScopes()];
+      } catch {
+        rankingScopeReadFailed = true;
+      }
+    }
+    if (rankingRequested && !rankingScopeReadFailed && rankingScopes.length === 0) {
+      this.statisticsWordRankingRetryNotBefore = 0;
+      await this.ctx.storage.delete(STATISTICS_WORD_RANKING_PENDING_KEY);
+    }
     const trackedWords = pending.length === 0 ? new Set<string>() : await this.readStatisticsWordCounterTrackedWords();
     const eligibleWords = pending.filter((word) => trackedWords.has(word));
     if (eligibleWords.length !== pending.length) {
       if (eligibleWords.length === 0) await this.ctx.storage.delete(STATISTICS_WORD_COUNTER_PENDING_KEY);
       else await this.ctx.storage.put(STATISTICS_WORD_COUNTER_PENDING_KEY, eligibleWords);
     }
-    if (eligibleWords.length === 0 && rankingScopes.length === 0) {
+    if (eligibleWords.length === 0 && rankingScopes.length === 0 && !rankingScopeReadFailed) {
       await this.clearAlarmEntry(STATISTICS_WORD_COUNTER_ALARM_KEY);
       return;
     }
@@ -5089,10 +5108,11 @@ export class ChannelObject extends DurableObject<Env> {
     }
 
     try {
-      const messages: RealtimeMessage[] = [];
+      let counterMessage: RealtimeMessage | null = null;
       const remainingWords: string[] = [];
       if (eligibleWords.length > 0) {
         const values = await this.readStatisticsWordCounterValues(eligibleWords, now);
+        await this.ctx.storage.put(STATISTICS_WORD_COUNTER_LAST_COMPUTED_KEY, Date.now());
         const firstChunk: Record<string, { streamCount: number; totalCount: number; streamIsLive: boolean }> = {};
         let chunkFull = false;
         for (const word of eligibleWords) {
@@ -5123,91 +5143,66 @@ export class ChannelObject extends DurableObject<Env> {
             elementKind: "statistics.word_counter",
             payload: { words: firstChunk, serverNow: new Date(now).toISOString() },
           }, true);
-          if (prepared.outcome === "ready") messages.push(prepared.message);
+          if (prepared.outcome === "ready") counterMessage = prepared.message;
           else if (prepared.outcome === "no_recipients") await this.ctx.storage.delete(STATISTICS_WORD_COUNTER_PENDING_KEY);
           else throw new Error("Word counter realtime update was rejected.");
         }
       }
 
-      const rankingValues = new Map<StatisticsWordRankingScope, {
-        value: { entries: readonly StatisticsWordRankingEntry[]; streamIsLive?: boolean };
-        previous: StatisticsWordRankingPublishedScope | undefined;
-      }>();
-      for (const scope of rankingScopes) {
-        const value = await this.computeStatisticsWordRanking(scope, now);
-        const key = scope === "stream" ? STATISTICS_WORD_RANKING_LAST_STREAM_KEY : STATISTICS_WORD_RANKING_LAST_TOTAL_KEY;
-        const previous = await this.ctx.storage.get<StatisticsWordRankingPublishedScope>(key);
-        rankingValues.set(scope, { value, previous });
+      if (counterMessage !== null) {
+        await this.publish([counterMessage]);
+        await this.ctx.storage.put(STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY, Date.now());
       }
-
       const computedAt = new Date(now).toISOString();
-      await this.ctx.storage.put(STATISTICS_WORD_COUNTER_LAST_COMPUTED_KEY, Date.now());
-      const rankingPreparedValues = new Map<StatisticsWordRankingScope, {
-        value: { entries: readonly StatisticsWordRankingEntry[]; streamIsLive?: boolean };
-      }>();
-      let rankingPublishFailed = false;
-      const channelId = rankingScopes.length > 0 ? this.ownChannelId() : null;
-      for (const [scope, { value, previous }] of rankingValues) {
-        const changed = previous === undefined || Date.parse(previous.serverNow) <= now &&
-          JSON.stringify(previous.value) !== JSON.stringify(value);
-        if (!changed) continue;
-        if (channelId === null) {
-          rankingPublishFailed = true;
-          continue;
-        }
-        const payload = {
-          serverNow: computedAt,
-          stream: scope === "stream"
-            ? { entries: value.entries, streamIsLive: value.streamIsLive ?? false, computedAt }
-            : null,
-          total: scope === "total" ? { entries: value.entries, computedAt } : null,
-        };
-        try {
-          const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, "statistics", {
-            kind: "overlay",
-            type: "word_ranking",
-            elementKind: "statistics.word_ranking",
-            payload,
-          }, true);
-          if (prepared.outcome === "ready") {
-            messages.push(prepared.message);
-            rankingPreparedValues.set(scope, { value });
-          } else if (prepared.outcome === "rejected") {
+      let rankingPublishFailed = rankingScopeReadFailed;
+      if (rankingScopeReadFailed) {
+        this.statisticsWordRankingRetryNotBefore = Date.now() + STATISTICS_WORD_COUNTER_THROTTLE_MS;
+      } else if (rankingScopes.length === 0) {
+        this.statisticsWordRankingRetryNotBefore = 0;
+      } else if (Date.now() < this.statisticsWordRankingRetryNotBefore) {
+        rankingPublishFailed = true;
+      } else {
+        for (const scope of rankingScopes) {
+          try {
+            const value = await this.computeStatisticsWordRanking(scope, now);
+            const key = scope === "stream" ? STATISTICS_WORD_RANKING_LAST_STREAM_KEY : STATISTICS_WORD_RANKING_LAST_TOTAL_KEY;
+            const previous = await this.ctx.storage.get<StatisticsWordRankingPublishedScope>(key);
+            const changed = previous === undefined || Date.parse(previous.serverNow) <= now &&
+              JSON.stringify(previous.value) !== JSON.stringify(value);
+            if (!changed) continue;
+            const channelId = this.ownChannelId();
+            if (channelId === null) throw new Error("Ranking updates require a named Durable Object.");
+            const payload = {
+              serverNow: computedAt,
+              stream: scope === "stream"
+                ? { entries: value.entries, streamIsLive: value.streamIsLive ?? false, computedAt }
+                : null,
+              total: scope === "total" ? { entries: value.entries, computedAt } : null,
+            };
+            const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, "statistics", {
+              kind: "overlay",
+              type: "word_ranking",
+              elementKind: "statistics.word_ranking",
+              payload,
+            }, true);
+            if (prepared.outcome === "ready") {
+              await this.publish([prepared.message]);
+              await this.rememberStatisticsWordRankingSnapshot(scope, { serverNow: computedAt, value });
+            } else if (prepared.outcome === "rejected") {
+              throw new Error("Word ranking realtime update was rejected.");
+            }
+          } catch {
             rankingPublishFailed = true;
           }
-        } catch {
-          rankingPublishFailed = true;
         }
-      }
-
-      if (messages.length === 0) {
-        if (remainingWords.length === 0) await this.ctx.storage.delete(STATISTICS_WORD_COUNTER_PENDING_KEY);
-        else await this.ctx.storage.put(STATISTICS_WORD_COUNTER_PENDING_KEY, remainingWords);
-        if (rankingPublishFailed) await this.ctx.storage.put(STATISTICS_WORD_RANKING_PENDING_KEY, true);
-        else await this.ctx.storage.delete(STATISTICS_WORD_RANKING_PENDING_KEY);
-        if (remainingWords.length === 0 && !rankingPublishFailed) {
-          await this.clearAlarmEntry(STATISTICS_WORD_COUNTER_ALARM_KEY);
+        if (rankingPublishFailed) {
+          this.statisticsWordRankingRetryNotBefore = Date.now() + STATISTICS_WORD_COUNTER_THROTTLE_MS;
         } else {
-          await this.scheduleAlarmEntry(
-            STATISTICS_WORD_COUNTER_ALARM_KEY,
-            STATISTICS_WORD_COUNTER_PUBLISH_HANDLER,
-            await this.nextStatisticsWordCounterUpdateAt(),
-          );
+          this.statisticsWordRankingRetryNotBefore = 0;
+          await this.ctx.storage.put(STATISTICS_WORD_COUNTER_LAST_COMPUTED_KEY, Date.now());
         }
-        return;
       }
 
-      await this.publish(messages);
-      const publishedAt = Date.now();
-      await this.ctx.storage.put(STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY, publishedAt);
-      if (rankingPreparedValues.size > 0) {
-        for (const [scope, { value }] of rankingPreparedValues) {
-          await this.rememberStatisticsWordRankingSnapshot(scope, {
-            serverNow: computedAt,
-            value,
-          });
-        }
-      }
       if (rankingPublishFailed) await this.ctx.storage.put(STATISTICS_WORD_RANKING_PENDING_KEY, true);
       else await this.ctx.storage.delete(STATISTICS_WORD_RANKING_PENDING_KEY);
       if (remainingWords.length === 0) await this.ctx.storage.delete(STATISTICS_WORD_COUNTER_PENDING_KEY);
@@ -5218,7 +5213,10 @@ export class ChannelObject extends DurableObject<Env> {
         await this.scheduleAlarmEntry(
           STATISTICS_WORD_COUNTER_ALARM_KEY,
           STATISTICS_WORD_COUNTER_PUBLISH_HANDLER,
-          await this.nextStatisticsWordCounterUpdateAt(publishedAt),
+          Math.max(
+            await this.nextStatisticsWordCounterUpdateAt(),
+            rankingPublishFailed && remainingWords.length === 0 ? this.statisticsWordRankingRetryNotBefore : 0,
+          ),
         );
       }
     } catch (error: unknown) {

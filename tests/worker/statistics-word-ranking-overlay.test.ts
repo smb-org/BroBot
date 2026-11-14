@@ -560,10 +560,16 @@ describe("statistics word ranking worker state", () => {
     const channelId = `statistics-ranking-computation-retry-${crypto.randomUUID()}`;
     await insertPointChannel(channelId);
     await seedWordRanking(channelId, "total");
+    const streamId = `ranking-stream-${crypto.randomUUID()}`;
+    const receivedAt = new Date(TEST_NOW).toISOString();
+    await writeEventSubStreamState(worker.DB, channelId, "online", receivedAt, receivedAt, streamId);
     const stub = channelObject(channelId);
     const compute = vi.spyOn(ChannelObject.prototype as unknown as {
       computeStatisticsWordRanking(scope: "stream" | "total", now: number): Promise<unknown>;
     }, "computeStatisticsWordRanking").mockRejectedValue(new Error("ranking query unavailable"));
+    const object = stub as unknown as {
+      recordChatActivity: Parameters<typeof chatActivity>[0]["recordChatActivity"];
+    };
     const readAlarm = (): Promise<{ deadline: number; nextAttemptAt?: number } | undefined> =>
       runInDurableObject(stub, (_durableObject, state) => {
         const table = state.storage.kv.get<Record<string, { deadline: number; nextAttemptAt?: number }>>(
@@ -577,14 +583,16 @@ describe("statistics word ranking worker state", () => {
       const target = durableObject as unknown as {
         queueStatisticsWordCounterChanges(words: readonly string[], refreshRanking?: boolean): Promise<void>;
       };
-      await expect(target.queueStatisticsWordCounterChanges([], true))
-        .rejects.toThrow("ranking query unavailable");
+      await target.queueStatisticsWordCounterChanges([], true);
     });
     await runInDurableObject(stub, async (_durableObject, state) => {
       await expect(state.storage.get("statistics:word_counter_last_computed")).resolves.toBeUndefined();
     });
     const firstRetry = await readAlarm();
     expect((firstRetry?.nextAttemptAt ?? firstRetry?.deadline ?? 0) - TEST_NOW).toBeGreaterThanOrEqual(2_000);
+
+    await chatActivity(object, streamId, "beforedeadline");
+    expect(compute).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(2_000);
     await runFailingAlarm(stub);
