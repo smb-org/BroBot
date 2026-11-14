@@ -19,6 +19,7 @@ export interface StatisticsWordCounterState {
   words: Readonly<Record<string, StatisticsWordCounterValue>>;
   serverNow: string;
   wordServerNow?: Readonly<Record<string, string>>;
+  bootstrapWordSet?: true;
 }
 
 export const DEFAULT_STATISTICS_WORD_COUNTER_CONFIG: StatisticsWordCounterConfig = {
@@ -72,7 +73,12 @@ export const parseStatisticsWordCounterState = (value: unknown): StatisticsWordC
     words[word] = count;
     wordServerNow[word] = entryServerNow;
   }
-  return { words, serverNow: input.serverNow, wordServerNow };
+  return {
+    words,
+    serverNow: input.serverNow,
+    wordServerNow,
+    ...(input.bootstrapWordSet === true ? { bootstrapWordSet: true as const } : {}),
+  };
 };
 
 export const mergeStatisticsWordCounterRealtimeState = (
@@ -82,24 +88,33 @@ export const mergeStatisticsWordCounterRealtimeState = (
   const next = parseStatisticsWordCounterState(incoming);
   if (next === null) return current ?? {};
   const previous = current === null ? null : parseStatisticsWordCounterState(current);
-  if (previous === null) return next as unknown as Readonly<Record<string, unknown>>;
-  const words = { ...previous.words };
-  const wordServerNow = { ...previous.wordServerNow };
+  const isBootstrap = next.bootstrapWordSet === true;
+  if (previous === null && !isBootstrap) {
+    return { words: {}, serverNow: next.serverNow, wordServerNow: {} };
+  }
+  const words = isBootstrap ? {} : { ...previous?.words };
+  const wordServerNow = isBootstrap ? {} : { ...previous?.wordServerNow };
   for (const [word, value] of Object.entries(next.words)) {
-    const previousEntryServerNow = Object.prototype.hasOwnProperty.call(wordServerNow, word)
-      ? wordServerNow[word]
-      : undefined;
+    if (!isBootstrap && !Object.prototype.hasOwnProperty.call(previous?.words, word)) continue;
+    const previousEntryServerNow = previous?.wordServerNow?.[word];
+    const previousValue = previous?.words[word];
     const nextEntryServerNow = next.wordServerNow?.[word] ?? next.serverNow;
     if (previousEntryServerNow === undefined ||
         Date.parse(nextEntryServerNow) >= Date.parse(previousEntryServerNow)) {
       words[word] = value;
       wordServerNow[word] = nextEntryServerNow;
+    } else if (isBootstrap && previousValue !== undefined) {
+      words[word] = previousValue;
+      wordServerNow[word] = previousEntryServerNow;
     }
   }
   return {
-    serverNow: Date.parse(next.serverNow) >= Date.parse(previous.serverNow) ? next.serverNow : previous.serverNow,
+    serverNow: previous === null || Date.parse(next.serverNow) >= Date.parse(previous.serverNow)
+      ? next.serverNow
+      : previous.serverNow,
     words,
     wordServerNow,
+    ...((isBootstrap || previous?.bootstrapWordSet === true) ? { bootstrapWordSet: true } : {}),
   };
 };
 

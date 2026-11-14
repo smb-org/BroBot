@@ -56,6 +56,7 @@ describe("statistics word counter overlay", () => {
 
   it("applies bootstrap freshness independently for each word", () => {
     const initial = mergeStatisticsWordCounterRealtimeState(null, {
+      bootstrapWordSet: true,
       words: {
         alpha: { streamCount: 8, totalCount: 100, streamIsLive: true },
       },
@@ -68,6 +69,7 @@ describe("statistics word counter overlay", () => {
       serverNow: "2030-01-01T00:00:02.000Z",
     });
     const withBootstrap = mergeStatisticsWordCounterRealtimeState(withLaterChunk, {
+      bootstrapWordSet: true,
       words: {
         alpha: { streamCount: 0, totalCount: 4, streamIsLive: true },
       },
@@ -77,9 +79,68 @@ describe("statistics word counter overlay", () => {
     expect(withBootstrap).toMatchObject({
       words: {
         alpha: { streamCount: 0, totalCount: 4, streamIsLive: true },
-        beta: { streamCount: 2, totalCount: 12, streamIsLive: true },
       },
       serverNow: "2030-01-01T00:00:02.000Z",
     });
+  });
+
+  it("keeps configuration churn bounded to the current bootstrap word", () => {
+    let state: Readonly<Record<string, unknown>> | null = null;
+    for (let index = 0; index < 1_000; index += 1) {
+      const word = `word-${String(index)}`;
+      state = mergeStatisticsWordCounterRealtimeState(state, {
+        bootstrapWordSet: true,
+        words: { [word]: { streamCount: index, totalCount: index, streamIsLive: true } },
+        serverNow: new Date(1_893_456_000_000 + index * 1_000).toISOString(),
+      });
+    }
+
+    expect(state?.words).toEqual({ "word-999": { streamCount: 999, totalCount: 999, streamIsLive: true } });
+    expect(state?.wordServerNow).toEqual({ "word-999": new Date(1_893_456_999_000).toISOString() });
+  });
+
+  it("ignores chunk words that are not in this counter's bootstrap", () => {
+    const initial = mergeStatisticsWordCounterRealtimeState(null, {
+      bootstrapWordSet: true,
+      words: { alpha: { streamCount: 1, totalCount: 10, streamIsLive: true } },
+      serverNow: "2030-01-01T00:00:00.000Z",
+    });
+    const afterChunk = mergeStatisticsWordCounterRealtimeState(initial, {
+      words: {
+        alpha: { streamCount: 2, totalCount: 11, streamIsLive: true },
+        beta: { streamCount: 7, totalCount: 20, streamIsLive: true },
+      },
+      serverNow: "2030-01-01T00:00:01.000Z",
+    });
+
+    expect(afterChunk.words).toEqual({ alpha: { streamCount: 2, totalCount: 11, streamIsLive: true } });
+  });
+
+  it("keeps a newer chunk value over a stale bootstrap value", () => {
+    const initial = mergeStatisticsWordCounterRealtimeState(null, {
+      bootstrapWordSet: true,
+      words: { alpha: { streamCount: 1, totalCount: 10, streamIsLive: true } },
+      serverNow: "2030-01-01T00:00:00.000Z",
+    });
+    const afterChunk = mergeStatisticsWordCounterRealtimeState(initial, {
+      words: { alpha: { streamCount: 2, totalCount: 11, streamIsLive: true } },
+      serverNow: "2030-01-01T00:00:02.000Z",
+    });
+    const afterStaleBootstrap = mergeStatisticsWordCounterRealtimeState(afterChunk, {
+      bootstrapWordSet: true,
+      words: { alpha: { streamCount: 0, totalCount: 4, streamIsLive: true } },
+      serverNow: "2030-01-01T00:00:01.000Z",
+    });
+
+    expect(afterStaleBootstrap.words).toEqual({ alpha: { streamCount: 2, totalCount: 11, streamIsLive: true } });
+  });
+
+  it("does not add chunk words before the first bootstrap", () => {
+    const afterChunk = mergeStatisticsWordCounterRealtimeState(null, {
+      words: { alpha: { streamCount: 2, totalCount: 11, streamIsLive: true } },
+      serverNow: "2030-01-01T00:00:01.000Z",
+    });
+
+    expect(afterChunk.words).toEqual({});
   });
 });

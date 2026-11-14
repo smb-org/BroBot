@@ -89,6 +89,7 @@ const initialState = async (
   );
   const hidden = ignoredWords.has(parsedConfig.word) || count.hiddenByRarity;
   return statisticsWordCounterStateToJson({
+    bootstrapWordSet: true,
     words: {
       [parsedConfig.word]: {
         streamCount: hidden ? 0 : count.streamCount,
