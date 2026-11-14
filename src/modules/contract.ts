@@ -317,6 +317,11 @@ export interface ModuleOverlayElementContext {
     streamId: string | undefined,
     word: string,
   ) => Promise<ModuleStatisticsWordCountLookup>;
+  /** Reads the current top words for one overlay ranking scope without exposing chat text. */
+  readStatisticsWordRanking?: (
+    scope: "stream" | "total",
+    now: number,
+  ) => Promise<ModuleStatisticsWordRankingSnapshot>;
 }
 
 export type ModuleOverlayInitialStateContext = ModuleOverlayElementContext | ModuleOverlaySnapshotContext;
@@ -976,6 +981,19 @@ export interface ModuleStatisticsWordCountLookup {
   batches: readonly { batch: number; words: readonly ModuleStatisticsWordCount[] }[];
   streamWord: ModuleStatisticsWordCount | null;
   bufferedWord: ModuleStatisticsWordCount | null;
+}
+
+interface ModuleStatisticsWordRankingEntry {
+  word: string;
+  displayWord: string;
+  count: number;
+}
+
+export interface ModuleStatisticsWordRankingSnapshot {
+  serverNow: string;
+  entries: readonly ModuleStatisticsWordRankingEntry[];
+  /** Present only for stream scope, including when the latest retained stream is offline. */
+  streamIsLive?: boolean;
 }
 
 export interface ModuleStatisticsPreparedWordBucket {

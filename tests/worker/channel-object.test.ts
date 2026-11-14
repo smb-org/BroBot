@@ -630,6 +630,8 @@ const objectFor = (
   (object as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
   (object as unknown as { timerOccurrenceQueues: Map<string, Promise<void>> }).timerOccurrenceQueues = new Map();
   (object as unknown as { statisticsWordStreamEndedAt: Map<string, number> }).statisticsWordStreamEndedAt = new Map();
+  (object as unknown as { statisticsWordRankingScopesCache: null }).statisticsWordRankingScopesCache = null;
+  (object as unknown as { statisticsWordRankingScopesGeneration: number }).statisticsWordRankingScopesGeneration = 0;
   return object;
 };
 
@@ -1534,6 +1536,8 @@ describe("ChannelObject realtime path", () => {
     (objectAfterWake as unknown as { ctx: DurableObjectState }).ctx = internals.ctx;
     (objectAfterWake as unknown as { env: Env }).env = internals.env;
     (objectAfterWake as unknown as { recentlyBoundOverlayTokenIds: Set<string> }).recentlyBoundOverlayTokenIds = new Set();
+    (objectAfterWake as unknown as { statisticsWordRankingScopesCache: null }).statisticsWordRankingScopesCache = null;
+    (objectAfterWake as unknown as { statisticsWordRankingScopesGeneration: number }).statisticsWordRankingScopesGeneration = 0;
     const changed: RealtimeEnvelope<"overlay.changed"> = {
       version: 1,
       id: "overlay-change-1",

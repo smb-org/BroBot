@@ -28,3 +28,32 @@ const labels = {
 } as const;
 
 export const statisticsWordCounterLabels = (language: ModuleLanguage) => labels[language];
+
+const rankingLabels = {
+  de: {
+    elementLabel: "Wort-Rangliste",
+    description: "Zeigt die häufigsten Chatwörter im Stream oder insgesamt.",
+    defaultTitle: "Top-Wörter",
+    scope: "Bereich",
+    stream: "Stream",
+    total: "Gesamt",
+    count: "Anzahl der Wörter",
+    title: "Titel",
+    bars: "Balken anzeigen",
+    preview: "Vorschau",
+  },
+  en: {
+    elementLabel: "Word ranking",
+    description: "Shows the most frequent chat words for a stream or all time.",
+    defaultTitle: "Top words",
+    scope: "Scope",
+    stream: "Stream",
+    total: "Total",
+    count: "Word count",
+    title: "Title",
+    bars: "Show bars",
+    preview: "Preview",
+  },
+} as const;
+
+export const statisticsWordRankingLabels = (language: ModuleLanguage) => rankingLabels[language];
