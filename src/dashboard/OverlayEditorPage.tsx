@@ -47,7 +47,7 @@ import "./overlay-editor.css";
 
 const installPreviewStylesheet = (
   frameDocument: Document,
-  attribute: "data-brobot-overlay-fonts-css" | "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css" | "data-brobot-overlay-quiz-css" | "data-brobot-overlay-statistics-css",
+  attribute: "data-brobot-overlay-fonts-css" | "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css" | "data-brobot-overlay-quiz-css" | "data-brobot-overlay-statistics-css" | "data-brobot-overlay-statistics-ranking-css",
   css: string,
 ): void => {
   let style = frameDocument.head.querySelector<HTMLStyleElement>(`style[${attribute}]`);
@@ -708,13 +708,15 @@ function OverlayEditorWorkspace({
       import("../modules/emote_slots/overlay/slot.css?inline"),
       import("../modules/quiz/overlay/view.css?inline"),
       import("../modules/statistics/overlay/view.css?inline"),
-    ]).then(([{ default: fontsCss }, { default: overlayTallyCss }, { default: slotCss }, { default: quizCss }, { default: statisticsCss }]) => {
+      import("../modules/statistics/overlay/ranking-view.css?inline"),
+    ]).then(([{ default: fontsCss }, { default: overlayTallyCss }, { default: slotCss }, { default: quizCss }, { default: statisticsCss }, { default: statisticsRankingCss }]) => {
       if (!frame.isConnected || frame.contentDocument !== frameDocument) return;
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-fonts-css", fontsCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-tally-css", overlayTallyCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-slot-css", slotCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-quiz-css", quizCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-statistics-css", statisticsCss);
+      installPreviewStylesheet(frameDocument, "data-brobot-overlay-statistics-ranking-css", statisticsRankingCss);
       canvasRef.current = root;
       previewFrameRootRef.current = root;
       setPreviewFrameRoot(root);

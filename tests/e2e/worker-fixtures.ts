@@ -189,6 +189,33 @@ export const seedE2EWordCounterOverlay = (channelId = e2eChannelId): SeededE2EOv
   return overlay;
 };
 
+/** Seeds one real statistics word ranking in the worker-backed overlay sandbox. */
+export const seedE2EWordRankingOverlay = (channelId = e2eChannelId): SeededE2EOverlay => {
+  const overlay = seedE2EOverlay(channelId);
+  const now = new Date().toISOString();
+  const sql = `
+    INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision)
+      VALUES ('${channelId}', 'statistics', 1, '{}', 1)
+      ON CONFLICT(channel_id, module_id) DO UPDATE SET enabled = 1, settings = '{}';
+    INSERT INTO overlay_elements
+      (element_id, channel_id, overlay_id, kind, label, config_json, x, y, scale_percent, z, in_composition)
+      VALUES ('element-word-ranking-${channelId}', '${channelId}', '${overlay.overlayId}', 'statistics.word_ranking',
+        'Top words', '{"scope":"stream","count":3,"bars":true}', 520, 340, 100, 10, 1);
+    UPDATE overlays SET revision = revision + 1, updated_at = '${now}' WHERE overlay_id = '${overlay.overlayId}';
+  `;
+  const result = spawnSync("./node_modules/.bin/wrangler", [
+    "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes",
+    "--persist-to", e2eWorkerPersist, "--command", sql,
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
+  });
+  if (result.status !== 0) {
+    throw new Error(`Word ranking e2e setup failed.\n${result.stdout}\n${result.stderr}`);
+  }
+  return overlay;
+};
+
 /** Seeds one real alert element, media asset, and channel-points reward for the worker-backed alert flow. */
 export const seedE2EOverlayAlert = (imageBytes: Uint8Array, soundBytes: Uint8Array): void => {
   seedE2EOverlay();

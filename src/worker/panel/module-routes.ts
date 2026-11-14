@@ -1005,6 +1005,12 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
       current: current === null ? null : { settings: currentSettings, revision: current.settingsRevision },
     }, 409);
   }
+  if (module.id === "statistics") {
+    const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)) as unknown as {
+      refreshStatisticsWordRankingAfterSettingsChange: () => Promise<void>;
+    };
+    await channelObject.refreshStatisticsWordRankingAfterSettingsChange();
+  }
   if (module.id === BELABOX_MODULE_ID && (statsUrl !== undefined || removeStatsUrl)) {
     await resetSampleAfterStatsUrlChangeBestEffort(
       context.get("runModuleAlarm"),

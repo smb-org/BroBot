@@ -8,6 +8,7 @@ import {
   e2eWorkerOrigin,
   seedE2EOverlay,
   seedE2EWordCounterOverlay,
+  seedE2EWordRankingOverlay,
 } from "./worker-fixtures";
 
 const bootstrap = {
@@ -267,4 +268,106 @@ test("a sandboxed overlay updates its word counter after a real chat message", a
   });
 
   await expect.poll(async () => frame.locator(".statistics-word-counter__value").allTextContents()).toEqual(["1", "1"]);
+});
+
+test("a sandboxed word ranking reorders after real chat messages", async ({ page }) => {
+  test.setTimeout(60_000);
+  const channelId = `channel-e2e-ranking-${randomUUID()}`;
+  const overlay = seedE2EWordRankingOverlay(channelId);
+  const connected = new Promise<void>((resolve) => {
+    page.on("websocket", (socket) => {
+      if (new URL(socket.url()).pathname !== "/ws/overlay") return;
+      socket.on("framereceived", ({ payload }) => {
+        const frame = typeof payload === "string" ? payload : payload.toString("utf8");
+        if (frame.includes('"system.hello"')) resolve();
+      });
+    });
+  });
+  await page.goto(`/tests/e2e/fixtures/overlay-embed.html#token=${encodeURIComponent(overlay.overlayToken)}&origin=${encodeURIComponent(e2eWorkerOrigin)}`);
+  const frame = page.frameLocator("#overlay-frame");
+  await expect(frame.locator(".statistics-word-ranking")).toBeVisible();
+  await connected;
+
+  const postNotification = async (type: "stream.online" | "channel.chat.message", event: Record<string, unknown>): Promise<void> => {
+    const messageId = `eventsub-ranking-${randomUUID()}`;
+    const timestamp = new Date().toISOString();
+    const payload = {
+      subscription: {
+        id: `subscription-${type.replaceAll(".", "-")}`,
+        type,
+        version: "1",
+        status: "enabled",
+        condition: type === "channel.chat.message"
+          ? { broadcaster_user_id: channelId, user_id: "bot-ranking-e2e" }
+          : { broadcaster_user_id: channelId },
+        transport: { method: "webhook", callback: `${e2eWorkerOrigin}/api/twitch/eventsub` },
+        created_at: timestamp,
+      },
+      event,
+    };
+    const body = Buffer.from(JSON.stringify(payload));
+    const secretRing = JSON.parse(e2eWorkerEnvironment.TWITCH_EVENTSUB_SECRET ?? "{}") as {
+      active?: { key?: string };
+    };
+    const eventSubKey = secretRing.active?.key;
+    if (eventSubKey === undefined) throw new Error("The E2E EventSub signing key is missing.");
+    const signature = createHmac("sha256", eventSubKey)
+      .update(messageId)
+      .update(timestamp)
+      .update(body)
+      .digest("hex");
+    const response = await page.request.post(`${e2eWorkerOrigin}/api/twitch/eventsub`, {
+      headers: {
+        "Content-Type": "application/json",
+        "Twitch-Eventsub-Message-Id": messageId,
+        "Twitch-Eventsub-Message-Timestamp": timestamp,
+        "Twitch-Eventsub-Message-Signature": `sha256=${signature}`,
+        "Twitch-Eventsub-Message-Type": "notification",
+      },
+      data: body,
+    });
+    expect(response.status()).toBe(204);
+  };
+
+  const startedAt = new Date().toISOString();
+  const streamId = `stream-ranking-${randomUUID()}`;
+  await postNotification("stream.online", {
+    id: streamId,
+    broadcaster_user_id: channelId,
+    broadcaster_user_login: overlay.channelLogin,
+    broadcaster_user_name: "E2E Channel",
+    type: "live",
+    started_at: startedAt,
+  });
+  await postNotification("channel.chat.message", {
+    broadcaster_user_id: channelId,
+    broadcaster_user_login: overlay.channelLogin,
+    broadcaster_user_name: "E2E Channel",
+    chatter_user_id: "viewer-ranking-e2e",
+    chatter_user_login: "frostfern",
+    chatter_user_name: "Frost Fern",
+    message_id: `chat-ranking-${randomUUID()}`,
+    message: { text: "Alpha", fragments: [{ type: "text", text: "Alpha" }] },
+    message_type: "text",
+    badges: [],
+  });
+  await expect(frame.locator(".statistics-word-ranking__word").first()).toHaveText("Alpha");
+
+  for (let index = 0; index < 3; index += 1) {
+    await postNotification("channel.chat.message", {
+      broadcaster_user_id: channelId,
+      broadcaster_user_login: overlay.channelLogin,
+      broadcaster_user_name: "E2E Channel",
+      chatter_user_id: "viewer-ranking-e2e",
+      chatter_user_login: "frostfern",
+      chatter_user_name: "Frost Fern",
+      message_id: `chat-ranking-${randomUUID()}`,
+      message: { text: "Beta", fragments: [{ type: "text", text: "Beta" }] },
+      message_type: "text",
+      badges: [],
+    });
+  }
+
+  await expect.poll(() => frame.locator(".statistics-word-ranking__word").first().textContent()).toBe("Beta");
+  await expect(frame.locator(".statistics-word-ranking__count").first()).toHaveText("3");
 });

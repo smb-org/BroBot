@@ -140,3 +140,156 @@ export const mergeStatisticsWordCounterRealtimeState = (
 };
 
 export const statisticsWordCounterStateToJson = (state: StatisticsWordCounterState): JsonObject => state as unknown as JsonObject;
+
+export {
+  DEFAULT_STATISTICS_WORD_RANKING_CONFIG,
+  parseStatisticsWordRankingConfig,
+  type StatisticsWordRankingScope,
+} from "./ranking-config";
+
+interface StatisticsWordRankingEntry {
+  word: string;
+  displayWord: string;
+  count: number;
+}
+
+interface StatisticsWordRankingScopeState {
+  entries: readonly StatisticsWordRankingEntry[];
+  streamIsLive?: boolean;
+}
+
+export interface StatisticsWordRankingState {
+  serverNow: string;
+  stream: StatisticsWordRankingScopeState | null;
+  total: StatisticsWordRankingScopeState | null;
+  streamServerNow?: string;
+  totalServerNow?: string;
+  refreshAt?: string;
+  bootstrap?: true;
+}
+
+const wordRankingRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+const validWordRankingInstant = (value: unknown): value is string =>
+  typeof value === "string" && Number.isFinite(Date.parse(value));
+
+const parseStatisticsWordRankingEntry = (value: unknown): StatisticsWordRankingEntry | null => {
+  const input = wordRankingRecord(value);
+  if (input === null || typeof input.word !== "string" || input.word.length === 0 ||
+      foldStatisticsWord(input.word) !== input.word || typeof input.displayWord !== "string" ||
+      input.displayWord.length === 0 || input.displayWord.length > 80 ||
+      !Number.isSafeInteger(input.count) || (input.count as number) < 1) return null;
+  return { word: input.word, displayWord: input.displayWord, count: input.count as number };
+};
+
+const parseStatisticsWordRankingEntries = (value: unknown): readonly StatisticsWordRankingEntry[] | null => {
+  if (!Array.isArray(value) || value.length > 10) return null;
+  const entries = value.map(parseStatisticsWordRankingEntry);
+  return entries.some((entry) => entry === null) ? null : entries as StatisticsWordRankingEntry[];
+};
+
+const parseStatisticsWordRankingStream = (
+  value: unknown,
+): StatisticsWordRankingScopeState | null | undefined => {
+  if (value === null) return null;
+  const input = wordRankingRecord(value);
+  if (input === null || typeof input.streamIsLive !== "boolean") return undefined;
+  const entries = parseStatisticsWordRankingEntries(input.entries);
+  return entries === null ? undefined : { entries, streamIsLive: input.streamIsLive };
+};
+
+const parseStatisticsWordRankingTotal = (
+  value: unknown,
+): StatisticsWordRankingScopeState | null | undefined => {
+  if (value === null) return null;
+  const input = wordRankingRecord(value);
+  if (input === null) return undefined;
+  const entries = parseStatisticsWordRankingEntries(input.entries);
+  return entries === null ? undefined : { entries };
+};
+
+export const parseStatisticsWordRankingState = (value: unknown): StatisticsWordRankingState | null => {
+  const input = wordRankingRecord(value);
+  if (input === null || !validWordRankingInstant(input.serverNow) ||
+      !Object.prototype.hasOwnProperty.call(input, "stream") ||
+      !Object.prototype.hasOwnProperty.call(input, "total")) return null;
+  const stream = parseStatisticsWordRankingStream(input.stream);
+  const total = parseStatisticsWordRankingTotal(input.total);
+  if (stream === undefined || total === undefined ||
+      input.streamServerNow !== undefined && !validWordRankingInstant(input.streamServerNow) ||
+      input.totalServerNow !== undefined && !validWordRankingInstant(input.totalServerNow) ||
+      input.refreshAt !== undefined && !validWordRankingInstant(input.refreshAt) ||
+      input.bootstrap !== undefined && input.bootstrap !== true) return null;
+  return {
+    serverNow: input.serverNow,
+    stream,
+    total,
+    ...(typeof input.streamServerNow === "string" ? { streamServerNow: input.streamServerNow } : {}),
+    ...(typeof input.totalServerNow === "string" ? { totalServerNow: input.totalServerNow } : {}),
+    ...(typeof input.refreshAt === "string" ? { refreshAt: input.refreshAt } : {}),
+    ...(input.bootstrap === true ? { bootstrap: true as const } : {}),
+  };
+};
+
+const effectiveStatisticsWordRankingStreamTime = (state: StatisticsWordRankingState): string =>
+  state.streamServerNow ?? state.serverNow;
+const effectiveStatisticsWordRankingTotalTime = (state: StatisticsWordRankingState): string =>
+  state.totalServerNow ?? state.serverNow;
+
+/** Merges whole-scope snapshots without letting stale hydrations erase fresher live lists. */
+export const mergeStatisticsWordRankingRealtimeState = (
+  current: Readonly<Record<string, unknown>> | null,
+  incoming: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> => {
+  const next = parseStatisticsWordRankingState(incoming);
+  if (next === null) {
+    if (!validWordRankingInstant(incoming.refreshAt)) return current ?? {};
+    if (current === null) return incoming;
+    const previous = parseStatisticsWordRankingState(current);
+    if (previous === null) return { ...current, refreshAt: incoming.refreshAt };
+    // Pin each scope's effective timestamp before serverNow moves, so the retry delay counts from the failure.
+    return {
+      ...previous,
+      ...(validWordRankingInstant(incoming.serverNow) && Date.parse(incoming.serverNow) > Date.parse(previous.serverNow)
+        ? { serverNow: incoming.serverNow }
+        : {}),
+      streamServerNow: effectiveStatisticsWordRankingStreamTime(previous),
+      totalServerNow: effectiveStatisticsWordRankingTotalTime(previous),
+      refreshAt: incoming.refreshAt,
+    };
+  }
+
+  const previous = current === null ? null : parseStatisticsWordRankingState(current);
+  const incomingAt = Date.parse(next.serverNow);
+  const streamProvided = next.stream !== null || next.bootstrap === true;
+  const totalProvided = next.total !== null || next.bootstrap === true;
+  const streamAccepted = streamProvided &&
+    (previous === null || incomingAt >= Date.parse(effectiveStatisticsWordRankingStreamTime(previous)));
+  const totalAccepted = totalProvided &&
+    (previous === null || incomingAt >= Date.parse(effectiveStatisticsWordRankingTotalTime(previous)));
+  const stream = streamAccepted ? next.stream : previous === null ? next.stream : previous.stream;
+  const total = totalAccepted ? next.total : previous === null ? next.total : previous.total;
+  const previousServerNow = previous?.serverNow;
+  const serverNow = previousServerNow === undefined || incomingAt >= Date.parse(previousServerNow)
+    ? next.serverNow
+    : previousServerNow;
+  const refreshAt = next.bootstrap === true ? undefined
+    : typeof current?.refreshAt === "string" ? current.refreshAt
+      : next.refreshAt;
+
+  return {
+    serverNow,
+    stream,
+    total,
+    ...(streamAccepted ? { streamServerNow: next.serverNow }
+      : previous === null ? {} : { streamServerNow: effectiveStatisticsWordRankingStreamTime(previous) }),
+    ...(totalAccepted ? { totalServerNow: next.serverNow }
+      : previous === null ? {} : { totalServerNow: effectiveStatisticsWordRankingTotalTime(previous) }),
+    ...(refreshAt === undefined ? {} : { refreshAt }),
+    ...(next.bootstrap === true ? { bootstrap: true as const } : {}),
+  };
+};
+
+export const statisticsWordRankingStateToJson = (state: StatisticsWordRankingState): JsonObject =>
+  state as unknown as JsonObject;
