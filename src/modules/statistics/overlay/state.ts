@@ -86,7 +86,7 @@ export const mergeStatisticsWordCounterRealtimeState = (
   incoming: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> => {
   const next = parseStatisticsWordCounterState(incoming);
-  if (next === null) return current ?? {};
+  if (next === null) return typeof incoming.refreshAt === "string" ? incoming : current ?? {};
   const previous = current === null ? null : parseStatisticsWordCounterState(current);
   const isBootstrap = next.bootstrapWordSet === true;
   if (previous === null && !isBootstrap) {

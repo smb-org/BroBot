@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RealtimeEnvelope } from "../../src/realtime-contract";
 import type { OverlayRealtimeCallbacks } from "../../src/overlay/realtime";
 import { emoteSlotOverlayElement } from "../../src/modules/emote_slots/overlay/element";
+import { statisticsWordCounterOverlayElement } from "../../src/modules/statistics/overlay/element";
 
 const realtimeMocks = vi.hoisted(() => ({ connectOverlayRealtime: vi.fn() }));
 
@@ -858,6 +859,97 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a failed word-counter hydration after its configured word changes", async () => {
+    vi.useFakeTimers();
+    await statisticsWordCounterOverlayElement.load();
+    const start = Date.parse("2030-01-01T00:00:00.000Z");
+    vi.setSystemTime(start);
+    const payloadFor = (word: string, state: Record<string, unknown>): Response => new Response(JSON.stringify({
+      language: "en",
+      overlay: {
+        id: "word-counter-retry-fixture",
+        revision: 1,
+        width: 1920,
+        height: 1080,
+        css: "",
+        elements: [{
+          ...element("word-counter", 0, 0, 100, 1, true, "", "statistics.word_counter"),
+          label: word,
+          variableName: null,
+          text: "",
+          config: { word, label: word, show: "both" },
+          state,
+          moduleEnabled: true,
+        }],
+      },
+      variables: {},
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(payloadFor("alpha", {
+        bootstrapWordSet: true,
+        words: { alpha: { streamCount: 42, totalCount: 420, streamIsLive: true } },
+        serverNow: new Date(start).toISOString(),
+      }))
+      .mockResolvedValueOnce(payloadFor("beta", {
+        serverNow: new Date(start).toISOString(),
+        refreshAt: new Date(start + 30_000).toISOString(),
+      }))
+      .mockResolvedValueOnce(payloadFor("beta", {
+        bootstrapWordSet: true,
+        words: { beta: { streamCount: 6, totalCount: 60, streamIsLive: true } },
+        serverNow: new Date(start + 30_000).toISOString(),
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(container.querySelector(".statistics-word-counter__label")).toHaveTextContent("alpha");
+    expect(Array.from(container.querySelectorAll(".statistics-word-counter__value"), (value) => value.textContent))
+      .toEqual(["42", "420"]);
+
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(container.querySelector(".statistics-word-counter__label")).toHaveTextContent("beta");
+    expect(Array.from(container.querySelectorAll(".statistics-word-counter__value"), (value) => value.textContent))
+      .toEqual(["0", "0"]);
+
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "beta-chunk-before-retry",
+      createdAt: new Date(start + 5_000).toISOString(),
+      channelId: "fictional-channel",
+      type: "modul.statistics.word_counts",
+      payload: {
+        words: { beta: { streamCount: 5, totalCount: 50, streamIsLive: true } },
+        serverNow: new Date(start + 5_000).toISOString(),
+      },
+    }));
+    expect(Array.from(container.querySelectorAll(".statistics-word-counter__value"), (value) => value.textContent))
+      .toEqual(["0", "0"]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(Array.from(container.querySelectorAll(".statistics-word-counter__value"), (value) => value.textContent))
+      .toEqual(["6", "60"]);
+
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "beta-chunk-after-retry",
+      createdAt: new Date(start + 31_000).toISOString(),
+      channelId: "fictional-channel",
+      type: "modul.statistics.word_counts",
+      payload: {
+        words: { beta: { streamCount: 8, totalCount: 80, streamIsLive: true } },
+        serverNow: new Date(start + 31_000).toISOString(),
+      },
+    }));
+    expect(Array.from(container.querySelectorAll(".statistics-word-counter__value"), (value) => value.textContent))
+      .toEqual(["8", "80"]);
   });
 
   it("keeps a denied bootstrap transparent when a legacy debug fragment is present", async () => {
