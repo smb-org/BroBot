@@ -80,7 +80,7 @@ describe("statistics word counter overlay", () => {
       words: {
         alpha: { streamCount: 0, totalCount: 4, streamIsLive: true },
       },
-      serverNow: "2030-01-01T00:00:02.000Z",
+      serverNow: "2030-01-01T00:00:01.000Z",
     });
   });
 

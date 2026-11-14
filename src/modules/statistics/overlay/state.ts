@@ -86,10 +86,21 @@ export const mergeStatisticsWordCounterRealtimeState = (
   incoming: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> => {
   const next = parseStatisticsWordCounterState(incoming);
-  if (next === null) return typeof incoming.refreshAt === "string" ? incoming : current ?? {};
+  if (next === null) {
+    if (typeof incoming.refreshAt !== "string") return current ?? {};
+    if (current === null) return incoming;
+    return {
+      ...current,
+      ...(typeof incoming.serverNow === "string" && Number.isFinite(Date.parse(incoming.serverNow))
+        ? { serverNow: incoming.serverNow }
+        : {}),
+      refreshAt: incoming.refreshAt,
+    };
+  }
   const previous = current === null ? null : parseStatisticsWordCounterState(current);
   const isBootstrap = next.bootstrapWordSet === true;
   if (previous === null && !isBootstrap) {
+    if (current !== null) return current;
     return { words: {}, serverNow: next.serverNow, wordServerNow: {} };
   }
   const words = isBootstrap ? {} : { ...previous?.words };
@@ -108,13 +119,20 @@ export const mergeStatisticsWordCounterRealtimeState = (
       wordServerNow[word] = previousEntryServerNow;
     }
   }
+  if (!isBootstrap) {
+    return {
+      ...current,
+      words,
+      wordServerNow,
+    };
+  }
   return {
     serverNow: previous === null || Date.parse(next.serverNow) >= Date.parse(previous.serverNow)
       ? next.serverNow
       : previous.serverNow,
     words,
     wordServerNow,
-    ...((isBootstrap || previous?.bootstrapWordSet === true) ? { bootstrapWordSet: true } : {}),
+    bootstrapWordSet: true,
   };
 };
 
