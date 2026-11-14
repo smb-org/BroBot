@@ -893,6 +893,11 @@ export class ChannelObject extends DurableObject<Env> {
   /** Latest increment per stream that is still buffered in memory, so idle checks see unflushed activity. */
   private statisticsWordLastBufferedIncrementAt = new Map<string, number>();
   private statisticsWordCounterTrackedWords: Set<string> | null = null;
+  private statisticsWordCounterTrackedWordsGeneration = 0;
+  private statisticsWordCounterTrackedWordsRead: {
+    generation: number;
+    promise: Promise<Set<string>>;
+  } | null = null;
   private statisticsWordCounterPublishQueue: Promise<void> = Promise.resolve();
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
@@ -4066,6 +4071,10 @@ export class ChannelObject extends DurableObject<Env> {
         prepareWordBucketForMerge: (bucket, streamIsOnline, streamId, idleBefore) =>
           this.prepareStatisticsWordBucketForMerge(bucket, streamIsOnline, streamId, idleBefore),
         deleteWordBucket: (bucket) => this.deleteStatisticsWordBucket(bucket),
+        queueWordCounterOverlayRefresh: async () => {
+          const trackedWords = await this.readStatisticsWordCounterTrackedWords();
+          await this.queueStatisticsWordCounterChanges([...trackedWords]);
+        },
         pruneExpiredWordStreams: (now) => this.pruneExpiredStatisticsWordStreams(now),
         hasWordStreams: () => this.hasStatisticsWordStreams(),
         markClipImportPending: (streamId, startedAt, endedAt) =>
@@ -4611,25 +4620,47 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async readStatisticsWordCounterTrackedWords(): Promise<Set<string>> {
-    if (this.statisticsWordCounterTrackedWords !== null) return this.statisticsWordCounterTrackedWords;
-    const channelId = this.ownChannelId();
-    if (channelId === null) return new Set();
-    const rows = await this.env.DB.prepare(
-      `SELECT DISTINCT CASE WHEN json_valid(element.config_json)
-                            THEN json_extract(element.config_json, '$.word') END AS word
-         FROM overlay_elements AS element
-        WHERE element.channel_id = ? AND element.kind = 'statistics.word_counter'`,
-    ).bind(channelId).all<{ word: unknown }>();
-    const trackedWords = new Set<string>();
-    for (const { word } of rows.results) {
-      if (typeof word !== "string") continue;
-      const parsed = tokenizeStatisticsWordDetails([word]);
-      if (parsed.size !== 1) continue;
-      const foldedWord = parsed.keys().next().value;
-      if (foldedWord !== undefined && foldedWord === foldStatisticsWord(word)) trackedWords.add(foldedWord);
+    for (;;) {
+      if (this.statisticsWordCounterTrackedWords !== null) return this.statisticsWordCounterTrackedWords;
+      const generation = this.statisticsWordCounterTrackedWordsGeneration;
+      const pendingRead = this.statisticsWordCounterTrackedWordsRead;
+      if (pendingRead?.generation === generation) {
+        const trackedWords = await pendingRead.promise;
+        if (generation === this.statisticsWordCounterTrackedWordsGeneration) return trackedWords;
+        continue;
+      }
+
+      const channelId = this.ownChannelId();
+      if (channelId === null) return new Set();
+      const promise = (async () => {
+        const rows = await this.env.DB.prepare(
+          `SELECT DISTINCT CASE WHEN json_valid(element.config_json)
+                                THEN json_extract(element.config_json, '$.word') END AS word
+             FROM overlay_elements AS element
+            WHERE element.channel_id = ? AND element.kind = 'statistics.word_counter'`,
+        ).bind(channelId).all<{ word: unknown }>();
+        const trackedWords = new Set<string>();
+        for (const { word } of rows.results) {
+          if (typeof word !== "string") continue;
+          const parsed = tokenizeStatisticsWordDetails([word]);
+          if (parsed.size !== 1) continue;
+          const foldedWord = parsed.keys().next().value;
+          if (foldedWord !== undefined && foldedWord === foldStatisticsWord(word)) trackedWords.add(foldedWord);
+        }
+        if (generation === this.statisticsWordCounterTrackedWordsGeneration) {
+          this.statisticsWordCounterTrackedWords = trackedWords;
+        }
+        return trackedWords;
+      })();
+      const read = { generation, promise };
+      this.statisticsWordCounterTrackedWordsRead = read;
+      try {
+        const trackedWords = await promise;
+        if (generation === this.statisticsWordCounterTrackedWordsGeneration) return trackedWords;
+      } finally {
+        if (this.statisticsWordCounterTrackedWordsRead === read) this.statisticsWordCounterTrackedWordsRead = null;
+      }
     }
-    this.statisticsWordCounterTrackedWords = trackedWords;
-    return trackedWords;
   }
 
   private async queueStatisticsWordCounterChanges(words: readonly string[]): Promise<void> {
@@ -9270,6 +9301,7 @@ export class ChannelObject extends DurableObject<Env> {
     }
     if (messages.some((message) => message.type === "overlay.changed")) {
       this.statisticsWordCounterTrackedWords = null;
+      this.statisticsWordCounterTrackedWordsGeneration += 1;
     }
     const now = Date.now();
     const ordinarySockets = messages.some((message) => message.type !== "overlay.changed" &&

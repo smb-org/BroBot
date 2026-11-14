@@ -5,7 +5,10 @@ import type { JsonObject } from "../../src/modules/contract";
 import StatisticsWordCounterEditor from "../../src/modules/statistics/overlay/editor";
 import StatisticsWordCounter from "../../src/modules/statistics/overlay/view";
 import { statisticsWordCounterOverlayElement } from "../../src/modules/statistics/overlay/element";
-import { parseStatisticsWordCounterConfig } from "../../src/modules/statistics/overlay/state";
+import {
+  mergeStatisticsWordCounterRealtimeState,
+  parseStatisticsWordCounterConfig,
+} from "../../src/modules/statistics/overlay/state";
 
 afterEach(cleanup);
 
@@ -49,5 +52,34 @@ describe("statistics word counter overlay", () => {
     rerender(<StatisticsWordCounterEditor config={{ word: "fak", label: "FAAAK", show: "both" }} onChange={onChange} language="en" />);
     fireEvent.change(screen.getByRole("combobox", { name: "Show" }), { target: { value: "total" } });
     expect(onChange).toHaveBeenLastCalledWith({ word: "fak", label: "FAAAK", show: "total" });
+  });
+
+  it("applies bootstrap freshness independently for each word", () => {
+    const initial = mergeStatisticsWordCounterRealtimeState(null, {
+      words: {
+        alpha: { streamCount: 8, totalCount: 100, streamIsLive: true },
+      },
+      serverNow: "2030-01-01T00:00:00.000Z",
+    });
+    const withLaterChunk = mergeStatisticsWordCounterRealtimeState(initial, {
+      words: {
+        beta: { streamCount: 2, totalCount: 12, streamIsLive: true },
+      },
+      serverNow: "2030-01-01T00:00:02.000Z",
+    });
+    const withBootstrap = mergeStatisticsWordCounterRealtimeState(withLaterChunk, {
+      words: {
+        alpha: { streamCount: 0, totalCount: 4, streamIsLive: true },
+      },
+      serverNow: "2030-01-01T00:00:01.000Z",
+    });
+
+    expect(withBootstrap).toMatchObject({
+      words: {
+        alpha: { streamCount: 0, totalCount: 4, streamIsLive: true },
+        beta: { streamCount: 2, totalCount: 12, streamIsLive: true },
+      },
+      serverNow: "2030-01-01T00:00:02.000Z",
+    });
   });
 });

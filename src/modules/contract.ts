@@ -1076,6 +1076,8 @@ interface ModuleStatisticsChat {
     idleBefore: number,
   ) => Promise<ModuleStatisticsPreparedWordBucket | null>;
   deleteWordBucket: (bucket: ModuleStatisticsWordBucket) => Promise<void>;
+  /** Enqueues tracked word counters after their baseline changes. */
+  queueWordCounterOverlayRefresh?: () => Promise<void>;
   pruneExpiredWordStreams: (now: number) => Promise<void>;
   hasWordStreams: () => Promise<boolean>;
   markClipImportPending: (streamId: string, startedAt: string | null, endedAt: string) => Promise<void>;

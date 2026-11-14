@@ -654,7 +654,10 @@ export const handleStatisticsWindowAlarm = async (
         );
         // A refused merge (stream turned live meanwhile) keeps the bucket for a later alarm and blocks
         // the stream's later batches so they cannot overtake it and reorder the capped baseline.
-        if (merged) await context.statisticsChat.deleteWordBucket(bucket);
+        if (merged) {
+          await context.statisticsChat.queueWordCounterOverlayRefresh?.();
+          await context.statisticsChat.deleteWordBucket(bucket);
+        }
         else blockedStreams.add(bucket.streamId);
       } catch (error: unknown) {
         blockedStreams.add(bucket.streamId);

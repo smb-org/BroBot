@@ -18,6 +18,7 @@ interface StatisticsWordCounterValue {
 export interface StatisticsWordCounterState {
   words: Readonly<Record<string, StatisticsWordCounterValue>>;
   serverNow: string;
+  wordServerNow?: Readonly<Record<string, string>>;
 }
 
 export const DEFAULT_STATISTICS_WORD_COUNTER_CONFIG: StatisticsWordCounterConfig = {
@@ -57,13 +58,21 @@ export const parseStatisticsWordCounterState = (value: unknown): StatisticsWordC
   if (input === null || typeof input.serverNow !== "string" || !Number.isFinite(Date.parse(input.serverNow))) return null;
   const wordsInput = record(input.words);
   if (wordsInput === null) return null;
+  const wordServerNowInput = input.wordServerNow === undefined ? null : record(input.wordServerNow);
+  if (input.wordServerNow !== undefined && wordServerNowInput === null) return null;
   const words: Record<string, StatisticsWordCounterValue> = {};
+  const wordServerNow: Record<string, string> = {};
   for (const [word, count] of Object.entries(wordsInput)) {
     const foldedWord = foldStatisticsWord(word);
     if (foldedWord !== word || !isCounterValue(count)) return null;
+    const entryServerNow = wordServerNowInput !== null && Object.prototype.hasOwnProperty.call(wordServerNowInput, word)
+      ? wordServerNowInput[word]
+      : input.serverNow;
+    if (typeof entryServerNow !== "string" || !Number.isFinite(Date.parse(entryServerNow))) return null;
     words[word] = count;
+    wordServerNow[word] = entryServerNow;
   }
-  return { words, serverNow: input.serverNow };
+  return { words, serverNow: input.serverNow, wordServerNow };
 };
 
 export const mergeStatisticsWordCounterRealtimeState = (
@@ -74,10 +83,23 @@ export const mergeStatisticsWordCounterRealtimeState = (
   if (next === null) return current ?? {};
   const previous = current === null ? null : parseStatisticsWordCounterState(current);
   if (previous === null) return next as unknown as Readonly<Record<string, unknown>>;
-  if (Date.parse(next.serverNow) < Date.parse(previous.serverNow)) return previous as unknown as Readonly<Record<string, unknown>>;
+  const words = { ...previous.words };
+  const wordServerNow = { ...previous.wordServerNow };
+  for (const [word, value] of Object.entries(next.words)) {
+    const previousEntryServerNow = Object.prototype.hasOwnProperty.call(wordServerNow, word)
+      ? wordServerNow[word]
+      : undefined;
+    const nextEntryServerNow = next.wordServerNow?.[word] ?? next.serverNow;
+    if (previousEntryServerNow === undefined ||
+        Date.parse(nextEntryServerNow) >= Date.parse(previousEntryServerNow)) {
+      words[word] = value;
+      wordServerNow[word] = nextEntryServerNow;
+    }
+  }
   return {
-    serverNow: next.serverNow,
-    words: { ...previous.words, ...next.words },
+    serverNow: Date.parse(next.serverNow) >= Date.parse(previous.serverNow) ? next.serverNow : previous.serverNow,
+    words,
+    wordServerNow,
   };
 };
 
