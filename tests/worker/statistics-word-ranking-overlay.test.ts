@@ -19,10 +19,15 @@ const channelObject = (channelId: string): DurableObjectStub => {
   return stub;
 };
 
-/** A woken object learns its active ranking scopes from a bootstrap read or an overlay change; model that. */
-const primeRankingScopes = async (object: unknown): Promise<void> => {
-  await (object as { readStatisticsWordRankingScopes(): Promise<unknown> }).readStatisticsWordRankingScopes();
-};
+/** Runs the alarm inside the object; a failing handler rejection crossing the stub would be an unhandled rejection. */
+const runFailingAlarm = (stub: DurableObjectStub): Promise<void> =>
+  runInDurableObject(stub, async (durableObject) => {
+    try {
+      await (durableObject as unknown as { alarm(): Promise<void> }).alarm();
+    } catch {
+      // The handler rethrows after rescheduling; the test reads the schedule instead.
+    }
+  });
 
 const seedWordRanking = async (
   channelId: string,
@@ -222,6 +227,60 @@ describe("statistics word ranking worker state", () => {
     });
   });
 
+  it("publishes a ranking from D1 on a fresh object without a bootstrap read", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TEST_NOW);
+    const channelId = `statistics-ranking-cold-publish-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await seedWordRanking(channelId, "total");
+    const streamId = `ranking-stream-${crypto.randomUUID()}`;
+    const receivedAt = new Date(TEST_NOW).toISOString();
+    await writeEventSubStreamState(worker.DB, channelId, "online", receivedAt, receivedAt, streamId);
+    const sent: RealtimeMessage[] = [];
+    vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
+      sent.push(...messages.filter((message) => message.type === "modul.statistics.word_ranking"));
+      return Promise.resolve();
+    });
+    const object = channelObject(channelId) as unknown as {
+      recordChatActivity: Parameters<typeof chatActivity>[0]["recordChatActivity"];
+    };
+
+    await chatActivity(object, streamId, "freshword");
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      type: "modul.statistics.word_ranking",
+      payload: { total: { entries: [{ word: "freshword", count: 1 }] } },
+    });
+  });
+
+  it("publishes a standalone ranking from D1 on a fresh object", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TEST_NOW);
+    const channelId = `statistics-ranking-cold-standalone-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await seedWordRanking(channelId, "total", {}, false);
+    const streamId = `ranking-stream-${crypto.randomUUID()}`;
+    const receivedAt = new Date(TEST_NOW).toISOString();
+    await writeEventSubStreamState(worker.DB, channelId, "online", receivedAt, receivedAt, streamId);
+    const sent: RealtimeMessage[] = [];
+    vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
+      sent.push(...messages.filter((message) => message.type === "modul.statistics.word_ranking"));
+      return Promise.resolve();
+    });
+    const object = channelObject(channelId) as unknown as {
+      recordChatActivity: Parameters<typeof chatActivity>[0]["recordChatActivity"];
+    };
+
+    await chatActivity(object, streamId, "standaloneword");
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      type: "modul.statistics.word_ranking",
+      payload: { total: { entries: [{ word: "standaloneword", count: 1 }] } },
+    });
+  });
+
   it("publishes a maximum-length Unicode ranking scope within the realtime payload limit", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(TEST_NOW);
@@ -248,7 +307,6 @@ describe("statistics word ranking worker state", () => {
       recordChatActivity: Parameters<typeof chatActivity>[0]["recordChatActivity"];
     };
 
-    await primeRankingScopes(object);
     await chatActivity(object, streamId, "ordinaryword");
 
     expect(sent).toHaveLength(1);
@@ -291,7 +349,6 @@ describe("statistics word ranking worker state", () => {
       recordChatActivity: Parameters<typeof chatActivity>[0]["recordChatActivity"];
     };
 
-    await primeRankingScopes(object);
     await chatActivity(object, streamId, "master");
 
     expect(sent).toHaveLength(2);
@@ -325,6 +382,9 @@ describe("statistics word ranking worker state", () => {
     const receivedAt = new Date(TEST_NOW).toISOString();
     await writeEventSubStreamState(worker.DB, channelId, "online", receivedAt, receivedAt, streamId);
     const sent: RealtimeMessage[] = [];
+    const compute = vi.spyOn(ChannelObject.prototype as unknown as {
+      computeStatisticsWordRanking(scope: "stream" | "total", now: number): Promise<unknown>;
+    }, "computeStatisticsWordRanking");
     vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
       sent.push(...messages);
       return Promise.resolve();
@@ -335,6 +395,7 @@ describe("statistics word ranking worker state", () => {
 
     await chatActivity(object, streamId, "trackedword");
 
+    expect(compute).toHaveBeenCalledWith("total", TEST_NOW);
     expect(sent.some((message) => message.type === "modul.statistics.word_counts")).toBe(true);
     expect(sent.some((message) => message.type === "modul.statistics.word_ranking")).toBe(false);
   });
@@ -358,7 +419,6 @@ describe("statistics word ranking worker state", () => {
       return Promise.resolve();
     });
     const initialWords = ["aword", "bword", "cword", "dword", "eword", "fword", "gword", "hword", "iword", "jword"];
-    await primeRankingScopes(object);
     for (const word of initialWords) await chatActivity(object, streamId, word);
     await vi.advanceTimersByTimeAsync(2_000);
     await runDurableObjectAlarm(stub);
@@ -403,7 +463,6 @@ describe("statistics word ranking worker state", () => {
       readStatisticsWordRanking(scope: "stream" | "total", now?: number): Promise<unknown>;
     };
 
-    await primeRankingScopes(object);
     await chatActivity(object, streamId, "master");
     expect(sent).toHaveLength(1);
     await chatActivity(object, streamId, "master");
@@ -449,7 +508,6 @@ describe("statistics word ranking worker state", () => {
       computeStatisticsWordRanking(scope: "stream" | "total", now: number): Promise<unknown>;
     }, "computeStatisticsWordRanking");
 
-    await primeRankingScopes(object);
     await chatActivity(object, streamId, "triggerword");
     compute.mockClear();
     await vi.advanceTimersByTimeAsync(2_000);
@@ -461,6 +519,87 @@ describe("statistics word ranking worker state", () => {
     await vi.advanceTimersByTimeAsync(2_000);
     await runDurableObjectAlarm(stub);
     expect(compute).toHaveBeenCalledTimes(2);
+  });
+
+  it("reloads ranking scopes before an invalidated alarm flush", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TEST_NOW);
+    const channelId = `statistics-ranking-alarm-scope-reload-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await seedWordRanking(channelId, "stream");
+    const streamId = `ranking-stream-${crypto.randomUUID()}`;
+    const receivedAt = new Date(TEST_NOW).toISOString();
+    await writeEventSubStreamState(worker.DB, channelId, "online", receivedAt, receivedAt, streamId);
+    const stub = channelObject(channelId);
+    const sent: RealtimeMessage[] = [];
+    vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
+      sent.push(...messages.filter((message) => message.type === "modul.statistics.word_ranking"));
+      return Promise.resolve();
+    });
+    const object = stub as unknown as {
+      recordChatActivity: Parameters<typeof chatActivity>[0]["recordChatActivity"];
+      invalidateStatisticsWordRankingScopes(): void;
+    };
+
+    await chatActivity(object, streamId, "firstword");
+    await chatActivity(object, streamId, "secondword");
+    object.invalidateStatisticsWordRankingScopes();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await runDurableObjectAlarm(stub);
+
+    expect(sent).toHaveLength(2);
+    expect((sent[1]?.payload as { stream: { entries: readonly unknown[] } }).stream.entries[0])
+      .toMatchObject({ word: "firstword", count: 1 });
+    expect((sent[1]?.payload as { stream: { entries: readonly unknown[] } }).stream.entries)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ word: "secondword", count: 1 })]));
+  });
+
+  it("backs off repeated ranking computation failures before last-computed is stored", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TEST_NOW);
+    const channelId = `statistics-ranking-computation-retry-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await seedWordRanking(channelId, "total");
+    const stub = channelObject(channelId);
+    const compute = vi.spyOn(ChannelObject.prototype as unknown as {
+      computeStatisticsWordRanking(scope: "stream" | "total", now: number): Promise<unknown>;
+    }, "computeStatisticsWordRanking").mockRejectedValue(new Error("ranking query unavailable"));
+    const readAlarm = (): Promise<{ deadline: number; nextAttemptAt?: number } | undefined> =>
+      runInDurableObject(stub, (_durableObject, state) => {
+        const table = state.storage.kv.get<Record<string, { deadline: number; nextAttemptAt?: number }>>(
+          "channel:alarm_schedule",
+        ) ?? {};
+        return table["statistics:word_counter_publish"];
+      });
+
+    // Inside the object: a rejection crossing the stub would surface as an unhandled rejection in the runner.
+    await runInDurableObject(stub, async (durableObject) => {
+      const target = durableObject as unknown as {
+        queueStatisticsWordCounterChanges(words: readonly string[], refreshRanking?: boolean): Promise<void>;
+      };
+      await expect(target.queueStatisticsWordCounterChanges([], true))
+        .rejects.toThrow("ranking query unavailable");
+    });
+    await runInDurableObject(stub, async (_durableObject, state) => {
+      await expect(state.storage.get("statistics:word_counter_last_computed")).resolves.toBeUndefined();
+    });
+    const firstRetry = await readAlarm();
+    expect((firstRetry?.nextAttemptAt ?? firstRetry?.deadline ?? 0) - TEST_NOW).toBeGreaterThanOrEqual(2_000);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await runFailingAlarm(stub);
+    expect(compute).toHaveBeenCalledTimes(2);
+    const secondRetry = await readAlarm();
+    expect((secondRetry?.nextAttemptAt ?? secondRetry?.deadline ?? 0) - Date.now()).toBeGreaterThanOrEqual(2_000);
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    await runFailingAlarm(stub);
+    expect(compute).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await runFailingAlarm(stub);
+    expect(compute).toHaveBeenCalledTimes(3);
+    const thirdRetry = await readAlarm();
+    expect((thirdRetry?.nextAttemptAt ?? thirdRetry?.deadline ?? 0) - Date.now()).toBeGreaterThanOrEqual(2_000);
   });
 
   it("does not read ranking baselines or publish without a ranking element", async () => {
@@ -486,7 +625,10 @@ describe("statistics word ranking worker state", () => {
       const prepare = vi.spyOn(object.env.DB, "prepare");
       await chatActivity(object, streamId, "ordinaryword");
       expect(prepare.mock.calls.some(([sql]) => sql.includes("channel_word_frequency_baseline"))).toBe(false);
-      expect(prepare.mock.calls.some(([sql]) => sql.includes("statistics.word_ranking"))).toBe(false);
+      // Only the one scope lookup may mention the ranking element; no ranking computation or recipient query runs.
+      const rankingQueries = prepare.mock.calls.map(([sql]) => sql).filter((sql) => sql.includes("statistics.word_ranking"));
+      expect(rankingQueries).toHaveLength(1);
+      expect(rankingQueries[0]).toContain("SELECT config_json FROM overlay_elements");
       prepare.mockRestore();
     });
 
@@ -584,8 +726,9 @@ describe("statistics word ranking worker state", () => {
     await vi.advanceTimersByTimeAsync(16 * 60_000);
     await object.runModuleAlarm("statistics", "window", "window");
 
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.payload).toMatchObject({
+    // The first chat message of the fresh object publishes immediately; the merge refresh is the second message.
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.payload).toMatchObject({
       total: { entries: [
         { word: "baseline", displayWord: "Baseline", count: 100 },
         { word: "master", displayWord: "master", count: 10 },

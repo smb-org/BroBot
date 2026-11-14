@@ -445,7 +445,6 @@ const STATISTICS_WORD_COUNTER_LAST_COMPUTED_KEY = "statistics:word_counter_last_
 const STATISTICS_WORD_RANKING_PENDING_KEY = "statistics:word_ranking_pending";
 const STATISTICS_WORD_RANKING_LAST_STREAM_KEY = "statistics:word_ranking_last:stream";
 const STATISTICS_WORD_RANKING_LAST_TOTAL_KEY = "statistics:word_ranking_last:total";
-const STATISTICS_WORD_RANKING_SCOPES_KEY = "statistics:word_ranking_scopes";
 const STATISTICS_WORD_COUNTER_THROTTLE_MS = 2_000;
 const STATISTICS_WORD_RANKING_PAGE_SIZE = 500;
 const STATISTICS_WINDOW_RETENTION_MS = 60 * 60 * 1_000;
@@ -610,11 +609,6 @@ type BufferedStatisticsWordCount = {
 };
 
 type StatisticsWordRankingScope = "stream" | "total";
-
-interface StatisticsWordRankingScopesCache {
-  generation: number;
-  scopes: readonly StatisticsWordRankingScope[] | null;
-}
 
 interface StatisticsWordRankingPublishedScope {
   serverNow: string;
@@ -4716,34 +4710,9 @@ export class ChannelObject extends DurableObject<Env> {
     }
   }
 
-  private async invalidateStatisticsWordRankingScopes(): Promise<void> {
+  private invalidateStatisticsWordRankingScopes(): void {
     this.statisticsWordRankingScopesCache = null;
     this.statisticsWordRankingScopesGeneration += 1;
-    const localGeneration = this.statisticsWordRankingScopesGeneration;
-    const generation = await this.ctx.storage.transaction(async (transaction) => {
-      const previous = await transaction.get<StatisticsWordRankingScopesCache>(STATISTICS_WORD_RANKING_SCOPES_KEY);
-      const storedGeneration = previous !== undefined && Number.isSafeInteger(previous.generation) && previous.generation >= 0
-        ? previous.generation
-        : 0;
-      const nextGeneration = Math.max(localGeneration, storedGeneration + 1);
-      await transaction.put(STATISTICS_WORD_RANKING_SCOPES_KEY, { generation: nextGeneration, scopes: null } satisfies StatisticsWordRankingScopesCache);
-      return nextGeneration;
-    });
-    this.statisticsWordRankingScopesGeneration = Math.max(this.statisticsWordRankingScopesGeneration, generation);
-  }
-
-  private async restoreStatisticsWordRankingScopesCache(): Promise<Set<StatisticsWordRankingScope> | null> {
-    if (this.statisticsWordRankingScopesCache !== null) return this.statisticsWordRankingScopesCache;
-    const generationBeforeRead = this.statisticsWordRankingScopesGeneration;
-    const stored = await this.ctx.storage.get<StatisticsWordRankingScopesCache>(STATISTICS_WORD_RANKING_SCOPES_KEY);
-    if (generationBeforeRead !== this.statisticsWordRankingScopesGeneration) return null;
-    if (stored === undefined || !Number.isSafeInteger(stored.generation) || stored.generation < 0) return null;
-    if (stored.generation < this.statisticsWordRankingScopesGeneration) return null;
-    this.statisticsWordRankingScopesGeneration = Math.max(this.statisticsWordRankingScopesGeneration, stored.generation);
-    if (!Array.isArray(stored.scopes) || stored.scopes.some((scope) => scope !== "stream" && scope !== "total")) return null;
-    const scopes = new Set(stored.scopes);
-    this.statisticsWordRankingScopesCache = scopes;
-    return scopes;
   }
 
   private invalidateStatisticsWordRankingData(): void {
@@ -4754,8 +4723,7 @@ export class ChannelObject extends DurableObject<Env> {
 
   private async readStatisticsWordRankingScopes(): Promise<Set<StatisticsWordRankingScope>> {
     for (;;) {
-      const cached = await this.restoreStatisticsWordRankingScopesCache();
-      if (cached !== null) return cached;
+      if (this.statisticsWordRankingScopesCache !== null) return this.statisticsWordRankingScopesCache;
       const generation = this.statisticsWordRankingScopesGeneration;
       const pendingRead = this.statisticsWordRankingScopesRead;
       if (pendingRead?.generation === generation) {
@@ -4764,7 +4732,11 @@ export class ChannelObject extends DurableObject<Env> {
         continue;
       }
       const channelId = this.ownChannelId();
-      if (channelId === null) return new Set();
+      if (channelId === null) {
+        const scopes = new Set<StatisticsWordRankingScope>();
+        if (generation === this.statisticsWordRankingScopesGeneration) this.statisticsWordRankingScopesCache = scopes;
+        return scopes;
+      }
       const promise = (async () => {
         const rows = await this.env.DB.prepare(
           `SELECT config_json FROM overlay_elements
@@ -4779,23 +4751,7 @@ export class ChannelObject extends DurableObject<Env> {
             // Invalid legacy element configuration is not an enabled ranking.
           }
         }
-        if (generation === this.statisticsWordRankingScopesGeneration) {
-          const persisted = await this.ctx.storage.transaction(async (transaction) => {
-            const previous = await transaction.get<StatisticsWordRankingScopesCache>(STATISTICS_WORD_RANKING_SCOPES_KEY);
-            const storedGeneration = previous !== undefined && Number.isSafeInteger(previous.generation) && previous.generation >= 0
-              ? previous.generation
-              : 0;
-            if (storedGeneration !== generation) return false;
-            await transaction.put(STATISTICS_WORD_RANKING_SCOPES_KEY, {
-              generation,
-              scopes: [...scopes],
-            } satisfies StatisticsWordRankingScopesCache);
-            return true;
-          });
-          if (persisted && generation === this.statisticsWordRankingScopesGeneration) {
-            this.statisticsWordRankingScopesCache = scopes;
-          }
-        }
+        if (generation === this.statisticsWordRankingScopesGeneration) this.statisticsWordRankingScopesCache = scopes;
         return scopes;
       })();
       const read = { generation, promise };
@@ -5063,12 +5019,12 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Invalidates ignored-word data and queues the shared trailing refresh when rankings are active. */
   public async refreshStatisticsWordRankingAfterSettingsChange(): Promise<void> {
-    const scopes = await this.restoreStatisticsWordRankingScopesCache();
-    if (scopes === null || scopes.size === 0) return;
+    const scopes = await this.readStatisticsWordRankingScopes();
+    if (scopes.size === 0) return;
     this.invalidateStatisticsWordRankingData();
     await this.withStatisticsWordCounterPublishQueue(async () => {
-      const activeScopes = await this.restoreStatisticsWordRankingScopesCache();
-      if (activeScopes === null || activeScopes.size === 0) return;
+      const activeScopes = await this.readStatisticsWordRankingScopes();
+      if (activeScopes.size === 0) return;
       await this.ctx.storage.put(STATISTICS_WORD_RANKING_PENDING_KEY, true);
       const dueAt = await this.nextStatisticsWordCounterUpdateAt();
       await this.scheduleAlarmEntry(STATISTICS_WORD_COUNTER_ALARM_KEY, STATISTICS_WORD_COUNTER_PUBLISH_HANDLER, dueAt);
@@ -5083,8 +5039,8 @@ export class ChannelObject extends DurableObject<Env> {
     await this.withStatisticsWordCounterPublishQueue(async () => {
       const trackedWords = words.length === 0 ? new Set<string>() : await this.readStatisticsWordCounterTrackedWords();
       const changedWords = words.filter((word) => trackedWords.has(word));
-      const activeRankingScopes = await this.restoreStatisticsWordRankingScopesCache();
-      const rankingPending = (refreshRanking || words.length > 0) && activeRankingScopes !== null && activeRankingScopes.size > 0;
+      const activeRankingScopes = await this.readStatisticsWordRankingScopes();
+      const rankingPending = (refreshRanking || words.length > 0) && activeRankingScopes.size > 0;
       if (changedWords.length === 0 && !rankingPending) return;
       const stored = await this.ctx.storage.get(STATISTICS_WORD_COUNTER_PENDING_KEY);
       const pending = new Set(Array.isArray(stored)
@@ -5108,8 +5064,7 @@ export class ChannelObject extends DurableObject<Env> {
       ? stored.filter((word): word is string => typeof word === "string")
       : [])];
     const rankingRequested = await this.ctx.storage.get<boolean>(STATISTICS_WORD_RANKING_PENDING_KEY) === true;
-    const cachedRankingScopes = rankingRequested ? await this.restoreStatisticsWordRankingScopesCache() : null;
-    const rankingScopes = cachedRankingScopes === null ? [] : [...cachedRankingScopes];
+    const rankingScopes = rankingRequested ? [...await this.readStatisticsWordRankingScopes()] : [];
     if (rankingRequested && rankingScopes.length === 0) await this.ctx.storage.delete(STATISTICS_WORD_RANKING_PENDING_KEY);
     const trackedWords = pending.length === 0 ? new Set<string>() : await this.readStatisticsWordCounterTrackedWords();
     const eligibleWords = pending.filter((word) => trackedWords.has(word));
@@ -5267,10 +5222,14 @@ export class ChannelObject extends DurableObject<Env> {
         );
       }
     } catch (error: unknown) {
+      const retryAt = Math.max(
+        await this.nextStatisticsWordCounterUpdateAt(),
+        Date.now() + STATISTICS_WORD_COUNTER_THROTTLE_MS,
+      );
       await this.scheduleAlarmEntry(
         STATISTICS_WORD_COUNTER_ALARM_KEY,
         STATISTICS_WORD_COUNTER_PUBLISH_HANDLER,
-        await this.nextStatisticsWordCounterUpdateAt(),
+        retryAt,
       );
       throw error;
     }
@@ -9802,12 +9761,12 @@ export class ChannelObject extends DurableObject<Env> {
       throw new Error("Realtime message belongs to a foreign channel.");
     }
     const overlayChanged = messages.some((message) => message.type === "overlay.changed");
-    const scopesBeforeChange = overlayChanged ? await this.restoreStatisticsWordRankingScopesCache() : null;
-    const rankingWasActive = scopesBeforeChange !== null && scopesBeforeChange.size > 0;
+    let rankingWasActive = false;
     if (overlayChanged) {
       this.statisticsWordCounterTrackedWords = null;
       this.statisticsWordCounterTrackedWordsGeneration += 1;
-      await this.invalidateStatisticsWordRankingScopes();
+      this.invalidateStatisticsWordRankingScopes();
+      rankingWasActive = (await this.readStatisticsWordRankingScopes()).size > 0;
       this.invalidateStatisticsWordRankingData();
     }
     const now = Date.now();
@@ -9941,7 +9900,7 @@ export class ChannelObject extends DurableObject<Env> {
     const streamStateChanged = messages.some((message) => message.type === "stream.state.changed");
     if (statisticsStateChanged) this.invalidateStatisticsWordRankingData();
     const activeScopes = statisticsStateChanged || streamStateChanged
-      ? await this.restoreStatisticsWordRankingScopesCache()
+      ? await this.readStatisticsWordRankingScopes()
       : null;
     if ((statisticsStateChanged || streamStateChanged) && activeScopes !== null && activeScopes.size > 0) {
       await this.ctx.storage.put(STATISTICS_WORD_RANKING_PENDING_KEY, true);
