@@ -121,13 +121,17 @@ import type {
 } from "../../modules/contract";
 import {
   admitStatisticsWordCounts,
+  addStatisticsWordCount,
+  calculateStatisticsWordCountForLookup,
   foldStatisticsWord,
+  STATISTICS_WORD_RARE_HIDE_MILLISECONDS,
   STATISTICS_WORD_STREAM_IDLE_MILLISECONDS,
   STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS,
   STATISTICS_WINDOW_MILLISECONDS,
   statisticsWindowStartMs,
   tokenizeStatisticsWordDetails,
   type StatisticsChatActivity,
+  type StatisticsWordCountValue,
 } from "../../modules/statistics/domain";
 import {
   EVENTSUB_REPLAY_WINDOW_MILLISECONDS,
@@ -143,6 +147,7 @@ import {
   MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER,
   SECURITY_RETRY_HANDLER,
   SECURITY_ROUND_HANDLER,
+  STATISTICS_WORD_COUNTER_PUBLISH_HANDLER,
   missingAlarmHandlerKeys,
   moduleAlarmHandlerEntries,
   TEMP_VIP_EXPIRY_ALARM_HANDLER,
@@ -426,6 +431,10 @@ const STATISTICS_CLIP_IMPORT_TABLE = "statistics_clip_imports";
 const STATISTICS_WORD_COUNT_TABLE = "statistics_word_counts";
 const STATISTICS_WORD_SEEN_TABLE = "statistics_word_seen";
 const STATISTICS_WORD_SCHEMA_VERSION = 2;
+const STATISTICS_WORD_COUNTER_ALARM_KEY = "statistics:word_counter_publish";
+const STATISTICS_WORD_COUNTER_PENDING_KEY = "statistics:word_counter_pending";
+const STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY = "statistics:word_counter_last_published";
+const STATISTICS_WORD_COUNTER_THROTTLE_MS = 2_000;
 const STATISTICS_WINDOW_RETENTION_MS = 60 * 60 * 1_000;
 const EVENTSUB_MESSAGE_ID_TABLE = "eventsub_message_ids";
 const EVENTSUB_MESSAGE_ID_RETENTION_MS = EVENTSUB_REPLAY_WINDOW_MILLISECONDS + 2 * EVENTSUB_TIMESTAMP_SKEW_TOLERANCE_MILLISECONDS;
@@ -883,6 +892,13 @@ export class ChannelObject extends DurableObject<Env> {
   private statisticsWordStreamEndedAt = new Map<string, number>();
   /** Latest increment per stream that is still buffered in memory, so idle checks see unflushed activity. */
   private statisticsWordLastBufferedIncrementAt = new Map<string, number>();
+  private statisticsWordCounterTrackedWords: Set<string> | null = null;
+  private statisticsWordCounterTrackedWordsGeneration = 0;
+  private statisticsWordCounterTrackedWordsRead: {
+    generation: number;
+    promise: Promise<Set<string>>;
+  } | null = null;
+  private statisticsWordCounterPublishQueue: Promise<void> = Promise.resolve();
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
   private timerScheduleInputGeneration = 0;
@@ -4055,6 +4071,10 @@ export class ChannelObject extends DurableObject<Env> {
         prepareWordBucketForMerge: (bucket, streamIsOnline, streamId, idleBefore) =>
           this.prepareStatisticsWordBucketForMerge(bucket, streamIsOnline, streamId, idleBefore),
         deleteWordBucket: (bucket) => this.deleteStatisticsWordBucket(bucket),
+        queueWordCounterOverlayRefresh: async () => {
+          const trackedWords = await this.readStatisticsWordCounterTrackedWords();
+          await this.queueStatisticsWordCounterChanges([...trackedWords]);
+        },
         pruneExpiredWordStreams: (now) => this.pruneExpiredStatisticsWordStreams(now),
         hasWordStreams: () => this.hasStatisticsWordStreams(),
         markClipImportPending: (streamId, startedAt, endedAt) =>
@@ -4335,6 +4355,7 @@ export class ChannelObject extends DurableObject<Env> {
       : null;
     const statisticsWindowStart = statistics === undefined ? Number.NaN : Date.parse(statistics.windowStart);
     const statisticsEmotesValid = statistics !== undefined && Number.isSafeInteger(statistics.emotes) && statistics.emotes >= 0;
+    let countedWords: readonly string[] = [];
     const recordStatistics = (): void => {
       if (statistics === undefined) return;
       if (!Number.isFinite(statisticsWindowStart) || !statisticsEmotesValid) return;
@@ -4354,7 +4375,11 @@ export class ChannelObject extends DurableObject<Env> {
         statistics.streamId,
         statistics.emotes,
       );
-      this.recordStatisticsWordCountsSync(statistics.streamId, statistics.textFragments ?? [], statistics.receivedAt);
+      countedWords = this.recordStatisticsWordCountsSync(
+        statistics.streamId,
+        statistics.textFragments ?? [],
+        statistics.receivedAt,
+      );
     };
     if (userIdForTracking === null) {
       const activityCount = this.ctx.storage.transactionSync(() => {
@@ -4364,6 +4389,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid) {
         await this.ensureStatisticsWindowAlarmScheduled(now);
       }
+      await this.queueStatisticsWordCounterChanges(countedWords);
       return activityCount;
     }
 
@@ -4396,6 +4422,7 @@ export class ChannelObject extends DurableObject<Env> {
         if (statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid) {
           await this.ensureStatisticsWindowAlarmScheduled(now);
         }
+        await this.queueStatisticsWordCounterChanges(countedWords);
         throw error;
       }
       return this.ctx.storage.transactionSync(() => {
@@ -4423,6 +4450,7 @@ export class ChannelObject extends DurableObject<Env> {
     if (statistics !== undefined && Number.isFinite(statisticsWindowStart) && statisticsEmotesValid) {
       await this.ensureStatisticsWindowAlarmScheduled(now);
     }
+    await this.queueStatisticsWordCounterChanges(countedWords);
     return activityCount;
   }
 
@@ -4474,8 +4502,8 @@ export class ChannelObject extends DurableObject<Env> {
     streamId: string | null,
     textFragments: readonly string[],
     receivedAt: string,
-  ): void {
-    if (streamId === null || streamId.length === 0) return;
+  ): string[] {
+    if (streamId === null || streamId.length === 0) return [];
 
     const now = Date.now();
     const receivedAtMs = Date.parse(receivedAt);
@@ -4492,7 +4520,7 @@ export class ChannelObject extends DurableObject<Env> {
     const memoryEndedAt = this.statisticsWordStreamEndedAt.get(streamId);
     if (stream !== undefined && stream.expires_at <= now ||
         stream === undefined && memoryEndedAt !== undefined &&
-          memoryEndedAt + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS <= now) return;
+          memoryEndedAt + STATISTICS_WORD_STREAM_RETENTION_MILLISECONDS <= now) return [];
 
     const endedAt = memoryEndedAt === undefined ? null : new Date(memoryEndedAt).toISOString();
     const expiresAt = memoryEndedAt === undefined
@@ -4523,10 +4551,10 @@ export class ChannelObject extends DurableObject<Env> {
       );
     }
 
-    if (textFragments.length === 0) return;
+    if (textFragments.length === 0) return [];
     const details = tokenizeStatisticsWordDetails(textFragments);
     const counts = new Map([...details].map(([word, token]) => [word, token.count]));
-    if (counts.size === 0) return;
+    if (counts.size === 0) return [];
     const bufferedWords = this.statisticsWordWordsByStream.get(streamId) ?? new Set<string>();
     // Only this message's (at most 20) words are looked up; the stream-wide buffer is never copied.
     const existingWords = new Set<string>();
@@ -4576,6 +4604,265 @@ export class ChannelObject extends DurableObject<Env> {
     if (addedDistinctWords > 0) {
       this.statisticsWordNewDistinctByStream.set(streamId, bufferedDistinct + addedDistinctWords);
     }
+    return [...accepted.keys()];
+  }
+
+  private async withStatisticsWordCounterPublishQueue(action: () => Promise<void>): Promise<void> {
+    const previous = this.statisticsWordCounterPublishQueue;
+    let release!: () => void;
+    this.statisticsWordCounterPublishQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      await action();
+    } finally {
+      release();
+    }
+  }
+
+  private async readStatisticsWordCounterTrackedWords(): Promise<Set<string>> {
+    for (;;) {
+      if (this.statisticsWordCounterTrackedWords !== null) return this.statisticsWordCounterTrackedWords;
+      const generation = this.statisticsWordCounterTrackedWordsGeneration;
+      const pendingRead = this.statisticsWordCounterTrackedWordsRead;
+      if (pendingRead?.generation === generation) {
+        const trackedWords = await pendingRead.promise;
+        if (generation === this.statisticsWordCounterTrackedWordsGeneration) return trackedWords;
+        continue;
+      }
+
+      const channelId = this.ownChannelId();
+      if (channelId === null) return new Set();
+      const promise = (async () => {
+        const rows = await this.env.DB.prepare(
+          `SELECT DISTINCT CASE WHEN json_valid(element.config_json)
+                                THEN json_extract(element.config_json, '$.word') END AS word
+             FROM overlay_elements AS element
+            WHERE element.channel_id = ? AND element.kind = 'statistics.word_counter'`,
+        ).bind(channelId).all<{ word: unknown }>();
+        const trackedWords = new Set<string>();
+        for (const { word } of rows.results) {
+          if (typeof word !== "string") continue;
+          const parsed = tokenizeStatisticsWordDetails([word]);
+          if (parsed.size !== 1) continue;
+          const foldedWord = parsed.keys().next().value;
+          if (foldedWord !== undefined && foldedWord === foldStatisticsWord(word)) trackedWords.add(foldedWord);
+        }
+        if (generation === this.statisticsWordCounterTrackedWordsGeneration) {
+          this.statisticsWordCounterTrackedWords = trackedWords;
+        }
+        return trackedWords;
+      })();
+      const read = { generation, promise };
+      this.statisticsWordCounterTrackedWordsRead = read;
+      try {
+        const trackedWords = await promise;
+        if (generation === this.statisticsWordCounterTrackedWordsGeneration) return trackedWords;
+      } finally {
+        if (this.statisticsWordCounterTrackedWordsRead === read) this.statisticsWordCounterTrackedWordsRead = null;
+      }
+    }
+  }
+
+  private async queueStatisticsWordCounterChanges(words: readonly string[]): Promise<void> {
+    if (words.length === 0) return;
+    await this.withStatisticsWordCounterPublishQueue(async () => {
+      const trackedWords = await this.readStatisticsWordCounterTrackedWords();
+      const changedWords = words.filter((word) => trackedWords.has(word));
+      if (changedWords.length === 0) return;
+      const stored = await this.ctx.storage.get(STATISTICS_WORD_COUNTER_PENDING_KEY);
+      const pending = new Set(Array.isArray(stored)
+        ? stored.filter((word): word is string => typeof word === "string")
+        : []);
+      for (const word of changedWords) pending.add(word);
+      await this.ctx.storage.put(STATISTICS_WORD_COUNTER_PENDING_KEY, [...pending]);
+      await this.flushStatisticsWordCounterUpdatesLocked();
+    });
+  }
+
+  private async flushStatisticsWordCounterUpdates(): Promise<void> {
+    await this.withStatisticsWordCounterPublishQueue(() => this.flushStatisticsWordCounterUpdatesLocked());
+  }
+
+  private async flushStatisticsWordCounterUpdatesLocked(): Promise<void> {
+    const stored = await this.ctx.storage.get(STATISTICS_WORD_COUNTER_PENDING_KEY);
+    const pending = [...new Set(Array.isArray(stored)
+      ? stored.filter((word): word is string => typeof word === "string")
+      : [])];
+    const trackedWords = await this.readStatisticsWordCounterTrackedWords();
+    const eligibleWords = pending.filter((word) => trackedWords.has(word));
+    if (eligibleWords.length !== pending.length) {
+      if (eligibleWords.length === 0) await this.ctx.storage.delete(STATISTICS_WORD_COUNTER_PENDING_KEY);
+      else await this.ctx.storage.put(STATISTICS_WORD_COUNTER_PENDING_KEY, eligibleWords);
+    }
+    if (eligibleWords.length === 0) {
+      await this.clearAlarmEntry(STATISTICS_WORD_COUNTER_ALARM_KEY);
+      return;
+    }
+
+    const now = Date.now();
+    const lastPublishedAt = await this.ctx.storage.get<number>(STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY);
+    const nextAllowedAt = lastPublishedAt === undefined ? now : lastPublishedAt + STATISTICS_WORD_COUNTER_THROTTLE_MS;
+    if (now < nextAllowedAt) {
+      await this.scheduleAlarmEntry(
+        STATISTICS_WORD_COUNTER_ALARM_KEY,
+        STATISTICS_WORD_COUNTER_PUBLISH_HANDLER,
+        nextAllowedAt,
+      );
+      return;
+    }
+
+    try {
+      const values = await this.readStatisticsWordCounterValues(eligibleWords, now);
+      const firstChunk: Record<string, { streamCount: number; totalCount: number; streamIsLive: boolean }> = {};
+      const remainingWords: string[] = [];
+      let chunkFull = false;
+      for (const word of eligibleWords) {
+        const value = values[word];
+        if (value === undefined) continue;
+        if (chunkFull) {
+          remainingWords.push(word);
+          continue;
+        }
+        firstChunk[word] = value;
+        const payloadSize = new TextEncoder().encode(JSON.stringify({
+          words: firstChunk,
+          serverNow: new Date(now).toISOString(),
+        })).byteLength;
+        if (payloadSize > 3_800) {
+          Reflect.deleteProperty(firstChunk, word);
+          remainingWords.push(word);
+          chunkFull = true;
+        }
+      }
+
+      const channelId = this.ownChannelId();
+      if (channelId === null) throw new Error("Word counter updates require a named Durable Object.");
+      const payload = { words: firstChunk, serverNow: new Date(now).toISOString() };
+      const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, "statistics", {
+        kind: "overlay",
+        type: "word_counts",
+        elementKind: "statistics.word_counter",
+        payload,
+      }, true);
+      if (prepared.outcome === "no_recipients") {
+        await this.ctx.storage.delete(STATISTICS_WORD_COUNTER_PENDING_KEY);
+        await this.clearAlarmEntry(STATISTICS_WORD_COUNTER_ALARM_KEY);
+        return;
+      }
+      if (prepared.outcome !== "ready") throw new Error("Word counter realtime update was rejected.");
+      await this.publish([prepared.message]);
+      const publishedAt = Date.now();
+      await this.ctx.storage.put(STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY, publishedAt);
+      if (remainingWords.length === 0) {
+        await this.ctx.storage.delete(STATISTICS_WORD_COUNTER_PENDING_KEY);
+        await this.clearAlarmEntry(STATISTICS_WORD_COUNTER_ALARM_KEY);
+      } else {
+        await this.ctx.storage.put(STATISTICS_WORD_COUNTER_PENDING_KEY, remainingWords);
+        await this.scheduleAlarmEntry(
+          STATISTICS_WORD_COUNTER_ALARM_KEY,
+          STATISTICS_WORD_COUNTER_PUBLISH_HANDLER,
+          publishedAt + STATISTICS_WORD_COUNTER_THROTTLE_MS,
+        );
+      }
+    } catch (error: unknown) {
+      await this.scheduleAlarmEntry(
+        STATISTICS_WORD_COUNTER_ALARM_KEY,
+        STATISTICS_WORD_COUNTER_PUBLISH_HANDLER,
+        Date.now() + STATISTICS_WORD_COUNTER_THROTTLE_MS,
+      );
+      throw error;
+    }
+  }
+
+  private async readStatisticsWordCounterValues(
+    words: readonly string[],
+    now: number,
+  ): Promise<Record<string, { streamCount: number; totalCount: number; streamIsLive: boolean }>> {
+    const channelId = this.ownChannelId();
+    if (channelId === null || words.length === 0) return {};
+    const [streamState, settingsRow] = await Promise.all([
+      this.env.DB.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
+        .bind(channelId).first<{ state: string; stream_id: string | null }>(),
+      this.env.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'statistics'")
+        .bind(channelId).first<{ settings: string }>(),
+    ]);
+    const streamIsLive = streamState?.state === "online";
+    let selectedStreamId = streamIsLive ? streamState.stream_id ?? null : null;
+    if (!streamIsLive) {
+      selectedStreamId = this.ctx.storage.sql.exec<{ stream_id: string }>(
+        `SELECT stream_id FROM ${STATISTICS_WORD_STREAM_TABLE}
+          WHERE expires_at > ?
+          ORDER BY CASE WHEN ended_at IS NULL THEN 0 ELSE 1 END ASC, ended_at DESC, stream_id DESC
+          LIMIT 1`,
+        now,
+      ).toArray()[0]?.stream_id ?? null;
+    }
+
+    let ignoredWords = new Set<string>();
+    if (settingsRow !== null) {
+      try {
+        const settings = JSON.parse(settingsRow.settings) as unknown;
+        if (typeof settings === "object" && settings !== null && !Array.isArray(settings) &&
+            "ignoredWords" in settings && Array.isArray(settings.ignoredWords)) {
+          ignoredWords = new Set(settings.ignoredWords.filter((word): word is string => typeof word === "string")
+            .map(foldStatisticsWord));
+        }
+      } catch {
+        // Invalid legacy settings leave ignored words visible, matching the dashboard's repairable state.
+      }
+    }
+
+    const baselineRows = await this.env.DB.prepare(
+      `SELECT word, display_word, total_count, last_seen_at
+         FROM channel_word_frequency_baseline
+        WHERE channel_id = ?
+        ORDER BY total_count DESC, word ASC`,
+    ).bind(channelId).all<{
+      word: string;
+      display_word: string;
+      total_count: number;
+      last_seen_at: string;
+    }>();
+    const baselineCounts = new Map<string, StatisticsWordCountValue>();
+    for (const row of baselineRows.results) {
+      addStatisticsWordCount(baselineCounts, {
+        word: row.word,
+        displayWord: row.display_word,
+        count: row.total_count,
+        lastSeenAt: row.last_seen_at,
+      });
+    }
+
+    const mergedBatches = streamIsLive && selectedStreamId !== null
+      ? new Set((await this.env.DB.prepare(
+        `SELECT batch FROM channel_word_frequency_streams
+          WHERE channel_id = ? AND stream_id = ? AND merged_at IS NOT NULL`,
+      ).bind(channelId, selectedStreamId).all<{ batch: number }>()).results.map(({ batch }) => batch))
+      : new Set<number>();
+    const hiddenBefore = new Date(now - STATISTICS_WORD_RARE_HIDE_MILLISECONDS).toISOString();
+    const values: Record<string, { streamCount: number; totalCount: number; streamIsLive: boolean }> = {};
+    for (const word of words) {
+      const lookup = selectedStreamId === null
+        ? { streamId: null, batches: [], streamWord: null, bufferedWord: null }
+        : await this.readStatisticsWordCountForLookup(selectedStreamId, word);
+      const count = calculateStatisticsWordCountForLookup(
+        word,
+        baselineCounts,
+        streamIsLive ? lookup.batches : [],
+        mergedBatches,
+        lookup.streamWord,
+        lookup.bufferedWord,
+        hiddenBefore,
+        streamIsLive,
+      );
+      const hidden = ignoredWords.has(word) || count.hiddenByRarity;
+      values[word] = {
+        streamCount: hidden ? 0 : count.streamCount,
+        totalCount: hidden ? 0 : count.totalCount,
+        streamIsLive,
+      };
+    }
+    return values;
   }
 
   private flushStatisticsWordCounts(): Promise<void> {
@@ -5123,16 +5410,29 @@ export class ChannelObject extends DurableObject<Env> {
 
   /** Reads one word's persisted counts and in-memory count without flushing buffered words. */
   public readStatisticsWordCountForLookup(
-    streamId: string,
+    streamId: string | undefined,
     word: string,
   ): Promise<{
+    streamId: string | null;
     batches: readonly StatisticsWordBatchCounts[];
     streamWord: ModuleStatisticsWordCount | null;
     bufferedWord: ModuleStatisticsWordCount | null;
   }> {
     const foldedWord = foldStatisticsWord(word);
-    if (foldedWord.length === 0) return Promise.resolve({ batches: [], streamWord: null, bufferedWord: null });
     this.ensureStatisticsSchema();
+    const selectedStreamId = streamId ?? this.ctx.storage.sql.exec<{ stream_id: string }>(
+      `SELECT stream_id FROM ${STATISTICS_WORD_STREAM_TABLE}
+        WHERE expires_at > ?
+        ORDER BY CASE WHEN ended_at IS NULL THEN 0 ELSE 1 END ASC, ended_at DESC, stream_id DESC
+        LIMIT 1`,
+      Date.now(),
+    ).toArray()[0]?.stream_id ?? null;
+    if (selectedStreamId === null || foldedWord.length === 0) return Promise.resolve({
+      streamId: selectedStreamId,
+      batches: [],
+      streamWord: null,
+      bufferedWord: null,
+    });
     const batchRows = this.ctx.storage.sql.exec<{
       batch: number;
       word: string;
@@ -5144,7 +5444,7 @@ export class ChannelObject extends DurableObject<Env> {
          FROM ${STATISTICS_WORD_COUNT_TABLE} AS counts
         WHERE counts.stream_id = ? AND counts.word = ?
         ORDER BY counts.batch ASC`,
-      streamId,
+      selectedStreamId,
       foldedWord,
     ).toArray();
     const streamRow = this.ctx.storage.sql.exec<{
@@ -5156,11 +5456,12 @@ export class ChannelObject extends DurableObject<Env> {
       `SELECT totals.word, totals.display_word, totals.count, totals.last_seen_at
          FROM statistics_word_stream_totals AS totals
         WHERE totals.stream_id = ? AND totals.word = ?`,
-      streamId,
+      selectedStreamId,
       foldedWord,
     ).toArray()[0];
-    const buffered = this.statisticsWordCounts.get(`${streamId}\u0000${foldedWord}`);
+    const buffered = this.statisticsWordCounts.get(`${selectedStreamId}\u0000${foldedWord}`);
     return Promise.resolve({
+      streamId: selectedStreamId,
       batches: batchRows.map((row) => ({
         batch: row.batch,
         words: [{
@@ -8429,6 +8730,12 @@ export class ChannelObject extends DurableObject<Env> {
           return undefined;
         },
       }],
+      [STATISTICS_WORD_COUNTER_PUBLISH_HANDLER, {
+        retryDelaysMs: [STATISTICS_WORD_COUNTER_THROTTLE_MS, 5_000],
+        handle: async () => {
+          await this.flushStatisticsWordCounterUpdates();
+        },
+      }],
       [MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER, {
         retryDelaysMs: [5_000, 15_000, 60_000],
         handle: async (key) => {
@@ -8991,6 +9298,10 @@ export class ChannelObject extends DurableObject<Env> {
     const ownChannelId = this.ownChannelId();
     if (ownChannelId === null || messages.some((message) => message.channelId !== ownChannelId)) {
       throw new Error("Realtime message belongs to a foreign channel.");
+    }
+    if (messages.some((message) => message.type === "overlay.changed")) {
+      this.statisticsWordCounterTrackedWords = null;
+      this.statisticsWordCounterTrackedWordsGeneration += 1;
     }
     const now = Date.now();
     const ordinarySockets = messages.some((message) => message.type !== "overlay.changed" &&

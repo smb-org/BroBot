@@ -10,6 +10,7 @@ export const AD_COUNTDOWN_REFRESH_HANDLER = "channel.ad_countdown_refresh";
 export const MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER = "channel.module_schedule_inputs_changed";
 export const CLIP_JOB_ALARM_HANDLER = "channel.clip_jobs";
 export const TEMP_VIP_EXPIRY_ALARM_HANDLER = "channel.temp_vip_expiry";
+export const STATISTICS_WORD_COUNTER_PUBLISH_HANDLER = "channel.statistics_word_counter_publish";
 
 // Every host alarm scheduled by ChannelObject has a matching runtime handler.
 // Keep this registry beside the module registry so coverage can compare the
@@ -26,6 +27,7 @@ export const CHANNEL_HOST_ALARM_HANDLER_KEYS = [
   MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER,
   CLIP_JOB_ALARM_HANDLER,
   TEMP_VIP_EXPIRY_ALARM_HANDLER,
+  STATISTICS_WORD_COUNTER_PUBLISH_HANDLER,
 ] as const;
 
 export const missingAlarmHandlerKeys = (

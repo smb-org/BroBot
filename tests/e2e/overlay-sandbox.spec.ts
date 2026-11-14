@@ -1,10 +1,13 @@
 import { expect, test } from "@playwright/test";
+import { createHmac, randomUUID } from "node:crypto";
 import {
   createE2ESessionCredentials,
   e2eChannelId,
   e2eOverlayToken,
+  e2eWorkerEnvironment,
   e2eWorkerOrigin,
   seedE2EOverlay,
+  seedE2EWordCounterOverlay,
 } from "./worker-fixtures";
 
 const bootstrap = {
@@ -174,4 +177,94 @@ test("a sandboxed embed bootstraps through Worker CORS and receives a real Worke
     }
   })).toBe(true);
   await expect(frame.locator(".brobot-variable__value")).toHaveText("42");
+});
+
+test("a sandboxed overlay updates its word counter after a real chat message", async ({ page }) => {
+  test.setTimeout(60_000);
+  const channelId = `channel-e2e-counter-${randomUUID()}`;
+  const overlay = seedE2EWordCounterOverlay(channelId);
+  const connected = new Promise<void>((resolve) => {
+    page.on("websocket", (socket) => {
+      if (new URL(socket.url()).pathname !== "/ws/overlay") return;
+      socket.on("framereceived", ({ payload }) => {
+        const frame = typeof payload === "string" ? payload : payload.toString("utf8");
+        if (frame.includes('"system.hello"')) resolve();
+      });
+    });
+  });
+  await page.goto(`/tests/e2e/fixtures/overlay-embed.html#token=${encodeURIComponent(overlay.overlayToken)}&origin=${encodeURIComponent(e2eWorkerOrigin)}`);
+  const frame = page.frameLocator("#overlay-frame");
+  await expect(frame.locator(".statistics-word-counter")).toBeVisible();
+  await expect(frame.locator(".statistics-word-counter__value").first()).toHaveText("0");
+  await connected;
+
+  const postNotification = async (type: "stream.online" | "channel.chat.message", event: Record<string, unknown>): Promise<void> => {
+    const messageId = `eventsub-counter-${randomUUID()}`;
+    const timestamp = new Date().toISOString();
+    const payload = {
+      subscription: {
+        id: `subscription-${type.replaceAll(".", "-")}`,
+        type,
+        version: "1",
+        status: "enabled",
+        condition: type === "channel.chat.message"
+          ? { broadcaster_user_id: channelId, user_id: "bot-counter-e2e" }
+          : { broadcaster_user_id: channelId },
+        transport: { method: "webhook", callback: `${e2eWorkerOrigin}/api/twitch/eventsub` },
+        created_at: timestamp,
+      },
+      event,
+    };
+    const body = Buffer.from(JSON.stringify(payload));
+    const secretRing = JSON.parse(e2eWorkerEnvironment.TWITCH_EVENTSUB_SECRET ?? "{}") as {
+      active?: { key?: string };
+    };
+    const eventSubKey = secretRing.active?.key;
+    if (eventSubKey === undefined) throw new Error("The E2E EventSub signing key is missing.");
+    const signature = createHmac("sha256", eventSubKey)
+      .update(messageId)
+      .update(timestamp)
+      .update(body)
+      .digest("hex");
+    const response = await page.request.post(`${e2eWorkerOrigin}/api/twitch/eventsub`, {
+      headers: {
+        "Content-Type": "application/json",
+        "Twitch-Eventsub-Message-Id": messageId,
+        "Twitch-Eventsub-Message-Timestamp": timestamp,
+        "Twitch-Eventsub-Message-Signature": `sha256=${signature}`,
+        "Twitch-Eventsub-Message-Type": "notification",
+      },
+      data: body,
+    });
+    expect(response.status()).toBe(204);
+  };
+
+  const startedAt = new Date().toISOString();
+  const streamId = `stream-counter-${randomUUID()}`;
+  await postNotification("stream.online", {
+    id: streamId,
+    broadcaster_user_id: channelId,
+    broadcaster_user_login: overlay.channelLogin,
+    broadcaster_user_name: "E2E Kanal",
+    type: "live",
+    started_at: startedAt,
+  });
+  await expect(frame.locator(".statistics-word-counter")).toHaveAttribute("data-stream-live", "true");
+
+  const messageId = `chat-counter-${randomUUID()}`;
+  const text = "Fak";
+  await postNotification("channel.chat.message", {
+    broadcaster_user_id: channelId,
+    broadcaster_user_login: overlay.channelLogin,
+    broadcaster_user_name: "E2E Kanal",
+    chatter_user_id: "viewer-counter-e2e",
+    chatter_user_login: "frostfern",
+    chatter_user_name: "Frost Fern",
+    message_id: messageId,
+    message: { text, fragments: [{ type: "text", text }] },
+    message_type: "text",
+    badges: [],
+  });
+
+  await expect.poll(async () => frame.locator(".statistics-word-counter__value").allTextContents()).toEqual(["1", "1"]);
 });

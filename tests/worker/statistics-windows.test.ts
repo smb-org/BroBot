@@ -476,6 +476,7 @@ describe("statistics windows in the channel object", () => {
       ],
     }]);
     await expect(object.readStatisticsWordCountForLookup(streamId, "FAAAK")).resolves.toEqual({
+      streamId,
       batches: [{
         batch: 1,
         words: [{ word: "fak", displayWord: "faaak", count: 7, lastSeenAt: "2026-10-25T12:01:00.000Z" }],

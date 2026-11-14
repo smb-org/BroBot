@@ -312,6 +312,11 @@ export interface ModuleOverlayElementContext {
   overlayTemplateVariableNames: ReadonlySet<string>;
   /** Reads only this overlay element's module ballot in the current channel. */
   readBallot: (ballotId: string) => Promise<BallotSnapshot | null>;
+  /** Reads one word's current or latest retained stream counts without flushing the channel buffer. */
+  readStatisticsWordCountForLookup?: (
+    streamId: string | undefined,
+    word: string,
+  ) => Promise<ModuleStatisticsWordCountLookup>;
 }
 
 export type ModuleOverlayInitialStateContext = ModuleOverlayElementContext | ModuleOverlaySnapshotContext;
@@ -966,6 +971,13 @@ export interface ModuleStatisticsWordCount {
   lastSeenAt: string;
 }
 
+export interface ModuleStatisticsWordCountLookup {
+  streamId: string | null;
+  batches: readonly { batch: number; words: readonly ModuleStatisticsWordCount[] }[];
+  streamWord: ModuleStatisticsWordCount | null;
+  bufferedWord: ModuleStatisticsWordCount | null;
+}
+
 export interface ModuleStatisticsPreparedWordBucket {
   words: readonly ModuleStatisticsWordCount[];
 }
@@ -1064,6 +1076,8 @@ interface ModuleStatisticsChat {
     idleBefore: number,
   ) => Promise<ModuleStatisticsPreparedWordBucket | null>;
   deleteWordBucket: (bucket: ModuleStatisticsWordBucket) => Promise<void>;
+  /** Enqueues tracked word counters after their baseline changes. */
+  queueWordCounterOverlayRefresh?: () => Promise<void>;
   pruneExpiredWordStreams: (now: number) => Promise<void>;
   hasWordStreams: () => Promise<boolean>;
   markClipImportPending: (streamId: string, startedAt: string | null, endedAt: string) => Promise<void>;

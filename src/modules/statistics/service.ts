@@ -12,7 +12,7 @@ import { statisticsSettingsSchema, type StatisticsSettings } from "./contracts";
 import { wordCommandTexts } from "./locale";
 import {
   addStatisticsWordCount,
-  calculateStatisticsWordCount,
+  calculateStatisticsWordCountForLookup,
   STATISTICS_WORD_BASELINE_LIMIT,
   STATISTICS_WORD_RARE_HIDE_MILLISECONDS,
   STATISTICS_WORD_STREAM_IDLE_MILLISECONDS,
@@ -164,8 +164,6 @@ const processStatisticsWordCommand = async (
     : (readResults[1] as D1Result<{ batch: number }>).results.map(({ batch }) => batch));
 
   const baselineCounts = new Map<string, StatisticsWordCountValue>();
-  const pendingCounts = new Map<string, StatisticsWordCountValue>();
-  const fullStreamCounts = new Map<string, StatisticsWordCountValue>();
   for (const row of baselineRows) {
     addStatisticsWordCount(baselineCounts, {
       word: row.word,
@@ -174,18 +172,10 @@ const processStatisticsWordCommand = async (
       lastSeenAt: row.last_seen_at,
     });
   }
-  for (const batch of pendingBatches) {
-    if (mergedBatches.has(batch.batch)) continue;
-    for (const row of batch.words) addStatisticsWordCount(pendingCounts, row);
-  }
-  if (streamWord !== null) addStatisticsWordCount(fullStreamCounts, streamWord);
-  if (bufferedWord !== null) {
-    addStatisticsWordCount(pendingCounts, bufferedWord);
-    addStatisticsWordCount(fullStreamCounts, bufferedWord);
-  }
-
   const hiddenBefore = new Date(Date.now() - STATISTICS_WORD_RARE_HIDE_MILLISECONDS).toISOString();
-  const count = calculateStatisticsWordCount(word, baselineCounts, pendingCounts, "total", hiddenBefore, fullStreamCounts);
+  const count = calculateStatisticsWordCountForLookup(
+    word, baselineCounts, pendingBatches, mergedBatches, streamWord, bufferedWord, hiddenBefore,
+  );
   const ignoredWords = new Set(event.settings.ignoredWords.map(foldStatisticsWord));
   const language = await context.channelLanguage();
   const text = count.count === 0 || count.hiddenByRarity || ignoredWords.has(word)
@@ -664,7 +654,10 @@ export const handleStatisticsWindowAlarm = async (
         );
         // A refused merge (stream turned live meanwhile) keeps the bucket for a later alarm and blocks
         // the stream's later batches so they cannot overtake it and reorder the capped baseline.
-        if (merged) await context.statisticsChat.deleteWordBucket(bucket);
+        if (merged) {
+          await context.statisticsChat.queueWordCounterOverlayRefresh?.();
+          await context.statisticsChat.deleteWordBucket(bucket);
+        }
         else blockedStreams.add(bucket.streamId);
       } catch (error: unknown) {
         blockedStreams.add(bucket.streamId);

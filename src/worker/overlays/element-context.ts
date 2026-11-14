@@ -9,6 +9,7 @@ import type {
   ModuleQuizOverlaySnapshot,
   ModuleOverlayTemplateConditions,
   ModuleOverlayTemplateValue,
+  ModuleStatisticsWordCountLookup,
   ModuleTemplateConditionContext,
   ModuleTemplateConditionTimelineContext,
   ModuleTextBlockConditionDefinition,
@@ -390,5 +391,14 @@ export const createOverlayElementContext = async (
     dynamicTemplateVariableNames,
     overlayTemplateVariableNames,
     readBallot: (ballotId) => moduleBallots(env.CHANNEL, channelId, moduleId).read(ballotId),
+    readStatisticsWordCountForLookup: async (streamId, word) => {
+      const channelObject = env.CHANNEL.get(env.CHANNEL.idFromName(channelId)) as unknown as {
+        readStatisticsWordCountForLookup: (
+          selectedStreamId: string | undefined,
+          selectedWord: string,
+        ) => Promise<ModuleStatisticsWordCountLookup>;
+      };
+      return await channelObject.readStatisticsWordCountForLookup(streamId, word);
+    },
   };
 };

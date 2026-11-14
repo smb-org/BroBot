@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RealtimeEnvelope } from "../../src/realtime-contract";
 import type { OverlayRealtimeCallbacks } from "../../src/overlay/realtime";
 import { emoteSlotOverlayElement } from "../../src/modules/emote_slots/overlay/element";
+import { statisticsWordCounterOverlayElement } from "../../src/modules/statistics/overlay/element";
 
 const realtimeMocks = vi.hoisted(() => ({ connectOverlayRealtime: vi.fn() }));
 
@@ -110,6 +111,48 @@ const quizOverlayPayload = (state: Record<string, unknown> | null): Response => 
   },
   variables: {},
 }), { status: 200, headers: { "Content-Type": "application/json" } });
+
+const wordCounterOverlayPayload = (word: string, state: Record<string, unknown>): Response => new Response(JSON.stringify({
+  language: "en",
+  overlay: {
+    id: "word-counter-retry-fixture",
+    revision: 1,
+    width: 1920,
+    height: 1080,
+    css: "",
+    elements: [{
+      ...element("word-counter", 0, 0, 100, 1, true, "", "statistics.word_counter"),
+      label: word,
+      variableName: null,
+      text: "",
+      config: { word, label: word, show: "both" },
+      state,
+      moduleEnabled: true,
+    }],
+  },
+  variables: {},
+}), { status: 200, headers: { "Content-Type": "application/json" } });
+
+const wordCounterMessage = (
+  id: string,
+  word: string,
+  streamCount: number,
+  totalCount: number,
+  serverNow: string,
+): RealtimeEnvelope<"modul.statistics.word_counts"> => ({
+  version: 1,
+  id,
+  createdAt: serverNow,
+  channelId: "fictional-channel",
+  type: "modul.statistics.word_counts",
+  payload: {
+    words: { [word]: { streamCount, totalCount, streamIsLive: true } },
+    serverNow,
+  },
+});
+
+const wordCounterValues = (container: HTMLElement): string[] =>
+  Array.from(container.querySelectorAll(".statistics-word-counter__value"), (value) => value.textContent);
 
 const slotSpinState = {
   spinId: "spin-shell-fixture",
@@ -858,6 +901,306 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a failed word change after replaying a queued chunk", async () => {
+    vi.useFakeTimers();
+    await statisticsWordCounterOverlayElement.load();
+    const start = Date.parse("2030-01-01T00:00:00.000Z");
+    vi.setSystemTime(start);
+    const reloadAt = start + 250;
+    let finishReload: ((response: Response) => void) | undefined;
+    const reload = new Promise<Response>((resolve) => { finishReload = resolve; });
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        bootstrapWordSet: true,
+        words: { alpha: { streamCount: 42, totalCount: 420, streamIsLive: true } },
+        serverNow: new Date(start).toISOString(),
+      }))
+      .mockImplementationOnce(() => reload)
+      .mockResolvedValueOnce(wordCounterOverlayPayload("beta", {
+        bootstrapWordSet: true,
+        words: { beta: { streamCount: 6, totalCount: 60, streamIsLive: true } },
+        serverNow: new Date(reloadAt + 30_000).toISOString(),
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    act(() => realtimeCallbacks?.onOverlayChanged?.({
+      version: 1,
+      id: "word-counter-config-changed",
+      createdAt: new Date(reloadAt).toISOString(),
+      channelId: "fictional-channel",
+      type: "overlay.changed",
+      payload: { overlayId: "word-counter-retry-fixture", revision: 2 },
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    act(() => realtimeCallbacks?.onModuleMessage?.(wordCounterMessage(
+      "queued-beta-chunk",
+      "beta",
+      5,
+      50,
+      new Date(reloadAt + 5_000).toISOString(),
+    )));
+    finishReload?.(wordCounterOverlayPayload("beta", {
+      serverNow: new Date(reloadAt).toISOString(),
+      refreshAt: new Date(reloadAt + 30_000).toISOString(),
+    }));
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+
+    expect(container.querySelector(".statistics-word-counter__label")).toHaveTextContent("beta");
+    expect(wordCounterValues(container)).toEqual(["0", "0"]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(wordCounterValues(container)).toEqual(["6", "60"]);
+
+    act(() => realtimeCallbacks?.onModuleMessage?.(wordCounterMessage(
+      "beta-chunk-after-retry",
+      "beta",
+      8,
+      80,
+      new Date(reloadAt + 31_000).toISOString(),
+    )));
+    expect(wordCounterValues(container)).toEqual(["8", "80"]);
+  });
+
+  it("keeps same-word counters through a failed reload and live chunks", async () => {
+    vi.useFakeTimers();
+    await statisticsWordCounterOverlayElement.load();
+    const start = Date.parse("2030-01-01T00:00:00.000Z");
+    vi.setSystemTime(start);
+    const reloadAt = start + 250;
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        bootstrapWordSet: true,
+        words: { alpha: { streamCount: 42, totalCount: 420, streamIsLive: true } },
+        serverNow: new Date(start).toISOString(),
+      }))
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        serverNow: new Date(reloadAt).toISOString(),
+        refreshAt: new Date(reloadAt + 30_000).toISOString(),
+      }))
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        bootstrapWordSet: true,
+        words: { alpha: { streamCount: 45, totalCount: 450, streamIsLive: true } },
+        serverNow: new Date(reloadAt + 30_000).toISOString(),
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "statistics-stream-state-changed",
+      createdAt: new Date(reloadAt).toISOString(),
+      channelId: "fictional-channel",
+      type: "modul.statistics.state_changed",
+      payload: { reason: "stream.state.changed" },
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(wordCounterValues(container)).toEqual(["42", "420"]);
+
+    act(() => realtimeCallbacks?.onModuleMessage?.(wordCounterMessage(
+      "alpha-live-chunk-one",
+      "alpha",
+      43,
+      430,
+      new Date(reloadAt + 5_000).toISOString(),
+    )));
+    expect(wordCounterValues(container)).toEqual(["43", "430"]);
+    act(() => realtimeCallbacks?.onModuleMessage?.(wordCounterMessage(
+      "alpha-live-chunk-two",
+      "alpha",
+      44,
+      440,
+      new Date(reloadAt + 10_000).toISOString(),
+    )));
+    expect(wordCounterValues(container)).toEqual(["44", "440"]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(wordCounterValues(container)).toEqual(["45", "450"]);
+  });
+
+  it("applies a delayed chunk older than a failed reload but newer than the bootstrap", async () => {
+    vi.useFakeTimers();
+    await statisticsWordCounterOverlayElement.load();
+    const start = Date.parse("2030-01-01T00:00:00.000Z");
+    vi.setSystemTime(start);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        bootstrapWordSet: true,
+        words: { alpha: { streamCount: 42, totalCount: 420, streamIsLive: true } },
+        serverNow: new Date(start).toISOString(),
+      }))
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        serverNow: new Date(start + 10_000).toISOString(),
+        refreshAt: new Date(start + 40_000).toISOString(),
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "statistics-stream-state-changed",
+      createdAt: new Date(start + 250).toISOString(),
+      channelId: "fictional-channel",
+      type: "modul.statistics.state_changed",
+      payload: { reason: "stream.state.changed" },
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(wordCounterValues(container)).toEqual(["42", "420"]);
+
+    act(() => realtimeCallbacks?.onModuleMessage?.(wordCounterMessage(
+      "alpha-delayed-chunk",
+      "alpha",
+      43,
+      430,
+      new Date(start + 5_000).toISOString(),
+    )));
+    expect(wordCounterValues(container)).toEqual(["43", "430"]);
+  });
+
+  it("reschedules repeated word-counter hydration failures without losing counters", async () => {
+    vi.useFakeTimers();
+    await statisticsWordCounterOverlayElement.load();
+    const start = Date.parse("2030-01-01T00:00:00.000Z");
+    vi.setSystemTime(start);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        bootstrapWordSet: true,
+        words: { alpha: { streamCount: 42, totalCount: 420, streamIsLive: true } },
+        serverNow: new Date(start).toISOString(),
+      }))
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        serverNow: new Date(start).toISOString(),
+        refreshAt: new Date(start + 30_000).toISOString(),
+      }))
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        serverNow: new Date(start + 30_000).toISOString(),
+        refreshAt: new Date(start + 60_000).toISOString(),
+      }))
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        bootstrapWordSet: true,
+        words: { alpha: { streamCount: 50, totalCount: 500, streamIsLive: true } },
+        serverNow: new Date(start + 60_000).toISOString(),
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(wordCounterValues(container)).toEqual(["42", "420"]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(wordCounterValues(container)).toEqual(["42", "420"]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(wordCounterValues(container)).toEqual(["50", "500"]);
+  });
+
+  it("retries a failed word-counter hydration after its configured word changes", async () => {
+    vi.useFakeTimers();
+    await statisticsWordCounterOverlayElement.load();
+    const start = Date.parse("2030-01-01T00:00:00.000Z");
+    vi.setSystemTime(start);
+    const payloadFor = (word: string, state: Record<string, unknown>): Response => new Response(JSON.stringify({
+      language: "en",
+      overlay: {
+        id: "word-counter-retry-fixture",
+        revision: 1,
+        width: 1920,
+        height: 1080,
+        css: "",
+        elements: [{
+          ...element("word-counter", 0, 0, 100, 1, true, "", "statistics.word_counter"),
+          label: word,
+          variableName: null,
+          text: "",
+          config: { word, label: word, show: "both" },
+          state,
+          moduleEnabled: true,
+        }],
+      },
+      variables: {},
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(payloadFor("alpha", {
+        bootstrapWordSet: true,
+        words: { alpha: { streamCount: 42, totalCount: 420, streamIsLive: true } },
+        serverNow: new Date(start).toISOString(),
+      }))
+      .mockResolvedValueOnce(payloadFor("beta", {
+        serverNow: new Date(start).toISOString(),
+        refreshAt: new Date(start + 30_000).toISOString(),
+      }))
+      .mockResolvedValueOnce(payloadFor("beta", {
+        bootstrapWordSet: true,
+        words: { beta: { streamCount: 6, totalCount: 60, streamIsLive: true } },
+        serverNow: new Date(start + 30_000).toISOString(),
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(container.querySelector(".statistics-word-counter__label")).toHaveTextContent("alpha");
+    expect(Array.from(container.querySelectorAll(".statistics-word-counter__value"), (value) => value.textContent))
+      .toEqual(["42", "420"]);
+
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(container.querySelector(".statistics-word-counter__label")).toHaveTextContent("beta");
+    expect(Array.from(container.querySelectorAll(".statistics-word-counter__value"), (value) => value.textContent))
+      .toEqual(["0", "0"]);
+
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "beta-chunk-before-retry",
+      createdAt: new Date(start + 5_000).toISOString(),
+      channelId: "fictional-channel",
+      type: "modul.statistics.word_counts",
+      payload: {
+        words: { beta: { streamCount: 5, totalCount: 50, streamIsLive: true } },
+        serverNow: new Date(start + 5_000).toISOString(),
+      },
+    }));
+    expect(Array.from(container.querySelectorAll(".statistics-word-counter__value"), (value) => value.textContent))
+      .toEqual(["0", "0"]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(Array.from(container.querySelectorAll(".statistics-word-counter__value"), (value) => value.textContent))
+      .toEqual(["6", "60"]);
+
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "beta-chunk-after-retry",
+      createdAt: new Date(start + 31_000).toISOString(),
+      channelId: "fictional-channel",
+      type: "modul.statistics.word_counts",
+      payload: {
+        words: { beta: { streamCount: 8, totalCount: 80, streamIsLive: true } },
+        serverNow: new Date(start + 31_000).toISOString(),
+      },
+    }));
+    expect(Array.from(container.querySelectorAll(".statistics-word-counter__value"), (value) => value.textContent))
+      .toEqual(["8", "80"]);
   });
 
   it("keeps a denied bootstrap transparent when a legacy debug fragment is present", async () => {
