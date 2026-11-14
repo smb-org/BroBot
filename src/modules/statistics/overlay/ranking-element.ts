@@ -30,9 +30,9 @@ const initialState = async (
     bootstrap: true,
     serverNow: snapshot.serverNow,
     stream: config.scope === "stream"
-      ? { entries: snapshot.entries, streamIsLive: snapshot.streamIsLive ?? false }
+      ? { entries: snapshot.entries, streamIsLive: snapshot.streamIsLive ?? false, computedAt: snapshot.serverNow }
       : null,
-    total: config.scope === "total" ? { entries: snapshot.entries } : null,
+    total: config.scope === "total" ? { entries: snapshot.entries, computedAt: snapshot.serverNow } : null,
   });
 };
 
@@ -53,8 +53,8 @@ const previewState = (rawConfig: JsonObject, _language: "de" | "en", now: number
   return statisticsWordRankingStateToJson({
     bootstrap: true,
     serverNow: new Date(now).toISOString(),
-    stream: config.scope === "stream" ? { entries, streamIsLive: true } : null,
-    total: config.scope === "total" ? { entries } : null,
+    stream: config.scope === "stream" ? { entries, streamIsLive: true, computedAt: new Date(now).toISOString() } : null,
+    total: config.scope === "total" ? { entries, computedAt: new Date(now).toISOString() } : null,
   });
 };
 

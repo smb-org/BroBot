@@ -17,7 +17,7 @@ describe("statistics word ranking overlay", () => {
         total: { entries: [
           { word: "alpha", displayWord: "Alpha", count: 20 },
           { word: "beta", displayWord: "Beta", count: 10 },
-        ] },
+        ], computedAt: "2030-01-01T00:00:00.000Z" },
       }} now={0} language="en" />);
 
     expect(container.querySelectorAll(".statistics-word-ranking__row")).toHaveLength(5);
@@ -34,7 +34,7 @@ describe("statistics word ranking overlay", () => {
         stream: { entries: [
           { word: "alpha", displayWord: "Alpha", count: 12 },
           { word: "beta", displayWord: "Beta", count: 6 },
-        ], streamIsLive: true },
+        ], streamIsLive: true, computedAt: "2030-01-01T00:00:00.000Z" },
         total: null,
       }} now={0} language="en" />);
 

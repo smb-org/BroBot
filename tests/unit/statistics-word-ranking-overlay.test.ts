@@ -16,8 +16,8 @@ const rankingState = (
   entries: readonly { word: string; displayWord: string; count: number }[],
 ): Record<string, unknown> => ({
   serverNow,
-  stream: { entries, streamIsLive: true },
-  total: { entries },
+  stream: { entries, streamIsLive: true, computedAt: serverNow },
+  total: { entries, computedAt: serverNow },
 });
 
 describe("statistics word ranking state", () => {
@@ -47,7 +47,9 @@ describe("statistics word ranking state", () => {
       { word: "alpha", displayWord: "ALPHA", count: 5 },
     ]));
 
-    expect(next.stream).toEqual({ entries: [{ word: "alpha", displayWord: "ALPHA", count: 5 }], streamIsLive: true });
+    expect(next.stream).toEqual({
+      entries: [{ word: "alpha", displayWord: "ALPHA", count: 5 }], streamIsLive: true, computedAt: earlier,
+    });
   });
 
   it("does not replace a scope with an older bootstrap or live state", () => {
@@ -67,23 +69,31 @@ describe("statistics word ranking state", () => {
       { word: "alpha", displayWord: "Alpha", count: 4 },
     ]));
 
-    expect(next.stream).toEqual({ entries: [{ word: "alpha", displayWord: "Alpha", count: 4 }], streamIsLive: true });
+    expect(next.stream).toEqual({
+      entries: [{ word: "alpha", displayWord: "Alpha", count: 4 }], streamIsLive: true, computedAt: later,
+    });
   });
 
-  it("lets a fresh bootstrap replace a null scope", () => {
+  it("lets a fresh bootstrap populate a null scope", () => {
     const current = mergeStatisticsWordRankingRealtimeState(null, {
-      ...rankingState(earlier, [{ word: "alpha", displayWord: "Alpha", count: 4 }]),
+      serverNow: earlier,
+      stream: null,
+      total: null,
       bootstrap: true,
     });
     const next = mergeStatisticsWordRankingRealtimeState(current, {
       serverNow: later,
-      stream: null,
-      total: { entries: [{ word: "beta", displayWord: "Beta", count: 9 }] },
+      stream: { entries: [{ word: "beta", displayWord: "Beta", count: 9 }], streamIsLive: true, computedAt: later },
+      total: { entries: [{ word: "beta", displayWord: "Beta", count: 9 }], computedAt: later },
       bootstrap: true,
     });
 
-    expect(next.stream).toBeNull();
-    expect(next.total).toEqual({ entries: [{ word: "beta", displayWord: "Beta", count: 9 }] });
+    expect(next.stream).toEqual({
+      entries: [{ word: "beta", displayWord: "Beta", count: 9 }],
+      streamIsLive: true,
+      computedAt: later,
+    });
+    expect(next.total).toEqual({ entries: [{ word: "beta", displayWord: "Beta", count: 9 }], computedAt: later });
   });
 
   it("leaves a null scope unchanged in a live message", () => {
@@ -93,14 +103,14 @@ describe("statistics word ranking state", () => {
     const next = mergeStatisticsWordRankingRealtimeState(current, {
       serverNow: later,
       stream: null,
-      total: { entries: [{ word: "beta", displayWord: "Beta", count: 9 }] },
+      total: { entries: [{ word: "beta", displayWord: "Beta", count: 9 }], computedAt: later },
     });
 
     expect(next.stream).toEqual(current.stream);
-    expect(next.total).toEqual({ entries: [{ word: "beta", displayWord: "Beta", count: 9 }] });
+    expect(next.total).toEqual({ entries: [{ word: "beta", displayWord: "Beta", count: 9 }], computedAt: later });
   });
 
-  it("compares each scope against its own effective timestamp", () => {
+  it("compares each scope against its own computedAt timestamp", () => {
     const current = mergeStatisticsWordRankingRealtimeState(null, {
       ...rankingState(earlier, [{ word: "alpha", displayWord: "Alpha", count: 4 }]),
       bootstrap: true,
@@ -108,21 +118,28 @@ describe("statistics word ranking state", () => {
     const totalUpdate = mergeStatisticsWordRankingRealtimeState(current, {
       serverNow: later,
       stream: null,
-      total: { entries: [{ word: "beta", displayWord: "Beta", count: 9 }] },
+      total: { entries: [{ word: "beta", displayWord: "Beta", count: 9 }], computedAt: later },
     });
     const streamUpdate = mergeStatisticsWordRankingRealtimeState(totalUpdate, {
-      serverNow: "2030-01-01T00:00:01.000Z",
-      stream: { entries: [{ word: "delta", displayWord: "Delta", count: 7 }], streamIsLive: true },
-      total: { entries: [{ word: "delta", displayWord: "Delta", count: 7 }] },
+      serverNow: "2030-01-01T00:00:03.000Z",
+      stream: {
+        entries: [{ word: "delta", displayWord: "Delta", count: 7 }],
+        streamIsLive: true,
+        computedAt: "2030-01-01T00:00:01.000Z",
+      },
+      total: { entries: [{ word: "delta", displayWord: "Delta", count: 7 }], computedAt: "2030-01-01T00:00:01.000Z" },
     });
 
-    expect(streamUpdate.stream).toEqual({ entries: [{ word: "delta", displayWord: "Delta", count: 7 }], streamIsLive: true });
-    expect(streamUpdate.total).toEqual({ entries: [{ word: "beta", displayWord: "Beta", count: 9 }] });
-    expect(streamUpdate.streamServerNow).toBe("2030-01-01T00:00:01.000Z");
-    expect(streamUpdate.totalServerNow).toBe(later);
+    expect(streamUpdate.stream).toEqual({
+      entries: [{ word: "delta", displayWord: "Delta", count: 7 }],
+      streamIsLive: true,
+      computedAt: "2030-01-01T00:00:01.000Z",
+    });
+    expect(streamUpdate.total).toEqual({ entries: [{ word: "beta", displayWord: "Beta", count: 9 }], computedAt: later });
+    expect(streamUpdate.serverNow).toBe("2030-01-01T00:00:03.000Z");
   });
 
-  it("keeps previous scope values and effective timestamps after a hydration failure", () => {
+  it("keeps previous scope values and computedAt timestamps after a hydration failure", () => {
     const current = mergeStatisticsWordRankingRealtimeState(null, rankingState(later, [
       { word: "alpha", displayWord: "Alpha", count: 4 },
     ]));
@@ -133,8 +150,8 @@ describe("statistics word ranking state", () => {
 
     expect(failed.stream).toEqual(current.stream);
     expect(failed.total).toEqual(current.total);
-    expect(failed.streamServerNow).toBe(later);
-    expect(failed.totalServerNow).toBe(later);
+    expect((failed.stream as { computedAt?: string } | undefined)?.computedAt).toBe(later);
+    expect((failed.total as { computedAt?: string } | undefined)?.computedAt).toBe(later);
     expect(failed.refreshAt).toBe("2030-01-01T00:00:33.000Z");
     expect(failed.serverNow).toBe("2030-01-01T00:00:03.000Z");
   });
@@ -148,11 +165,15 @@ describe("statistics word ranking state", () => {
     });
     const live = mergeStatisticsWordRankingRealtimeState(failed, {
       serverNow: later,
-      stream: { entries: [{ word: "beta", displayWord: "Beta", count: 9 }], streamIsLive: true },
+      stream: { entries: [{ word: "beta", displayWord: "Beta", count: 9 }], streamIsLive: true, computedAt: later },
       total: null,
     });
 
-    expect(live.stream).toEqual({ entries: [{ word: "beta", displayWord: "Beta", count: 9 }], streamIsLive: true });
+    expect(live.stream).toEqual({
+      entries: [{ word: "beta", displayWord: "Beta", count: 9 }],
+      streamIsLive: true,
+      computedAt: later,
+    });
     expect(live.refreshAt).toBe("2030-01-01T00:00:32.000Z");
   });
 

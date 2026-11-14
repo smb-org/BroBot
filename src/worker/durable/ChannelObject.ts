@@ -441,6 +441,7 @@ const STATISTICS_WORD_SCHEMA_VERSION = 2;
 const STATISTICS_WORD_COUNTER_ALARM_KEY = "statistics:word_counter_publish";
 const STATISTICS_WORD_COUNTER_PENDING_KEY = "statistics:word_counter_pending";
 const STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY = "statistics:word_counter_last_published";
+const STATISTICS_WORD_COUNTER_LAST_COMPUTED_KEY = "statistics:word_counter_last_computed";
 const STATISTICS_WORD_RANKING_PENDING_KEY = "statistics:word_ranking_pending";
 const STATISTICS_WORD_RANKING_LAST_STREAM_KEY = "statistics:word_ranking_last:stream";
 const STATISTICS_WORD_RANKING_LAST_TOTAL_KEY = "statistics:word_ranking_last:total";
@@ -4767,7 +4768,7 @@ export class ChannelObject extends DurableObject<Env> {
       const promise = (async () => {
         const rows = await this.env.DB.prepare(
           `SELECT config_json FROM overlay_elements
-            WHERE channel_id = ? AND kind = 'statistics.word_ranking' AND in_composition = 1`,
+            WHERE channel_id = ? AND kind = 'statistics.word_ranking'`,
         ).bind(channelId).all<{ config_json: string }>();
         const scopes = new Set<StatisticsWordRankingScope>();
         for (const { config_json: serializedConfig } of rows.results) {
@@ -5034,6 +5035,18 @@ export class ChannelObject extends DurableObject<Env> {
     await this.ctx.storage.put(key, snapshot);
   }
 
+  private async nextStatisticsWordCounterUpdateAt(now = Date.now()): Promise<number> {
+    const [lastPublishedAt, lastComputedAt] = await Promise.all([
+      this.ctx.storage.get<number>(STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY),
+      this.ctx.storage.get<number>(STATISTICS_WORD_COUNTER_LAST_COMPUTED_KEY),
+    ]);
+    return Math.max(
+      now,
+      (lastPublishedAt ?? 0) + STATISTICS_WORD_COUNTER_THROTTLE_MS,
+      (lastComputedAt ?? 0) + STATISTICS_WORD_COUNTER_THROTTLE_MS,
+    );
+  }
+
   /** Reads the current dashboard-equivalent top words for an overlay bootstrap. */
   public async readStatisticsWordRanking(
     scope: StatisticsWordRankingScope,
@@ -5045,7 +5058,6 @@ export class ChannelObject extends DurableObject<Env> {
     const value = scopes.has(scope)
       ? await this.computeStatisticsWordRanking(scope, now)
       : { entries: [], ...(scope === "stream" ? { streamIsLive: false } : {}) };
-    await this.rememberStatisticsWordRankingSnapshot(scope, { serverNow, value });
     return { serverNow, entries: value.entries, ...(scope === "stream" ? { streamIsLive: value.streamIsLive ?? false } : {}) };
   }
 
@@ -5058,8 +5070,7 @@ export class ChannelObject extends DurableObject<Env> {
       const activeScopes = await this.restoreStatisticsWordRankingScopesCache();
       if (activeScopes === null || activeScopes.size === 0) return;
       await this.ctx.storage.put(STATISTICS_WORD_RANKING_PENDING_KEY, true);
-      const lastPublishedAt = await this.ctx.storage.get<number>(STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY);
-      const dueAt = Math.max(Date.now(), (lastPublishedAt ?? 0) + STATISTICS_WORD_COUNTER_THROTTLE_MS);
+      const dueAt = await this.nextStatisticsWordCounterUpdateAt();
       await this.scheduleAlarmEntry(STATISTICS_WORD_COUNTER_ALARM_KEY, STATISTICS_WORD_COUNTER_PUBLISH_HANDLER, dueAt);
     });
   }
@@ -5112,8 +5123,7 @@ export class ChannelObject extends DurableObject<Env> {
     }
 
     const now = Date.now();
-    const lastPublishedAt = await this.ctx.storage.get<number>(STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY);
-    const nextAllowedAt = lastPublishedAt === undefined ? now : lastPublishedAt + STATISTICS_WORD_COUNTER_THROTTLE_MS;
+    const nextAllowedAt = await this.nextStatisticsWordCounterUpdateAt(now);
     if (now < nextAllowedAt) {
       await this.scheduleAlarmEntry(
         STATISTICS_WORD_COUNTER_ALARM_KEY,
@@ -5168,53 +5178,65 @@ export class ChannelObject extends DurableObject<Env> {
         value: { entries: readonly StatisticsWordRankingEntry[]; streamIsLive?: boolean };
         previous: StatisticsWordRankingPublishedScope | undefined;
       }>();
-      let rankingChanged = false;
-      let rankingPrepared = false;
       for (const scope of rankingScopes) {
         const value = await this.computeStatisticsWordRanking(scope, now);
         const key = scope === "stream" ? STATISTICS_WORD_RANKING_LAST_STREAM_KEY : STATISTICS_WORD_RANKING_LAST_TOTAL_KEY;
         const previous = await this.ctx.storage.get<StatisticsWordRankingPublishedScope>(key);
         rankingValues.set(scope, { value, previous });
-        if (previous === undefined || Date.parse(previous.serverNow) <= now &&
-            JSON.stringify(previous.value) !== JSON.stringify(value)) rankingChanged = true;
       }
 
-      if (rankingChanged) {
-        const channelId = this.ownChannelId();
-        if (channelId === null) throw new Error("Word ranking updates require a named Durable Object.");
-        const stream = rankingValues.get("stream")?.value;
-        const total = rankingValues.get("total")?.value;
-        const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, "statistics", {
-          kind: "overlay",
-          type: "word_ranking",
-          elementKind: "statistics.word_ranking",
-          payload: {
-            serverNow: new Date(now).toISOString(),
-            stream: stream === undefined ? null : { entries: stream.entries, streamIsLive: stream.streamIsLive ?? false },
-            total: total === undefined ? null : { entries: total.entries },
-          },
-        }, true);
-        if (prepared.outcome === "ready") {
-          messages.push(prepared.message);
-          rankingPrepared = true;
+      const computedAt = new Date(now).toISOString();
+      await this.ctx.storage.put(STATISTICS_WORD_COUNTER_LAST_COMPUTED_KEY, Date.now());
+      const rankingPreparedValues = new Map<StatisticsWordRankingScope, {
+        value: { entries: readonly StatisticsWordRankingEntry[]; streamIsLive?: boolean };
+      }>();
+      let rankingPublishFailed = false;
+      const channelId = rankingScopes.length > 0 ? this.ownChannelId() : null;
+      for (const [scope, { value, previous }] of rankingValues) {
+        const changed = previous === undefined || Date.parse(previous.serverNow) <= now &&
+          JSON.stringify(previous.value) !== JSON.stringify(value);
+        if (!changed) continue;
+        if (channelId === null) {
+          rankingPublishFailed = true;
+          continue;
         }
-        else if (prepared.outcome === "no_recipients") await this.ctx.storage.delete(STATISTICS_WORD_RANKING_PENDING_KEY);
-        else throw new Error("Word ranking realtime update was rejected.");
-      } else if (rankingRequested) {
-        await this.ctx.storage.delete(STATISTICS_WORD_RANKING_PENDING_KEY);
+        const payload = {
+          serverNow: computedAt,
+          stream: scope === "stream"
+            ? { entries: value.entries, streamIsLive: value.streamIsLive ?? false, computedAt }
+            : null,
+          total: scope === "total" ? { entries: value.entries, computedAt } : null,
+        };
+        try {
+          const prepared = await prepareModuleOverlayRealtimeMessage(this.env.DB, channelId, "statistics", {
+            kind: "overlay",
+            type: "word_ranking",
+            elementKind: "statistics.word_ranking",
+            payload,
+          }, true);
+          if (prepared.outcome === "ready") {
+            messages.push(prepared.message);
+            rankingPreparedValues.set(scope, { value });
+          } else if (prepared.outcome === "rejected") {
+            rankingPublishFailed = true;
+          }
+        } catch {
+          rankingPublishFailed = true;
+        }
       }
 
       if (messages.length === 0) {
-        if (remainingWords.length === 0) {
-          await this.ctx.storage.delete(STATISTICS_WORD_COUNTER_PENDING_KEY);
-          await this.ctx.storage.delete(STATISTICS_WORD_RANKING_PENDING_KEY);
+        if (remainingWords.length === 0) await this.ctx.storage.delete(STATISTICS_WORD_COUNTER_PENDING_KEY);
+        else await this.ctx.storage.put(STATISTICS_WORD_COUNTER_PENDING_KEY, remainingWords);
+        if (rankingPublishFailed) await this.ctx.storage.put(STATISTICS_WORD_RANKING_PENDING_KEY, true);
+        else await this.ctx.storage.delete(STATISTICS_WORD_RANKING_PENDING_KEY);
+        if (remainingWords.length === 0 && !rankingPublishFailed) {
           await this.clearAlarmEntry(STATISTICS_WORD_COUNTER_ALARM_KEY);
         } else {
-          await this.ctx.storage.put(STATISTICS_WORD_COUNTER_PENDING_KEY, remainingWords);
           await this.scheduleAlarmEntry(
             STATISTICS_WORD_COUNTER_ALARM_KEY,
             STATISTICS_WORD_COUNTER_PUBLISH_HANDLER,
-            now + STATISTICS_WORD_COUNTER_THROTTLE_MS,
+            await this.nextStatisticsWordCounterUpdateAt(),
           );
         }
         return;
@@ -5223,31 +5245,32 @@ export class ChannelObject extends DurableObject<Env> {
       await this.publish(messages);
       const publishedAt = Date.now();
       await this.ctx.storage.put(STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY, publishedAt);
-      if (rankingPrepared) {
-        for (const [scope, { value }] of rankingValues) {
+      if (rankingPreparedValues.size > 0) {
+        for (const [scope, { value }] of rankingPreparedValues) {
           await this.rememberStatisticsWordRankingSnapshot(scope, {
-            serverNow: new Date(now).toISOString(),
+            serverNow: computedAt,
             value,
           });
         }
       }
-      await this.ctx.storage.delete(STATISTICS_WORD_RANKING_PENDING_KEY);
-      if (remainingWords.length === 0) {
-        await this.ctx.storage.delete(STATISTICS_WORD_COUNTER_PENDING_KEY);
+      if (rankingPublishFailed) await this.ctx.storage.put(STATISTICS_WORD_RANKING_PENDING_KEY, true);
+      else await this.ctx.storage.delete(STATISTICS_WORD_RANKING_PENDING_KEY);
+      if (remainingWords.length === 0) await this.ctx.storage.delete(STATISTICS_WORD_COUNTER_PENDING_KEY);
+      else await this.ctx.storage.put(STATISTICS_WORD_COUNTER_PENDING_KEY, remainingWords);
+      if (remainingWords.length === 0 && !rankingPublishFailed) {
         await this.clearAlarmEntry(STATISTICS_WORD_COUNTER_ALARM_KEY);
       } else {
-        await this.ctx.storage.put(STATISTICS_WORD_COUNTER_PENDING_KEY, remainingWords);
         await this.scheduleAlarmEntry(
           STATISTICS_WORD_COUNTER_ALARM_KEY,
           STATISTICS_WORD_COUNTER_PUBLISH_HANDLER,
-          publishedAt + STATISTICS_WORD_COUNTER_THROTTLE_MS,
+          await this.nextStatisticsWordCounterUpdateAt(publishedAt),
         );
       }
     } catch (error: unknown) {
       await this.scheduleAlarmEntry(
         STATISTICS_WORD_COUNTER_ALARM_KEY,
         STATISTICS_WORD_COUNTER_PUBLISH_HANDLER,
-        Date.now() + STATISTICS_WORD_COUNTER_THROTTLE_MS,
+        await this.nextStatisticsWordCounterUpdateAt(),
       );
       throw error;
     }
@@ -9922,15 +9945,13 @@ export class ChannelObject extends DurableObject<Env> {
       : null;
     if ((statisticsStateChanged || streamStateChanged) && activeScopes !== null && activeScopes.size > 0) {
       await this.ctx.storage.put(STATISTICS_WORD_RANKING_PENDING_KEY, true);
-      const lastPublishedAt = await this.ctx.storage.get<number>(STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY);
-      const dueAt = Math.max(Date.now(), (lastPublishedAt ?? 0) + STATISTICS_WORD_COUNTER_THROTTLE_MS);
+      const dueAt = await this.nextStatisticsWordCounterUpdateAt();
       await this.scheduleAlarmEntry(STATISTICS_WORD_COUNTER_ALARM_KEY, STATISTICS_WORD_COUNTER_PUBLISH_HANDLER, dueAt);
     } else if (overlayChanged && rankingWasActive) {
       const scopes = await this.readStatisticsWordRankingScopes();
       if (scopes.size > 0) {
         await this.ctx.storage.put(STATISTICS_WORD_RANKING_PENDING_KEY, true);
-        const lastPublishedAt = await this.ctx.storage.get<number>(STATISTICS_WORD_COUNTER_LAST_PUBLISHED_KEY);
-        const dueAt = Math.max(Date.now(), (lastPublishedAt ?? 0) + STATISTICS_WORD_COUNTER_THROTTLE_MS);
+        const dueAt = await this.nextStatisticsWordCounterUpdateAt();
         await this.scheduleAlarmEntry(STATISTICS_WORD_COUNTER_ALARM_KEY, STATISTICS_WORD_COUNTER_PUBLISH_HANDLER, dueAt);
       }
     }

@@ -155,6 +155,7 @@ interface StatisticsWordRankingEntry {
 
 interface StatisticsWordRankingScopeState {
   entries: readonly StatisticsWordRankingEntry[];
+  computedAt: string;
   streamIsLive?: boolean;
 }
 
@@ -162,8 +163,6 @@ export interface StatisticsWordRankingState {
   serverNow: string;
   stream: StatisticsWordRankingScopeState | null;
   total: StatisticsWordRankingScopeState | null;
-  streamServerNow?: string;
-  totalServerNow?: string;
   refreshAt?: string;
   bootstrap?: true;
 }
@@ -194,9 +193,9 @@ const parseStatisticsWordRankingStream = (
 ): StatisticsWordRankingScopeState | null | undefined => {
   if (value === null) return null;
   const input = wordRankingRecord(value);
-  if (input === null || typeof input.streamIsLive !== "boolean") return undefined;
+  if (input === null || typeof input.streamIsLive !== "boolean" || !validWordRankingInstant(input.computedAt)) return undefined;
   const entries = parseStatisticsWordRankingEntries(input.entries);
-  return entries === null ? undefined : { entries, streamIsLive: input.streamIsLive };
+  return entries === null ? undefined : { entries, streamIsLive: input.streamIsLive, computedAt: input.computedAt };
 };
 
 const parseStatisticsWordRankingTotal = (
@@ -204,9 +203,9 @@ const parseStatisticsWordRankingTotal = (
 ): StatisticsWordRankingScopeState | null | undefined => {
   if (value === null) return null;
   const input = wordRankingRecord(value);
-  if (input === null) return undefined;
+  if (input === null || !validWordRankingInstant(input.computedAt)) return undefined;
   const entries = parseStatisticsWordRankingEntries(input.entries);
-  return entries === null ? undefined : { entries };
+  return entries === null ? undefined : { entries, computedAt: input.computedAt };
 };
 
 export const parseStatisticsWordRankingState = (value: unknown): StatisticsWordRankingState | null => {
@@ -217,25 +216,16 @@ export const parseStatisticsWordRankingState = (value: unknown): StatisticsWordR
   const stream = parseStatisticsWordRankingStream(input.stream);
   const total = parseStatisticsWordRankingTotal(input.total);
   if (stream === undefined || total === undefined ||
-      input.streamServerNow !== undefined && !validWordRankingInstant(input.streamServerNow) ||
-      input.totalServerNow !== undefined && !validWordRankingInstant(input.totalServerNow) ||
       input.refreshAt !== undefined && !validWordRankingInstant(input.refreshAt) ||
       input.bootstrap !== undefined && input.bootstrap !== true) return null;
   return {
     serverNow: input.serverNow,
     stream,
     total,
-    ...(typeof input.streamServerNow === "string" ? { streamServerNow: input.streamServerNow } : {}),
-    ...(typeof input.totalServerNow === "string" ? { totalServerNow: input.totalServerNow } : {}),
     ...(typeof input.refreshAt === "string" ? { refreshAt: input.refreshAt } : {}),
     ...(input.bootstrap === true ? { bootstrap: true as const } : {}),
   };
 };
-
-const effectiveStatisticsWordRankingStreamTime = (state: StatisticsWordRankingState): string =>
-  state.streamServerNow ?? state.serverNow;
-const effectiveStatisticsWordRankingTotalTime = (state: StatisticsWordRankingState): string =>
-  state.totalServerNow ?? state.serverNow;
 
 /** Merges whole-scope snapshots without letting stale hydrations erase fresher live lists. */
 export const mergeStatisticsWordRankingRealtimeState = (
@@ -248,26 +238,23 @@ export const mergeStatisticsWordRankingRealtimeState = (
     if (current === null) return incoming;
     const previous = parseStatisticsWordRankingState(current);
     if (previous === null) return { ...current, refreshAt: incoming.refreshAt };
-    // Pin each scope's effective timestamp before serverNow moves, so the retry delay counts from the failure.
     return {
       ...previous,
       ...(validWordRankingInstant(incoming.serverNow) && Date.parse(incoming.serverNow) > Date.parse(previous.serverNow)
         ? { serverNow: incoming.serverNow }
         : {}),
-      streamServerNow: effectiveStatisticsWordRankingStreamTime(previous),
-      totalServerNow: effectiveStatisticsWordRankingTotalTime(previous),
       refreshAt: incoming.refreshAt,
     };
   }
 
   const previous = current === null ? null : parseStatisticsWordRankingState(current);
   const incomingAt = Date.parse(next.serverNow);
-  const streamProvided = next.stream !== null || next.bootstrap === true;
-  const totalProvided = next.total !== null || next.bootstrap === true;
-  const streamAccepted = streamProvided &&
-    (previous === null || incomingAt >= Date.parse(effectiveStatisticsWordRankingStreamTime(previous)));
-  const totalAccepted = totalProvided &&
-    (previous === null || incomingAt >= Date.parse(effectiveStatisticsWordRankingTotalTime(previous)));
+  const streamAccepted = next.stream !== null &&
+    (previous === null || previous.stream === null ||
+      Date.parse(next.stream.computedAt) >= Date.parse(previous.stream.computedAt));
+  const totalAccepted = next.total !== null &&
+    (previous === null || previous.total === null ||
+      Date.parse(next.total.computedAt) >= Date.parse(previous.total.computedAt));
   const stream = streamAccepted ? next.stream : previous === null ? next.stream : previous.stream;
   const total = totalAccepted ? next.total : previous === null ? next.total : previous.total;
   const previousServerNow = previous?.serverNow;
@@ -282,10 +269,6 @@ export const mergeStatisticsWordRankingRealtimeState = (
     serverNow,
     stream,
     total,
-    ...(streamAccepted ? { streamServerNow: next.serverNow }
-      : previous === null ? {} : { streamServerNow: effectiveStatisticsWordRankingStreamTime(previous) }),
-    ...(totalAccepted ? { totalServerNow: next.serverNow }
-      : previous === null ? {} : { totalServerNow: effectiveStatisticsWordRankingTotalTime(previous) }),
     ...(refreshAt === undefined ? {} : { refreshAt }),
     ...(next.bootstrap === true ? { bootstrap: true as const } : {}),
   };
