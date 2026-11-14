@@ -1,0 +1,115 @@
+@layer components.overlay {
+  .statistics-word-ranking {
+    --word-counter-background: #0d1015;
+    --word-counter-text: #f2f5f9;
+    --word-counter-secondary: #a8b2c1;
+    --word-ranking-bar-color: #35557f;
+    box-sizing: border-box;
+    display: grid;
+    width: 100%;
+    height: 100%;
+    /* Reserve all fixed row slots (plus title and padding) so a larger count never clips a row. */
+    min-height: calc(24px + 32px + var(--word-ranking-count) * 28px);
+    grid-template-rows: auto minmax(0, 1fr);
+    align-content: start;
+    gap: 8px;
+    padding: 12px 16px;
+    overflow: hidden;
+    border-radius: 12px;
+    background: var(--word-counter-background);
+    color: var(--word-counter-text);
+    font-family: Archivo, system-ui, sans-serif;
+  }
+
+  .statistics-word-ranking--no-title {
+    min-height: calc(24px + var(--word-ranking-count) * 28px);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .statistics-word-ranking__title {
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 24px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .statistics-word-ranking__rows {
+    display: grid;
+    min-height: 0;
+    grid-template-rows: repeat(var(--word-ranking-count), 28px);
+    align-content: start;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    list-style: none;
+  }
+
+  .statistics-word-ranking__row {
+    position: relative;
+    display: grid;
+    min-width: 0;
+    grid-template-columns: 2.5ch minmax(0, 1fr) 8ch;
+    align-items: center;
+    gap: 10px;
+    height: 28px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    overflow: hidden;
+    border-radius: 4px;
+    font-size: 15px;
+    line-height: 20px;
+  }
+
+  .statistics-word-ranking__row--empty { background: transparent; }
+
+  .statistics-word-ranking__bar {
+    position: absolute;
+    z-index: 0;
+    inset: 2px auto 2px 0;
+    width: var(--word-ranking-bar-width);
+    border-radius: 3px;
+    background: var(--word-ranking-bar-color);
+    opacity: 0.55;
+  }
+
+  .statistics-word-ranking__rank,
+  .statistics-word-ranking__word,
+  .statistics-word-ranking__count {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+  }
+
+  .statistics-word-ranking__rank {
+    color: var(--word-counter-secondary);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  .statistics-word-ranking__word {
+    overflow: hidden;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .statistics-word-ranking__count {
+    color: var(--word-counter-text);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .statistics-word-ranking__row--without-bars .statistics-word-ranking__word,
+  .statistics-word-ranking__row--without-bars .statistics-word-ranking__count {
+    color: var(--word-counter-text);
+  }
+}

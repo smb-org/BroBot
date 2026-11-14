@@ -20,6 +20,11 @@ const channelObject = (channelId: string): DurableObjectStub => {
   return stub;
 };
 
+const dispatchAlarm = (stub: DurableObjectStub): Promise<void> =>
+  runInDurableObject(stub, async (durableObject) => {
+    await (durableObject as unknown as { alarm(): Promise<void> }).alarm();
+  });
+
 const seedWordCounter = async (channelId: string, word: string, inComposition = true): Promise<void> => {
   const now = new Date(TEST_NOW).toISOString();
   const overlayId = `overlay-${channelId}`;
@@ -160,9 +165,12 @@ describe("statistics word counter worker state", () => {
        VALUES (?, 'fak', 100, ?, 'fak')`,
     ).bind(channelId, new Date(TEST_NOW - 30 * 60_000).toISOString()).run();
     const streamId = `word-stream-${crypto.randomUUID()}`;
-    const receivedAt = new Date(TEST_NOW - 20 * 60_000).toISOString();
+    const receivedAt = new Date(TEST_NOW).toISOString();
     await writeEventSubStreamState(worker.DB, channelId, "online", receivedAt, receivedAt, streamId);
     const stub = channelObject(channelId);
+    const disableAutomaticAlarm = () => runInDurableObject(stub, async (_object, state) => {
+      await state.storage.deleteAlarm();
+    });
     const sent: RealtimeMessage[] = [];
     vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
       sent.push(...messages.filter((message) => message.type === "modul.statistics.word_counts"));
@@ -175,7 +183,6 @@ describe("statistics word counter worker state", () => {
         statistics: { windowStart: string; receivedAt: string; emotes: number; streamId: string; textFragments: readonly string[] },
       ): Promise<number>;
       markStatisticsWordStreamEnded(streamId: string, endedAt: string): Promise<void>;
-      runModuleAlarm(moduleId: string, handlerKey: string, alarmKey: string): Promise<unknown>;
     };
 
     for (let index = 0; index < 10; index += 1) {
@@ -187,18 +194,101 @@ describe("statistics word counter worker state", () => {
         textFragments: ["fak"],
       });
     }
+    await disableAutomaticAlarm();
     await vi.advanceTimersByTimeAsync(2_000);
-    await runDurableObjectAlarm(stub);
+    await dispatchAlarm(stub);
+    await disableAutomaticAlarm();
     sent.length = 0;
 
     const endedAt = new Date(Date.now()).toISOString();
     await object.markStatisticsWordStreamEnded(streamId, endedAt);
     await writeEventSubStreamState(worker.DB, channelId, "offline", endedAt, null);
+    await disableAutomaticAlarm();
     await vi.advanceTimersByTimeAsync(16 * 60_000);
-    await object.runModuleAlarm("statistics", "window", "window");
+    await dispatchAlarm(stub);
+    await disableAutomaticAlarm();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await dispatchAlarm(stub);
 
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.payload).toMatchObject({
+    expect(sent.at(-1)?.payload).toMatchObject({
+      words: { fak: { streamCount: 10, totalCount: 110, streamIsLive: false } },
+    });
+    await runInDurableObject(stub, async (_object, state) => {
+      await expect(state.storage.get("statistics:word_counter_pending")).resolves.toBeUndefined();
+    });
+  });
+
+  it("publishes counter totals through repeated ranking failures and after a baseline merge", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TEST_NOW);
+    const channelId = `statistics-counter-ranking-failure-${crypto.randomUUID()}`;
+    await insertPointChannel(channelId);
+    await seedWordCounter(channelId, "fak");
+    await worker.DB.prepare(
+      `INSERT INTO channel_word_frequency_baseline (channel_id, word, total_count, last_seen_at, display_word)
+       VALUES (?, 'fak', 100, ?, 'fak')`,
+    ).bind(channelId, new Date(TEST_NOW - 30 * 60_000).toISOString()).run();
+    await worker.DB.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision)
+       VALUES (?, 'statistics', 1, '{}', 1)
+       ON CONFLICT(channel_id, module_id) DO UPDATE SET enabled = 1`,
+    ).bind(channelId).run();
+    await worker.DB.prepare(
+      `INSERT INTO overlay_elements
+         (element_id, channel_id, overlay_id, kind, label, config_json, x, y, scale_percent, z, in_composition)
+       VALUES (?, ?, ?, 'statistics.word_ranking', 'Ranking', ?, 0, 0, 100, 1, 1)`,
+    ).bind(`ranking-${channelId}`, channelId, `overlay-${channelId}`, JSON.stringify({ scope: "total", count: 5 }),).run();
+    const streamId = `word-stream-${crypto.randomUUID()}`;
+    const receivedAt = new Date(TEST_NOW).toISOString();
+    await writeEventSubStreamState(worker.DB, channelId, "online", receivedAt, receivedAt, streamId);
+    const stub = channelObject(channelId);
+    const disableAutomaticAlarm = () => runInDurableObject(stub, async (_object, state) => {
+      await state.storage.deleteAlarm();
+    });
+    const sent: RealtimeMessage[] = [];
+    vi.spyOn(ChannelObject.prototype, "publish").mockImplementation((messages) => {
+      sent.push(...messages.filter((message) => message.type === "modul.statistics.word_counts"));
+      return Promise.resolve();
+    });
+    const compute = vi.spyOn(ChannelObject.prototype as unknown as {
+      computeStatisticsWordRanking(scope: "stream" | "total", now: number): Promise<unknown>;
+    }, "computeStatisticsWordRanking").mockRejectedValue(new Error("ranking query unavailable"));
+    const object = stub as unknown as {
+      recordChatActivity(
+        chatterUserId: string | null,
+        needsActiveChatters: boolean,
+        statistics: { windowStart: string; receivedAt: string; emotes: number; streamId: string; textFragments: readonly string[] },
+      ): Promise<number>;
+      markStatisticsWordStreamEnded(streamId: string, endedAt: string): Promise<void>;
+    };
+
+    for (let index = 0; index < 10; index += 1) {
+      await object.recordChatActivity(null, false, {
+        windowStart: receivedAt,
+        receivedAt,
+        emotes: 0,
+        streamId,
+        textFragments: ["fak"],
+      });
+    }
+    await disableAutomaticAlarm();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await dispatchAlarm(stub);
+    await disableAutomaticAlarm();
+    expect(sent.some((message) => message.type === "modul.statistics.word_counts")).toBe(true);
+
+    const endedAt = new Date(Date.now()).toISOString();
+    await object.markStatisticsWordStreamEnded(streamId, endedAt);
+    await writeEventSubStreamState(worker.DB, channelId, "offline", endedAt, null);
+    await disableAutomaticAlarm();
+    await vi.advanceTimersByTimeAsync(16 * 60_000);
+    await dispatchAlarm(stub);
+    await disableAutomaticAlarm();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await dispatchAlarm(stub);
+
+    expect(compute.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(sent.at(-1)?.payload).toMatchObject({
       words: { fak: { streamCount: 10, totalCount: 110, streamIsLive: false } },
     });
   });

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RealtimeEnvelope } from "../../src/realtime-contract";
 import type { OverlayRealtimeCallbacks } from "../../src/overlay/realtime";
 import { emoteSlotOverlayElement } from "../../src/modules/emote_slots/overlay/element";
+import { statisticsWordRankingOverlayElement } from "../../src/modules/statistics/overlay/ranking-element";
 import { statisticsWordCounterOverlayElement } from "../../src/modules/statistics/overlay/element";
 
 const realtimeMocks = vi.hoisted(() => ({ connectOverlayRealtime: vi.fn() }));
@@ -148,6 +149,45 @@ const wordCounterMessage = (
   payload: {
     words: { [word]: { streamCount, totalCount, streamIsLive: true } },
     serverNow,
+  },
+});
+
+const wordRankingOverlayPayload = (state: Record<string, unknown>, responseNow?: string): Response => new Response(JSON.stringify({
+  language: "en",
+  overlay: {
+    id: "word-ranking-retry-fixture",
+    revision: 1,
+    width: 1920,
+    height: 1080,
+    css: "",
+    elements: [{
+      ...element("word-ranking", 0, 0, 100, 1, true, "", "statistics.word_ranking"),
+      label: "Top words",
+      variableName: null,
+      text: "",
+      config: { scope: "stream", count: 5, bars: true },
+      // The bootstrap route rewrites serverNow at response time while preserving the scope's computation time.
+      state: responseNow === undefined ? state : { ...state, serverNow: responseNow },
+      moduleEnabled: true,
+    }],
+  },
+  variables: {},
+}), { status: 200, headers: { "Content-Type": "application/json" } });
+
+const wordRankingMessage = (serverNow: string, word: string, count: number): RealtimeEnvelope<"modul.statistics.word_ranking"> => ({
+  version: 1,
+  id: `word-ranking-${word}`,
+  createdAt: serverNow,
+  channelId: "fictional-channel",
+  type: "modul.statistics.word_ranking",
+  payload: {
+    serverNow,
+    stream: {
+      entries: [{ word, displayWord: word.toUpperCase(), count }],
+      streamIsLive: true,
+      computedAt: serverNow,
+    },
+    total: null,
   },
 });
 
@@ -1026,6 +1066,110 @@ describe("OverlayShell and OverlayCanvas", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(wordCounterValues(container)).toEqual(["45", "450"]);
+  });
+
+  it("keeps a ranking visible through failed hydration, applies a live list, and still retries", async () => {
+    vi.useFakeTimers();
+    await statisticsWordRankingOverlayElement.load();
+    const start = Date.parse("2030-01-01T00:00:00.000Z");
+    vi.setSystemTime(start);
+    const reloadAt = start + 250;
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(wordRankingOverlayPayload({
+        bootstrap: true,
+        serverNow: new Date(start).toISOString(),
+        stream: {
+          entries: [{ word: "alpha", displayWord: "Alpha", count: 4 }],
+          streamIsLive: true,
+          computedAt: new Date(start).toISOString(),
+        },
+        total: null,
+      }))
+      .mockResolvedValueOnce(wordRankingOverlayPayload({
+        serverNow: new Date(reloadAt).toISOString(),
+        refreshAt: new Date(reloadAt + 30_000).toISOString(),
+      }))
+      .mockResolvedValueOnce(wordRankingOverlayPayload({
+        bootstrap: true,
+        serverNow: new Date(reloadAt + 30_000).toISOString(),
+        stream: {
+          entries: [{ word: "delta", displayWord: "Delta", count: 9 }],
+          streamIsLive: true,
+          computedAt: new Date(reloadAt + 30_000).toISOString(),
+        },
+        total: null,
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(container.querySelector(".statistics-word-ranking__word")).toHaveTextContent("Alpha");
+
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "statistics-ranking-state-reload",
+      createdAt: new Date(reloadAt).toISOString(),
+      channelId: "fictional-channel",
+      type: "modul.statistics.state_changed",
+      payload: { reason: "stream.state.changed" },
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(container.querySelector(".statistics-word-ranking__word")).toHaveTextContent("Alpha");
+
+    act(() => realtimeCallbacks?.onModuleMessage?.(wordRankingMessage(
+      new Date(reloadAt + 5_000).toISOString(), "beta", 7,
+    )));
+    expect(container.querySelector(".statistics-word-ranking__word")).toHaveTextContent("BETA");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(container.querySelector(".statistics-word-ranking__word")).toHaveTextContent("Delta");
+  });
+
+  it("keeps a live ranking computed after a snapshot when hydration rewrites serverNow", async () => {
+    vi.useFakeTimers();
+    await statisticsWordRankingOverlayElement.load();
+    const start = Date.parse("2030-01-01T00:00:00.000Z");
+    vi.setSystemTime(start);
+    let finishReload: ((response: Response) => void) | undefined;
+    const staleSnapshot = {
+      bootstrap: true,
+      serverNow: new Date(start).toISOString(),
+      stream: {
+        entries: [{ word: "alpha", displayWord: "Alpha", count: 1 }],
+        streamIsLive: true,
+        computedAt: new Date(start).toISOString(),
+      },
+      total: null,
+    };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(wordRankingOverlayPayload(staleSnapshot))
+      .mockImplementationOnce(() => new Promise((resolve) => { finishReload = resolve; }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(container.querySelector(".statistics-word-ranking__word")).toHaveTextContent("Alpha");
+    act(() => realtimeCallbacks?.onOpen?.(true));
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    act(() => realtimeCallbacks?.onModuleMessage?.(wordRankingMessage(
+      new Date(start + 5_000).toISOString(), "beta", 7,
+    )));
+    expect(container.querySelector(".statistics-word-ranking__word")).toHaveTextContent("BETA");
+
+    await act(async () => {
+      finishReload?.(wordRankingOverlayPayload(staleSnapshot, new Date(start + 10_000).toISOString()));
+      for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    });
+
+    expect(container.querySelector(".statistics-word-ranking__word")).toHaveTextContent("BETA");
   });
 
   it("applies a delayed chunk older than a failed reload but newer than the bootstrap", async () => {

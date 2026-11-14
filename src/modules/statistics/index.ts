@@ -5,6 +5,7 @@ import { statisticsRoutes } from "./routes";
 import { handleStatisticsWindowAlarm, processStatisticsEvent, reconcileStatisticsSchedule } from "./service";
 import { statisticsSettingsSchema } from "./contracts";
 import { statisticsWordCounterOverlayElement } from "./overlay/element";
+import { statisticsWordRankingOverlayElement } from "./overlay/ranking-element";
 
 const settingsSchema = statisticsSettingsSchema;
 
@@ -24,7 +25,7 @@ const wordCountChatCommand = [{
 
 export const statisticsModule: BotModule<typeof settingsSchema> = {
   id: "statistics",
-  overlayElements: [statisticsWordCounterOverlayElement],
+  overlayElements: [statisticsWordCounterOverlayElement, statisticsWordRankingOverlayElement],
   navigationCategory: "data",
   panelIcon: { paths: ["M4 19h16", "M7 16V9", "M12 16V5", "M17 16v-4"] },
   mandatory: true,

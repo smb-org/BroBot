@@ -10,6 +10,7 @@ import type {
   ModuleOverlayTemplateConditions,
   ModuleOverlayTemplateValue,
   ModuleStatisticsWordCountLookup,
+  ModuleStatisticsWordRankingSnapshot,
   ModuleTemplateConditionContext,
   ModuleTemplateConditionTimelineContext,
   ModuleTextBlockConditionDefinition,
@@ -399,6 +400,15 @@ export const createOverlayElementContext = async (
         ) => Promise<ModuleStatisticsWordCountLookup>;
       };
       return await channelObject.readStatisticsWordCountForLookup(streamId, word);
+    },
+    readStatisticsWordRanking: async (scope, requestedNow) => {
+      const channelObject = env.CHANNEL.get(env.CHANNEL.idFromName(channelId)) as unknown as {
+        readStatisticsWordRanking: (
+          selectedScope: "stream" | "total",
+          now: number,
+        ) => Promise<ModuleStatisticsWordRankingSnapshot>;
+      };
+      return await channelObject.readStatisticsWordRanking(scope, requestedNow);
     },
   };
 };
