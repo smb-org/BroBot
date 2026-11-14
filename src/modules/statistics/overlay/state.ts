@@ -89,8 +89,11 @@ export const mergeStatisticsWordCounterRealtimeState = (
   if (next === null) {
     if (typeof incoming.refreshAt !== "string") return current ?? {};
     if (current === null) return incoming;
+    // Pin each counter's effective timestamp before serverNow moves, so older-than-failure chunks still apply.
+    const currentParsed = parseStatisticsWordCounterState(current);
     return {
       ...current,
+      ...(currentParsed === null ? {} : { wordServerNow: currentParsed.wordServerNow }),
       ...(typeof incoming.serverNow === "string" && Number.isFinite(Date.parse(incoming.serverNow))
         ? { serverNow: incoming.serverNow }
         : {}),

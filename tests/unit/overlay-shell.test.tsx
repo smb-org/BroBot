@@ -1028,6 +1028,48 @@ describe("OverlayShell and OverlayCanvas", () => {
     expect(wordCounterValues(container)).toEqual(["45", "450"]);
   });
 
+  it("applies a delayed chunk older than a failed reload but newer than the bootstrap", async () => {
+    vi.useFakeTimers();
+    await statisticsWordCounterOverlayElement.load();
+    const start = Date.parse("2030-01-01T00:00:00.000Z");
+    vi.setSystemTime(start);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        bootstrapWordSet: true,
+        words: { alpha: { streamCount: 42, totalCount: 420, streamIsLive: true } },
+        serverNow: new Date(start).toISOString(),
+      }))
+      .mockResolvedValueOnce(wordCounterOverlayPayload("alpha", {
+        serverNow: new Date(start + 10_000).toISOString(),
+        refreshAt: new Date(start + 40_000).toISOString(),
+      }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const { container } = render(<OverlayShell token="fictional-token" elementId={null} />);
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    act(() => realtimeCallbacks?.onModuleMessage?.({
+      version: 1,
+      id: "statistics-stream-state-changed",
+      createdAt: new Date(start + 250).toISOString(),
+      channelId: "fictional-channel",
+      type: "modul.statistics.state_changed",
+      payload: { reason: "stream.state.changed" },
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    await act(async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(wordCounterValues(container)).toEqual(["42", "420"]);
+
+    act(() => realtimeCallbacks?.onModuleMessage?.(wordCounterMessage(
+      "alpha-delayed-chunk",
+      "alpha",
+      43,
+      430,
+      new Date(start + 5_000).toISOString(),
+    )));
+    expect(wordCounterValues(container)).toEqual(["43", "430"]);
+  });
+
   it("reschedules repeated word-counter hydration failures without losing counters", async () => {
     vi.useFakeTimers();
     await statisticsWordCounterOverlayElement.load();
