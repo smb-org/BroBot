@@ -92,6 +92,33 @@ export const calculateStatisticsWordCount = (
   };
 };
 
+/** Combines the sources used by a single-word lookup before applying shared count rules. */
+export const calculateStatisticsWordCountForLookup = (
+  word: string,
+  baselineCounts: ReadonlyMap<string, StatisticsWordCountValue>,
+  batches: readonly { batch: number; words: readonly StatisticsWordCountSource[] }[],
+  mergedBatches: ReadonlySet<number>,
+  streamWord: StatisticsWordCountSource | null,
+  bufferedWord: StatisticsWordCountSource | null,
+  hiddenBefore: string,
+  includeCurrentStreamInTotal = true,
+): CalculatedStatisticsWordCount => {
+  const pendingCounts = new Map<string, StatisticsWordCountValue>();
+  const fullStreamCounts = new Map<string, StatisticsWordCountValue>();
+  if (includeCurrentStreamInTotal) {
+    for (const batch of batches) {
+      if (mergedBatches.has(batch.batch)) continue;
+      for (const entry of batch.words) addStatisticsWordCount(pendingCounts, entry);
+    }
+  }
+  if (streamWord !== null) addStatisticsWordCount(fullStreamCounts, streamWord);
+  if (bufferedWord !== null) {
+    if (includeCurrentStreamInTotal) addStatisticsWordCount(pendingCounts, bufferedWord);
+    addStatisticsWordCount(fullStreamCounts, bufferedWord);
+  }
+  return calculateStatisticsWordCount(word, baselineCounts, pendingCounts, "total", hiddenBefore, fullStreamCounts);
+};
+
 export const admitStatisticsWordCounts = (
   candidates: ReadonlyMap<string, number>,
   existingWords: ReadonlySet<string>,

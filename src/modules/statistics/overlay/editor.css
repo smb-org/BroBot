@@ -1,0 +1,53 @@
+@layer components.overlay-editor {
+  .statistics-word-counter-editor {
+    display: grid;
+    gap: 10px;
+  }
+
+  .statistics-word-counter-editor__field {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+    color: var(--color-text-2);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .statistics-word-counter-editor__field input,
+  .statistics-word-counter-editor__field select {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 32px;
+    padding: 4px 8px;
+    border: 1px solid var(--color-border-control);
+    border-radius: 6px;
+    background: var(--color-well);
+    color: var(--color-text);
+    font: inherit;
+  }
+
+  .statistics-word-counter-editor__field input:focus-visible,
+  .statistics-word-counter-editor__field select:focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  .statistics-word-counter-editor__hint {
+    min-height: 16px;
+    color: var(--color-text-3);
+    font-size: 11px;
+    font-weight: 400;
+  }
+
+  .statistics-word-counter-editor__field input[aria-invalid="true"] + .statistics-word-counter-editor__hint {
+    color: var(--color-error-text);
+  }
+
+  .statistics-word-counter-editor__preview {
+    min-height: 18px;
+    margin: 0;
+    color: var(--color-text-2);
+    font-size: 12px;
+  }
+}
