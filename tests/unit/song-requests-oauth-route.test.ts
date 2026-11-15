@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { beginSpotifyOAuth } from "../../src/modules/song_requests/adapters/oauth-transactions";
+import { beginSpotifyOAuth } from "../../src/worker/auth/spotify-oauth";
 import { authRouter } from "../../src/worker/auth/routes";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";

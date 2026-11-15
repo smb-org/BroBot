@@ -4,7 +4,7 @@ import type { ModuleAlarmContext } from "../../src/modules/contract";
 import { SONG_REQUESTS_CREDENTIAL_SECRET, spotifyAccessToken } from "../../src/modules/song_requests/service";
 import { createModuleSecretAccess } from "../../src/worker/module-secrets";
 import { insertChannel, insertMember, testKey } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const CHANNEL_ID = "song-requests-token-refresh";
 const ACTOR_ID = "manager-fictional";
@@ -35,7 +35,7 @@ const credentialsFor = async (database: TestD1Database, refreshToken: string): P
     refreshToken,
     expiresAt: NOW - 1,
   }), { userId: ACTOR_ID }, new Date(NOW - 60_000).toISOString());
-  await database.batch([write]);
+  await database.batch([write as unknown as TestPreparedStatement]);
   return { DB: database as unknown as D1Database, channelId: CHANNEL_ID, environment, secrets } as unknown as ModuleAlarmContext;
 };
 
@@ -64,12 +64,12 @@ describe("Spotify access token refresh", () => {
     databases.push(database);
     const context = await credentialsFor(database, "refresh-token-original");
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
-      const write = await context.secrets.prepareWrite!(SONG_REQUESTS_CREDENTIAL_SECRET, JSON.stringify({
+      const write = await context.secrets.prepareWrite(SONG_REQUESTS_CREDENTIAL_SECRET, JSON.stringify({
         accessToken: "access-token-from-other-rotation",
         refreshToken: "refresh-token-from-other-rotation",
         expiresAt: NOW + 3_600_000,
       }), { userId: ACTOR_ID }, new Date(NOW).toISOString());
-      await database.batch([write]);
+      await database.batch([write as unknown as TestPreparedStatement]);
       return new Response(JSON.stringify({
         access_token: "stale-access-token-from-lost-rotation",
         token_type: "Bearer",

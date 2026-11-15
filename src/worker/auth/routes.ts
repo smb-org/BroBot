@@ -79,7 +79,7 @@ import { ADS_COUNTDOWN_ELEMENT_KIND } from "../../modules/ads/overlay/kinds";
 import { createOverlayElementContext, createOverlaySnapshotContext } from "../overlays/element-context";
 import { getChannelMemberForChannel } from "../db/channel-members";
 import { createModuleSecretAccess } from "../module-secrets";
-import { clearSpotifyOAuthStateCookie, consumeSpotifyOAuthTransaction, verifySpotifyOAuthState, SPOTIFY_OAUTH_STATE_COOKIE } from "../../modules/song_requests/adapters/oauth-transactions";
+import { clearSpotifyOAuthStateCookie, consumeSpotifyOAuthTransaction, verifySpotifyOAuthState, SPOTIFY_OAUTH_STATE_COOKIE } from "./spotify-oauth";
 import { exchangeSpotifyCode, SpotifyRequestError } from "../../modules/song_requests/adapters/spotify";
 import { SONG_REQUESTS_ALARM, SONG_REQUESTS_CREDENTIAL_SECRET, SONG_REQUESTS_HANDLER } from "../../modules/song_requests/service";
 import { notifyCommittedResources, schedulePanelResourceBackgroundWork } from "../panel-resources";
@@ -737,7 +737,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
 });
 
 authRouter.get("/auth/spotify/callback", async (context) => {
-  const clearStateCookie = (): void => context.header("Set-Cookie", clearSpotifyOAuthStateCookie(), { append: true });
+  const clearStateCookie = (): void => { context.header("Set-Cookie", clearSpotifyOAuthStateCookie(), { append: true }); };
   const serializedState = context.req.query("state");
   if (serializedState === undefined) {
     clearStateCookie();
@@ -767,13 +767,14 @@ authRouter.get("/auth/spotify/callback", async (context) => {
     const credentials = JSON.stringify({ accessToken: token.access_token, refreshToken: token.refresh_token ?? "", expiresAt: Date.now() + token.expires_in * 1_000 });
     if (token.refresh_token === undefined || token.refresh_token.length === 0) return oauthError(context, "spotify_callback_failed", 502);
     const write = await secret.prepareWrite(SONG_REQUESTS_CREDENTIAL_SECRET, credentials, {
-      userId: session.userId, login: session.login ?? session.userId,
+      userId: session.userId,
     }, now);
     const connection = context.env.DB.prepare(
       `INSERT INTO song_requests_connections (channel_id, state, error_message, updated_at, poll_failures) VALUES (?, 'connected', NULL, ?, 0)
        ON CONFLICT (channel_id) DO UPDATE SET state = 'connected', error_message = NULL, updated_at = excluded.updated_at, poll_failures = 0`,
     ).bind(transaction.channelId, now);
     await context.env.DB.batch([write, connection]);
+    await notifyCommittedResources(context.env, transaction.channelId);
     const [stream, moduleActivation] = await Promise.all([
       context.env.DB.prepare("SELECT state FROM channel_stream_state WHERE channel_id = ?")
         .bind(transaction.channelId).first<{ state: string }>(),

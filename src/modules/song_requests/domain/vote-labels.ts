@@ -1,7 +1,8 @@
 import type { SpotifyTrack } from "./track";
-import { CHAT_VOTING_LABEL_MAX_LENGTH } from "../../chat_voting/domain";
 
 const MAX_BALLOT_OPTIONS = 9;
+// Mirrors the chat vote label limit; chat_voting still validates every label when the vote starts.
+const CHAT_VOTING_LABEL_MAX_LENGTH = 32;
 
 const normalizedLabel = (label: string): string => label.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 const shortened = (label: string, maximum: number): string => Array.from(label).slice(0, maximum).join("").trim();

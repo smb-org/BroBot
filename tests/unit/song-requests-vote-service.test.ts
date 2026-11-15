@@ -28,6 +28,12 @@ const TRACKS = ["glassharbor01", "quietatlas02", "silvercurrent03"].map((id, ind
   coverUrl: null,
   spotifyUrl: `https://open.spotify.com/track/${id}`,
 }));
+const textOf = (value: unknown): string => typeof value === "string" ? value : value instanceof URL ? value.href : "";
+const trackAt = (index: number): (typeof TRACKS)[number] => {
+  const track = TRACKS[index];
+  if (track === undefined) throw new Error("Unknown fixture track.");
+  return track;
+};
 const databases: TestD1Database[] = [];
 
 const createContext = async (ballotId: string) => {
@@ -122,7 +128,7 @@ describe("durable song vote results", () => {
     await handleSubmitAlarm(context, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`);
 
     expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(String(fetcher.mock.calls[0]?.[0])).toContain("/me/player/queue?uri=spotify%3Atrack%3Aquietatlas02");
+    expect(textOf(fetcher.mock.calls[0]?.[0])).toContain("/me/player/queue?uri=spotify%3Atrack%3Aquietatlas02");
     expect(await database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(requestId).first()).toEqual({ state: "submitted" });
     expect(sendChat).toHaveBeenCalledTimes(1);
     expect(sendChat.mock.calls[0]?.[0]).toContain("queued in Spotify");
@@ -169,7 +175,7 @@ describe("durable song vote results", () => {
     { name: "a forbidden scope", status: 403, reason: undefined, state: "spotify_error", message: "Spotify rejected the request" },
     { name: "429 after the retry budget", status: 429, reason: undefined, state: "connected", message: null },
   ])("stores a clear $name enqueue failure without a second send", async ({ status, reason, state, message }) => {
-    const ballotId = `ballot-${status}-${reason ?? "rate"}`;
+    const ballotId = `ballot-${String(status)}-${reason ?? "rate"}`;
     const { database, context, sendChat } = await createContext(ballotId);
     const body = { error: { status, message: "Spotify rejected the request", ...(reason === undefined ? {} : { reason }) } };
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(body), {
@@ -190,9 +196,7 @@ describe("durable song vote results", () => {
 
   it("marks a timeout after Spotify accepted as outcome_unknown and never retries it", async () => {
     const { database, context } = await createContext("ballot-timeout");
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
-      throw new TypeError("Connection closed after Spotify accepted the queue command.");
-    });
+    const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("Connection closed after Spotify accepted the queue command."));
     vi.stubGlobal("fetch", fetcher);
     await handleSongRequestDurableAction(context, voteResult("ballot-timeout", [9, 2, 1]));
     const requestId = await requestIdFor(database);
@@ -262,12 +266,12 @@ describe("durable song vote results", () => {
       clearAlarm,
       scheduleAlarm,
       streamSession: { streamId: STREAM_ID },
+      streamStateTransitionAccepted: true,
     } as unknown as ModuleExecutionContext;
     const event = {
       subscriptionType: "stream.offline",
       channelId: CHANNEL_ID,
       receivedAt: new Date(NOW).toISOString(),
-      streamStateTransitionAccepted: true,
     } as unknown as ModuleEvent;
 
     await processSongRequestsEvent(event, eventContext);
@@ -287,7 +291,7 @@ describe("durable song vote results", () => {
       fromState: null,
       toState: "approved",
       now: new Date(NOW - 120_000).toISOString(),
-      newRequest: { source: "mod_vote", track: TRACKS[0]!, operationId: "mod_vote:interrupted", streamId: STREAM_ID },
+      newRequest: { source: "mod_vote", track: trackAt(0), operationId: "mod_vote:interrupted", streamId: STREAM_ID },
     });
     await transitionRequest(db, {
       channelId: CHANNEL_ID, requestId: "request-interrupted", fromState: "approved", toState: "submitting",
@@ -307,20 +311,20 @@ describe("durable song vote results", () => {
     const db = database as unknown as D1Database;
     await transitionRequest(db, {
       channelId: CHANNEL_ID, requestId: "request-pending", fromState: null, toState: "pending_review", now: new Date(NOW).toISOString(),
-      newRequest: { source: "mod_vote", track: TRACKS[0]!, operationId: "pending-op", streamId: STREAM_ID },
+      newRequest: { source: "mod_vote", track: trackAt(0), operationId: "pending-op", streamId: STREAM_ID },
     });
     await transitionRequest(db, {
       channelId: CHANNEL_ID, requestId: "request-approved", fromState: null, toState: "approved", now: new Date(NOW).toISOString(),
-      newRequest: { source: "mod_vote", track: TRACKS[2]!, operationId: "approved-op", streamId: STREAM_ID },
+      newRequest: { source: "mod_vote", track: trackAt(2), operationId: "approved-op", streamId: STREAM_ID },
     });
     await transitionRequest(db, {
       channelId: CHANNEL_ID, requestId: "request-submitting", fromState: null, toState: "approved", now: new Date(NOW).toISOString(),
-      newRequest: { source: "mod_vote", track: TRACKS[2]!, operationId: "submitting-op", streamId: STREAM_ID },
+      newRequest: { source: "mod_vote", track: trackAt(2), operationId: "submitting-op", streamId: STREAM_ID },
     });
     await transitionRequest(db, { channelId: CHANNEL_ID, requestId: "request-submitting", fromState: "approved", toState: "submitting", now: new Date(NOW).toISOString() });
     await transitionRequest(db, {
       channelId: CHANNEL_ID, requestId: "request-unknown", fromState: null, toState: "approved", now: new Date(NOW).toISOString(),
-      newRequest: { source: "mod_vote", track: TRACKS[1]!, operationId: "unknown-op", streamId: STREAM_ID },
+      newRequest: { source: "mod_vote", track: trackAt(1), operationId: "unknown-op", streamId: STREAM_ID },
     });
     await transitionRequest(db, { channelId: CHANNEL_ID, requestId: "request-unknown", fromState: "approved", toState: "submitting", now: new Date(NOW).toISOString() });
     await transitionRequest(db, { channelId: CHANNEL_ID, requestId: "request-unknown", fromState: "submitting", toState: "outcome_unknown", failureReason: "network_or_timeout", now: new Date(NOW).toISOString() });
@@ -339,7 +343,7 @@ describe("durable song vote results", () => {
 
     await transitionRequest(db, {
       channelId: CHANNEL_ID, requestId: "request-late-vote", fromState: null, toState: "approved", now: new Date(NOW).toISOString(),
-      newRequest: { source: "mod_vote", track: TRACKS[0]!, operationId: "late-vote-op", streamId: STREAM_ID },
+      newRequest: { source: "mod_vote", track: trackAt(0), operationId: "late-vote-op", streamId: STREAM_ID },
     });
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
@@ -357,10 +361,10 @@ describe("durable song vote results", () => {
   it("matches the next submitted request when the same track restarts and progress drops", async () => {
     const { database } = await createContext("ballot-repeat-run");
     const db = database as unknown as D1Database;
-    for (const [requestId, operationId] of [["request-run-one", "run-one"], ["request-run-two", "run-two"]]) {
+    for (const [requestId, operationId] of [["request-run-one", "run-one"], ["request-run-two", "run-two"]] as const) {
       await transitionRequest(db, {
         channelId: CHANNEL_ID, requestId, fromState: null, toState: "approved", now: new Date(NOW).toISOString(),
-        newRequest: { source: "mod_vote", track: TRACKS[0]!, operationId, streamId: STREAM_ID },
+        newRequest: { source: "mod_vote", track: trackAt(0), operationId, streamId: STREAM_ID },
       });
       await transitionRequest(db, { channelId: CHANNEL_ID, requestId, fromState: "approved", toState: "submitting", now: new Date(NOW).toISOString() });
       await transitionRequest(db, { channelId: CHANNEL_ID, requestId, fromState: "submitting", toState: "submitted", now: new Date(NOW).toISOString() });

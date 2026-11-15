@@ -163,14 +163,28 @@ const ChannelInspector = ({
     return () => { aborted = true; };
   }, [channel.channelId, onAuthenticationRequired, texts.error]);
 
-  const reloadSpotifyAccess = useCallback(async (): Promise<void> => {
+  const reloadSpotifyAccess = async (): Promise<void> => {
     try { setSpotifyAccess(await getPlatformSpotifyAccess()); }
     catch (error: unknown) {
       if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
       notify({ tone: "error", message: errorText(error, texts.error) });
     }
-  }, [onAuthenticationRequired, texts.error]);
-  useEffect(() => { void reloadSpotifyAccess(); }, [channel.channelId, reloadSpotifyAccess]);
+  };
+  useEffect(() => {
+    let aborted = false;
+    const load = async (): Promise<void> => {
+      try {
+        const access = await getPlatformSpotifyAccess();
+        if (!aborted) setSpotifyAccess(access);
+      } catch (error: unknown) {
+        if (aborted) return;
+        if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
+        notify({ tone: "error", message: errorText(error, texts.error) });
+      }
+    };
+    void load();
+    return () => { aborted = true; };
+  }, [channel.channelId, onAuthenticationRequired, texts.error]);
 
   useEffect(() => {
     if (members.error === null) {
@@ -257,7 +271,7 @@ const ChannelInspector = ({
       <InvitationLink channel={channel} />
       <section className="config-section platform-inspector-section" aria-label={texts.spotifyAccess}>
         <div className="section-heading"><h3>{texts.spotifyAccess}</h3><span className="muted">{spotifyAccess === null ? "…" : texts.spotifyUsedSlots(String(spotifyAccess.usedSlots), String(spotifyAccess.limit))}</span></div>
-        <p className="muted">{spotifyAccess?.channels.map(({ slot, login }) => `${slot}. @${login}`).join(" · ") || "—"}</p>
+        <p className="muted">{spotifyAccess?.channels.map(({ slot, login }) => `${String(slot)}. @${login}`).join(" · ") || "—"}</p>
         <Button type="button" variant="secondary" disabled={spotifyBusy || spotifyAccess === null || spotifyChannel === undefined && spotifyAccess.usedSlots >= spotifyAccess.limit} onClick={() => { void toggleSpotify(); }}>
           {spotifyChannel === undefined ? texts.spotifyEnabled : texts.spotifyDisabled}
         </Button>

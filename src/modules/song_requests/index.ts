@@ -10,7 +10,6 @@ import {
   readSpotifyAccessTokenAlarm,
   SONG_REQUESTS_ACCESS_TOKEN_HANDLER,
   SONG_REQUESTS_ALARM,
-  SONG_REQUESTS_HANDLER,
   SONG_REQUESTS_LIFECYCLE_HANDLER,
   SONG_REQUESTS_SUBMIT_HANDLER,
 } from "./service";
@@ -37,22 +36,22 @@ export const songRequestsModule: BotModule<typeof settingsSchema> = {
   panel: () => import("./panel"),
   actions: [{
     id: "start-song-vote",
-    name: songRequestsActionTexts.name,
+    name: { de: songRequestsActionTexts.de.name, en: songRequestsActionTexts.en.name },
     icon: "vote",
     conditions: ["moduleEnabled", "streamLive"],
     requiredRole: "operator",
     content: { presentation: "dialog", requiresReadiness: true, hideSubmit: true, dismissAsClose: true, load: () => import("./panel/cockpit-action-content") },
-    errorMessage: { de: songRequestsActionTexts.error.de, en: songRequestsActionTexts.error.en },
+    errorMessage: { de: songRequestsActionTexts.de.error, en: songRequestsActionTexts.en.error },
     execute: async ({ channelId, formData }) => {
       const trackIds = formData.getAll("trackId").filter((id): id is string => typeof id === "string");
       try {
         await (await import("../../dashboard/api")).startSongRequestVote(channelId, trackIds);
-        return { tone: "success", message: { de: songRequestsActionTexts.started.de, en: songRequestsActionTexts.started.en } };
+        return { tone: "success", message: { de: songRequestsActionTexts.de.started, en: songRequestsActionTexts.en.started } };
       } catch (error) {
         if (error instanceof PanelApiError && error.code === "chat_vote_already_open") {
-          return { tone: "error", message: { de: songRequestsActionTexts.busy.de, en: songRequestsActionTexts.busy.en } };
+          return { tone: "error", message: { de: songRequestsActionTexts.de.busy, en: songRequestsActionTexts.en.busy } };
         }
-        return { tone: "error", message: { de: songRequestsActionTexts.error.de, en: songRequestsActionTexts.error.en } };
+        return { tone: "error", message: { de: songRequestsActionTexts.de.error, en: songRequestsActionTexts.en.error } };
       }
     },
   }],

@@ -11,7 +11,7 @@ export const matchSubmittedRequest = <Request extends SubmittedRequest>(
   trackId: string,
   streamId: string,
 ): Request | null => requests
-  .filter((request) => request.state === "submitted" && request.trackId === trackId && request.streamId === streamId)
+  .filter((request) => request.trackId === trackId && request.streamId === streamId)
   .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))[0] ?? null;
 
 export type SongRequestState = "pending_review" | "approved" | "submitting" | "submitted" | "observed_playing" |

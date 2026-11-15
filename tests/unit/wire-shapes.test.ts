@@ -403,6 +403,7 @@ const expectedModuleSettings = {
   quiz: { answerSeconds: 30, chatQuestions: true, pot: 500, revealSeconds: 8 },
   polls: {},
   channel_points: {},
+  song_requests: { emptyText: "" },
   emote_slots: {
     symbols: [
       { id: "cherry", source: "emoji", code: "🍒", name: "Cherry", weight: 4, triple: 3, isJackpot: false },
@@ -921,6 +922,7 @@ describe("serialized contract shapes", () => {
         "polls",
         "quiz",
         "raid",
+        "song_requests",
         "statistics",
         "sun",
         "temp_vips",

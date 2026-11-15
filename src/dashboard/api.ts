@@ -288,8 +288,11 @@ export const fetchChannels = (signal?: AbortSignal): Promise<PanelChannelsRespon
 export const getPlatformOverview = (): Promise<PanelPlatformOverviewResponse> =>
   requestJson<PanelPlatformOverviewResponse>("/api/platform");
 
-export const getPlatformSpotifyAccess = (): Promise<PanelSpotifyAccessResponse> =>
-  requestJson<PanelSpotifyAccessResponse>("/api/platform/spotify-channels");
+export const getPlatformSpotifyAccess = async (): Promise<PanelSpotifyAccessResponse> => {
+  const response = await requestJson<Partial<PanelSpotifyAccessResponse>>("/api/platform/spotify-channels");
+  const channels = response.channels ?? [];
+  return { channels, usedSlots: response.usedSlots ?? channels.length, limit: 5 };
+};
 
 export const setPlatformSpotifyChannel = (channelId: string, enabled: boolean): Promise<{ enabled: boolean }> =>
   requestMutation(`/api/platform/spotify-channels/${encodeURIComponent(channelId)}`, "PATCH", { enabled });

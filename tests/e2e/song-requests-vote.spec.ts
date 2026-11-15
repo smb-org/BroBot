@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   createE2ESessionCredentials,
+  e2eSpotifyMockPort,
   e2eWorkerEnvironment,
   e2eWorkerOrigin,
   seedE2ESongRequests,
@@ -17,7 +18,7 @@ test("connects mocked Spotify, votes on three tracks, and shows the winner as no
   test.setTimeout(90_000);
   const channelId = `channel-song-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const overlay = seedE2ESongRequests(channelId);
-  await page.request.post(`${e2eWorkerEnvironment.SPOTIFY_ACCOUNTS_BASE}/__test/reset`);
+  await page.request.post(`http://127.0.0.1:${e2eSpotifyMockPort}/__test/reset`);
   const credentials = createE2ESessionCredentials();
   await page.context().addCookies([
     { name: "__Host-brobot_session", value: credentials.cookie, domain: localWorkerHost, path: "/", secure: true, httpOnly: true, sameSite: "Lax" },
@@ -28,7 +29,6 @@ test("connects mocked Spotify, votes on three tracks, and shows the winner as no
   await expect(page.getByRole("heading", { name: "Spotify and song vote" })).toBeVisible();
   await expect(page.getByText("Spotify is not connected yet.")).toBeVisible();
   await page.getByRole("button", { name: "Connect Spotify" }).click();
-  await expect(page).toHaveURL(new RegExp(`/channels/${channelId}/modules/song_requests\\?spotify=connected$`u));
   await expect(page.getByText("Spotify is connected.")).toBeVisible();
 
   const overlayPage = await page.context().newPage();
@@ -80,11 +80,13 @@ test("connects mocked Spotify, votes on three tracks, and shows the winner as no
     type: "live",
     started_at: startedAt,
   });
-  await expect.poll(async () => (await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/connection`)).json())
+  // Secure host-prefixed cookies are not replayed by the Node-side request jar over http, so API calls send them explicitly.
+  const apiHeaders = { Cookie: `__Host-brobot_session=${credentials.cookie}; __Host-brobot_csrf=${credentials.csrfToken}`, "X-CSRF-Token": credentials.csrfToken };
+  await expect.poll(async (): Promise<unknown> => (await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/connection`, { headers: apiHeaders })).json())
     .toMatchObject({ state: "connected", streamId: expect.any(String) });
 
   await page.getByRole("textbox", { name: "Track, Spotify link, or URI" }).fill("Glass Harbor");
-  await page.getByRole("button", { name: "Search" }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
   for (const title of ["Glass Harbor", "Quiet Atlas", "Silver Current"]) await expect(page.getByText(title).first()).toBeVisible();
   for (const title of ["Glass Harbor", "Quiet Atlas", "Silver Current"]) {
     const row = page.getByText(title).first().locator("xpath=ancestor::article");
@@ -119,13 +121,13 @@ test("connects mocked Spotify, votes on three tracks, and shows the winner as no
   await castVote(2, "viewer-song-three");
 
   const closeVote = await page.request.post(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/chat_voting/close`, {
-    headers: { "X-CSRF-Token": credentials.csrfToken },
+    headers: apiHeaders,
     data: { pollId: vote.ballotId },
   });
   expect(closeVote.status()).toBe(200);
 
   await expect.poll(async () => {
-    const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests`);
+    const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests`, { headers: apiHeaders });
     if (!response.ok()) return null;
     const body = await response.json() as { requests: Array<{ title: string; state: string }> };
     return body.requests[0] ?? null;

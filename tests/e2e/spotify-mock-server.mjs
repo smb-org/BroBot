@@ -1,4 +1,6 @@
 import { createServer } from "node:http";
+import process from "node:process";
+import { URL, URLSearchParams } from "node:url";
 
 const port = Number(process.env.SPOTIFY_MOCK_PORT ?? 8791);
 const tracks = [

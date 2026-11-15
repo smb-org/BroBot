@@ -2471,6 +2471,8 @@ export interface ModuleRouteVariables {
   ) => Promise<unknown>;
   /** Starts a persisted options ballot owned by chat_voting; callers supply only validated labels and timing. */
   startChatVote?: (channelId: string, request: ModuleChatVoteStartRequest) => Promise<ModuleChatVoteStartResult>;
+  /** Opens a signed Spotify OAuth transaction for the authorized channel; the host owns the signing keys. */
+  beginSpotifyOAuth?: (channelId: string, memberUserId: string) => Promise<{ authorizationUrl: string; stateCookie: string }>;
   prepareModuleAudit: PrepareModuleAudit;
   writeModuleAudit: WriteModuleAudit;
   listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];

@@ -4145,15 +4145,15 @@ export class ChannelObject extends DurableObject<Env> {
       ...(streamGeneration === undefined ? {} : { streamGeneration }),
       externalFetchBudget,
       dispatchDurableAction: async (action: ModuleDurableAction) => {
-        if (moduleId !== "chat_voting" || action.kind !== "chat_vote.result") {
+        if (moduleId !== "chat_voting") {
           throw new Error("This module cannot dispatch that durable action.");
         }
-        const source = MODULES.find((module) => module.id === moduleId);
         const target = MODULES.find((module) => module.id === action.targetModuleId);
-        if (source?.requiresModules?.includes(action.targetModuleId) !== true || target?.handleDurableAction === undefined) {
+        // The target module declares the dependency (song_requests requires chat_voting), not the dispatching module.
+        if (target?.requiresModules?.includes(moduleId) !== true || target.handleDurableAction === undefined) {
           throw new Error("The durable action target is not a declared module dependency.");
         }
-        const targetAlarm = target?.alarms?.find((alarm) => alarm.key === action.targetHandlerKey);
+        const targetAlarm = target.alarms?.find((alarm) => alarm.key === action.targetHandlerKey);
         if (targetAlarm === undefined) throw new Error(`Module ${target.id} has no alarm context for durable actions.`);
         await target.handleDurableAction(
           this.moduleAlarmContext(target.id, targetAlarm, externalFetchBudget),

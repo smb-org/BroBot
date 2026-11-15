@@ -11,7 +11,7 @@ import { createChatVotingRepository } from "./repository";
 import { CHAT_VOTING_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
 import { chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition, processChatVotingMessage, startChatVote } from "./service";
-import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsReadSchema, chatVotingSettingsSchema, type ChatVotingKind } from "./contracts";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingStartAnnouncementAlarmKey, chatVotingSettingsReadSchema, chatVotingSettingsSchema, type ChatVotingKind } from "./contracts";
 import { chatVotingOverlayElements } from "./overlay/element";
 import { chatVotingRoutes } from "./routes";
 import { chatVotingImmediateActionTexts } from "./action-locale";

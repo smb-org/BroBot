@@ -1,7 +1,7 @@
 import type { JsonObject } from "../../contract";
 
 export interface NowPlayingConfig { showCover: boolean; showRequester: boolean }
-export interface NowPlayingTrack { id: string; title: string; artist: string; coverUrl: string | null; spotifyUrl: string; requester: string | null; source: string }
+interface NowPlayingTrack { id: string; title: string; artist: string; coverUrl: string | null; spotifyUrl: string; requester: string | null; source: string }
 export interface NowPlayingState { revision: number; track: NowPlayingTrack | null; serverNow: string; emptyText?: string }
 export const DEFAULT_NOW_PLAYING_CONFIG: NowPlayingConfig = { showCover: true, showRequester: true };
 

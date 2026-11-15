@@ -1,5 +1,5 @@
-import { signJson, verifyJson, parseKeyRing } from "../../../worker/auth/crypto";
-import { spotifyAuthorizationUrl, type SpotifyEnvironment } from "./spotify";
+import { signJson, verifyJson, parseKeyRing } from "./crypto";
+import { spotifyAuthorizationUrl, type SpotifyEnvironment } from "../../modules/song_requests/adapters/spotify";
 
 export const SPOTIFY_OAUTH_STATE_COOKIE = "__Host-brobot_spotify_oauth_state";
 const STATE_TTL_MS = 10 * 60_000;

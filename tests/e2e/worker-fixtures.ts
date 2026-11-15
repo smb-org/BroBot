@@ -174,6 +174,12 @@ export const seedE2ESongRequests = (channelId: string): SeededE2EOverlay => {
   const sql = `
     INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision)
       VALUES ('${channelId}', 'chat_voting', 1, '{}', 1), ('${channelId}', 'song_requests', 1, '{}', 1);
+    INSERT OR REPLACE INTO bot_identity
+      (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, created_at, updated_at)
+      VALUES (1, 'bot-e2e', 'brobot-e2e', '[]', 'test-access', 'test-refresh', '2099-01-01T00:00:00.000Z', '${createdAt}', '${createdAt}');
+    INSERT OR REPLACE INTO bot_identity_status (id, status, reason, updated_at)
+      VALUES (1, 'connected', NULL, '${createdAt}');
+    DELETE FROM spotify_channel_access;
     INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at)
       VALUES (1, '${channelId}', 'user-e2e', '${createdAt}');
     INSERT INTO overlay_elements

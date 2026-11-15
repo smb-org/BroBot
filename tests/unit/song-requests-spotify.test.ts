@@ -10,6 +10,8 @@ import {
 } from "../../src/modules/song_requests/adapters/spotify";
 import { spotifyTrackIdFromInput } from "../../src/modules/song_requests/domain/track";
 
+const textOf = (value: unknown): string => typeof value === "string" ? value : value instanceof URL ? value.href : value instanceof URLSearchParams ? value.toString() : "";
+
 const track = {
   id: "glassharbor01",
   uri: "spotify:track:glassharbor01",
@@ -43,7 +45,7 @@ describe("Spotify adapter", () => {
   it("searches with Spotify's ten-track shape and preserves its returned tracks", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ tracks: { items: [track], total: 1, limit: 10, offset: 0 } }), { status: 200 }));
     const result = await spotifySearchTracks({ SPOTIFY_API_BASE: "https://spotify.example/v1" }, "access-token", "Glass Harbor", fetcher);
-    const calledUrl = new URL(String(fetcher.mock.calls[0]?.[0]));
+    const calledUrl = new URL(textOf(fetcher.mock.calls[0]?.[0]));
     expect(calledUrl.pathname).toBe("/v1/search");
     expect(calledUrl.searchParams.get("type")).toBe("track");
     expect(calledUrl.searchParams.get("limit")).toBe("10");
@@ -57,7 +59,7 @@ describe("Spotify adapter", () => {
     }), { status: 200 }));
     const result = await refreshSpotifyToken({ SPOTIFY_CLIENT_ID: "fictional-client", SPOTIFY_CLIENT_SECRET: "fictional-secret" }, "existing-refresh", fetcher);
     expect(fetcher).toHaveBeenCalledWith("https://accounts.spotify.com/api/token", expect.objectContaining({ method: "POST" }));
-    expect(String((fetcher.mock.calls[0]?.[1] as RequestInit).body)).toContain("refresh_token=existing-refresh");
+    expect(textOf((fetcher.mock.calls[0]?.[1] as RequestInit).body)).toContain("refresh_token=existing-refresh");
     expect(result.refresh_token).toBeUndefined();
   });
 
@@ -70,8 +72,8 @@ describe("Spotify adapter", () => {
       "https://brobot.example/auth/spotify/callback", "authorization-code", fetcher);
     const init = fetcher.mock.calls[0]?.[1] as RequestInit;
     expect(new Headers(init.headers).get("Authorization")).toBe(`Basic ${btoa("fictional-client:fictional-secret")}`);
-    expect(String(init.body)).toContain("grant_type=authorization_code");
-    expect(String(init.body)).not.toContain("code_verifier");
+    expect(textOf(init.body)).toContain("grant_type=authorization_code");
+    expect(textOf(init.body)).not.toContain("code_verifier");
   });
 
   it("maps Spotify's no-device, Premium, forbidden-scope, retry, and invalid-grant errors", async () => {

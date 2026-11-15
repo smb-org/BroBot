@@ -175,6 +175,8 @@ describe("Secret name drift", () => {
       `SESSION_ENCRYPTION_KEYS='${keyRing}'`,
       `OVERLAY_TOKEN_PEPPER=${key}`,
       "PLATFORM_USER_IDS=[]",
+      "SPOTIFY_CLIENT_ID=client-id",
+      "SPOTIFY_CLIENT_SECRET=client-secret",
       "",
     ].join("\n"));
 

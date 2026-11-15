@@ -24,7 +24,6 @@ export default defineConfig({
     {
       command: "node tests/e2e/spotify-mock-server.mjs",
       url: `http://127.0.0.1:${e2eSpotifyMockPort}/health`,
-      port: Number(e2eSpotifyMockPort),
       reuseExistingServer: false,
       timeout: 30_000,
       env: { SPOTIFY_MOCK_PORT: e2eSpotifyMockPort },

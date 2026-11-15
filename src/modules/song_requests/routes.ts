@@ -1,10 +1,10 @@
 import { Hono, type Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { canManage, hasRequiredChannelRole } from "../../contracts/values";
 import type { ModuleChatVoteStartResult, ModuleRouteEnvironment } from "../contract";
 import { spotifySearchTracks, spotifyTrackById, SpotifyRequestError, type SpotifyEnvironment } from "./adapters/spotify";
 import { spotifyTrackIdFromInput } from "./domain/track";
 import { songVoteLabels } from "./domain/vote-labels";
-import { validateVoteLabels } from "../chat_voting/domain";
 import { songRequestTrackFromSpotify } from "./adapters/d1";
 import { resolveUnknownRequest, latestSongRequestStreamId, recentSongRequests, recentSongVoteOutcomes } from "./adapters/d1";
 import { SONG_REQUESTS_CREDENTIAL_SECRET, SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM } from "./service";
@@ -15,7 +15,8 @@ const bodyFrom = async (request: Request): Promise<Body | null> => {
   try { const value: unknown = await request.json(); return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Body : null; }
   catch { return null; }
 };
-const channel = (context: RouteContext): string => context.req.param("channelId");
+const channel = (context: RouteContext): string => context.req.param("channelId") ?? "";
+const upstreamStatus = (error: unknown): ContentfulStatusCode => error instanceof SpotifyRequestError && error.status >= 400 && error.status < 600 ? error.status as ContentfulStatusCode : 502;
 const isManager = (context: RouteContext): boolean => canManage(context.get("channelRole"));
 const isModerator = (context: RouteContext): boolean => hasRequiredChannelRole(context.get("channelRole"), "operator");
 const managerDenied = (context: RouteContext): Response => context.json({ error: "song_requests_manager_required" }, 403);
@@ -56,7 +57,7 @@ songRequestsRoutes.get("/connection", async (context) => {
   const stream = await streamId(context);
   const settingsRow = await context.env.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'").bind(channelId).first<{ settings: string }>();
   let emptyText = "";
-  try { const parsed: unknown = JSON.parse(settingsRow?.settings ?? "{}"); if (typeof parsed === "object" && parsed !== null && typeof (parsed as Record<string, unknown>).emptyText === "string") emptyText = (parsed as Record<string, string>).emptyText; } catch { /* Invalid legacy settings use the empty default. */ }
+  try { const parsed: unknown = JSON.parse(settingsRow?.settings ?? "{}"); if (typeof parsed === "object" && parsed !== null && typeof (parsed as Record<string, unknown>).emptyText === "string") emptyText = (parsed as { emptyText: string }).emptyText; } catch { /* Invalid legacy settings use the empty default. */ }
   return context.json({ enabled: access !== null, hasCredentials: credentialStatus.configured, slot: access?.slot ?? null, state: access === null ? "not_enabled" : connection.state, errorMessage: connection.error_message, streamId: stream,
     emptyText,
   });
@@ -66,13 +67,13 @@ songRequestsRoutes.post("/oauth/start", async (context) => {
   if (!isManager(context)) return managerDenied(context);
   if (!await accessEnabled(context)) return context.json({ error: "spotify_not_enabled" }, 403);
   const session = context.get("session");
-  const redirectUri = `${context.env.PUBLIC_ORIGIN.replace(/\/+$/u, "")}/auth/spotify/callback`;
-  const { beginSpotifyOAuth, spotifyOAuthStateCookie } = await import("./adapters/oauth-transactions");
-  const transaction = await beginSpotifyOAuth(context.env.DB, context.env, channel(context), session.userId, redirectUri, new Date().toISOString());
+  const begin = context.get("beginSpotifyOAuth");
+  if (begin === undefined) return context.json({ error: "spotify_oauth_unavailable" }, 503);
+  const transaction = await begin(channel(context), session.userId);
   const url = new URL(transaction.authorizationUrl);
   const state = url.searchParams.get("state");
   return context.json({ authorizationUrl: transaction.authorizationUrl }, 200, {
-    "Set-Cookie": spotifyOAuthStateCookie(transaction.stateNonce),
+    "Set-Cookie": transaction.stateCookie,
     "Cache-Control": "no-store",
     ...(state === null ? {} : { "X-Spotify-OAuth-State": state }),
   });
@@ -108,7 +109,7 @@ songRequestsRoutes.get("/search", async (context) => {
   } catch (error) {
     if (error instanceof SpotifyRequestError) await updateConnectionFromRouteError(context, error);
     const status = error instanceof SpotifyRequestError ? error.status : 502;
-    return context.json({ error: error instanceof SpotifyRequestError ? error.reason ?? `spotify_${status}` : "spotify_unavailable" }, status >= 400 && status < 600 ? status : 502);
+    return context.json({ error: error instanceof SpotifyRequestError ? error.reason ?? `spotify_${String(status)}` : "spotify_unavailable" }, upstreamStatus(error));
   }
 });
 
@@ -131,10 +132,10 @@ songRequestsRoutes.post("/vote", async (context) => {
   try { tracks = await Promise.all(ids.map((id) => spotifyTrackById(spotifyEnvironment(context), accessToken, id as string))); }
   catch (error) {
     if (error instanceof SpotifyRequestError) await updateConnectionFromRouteError(context, error);
-    return context.json({ error: error instanceof SpotifyRequestError ? error.reason ?? "spotify_track_unavailable" : "spotify_unavailable" }, error instanceof SpotifyRequestError && error.status >= 400 && error.status < 600 ? error.status : 502);
+    return context.json({ error: error instanceof SpotifyRequestError ? error.reason ?? "spotify_track_unavailable" : "spotify_unavailable" }, upstreamStatus(error));
   }
   const labels = songVoteLabels(tracks);
-  if (labels.length !== tracks.length || !validateVoteLabels(labels, 2, 9)) return context.json({ error: "song_vote_candidates_invalid" }, 400);
+  if (labels.length !== tracks.length) return context.json({ error: "song_vote_candidates_invalid" }, 400);
   let started: ModuleChatVoteStartResult | undefined;
   try { started = await context.get("startChatVote")?.(channel(context), { title: "Song vote", labels, durationSeconds: 90 }); }
   catch (error) {

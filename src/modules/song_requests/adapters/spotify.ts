@@ -64,7 +64,8 @@ const errorFrom = async (response: Response): Promise<SpotifyRequestError> => {
       }
     }
   } catch { /* Keep the fixed fallback text. */ }
-  const retryAfter = Number(response.headers.get("Retry-After"));
+  const retryAfterHeader = response.headers.get("Retry-After");
+  const retryAfter = retryAfterHeader === null || retryAfterHeader.trim() === "" ? Number.NaN : Number(retryAfterHeader);
   const retryAfterMs = Number.isFinite(retryAfter) && retryAfter >= 0 ? retryAfter * 1_000 : null;
   return new SpotifyRequestError(message, response.status, reason, retryAfterMs);
 };
@@ -134,7 +135,7 @@ const formRequest = async (
       (body as Record<string, unknown>).error === "invalid_grant";
     throw new SpotifyRequestError(invalidGrant ? "Spotify authorization must be renewed." : "Spotify token exchange failed.", response.status, invalidGrant ? "invalid_grant" : null);
   }
-  return await response.json() as SpotifyToken;
+  return await response.json<SpotifyToken>();
 };
 
 export const spotifyAuthorizationUrl = (
@@ -178,5 +179,5 @@ export const spotifyTrackById = async (
   fetcher: typeof fetch = fetch,
 ): Promise<SpotifyTrack> => {
   const response = await spotifyApiRequest(environment, accessToken, `tracks/${encodeURIComponent(id)}`, {}, fetcher);
-  return await response.json() as SpotifyTrack;
+  return await response.json<SpotifyTrack>();
 };

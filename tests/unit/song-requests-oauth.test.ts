@@ -4,7 +4,7 @@ import {
   beginSpotifyOAuth,
   consumeSpotifyOAuthTransaction,
   verifySpotifyOAuthState,
-} from "../../src/modules/song_requests/adapters/oauth-transactions";
+} from "../../src/worker/auth/spotify-oauth";
 import { insertChannel, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -33,12 +33,12 @@ describe("Spotify OAuth transaction", () => {
     expect(state).toMatchObject({ channelId: CHANNEL_ID, memberUserId: "member-fictional" });
     expect(await verifySpotifyOAuthState(stateToken ?? "", "wrong-cookie-nonce", COOKIE_KEYS, "2026-11-15T12:01:00.000Z")).toBeNull();
     expect(await verifySpotifyOAuthState(stateToken ?? "", started.stateNonce, COOKIE_KEYS, "2026-11-15T12:11:00.000Z")).toBeNull();
-    expect(state).not.toBeNull();
-    const firstUse = await consumeSpotifyOAuthTransaction(database as unknown as D1Database, state!, "2026-11-15T12:01:00.000Z");
+    if (state === null) throw new Error("The signed state must verify.");
+    const firstUse = await consumeSpotifyOAuthTransaction(database as unknown as D1Database, state, "2026-11-15T12:01:00.000Z");
     expect(firstUse).toMatchObject({ channelId: CHANNEL_ID, memberUserId: "member-fictional" });
     expect(firstUse).not.toHaveProperty("codeVerifier");
     const columns = await database.prepare("PRAGMA table_info(spotify_oauth_transactions)").all<{ name: string }>();
     expect(columns.results.map(({ name }) => name)).not.toContain("code_verifier");
-    expect(await consumeSpotifyOAuthTransaction(database as unknown as D1Database, state!, "2026-11-15T12:01:01.000Z")).toBeNull();
+    expect(await consumeSpotifyOAuthTransaction(database as unknown as D1Database, state, "2026-11-15T12:01:01.000Z")).toBeNull();
   });
 });

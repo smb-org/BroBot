@@ -1,7 +1,7 @@
 import type { JsonObject, ModuleOverlayElementContext, ModuleOverlayElementDefinition } from "../../contract";
 import { SONG_REQUESTS_NOW_PLAYING_KIND, SONG_REQUESTS_NOW_PLAYING_SIZE } from "./kinds";
 import { nowPlayingTexts } from "./locale";
-import { DEFAULT_NOW_PLAYING_CONFIG, mergeNowPlayingRevision, nowPlayingStateJson, parseNowPlayingConfig } from "./state";
+import { DEFAULT_NOW_PLAYING_CONFIG, mergeNowPlayingRevision, nowPlayingStateJson, parseNowPlayingConfig, parseNowPlayingState } from "./state";
 
 const sample = (now: number): JsonObject => nowPlayingStateJson({
   revision: 1,
@@ -18,12 +18,11 @@ export const songRequestsNowPlayingElement: ModuleOverlayElementDefinition = {
   editorLabel: { de: nowPlayingTexts.de.name, en: nowPlayingTexts.en.name },
   editorAddLabel: { de: nowPlayingTexts.de.name, en: nowPlayingTexts.en.name },
   editorDescription: { de: nowPlayingTexts.de.description, en: nowPlayingTexts.en.description },
-  editorModuleLabel: { de: "Song-Wünsche", en: "Song requests" },
+  editorModuleLabel: { de: nowPlayingTexts.de.moduleLabel, en: nowPlayingTexts.en.moduleLabel },
   initialStateNeedsContext: true,
   reloadStateOnModuleMessages: ["modul.song_requests.state_changed"],
   mergeRealtimeStateOnModuleMessages: ["modul.song_requests.state_changed"],
   mergeRealtimeState: mergeNowPlayingRevision,
-  preserveRealtimeStateOnReload: true,
   parseConfig: (raw) => {
     const parsed = parseNowPlayingConfig(raw);
     return parsed === null ? null : parsed as unknown as JsonObject;
@@ -36,13 +35,15 @@ export const songRequestsNowPlayingElement: ModuleOverlayElementDefinition = {
     let emptyText = "";
     try {
       const parsed: unknown = JSON.parse(settings?.settings ?? "{}");
-      if (typeof parsed === "object" && parsed !== null && typeof (parsed as Record<string, unknown>).emptyText === "string") emptyText = (parsed as Record<string, string>).emptyText;
+      if (typeof parsed === "object" && parsed !== null && typeof (parsed as Record<string, unknown>).emptyText === "string") emptyText = (parsed as { emptyText: string }).emptyText;
     } catch { /* Invalid legacy settings use the empty default. */ }
-    let track = null;
+    let track: unknown = null;
     if (snapshot?.track_json != null) {
       try { track = JSON.parse(snapshot.track_json); } catch { track = null; }
     }
-    return nowPlayingStateJson({ revision: snapshot?.revision ?? 0, serverNow: new Date(context?.now ?? Date.now()).toISOString(), track, emptyText } as Parameters<typeof nowPlayingStateJson>[0]);
+    const revision = snapshot?.revision ?? 0;
+    const serverNow = new Date(context?.now ?? Date.now()).toISOString();
+    return nowPlayingStateJson(parseNowPlayingState({ revision, serverNow, track, emptyText }) ?? { revision, serverNow, track: null, emptyText });
   },
   load: () => import("./view"),
   editor: () => import("./editor"),

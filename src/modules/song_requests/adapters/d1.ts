@@ -165,7 +165,7 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
     ).bind(...bindings);
   }
   const results = await db.batch([transition, ...(input.companionStatements ?? [])]);
-  return (results[0]?.meta.changes ?? 0) === 1 && results.slice(1).every((result) => (result?.meta.changes ?? 0) === 1);
+  return results[0]?.meta.changes === 1 && results.slice(1).every((result) => result.meta.changes === 1);
 };
 
 export const songRequestTrackFromSpotify = (track: SpotifyTrack): SongRequestTrack => {
@@ -259,7 +259,7 @@ export const createVoteRequestClaim = async (
     fromState: null,
     toState: input.initialState ?? "approved",
     now: input.now,
-    failureReason: input.failureReason,
+    failureReason: input.failureReason ?? null,
     onlyIfOpenBallotId: input.ballotId,
     newRequest: { source: "mod_vote", track: input.track, operationId, streamId: input.streamId },
     companionStatements: [claim],
@@ -296,7 +296,7 @@ export const finishVoteWithoutRequest = async (
     `UPDATE song_requests_votes SET state = ?, completed_at = ?
       WHERE channel_id = ? AND ballot_id = ? AND state = 'open'`,
   ).bind(state, now, channelId, ballotId).run();
-  return (result.meta.changes ?? 0) === 1;
+  return result.meta.changes === 1;
 };
 
 export const createNowPlayingSnapshot = async (
@@ -369,7 +369,7 @@ export const createNowPlayingSnapshot = async (
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (channel_id) DO UPDATE SET revision = excluded.revision, track_json = excluded.track_json,
        request_id = excluded.request_id, progress_ms = excluded.progress_ms, observed_at = excluded.observed_at`,
-  ).bind(channelId, revision, serialized, request?.requestId ?? (sameTrack ? current?.request_id ?? null : null), nextProgress, now);
+  ).bind(channelId, revision, serialized, request?.requestId ?? (sameTrack ? current.request_id ?? null : null), nextProgress, now);
   if (request !== null) {
     await transitionRequest(db, {
       channelId,
@@ -433,14 +433,4 @@ export const resolveUnknownRequest = async (
   return await transitionRequest(db, {
     channelId, requestId, fromState: "outcome_unknown", toState: state, failureReason: null, now,
   });
-};
-
-export const nowPlayingSnapshot = async (db: D1Database, channelId: string): Promise<Record<string, unknown> | null> => {
-  const row = await db.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
-    .bind(channelId).first<{ track_json: string | null }>();
-  if (row?.track_json == null) return null;
-  try {
-    const state: unknown = JSON.parse(row.track_json);
-    return typeof state === "object" && state !== null && !Array.isArray(state) ? state as Record<string, unknown> : null;
-  } catch { return null; }
 };

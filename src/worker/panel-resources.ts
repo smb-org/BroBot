@@ -25,6 +25,7 @@ export const PANEL_RESOURCE_NOTIFIER_COVERAGE = {
   platformRoutes: "/api/platform/*",
   explicitlyCommittedRoutes: [
     "GET /auth/twitch/callback",
+    "GET /auth/spotify/callback",
     "GET /api/overlay/bootstrap",
     "GET /api/overlay/variables/:name",
     "GET /api/overlay/media/:id/:sha256",
@@ -39,6 +40,7 @@ export const PANEL_RESOURCE_NOTIFIER_COVERAGE = {
     "/api/platform/twitch/user-suggestions",
     "/api/platform/channels",
     "/api/platform/channels/:channelId/members",
+    "/api/platform/spotify-channels",
     "/api/platform/audit",
     "/auth/login",
     "/auth/channels/:channelId/channel-bot",
