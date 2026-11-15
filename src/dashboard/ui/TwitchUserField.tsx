@@ -260,11 +260,14 @@ export function TwitchUserField({
             onFocus={() => { if (users.length > 0) setOpen(true); }}
             onBlur={() => { void resolve(); }}
             onKeyDown={(event) => {
-              if (handleKeyDown(event)) return;
               if (event.key === "Escape") {
                 abortActiveRequest();
-                setOpen(false);
+                requestIdRef.current += 1;
                 setStatus("idle");
+              }
+              if (handleKeyDown(event)) return;
+              if (event.key === "Escape") {
+                setOpen(false);
               }
             }}
           />

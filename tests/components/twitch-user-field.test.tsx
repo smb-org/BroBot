@@ -81,6 +81,39 @@ describe("TwitchUserField", () => {
     expect(input).toHaveValue("chat");
   });
 
+  it("keeps suggestions closed when a pending search resolves after Escape", async () => {
+    vi.useFakeTimers();
+    let resolvePending: ((result: ReturnType<typeof resultFor>) => void) | undefined;
+    let pendingSignal: AbortSignal | undefined;
+    const loadSuggestions = vi.fn((query: string, signal: AbortSignal) => {
+      if (query === "chat") return Promise.resolve(resultFor());
+      pendingSignal = signal;
+      return new Promise<ReturnType<typeof resultFor>>((resolve) => { resolvePending = resolve; });
+    });
+    render(<TwitchUserField channelId="channel-a" label="Twitch user" hint="Choose a user" language="en"
+      value={null} onChange={vi.fn()} loadSuggestions={loadSuggestions} />);
+
+    const input = screen.getByRole("combobox", { name: "Twitch user" });
+    fireEvent.change(input, { target: { value: "chat" } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "chatf" } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(loadSuggestions).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    expect(pendingSignal?.aborted).toBe(true);
+
+    await act(() => {
+      resolvePending?.(resultFor());
+      return Promise.resolve();
+    });
+
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("resolves exact free text when a submit handler asks the field to resolve", async () => {
     const reference = createRef<TwitchUserFieldHandle>();
     const onChange = vi.fn();

@@ -91,7 +91,7 @@ describe("Twitch user suggestion route", () => {
     expect(response.status).toBe(200);
     expect(body.partial).toBe(false);
     expect(body.users).toEqual([
-      chatter,
+      { ...chatter, isLive: false },
       { userId: "200", login: "chatfreund", displayName: "Chatfreund Exact", profileImageUrl: null },
       { userId: "300", login: "beispielkanal", displayName: "Beispielkanal", profileImageUrl: "https://static.example/beispielkanal.png", isLive: true },
     ]);
@@ -101,6 +101,29 @@ describe("Twitch user suggestion route", () => {
     const cachedResponse = await panelRouter.fetch(await requestFor("manager", "chatfreund"), environmentFor());
     expect(cachedResponse.status).toBe(200);
     expect(helixCalls).toHaveLength(2);
+  });
+
+  it("merges live status from a duplicate channel search into the first chatter suggestion", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname.endsWith("/users")) {
+        return Promise.resolve(Response.json({ data: [
+          { id: "200", login: "chatfreund", display_name: "Chatfreund Exact", profile_image_url: null },
+        ] }));
+      }
+      return Promise.resolve(Response.json({ data: [
+        { id: "100", broadcaster_login: "chatfreund", display_name: "Chatfreund Live", thumbnail_url: "https://static.example/chatfreund-live.png", is_live: true },
+      ] }));
+    }));
+    await insertChannel(database, "channel-live");
+    await insertMember(database, "channel-live", "manager", "manager");
+
+    const response = await panelRouter.fetch(await requestFor("manager", "chatfreund", "channel-live"), environmentFor());
+    const body = await response.json<{ users: Array<Record<string, unknown>>; partial: boolean }>();
+
+    expect(response.status).toBe(200);
+    expect(body.users.filter((user) => user.userId === "100")).toHaveLength(1);
+    expect(body.users[0]).toMatchObject({ userId: "100", isLive: true });
   });
 
   it("keeps the exact login within the eight-result limit when the chatter roster is full", async () => {

@@ -80,12 +80,23 @@ const appendUnique = (
   seenIds: Set<string>,
   entries: readonly (TwitchUserSuggestion | null)[],
 ): void => {
-  if (result.length >= MAX_SUGGESTIONS) return;
   for (const entry of entries) {
-    if (entry === null || seenIds.has(entry.userId)) continue;
+    if (entry === null) continue;
+    if (seenIds.has(entry.userId)) {
+      const existingIndex = result.findIndex((existing) => existing.userId === entry.userId);
+      const existing = result[existingIndex];
+      if (existingIndex < 0 || existing === undefined) continue;
+      result[existingIndex] = {
+        ...existing,
+        ...(existing.isLive === undefined && entry.isLive !== undefined ? { isLive: entry.isLive } : {}),
+        ...(existing.profileImageUrl === null && entry.profileImageUrl !== null ? { profileImageUrl: entry.profileImageUrl } : {}),
+        ...(existing.displayName.length === 0 && entry.displayName.length > 0 ? { displayName: entry.displayName } : {}),
+      };
+      continue;
+    }
+    if (result.length >= MAX_SUGGESTIONS) continue;
     seenIds.add(entry.userId);
     result.push(entry);
-    if (result.length >= MAX_SUGGESTIONS) return;
   }
 };
 

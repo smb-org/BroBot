@@ -75,7 +75,13 @@ export function MemberGrantEditor({
   const discard = (): void => {
     setFound(null);
     setLogin("");
+    setRole(defaultRole);
     userField.current?.clear();
+  };
+
+  const handleUserChange = (user: PanelTwitchUser | null): void => {
+    if (user !== null && user.userId !== found?.userId) setRole(defaultRole);
+    setFound(user);
   };
 
   const handleLookupError = (error: unknown): void => {
@@ -89,7 +95,6 @@ export function MemberGrantEditor({
       const user = await userField.current?.resolve() ?? null;
       if (user === null) return;
       setFound(user);
-      setRole(defaultRole);
       setConfirmOpen(true);
     } finally {
       setResolving(false);
@@ -137,7 +142,7 @@ export function MemberGrantEditor({
                   label={texts.searchLabel}
                   hint={texts.searchHint}
                   value={found}
-                  onChange={setFound}
+                  onChange={handleUserChange}
                   onLoginChange={setLogin}
                   onLookupError={handleLookupError}
                   {...(loadSuggestions === undefined ? {} : { loadSuggestions })}
