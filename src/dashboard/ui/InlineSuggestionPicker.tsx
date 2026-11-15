@@ -51,6 +51,7 @@ interface InlineSuggestionPickerProps<Option extends { name: string }> {
   onSelect: (name: string) => void;
   onClose: () => void;
   renderOption: (option: Option, active: boolean) => ReactNode;
+  matchAnchorWidth?: boolean;
   children: (controls: InlineSuggestionPickerControls) => ReactNode;
 }
 
@@ -89,6 +90,7 @@ export function InlineSuggestionPicker<Option extends { name: string }>({
   onSelect,
   onClose,
   renderOption,
+  matchAnchorWidth = false,
   children,
 }: InlineSuggestionPickerProps<Option>): ReactElement {
   const groupKey = groups.map(({ group, options: groupOptions }) => `${group.id}:${groupOptions.map(({ option }) => option.name).join(",")}`).join("|");
@@ -148,7 +150,7 @@ export function InlineSuggestionPicker<Option extends { name: string }>({
       </PickerTargetContext.Provider>
       {open ? <PopoverPrimitive.Portal>
         <PopoverPrimitive.Positioner anchor={anchorRef} side="bottom" align="start" sideOffset={4} collisionPadding={12} collisionAvoidance={{ side: "flip", align: "shift", fallbackAxisSide: "start" }} className="z-[var(--layer-popover)]" style={{ zIndex: "var(--layer-popover)" }}>
-          <PopoverPrimitive.Popup data-ui="" className="ui-template-text-field__suggestions-dropdown" initialFocus={false} finalFocus={false}>
+          <PopoverPrimitive.Popup data-ui="" className={matchAnchorWidth ? "ui-template-text-field__suggestions-dropdown ui-template-text-field__suggestions-dropdown--anchor-width" : "ui-template-text-field__suggestions-dropdown"} initialFocus={false} finalFocus={false}>
             <div id={listboxId} className="ui-template-text-field__suggestions" role="listbox" aria-label={messages.title}>
               {groups.map(({ group, options: groupOptions }) => (
                 <div className="ui-template-text-field__suggestions-group" role="group" aria-label={group.label} key={group.id}>

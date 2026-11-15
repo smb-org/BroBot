@@ -218,6 +218,7 @@ export function TwitchUserField({
   const isOpen = open && !disabled;
 
   return <InlineSuggestionPicker
+    matchAnchorWidth
     listboxId={listboxId}
     open={isOpen}
     groups={groups}
