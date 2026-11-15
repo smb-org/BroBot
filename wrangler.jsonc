@@ -50,7 +50,9 @@
       "SESSION_COOKIE_KEYS",
       "TOKEN_ENCRYPTION_KEYS",
       "OVERLAY_TOKEN_PEPPER",
-      "PLATFORM_USER_IDS"
+      "PLATFORM_USER_IDS",
+      "SPOTIFY_CLIENT_ID",
+      "SPOTIFY_CLIENT_SECRET"
     ]
   },
   "observability": {
@@ -100,7 +102,9 @@
           "SESSION_COOKIE_KEYS",
           "TOKEN_ENCRYPTION_KEYS",
           "OVERLAY_TOKEN_PEPPER",
-          "PLATFORM_USER_IDS"
+          "PLATFORM_USER_IDS",
+          "SPOTIFY_CLIENT_ID",
+          "SPOTIFY_CLIENT_SECRET"
         ]
       },
       "observability": {
@@ -150,7 +154,9 @@
           "SESSION_COOKIE_KEYS",
           "TOKEN_ENCRYPTION_KEYS",
           "OVERLAY_TOKEN_PEPPER",
-          "PLATFORM_USER_IDS"
+          "PLATFORM_USER_IDS",
+          "SPOTIFY_CLIENT_ID",
+          "SPOTIFY_CLIENT_SECRET"
         ]
       },
       "observability": {

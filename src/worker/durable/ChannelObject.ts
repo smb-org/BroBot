@@ -79,6 +79,7 @@ import type {
   JsonObject,
   ModuleOverlayAlertQueueItem,
   ModuleAction,
+  ModuleDurableAction,
   ModuleBallotAccess,
   ModuleChatDelivery,
   ModuleLanguage,
@@ -4127,8 +4128,10 @@ export class ChannelObject extends DurableObject<Env> {
     const context: ModuleAlarmContext = {
       DB: this.env.DB,
       // Only the channel-points lifecycle needs Worker integrations; the Env is not structured-cloneable over test RPC.
-      ...(moduleId === "channel_points" ? {
+      ...(moduleId === "channel_points" || moduleId === "song_requests" ? {
         environment: this.env,
+      } : {}),
+      ...(moduleId === "channel_points" ? {
         authorizeMutation: authorizeModuleMutation,
         authorizeManagementMutation: authorizeModuleManagementMutation,
       } : {}),
@@ -4141,6 +4144,22 @@ export class ChannelObject extends DurableObject<Env> {
       ...(alarmPlanSequence === undefined ? {} : { alarmPlanSequence }),
       ...(streamGeneration === undefined ? {} : { streamGeneration }),
       externalFetchBudget,
+      dispatchDurableAction: async (action: ModuleDurableAction) => {
+        if (moduleId !== "chat_voting") {
+          throw new Error("This module cannot dispatch that durable action.");
+        }
+        const target = MODULES.find((module) => module.id === action.targetModuleId);
+        // The target module declares the dependency (song_requests requires chat_voting), not the dispatching module.
+        if (target?.requiresModules?.includes(moduleId) !== true || target.handleDurableAction === undefined) {
+          throw new Error("The durable action target is not a declared module dependency.");
+        }
+        const targetAlarm = target.alarms?.find((alarm) => alarm.key === action.targetHandlerKey);
+        if (targetAlarm === undefined) throw new Error(`Module ${target.id} has no alarm context for durable actions.`);
+        await target.handleDurableAction(
+          this.moduleAlarmContext(target.id, targetAlarm, externalFetchBudget),
+          action,
+        );
+      },
       statisticsChat: {
         advanceToBoundary: (boundary, streamIsOnline, streamId) =>
           this.advanceStatisticsToBoundary(boundary, streamIsOnline, streamId),
@@ -4259,8 +4278,13 @@ export class ChannelObject extends DurableObject<Env> {
           return new Map([...entries].map(([key, value]) => [key.slice(storagePrefix.length), value]));
         },
       },
-      schedule: async (key, deadline, ownerRevision, scheduledStreamGeneration, identity, planSequence) => {
-        const scheduledRegistration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === key);
+      schedule: async (key, deadline, ownerRevision, scheduledStreamGeneration, identity, planSequence, scheduledHandlerKey) => {
+        const moduleAlarms = MODULES.find((module) => module.id === moduleId)?.alarms ?? [];
+        const targetHandlerKey = scheduledHandlerKey ?? (moduleAlarms.some((alarm) => alarm.key === key) ? key : registration.key);
+        const scheduledRegistration = moduleAlarms.find((alarm) => alarm.key === targetHandlerKey);
+        if (scheduledHandlerKey !== undefined && scheduledRegistration === undefined) {
+          throw new Error(`Unknown module alarm handler ${moduleId}.${scheduledHandlerKey}.`);
+        }
         await this.scheduleAlarmEntry(
           `module:${moduleId}:${key}`,
           scheduledRegistration === undefined ? handler : `module:${moduleId}:${scheduledRegistration.key}`,
@@ -8020,6 +8044,12 @@ export class ChannelObject extends DurableObject<Env> {
       () => this.runModuleAlarmHandler(moduleId, handlerKey, execute),
       () => this.notifyCommittedPanelResources(),
     );
+  }
+
+  /** Returns the channel's Spotify token after any refresh performed inside this object. */
+  public async getSpotifyAccessToken(): Promise<string | null> {
+    const result = await this.runModuleAlarm("song_requests", "access_token", "read");
+    return typeof result === "string" ? result : null;
   }
 
   private async recordPointRoundAnnouncement(

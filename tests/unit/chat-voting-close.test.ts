@@ -59,6 +59,7 @@ describe("chat voting close service", () => {
       schedule?: ModuleAlarmContext["schedule"];
       sendChat?: (...args: Parameters<ModuleAlarmContext["sendChat"]>) => Promise<{ sent: boolean; reason: string | null; retryable: boolean }>;
       renderTemplate?: ModuleAlarmContext["renderTemplate"];
+      dispatchDurableAction?: ModuleAlarmContext["dispatchDurableAction"];
     } = {},
   ) => {
     const values = new Map<string, unknown>();
@@ -95,6 +96,7 @@ describe("chat voting close service", () => {
       clear: vi.fn(),
       renderTemplate: overrides.renderTemplate ?? vi.fn(() => Promise.resolve({ text: "Yes: 7 (70%) · No: 3 (30%)" })),
       publishModuleOverlayMessage,
+      dispatchDurableAction: overrides.dispatchDurableAction,
       sendChat: vi.fn((...args: Parameters<ModuleAlarmContext["sendChat"]>) => {
         order.push("chat");
         return sendChat(...args);
@@ -418,6 +420,21 @@ describe("chat voting close service", () => {
     expect(sendChat).toHaveBeenCalledTimes(2);
     await expect(repository.byId("fictional-channel", "fictional-poll"))
       .resolves.toMatchObject({ status: "closed", counts: [7, 3] });
+  });
+
+  it("closes and announces a vote when the song request handler fails", async () => {
+    const repository = await seedOpenVote(true, "Dinner?");
+    const order: string[] = [];
+    const dispatchDurableAction = vi.fn(() => Promise.reject(new Error("song request storage unavailable")));
+    const { context, sendChat } = createAlarmContext(order, { dispatchDurableAction });
+    const logError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await closeChatVoteFromAlarm(context, repository, "fictional-poll");
+
+    await expect(repository.byId("fictional-channel", "fictional-poll")).resolves.toMatchObject({ status: "closed" });
+    expect(dispatchDurableAction).toHaveBeenCalledOnce();
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(logError).toHaveBeenCalledWith(expect.stringContaining("Song vote result dispatch failed"), expect.any(Error));
   });
 
   it("sends the rendered remainder when a text-block rename crosses alarm awaits", async () => {

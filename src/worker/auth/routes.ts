@@ -77,6 +77,11 @@ import type { ModuleOverlayInitialStateContext } from "../../modules/contract";
 import { hydrateCachedAdsCountdownSnapshot } from "../overlays/ads-countdown-cache";
 import { ADS_COUNTDOWN_ELEMENT_KIND } from "../../modules/ads/overlay/kinds";
 import { createOverlayElementContext, createOverlaySnapshotContext } from "../overlays/element-context";
+import { getChannelMemberForChannel } from "../db/channel-members";
+import { createModuleSecretAccess } from "../module-secrets";
+import { clearSpotifyOAuthStateCookie, consumeSpotifyOAuthTransaction, verifySpotifyOAuthState, SPOTIFY_OAUTH_STATE_COOKIE } from "./spotify-oauth";
+import { exchangeSpotifyCode, SpotifyRequestError } from "../../modules/song_requests/adapters/spotify";
+import { SONG_REQUESTS_ALARM, SONG_REQUESTS_CREDENTIAL_SECRET, SONG_REQUESTS_HANDLER } from "../../modules/song_requests/service";
 import { notifyCommittedResources, schedulePanelResourceBackgroundWork } from "../panel-resources";
 
 const nowIso = (): string => new Date().toISOString();
@@ -728,6 +733,74 @@ authRouter.get("/auth/twitch/callback", async (context) => {
     return error instanceof OAuthExchangeError
       ? oauthError(context, "code_exchange_rejected")
       : oauthError(context, "callback_failed", 502);
+  }
+});
+
+authRouter.get("/auth/spotify/callback", async (context) => {
+  const clearStateCookie = (): void => { context.header("Set-Cookie", clearSpotifyOAuthStateCookie(), { append: true }); };
+  const serializedState = context.req.query("state");
+  if (serializedState === undefined) {
+    clearStateCookie();
+    return oauthError(context, "oauth_state_missing");
+  }
+  const now = nowIso();
+  const cookieNonce = readCookieValue(context.req.raw.headers.get("Cookie"), SPOTIFY_OAUTH_STATE_COOKIE);
+  const state = await verifySpotifyOAuthState(serializedState, cookieNonce, context.env.SESSION_COOKIE_KEYS, now);
+  clearStateCookie();
+  if (state === null) return oauthError(context, "oauth_state_invalid");
+  const transaction = await consumeSpotifyOAuthTransaction(context.env.DB, state, now);
+  if (transaction === null) return oauthError(context, "oauth_transaction_invalid");
+  if (context.req.query("error") !== undefined) return oauthError(context, "spotify_authorization_denied");
+  const code = context.req.query("code");
+  if (code === undefined || code.length === 0) return oauthError(context, "oauth_code_missing");
+  const session = await getSessionFromRequest(context.req.raw, context.env);
+  if (session === null || session.userId !== transaction.memberUserId) return oauthError(context, "spotify_channel_access_denied", 403);
+  const [member, access] = await Promise.all([
+    getChannelMemberForChannel(context.env.DB, transaction.channelId, session.userId),
+    context.env.DB.prepare("SELECT 1 AS enabled FROM spotify_channel_access WHERE channel_id = ?").bind(transaction.channelId).first(),
+  ]);
+  if (member === null || !canManage(member.role) || access === null) return oauthError(context, "spotify_channel_access_denied", 403);
+  try {
+    const redirectUri = `${context.env.PUBLIC_ORIGIN.replace(/\/+$/u, "")}/auth/spotify/callback`;
+    const token = await exchangeSpotifyCode(context.env, redirectUri, code);
+    const secret = createModuleSecretAccess(context.env, transaction.channelId, "song_requests");
+    const credentials = JSON.stringify({ accessToken: token.access_token, refreshToken: token.refresh_token ?? "", expiresAt: Date.now() + token.expires_in * 1_000 });
+    if (token.refresh_token === undefined || token.refresh_token.length === 0) return oauthError(context, "spotify_callback_failed", 502);
+    const write = await secret.prepareWrite(SONG_REQUESTS_CREDENTIAL_SECRET, credentials, {
+      userId: session.userId,
+      login: session.login,
+    }, now, false, true);
+    const connection = context.env.DB.prepare(
+      `INSERT INTO song_requests_connections (channel_id, state, error_message, updated_at, poll_failures)
+       SELECT ?, 'connected', NULL, ?, 0 WHERE changes() = 1
+       ON CONFLICT (channel_id) DO UPDATE SET state = 'connected', error_message = NULL, updated_at = excluded.updated_at, poll_failures = 0`,
+    ).bind(transaction.channelId, now);
+    const results = await context.env.DB.batch([write, connection]);
+    // D1 counts rows written by the panel revision triggers too, so test for "at least one".
+    if ((results[0]?.meta.changes ?? 0) < 1 || (results[1]?.meta.changes ?? 0) < 1) {
+      return oauthError(context, "spotify_channel_access_denied", 403);
+    }
+    await notifyCommittedResources(context.env, transaction.channelId);
+    const [stream, moduleActivation] = await Promise.all([
+      context.env.DB.prepare("SELECT state FROM channel_stream_state WHERE channel_id = ?")
+        .bind(transaction.channelId).first<{ state: string }>(),
+      context.env.DB.prepare("SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+        .bind(transaction.channelId).first<{ enabled: number }>(),
+    ]);
+    if (stream?.state === "online" && moduleActivation?.enabled === 1) {
+      const module = MODULES.find((candidate) => candidate.id === "song_requests");
+      const alarm = module?.alarms?.find((candidate) => candidate.key === SONG_REQUESTS_HANDLER);
+      if (module !== undefined && alarm !== undefined) {
+        try {
+          const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(transaction.channelId));
+          await channelObject.scheduleModuleAlarm(module.id, alarm.key, SONG_REQUESTS_ALARM, Date.now() + 12_000);
+        } catch { /* The next stream transition can repair a missed polling alarm. */ }
+      }
+    }
+    return context.redirect(`${context.env.PUBLIC_ORIGIN.replace(/\/+$/u, "")}${moduleDashboardPath(transaction.channelId, "song_requests")}?spotify=connected`, 302);
+  } catch (error) {
+    if (error instanceof SpotifyRequestError && error.status === 400) return oauthError(context, "spotify_code_exchange_rejected");
+    return oauthError(context, "spotify_callback_failed", 502);
   }
 });
 

@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { e2eWorkerEnvironment, e2eWorkerPersist, e2eWorkerPort } from "./tests/e2e/worker-fixtures";
+import { e2eSpotifyMockPort, e2eWorkerEnvironment, e2eWorkerPersist, e2eWorkerPort } from "./tests/e2e/worker-fixtures";
 
 const playwrightPort = process.env.PLAYWRIGHT_PORT ?? "5174";
 const inspectorPort = process.env.WORKER_INSPECTOR_PORT ?? String(Number(e2eWorkerPort) + 2);
@@ -21,6 +21,13 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: [
+    {
+      command: "node tests/e2e/spotify-mock-server.mjs",
+      url: `http://127.0.0.1:${e2eSpotifyMockPort}/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      env: { SPOTIFY_MOCK_PORT: e2eSpotifyMockPort },
+    },
     {
       command: `./node_modules/.bin/vite --host 127.0.0.1 --port ${playwrightPort} --strictPort`,
       url: `http://localhost:${playwrightPort}/`,

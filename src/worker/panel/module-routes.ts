@@ -61,6 +61,8 @@ import { modulePoints } from "../module-points";
 import { moduleTempVipRoutes } from "../module-temp-vips";
 import { listChannelVips } from "../twitch/vips";
 import { createModuleSecretAccess } from "../module-secrets";
+import { createModuleActionExecutionContext } from "../module-action-context";
+import { beginSpotifyOAuth, spotifyOAuthStateCookie } from "../auth/spotify-oauth";
 import { liftModerationBan } from "../moderation";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../../modules/contracts/text-block-write-guard";
 import { effectiveEventTemplateDeclarations } from "../../modules/contracts/text-block-validation";
@@ -79,7 +81,7 @@ interface ModuleRouteEnvironment {
     | "tempVips"
     | "botCredentials" | "getUserEmotes" | "getGlobalEmotes"
     | "readChannelBlockedTerms"
-    | "runModuleAlarm"
+    | "runModuleAlarm" | "startChatVote" | "beginSpotifyOAuth"
     | "listTextBlockConditions"
     | "listEventTimeSources" | "resolveEventTimes"
     | "notifyScheduleInputsChanged" | "reconcileTimerSchedules" | "validateTemplateContentMutation"
@@ -372,6 +374,22 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     return invocation === undefined
       ? object.runModuleAlarm(moduleId, handlerKey, alarmKey)
       : object.runModuleAlarm(moduleId, handlerKey, alarmKey, invocation);
+  });
+  context.set("beginSpotifyOAuth", async (channelId, memberUserId) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Spotify OAuth must use the authorized route channel.");
+    const redirectUri = `${context.env.PUBLIC_ORIGIN.replace(/\/+$/u, "")}/auth/spotify/callback`;
+    const transaction = await beginSpotifyOAuth(context.env.DB, context.env, channelId, memberUserId, redirectUri, new Date().toISOString());
+    return { authorizationUrl: transaction.authorizationUrl, stateCookie: spotifyOAuthStateCookie(transaction.stateNonce) };
+  });
+  context.set("startChatVote", async (channelId, request) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Chat vote access must use the authorized route channel.");
+    const chatVoting = MODULES.find((module) => module.id === "chat_voting");
+    if (chatVoting?.startChatVote === undefined) throw new Error("The chat vote service is unavailable.");
+    return await chatVoting.startChatVote(
+      createModuleActionExecutionContext(context.env, channelId, "chat_voting"),
+      request,
+      actorOf(context),
+    );
   });
   context.set("writeModuleDiagnostics", writeModuleDiagnostics);
   context.set("broadcasterHasScope", broadcasterHasScope);

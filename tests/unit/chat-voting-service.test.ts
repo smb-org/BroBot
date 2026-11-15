@@ -556,6 +556,7 @@ describe("chat voting event service", () => {
 
     const result = await startChatVote(repository, {
       channelId: "fictional-channel",
+      ballotId: "ballot-preallocated-id",
       kind: "yes_no",
       optionCount: 2,
       durationSeconds: 0,
@@ -565,15 +566,15 @@ describe("chat voting event service", () => {
     }, ballots, scheduleClose);
 
     expect(result.status).toBe("started");
-    expect(ballots.open).toHaveBeenCalledWith(expect.any(String), 2, effectiveOpenedAt + 24 * 60 * 60 * 1_000 - 60_000, undefined, undefined);
+    expect(ballots.open).toHaveBeenCalledWith("ballot-preallocated-id", 2, effectiveOpenedAt + 24 * 60 * 60 * 1_000 - 60_000, undefined, undefined);
     expect(insertOpen).toHaveBeenCalledWith(expect.objectContaining<Partial<ChatVoteDraft>>({
       channelId: "fictional-channel",
       kind: "yes_no",
       closeReason: "limit",
       requestedDurationSeconds: null,
     }), undefined);
-    expect(scheduleClose).toHaveBeenCalledWith(expect.any(String), effectiveOpenedAt + 4 * 60 * 60 * 1_000, 0);
-    expect(result).toMatchObject({ status: "started", vote: { openedAt: new Date(effectiveOpenedAt).toISOString() } });
+    expect(scheduleClose).toHaveBeenCalledWith("ballot-preallocated-id", effectiveOpenedAt + 4 * 60 * 60 * 1_000, 0);
+    expect(result).toMatchObject({ status: "started", vote: { id: "ballot-preallocated-id", openedAt: new Date(effectiveOpenedAt).toISOString() } });
   });
 
   it("releases the close recovery snapshot when another open vote makes the insert busy", async () => {

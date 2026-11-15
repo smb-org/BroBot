@@ -53,7 +53,8 @@ type PlatformAction =
   | "channel.full_consent_changed"
   | "member.added"
   | "member.role_changed"
-  | "member.removed";
+  | "member.removed"
+  | "platform.spotify_access_changed";
 
 export interface PlatformTexts {
   title: string;
@@ -124,6 +125,11 @@ export interface PlatformTexts {
   loaded: string;
   platformAdmin: string;
   member: string;
+  spotifyAccess: string;
+  spotifyUsedSlots: (used: string, limit: string) => string;
+  spotifyEnabled: string;
+  spotifyDisabled: string;
+  spotifyLimit: string;
   actionLabel: Record<PlatformAction, string>;
 }
 
@@ -194,12 +200,18 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     loaded: "geladen",
     platformAdmin: "Betreiber",
     member: "Mitglied",
+    spotifyAccess: "Spotify-Freigabe",
+    spotifyUsedSlots: (used, limit) => `${used} von ${limit} Spotify-Plätzen belegt`,
+    spotifyEnabled: "Spotify freischalten",
+    spotifyDisabled: "Spotify-Freigabe entfernen",
+    spotifyLimit: "Alle fünf Spotify-Plätze sind belegt.",
     actionLabel: {
       "channel.released": "Kanal freigegeben",
       "channel.full_consent_changed": "Vollzustimmung geändert",
       "member.added": "Mitglied hinzugefügt",
       "member.role_changed": "Mitgliedsrolle geändert",
       "member.removed": "Mitglied entfernt",
+      "platform.spotify_access_changed": "Spotify-Freigabe geändert",
     },
   },
   en: {
@@ -268,12 +280,18 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     loaded: "loaded",
     platformAdmin: "Operator",
     member: "Member",
+    spotifyAccess: "Spotify access",
+    spotifyUsedSlots: (used, limit) => `${used} of ${limit} Spotify slots used`,
+    spotifyEnabled: "Enable Spotify",
+    spotifyDisabled: "Remove Spotify access",
+    spotifyLimit: "All five Spotify slots are in use.",
     actionLabel: {
       "channel.released": "Channel released",
       "channel.full_consent_changed": "Full consent changed",
       "member.added": "Member added",
       "member.role_changed": "Member role changed",
       "member.removed": "Member removed",
+      "platform.spotify_access_changed": "Spotify access changed",
     },
   },
 };

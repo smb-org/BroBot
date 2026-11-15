@@ -241,6 +241,8 @@ const sqlGetFixtures = new Map<string, string>([
   ["channelBotConsentCondition(\"channel\")", channelBotConsentCondition("channel")],
   ["authorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
   ["predicateSql", "1 = 1"],
+  ["conditions.join(\" AND \")", "channel_id = ? AND id = ? AND state = ? AND stream_id IS ? AND updated_at < ?"],
+  ["ballotGuard"," AND EXISTS (SELECT 1 FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ? AND state = 'open')"],
   ["blockGuard.sql", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["textBlockGuard?.sql ?? \"\"", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["commandCollisionGuard?.sql ?? \"\"", moduleCommandCollisionWriteGuard("channel-id", ["!duel"], MODULES).sql],
@@ -377,10 +379,10 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(81);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(72);
-      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(162);
-      expect(objects).toHaveLength(315);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(87);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(76);
+      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(180);
+      expect(objects).toHaveLength(343);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

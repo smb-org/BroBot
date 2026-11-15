@@ -39,7 +39,7 @@ import { botAccessTokenFor } from "./twitch/bot-access";
 import { moduleBallots } from "./module-ballots";
 import { modulePoints } from "./module-points";
 import { moduleTempVips } from "./module-temp-vips";
-import { createModuleSecretReadAccess } from "./module-secrets";
+import { createModuleSecretAccess, createModuleSecretReadAccess } from "./module-secrets";
 import { recordChannelGameHistory } from "./db/game-search-cache";
 import { broadcasterHasScope } from "./broadcaster-scope";
 import { writeChannelTimelineEvent } from "./db/timeline-events";
@@ -1446,6 +1446,7 @@ export const dispatchEventSubNotification = async (
             DB: environment.DB,
             environment: environment as unknown as Env,
             channelId: event.channelId,
+            secrets: createModuleSecretAccess(environment, event.channelId, module.id),
             authorizeMutation: authorizeModuleMutation,
             ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),
             points,

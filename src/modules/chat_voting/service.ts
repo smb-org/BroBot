@@ -17,6 +17,7 @@ import { chatVoteDefaultColors } from "./contracts/vote-colors";
 
 export interface StartChatVoteInput {
   channelId: string;
+  ballotId?: string;
   kind: ChatVotingKind;
   optionCount: number;
   durationSeconds: number;
@@ -100,6 +101,8 @@ export const startChatVote = async (
   if (!Number.isSafeInteger(input.durationSeconds) || input.durationSeconds < 0 || input.durationSeconds > 14_400) {
     throw new RangeError("The voting duration is invalid.");
   }
+  const ballotId = input.ballotId ?? crypto.randomUUID();
+  if (!/^[A-Za-z0-9_-]{1,128}$/u.test(ballotId)) throw new RangeError("The ballot id is invalid.");
   const requestedOpenedAt = input.openedAt ?? Date.now();
   const latestVote = await repository.latest(input.channelId);
   const latestOpenedAt = latestVote === null ? Number.NaN : Date.parse(latestVote.openedAt);
@@ -108,7 +111,7 @@ export const startChatVote = async (
     : requestedOpenedAt;
   const deadline = voteCloseDeadline(openedAt, input.durationSeconds);
   const vote: ChatVoteDraft = {
-    id: crypto.randomUUID(),
+    id: ballotId,
     channelId: input.channelId,
     kind,
     optionCount: input.optionCount,
@@ -785,6 +788,20 @@ export const closeChatVoteFromAlarm = async (
     closeReason: closedVote.closeReason,
     deadlineRevision: closedVote.deadlineRevision ?? 0,
   });
+
+  try {
+    await context.dispatchDurableAction?.({
+      kind: "chat_vote.result",
+      targetModuleId: "song_requests",
+      targetHandlerKey: "submit",
+      ballotId: pollId,
+      labels: [...closedVote.labels],
+      counts: [...(closedVote.counts ?? snapshot.counts)],
+      closedAt: closedVote.closedAt ?? new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(`Song vote result dispatch failed for ballot ${pollId}.`, error);
+  }
 
   if (settings.announceResult && closedVote.resultDeliveryPending) {
     const language = await context.channelLanguage();

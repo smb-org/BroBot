@@ -1,0 +1,59 @@
+@layer components.modules {
+  .song-requests-panel {
+    display: grid;
+    align-content: start;
+    gap: var(--s4);
+    width: 100%;
+    min-width: 0;
+  }
+
+  .module-detail:has(.song-requests-panel) { width: 100%; max-width: none; }
+  .module-detail__content:has(.song-requests-panel) { width: 100%; min-width: 0; }
+
+  .song-requests-panel__connection-status { display: flex; align-items: center; gap: var(--s2); min-width: 0; min-height: calc(var(--s5) * 2); }
+  .song-requests-panel__connection-status > span:last-child { display: -webkit-box; min-width: 0; overflow: hidden; color: var(--text-2); overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .song-requests-panel__connection-copy { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); min-width: 0; }
+  .song-requests-panel__connection-copy .song-requests-panel__connection-status { flex: 1; }
+  .song-requests-panel__actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: var(--s2); }
+  .song-requests-panel__slot-count { min-height: var(--s5); color: var(--text-3); }
+  /* The field's own helper line sits below the control, so the grid places label, control and button explicitly. */
+  .song-requests-panel__search { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--s2); align-items: center; min-width: 0; }
+  .song-requests-panel__search > .ui-field { display: contents; }
+  .song-requests-panel__search .ui-field__label { grid-column: 1 / -1; grid-row: 1; margin-bottom: var(--s1); }
+  .song-requests-panel__search .ui-field__control { grid-column: 1; grid-row: 2; }
+  .song-requests-panel__search .song-requests-panel__search-button { grid-column: 2; grid-row: 2; flex: none; min-height: var(--control-height); }
+  .song-requests-panel__search .ui-field__description, .song-requests-panel__search .ui-field__error { display: none; }
+  .song-requests-panel .ui-load-state--retry { grid-template-rows: auto; }
+  .song-requests-panel .ui-load-state__retry-slot:empty { display: none; }
+  .song-requests-panel__list { display: grid; min-width: 0; }
+  .song-requests-panel__list [role="listitem"] { min-width: 0; }
+  .song-requests-panel__list .list-row__link--no-icon { grid-template-columns: minmax(0, 1fr) auto; }
+  .song-requests-panel__list .list-row__status, .song-requests-panel__list .list-row__action { flex: none; white-space: nowrap; }
+  .song-requests-panel__list .list-row__action:empty { display: none; }
+  .song-requests-panel__added { display: inline-flex; align-items: center; gap: var(--s1); color: var(--ok-text, var(--text-2)); font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .song-requests-panel__candidate-section .ui-section__heading { align-items: center; }
+  .song-requests-panel__candidate-section .ui-section__heading > .ui-button { flex: none; }
+  .song-requests-panel__resolution { display: flex; flex-wrap: wrap; gap: var(--s1); }
+  .song-requests-panel__outcomes { display: grid; min-width: 0; }
+  .song-requests-panel__outcome { display: flex; min-width: 0; min-height: var(--s8); align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s2); border-bottom: 1px solid var(--line); }
+  .song-requests-panel__outcome time { flex: none; color: var(--text-3); }
+  .song-requests-panel__settings .ui-section__content { gap: var(--s3); }
+  .song-requests-cockpit-action { min-width: 0; }
+  .song-requests-cockpit-action { display: grid; gap: var(--s3); }
+  .song-requests-cockpit-action__candidates { display: grid; gap: var(--s2); min-width: 0; }
+  .song-requests-cockpit-action__candidates > strong { color: var(--text-2); font-size: var(--text-section); font-weight: 600; }
+
+  @media (max-width: 600px) {
+    .song-requests-panel__connection-copy { align-items: flex-start; flex-direction: column; }
+    .song-requests-panel__actions { justify-content: flex-start; }
+    .song-requests-panel__list .list-row:has(.song-requests-panel__resolution) { flex-wrap: wrap; }
+    .song-requests-panel__list .list-row:has(.song-requests-panel__resolution) .list-row__action { flex: 1 0 100%; }
+    .song-requests-panel__resolution { width: 100%; }
+    .song-requests-panel__resolution > .ui-button { flex: 1 1 auto; }
+  }
+
+  @media (max-width: 420px) {
+    .song-requests-panel__search-button { width: var(--control-height); min-width: var(--control-height); padding-inline: 0; }
+    .song-requests-panel__search-button-label { display: none; }
+  }
+}

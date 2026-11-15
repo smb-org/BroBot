@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 
 import { MODULES } from "../../src/modules/registry";
+import { transitionRequest } from "../../src/modules/song_requests/adapters/d1";
 import { dashboardDataKeys, queryKeys } from "../../src/dashboard/data/keys";
 import { cancelDashboardRealtimeRetries, reconcileDashboardRealtimeMessage, reconcileDashboardPanelResourceRevisions, setDashboardRealtimeStatus } from "../../src/dashboard/data/realtime";
 import { moduleQueryKey } from "../../src/dashboard/data/module-query";
@@ -215,6 +216,42 @@ const panelWriteRegressions: readonly PanelWriteRegressionCase[] = [
         `INSERT INTO chat_vote_term_approvals (channel_id, poll_id, term, approved_at, approved_by)
          VALUES (?, 'poll-words', 'pizza', '2026-10-10T00:00:01.000Z', 'manager-1')`,
       ).bind(id).run();
+    },
+  },
+  {
+    name: "song request ledger transitions",
+    keys: (id) => [moduleQueryKey(id, "song_requests", "requests")],
+    write: async (database, id) => {
+      const db = database as unknown as D1Database;
+      await transitionRequest(db, {
+        channelId: id,
+        requestId: "request-revision",
+        fromState: null,
+        toState: "approved",
+        now: "2026-11-15T19:00:00.000Z",
+        newRequest: {
+          source: "mod_vote",
+          track: {
+            id: "glassharbor01",
+            uri: "spotify:track:glassharbor01",
+            title: "Glass Harbor",
+            artists: ["Mira Vale"],
+            durationMs: 201_000,
+            explicit: false,
+            coverUrl: "https://i.scdn.co/image/fictional-cover",
+            spotifyUrl: "https://open.spotify.com/track/glassharbor01",
+          },
+          operationId: "mod_vote:ballot-revision",
+          streamId: "stream-fictional-current",
+        },
+      });
+      await transitionRequest(db, {
+        channelId: id,
+        requestId: "request-revision",
+        fromState: "approved",
+        toState: "submitting",
+        now: "2026-11-15T19:00:01.000Z",
+      });
     },
   },
   {
@@ -1651,7 +1688,8 @@ describe("panel resource revisions", () => {
       ).all() as Array<{ sql: string }>;
       for (const { source_table: table } of sources) {
         for (const operation of ["INSERT", "UPDATE", "DELETE"]) {
-          expect(triggers.some(({ sql }) => new RegExp(`AFTER ${operation} ON ${table}\\b`, "iu").test(sql)),
+          const updateColumns = operation === "UPDATE" ? "(?: OF [\\s\\S]*?)?" : "";
+          expect(triggers.some(({ sql }) => new RegExp(`AFTER ${operation}${updateColumns} ON ${table}\\b`, "iu").test(sql)),
             `${table} must revise resources after ${operation}`).toBe(true);
         }
       }
@@ -1722,6 +1760,52 @@ describe("panel resource revisions", () => {
       expect(resourcesFor("overlays")).toContain("channel.variables");
       expect(resourcesFor("chat_votes")).toContain("module:chat_voting:panel");
       expect(resourcesFor("chat_vote_term_approvals")).toContain("module:chat_voting:panel");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("bumps the song request panel revision when a ledger transition commits", async () => {
+    const channelId = "song-request-panel-revision";
+    const database = new TestD1Database();
+    const db = database as unknown as D1Database;
+    const resource = "module:song_requests:requests";
+    try {
+      await addChannel(database, channelId);
+      await transitionRequest(db, {
+        channelId,
+        requestId: "request-panel-revision",
+        fromState: null,
+        toState: "approved",
+        now: "2026-11-15T19:00:00.000Z",
+        newRequest: {
+          source: "mod_vote",
+          track: {
+            id: "glassharbor01",
+            uri: "spotify:track:glassharbor01",
+            title: "Glass Harbor",
+            artists: ["Mira Vale"],
+            durationMs: 201_000,
+            explicit: false,
+            coverUrl: "https://i.scdn.co/image/fictional-cover",
+            spotifyUrl: "https://open.spotify.com/track/glassharbor01",
+          },
+          operationId: "mod_vote:ballot-panel-revision",
+          streamId: "stream-fictional-current",
+        },
+      });
+      const before = await readPanelResourceRevisions(db, channelId);
+
+      expect(await transitionRequest(db, {
+        channelId,
+        requestId: "request-panel-revision",
+        fromState: "approved",
+        toState: "submitting",
+        now: "2026-11-15T19:00:01.000Z",
+      })).toBe(true);
+
+      const after = await readPanelResourceRevisions(db, channelId);
+      expect(after[resource]).toBe((before[resource] ?? 0) + 1);
     } finally {
       database.close();
     }

@@ -6,6 +6,7 @@ import { authorizeModuleMutation } from "./module-authorization";
 import { readChannelStreamState } from "./db/stream-state";
 import { prepareChannelVariableChange, readChannelVariables } from "./db/channel-variables";
 import { secureRandomInteger } from "./template-resolver";
+import { createModuleSecretAccess } from "./module-secrets";
 
 /** Builds the worker-owned, channel-scoped context used by action retries outside EventSub dispatch. */
 export const createModuleActionExecutionContext = (
@@ -16,6 +17,7 @@ export const createModuleActionExecutionContext = (
   const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(channelId));
   const context: Partial<ModuleExecutionContext> = {
     DB: environment.DB,
+    secrets: createModuleSecretAccess(environment, channelId, moduleId),
     environment,
     channelId,
     authorizeMutation: authorizeModuleMutation,

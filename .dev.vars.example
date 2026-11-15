@@ -6,3 +6,5 @@ SESSION_COOKIE_KEYS={"active":{"id":"local-v2","key":"replace-with-32-byte-base6
 TOKEN_ENCRYPTION_KEYS={"active":{"id":"local-v2","key":"replace-with-32-byte-base64url-key"},"retired":[{"id":"local-v1","key":"replace-with-retired-32-byte-base64url-key"}]}
 OVERLAY_TOKEN_PEPPER=replace-with-32-byte-base64url-key
 PLATFORM_USER_IDS=[]
+SPOTIFY_CLIENT_ID=local-spotify-client-id
+SPOTIFY_CLIENT_SECRET=local-spotify-client-secret
