@@ -416,7 +416,10 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
     <Section
       title={`${text.selected} (${String(selected.length)}/5)`}
       className="song-requests-panel__candidate-section"
-      headingAction={<Button variant="primary" disabled={voteBlocked} onClick={startVote}>{text.startVote}</Button>}
+      headingAction={<>
+        <span className="ui-section__rule" aria-hidden="true" />
+        <Button variant="primary" disabled={voteBlocked} onClick={startVote}>{text.startVote}</Button>
+      </>}
     >
       {selected.length === 0 ? <EmptyState title={text.emptyCandidates} description={text.emptyCandidatesDescription} /> :
         <div className="song-requests-panel__list" role="list" aria-label={text.selected}>

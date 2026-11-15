@@ -44,8 +44,10 @@ const setConnectionState = async (
   now: string,
   errorMessage: string | null = null,
 ): Promise<void> => {
-  await context.DB.prepare("UPDATE song_requests_connections SET state = ?, error_message = ?, updated_at = ? WHERE channel_id = ?")
-    .bind(state, errorMessage, now, context.channelId).run();
+  await context.DB.prepare(
+    `UPDATE song_requests_connections SET state = ?, error_message = ?, updated_at = ?
+      WHERE channel_id = ? AND (state IS NOT ? OR error_message IS NOT ?)`,
+  ).bind(state, errorMessage, now, context.channelId, state, errorMessage).run();
 };
 
 /** This runs inside ChannelObject only. Worker routes retrieve its result through the DO RPC. */
@@ -140,6 +142,33 @@ const updateConnectionForError = async (
   }
 };
 
+/**
+ * Re-checks claim, activation, slot and live stream in one statement. The update is a value no-op, so no panel
+ * revision trigger fires and meta.changes is exactly the number of matched base rows.
+ */
+export const holdSubmitClaim = async (
+  db: D1Database,
+  channelId: string,
+  requestId: string,
+  streamId: string | null,
+): Promise<boolean> => {
+  if (streamId === null) return false;
+  const claim = await db.prepare(
+    `UPDATE song_requests SET updated_at = updated_at
+      WHERE channel_id = ? AND id = ? AND state = 'submitting' AND stream_id = ?
+        AND EXISTS (
+          SELECT 1 FROM channel_modules
+           WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1
+        )
+        AND EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)
+        AND EXISTS (
+          SELECT 1 FROM channel_stream_state
+           WHERE channel_id = ? AND state = 'online' AND stream_id = ?
+        )`,
+  ).bind(channelId, requestId, streamId, channelId, channelId, channelId, streamId).run();
+  return claim.meta.changes > 0;
+};
+
 const submitClaimStillValid = async (context: ModuleAlarmContext, requestId: string): Promise<boolean> => {
   const row = await readSongRequest(context.DB, context.channelId, requestId);
   if (row === null || row.state !== "submitting") return false;
@@ -169,7 +198,39 @@ const submitClaimStillValid = async (context: ModuleAlarmContext, requestId: str
     });
     return false;
   }
-  return true;
+  if (await holdSubmitClaim(context.DB, context.channelId, requestId, row.streamId)) return true;
+
+  const current = await readSongRequest(context.DB, context.channelId, requestId);
+  if (current === null || current.state !== "submitting") return false;
+  const currentModule = await context.DB.prepare(
+    "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'",
+  ).bind(context.channelId).first<{ enabled: number }>();
+  if (currentModule?.enabled !== 1) {
+    await transitionRequest(context.DB, {
+      channelId: context.channelId, requestId, fromState: "submitting", toState: "failed",
+      failureReason: "module_disabled", now: new Date().toISOString(),
+    });
+    return false;
+  }
+  if (!await spotifySlotHeld(context.DB, context.channelId)) {
+    const failedAt = new Date().toISOString();
+    await setConnectionState(context, "not_connected", failedAt);
+    await transitionRequest(context.DB, {
+      channelId: context.channelId, requestId, fromState: "submitting", toState: "failed",
+      failureReason: "spotify_not_enabled", now: failedAt,
+    });
+    return false;
+  }
+  const liveStream = await context.DB.prepare(
+    "SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?",
+  ).bind(context.channelId).first<{ state: string; stream_id: string | null }>();
+  if (current.streamId === null || liveStream?.state !== "online" || liveStream.stream_id !== current.streamId) {
+    await transitionRequest(context.DB, {
+      channelId: context.channelId, requestId, fromState: "submitting", toState: "failed",
+      failureReason: "stream_offline", now: new Date().toISOString(),
+    });
+  }
+  return false;
 };
 
 const transitionAfterSpotifyPost = async (
@@ -177,14 +238,32 @@ const transitionAfterSpotifyPost = async (
   requestId: string,
   toState: "submitted" | "outcome_unknown" | "failed",
   failureReason: string | null = null,
+  activeStreamId: string | null = null,
 ): Promise<void> => {
   const now = new Date().toISOString();
-  const transitioned = await transitionRequest(context.DB, {
-    channelId: context.channelId, requestId, fromState: "submitting", toState, failureReason, now,
+  const transitioned = toState === "submitted" && activeStreamId === null ? false : await transitionRequest(context.DB, {
+    channelId: context.channelId,
+    requestId,
+    fromState: "submitting",
+    toState,
+    failureReason,
+    now,
+    ...(toState === "submitted" && activeStreamId !== null
+      ? { streamId: activeStreamId, activeStreamId }
+      : {}),
   });
   if (transitioned) return;
   const current = await readSongRequest(context.DB, context.channelId, requestId);
-  if (current?.state === "failed") {
+  if (toState === "submitted" && current?.state === "submitting") {
+    await transitionRequest(context.DB, {
+      channelId: context.channelId,
+      requestId,
+      fromState: "submitting",
+      toState: "outcome_unknown",
+      failureReason: "submit_state_conflict",
+      now: new Date().toISOString(),
+    });
+  } else if (current?.state === "failed") {
     await transitionRequest(context.DB, {
       channelId: context.channelId,
       requestId,
@@ -251,15 +330,15 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
   );
   try {
     await enqueue();
-    await transitionAfterSpotifyPost(context, requestId, "submitted");
+    await transitionAfterSpotifyPost(context, requestId, "submitted", null, row.streamId);
   } catch (error) {
     if (!(error instanceof SpotifyRequestError)) {
-      await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "network_or_timeout");
+      await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "network_or_timeout", row.streamId);
       return;
     }
     await updateConnectionForError(context, error);
     if (error.status >= 500) {
-      await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "spotify_server_error");
+      await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "spotify_server_error", row.streamId);
       return;
     }
     if (error.status === 429) {
@@ -268,22 +347,22 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
         if (!await submitClaimStillValid(context, requestId)) return;
         try {
           await enqueue();
-          await transitionAfterSpotifyPost(context, requestId, "submitted");
+          await transitionAfterSpotifyPost(context, requestId, "submitted", null, row.streamId);
           return;
         } catch (retryError) {
           if (retryError instanceof SpotifyRequestError) await updateConnectionForError(context, retryError);
           if (!(retryError instanceof SpotifyRequestError) || retryError.status >= 500) {
-            await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "retry_response_uncertain");
+            await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "retry_response_uncertain", row.streamId);
             return;
           }
         }
       }
-      await transitionAfterSpotifyPost(context, requestId, "failed", "rate_limited");
+      await transitionAfterSpotifyPost(context, requestId, "failed", "rate_limited", row.streamId);
       return;
     }
     await transitionAfterSpotifyPost(context, requestId, "failed",
       error.status === 403 && error.reason !== "PREMIUM_REQUIRED" ? error.message.slice(0, 200)
-        : error.reason ?? `spotify_${String(error.status)}`);
+        : error.reason ?? `spotify_${String(error.status)}`, row.streamId);
   }
 };
 

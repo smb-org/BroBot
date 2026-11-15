@@ -1688,7 +1688,8 @@ describe("panel resource revisions", () => {
       ).all() as Array<{ sql: string }>;
       for (const { source_table: table } of sources) {
         for (const operation of ["INSERT", "UPDATE", "DELETE"]) {
-          expect(triggers.some(({ sql }) => new RegExp(`AFTER ${operation} ON ${table}\\b`, "iu").test(sql)),
+          const updateColumns = operation === "UPDATE" ? "(?: OF [\\s\\S]*?)?" : "";
+          expect(triggers.some(({ sql }) => new RegExp(`AFTER ${operation}${updateColumns} ON ${table}\\b`, "iu").test(sql)),
             `${table} must revise resources after ${operation}`).toBe(true);
         }
       }

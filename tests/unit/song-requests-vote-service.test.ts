@@ -247,6 +247,52 @@ describe("durable song vote results", () => {
       .toEqual({ state: "failed", failure_reason: "module_disabled" });
   });
 
+  it("does not send a winner when deactivation completes during the final stream reads", async () => {
+    const { database, context } = await createContext("ballot-deactivated-during-final-stream-reads");
+    await handleSongRequestDurableAction(context, voteResult("ballot-deactivated-during-final-stream-reads", [9, 2, 1]));
+    const requestId = await requestIdFor(database);
+    let streamReads = 0;
+    context.streamStartedAt = async () => {
+      streamReads += 1;
+      if (streamReads === 2) {
+        await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'song_requests'")
+          .bind(CHANNEL_ID).run();
+        await handleSongRequestsActivation(context, false);
+      }
+      return { streamId: STREAM_ID, startedAt: "2026-11-15T19:00:00.000Z" };
+    };
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    await handleSubmitAlarm(context, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`);
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
+      .toEqual({ state: "failed", failure_reason: "module_disabled" });
+  });
+
+  it("does not send a winner when its Spotify slot is revoked during the final stream reads", async () => {
+    const { database, context } = await createContext("ballot-slot-revoked-during-final-stream-reads");
+    await handleSongRequestDurableAction(context, voteResult("ballot-slot-revoked-during-final-stream-reads", [9, 2, 1]));
+    const requestId = await requestIdFor(database);
+    let streamReads = 0;
+    context.streamStartedAt = async () => {
+      streamReads += 1;
+      if (streamReads === 2) {
+        await database.prepare("DELETE FROM spotify_channel_access WHERE channel_id = ?").bind(CHANNEL_ID).run();
+      }
+      return { streamId: STREAM_ID, startedAt: "2026-11-15T19:00:00.000Z" };
+    };
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    await handleSubmitAlarm(context, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`);
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
+      .toEqual({ state: "failed", failure_reason: "spotify_not_enabled" });
+  });
+
   it("reports an uncertain outcome when deactivation conflicts after Spotify received the POST", async () => {
     const { database, context, sendChat } = await createContext("ballot-deactivated-after-send");
     await handleSongRequestDurableAction(context, voteResult("ballot-deactivated-after-send", [9, 2, 1]));
@@ -267,6 +313,33 @@ describe("durable song vote results", () => {
     await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'song_requests'")
       .bind(CHANNEL_ID).run();
     await handleSongRequestsActivation(context, false);
+    releasePost();
+    await submitting;
+
+    expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
+      .toEqual({ state: "outcome_unknown", failure_reason: "submit_state_conflict" });
+    expect(sendChat.mock.calls[0]?.[0]).toContain("result is unclear");
+    expect(sendChat.mock.calls[0]?.[0]).not.toContain("was not queued");
+  });
+
+  it("reports an uncertain outcome when the Spotify slot is revoked after Spotify received the POST", async () => {
+    const { database, context, sendChat } = await createContext("ballot-slot-revoked-after-post");
+    await handleSongRequestDurableAction(context, voteResult("ballot-slot-revoked-after-post", [9, 2, 1]));
+    const requestId = await requestIdFor(database);
+    let releasePost!: () => void;
+    let postStarted!: () => void;
+    const postStartedPromise = new Promise<void>((resolve) => { postStarted = resolve; });
+    const postResponse = new Promise<void>((resolve) => { releasePost = resolve; });
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      postStarted();
+      await postResponse;
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const submitting = handleSubmitAlarm(context, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`);
+    await postStartedPromise;
+
+    await database.prepare("DELETE FROM spotify_channel_access WHERE channel_id = ?").bind(CHANNEL_ID).run();
     releasePost();
     await submitting;
 

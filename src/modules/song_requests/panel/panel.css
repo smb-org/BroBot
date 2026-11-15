@@ -32,7 +32,7 @@
   .song-requests-panel__list .list-row__action:empty { display: none; }
   .song-requests-panel__added { display: inline-flex; align-items: center; gap: var(--s1); color: var(--ok-text, var(--text-2)); font-size: 13px; font-weight: 600; white-space: nowrap; }
   .song-requests-panel__candidate-section .ui-section__heading { align-items: center; }
-  .song-requests-panel__candidate-section .ui-section__heading > .ui-button { flex: none; order: 2; }
+  .song-requests-panel__candidate-section .ui-section__heading > .ui-button { flex: none; }
   .song-requests-panel__resolution { display: flex; flex-wrap: wrap; gap: var(--s1); }
   .song-requests-panel__outcomes { display: grid; min-width: 0; }
   .song-requests-panel__outcome { display: flex; min-width: 0; min-height: var(--s8); align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s2); border-bottom: 1px solid var(--line); }

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleAlarmContext, ModuleChatVoteStartRequest, ModuleRouteEnvironment } from "../../src/modules/contract";
 import { songRequestsRoutes } from "../../src/modules/song_requests/routes";
-import { handleSongRequestDurableAction } from "../../src/modules/song_requests/service";
+import { handleSongRequestDurableAction, spotifyAccessToken } from "../../src/modules/song_requests/service";
 import { beginSpotifyOAuth, spotifyOAuthStateCookie } from "../../src/worker/auth/spotify-oauth";
 import { insertChannel, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -419,5 +419,53 @@ describe("song request routes", () => {
 
     expect(response.status).toBe(200);
     expect(getSpotifyAccessToken).toHaveBeenCalledOnce();
+  });
+
+  it("does not bump the connection revision on repeated reads while disconnected", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
+      .bind(CHANNEL_ID, "moderator-fictional", "2026-11-15T19:00:00.000Z").run();
+    await database.prepare("INSERT INTO song_requests_connections (channel_id, state, error_message, updated_at) VALUES (?, 'not_connected', NULL, ?)")
+      .bind(CHANNEL_ID, "2026-11-15T19:00:00.000Z").run();
+
+    const getSpotifyAccessToken = vi.fn(() => spotifyAccessToken({
+      DB: database as unknown as D1Database,
+      channelId: CHANNEL_ID,
+      secrets: { readWithVersion: () => Promise.resolve(null) },
+    } as unknown as ModuleAlarmContext));
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("secrets", () => ({
+        status: () => Promise.resolve({ configured: false, updatedAt: null }),
+        read: () => Promise.resolve(null),
+        readWithVersion: () => Promise.resolve(null),
+        prepareWrite: () => Promise.resolve({} as D1PreparedStatement),
+        prepareDelete: () => ({} as D1PreparedStatement),
+      }));
+      await next();
+    });
+    app.route("/channels/:channelId", songRequestsRoutes);
+
+    const environment = {
+      DB: database as unknown as D1Database,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ getSpotifyAccessToken }),
+      },
+    } as unknown as ModuleRouteEnvironment["Bindings"];
+    const readRevision = async (): Promise<number | null> => (await database.prepare(
+      "SELECT revision FROM panel_resource_revisions WHERE channel_id = ? AND resource = 'module:song_requests:connection'",
+    ).bind(CHANNEL_ID).first<{ revision: number }>())?.revision ?? null;
+    const revisionBeforeReads = await readRevision();
+
+    const firstResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/connection`), environment);
+    const secondResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/connection`), environment);
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(getSpotifyAccessToken).toHaveBeenCalledTimes(2);
+    expect(await readRevision()).toBe(revisionBeforeReads);
   });
 });
