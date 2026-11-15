@@ -6,6 +6,10 @@ export const CHANNEL_POINTS_QUEUE_ACTION_NAME = {
   de: "Kanalpunkte-Warteschlange",
   en: "Channel points queue",
 } as const;
+export const CHANNEL_POINTS_QUEUE_WAITING_COUNT = {
+  de: (count: number) => `${String(count)} wartend`,
+  en: (count: number) => `${String(count)} waiting`,
+} as const;
 
 export const channelPointsRewardInputSchema = z.object({
   title: z.string().trim().min(1).max(45),

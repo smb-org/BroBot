@@ -201,6 +201,7 @@ test.describe("English cockpit status labels", () => {
     api.setLocation({ name: "Berlin, Germany", latitude: 52.52, longitude: 13.405, timeZone: "Europe/Berlin" });
     await page.setViewportSize({ width: 768, height: 900 });
     await page.reload();
+    await waitForWebFonts(page);
     await expect(warningSlot).toHaveAttribute("data-warning-count", "0");
     // Wait for the same indicator texts as in the warning state so wrapping matches.
     await expect(indicators.nth(1)).toContainText("BELABOX · connected · 1,000,000 kbps");

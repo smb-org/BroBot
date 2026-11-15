@@ -19,6 +19,7 @@ type CustomCondition = Extract<ModuleImmediateActionCondition, { check: unknown 
 
 interface ActionAvailabilityResult {
   reason: Readonly<Record<"de" | "en", string>> | null;
+  subtitle?: Readonly<Record<"de" | "en", string>> | null;
   visible?: boolean;
   link?: { href: string; label: Readonly<Record<"de" | "en", string>> };
   until?: number;
@@ -111,15 +112,21 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
           return value;
         }
         let pollId: string | null = null;
+        let subtitle: Readonly<Record<"de" | "en", string>> | null = null;
         for (const condition of customConditions) {
           const result = "query" in condition
             ? condition.query.evaluate(await condition.query.load(channelId, controller.signal))
             : await condition.check({ channelId, ...(viewerUserId === undefined ? {} : { viewerUserId }), streamState, botConnected, language, signal: controller.signal });
           controller.signal.throwIfAborted();
           pollId = result.pollId ?? pollId;
-          if (result.reason !== null) return { ...result, ...(pollId === null ? {} : { pollId }) };
+          subtitle = result.subtitle ?? subtitle;
+          if (result.reason !== null) return {
+            ...result,
+            ...(subtitle === null ? {} : { subtitle }),
+            ...(pollId === null ? {} : { pollId }),
+          };
         }
-        return { reason: null, ...(pollId === null ? {} : { pollId }) } satisfies ActionAvailabilityResult;
+        return { reason: null, ...(subtitle === null ? {} : { subtitle }), ...(pollId === null ? {} : { pollId }) } satisfies ActionAvailabilityResult;
       } catch (error) {
         signal.throwIfAborted();
         throw error;
@@ -147,6 +154,7 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
   const activeConditionState = {
     loading: shouldCheckConditions && sharedStateQuery.isPending && !sharedStateQuery.isError,
     reason: sharedStateQuery.isError ? null : availability?.reason ?? null,
+    subtitle: sharedStateQuery.isError ? null : availability?.subtitle?.[language] ?? null,
     link: availability?.link === undefined ? null : {
       href: availability.link.href,
       label: availability.link.label[language],
@@ -209,6 +217,7 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
   if (hideAction) return null;
 
   return <ActionFrame action={action} moduleId={moduleId} channelId={channelId} {...(viewerUserId === undefined ? {} : { viewerUserId })} language={language} pollId={activeConditionState.pollId}
+    subtitle={activeConditionState.subtitle}
     canOperate={meetsRole} disabled={lockReason !== null} reason={lockReason} availabilityStale={activeConditionState.stale}
     availabilityConfirmations={availabilityConfirmations}
     availabilityLink={shouldCheckConditions && activeConditionState.reason !== null ? activeConditionState.link : null}
@@ -218,13 +227,14 @@ const ActionButton = ({ action, moduleId, channelId, viewerUserId, streamState, 
     {...(onActionFailure === undefined ? {} : { onActionFailure })} />;
 };
 
-const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, pollId, canOperate, disabled, reason, availabilityStale, availabilityConfirmations, availabilityLink, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
+const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, pollId, subtitle, canOperate, disabled, reason, availabilityStale, availabilityConfirmations, availabilityLink, onActionStart, onActionResult, onActionFailure, onFeedbackMessage }: {
   action: ModuleImmediateActionDefinition;
   moduleId: string;
   channelId: string;
   viewerUserId?: string | null;
   language: "de" | "en";
   pollId: string | null;
+  subtitle: string | null;
   canOperate: boolean;
   disabled: boolean;
   reason: string | null;
@@ -268,6 +278,7 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
   const contentReadinessReasonId = `live-action-readiness-${moduleId}-${action.id}`;
   const Content = content;
   const reasonId = `live-action-reason-${moduleId}-${action.id}`;
+  const subtitleId = `${reasonId}-subtitle`;
 
   useLayoutEffect(() => {
     mounted.current = true;
@@ -397,13 +408,14 @@ const ActionFrame = ({ action, moduleId, channelId, viewerUserId, language, poll
   const buttonContents = <>
     <span className="live-action__icon"><Icon name={action.icon} size={20} /></span>
     <span className="live-action__name">{action.name[language]}</span>
+    <span id={subtitleId} className="live-action__subtitle" aria-live="polite">{subtitle ?? " "}</span>
     <span id={reasonId} className={hasResultLink ? "sr-only" : `live-action__reason${reason !== null ? " is-locked" : error !== null ? " has-error" : ""}${availabilityWarning ? " is-availability-warning" : ""}`} aria-live="polite">{reasonLine}</span>
   </>;
   const hasReason = reason !== null || availabilityStale || error !== null || result !== null;
   const triggerClassName = `live-action__button${reason !== null ? " is-locked" : ""}${hasReason ? " has-reason" : ""}`;
   const triggerProps = {
     "aria-label": action.name[language],
-    "aria-describedby": reasonId,
+    "aria-describedby": `${subtitleId} ${reasonId}`,
     "aria-haspopup": action.content === undefined ? undefined : "dialog" as const,
     "aria-busy": busy,
     disabled: disabled || busy,

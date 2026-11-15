@@ -121,14 +121,15 @@
   .channel-points-editor { display: flex; max-height: min(82dvh, 860px); flex-direction: column; gap: var(--s3); overflow: auto; }
   .channel-points-editor__form { display: flex; min-width: 0; flex-direction: column; gap: var(--s3); margin: 0; padding: 0; border: 0; }
   .channel-points-editor__fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); }
-  .channel-points-editor__limits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
+  .channel-points-editor__limits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: var(--s3); }
   .channel-points-editor :is(.ui-field, .unit-input, .ui-select, .segment-choice-field) { gap: 4px; }
   .channel-points-editor .ui-field__description { position: absolute; top: 0; right: 0; width: auto; min-height: 0; }
   .channel-points-editor :is(.unit-input__description, .ui-select__description) { display: none; }
   .channel-points-editor :is(.segment-choice-field__hint, .segment-choice-field__warning)[aria-hidden="true"] { display: none; }
-  .channel-points-editor__limits { align-items: start; }
   .channel-points-limit { display: flex; min-width: 0; flex-direction: column; gap: 0; padding: var(--s1) var(--s2); border: 1px solid var(--line); border-radius: var(--r-container); background: var(--surface); }
-  .channel-points-limit .ui-switch-row { min-height: 36px; }
+  .channel-points-limit .ui-switch-row { min-height: 44px; grid-template-columns: minmax(0, 1fr); align-content: start; padding-inline-end: 0; }
+  .channel-points-limit .ui-switch-row__copy strong { white-space: nowrap; }
+  .channel-points-limit .ui-switch-row [data-slot="switch"] { grid-column: 1; grid-row: 2; justify-self: end; }
   .channel-points-limit .unit-input { width: 100%; }
   .channel-points-limit .unit-input__input { padding-right: 7rem; }
   .channel-points-limit .unit-input > .ui-field__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

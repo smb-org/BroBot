@@ -461,7 +461,7 @@ describe("cockpit action role mirror", () => {
     const action = await screen.findByRole("button", { name: /Set stream marker|Stream-Marker setzen/u });
     await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(true));
     expect(screen.getAllByText(/broadcast permission is missing|Broadcaster-Berechtigung fehlt/u)).not.toHaveLength(0);
-    const reasonId = action.getAttribute("aria-describedby");
+    const reasonId = action.getAttribute("aria-describedby")?.split(" ")[1];
     expect(reasonId).not.toBeNull();
     expect(document.getElementById(reasonId ?? "")?.textContent).toMatch(/broadcast permission is missing|Broadcaster-Berechtigung fehlt/u);
     expect(screen.getByRole("button", {

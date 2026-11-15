@@ -82,6 +82,7 @@ const installChannelPointsApi = async (page: Page): Promise<{
 };
 
 test("creates and edits a channel-points reward and shows a seeded redemption", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await installLiveCockpitMocks(page, {
     channelId,
     modules: [{ id: "channel_points", enabled: true, settings: "{}" }],
@@ -94,6 +95,34 @@ test("creates and edits a channel-points reward and shows a seeded redemption", 
 
   await page.getByRole("button", { name: "Neu", exact: true }).click();
   const createDialog = page.getByRole("dialog", { name: "Neue Belohnung" });
+  const desktopLimitLayout = await createDialog.locator(".channel-points-editor__limits").evaluate((row) => {
+    const tiles = Array.from(row.querySelectorAll<HTMLElement>(".channel-points-limit"));
+    const labels = tiles.map((tile) => tile.querySelector<HTMLElement>(".ui-switch-row__copy strong"));
+    return {
+      tileHeights: tiles.map((tile) => tile.getBoundingClientRect().height),
+      labels: labels.map((label) => label === null ? null : {
+        height: label.getBoundingClientRect().height,
+        lineHeight: Number.parseFloat(getComputedStyle(label).lineHeight),
+        whiteSpace: getComputedStyle(label).whiteSpace,
+      }),
+    };
+  });
+  expect(desktopLimitLayout.tileHeights).toHaveLength(3);
+  expect(new Set(desktopLimitLayout.tileHeights).size).toBe(1);
+  expect(desktopLimitLayout.labels.map((label) => label?.whiteSpace)).toEqual(["nowrap", "nowrap", "nowrap"]);
+  expect(desktopLimitLayout.labels.every((label) => label !== null && label.height <= label.lineHeight + 1)).toBe(true);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileLimitLayout = await createDialog.locator(".channel-points-editor__limits").evaluate((row) => {
+    const tiles = Array.from(row.querySelectorAll<HTMLElement>(".channel-points-limit"));
+    return {
+      documentWidth: document.documentElement.scrollWidth,
+      tileWidths: tiles.map((tile) => tile.getBoundingClientRect().width),
+    };
+  });
+  expect(mobileLimitLayout.documentWidth).toBeLessThanOrEqual(390);
+  expect(new Set(mobileLimitLayout.tileWidths).size).toBe(1);
+
   await createDialog.getByLabel("Titel").fill("Wunsch aus dem Chat");
   await createDialog.getByLabel("Kosten").fill("250");
   await createDialog.getByLabel("Chat-Nachricht").fill("Danke, {user}!");
