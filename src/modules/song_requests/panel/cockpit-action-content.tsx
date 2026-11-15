@@ -2,7 +2,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useState, type ReactElement } from "react";
 
 import type { ModuleImmediateActionContentProperties } from "../../contract";
-import { Badge, Button, EmptyState, Field, ListRow } from "../../../dashboard/ui";
+import { Badge, Button, EmptyState, Field, Icon, ListRow, notify } from "../../../dashboard/ui";
 import { songRequestsActionTexts } from "./action-locale";
 import { request } from "./service";
 import "./panel.css";
@@ -31,13 +31,12 @@ export default function SongRequestsCockpitAction({ channelId, language, onDraft
   const [searched, setSearched] = useState(false);
   const [selected, setSelected] = useState<Track[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
     void request<Readiness>(channelId, "connection", "GET", undefined, controller.signal)
-      .then((state) => { if (!controller.signal.aborted) setReady(state.enabled && state.state === "connected" && state.streamId !== null); })
-      .catch(() => { if (!controller.signal.aborted) setError(text.unavailable); })
+      .then((state) => { if (!controller.signal.aborted) setReady(state.enabled && (state.state === "connected" || state.state === "no_active_device") && state.streamId !== null); })
+      .catch(() => { if (!controller.signal.aborted) notify({ tone: "error", message: text.unavailable }); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => { controller.abort(); };
   }, [channelId, text.unavailable]);
@@ -49,15 +48,12 @@ export default function SongRequestsCockpitAction({ channelId, language, onDraft
   const search = async (): Promise<void> => {
     if (!ready || query.trim().length === 0 || busy) return;
     setBusy(true);
-    setError("");
-    setSearched(false);
-    setResults([]);
     try {
       const response = await request<{ tracks: Track[] }>(channelId, `search?q=${encodeURIComponent(query.trim())}`);
       setResults(response.tracks);
       setSearched(true);
     } catch {
-      setError(text.failed);
+      notify({ tone: "error", message: text.failed });
     } finally {
       setBusy(false);
     }
@@ -66,7 +62,6 @@ export default function SongRequestsCockpitAction({ channelId, language, onDraft
   const execute = async (): Promise<void> => {
     if (selected.length < 2 || selected.length > 5 || onActionExecute === undefined) return;
     setBusy(true);
-    setError("");
     try {
       const form = footerElement?.closest("form");
       if (form === null || form === undefined) return;
@@ -76,7 +71,7 @@ export default function SongRequestsCockpitAction({ channelId, language, onDraft
       setSelected([]);
       onDraftChange?.(false);
     } catch {
-      setError(text.error);
+      notify({ tone: "error", message: text.error });
     } finally {
       setBusy(false);
     }
@@ -90,7 +85,7 @@ export default function SongRequestsCockpitAction({ channelId, language, onDraft
           value={query}
           disabled={!ready || busy}
           normalize={(value) => value.slice(0, 200)}
-          onChange={(value) => { setQuery(value); setSearched(false); setResults([]); }}
+          onChange={(value) => { setQuery(value); }}
           onKeyDown={(event) => {
             if (event.key !== "Enter") return;
             event.preventDefault();
@@ -99,7 +94,6 @@ export default function SongRequestsCockpitAction({ channelId, language, onDraft
         />
         <Button
           variant="secondary"
-          size="compact"
           icon="search"
           ariaLabel={text.searchButton}
           className="song-requests-panel__search-button"
@@ -117,24 +111,23 @@ export default function SongRequestsCockpitAction({ channelId, language, onDraft
               onNavigate={() => { window.open(track.spotifyUrl, "_blank", "noopener,noreferrer"); }}
               title={track.title}
               description={track.artists.join(", ")}
-              status={alreadySelected ? <Badge tone="brand">{text.candidate}</Badge> : null}
-              action={<Button
-                variant="secondary"
-                size="compact"
-                ariaLabel={text.addTrack(track.title)}
-                disabled={alreadySelected || selected.length >= 5 || busy}
-                onClick={() => {
-                  setSelected((current) => current.some((item) => item.id === track.id) || current.length >= 5 ? current : [...current, track]);
-                  onDraftChange?.(true);
-                }}
-              >{alreadySelected ? text.added : text.add}</Button>}
+              status={null}
+              action={alreadySelected
+                ? <span className="song-requests-panel__added"><Icon name="copied" size={16} />{text.added}</span>
+                : <Button
+                  variant="secondary"
+                  size="compact"
+                  ariaLabel={text.addTrack(track.title)}
+                  disabled={selected.length >= 5 || busy}
+                  onClick={() => {
+                    setSelected((current) => current.some((item) => item.id === track.id) || current.length >= 5 ? current : [...current, track]);
+                    onDraftChange?.(true);
+                  }}
+                >{text.add}</Button>}
             />
           </div>;
         })}
       </div> : null}
-      <p className="live-action-content__status song-requests-cockpit-action__feedback" role="status" aria-live="polite">
-        {error || (loading ? text.loading : ready ? " " : text.unavailable)}
-      </p>
       <SectionCandidates selected={selected} text={text} busy={busy} onRemove={(trackId) => {
         setSelected((current) => current.filter(({ id }) => id !== trackId));
         onDraftChange?.(selected.length > 1);

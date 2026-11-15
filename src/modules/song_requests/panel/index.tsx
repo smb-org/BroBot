@@ -14,6 +14,8 @@ import {
   SaveStatus,
   Section,
   StatusLed,
+  Icon,
+  notify,
   registerDashboardNavigationGuard,
   useDraft,
   useDraftGuard,
@@ -218,10 +220,9 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
   );
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
-  const [searchState, setSearchState] = useState<"idle" | "loading" | "searched" | "error">("idle");
+  const [searchState, setSearchState] = useState<"idle" | "loading" | "searched">("idle");
   const [selected, setSelected] = useState<Track[]>([]);
   const [pending, setPending] = useState(false);
-  const [feedback, setFeedback] = useState("");
 
   const connection = connectionQuery.data ?? null;
   const requestData = requestsQuery.data;
@@ -245,12 +246,11 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
   const run = async (operation: () => Promise<void>): Promise<void> => {
     if (pending) return;
     setPending(true);
-    setFeedback("");
     try {
       await operation();
     } catch (error: unknown) {
       const code = error instanceof Error ? error.message : "";
-      setFeedback(code === "chat_vote_already_open" ? text.busy : code === "stream_offline" ? text.offline : text.error);
+      notify({ tone: "error", message: code === "chat_vote_already_open" ? text.busy : code === "stream_offline" ? text.offline : text.error });
     } finally {
       setPending(false);
     }
@@ -259,16 +259,15 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
   const submitSearch = async (event: SubmitEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     const searchQuery = query.trim();
-    if (searchQuery.length === 0 || pending || searchState === "loading" || connection?.state !== "connected" || !canOperate) return;
+    if (searchQuery.length === 0 || pending || searchState === "loading" || searchBlocked) return;
     setSearchState("loading");
-    setResults([]);
-    setFeedback("");
     try {
       const response = await request<{ tracks: Track[] }>(channelId, `search?q=${encodeURIComponent(searchQuery)}`);
       setResults(response.tracks);
       setSearchState("searched");
     } catch {
-      setSearchState("error");
+      setSearchState(results.length > 0 ? "searched" : "idle");
+      notify({ tone: "error", message: text.searchError });
     }
   };
 
@@ -337,11 +336,13 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
     : "success";
   const canConnect = canManage && connection?.enabled === true && !connection.hasCredentials;
   const canReconnect = canManage && connection?.enabled === true && connection.hasCredentials;
-  const canDisconnect = canManage && connection?.hasCredentials === true;
+  const canDisconnect = canManage && connection?.enabled === true && connection.hasCredentials;
+  const needsAttention = connection !== null && connection.state !== "connected" && connection.state !== "not_connected";
+  // Searching and voting do not need an active device, only a working Spotify link.
+  const searchBlocked = !canOperate || (connection?.state !== "connected" && connection?.state !== "no_active_device");
+  const voteBlocked = pending || searchBlocked || selected.length < 2 || selected.length > 5;
 
   return <div className="song-requests-panel">
-    <div className="song-requests-panel__feedback" role="status" aria-live="polite">{feedback || " "}</div>
-
     <Section title={text.connection} className="song-requests-panel__connection-section">
       <div className="song-requests-panel__connection-copy">
         <div className="song-requests-panel__connection-status" aria-live="polite">
@@ -350,13 +351,13 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
         </div>
         <div className="song-requests-panel__actions">
           {canConnect ? <Button variant="primary" disabled={pending} onClick={connect}>{text.connect}</Button> : null}
-          {canReconnect ? <Button variant="secondary" disabled={pending} onClick={connect}>{text.reconnectButton}</Button> : null}
-          {canDisconnect ? <Button variant="neutral" disabled={pending} onClick={disconnect}>{text.disconnect}</Button> : null}
+          {canReconnect ? <Button variant={needsAttention ? "primary" : "secondary"} disabled={pending} onClick={connect}>{text.reconnectButton}</Button> : null}
+          {canDisconnect ? <Button variant="secondary" disabled={pending} onClick={disconnect}>{text.disconnect}</Button> : null}
         </div>
       </div>
-      <div className="song-requests-panel__slot-count" aria-live="polite">
-        {connection?.enabled === true && connection.slot !== null ? `${text.usedSlots}: ${String(connection.slot)} / 5` : " "}
-      </div>
+      {connection?.enabled === true && connection.slot !== null
+        ? <div className="song-requests-panel__slot-count">{`${text.usedSlots}: ${String(connection.slot)} / 5`}</div>
+        : null}
     </Section>
 
     <Section title={text.search}>
@@ -364,9 +365,9 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
         <Field
           label={text.query}
           value={query}
-          onChange={(value) => { setQuery(value.slice(0, 200)); setSearchState("idle"); setResults([]); }}
+          onChange={(value) => { setQuery(value.slice(0, 200)); }}
           normalize={(value) => value.slice(0, 200)}
-          disabled={!canOperate || connection?.state !== "connected" || pending || searchState === "loading"}
+          disabled={searchBlocked || pending || searchState === "loading"}
           onKeyDown={(event) => {
             if (event.key !== "Enter") return;
             event.preventDefault();
@@ -375,24 +376,47 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
         />
         <Button
           variant="secondary"
-          size="compact"
           icon="search"
           ariaLabel={text.searchButton}
           className="song-requests-panel__search-button"
           type="submit"
-          disabled={!canOperate || connection?.state !== "connected" || pending || searchState === "loading" || query.trim().length === 0}
+          disabled={searchBlocked || pending || searchState === "loading" || query.trim().length === 0}
         ><span className="song-requests-panel__search-button-label">{text.searchButton}</span></Button>
       </form>
     </Section>
 
+    {searchState === "idle" ? null : <Section title={text.searchResults} className="song-requests-panel__results-section">
+      {searchState === "loading" ? <LoadStateLines rows={3} height={44} /> : null}
+      {searchState === "searched" && results.length === 0 ? <EmptyState title={text.emptyResults} description={text.emptyResultsDescription} /> : null}
+      {searchState === "searched" && results.length > 0 ? <div className="song-requests-panel__list" role="list" aria-label={text.searchResults}>
+        {results.map((track) => {
+          const alreadySelected = selected.some((item) => item.id === track.id);
+          return <div role="listitem" key={track.id}>
+            <ListRow
+              href={track.spotifyUrl}
+              onNavigate={() => { window.open(track.spotifyUrl, "_blank", "noopener,noreferrer"); }}
+              title={track.title}
+              description={track.artists.join(", ")}
+              status={null}
+              action={alreadySelected
+                ? <span className="song-requests-panel__added"><Icon name="copied" size={16} />{text.added}</span>
+                : <Button
+                  variant="secondary"
+                  size="compact"
+                  ariaLabel={text.addTrack(track.title)}
+                  disabled={selected.length >= 5 || pending}
+                  onClick={() => { addTrack(track); }}
+                >{text.add}</Button>}
+            />
+          </div>;
+        })}
+      </div> : null}
+    </Section>}
+
     <Section
       title={`${text.selected} (${String(selected.length)}/5)`}
       className="song-requests-panel__candidate-section"
-      headingAction={<Button
-        variant="primary"
-        disabled={pending || !canOperate || selected.length < 2 || selected.length > 5 || connection?.state !== "connected"}
-        onClick={startVote}
-      >{text.startVote}</Button>}
+      headingAction={<Button variant="primary" disabled={voteBlocked} onClick={startVote}>{text.startVote}</Button>}
     >
       {selected.length === 0 ? <EmptyState title={text.emptyCandidates} description={text.emptyCandidatesDescription} /> :
         <div className="song-requests-panel__list" role="list" aria-label={text.selected}>
@@ -415,35 +439,6 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
             />
           </div>)}
         </div>}
-    </Section>
-
-    <Section title={text.searchResults} className="song-requests-panel__results-section">
-      {searchState === "loading" ? <LoadStateLines rows={3} height={44} /> : null}
-      {searchState === "searched" && results.length === 0 ? <EmptyState title={text.emptyResults} description={text.emptyResultsDescription} /> : null}
-      {searchState === "searched" && results.length > 0 ? <div className="song-requests-panel__list" role="list" aria-label={text.searchResults}>
-        {results.map((track) => {
-          const alreadySelected = selected.some((item) => item.id === track.id);
-          return <div role="listitem" key={track.id}>
-            <ListRow
-              href={track.spotifyUrl}
-              onNavigate={() => { window.open(track.spotifyUrl, "_blank", "noopener,noreferrer"); }}
-              title={track.title}
-              description={track.artists.join(", ")}
-              status={alreadySelected ? <Badge tone="brand">{text.candidate}</Badge> : null}
-              action={<Button
-                variant="secondary"
-                size="compact"
-                ariaLabel={text.addTrack(track.title)}
-                disabled={alreadySelected || selected.length >= 5 || pending}
-                onClick={() => { addTrack(track); }}
-              >{alreadySelected ? text.added : text.add}</Button>}
-            />
-          </div>;
-        })}
-      </div> : null}
-      <div className="song-requests-panel__search-feedback" role="status" aria-live="polite">
-        {searchState === "error" ? text.searchError : " "}
-      </div>
     </Section>
 
     {canViewRequests ? <Section title={text.recent}>
@@ -474,7 +469,9 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
             </div>)}
           </div>
       </LoadState>
-      <h3 className="song-requests-panel__subheading">{text.recentVotes}</h3>
+    </Section> : null}
+
+    {canViewRequests ? <Section title={text.recentVotes}>
       {voteOutcomes.length === 0 ? <EmptyState title={text.emptyVoteOutcomes} description="" /> : <div className="song-requests-panel__outcomes" role="list" aria-label={text.recentVotes}>
         {voteOutcomes.map((outcome) => <div className="song-requests-panel__outcome" role="listitem" key={outcome.ballotId}>
           <Badge tone={outcome.state === "failed" ? "red" : "amber"}>{text.voteOutcomes[outcome.state]}</Badge>
@@ -485,7 +482,7 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
 
     <Section title={text.settings} className="song-requests-panel__settings">
       <LoadState
-        variant="status-row"
+        variant="panel-0"
         status={settingsQueryStatus}
         loading={<LoadStateLines rows={1} height={44} />}
         empty={null}
