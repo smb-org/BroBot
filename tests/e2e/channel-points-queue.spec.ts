@@ -61,6 +61,7 @@ test("runs one queued reward and refunds another from the cockpit", async ({ pag
   await page.goto(`/channels/${channelId}?lang=de`);
   const action = page.getByRole("button", { name: "Kanalpunkte-Warteschlange" });
   await expect(action).toBeVisible();
+  await expect(action).toContainText("2 wartend");
   await action.click();
 
   const dialog = page.getByRole("dialog", { name: "Kanalpunkte-Warteschlange" });

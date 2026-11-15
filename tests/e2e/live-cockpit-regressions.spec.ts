@@ -427,7 +427,8 @@ test("event shoutouts respect raid-module and live-stream availability", async (
   await expect(offlineAction).toBeDisabled();
   const streamReason = await offlineAction.getAttribute("aria-describedby");
   if (streamReason === null) throw new Error("The offline raid action must describe its stream requirement.");
-  await expect(page.locator(`#${streamReason}`)).toContainText("Stream ist offline");
+  // aria-describedby may list a subtitle id before the reason id.
+  await expect(page.locator(`#${streamReason.split(" ").at(-1) ?? streamReason}`)).toContainText("Stream ist offline");
 });
 
 test("event shoutout failures retain the specific Twitch reason", async ({ page }) => {

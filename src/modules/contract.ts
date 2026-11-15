@@ -2196,6 +2196,8 @@ type ModuleImmediateActionIcon = "ad" | "shoutout" | "clip" | "broadcast" | "vot
 
 type ModuleImmediateActionAvailability = {
   reason: Readonly<Record<ModuleLanguage, string>> | null;
+  /** Neutral, module-owned copy shown in the reserved compact-action subtitle slot. */
+  subtitle?: Readonly<Record<ModuleLanguage, string>> | null;
   /** Whether a cockpit action with hideUntilAvailable should currently appear. */
   visible?: boolean;
   link?: { href: string; label: Readonly<Record<ModuleLanguage, string>> };

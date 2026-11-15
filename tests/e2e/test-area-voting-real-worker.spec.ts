@@ -77,12 +77,28 @@ test("counts a seeded open chat vote through the real Worker and shows its ballo
     const voteStatus = typeof vote === "object" && vote !== null && "status" in vote && typeof vote.status === "string"
       ? vote.status
       : null;
-    return { status: response.status, voteStatus };
+    const voteId = typeof vote === "object" && vote !== null && "id" in vote && typeof vote.id === "string"
+      ? vote.id
+      : null;
+    return { status: response.status, voteStatus, voteId };
   }, channelId);
   expect(startResult.status).toBe(200);
   expect(startResult.voteStatus).toBe("open");
+  expect(startResult.voteId).not.toBeNull();
 
-  const messageField = page.locator(".test-area__context-form input").first();
+  // The real Worker and persisted D1 read can take longer than a mocked request under concurrent E2E load.
+  await expect.poll(() => page.evaluate(async (id) => {
+    const response = await fetch(`/api/channels/${id}/modules/chat_voting/current`);
+    if (!response.ok) return null;
+    const body: unknown = await response.json();
+    if (typeof body !== "object" || body === null || !("vote" in body)) return null;
+    const vote = body.vote;
+    if (typeof vote !== "object" || vote === null || !("id" in vote) || typeof vote.id !== "string" || !("status" in vote) || typeof vote.status !== "string") return null;
+    return { id: vote.id, status: vote.status };
+  }, channelId), { timeout: 15_000, intervals: [100, 250, 500] }).toEqual({ id: startResult.voteId, status: "open" });
+
+  const messageField = page.getByRole("textbox", { name: "Nachricht" });
+  await expect(messageField).toBeVisible();
   await messageField.fill("2");
   await page.locator(".test-area__context-form .test-area__run-button").click();
   const row = page.locator(".test-area__result-row");
