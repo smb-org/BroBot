@@ -245,4 +245,42 @@ describe("song request components", () => {
     const body = voteCall?.[1]?.body;
     expect(JSON.parse(typeof body === "string" ? body : "{}")).toEqual({ trackIds: ["glassharbor01", "quietatlas02", "silvercurrent03"] });
   });
+
+  it("offers removal per request, with the refund choice only for paid submitted requests, behind a confirmation", async () => {
+    const row = (requestId: string, title: string, state: string, requestType: string, chargedAmount: number) => ({
+      requestId, state, title, artists: ["Mira Vale"], coverUrl: null, spotifyUrl: `https://open.spotify.com/track/${requestId}`,
+      failureReason: null, source: "points", requestType, chargedAmount, requesterDisplayName: "Fictional Viewer", requesterLogin: "fictional_viewer", createdAt: "2026-11-15T19:00:00.000Z",
+    });
+    const requests = [
+      row("waiting01", "Waiting Track", "pending_review", "bot_points", 25),
+      row("paid02", "Paid Track", "submitted", "bot_points", 25),
+      row("free03", "Free Track", "submitted", "free", 0),
+    ];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-remove" }));
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 1, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests, voteOutcomes: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 1 }));
+      return Promise.resolve(json({ state: "removed" }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderPanel();
+    await screen.findByText("Paid Track");
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions: Free Track" }));
+    expect(await screen.findByRole("menuitem", { name: "Remove" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Remove and refund" })).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions: Paid Track" }));
+    expect(await screen.findByRole("menuitem", { name: "Remove and refund" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove and refund" }));
+    expect(fetcher.mock.calls.some(([input]) => urlOf(input).pathname.endsWith("/remove"))).toBe(false);
+    fireEvent.click(await screen.findByRole("button", { name: "Remove and refund" }));
+    await waitFor(() => {
+      const call = fetcher.mock.calls.find(([input]) => urlOf(input).pathname.endsWith("/requests/paid02/remove"));
+      expect(JSON.parse(typeof call?.[1]?.body === "string" ? call[1].body : "{}")).toEqual({ refund: true });
+    });
+  });
 });

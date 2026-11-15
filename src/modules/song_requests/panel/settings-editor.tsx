@@ -105,8 +105,23 @@ export default function SongRequestsSettingsEditor({
   const navigation = dashboardTexts(language).module;
   const rule = draft.value.rules;
 
+  type EnabledKey = "personCooldownEnabled" | "personOpenLimitEnabled" | "personRoundLimitEnabled" | "channelOpenLimitEnabled" | "artistOpenLimitEnabled" | "maxTrackLengthEnabled";
+  type ValueKey = "personCooldownMinutes" | "personOpenLimit" | "personRoundLimit" | "channelOpenLimit" | "artistOpenLimit" | "maxTrackLengthMinutes";
+  const limitRule = (label: string, enabledKey: EnabledKey, valueKey: ValueKey, min: number, max: number, unit?: string): ReactElement => {
+    const enabled = rule[enabledKey];
+    return <SwitchRow
+      label={label}
+      checked={enabled}
+      disabled={disabled}
+      onChange={(value) => { updateRule(enabledKey, value); }}
+      control={<UnitInput label={label} {...(unit === undefined ? {} : { unit })} min={min} max={max} value={rule[valueKey]}
+        disabled={disabled || !enabled}
+        onChange={(value) => { updateNumber(value, (next) => { updateRule(valueKey, next); }, rule[valueKey]); }} />}
+    />;
+  };
+
   return <div className="song-requests-settings-editor">
-    <Section title={labels.mode}>
+    <Section title={labels.admission}>
       <SegmentChoice
         label={labels.mode}
         value={draft.value.mode}
@@ -154,55 +169,44 @@ export default function SongRequestsSettingsEditor({
         disabled={disabled}
         onChange={(alsoOffline) => { update({ alsoOffline }); }}
       />
+    </Section>
+
+    <Section title={labels.rules}>
+      <SwitchRow label={labels.duplicate} checked={rule.duplicateEnabled} disabled={disabled} onChange={(value) => { updateRule("duplicateEnabled", value); }} />
+      <SwitchRow
+        label={labels.songCooldown}
+        checked={rule.songCooldownEnabled}
+        disabled={disabled}
+        onChange={(value) => { updateRule("songCooldownEnabled", value); }}
+        control={<UnitInput label={labels.songCooldown} unit="min" min={1} max={10_080} value={rule.songCooldownMinutes}
+          disabled={disabled || !rule.songCooldownEnabled || rule.songCooldownOncePerRound}
+          onChange={(value) => { updateNumber(value, (next) => { updateRule("songCooldownMinutes", next); }, rule.songCooldownMinutes); }} />}
+      />
+      <SwitchRow label={labels.oncePerRound} description={labels.oncePerRoundHint} checked={rule.songCooldownOncePerRound}
+        disabled={disabled || !rule.songCooldownEnabled} onChange={(value) => { updateRule("songCooldownOncePerRound", value); }} />
+      {limitRule(labels.personCooldown, "personCooldownEnabled", "personCooldownMinutes", 0, 10_080, "min")}
+      {limitRule(labels.personOpen, "personOpenLimitEnabled", "personOpenLimit", 1, 50)}
+      {limitRule(labels.personRound, "personRoundLimitEnabled", "personRoundLimit", 1, 100)}
+      {limitRule(labels.channelOpen, "channelOpenLimitEnabled", "channelOpenLimit", 1, 200)}
+      {limitRule(labels.artistOpen, "artistOpenLimitEnabled", "artistOpenLimit", 1, 50)}
+      {limitRule(labels.maxLength, "maxTrackLengthEnabled", "maxTrackLengthMinutes", 1, 1_000, "min")}
+      <SwitchRow label={labels.explicitAllowed} checked={rule.explicitAllowed} disabled={disabled} onChange={(value) => { updateRule("explicitAllowed", value); }} />
+      <SwitchRow label={labels.blockTracks} checked={rule.blockTracksEnabled} disabled={disabled} onChange={(value) => { updateRule("blockTracksEnabled", value); }} />
+      <ChipsInput label={labels.blockedTrackIds} values={rule.blockedTrackIds} onChange={(values) => { updateRule("blockedTrackIds", values); }}
+        max={200} disabled={disabled || !rule.blockTracksEnabled} placeholder={labels.listPlaceholder} removeLabel={labels.removeItem} listLabel={labels.blockedTrackIds}
+        messages={{ countLabel: labels.chipCount, atLimitHint: labels.chipLimit, duplicateWarning: labels.duplicateChip }} />
+      <SwitchRow label={labels.blockArtists} checked={rule.blockArtistsEnabled} disabled={disabled} onChange={(value) => { updateRule("blockArtistsEnabled", value); }} />
+      <ChipsInput label={labels.blockedArtists} values={rule.blockedArtists} onChange={(values) => { updateRule("blockedArtists", values); }}
+        max={100} disabled={disabled || !rule.blockArtistsEnabled} placeholder={labels.listPlaceholder} removeLabel={labels.removeItem} listLabel={labels.blockedArtists}
+        messages={{ countLabel: labels.chipCount, atLimitHint: labels.chipLimit, duplicateWarning: labels.duplicateChip }} />
+    </Section>
+
+    <Section title={labels.overlay}>
       <FieldPair>
         <UnitInput label={labels.overlayRows} min={2} max={20} value={draft.value.queueOverlayRows} disabled={disabled}
           onChange={(value) => { updateNumber(value, (queueOverlayRows) => { update({ queueOverlayRows }); }, draft.value.queueOverlayRows); }} />
         <Field label={labels.emptyText} value={draft.value.emptyText} onChange={(emptyText) => { update({ emptyText: emptyText.slice(0, 80) }); }} disabled={disabled} />
       </FieldPair>
-    </Section>
-
-    <Section title={labels.rules}>
-      <SwitchRow label={labels.duplicate} checked={rule.duplicateEnabled} disabled={disabled} onChange={(value) => { updateRule("duplicateEnabled", value); }} />
-      <SwitchRow label={labels.songCooldown} checked={rule.songCooldownEnabled} disabled={disabled} onChange={(value) => { updateRule("songCooldownEnabled", value); }} />
-      {rule.songCooldownEnabled ? <>
-        <SegmentChoice label={labels.songCooldown} value={rule.songCooldownOncePerRound ? "round" : "minutes"}
-          disabled={disabled} onChange={(value) => { updateRule("songCooldownOncePerRound", value === "round"); }}
-          options={[{ value: "minutes", label: labels.cooldownMinutes }, { value: "round", label: labels.oncePerRound }]} wrap />
-        {!rule.songCooldownOncePerRound ? <UnitInput label={labels.songCooldownMinutes} unit="min" min={1} max={10_080}
-          value={rule.songCooldownMinutes} disabled={disabled}
-          onChange={(value) => { updateNumber(value, (next) => { updateRule("songCooldownMinutes", next); }, rule.songCooldownMinutes); }} /> : null}
-      </> : null}
-      <SwitchRow label={labels.personCooldown} checked={rule.personCooldownEnabled} disabled={disabled} onChange={(value) => { updateRule("personCooldownEnabled", value); }} />
-      {rule.personCooldownEnabled ? <UnitInput label={labels.personCooldown} unit="min" min={0} max={10_080} value={rule.personCooldownMinutes} disabled={disabled}
-        onChange={(value) => { updateNumber(value, (next) => { updateRule("personCooldownMinutes", next); }, rule.personCooldownMinutes); }} /> : null}
-      <FieldPair>
-        <div className="song-requests-settings-editor__rule-field"><SwitchRow label={labels.personOpen} checked={rule.personOpenLimitEnabled} disabled={disabled} onChange={(value) => { updateRule("personOpenLimitEnabled", value); }} />
-          <UnitInput label={labels.personOpen} min={1} max={50} value={rule.personOpenLimit} disabled={disabled || !rule.personOpenLimitEnabled}
-            onChange={(value) => { updateNumber(value, (next) => { updateRule("personOpenLimit", next); }, rule.personOpenLimit); }} /></div>
-        <div className="song-requests-settings-editor__rule-field"><SwitchRow label={labels.personRound} checked={rule.personRoundLimitEnabled} disabled={disabled} onChange={(value) => { updateRule("personRoundLimitEnabled", value); }} />
-          <UnitInput label={labels.personRound} min={1} max={100} value={rule.personRoundLimit} disabled={disabled || !rule.personRoundLimitEnabled}
-            onChange={(value) => { updateNumber(value, (next) => { updateRule("personRoundLimit", next); }, rule.personRoundLimit); }} /></div>
-      </FieldPair>
-      <FieldPair>
-        <div className="song-requests-settings-editor__rule-field"><SwitchRow label={labels.channelOpen} checked={rule.channelOpenLimitEnabled} disabled={disabled} onChange={(value) => { updateRule("channelOpenLimitEnabled", value); }} />
-          <UnitInput label={labels.channelOpen} min={1} max={200} value={rule.channelOpenLimit} disabled={disabled || !rule.channelOpenLimitEnabled}
-            onChange={(value) => { updateNumber(value, (next) => { updateRule("channelOpenLimit", next); }, rule.channelOpenLimit); }} /></div>
-        <div className="song-requests-settings-editor__rule-field"><SwitchRow label={labels.artistOpen} checked={rule.artistOpenLimitEnabled} disabled={disabled} onChange={(value) => { updateRule("artistOpenLimitEnabled", value); }} />
-          <UnitInput label={labels.artistOpen} min={1} max={50} value={rule.artistOpenLimit} disabled={disabled || !rule.artistOpenLimitEnabled}
-            onChange={(value) => { updateNumber(value, (next) => { updateRule("artistOpenLimit", next); }, rule.artistOpenLimit); }} /></div>
-      </FieldPair>
-      <SwitchRow label={labels.maxLength} checked={rule.maxTrackLengthEnabled} disabled={disabled} onChange={(value) => { updateRule("maxTrackLengthEnabled", value); }} />
-      {rule.maxTrackLengthEnabled ? <UnitInput label={labels.maxLengthMinutes} unit="min" min={1} max={1_000} value={rule.maxTrackLengthMinutes} disabled={disabled}
-        onChange={(value) => { updateNumber(value, (next) => { updateRule("maxTrackLengthMinutes", next); }, rule.maxTrackLengthMinutes); }} /> : null}
-      <SwitchRow label={labels.blockTracks} checked={rule.blockTracksEnabled} disabled={disabled} onChange={(value) => { updateRule("blockTracksEnabled", value); }} />
-      {rule.blockTracksEnabled ? <ChipsInput label={labels.blockedTrackIds} values={rule.blockedTrackIds} onChange={(values) => { updateRule("blockedTrackIds", values); }}
-        max={200} disabled={disabled} placeholder={labels.listPlaceholder} removeLabel={labels.removeItem} listLabel={labels.blockedTrackIds}
-        messages={{ countLabel: labels.chipCount, atLimitHint: labels.chipLimit, duplicateWarning: labels.duplicateChip }} /> : null}
-      <SwitchRow label={labels.blockArtists} checked={rule.blockArtistsEnabled} disabled={disabled} onChange={(value) => { updateRule("blockArtistsEnabled", value); }} />
-      {rule.blockArtistsEnabled ? <ChipsInput label={labels.blockedArtists} values={rule.blockedArtists} onChange={(values) => { updateRule("blockedArtists", values); }}
-        max={100} disabled={disabled} placeholder={labels.listPlaceholder} removeLabel={labels.removeItem} listLabel={labels.blockedArtists}
-        messages={{ countLabel: labels.chipCount, atLimitHint: labels.chipLimit, duplicateWarning: labels.duplicateChip }} /> : null}
-      <SwitchRow label={labels.explicitAllowed} checked={rule.explicitAllowed} disabled={disabled} onChange={(value) => { updateRule("explicitAllowed", value); }} />
     </Section>
 
     {canManage ? <SaveStatus dirty={draft.dirty} persistent pending={pending} saved={saved} {...(saveError === undefined ? {} : { error: saveError })}

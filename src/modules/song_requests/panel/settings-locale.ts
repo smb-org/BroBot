@@ -1,5 +1,8 @@
 export const songRequestsSettingsTexts = {
   de: {
+    admission: "Annahme",
+    overlay: "Overlay",
+    oncePerRoundHint: "Ersetzt die Minuten: ein Song nur einmal pro Stream.",
     mode: "Annahmemodus",
     automatic: "Automatisch mit Regeln",
     moderated: "Moderiert",
@@ -51,6 +54,9 @@ export const songRequestsSettingsTexts = {
     conflict: "Die Einstellungen wurden inzwischen geändert. Lade die Seite neu und versuche es erneut.",
   },
   en: {
+    admission: "Admission",
+    overlay: "Overlay",
+    oncePerRoundHint: "Replaces the minutes: a song plays once per stream.",
     mode: "Admission mode",
     automatic: "Automatic with rules",
     moderated: "Moderated",

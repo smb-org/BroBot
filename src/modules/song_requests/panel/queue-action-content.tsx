@@ -51,12 +51,12 @@ export default function SongRequestQueueActionContent({ channelId, language, can
       <h2>{labels.title}</h2>
       <span>{String(queueQuery.data?.count ?? 0)}</span>
     </header>
-    <div className="song-request-moderator-queue__status" role={queueQuery.isError ? "alert" : "status"} aria-live="polite">
+    <div className="song-request-moderator-queue__status" hidden={!queueQuery.isError} role={queueQuery.isError ? "alert" : "status"} aria-live="polite">
       {queueQuery.isError ? labels.error : queueQuery.isPending ? labels.loading : " "}
     </div>
-    {queueQuery.isPending ? <LoadStateLines rows={3} height={52} /> : null}
-    {queueQuery.data !== undefined && queueQuery.data.items.length === 0 ? <EmptyState title={labels.empty} description="" /> : null}
     <div className="song-request-moderator-queue__list" aria-busy={queueQuery.isFetching}>
+      {queueQuery.isPending ? <LoadStateLines rows={3} height={52} /> : null}
+      {queueQuery.data !== undefined && queueQuery.data.items.length === 0 ? <EmptyState title={labels.empty} description="" /> : null}
       {(queueQuery.data?.items ?? []).map((item) => {
         const pending = pendingIds.has(item.requestId);
         return <div className="song-request-moderator-queue__entry" role="listitem" key={item.requestId} aria-busy={pending}>

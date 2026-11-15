@@ -2,6 +2,7 @@ import { useState, type ReactElement, type SubmitEvent } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import {
+  ActionMenu,
   Badge,
   Button,
   ConfirmDialog,
@@ -114,6 +115,7 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
   const [selected, setSelected] = useState<Track[]>([]);
   const [pending, setPending] = useState(false);
   const [clearListOpen, setClearListOpen] = useState(false);
+  const [removal, setRemoval] = useState<{ requestId: string; refund: boolean; label: string; description: string } | null>(null);
 
   const connection = connectionQuery.data ?? null;
   const requestData = requestsQuery.data;
@@ -369,19 +371,22 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
                 title={requestRow.title}
                 description={[requestRow.artists.join(", "), requestRow.requesterDisplayName ?? requestRow.requesterLogin].filter(Boolean).join(" · ")}
                 status={<Badge tone={stateTone(requestRow.state)}>{text.states[requestRow.state]}</Badge>}
-                action={!canOperate ? null : <span className="song-requests-panel__resolution">
-                  {requestRow.state === "pending_review" || requestRow.state === "approved" ? <Button size="compact" variant="secondary" disabled={pending}
-                    onClick={() => { removeRequest(requestRow.requestId, false); }}>{text.removeBeforeSubmit}</Button> : null}
-                  {requestRow.state === "submitted" || requestRow.state === "outcome_unknown" ? <>
-                    <Button size="compact" variant="secondary" disabled={pending} onClick={() => { removeRequest(requestRow.requestId, false); }}>{text.remove}</Button>
-                    {requestRow.requestType === "bot_points" && requestRow.chargedAmount > 0 ? <Button size="compact" variant="secondary" disabled={pending}
-                      onClick={() => { removeRequest(requestRow.requestId, true); }}>{text.removeRefund}</Button> : null}
-                  </> : null}
-                  {requestRow.state === "outcome_unknown" ? <>
-                    <Button size="compact" variant="secondary" disabled={pending} onClick={() => { resolveRequest(requestRow.requestId, "submitted"); }}>{text.resolveIn}</Button>
-                    <Button size="compact" variant="secondary" disabled={pending} onClick={() => { resolveRequest(requestRow.requestId, "failed"); }}>{text.resolveOut}</Button>
-                  </> : null}
-                </span>}
+                action={!canOperate ? null : (() => {
+                  const beforeSubmit = requestRow.state === "pending_review" || requestRow.state === "approved";
+                  const afterSubmit = requestRow.state === "submitted" || requestRow.state === "outcome_unknown";
+                  const paid = requestRow.requestType === "bot_points" && requestRow.chargedAmount > 0;
+                  if (!beforeSubmit && !afterSubmit) return null;
+                  const items = [
+                    { label: text.remove, disabled: pending, onSelect: () => { setRemoval({ requestId: requestRow.requestId, refund: false, label: text.remove, description: beforeSubmit ? (paid ? text.removeConfirmBeforePaid : text.removeConfirmBefore) : text.removeConfirmAfter }); } },
+                    ...(afterSubmit && paid ? [{ label: text.removeRefund, disabled: pending, onSelect: () => { setRemoval({ requestId: requestRow.requestId, refund: true, label: text.removeRefund, description: text.removeConfirmRefund }); } }] : []),
+                    ...(requestRow.state === "outcome_unknown" ? [
+                      { divider: true as const },
+                      { label: text.resolveIn, disabled: pending, onSelect: () => { resolveRequest(requestRow.requestId, "submitted"); } },
+                      { label: text.resolveOut, disabled: pending, onSelect: () => { resolveRequest(requestRow.requestId, "failed"); } },
+                    ] : []),
+                  ];
+                  return <ActionMenu label={`${text.requestActions}: ${requestRow.title}`} items={items} />;
+                })()}
               />
             </div>)}
           </div>
@@ -417,6 +422,10 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
         />}
       </LoadState>
     </Section>
+    <ConfirmDialog opened={removal !== null} title={text.removeConfirmTitle} description={removal?.description ?? ""}
+      confirmLabel={removal?.label ?? text.remove} cancelLabel={text.cancel} danger pending={pending}
+      onConfirm={() => { if (removal !== null) removeRequest(removal.requestId, removal.refund); setRemoval(null); }}
+      onCancel={() => { setRemoval(null); }} />
     <ConfirmDialog opened={clearListOpen} title={text.clearConfirmTitle} description={text.clearConfirmDescription}
       confirmLabel={text.clearConfirm} cancelLabel={text.cancel} onConfirm={clearList} onCancel={() => { setClearListOpen(false); }}
       pending={pending} danger />
