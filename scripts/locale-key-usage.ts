@@ -293,13 +293,29 @@ const catalogueValuesInType = (
   const cached = catalogueValuesInTypeCache.get(type);
   if (cached !== undefined) return [...cached];
   const values = new Map<string, CatalogueValue>();
-  for (const part of typeParts(type)) {
-    if ((part.flags & ts.TypeFlags.Object) === 0) continue;
-    for (const property of checker.getPropertiesOfType(part)) {
+  const visitedTypes = new Set<ts.Type>();
+  const visitType = (part: ts.Type): void => {
+    if (visitedTypes.has(part)) return;
+    visitedTypes.add(part);
+    if ((part.flags & ts.TypeFlags.TypeParameter) !== 0) {
+      const constraint = checker.getBaseConstraintOfType(part);
+      if (constraint === undefined) return;
+      // Unions are visited member by member; an intersection keeps its merged property symbols,
+      // so scan it as a whole instead of flattening it back to the original catalogue root.
+      if (constraint.isUnion()) constraint.types.forEach(visitType);
+      else scanProperties(constraint);
+      return;
+    }
+    if ((part.flags & ts.TypeFlags.Object) === 0) return;
+    scanProperties(part);
+  };
+  const scanProperties = (scanned: ts.Type): void => {
+    for (const property of checker.getPropertiesOfType(scanned)) {
       const catalog = roots.get(unaliasSymbol(checker, property));
       if (catalog !== undefined) values.set(catalog, catalogueValue(catalog));
     }
-  }
+  };
+  typeParts(type).forEach(visitType);
   const result = [...values.values()];
   catalogueValuesInTypeCache.set(type, result);
   return [...result];
@@ -463,6 +479,7 @@ const mayCarryCatalogueValue = (expression: ts.Expression): boolean => {
       || (operator >= ts.SyntaxKind.FirstAssignment && operator <= ts.SyntaxKind.LastAssignment);
   }
   return ts.isIdentifier(expression)
+    || expression.kind === ts.SyntaxKind.ThisKeyword
     || ts.isPropertyAccessExpression(expression)
     || ts.isElementAccessExpression(expression)
     || ts.isCallExpression(expression)

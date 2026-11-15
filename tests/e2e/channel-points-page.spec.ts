@@ -123,6 +123,44 @@ test("creates and edits a channel-points reward and shows a seeded redemption", 
   expect(mobileLimitLayout.documentWidth).toBeLessThanOrEqual(390);
   expect(new Set(mobileLimitLayout.tileWidths).size).toBe(1);
 
+  for (const width of [480, 768]) {
+    await page.setViewportSize({ width, height: 844 });
+    const intermediateLimitLayout = await createDialog.locator(".channel-points-editor__limits").evaluate((row) => {
+      const tiles = Array.from(row.querySelectorAll<HTMLElement>(".channel-points-limit"));
+      return {
+        documentWidth: document.documentElement.scrollWidth,
+        tiles: tiles.map((tile) => {
+          const tileBounds = tile.getBoundingClientRect();
+          const label = tile.querySelector<HTMLElement>(".ui-switch-row__copy strong");
+          const labelBounds = label?.getBoundingClientRect();
+          return {
+            left: tileBounds.left,
+            right: tileBounds.right,
+            height: tileBounds.height,
+            label: label?.textContent ?? null,
+            labelWhiteSpace: label === null ? null : getComputedStyle(label).whiteSpace,
+            labelLeft: labelBounds?.left ?? null,
+            labelRight: labelBounds?.right ?? null,
+          };
+        }),
+      };
+    });
+    expect(intermediateLimitLayout.documentWidth).toBeLessThanOrEqual(width);
+    expect(new Set(intermediateLimitLayout.tiles.map((tile) => tile.height)).size).toBe(1);
+    if (width === 480) {
+      const longLabel = intermediateLimitLayout.tiles.find((tile) => tile.label === "Maximal pro Person und Stream");
+      expect(longLabel?.labelWhiteSpace).toBe("normal");
+    }
+    for (let index = 0; index < intermediateLimitLayout.tiles.length; index += 1) {
+      const tile = intermediateLimitLayout.tiles[index];
+      const nextTile = intermediateLimitLayout.tiles[index + 1];
+      expect(tile?.labelLeft).not.toBeNull();
+      expect(tile?.labelLeft).toBeGreaterThanOrEqual(tile?.left ?? 0);
+      expect(tile?.labelRight).toBeLessThanOrEqual(tile?.right ?? 0);
+      if (nextTile !== undefined) expect(tile?.right).toBeLessThanOrEqual(nextTile.left);
+    }
+  }
+
   await createDialog.getByLabel("Titel").fill("Wunsch aus dem Chat");
   await createDialog.getByLabel("Kosten").fill("250");
   await createDialog.getByLabel("Chat-Nachricht").fill("Danke, {user}!");

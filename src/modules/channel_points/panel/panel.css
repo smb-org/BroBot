@@ -170,6 +170,7 @@
 
   @media (max-width: 768px) {
     .module-detail:has(.channel-points-panel) { height: calc(100dvh - var(--app-shell-header-height) - 40px); }
+    .channel-points-limit .ui-switch-row__copy strong { white-space: normal; }
     .channel-points-reward-row { grid-template-columns: minmax(0, 1fr) max-content; gap: var(--s2); }
     .channel-points-reward-row__meta { grid-column: 1; grid-row: 2; flex-direction: row; flex-wrap: wrap; gap: var(--s2); }
     .channel-points-reward-row > .ui-badge { grid-column: 2; grid-row: 1; justify-self: end; }
