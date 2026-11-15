@@ -1,18 +1,31 @@
-import type { ModuleAlarmContext, ModuleDurableAction, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
+import type { ModuleAlarmContext, ModuleDurableAction, ModuleEvent, ModuleExecutionContext, ModuleResult, ModulePointsAccess } from "../contract";
 import { voteWinner } from "./domain/vote-result";
-import { isSpotifyTrack, type SpotifyTrack } from "./domain/track";
+import { isSpotifyTrack, spotifyTrackIdFromInput, type SpotifyTrack } from "./domain/track";
+import { canUseFreeSongRequest, isOpenSongRequestState } from "./domain/rules";
+import { songRequestsSettingsSchema, type SongRequestsSettings } from "./contracts";
+import { songRequestChatTexts } from "./chat-locale";
 import {
+  admitSongRequest,
+  closeOfflineSongRequestRound,
   createNowPlayingSnapshot,
   createVoteRequestClaim,
+  cleanupSongRequestRound,
   clearSongRequestsForStreamEnd,
+  ensureOfflineSongRequestRound,
   finishVoteWithoutRequest,
+  readOfflineSongRequestRound,
   readSongRequest,
+  songRequestAdmissionFailure,
   spotifySlotHeld,
+  songRequestTrackFromSpotify,
   transitionRequest,
   voteRecord,
 } from "./adapters/d1";
 import type { SongRequestState } from "./adapters/d1";
-import { SpotifyRequestError, refreshSpotifyToken, spotifyApiRequest } from "./adapters/spotify";
+import { SpotifyRequestError, refreshSpotifyToken, spotifyApiRequest, spotifySearchTracks, spotifyTrackById } from "./adapters/spotify";
+import { readSongRequestQueueState } from "./overlay/queue-state";
+
+export const songRequestQueueOverlayPayload = readSongRequestQueueState;
 
 export const SONG_REQUESTS_ALARM = "poll";
 export const SONG_REQUESTS_HANDLER = "poll";
@@ -25,6 +38,7 @@ const POLL_INTERVAL_MS = 12_000;
 const BASE_BACKOFF_MS = 24_000;
 export const MAX_BACKOFF_MS = 5 * 60_000;
 const SUBMITTING_MAX_AGE_MS = 60_000;
+const OFFLINE_POLL_INTERVAL_MS = 60_000;
 
 interface SpotifyCredentials { accessToken: string; refreshToken: string; expiresAt: number }
 const credentialsFrom = (value: string | null): SpotifyCredentials | null => {
@@ -142,6 +156,41 @@ const updateConnectionForError = async (
   }
 };
 
+const requestRoundIsCurrent = async (
+  db: D1Database,
+  channelId: string,
+  row: { streamId: string | null; roundId: string | null },
+): Promise<boolean> => {
+  if (row.roundId === null) return false;
+  const [stream, module, offlineRound] = await Promise.all([
+    db.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
+      .bind(channelId).first<{ state: string; stream_id: string | null }>(),
+    db.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1")
+      .bind(channelId).first<{ settings: string }>(),
+    db.prepare("SELECT round_id FROM song_requests_offline_rounds WHERE channel_id = ?")
+      .bind(channelId).first<{ round_id: string }>(),
+  ]);
+  if (stream?.state === "online") return stream.stream_id !== null && row.streamId === stream.stream_id && row.roundId === stream.stream_id;
+  if (stream?.state !== "offline" || row.streamId !== null || offlineRound?.round_id !== row.roundId || module === null) return false;
+  try {
+    return songRequestsSettingsSchema.parse(JSON.parse(module.settings) as unknown).alsoOffline;
+  } catch {
+    return false;
+  }
+};
+
+/** Live rows also have to match the host's live stream view; offline rounds only exist in D1. */
+const roundIsCurrentForSubmit = async (
+  context: ModuleAlarmContext,
+  row: { streamId: string | null; roundId: string | null },
+): Promise<boolean> => {
+  if (row.streamId !== null) {
+    const stream = await context.streamStartedAt();
+    if (await context.streamState() !== "online" || stream.streamId !== row.streamId) return false;
+  }
+  return await requestRoundIsCurrent(context.DB, context.channelId, row);
+};
+
 /**
  * Re-checks claim, activation, slot and live stream in one statement. The update is a value no-op, so no panel
  * revision trigger fires and meta.changes is exactly the number of matched base rows.
@@ -150,22 +199,31 @@ export const holdSubmitClaim = async (
   db: D1Database,
   channelId: string,
   requestId: string,
-  streamId: string | null,
+  roundId: string | null,
 ): Promise<boolean> => {
-  if (streamId === null) return false;
+  if (roundId === null) return false;
   const claim = await db.prepare(
     `UPDATE song_requests SET updated_at = updated_at
-      WHERE channel_id = ? AND id = ? AND state = 'submitting' AND stream_id = ?
+      WHERE channel_id = ? AND id = ? AND state = 'submitting' AND round_id = ?
         AND EXISTS (
           SELECT 1 FROM channel_modules
            WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1
         )
         AND EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)
-        AND EXISTS (
-          SELECT 1 FROM channel_stream_state
-           WHERE channel_id = ? AND state = 'online' AND stream_id = ?
+        AND (
+          (song_requests.stream_id = ? AND EXISTS (
+            SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?
+          )) OR (song_requests.stream_id IS NULL AND EXISTS (
+            SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'offline'
+          ) AND EXISTS (
+            SELECT 1 FROM song_requests_offline_rounds WHERE channel_id = ? AND round_id = ?
+          ) AND EXISTS (
+            SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1
+              AND json_extract(settings, '$.alsoOffline') = 1
+          ))
         )`,
-  ).bind(channelId, requestId, streamId, channelId, channelId, channelId, streamId).run();
+  ).bind(channelId, requestId, roundId, channelId, channelId, roundId, channelId, roundId,
+    channelId, channelId, roundId, channelId).run();
   return claim.meta.changes > 0;
 };
 
@@ -190,15 +248,14 @@ const submitClaimStillValid = async (context: ModuleAlarmContext, requestId: str
     });
     return false;
   }
-  const stream = await context.streamStartedAt();
-  if (await context.streamState() !== "online" || row.streamId === null || stream.streamId !== row.streamId) {
+  if (!await roundIsCurrentForSubmit(context, row)) {
     await transitionRequest(context.DB, {
       channelId: context.channelId, requestId, fromState: "submitting", toState: "failed",
       failureReason: "stream_offline", now,
     });
     return false;
   }
-  if (await holdSubmitClaim(context.DB, context.channelId, requestId, row.streamId)) return true;
+  if (await holdSubmitClaim(context.DB, context.channelId, requestId, row.roundId)) return true;
 
   const current = await readSongRequest(context.DB, context.channelId, requestId);
   if (current === null || current.state !== "submitting") return false;
@@ -221,10 +278,7 @@ const submitClaimStillValid = async (context: ModuleAlarmContext, requestId: str
     });
     return false;
   }
-  const liveStream = await context.DB.prepare(
-    "SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?",
-  ).bind(context.channelId).first<{ state: string; stream_id: string | null }>();
-  if (current.streamId === null || liveStream?.state !== "online" || liveStream.stream_id !== current.streamId) {
+  if (!await requestRoundIsCurrent(context.DB, context.channelId, current)) {
     await transitionRequest(context.DB, {
       channelId: context.channelId, requestId, fromState: "submitting", toState: "failed",
       failureReason: "stream_offline", now: new Date().toISOString(),
@@ -238,18 +292,18 @@ const transitionAfterSpotifyPost = async (
   requestId: string,
   toState: "submitted" | "outcome_unknown" | "failed",
   failureReason: string | null = null,
-  activeStreamId: string | null = null,
+  activeRoundId: string | null = null,
 ): Promise<void> => {
   const now = new Date().toISOString();
-  const transitioned = toState === "submitted" && activeStreamId === null ? false : await transitionRequest(context.DB, {
+  const transitioned = toState === "submitted" && activeRoundId === null ? false : await transitionRequest(context.DB, {
     channelId: context.channelId,
     requestId,
     fromState: "submitting",
     toState,
     failureReason,
     now,
-    ...(toState === "submitted" && activeStreamId !== null
-      ? { streamId: activeStreamId, activeStreamId }
+    ...(toState === "submitted" && activeRoundId !== null
+      ? { activeRoundId }
       : {}),
   });
   if (transitioned) return;
@@ -288,11 +342,17 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
     });
     return;
   }
-  const stream = await context.streamStartedAt();
-  if (await context.streamState() !== "online" || row.streamId === null || stream.streamId !== row.streamId) {
+  if (!await roundIsCurrentForSubmit(context, row)) {
     await transitionRequest(context.DB, {
       channelId: context.channelId, requestId, fromState: "approved", toState: "rejected",
       failureReason: "stream_offline", now,
+    });
+    return;
+  }
+  if (!await chargeSongRequest(context.points, row)) {
+    await transitionRequest(context.DB, {
+      channelId: context.channelId, requestId, fromState: "approved", toState: "failed",
+      failureReason: "charge_failed", chargedAmount: 0, now: new Date().toISOString(),
     });
     return;
   }
@@ -330,15 +390,15 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
   );
   try {
     await enqueue();
-    await transitionAfterSpotifyPost(context, requestId, "submitted", null, row.streamId);
+    await transitionAfterSpotifyPost(context, requestId, "submitted", null, row.roundId);
   } catch (error) {
     if (!(error instanceof SpotifyRequestError)) {
-      await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "network_or_timeout", row.streamId);
+      await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "network_or_timeout", row.roundId);
       return;
     }
     await updateConnectionForError(context, error);
     if (error.status >= 500) {
-      await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "spotify_server_error", row.streamId);
+      await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "spotify_server_error", row.roundId);
       return;
     }
     if (error.status === 429) {
@@ -347,23 +407,67 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
         if (!await submitClaimStillValid(context, requestId)) return;
         try {
           await enqueue();
-          await transitionAfterSpotifyPost(context, requestId, "submitted", null, row.streamId);
+          await transitionAfterSpotifyPost(context, requestId, "submitted", null, row.roundId);
           return;
         } catch (retryError) {
           if (retryError instanceof SpotifyRequestError) await updateConnectionForError(context, retryError);
           if (!(retryError instanceof SpotifyRequestError) || retryError.status >= 500) {
-            await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "retry_response_uncertain", row.streamId);
+            await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "retry_response_uncertain", row.roundId);
             return;
           }
         }
       }
-      await transitionAfterSpotifyPost(context, requestId, "failed", "rate_limited", row.streamId);
+      await transitionAfterSpotifyPost(context, requestId, "failed", "rate_limited", row.roundId);
       return;
     }
     await transitionAfterSpotifyPost(context, requestId, "failed",
       error.status === 403 && error.reason !== "PREMIUM_REQUIRED" ? error.message.slice(0, 200)
-        : error.reason ?? `spotify_${String(error.status)}`, row.streamId);
+        : error.reason ?? `spotify_${String(error.status)}`, row.roundId);
   }
+};
+
+export const songRequestChargeOperationId = (requestId: string): string => `sr:${requestId}:charge`;
+export const songRequestRefundOperationId = (requestId: string): string => `sr:${requestId}:refund`;
+
+const chargeSongRequest = async (points: ModulePointsAccess, row: NonNullable<Awaited<ReturnType<typeof readSongRequest>>>): Promise<boolean> => {
+  if (row.requestType !== "bot_points" || row.chargedAmount < 1 || row.requesterUserId === null) return true;
+  const operationId = songRequestChargeOperationId(row.requestId);
+  if (await points.getOperation(operationId) !== null) return true;
+  try {
+    await points.apply(operationId, "stake", [{
+      accountId: row.requesterUserId,
+      login: row.requesterLogin ?? row.requesterUserId,
+      delta: -row.chargedAmount,
+    }], { requestId: row.requestId, trackId: row.id, amount: row.chargedAmount }, { requestId: row.requestId });
+    return true;
+  } catch {
+    return await points.getOperation(operationId) !== null;
+  }
+};
+
+const refundSongRequest = async (
+  points: ModulePointsAccess,
+  row: NonNullable<Awaited<ReturnType<typeof readSongRequest>>>,
+): Promise<boolean> => {
+  if (row.requestType !== "bot_points" || row.chargedAmount < 1 || row.requesterUserId === null) return false;
+  if (await points.getOperation(songRequestChargeOperationId(row.requestId)) === null) return false;
+  const refundId = songRequestRefundOperationId(row.requestId);
+  if (await points.getOperation(refundId) !== null) return true;
+  await points.apply(refundId, "refund", [{
+    accountId: row.requesterUserId,
+    login: row.requesterLogin ?? row.requesterUserId,
+    delta: row.chargedAmount,
+  }], { requestId: row.requestId, amount: row.chargedAmount }, { requestId: row.requestId });
+  return true;
+};
+
+export const refundRequestId = async (
+  context: Pick<ModuleAlarmContext, "DB" | "channelId" | "points">,
+  requestId: string,
+): Promise<void> => {
+  const row = await readSongRequest(context.DB, context.channelId, requestId);
+  if (row === null || isOpenSongRequestState(row.state)) return;
+  await refundSongRequest(context.points, row);
 };
 
 const failureMessage = (reason: string | null): { de: string; en: string } => {
@@ -409,7 +513,10 @@ export const handleSubmitAlarm = async (context: ModuleAlarmContext, alarmKey: s
   const request = await readSongRequest(context.DB, context.channelId, requestId);
   if (request === null) return;
   if (request.state === "approved") await submitRequest(context, requestId);
+  const current = await readSongRequest(context.DB, context.channelId, requestId);
+  if (current?.state === "failed" || current?.state === "rejected") await refundRequestId(context, requestId);
   await announceSubmitResult(context, requestId);
+  await notifyQueueOverlay(context);
 };
 
 const scheduleSubmitAlarm = async (context: ModuleAlarmContext, requestId: string, deadline = Date.now()): Promise<void> => {
@@ -436,20 +543,27 @@ export const handleSongRequestDurableAction = async (context: ModuleAlarmContext
     }
     const track = vote.candidates[winner];
     if (track === undefined) return;
-    const currentStream = await context.streamStartedAt();
-    const online = await context.streamState() === "online" && currentStream.streamId !== null && currentStream.streamId === vote.streamId;
+    const roundId = vote.roundId ?? vote.streamId;
+    const streamId = vote.streamId;
+    const active = roundId !== null && await roundIsCurrentForSubmit(context, { streamId, roundId });
     const requestId = crypto.randomUUID();
-    await createVoteRequestClaim(context.DB, {
+    const claimed = await createVoteRequestClaim(context.DB, {
       channelId: context.channelId,
       ballotId: action.ballotId,
       moderatorUserId: "system",
       track,
-      streamId: vote.streamId,
+      streamId,
+      roundId,
       requestId,
       now: action.closedAt,
-      initialState: online ? "approved" : "rejected",
-      failureReason: online ? null : "stream_offline",
+      ...(active ? { activeRoundId: roundId } : {}),
+      initialState: active ? "approved" : "rejected",
+      failureReason: active ? null : "stream_offline",
     });
+    if (!claimed) {
+      const current = await voteRecord(context.DB, context.channelId, action.ballotId);
+      if (current?.state === "open") await finishVoteWithoutRequest(context.DB, context.channelId, action.ballotId, "failed", action.closedAt);
+    }
     vote = await voteRecord(context.DB, context.channelId, action.ballotId);
   }
   if (vote?.state === "queued" && vote.requestId !== null) await scheduleSubmitAlarm(context, vote.requestId);
@@ -478,9 +592,15 @@ const ageSubmittingRequests = async (context: ModuleAlarmContext, now: number): 
   }
 };
 
-const recordPollFailure = async (context: ModuleAlarmContext, priorFailures: number, error?: unknown): Promise<void> => {
+const recordPollFailure = async (
+  context: ModuleAlarmContext,
+  priorFailures: number,
+  error?: unknown,
+  streamGeneration: number | null | undefined = context.streamGeneration,
+  baseBackoffMs = BASE_BACKOFF_MS,
+): Promise<void> => {
   const failures = Math.min(priorFailures + 1, 8);
-  let delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** (failures - 1));
+  let delay = Math.min(MAX_BACKOFF_MS, baseBackoffMs * 2 ** (failures - 1));
   if (error instanceof SpotifyRequestError) {
     await updateConnectionForError(context, error);
     if (error.status === 429 && error.retryAfterMs !== null) delay = Math.max(delay, error.retryAfterMs);
@@ -491,7 +611,7 @@ const recordPollFailure = async (context: ModuleAlarmContext, priorFailures: num
      VALUES (?, 'not_connected', NULL, ?, ?)
      ON CONFLICT (channel_id) DO UPDATE SET poll_failures = excluded.poll_failures, updated_at = excluded.updated_at`,
   ).bind(context.channelId, new Date(now).toISOString(), failures).run();
-  await context.schedule(SONG_REQUESTS_ALARM, now + delay, undefined, context.streamGeneration);
+  await context.schedule(SONG_REQUESTS_ALARM, now + delay, undefined, streamGeneration);
 };
 
 const reconcileApprovedSubmissionAlarms = async (context: ModuleAlarmContext): Promise<void> => {
@@ -505,50 +625,85 @@ const reconcileApprovedSubmissionAlarms = async (context: ModuleAlarmContext): P
   }
 };
 
-const playbackCycleIsCurrent = async (context: ModuleAlarmContext, streamId: string): Promise<boolean> => {
-  const [state, module, stream, slotHeld] = await Promise.all([
-    context.streamState(),
-    context.DB.prepare("SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
-      .bind(context.channelId).first<{ enabled: number }>(),
-    context.streamStartedAt(),
+const playbackCycleIsCurrent = async (context: ModuleAlarmContext, roundId: string): Promise<boolean> => {
+  const [stream, offlineRound, slotHeld] = await Promise.all([
+    context.DB.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
+      .bind(context.channelId).first<{ state: string; stream_id: string | null }>(),
+    readOfflineSongRequestRound(context.DB, context.channelId),
     spotifySlotHeld(context.DB, context.channelId),
   ]);
-  return state === "online" && module?.enabled === 1 && stream.streamId === streamId && slotHeld;
+  if (!slotHeld) return false;
+  return await requestRoundIsCurrent(context.DB, context.channelId, {
+    streamId: stream?.state === "online" ? stream.stream_id : null,
+    roundId: stream?.state === "online" ? stream.stream_id : offlineRound,
+  }) && (stream?.state !== "online" || stream.stream_id === roundId) && (stream?.state !== "offline" || offlineRound === roundId);
 };
 
-export const pollSongRequestsPlayback = async (context: ModuleAlarmContext): Promise<void> => {
+export const pollSongRequestsPlayback = async (
+  context: ModuleAlarmContext,
+  _alarmKey?: string,
+  _deadline?: number,
+  _ownerRevision?: number,
+  invocation?: unknown,
+): Promise<void> => {
+  if (typeof invocation === "object" && invocation !== null && (invocation as Record<string, unknown>).kind === "disconnect") {
+    await context.clear(SONG_REQUESTS_ALARM);
+    await notifyQueueOverlay(context);
+    return;
+  }
   const now = Date.now();
   await ageSubmittingRequests(context, now);
-  if (await context.streamState() !== "online") return;
-  const module = await context.DB.prepare("SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
-    .bind(context.channelId).first<{ enabled: number }>();
-  if (module?.enabled !== 1) return;
+  const module = await context.DB.prepare("SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+    .bind(context.channelId).first<{ enabled: number; settings: string }>();
+  if (module?.enabled !== 1) {
+    await context.clear(SONG_REQUESTS_ALARM);
+    return;
+  }
+  let settings: SongRequestsSettings;
+  try { settings = songRequestsSettingsSchema.parse(JSON.parse(module.settings) as unknown); }
+  catch { settings = songRequestsSettingsSchema.parse({}); }
+  const streamRow = await context.DB.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
+    .bind(context.channelId).first<{ state: string; stream_id: string | null }>();
+  let roundId: string | null;
+  let streamGeneration: number | null | undefined = context.streamGeneration;
+  let interval = POLL_INTERVAL_MS;
+  let backoffBase = BASE_BACKOFF_MS;
+  if (streamRow?.state === "online" && streamRow.stream_id !== null) roundId = streamRow.stream_id;
+  else if (streamRow?.state === "offline" && settings.alsoOffline) {
+    roundId = await ensureOfflineSongRequestRound(context.DB, context.channelId, new Date(now).toISOString());
+    streamGeneration = null;
+    interval = OFFLINE_POLL_INTERVAL_MS;
+    backoffBase = OFFLINE_POLL_INTERVAL_MS;
+  } else {
+    await context.clear(SONG_REQUESTS_ALARM);
+    return;
+  }
+  if (roundId === null) return;
   const connection = await context.DB.prepare("SELECT state, poll_failures FROM song_requests_connections WHERE channel_id = ?")
     .bind(context.channelId).first<{ state: string; poll_failures: number }>();
-  const stream = await context.streamStartedAt();
   await reconcileApprovedSubmissionAlarms(context);
-  if (stream.streamId === null || context.environment === undefined) {
-    await recordPollFailure(context, connection?.poll_failures ?? 0);
+  if (context.environment === undefined) {
+    await recordPollFailure(context, connection?.poll_failures ?? 0, undefined, streamGeneration, backoffBase);
     return;
   }
   if (connection?.state !== "connected" && connection?.state !== "no_active_device") {
-    await recordPollFailure(context, connection?.poll_failures ?? 0);
+    await recordPollFailure(context, connection?.poll_failures ?? 0, undefined, streamGeneration, backoffBase);
     return;
   }
   try {
     if (!await spotifySlotHeld(context.DB, context.channelId)) {
       await setConnectionState(context, "not_connected", new Date(now).toISOString());
-      await recordPollFailure(context, connection.poll_failures);
+      await recordPollFailure(context, connection.poll_failures, undefined, streamGeneration, backoffBase);
       return;
     }
     const token = await spotifyAccessToken(context, now);
     const currentConnection = await context.DB.prepare("SELECT state FROM song_requests_connections WHERE channel_id = ?")
       .bind(context.channelId).first<{ state: string }>();
     if (token === null || currentConnection?.state !== "connected" && currentConnection?.state !== "no_active_device") {
-      await recordPollFailure(context, connection.poll_failures);
+      await recordPollFailure(context, connection.poll_failures, undefined, streamGeneration, backoffBase);
       return;
     }
-    if (!await playbackCycleIsCurrent(context, stream.streamId)) return;
+    if (!await playbackCycleIsCurrent(context, roundId)) return;
     const response = await spotifyApiRequest(context.environment, token, "me/player/currently-playing");
     let track: SpotifyTrack | null = null;
     let progressMs: number | null | undefined;
@@ -563,26 +718,29 @@ export const pollSongRequestsPlayback = async (context: ModuleAlarmContext): Pro
     } else {
       progressMs = null;
     }
-    if (!await playbackCycleIsCurrent(context, stream.streamId)) return;
+    if (!await playbackCycleIsCurrent(context, roundId)) return;
     const snapshot = await createNowPlayingSnapshot(
       context.DB,
       context.channelId,
-      stream.streamId,
+      roundId,
       track,
       new Date(now).toISOString(),
       progressMs,
-      { activeStreamId: stream.streamId },
+      streamRow.state === "online" ? { activeStreamId: roundId } : { offlineRoundId: roundId },
     );
-    if (!snapshot.committed || !await playbackCycleIsCurrent(context, stream.streamId)) return;
+    if (!snapshot.committed || !await playbackCycleIsCurrent(context, roundId)) return;
     await setConnectionState(context, "connected", new Date(now).toISOString());
     await context.DB.prepare("UPDATE song_requests_connections SET poll_failures = 0 WHERE channel_id = ? AND poll_failures > 0")
       .bind(context.channelId).run();
-    if (snapshot.changed) await notifyNowPlaying(context, snapshot.revision);
-    if (!await playbackCycleIsCurrent(context, stream.streamId)) return;
-    await context.schedule(SONG_REQUESTS_ALARM, Date.now() + POLL_INTERVAL_MS, undefined, context.streamGeneration);
+    if (snapshot.changed) {
+      await notifyNowPlaying(context, snapshot.revision);
+      await notifyQueueOverlay(context);
+    }
+    if (!await playbackCycleIsCurrent(context, roundId)) return;
+    await context.schedule(SONG_REQUESTS_ALARM, Date.now() + interval, undefined, streamGeneration);
   } catch (error) {
-    if (!await playbackCycleIsCurrent(context, stream.streamId)) return;
-    await recordPollFailure(context, connection.poll_failures, error);
+    if (!await playbackCycleIsCurrent(context, roundId)) return;
+    await recordPollFailure(context, connection.poll_failures, error, streamGeneration, backoffBase);
   }
 };
 
@@ -590,11 +748,12 @@ export const handleSongRequestsActivation = async (context: ModuleAlarmContext, 
   if (!enabled) {
     const rows = await context.DB.prepare(
       `SELECT id, state FROM song_requests WHERE channel_id = ?
-        AND state IN ('pending_review', 'approved', 'submitting', 'outcome_unknown') ORDER BY created_at, id`,
+        AND state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown') ORDER BY created_at, id`,
     ).bind(context.channelId).all<{ id: string; state: SongRequestState }>();
     for (const row of rows.results) {
-      const toState: SongRequestState = row.state === "pending_review" || row.state === "approved" ? "rejected" : "failed";
-      await transitionRequest(context.DB, {
+      const toState: SongRequestState = row.state === "submitted" ? "removed"
+        : row.state === "outcome_unknown" || row.state === "submitting" ? "failed" : "rejected";
+      const changed = await transitionRequest(context.DB, {
         channelId: context.channelId,
         requestId: row.id,
         fromState: row.state,
@@ -602,13 +761,64 @@ export const handleSongRequestsActivation = async (context: ModuleAlarmContext, 
         failureReason: "module_disabled",
         now: new Date().toISOString(),
       });
+      if (changed) await refundRequestId(context, row.id);
+    }
+    const stream = await context.DB.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
+      .bind(context.channelId).first<{ state: string; stream_id: string | null }>();
+    if (stream?.state === "online" && stream.stream_id !== null) {
+      const cleanup = await cleanupSongRequestRound(context.DB, context.channelId, stream.stream_id, new Date().toISOString(), "module_disabled");
+      if (cleanup.changed) await notifyNowPlaying(context, cleanup.revision);
+    }
+    const offlineRoundId = await closeOfflineSongRequestRound(context.DB, context.channelId);
+    if (offlineRoundId !== null) {
+      const cleanup = await cleanupSongRequestRound(context.DB, context.channelId, offlineRoundId, new Date().toISOString(), "module_disabled");
+      for (const requestId of cleanup.refundableRequestIds) await refundRequestId(context, requestId);
+      if (cleanup.changed) await notifyNowPlaying(context, cleanup.revision);
     }
     await context.clear(SONG_REQUESTS_ALARM);
+    await notifyQueueOverlay(context);
     return;
   }
-  if (await context.streamState() === "online") {
-    await context.schedule(SONG_REQUESTS_ALARM, Date.now() + POLL_INTERVAL_MS, undefined, context.streamGeneration);
+  await handleSongRequestsSettingsChanged(context);
+};
+
+export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmContext): Promise<void> => {
+  const module = await context.DB.prepare("SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+    .bind(context.channelId).first<{ enabled: number; settings: string }>();
+  if (module?.enabled !== 1) return;
+  let settings: SongRequestsSettings;
+  try { settings = songRequestsSettingsSchema.parse(JSON.parse(module.settings) as unknown); }
+  catch { settings = songRequestsSettingsSchema.parse({}); }
+  const stream = await context.DB.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
+    .bind(context.channelId).first<{ state: string; stream_id: string | null }>();
+  if (stream?.state === "offline") {
+    if (!settings.alsoOffline) {
+      const roundId = await closeOfflineSongRequestRound(context.DB, context.channelId);
+      if (roundId !== null) {
+        const cleanup = await cleanupSongRequestRound(context.DB, context.channelId, roundId, new Date().toISOString(), "offline_round_ended");
+        for (const requestId of cleanup.refundableRequestIds) await refundRequestId(context, requestId);
+        if (cleanup.changed) await notifyNowPlaying(context, cleanup.revision);
+      }
+      await context.clear(SONG_REQUESTS_ALARM);
+      await notifyQueueOverlay(context);
+      return;
+    }
+    await ensureOfflineSongRequestRound(context.DB, context.channelId, new Date().toISOString());
+    const connection = await context.DB.prepare("SELECT state FROM song_requests_connections WHERE channel_id = ?")
+      .bind(context.channelId).first<{ state: string }>();
+    if (await spotifySlotHeld(context.DB, context.channelId) && (connection?.state === "connected" || connection?.state === "no_active_device")) {
+      await context.schedule(SONG_REQUESTS_ALARM, Date.now() + OFFLINE_POLL_INTERVAL_MS, undefined, null);
+    } else {
+      await context.clear(SONG_REQUESTS_ALARM);
+    }
+    return;
   }
+  if (stream?.state === "online" && stream.stream_id !== null) {
+    await context.schedule(SONG_REQUESTS_ALARM, Date.now() + POLL_INTERVAL_MS, undefined, context.streamGeneration);
+  } else {
+    await context.clear(SONG_REQUESTS_ALARM);
+  }
+  await notifyQueueOverlay(context);
 };
 
 export const handleSongRequestsLifecycleAlarm = async (
@@ -618,26 +828,217 @@ export const handleSongRequestsLifecycleAlarm = async (
   _ownerRevision: number | undefined,
   invocation?: unknown,
 ): Promise<void> => {
-  if (typeof invocation !== "object" || invocation === null || typeof (invocation as Record<string, unknown>).enabled !== "boolean") return;
-  await handleSongRequestsActivation(context, (invocation as Record<string, unknown>).enabled as boolean);
+  if (typeof invocation === "object" && invocation !== null && typeof (invocation as Record<string, unknown>).enabled === "boolean") {
+    await handleSongRequestsActivation(context, (invocation as Record<string, unknown>).enabled as boolean);
+    return;
+  }
+  await handleSongRequestsSettingsChanged(context);
 };
 
 export const readSpotifyAccessTokenAlarm = async (context: ModuleAlarmContext): Promise<string | null> => await spotifyAccessToken(context);
 
-export const processSongRequestsEvent = async (event: ModuleEvent, context: ModuleExecutionContext): Promise<ModuleResult> => {
+const notifyQueueOverlay = async (context: Pick<ModuleAlarmContext, "DB" | "channelId" | "publishModuleOverlayMessage">): Promise<void> => {
+  await context.publishModuleOverlayMessage(
+    "queue_changed",
+    "song_requests.queue",
+    await songRequestQueueOverlayPayload(context.DB, context.channelId),
+  );
+};
+
+const queueOverlayChange = async (context: { DB: D1Database; channelId: string }): Promise<ModuleResult["actions"][number]> => ({
+  kind: "overlay",
+  type: "queue_changed",
+  elementKind: "song_requests.queue",
+  payload: await songRequestQueueOverlayPayload(context.DB, context.channelId),
+});
+
+const readCurrentSongRequestScope = async (
+  db: D1Database,
+  channelId: string,
+  now: string,
+): Promise<{ streamId: string | null; roundId: string; settingsJson: string; settings: SongRequestsSettings } | { error: "module_disabled" | "stream_offline" | "settings_invalid" }> => {
+  const module = await db.prepare("SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+    .bind(channelId).first<{ enabled: number; settings: string }>();
+  if (module?.enabled !== 1) return { error: "module_disabled" };
+  let settings: SongRequestsSettings;
+  try { settings = songRequestsSettingsSchema.parse(JSON.parse(module.settings) as unknown); }
+  catch { return { error: "settings_invalid" }; }
+  const stream = await db.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
+    .bind(channelId).first<{ state: string; stream_id: string | null }>();
+  if (stream?.state === "online" && stream.stream_id !== null) {
+    return { streamId: stream.stream_id, roundId: stream.stream_id, settingsJson: module.settings, settings };
+  }
+  if (stream?.state !== "offline" || !settings.alsoOffline) return { error: "stream_offline" };
+  const roundId = await ensureOfflineSongRequestRound(db, channelId, now);
+  return roundId === null ? { error: "stream_offline" } : { streamId: null, roundId, settingsJson: module.settings, settings };
+};
+
+const admissionFailureReply = (
+  language: "de" | "en",
+  failure: { code: string; position?: number },
+): string => {
+  const text = songRequestChatTexts[language];
+  if (failure.code === "already_requested") return text.alreadyRequested(failure.position ?? 1);
+  if (failure.code === "points_disabled") return text.pointsDisabled;
+  const reason = text.reasons[failure.code as keyof typeof text.reasons];
+  return text.rejected(typeof reason === "string" ? reason : text.reasons.request_unavailable);
+};
+
+const chatReply = (event: ModuleEvent, message: string): ModuleResult["actions"][number] => ({
+  kind: "chat",
+  text: message,
+  automated: false,
+  ...(typeof event.payload.message_id === "string" ? { replyToMessageId: event.payload.message_id } : {}),
+});
+
+const processSongRequestCommand = async (
+  event: ModuleEvent<SongRequestsSettings>,
+  context: ModuleExecutionContext,
+): Promise<ModuleResult> => {
+  const payload = event.payload;
+  const message = typeof payload.message === "object" && payload.message !== null
+    ? payload.message as Record<string, unknown> : null;
+  const messageText = typeof message?.text === "string" ? message.text.trim() : "";
+  const match = /^!sr(?:\s+([\s\S]+))?$/iu.exec(messageText);
+  if (match === null) return { actions: [], diagnostics: [] };
+  const language = await context.channelLanguage();
+  const text = songRequestChatTexts[language === "en" ? "en" : "de"];
+  const argument = match[1]?.trim() ?? "";
+  if (argument.length === 0) return { actions: [chatReply(event, text.usage)], diagnostics: [] };
+  const userId = payload.chatter_user_id;
+  const login = payload.chatter_user_login;
+  if (typeof userId !== "string" || userId.length === 0 || typeof login !== "string" || login.length === 0) return { actions: [], diagnostics: [] };
+  if (await context.botUserId?.() === userId) return { actions: [], diagnostics: [] };
+  if (typeof payload.source_broadcaster_user_id === "string" && payload.source_broadcaster_user_id !== event.channelId) return { actions: [], diagnostics: [] };
+  const scope = await readCurrentSongRequestScope(context.DB, event.channelId, event.receivedAt);
+  if ("error" in scope) {
+    const reply = scope.error === "stream_offline" ? text.offline
+      : scope.error === "module_disabled" ? text.rejected(text.reasons.request_unavailable)
+        : text.spotifyUnavailable;
+    return { actions: [chatReply(event, reply)], diagnostics: [] };
+  }
+  let requestType: "bot_points" | "free";
+  if (scope.settings.paymentMode === "free") {
+    if (!canUseFreeSongRequest(scope.settings.freeRoleThreshold, event.chatStatus)) {
+      return { actions: [chatReply(event, text.roleRequired(scope.settings.freeRoleThreshold))], diagnostics: [] };
+    }
+    requestType = "free";
+  } else {
+    const pointsModule = await context.DB.prepare("SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'points'")
+      .bind(event.channelId).first<{ enabled: number }>();
+    if (pointsModule?.enabled !== 1) return { actions: [chatReply(event, text.pointsDisabled)], diagnostics: [] };
+    requestType = "bot_points";
+  }
+  if (!await spotifySlotHeld(context.DB, event.channelId)) return { actions: [chatReply(event, text.spotifySlot)], diagnostics: [] };
+  const connection = await context.DB.prepare("SELECT state FROM song_requests_connections WHERE channel_id = ?")
+    .bind(event.channelId).first<{ state: string }>();
+  if (connection?.state === "no_active_device") return { actions: [chatReply(event, text.spotifyDevice)], diagnostics: [] };
+  if (connection?.state !== "connected") {
+    const reply = connection?.state === "reconnect_required" ? text.spotifyReconnect : text.spotifyNotConnected;
+    return { actions: [chatReply(event, reply)], diagnostics: [] };
+  }
+  const environment = context.environment;
+  if (environment === undefined) return { actions: [chatReply(event, text.spotifyUnavailable)], diagnostics: [] };
+  let accessToken: string | null;
+  try {
+    accessToken = await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId)).getSpotifyAccessToken();
+  } catch {
+    return { actions: [chatReply(event, text.spotifyReconnect)], diagnostics: [] };
+  }
+  if (accessToken === null) return { actions: [chatReply(event, text.spotifyReconnect)], diagnostics: [] };
+  let track: SpotifyTrack | null;
+  try {
+    const trackId = spotifyTrackIdFromInput(argument);
+    if (trackId !== null) track = await spotifyTrackById(environment, accessToken, trackId);
+    else track = (await spotifySearchTracks(environment, accessToken, argument))[0] ?? null;
+  } catch (error) {
+    if (error instanceof SpotifyRequestError) await updateConnectionForError({ DB: context.DB, channelId: event.channelId }, error);
+    return { actions: [chatReply(event, error instanceof SpotifyRequestError && error.reason === "NO_ACTIVE_DEVICE" ? text.spotifyDevice : text.spotifyUnavailable)], diagnostics: [] };
+  }
+  if (track === null) return { actions: [chatReply(event, text.noTrack)], diagnostics: [] };
+  const requestId = `sr-${event.triggerId.replace(/[^A-Za-z0-9_-]/gu, "").slice(0, 120) || crypto.randomUUID()}`;
+  const operationId = `sr:${requestId}`;
+  const parsedTime = Number.isFinite(Date.parse(event.receivedAt)) ? event.receivedAt : new Date().toISOString();
+  const request = {
+    channelId: event.channelId,
+    requestId,
+    operationId,
+    track: songRequestTrackFromSpotify(track),
+    requestType,
+    streamId: scope.streamId,
+    roundId: scope.roundId,
+    settingsJson: scope.settingsJson,
+    settings: scope.settings,
+    requesterUserId: userId,
+    requesterLogin: login,
+    requesterDisplayName: typeof payload.chatter_user_name === "string" && payload.chatter_user_name.length > 0 ? payload.chatter_user_name : login,
+    initialState: scope.settings.mode === "moderated" ? "pending_review" as const : "approved" as const,
+    now: parsedTime,
+  };
+  const admission = await admitSongRequest(context.DB, request);
+  if (!admission.accepted) {
+    const failure = await songRequestAdmissionFailure(context.DB, request);
+    return { actions: [chatReply(event, admissionFailureReply(language === "en" ? "en" : "de", failure))], diagnostics: [] };
+  }
+  const row = await readSongRequest(context.DB, event.channelId, requestId);
+  if (row === null) return { actions: [chatReply(event, text.spotifyUnavailable)], diagnostics: [] };
+  if (requestType === "bot_points" && !await chargeSongRequest(context.points, row)) {
+    await transitionRequest(context.DB, {
+      channelId: event.channelId, requestId, fromState: row.state, toState: "failed",
+      failureReason: "charge_failed", chargedAmount: 0, now: new Date().toISOString(),
+    });
+    return { actions: [chatReply(event, text.insufficientPoints), await queueOverlayChange({ DB: context.DB, channelId: event.channelId })], diagnostics: [] };
+  }
+  if (scope.settings.mode === "automatic") {
+    await context.scheduleAlarm(SONG_REQUESTS_SUBMIT_HANDLER, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`, Date.now(), undefined, null);
+  }
+  const position = admission.position ?? 1;
+  const reply = scope.settings.mode === "moderated" ? text.waitingReview(position) : text.accepted(position);
+  return { actions: [chatReply(event, reply), await queueOverlayChange({ DB: context.DB, channelId: event.channelId })], diagnostics: [] };
+};
+
+export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSettings>, context: ModuleExecutionContext): Promise<ModuleResult> => {
+  if (event.subscriptionType === "channel.chat.message") return await processSongRequestCommand(event, context);
   if (context.streamStateTransitionAccepted !== true) return { actions: [], diagnostics: [] };
   const actions: ModuleResult["actions"][number][] = [];
+  const enabled = await context.DB.prepare("SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+    .bind(event.channelId).first<{ enabled: number; settings: string }>();
+  let settings: SongRequestsSettings;
+  try { settings = songRequestsSettingsSchema.parse(JSON.parse(enabled?.settings ?? "{}") as unknown); }
+  catch { settings = songRequestsSettingsSchema.parse({}); }
   if (event.subscriptionType === "stream.online") {
-    const enabled = await context.DB.prepare("SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
-      .bind(event.channelId).first<{ enabled: number }>();
+    const offlineRoundId = await closeOfflineSongRequestRound(context.DB, event.channelId);
+    if (offlineRoundId !== null) {
+      const cleanup = await cleanupSongRequestRound(context.DB, event.channelId, offlineRoundId, event.receivedAt, "offline_round_ended");
+      for (const requestId of cleanup.refundableRequestIds) await refundRequestId({ DB: context.DB, channelId: event.channelId, points: context.points }, requestId);
+      if (cleanup.changed) actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: cleanup.revision } });
+    }
     if (enabled?.enabled === 1) {
       await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + POLL_INTERVAL_MS);
     }
+    actions.push(await queueOverlayChange({ DB: context.DB, channelId: event.channelId }));
   } else if (event.subscriptionType === "stream.offline") {
-    await context.clearAlarm(SONG_REQUESTS_ALARM);
     const streamId = context.streamSession?.streamId ?? null;
-    const cleared = await clearSongRequestsForStreamEnd(context.DB, event.channelId, streamId, event.receivedAt);
-    if (cleared.changed) actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: cleared.revision } });
+    if (streamId !== null) {
+      const cleanup = await cleanupSongRequestRound(context.DB, event.channelId, streamId, event.receivedAt, "stream_ended");
+      for (const requestId of cleanup.refundableRequestIds) await refundRequestId({ DB: context.DB, channelId: event.channelId, points: context.points }, requestId);
+      if (cleanup.changed) actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: cleanup.revision } });
+    } else {
+      const cleared = await clearSongRequestsForStreamEnd(context.DB, event.channelId, streamId, event.receivedAt);
+      if (cleared.changed) actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: cleared.revision } });
+    }
+    if (enabled?.enabled === 1 && settings.alsoOffline) {
+      await ensureOfflineSongRequestRound(context.DB, event.channelId, event.receivedAt);
+      await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + OFFLINE_POLL_INTERVAL_MS, undefined, null);
+    } else {
+      await context.clearAlarm(SONG_REQUESTS_ALARM);
+    }
+    if (streamId !== null) {
+      const snapshot = await context.DB.prepare("SELECT revision FROM song_requests_now_playing WHERE channel_id = ?")
+        .bind(event.channelId).first<{ revision: number }>();
+      actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: snapshot?.revision ?? 0 } });
+    }
+    actions.push(await queueOverlayChange({ DB: context.DB, channelId: event.channelId }));
   }
   return { actions, diagnostics: [] };
 };

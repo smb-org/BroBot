@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
+import type { SongRequestsSettings } from "../../src/modules/song_requests/contracts";
 import {
   handleSongRequestDurableAction,
   handleSongRequestsActivation,
@@ -449,7 +450,7 @@ describe("durable song vote results", () => {
       subscriptionType: "stream.offline",
       channelId: CHANNEL_ID,
       receivedAt: new Date(NOW).toISOString(),
-    } as unknown as ModuleEvent, eventContext);
+    } as unknown as ModuleEvent<SongRequestsSettings>, eventContext);
     releaseFetch();
     await polling;
 
@@ -521,7 +522,7 @@ describe("durable song vote results", () => {
       subscriptionType: "stream.offline",
       channelId: CHANNEL_ID,
       receivedAt: new Date(NOW).toISOString(),
-    } as unknown as ModuleEvent;
+    } as unknown as ModuleEvent<SongRequestsSettings>;
 
     await processSongRequestsEvent(event, eventContext);
 

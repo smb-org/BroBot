@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement, type SubmitEvent } from "react";
+import { useState, type ReactElement, type SubmitEvent } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
-import { dashboardTexts } from "../../../dashboard/locale";
 import {
   Badge,
   Button,
@@ -11,20 +10,17 @@ import {
   LoadState,
   LoadStateLines,
   ListRow,
-  SaveStatus,
   Section,
   StatusLed,
   Icon,
   notify,
-  registerDashboardNavigationGuard,
-  useDraft,
-  useDraftGuard,
   type StatusLedState,
 } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import { songRequestsPanelTexts } from "./locale";
-import { readSettings, request, saveSettings } from "./service";
+import { readSettings, request } from "./service";
 import type { SongRequestsSettingsRead } from "./service";
+import SongRequestsSettingsEditor from "./settings-editor";
 import "./panel.css";
 
 interface Track {
@@ -43,6 +39,10 @@ interface RequestRow extends Track {
   state: SongRequestState;
   failureReason: string | null;
   source: string;
+  requestType: "vote" | "bot_points" | "free" | "channel_points";
+  chargedAmount: number;
+  requesterDisplayName: string | null;
+  requesterLogin: string | null;
   createdAt: string;
 }
 
@@ -60,6 +60,7 @@ interface Connection {
   errorMessage: string | null;
   streamId: string | null;
   emptyText: string;
+  pointsEnabled: boolean;
 }
 
 interface RequestsRead {
@@ -82,117 +83,6 @@ const formatOutcomeTime = (value: string, language: "de" | "en"): string => {
     timeZone: "UTC",
   }).format(date);
 };
-
-function EmptyTextSettings({
-  channelId,
-  language,
-  settings,
-  canManage,
-}: {
-  channelId: string;
-  language: "de" | "en";
-  settings: SongRequestsSettingsRead;
-  canManage: boolean;
-}): ReactElement {
-  const text = songRequestsPanelTexts[language];
-  const queryClient = useDashboardQueryClient();
-  const draft = useDraft(settings.settings.emptyText);
-  const baselineRevision = useRef(settings.revision);
-  const [pending, setPending] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState<string | undefined>();
-  const saveInFlight = useRef<Promise<string | null> | null>(null);
-
-  useEffect(() => {
-    if (draft.dirty || baselineRevision.current === settings.revision) return;
-    baselineRevision.current = settings.revision;
-    draft.accept(settings.settings.emptyText);
-    setSaved(false);
-  }, [draft.accept, draft.dirty, settings.revision, settings.settings.emptyText]);
-
-  const updateDraft = (value: string): void => {
-    draft.setValue(value.slice(0, 80));
-    setSaved(false);
-    setSaveError(undefined);
-  };
-
-  const saveDraft = useCallback((): Promise<string | null> => {
-    if (!canManage || !draft.dirty) return Promise.resolve(null);
-    if (saveInFlight.current !== null) return saveInFlight.current;
-    setPending(true);
-    setSaved(false);
-    setSaveError(undefined);
-    const operation = (async (): Promise<string | null> => {
-      try {
-        const result = await runModuleQueryWrite(
-          queryClient,
-          channelId,
-          "song_requests",
-          "settings",
-          (revision) => saveSettings(channelId, revision ?? baselineRevision.current, draft.value),
-          {
-            baselineRevision: baselineRevision.current,
-            updateCache: (_current, savedSettings) => savedSettings,
-          },
-        );
-        baselineRevision.current = result.revision;
-        draft.accept(result.settings.emptyText);
-        setSaved(true);
-        return null;
-      } catch (error: unknown) {
-        const message = error instanceof Error && error.message.includes("conflict") ? text.settingsConflict : text.settingsSaveError;
-        setSaveError(message);
-        return message;
-      } finally {
-        saveInFlight.current = null;
-        setPending(false);
-      }
-    })();
-    saveInFlight.current = operation;
-    return operation;
-  }, [canManage, channelId, draft.accept, draft.dirty, draft.value, queryClient, text.settingsConflict, text.settingsSaveError]);
-
-  const draftGuard = useDraftGuard(draft.dirty, saveDraft, draft.reset);
-  useEffect(() => registerDashboardNavigationGuard(draftGuard.guardSwitch), [draftGuard.guardSwitch]);
-  const navigation = dashboardTexts(language).module;
-
-  return <>
-    <Field
-      label={text.emptyText}
-      value={draft.value}
-      onChange={updateDraft}
-      maxLength={80}
-      countLabel={(count, maximum) => `${String(count)} / ${String(maximum)}`}
-      disabled={!canManage || pending}
-    />
-    {canManage ? <SaveStatus
-      dirty={draft.dirty}
-      persistent
-      pending={pending}
-      saved={saved}
-      saveDisabled={draft.value.length > 80}
-      {...(saveError === undefined ? {} : { error: saveError })}
-      onSave={() => { void saveDraft(); }}
-      onDiscard={() => { draft.reset(); setSaved(false); setSaveError(undefined); }}
-      saveLabel={text.save}
-      discardLabel={text.discard}
-      savedLabel={text.saved}
-      pendingLabel={text.saving}
-    /> : null}
-    <ConfirmDialog
-      opened={draftGuard.confirmOpen}
-      title={navigation.unsavedChangesTitle}
-      description={navigation.unsavedChangesDescription}
-      confirmLabel={navigation.discardAndSwitch}
-      cancelLabel={navigation.continueEditing}
-      onConfirm={draftGuard.discardAndSwitch}
-      onCancel={draftGuard.continueEditing}
-      {...(canManage ? { alternative: { label: navigation.saveAndSwitch, onClick: () => { void draftGuard.saveAndSwitch(); } } } : {})}
-      pending={draftGuard.saving || pending}
-      {...(draftGuard.saveError === undefined ? {} : { error: draftGuard.saveError })}
-    />
-  </>;
-}
 
 export default function SongRequestsPanel({ channelId, language = "de", canManage = false, canOperate = false }: ModulePanelProperties): ReactElement {
   const activeLanguage: "de" | "en" = language === "en" ? "en" : "de";
@@ -223,6 +113,7 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
   const [searchState, setSearchState] = useState<"idle" | "loading" | "searched">("idle");
   const [selected, setSelected] = useState<Track[]>([]);
   const [pending, setPending] = useState(false);
+  const [clearListOpen, setClearListOpen] = useState(false);
 
   const connection = connectionQuery.data ?? null;
   const requestData = requestsQuery.data;
@@ -325,6 +216,22 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
         () => request(channelId, `requests/${encodeURIComponent(requestId)}/resolve`, "POST", { state }),
         { baselineRevision: null, updateCache: (current) => current },
       );
+    });
+  };
+
+  const removeRequest = (requestId: string, refund: boolean): void => {
+    void run(async () => {
+      await request(channelId, `requests/${encodeURIComponent(requestId)}/remove`, "POST", { refund });
+      await requestsQuery.refetch();
+    });
+  };
+
+  const clearList = (): void => {
+    void run(async () => {
+      await request(channelId, "clear", "POST");
+      setClearListOpen(false);
+      await requestsQuery.refetch();
+      notify({ tone: "success", message: text.listCleared });
     });
   };
 
@@ -444,7 +351,7 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
         </div>}
     </Section>
 
-    {canViewRequests ? <Section title={text.recent}>
+    {canViewRequests ? <Section title={text.recent} headingAction={canOperate ? <Button variant="secondary" disabled={pending} onClick={() => { setClearListOpen(true); }}>{text.clearList}</Button> : null}>
       <LoadState
         variant="panel-0"
         status={requestQueryStatus}
@@ -460,14 +367,21 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
                 href={requestRow.spotifyUrl}
                 onNavigate={() => { window.open(requestRow.spotifyUrl, "_blank", "noopener,noreferrer"); }}
                 title={requestRow.title}
-                description={requestRow.artists.join(", ")}
+                description={[requestRow.artists.join(", "), requestRow.requesterDisplayName ?? requestRow.requesterLogin].filter(Boolean).join(" · ")}
                 status={<Badge tone={stateTone(requestRow.state)}>{text.states[requestRow.state]}</Badge>}
-                action={requestRow.state === "outcome_unknown" && canOperate
-                  ? <span className="song-requests-panel__resolution">
+                action={!canOperate ? null : <span className="song-requests-panel__resolution">
+                  {requestRow.state === "pending_review" || requestRow.state === "approved" ? <Button size="compact" variant="secondary" disabled={pending}
+                    onClick={() => { removeRequest(requestRow.requestId, false); }}>{text.removeBeforeSubmit}</Button> : null}
+                  {requestRow.state === "submitted" || requestRow.state === "outcome_unknown" ? <>
+                    <Button size="compact" variant="secondary" disabled={pending} onClick={() => { removeRequest(requestRow.requestId, false); }}>{text.remove}</Button>
+                    {requestRow.requestType === "bot_points" && requestRow.chargedAmount > 0 ? <Button size="compact" variant="secondary" disabled={pending}
+                      onClick={() => { removeRequest(requestRow.requestId, true); }}>{text.removeRefund}</Button> : null}
+                  </> : null}
+                  {requestRow.state === "outcome_unknown" ? <>
                     <Button size="compact" variant="secondary" disabled={pending} onClick={() => { resolveRequest(requestRow.requestId, "submitted"); }}>{text.resolveIn}</Button>
                     <Button size="compact" variant="secondary" disabled={pending} onClick={() => { resolveRequest(requestRow.requestId, "failed"); }}>{text.resolveOut}</Button>
-                  </span>
-                  : null}
+                  </> : null}
+                </span>}
               />
             </div>)}
           </div>
@@ -493,14 +407,18 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
         queryError={{ message: text.settingsLoadError, onRetry: () => { void settingsQuery.refetch(); } }}
         refreshError={settingsQuery.isRefetchError}
       >
-        {settingsQuery.data === undefined ? null : <EmptyTextSettings
+        {settingsQuery.data === undefined ? null : <SongRequestsSettingsEditor
           key={channelId}
           channelId={channelId}
           language={activeLanguage}
           settings={settingsQuery.data}
+          pointsEnabled={connection?.pointsEnabled === true}
           canManage={canManage}
         />}
       </LoadState>
     </Section>
+    <ConfirmDialog opened={clearListOpen} title={text.clearConfirmTitle} description={text.clearConfirmDescription}
+      confirmLabel={text.clearConfirm} cancelLabel={text.cancel} onConfirm={clearList} onCancel={() => { setClearListOpen(false); }}
+      pending={pending} danger />
   </div>;
 }

@@ -198,7 +198,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     overlay_alerts: "Verwaltet die Medienbibliothek für Overlay-Einblendungen.",
     channel_points: "Verwaltet eigene Kanalpunkt-Belohnungen und verarbeitet Einlösungen automatisch oder für eine spätere Freigabe.",
     temp_vips: "Verwaltet VIP auf Zeit und erinnert oder entzieht es nach Ablauf.",
-    song_requests: "Verbindet Spotify, startet kostenlose Song-Abstimmungen und zeigt den laufenden Titel.",
+    song_requests: "Verbindet Spotify, nimmt Song-Wünsche per !sr an, startet Song-Abstimmungen und zeigt den laufenden Titel.",
   },
   en: {
     text_commands: "Replies to short commands in chat.",
@@ -219,7 +219,7 @@ const moduleDescriptions: LocaleCatalog<ModuleDescriptions> = {
     overlay_alerts: "Manage the media library for overlay alerts.",
     channel_points: "Manage custom channel point rewards and process redemptions automatically or leave them queued for review.",
     temp_vips: "Manages time-limited VIPs and reminds or removes them when they expire.",
-    song_requests: "Connects Spotify, starts free song votes, and shows the track currently playing.",
+    song_requests: "Connects Spotify, takes song requests via !sr, starts song votes, and shows the track currently playing.",
   },
 };
 

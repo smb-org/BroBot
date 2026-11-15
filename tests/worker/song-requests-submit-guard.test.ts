@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { createNowPlayingSnapshot, createVoteRequestClaim } from "../../src/modules/song_requests/adapters/d1";
+import type { SpotifyTrack } from "../../src/modules/song_requests/domain/track";
 import { holdSubmitClaim } from "../../src/modules/song_requests/service";
 
 const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
@@ -38,6 +40,7 @@ beforeAll(async () => {
 
 const seed = async (channelId: string): Promise<void> => {
   await database.prepare("DELETE FROM song_requests").run();
+  await database.prepare("DELETE FROM spotify_channel_access").run();
   await database.batch([
     database.prepare("INSERT INTO channels (channel_id, login, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
       .bind(channelId, channelId, channelId, NOW, NOW),
@@ -49,11 +52,38 @@ const seed = async (channelId: string): Promise<void> => {
       .bind(channelId, NOW),
     database.prepare(
       `INSERT INTO song_requests (id, channel_id, source, track_id, track_uri, title, artists_json, duration_ms, explicit,
-         spotify_url, state, operation_id, stream_id, created_at, updated_at)
+         spotify_url, state, operation_id, stream_id, round_id, created_at, updated_at)
        VALUES ('request-1', ?, 'mod_vote', 'track-1', 'spotify:track:track-1', 'Glass Harbor', '["Mira Vale"]', 200000, 0,
-         'https://open.spotify.com/track/track-1', 'submitting', 'operation-1', 'stream-1', ?, ?)`,
+         'https://open.spotify.com/track/track-1', 'submitting', 'operation-1', 'stream-1', 'stream-1', ?, ?)`,
     ).bind(channelId, NOW, NOW),
   ]);
+};
+
+const seedOffline = async (channelId: string, alsoOffline: boolean): Promise<string> => {
+  await seed(channelId);
+  const roundId = `offline-round-${channelId}`;
+  await database.batch([
+    database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(JSON.stringify({ alsoOffline }), channelId),
+    database.prepare("UPDATE channel_stream_state SET state = 'offline', stream_id = NULL WHERE channel_id = ?")
+      .bind(channelId),
+    database.prepare("INSERT INTO song_requests_offline_rounds (channel_id, round_id, created_at) VALUES (?, ?, ?)")
+      .bind(channelId, roundId, NOW),
+    database.prepare("UPDATE song_requests SET stream_id = NULL, round_id = ? WHERE channel_id = ? AND id = 'request-1'")
+      .bind(roundId, channelId),
+  ]);
+  return roundId;
+};
+
+const spotifyTrack: SpotifyTrack = {
+  id: "glassharbor01",
+  uri: "spotify:track:glassharbor01",
+  name: "Glass Harbor",
+  duration_ms: 201_000,
+  explicit: false,
+  artists: [{ id: "miravale01", name: "Mira Vale" }],
+  album: { name: "Quiet Atlas", images: [{ url: "https://i.scdn.co/image/fictional-cover", width: 640, height: 640 }] },
+  external_urls: { spotify: "https://open.spotify.com/track/glassharbor01" },
 };
 
 const requestsRevision = async (channelId: string): Promise<number> => (await database.prepare(
@@ -89,6 +119,71 @@ describe("submit claim guard on real D1", () => {
       await database.prepare(breakIt).bind(channelId).run();
       expect(await holdSubmitClaim(database, channelId, "request-1", "stream-1")).toBe(false);
     }
+  });
+
+  it("accepts the offline round only while Also offline is enabled", async () => {
+    const offChannel = "guard-offline-disabled";
+    const offRoundId = await seedOffline(offChannel, false);
+    expect(await holdSubmitClaim(database, offChannel, "request-1", offRoundId)).toBe(false);
+
+    const onChannel = "guard-offline-enabled";
+    const onRoundId = await seedOffline(onChannel, true);
+    const before = await requestsRevision(onChannel);
+    expect(await holdSubmitClaim(database, onChannel, "request-1", onRoundId)).toBe(true);
+    expect(await requestsRevision(onChannel)).toBe(before);
+    expect(await holdSubmitClaim(database, onChannel, "request-1", "offline-round-stale")).toBe(false);
+  });
+
+  it("commits the poll snapshot only for the current enabled offline round", async () => {
+    const channelId = "guard-offline-poll";
+    const roundId = await seedOffline(channelId, true);
+    const first = await createNowPlayingSnapshot(database, channelId, roundId, spotifyTrack, NOW, 5_000, { offlineRoundId: roundId });
+    expect(first).toMatchObject({ changed: true, committed: true, state: { title: "Glass Harbor" } });
+
+    await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(JSON.stringify({ alsoOffline: false }), channelId).run();
+    const stopped = await createNowPlayingSnapshot(database, channelId, roundId, { ...spotifyTrack, id: "quietatlas02", uri: "spotify:track:quietatlas02", name: "Quiet Atlas" }, NOW, 7_000, { offlineRoundId: roundId });
+    expect(stopped).toMatchObject({ changed: false, committed: false });
+
+    await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(JSON.stringify({ alsoOffline: true }), channelId).run();
+    await database.prepare("DELETE FROM song_requests_offline_rounds WHERE channel_id = ?").bind(channelId).run();
+    const ended = await createNowPlayingSnapshot(database, channelId, roundId, { ...spotifyTrack, id: "quietatlas02", uri: "spotify:track:quietatlas02", name: "Quiet Atlas" }, NOW, 7_000, { offlineRoundId: roundId });
+    expect(ended).toMatchObject({ changed: false, committed: false });
+  });
+
+  it("claims offline vote results only while the persisted round is still enabled", async () => {
+    const onChannel = "guard-offline-vote-enabled";
+    const onRoundId = await seedOffline(onChannel, true);
+    await database.prepare(
+      `INSERT INTO song_requests_votes (ballot_id, channel_id, stream_id, round_id, candidate_tracks_json,
+         moderator_user_id, state, created_at) VALUES ('ballot-offline-on', ?, NULL, ?, '[]', 'moderator-fictional', 'open', ?)`,
+    ).bind(onChannel, onRoundId, NOW).run();
+    const track = {
+      id: "offlinevotetrack01", uri: "spotify:track:offlinevotetrack01", title: "Offline Vote Track",
+      artists: ["Mira Vale"], durationMs: 201_000, explicit: false, coverUrl: null,
+      spotifyUrl: "https://open.spotify.com/track/offlinevotetrack01",
+    };
+    expect(await createVoteRequestClaim(database, {
+      channelId: onChannel, ballotId: "ballot-offline-on", moderatorUserId: "moderator-fictional", track,
+      streamId: null, roundId: onRoundId, activeRoundId: onRoundId, requestId: "offline-vote-request-on", now: NOW,
+    })).toBe(true);
+    expect(await database.prepare("SELECT state, stream_id, round_id FROM song_requests WHERE id = 'offline-vote-request-on'").first())
+      .toEqual({ state: "approved", stream_id: null, round_id: onRoundId });
+
+    const offChannel = "guard-offline-vote-disabled";
+    const offRoundId = await seedOffline(offChannel, false);
+    await database.prepare(
+      `INSERT INTO song_requests_votes (ballot_id, channel_id, stream_id, round_id, candidate_tracks_json,
+         moderator_user_id, state, created_at) VALUES ('ballot-offline-off', ?, NULL, ?, '[]', 'moderator-fictional', 'open', ?)`,
+    ).bind(offChannel, offRoundId, NOW).run();
+    expect(await createVoteRequestClaim(database, {
+      channelId: offChannel, ballotId: "ballot-offline-off", moderatorUserId: "moderator-fictional", track,
+      streamId: null, roundId: offRoundId, activeRoundId: offRoundId, requestId: "offline-vote-request-off", now: NOW,
+    })).toBe(false);
+    expect(await database.prepare("SELECT state FROM song_requests_votes WHERE ballot_id = 'ballot-offline-off'").first())
+      .toEqual({ state: "open" });
+    expect(await database.prepare("SELECT id FROM song_requests WHERE id = 'offline-vote-request-off'").first()).toBeNull();
   });
 });
 

@@ -243,6 +243,22 @@ const sqlGetFixtures = new Map<string, string>([
   ["predicateSql", "1 = 1"],
   ["conditions.join(\" AND \")", "channel_id = ? AND id = ? AND state = ? AND stream_id IS ? AND updated_at < ?"],
   ["ballotGuard"," AND EXISTS (SELECT 1 FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ? AND state = 'open')"],
+  ["OPEN_REQUEST_SQL", "state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')"],
+  ["OPEN_OR_PLAYING_REQUEST_SQL", "(state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown') OR (state = 'removed' AND submitted_at IS NOT NULL))"],
+  ["conditions.join(\" AND \")", "channel_id = ? AND id = ? AND state = ?"],
+  ["roundFenceSql", " AND EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?)"],
+  ["activeRoundGuard", `
+       AND ? = ?
+       AND ((? IS NOT NULL AND EXISTS (
+         SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?
+       )) OR (? IS NULL AND EXISTS (
+         SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'offline'
+       ) AND EXISTS (
+         SELECT 1 FROM song_requests_offline_rounds WHERE channel_id = ? AND round_id = ?
+       ) AND EXISTS (
+         SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1
+           AND json_extract(settings, '$.alsoOffline') = 1
+       )))`],
   ["blockGuard.sql", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["textBlockGuard?.sql ?? \"\"", textBlockWriteGuard("channel-id", 1, ["{text.welcome}"]).sql],
   ["commandCollisionGuard?.sql ?? \"\"", moduleCommandCollisionWriteGuard("channel-id", ["!duel"], MODULES).sql],
@@ -379,10 +395,10 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(87);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(76);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(88);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(79);
       expect(objects.filter((object) => object.type === "trigger")).toHaveLength(180);
-      expect(objects).toHaveLength(343);
+      expect(objects).toHaveLength(347);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

@@ -171,6 +171,46 @@ dem Spotify-POST wird `outcome_unknown` und niemals automatisch erneut gesendet.
 Manager können diesen Zustand im Cockpit auf „gesendet“ oder „fehlgeschlagen“
 auflösen.
 
+`!sr` löst Spotify-URI und -Links direkt und Freitext über den ersten Treffer
+auf. Das D1-Wunschbuch wird mit genau einem bedingten `INSERT … SELECT`
+geschrieben: Aktivierung, Spotify-Slot, Zahlungsmodul, Stream beziehungsweise
+Offline-Runde und alle eingeschalteten Anti-Spam-Regeln sind Teil derselben
+Einfügebedingung. Damit kann paralleler EventSub-Dispatch keine konfigurierte
+Kanal-, Künstler- oder Personenobergrenze überschreiten. Erst nach erfolgreichem
+Insert wird `sr:<requestId>:charge` im Punkte-Ledger angewendet. Der keyed
+Alarm prüft diese idempotente Operation nochmals, bevor Spotify angesprochen
+wird; dadurch bleibt ein Abbruch zwischen Insert und Abbuchung sicher. Eine
+fehlgeschlagene Abbuchung setzt den Wunsch über `transitionRequest` auf
+`failed` und löscht den gespeicherten Betrag.
+
+Die Migration `0094_song_request_admission.sql` ergänzt `request_type`, den
+gespeicherten Abbuchungsbetrag und `round_id`. `round_id` ist im Live-Betrieb
+die Twitch-Stream-ID. Mit „Auch offline“ erzeugt die Tabelle
+`song_requests_offline_rounds` eine persistierte Offline-Runde, ohne eine
+fiktive Stream-ID vorzutäuschen. `stream.online`, das Ausschalten dieser
+Einstellung und „Liste leeren“ beenden die Offline-Runde. Die Bereinigung lehnt
+noch nicht gesendete Einträge ab und erstattet sie. Einträge in `submitting`
+oder `outcome_unknown` werden als fehlgeschlagen abgeschlossen und ebenfalls
+erstattet; bereits gesendete Titel bleiben in Spotify. Alle Übergänge laufen
+durch `transitionRequest`. Die
+Einzel-Submit- und Now-Playing-Schreibvorgänge prüfen eine Live-Stream-ID oder
+die aktive Offline-Runde in derselben D1-Änderung.
+
+Anfragen können automatisch oder moderiert angenommen werden. Kostenlose
+Anfragen speichern `request_type = 'free'`; sie rufen weder Abbuchung noch
+Erstattung auf und wenden dieselben Rollen- und Anti-Spam-Regeln an. Für
+Bot-Punkte verwenden Belastung und Erstattung stabile, an die Request-ID
+gebundene Operations-IDs. Das Ausschalten des Punkte-Moduls blockiert die
+Punkte-Zahlungsart, schaltet sie aber nicht still auf kostenlos um.
+
+Das Queue-Overlay rendert die offenen Einträge aus dem BroBot-Ledger, nicht
+Spotify-Queue-Daten. Seine 2 bis 20 Zeilen-Slots bleiben reserviert, auch wenn
+weniger Einträge vorhanden sind. Der Realtime-Zustand wird auf 20 Zeilen,
+gekürzte Namen und weniger als 4 KB begrenzt. „Entfernen“ nach erfolgreicher
+Spotify-Übermittlung ändert den BroBot-Status und optional die Erstattung; der
+Track bleibt in Spotify und zählt bis zum Rundenende weiter für Duplikat- und
+Künstlerregeln.
+
 Das Wunschbuch ist BroBots Zustandsliste, kein Spiegel der Spotify-Warteschlange:
 Spotify bietet für einzelne Einträge weder Idempotenz-Schlüssel noch Entfernen
 oder Umsortieren. Einreihen und Wiedergabesteuerung brauchen beim Streamer ein

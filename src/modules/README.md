@@ -1450,6 +1450,40 @@ Trefferquote und die Rangliste für Ergebnisanzeige und Statistiken erhalten.
 Phasen-, Lösungs- und Ergebnisereignisse werden über Quiz-Realtime-Nachrichten
 für das spätere Overlay-Modul veröffentlicht.
 
+## Song-Wünsche (`song_requests`)
+
+Song-Wünsche aus `!sr` verwenden das zentrale Spotify-Suchadapter und werden
+als Ledger-Einträge mit `request_type = 'bot_points'` oder `'free'`
+gespeichert. Die optionale Spalte `channel_points` bleibt für die spätere
+Integration reserviert. Die bedingte D1-Einfügung prüft gemeinsam mit dem
+Insert alle aktiven Anti-Spam-Regeln und Caps; nach erfolgreichem Insert folgt
+der Punkte-Abzug mit `sr:<requestId>:charge`. Charge und Refund verwenden
+idempotente Operations-IDs. Kostenlose Einträge erhalten keine Punktebewegung.
+
+Der Annahmemodus ist automatisch mit Regeln oder moderiert. Moderierte Wünsche
+erscheinen im Cockpit-Queue-Dialog; Freigabe plant denselben keyed Alarm
+`submit:<requestId>` wie der automatische Modus. Ablehnung und Entfernen vor
+dem Einreihen erstatten bezahlte Einträge. Nach dem Einreihen kann eine
+Moderation den Ledger-Eintrag ohne Erstattung oder mit Erstattung entfernen;
+Spotify spielt den Track weiter. Bis zum Rundenende zählen entfernte, bereits
+eingereihte Tracks für die Duplikat- und Künstlerregeln.
+
+`round_id` unterscheidet Twitch-Live-Streams und persistierte Offline-Runden.
+Die Einstellung „Auch offline“ ist standardmäßig deaktiviert. Wenn sie aktiv
+ist, funktionieren `!sr`, Song-Abstimmung, Now-Playing-Poll und Overlay ohne
+Live-Stream. Eine Offline-Runde endet beim nächsten `stream.online`, beim
+Ausschalten der Einstellung oder über „Liste leeren“. Noch nicht eingereihte
+Einträge werden bei der Bereinigung abgelehnt und erstattet. `submitting`- und
+`outcome_unknown`-Einträge werden als fehlgeschlagen abgeschlossen und ebenfalls
+erstattet. Der Offline-Poll läuft mit einem längeren Basisintervall und der
+vorhandenen Backoff-Strategie.
+
+Das separate Queue-Overlay zeigt den BroBot-Ledger mit festen Zeilen-Slots
+(2–20 Einträge) und einem auf unter 4 KB begrenzten Realtime-Zustand. Es liest
+nicht die Spotify-Warteschlange. Modul- und Regel-Einstellungen verwenden
+serverseitige Zod-Validierung sowie `useDraft`, `useDraftGuard` und explizites
+Speichern.
+
 ## Checkliste für ein neues Modul
 
 - [ ] **Contract:** `id`, `navigationCategory`, `settingsSchema`, `defaultSettings`; nur benötigte optionale Felder (`eventSubTypes`, `routes`, `panel` oder `settingsEditor` lazy, `defaultEnabled` bewusst gewählt). Bei Secrets, Ballots oder aktiven Chattern die jeweilige Deklaration und den Zugriff nur über den Kontext nutzen.

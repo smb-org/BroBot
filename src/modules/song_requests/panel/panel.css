@@ -43,6 +43,18 @@
   .song-requests-cockpit-action__candidates { display: grid; gap: var(--s2); min-width: 0; }
   .song-requests-cockpit-action__candidates > strong { color: var(--text-2); font-size: var(--text-section); font-weight: 600; }
 
+  .song-request-moderator-queue { display: grid; gap: var(--s2); min-width: 0; }
+  .song-request-moderator-queue__toolbar { display: flex; min-height: var(--s8); align-items: center; justify-content: space-between; gap: var(--s2); }
+  .song-request-moderator-queue__toolbar h2 { margin: 0; font-size: var(--text-section); }
+  .song-request-moderator-queue__toolbar > span { display: grid; min-width: 28px; height: 28px; place-items: center; border-radius: 999px; background: var(--surface-well); color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .song-request-moderator-queue__status { min-height: var(--s5); color: var(--text-3); font-size: 13px; }
+  .song-request-moderator-queue__list { display: grid; min-width: 0; }
+  .song-request-moderator-queue__entry { min-width: 0; padding-block: var(--s1); border-bottom: 1px solid var(--line); }
+  .song-request-moderator-queue .list-row__link--no-icon { grid-template-columns: minmax(0, 1fr) auto; }
+  .song-request-moderator-queue .list-row__status, .song-request-moderator-queue .list-row__action { flex: none; white-space: nowrap; }
+  .song-request-moderator-queue__actions { display: flex; flex-wrap: nowrap; gap: var(--s1); }
+  .song-request-moderator-queue__pending { display: block; min-height: 18px; padding-inline: var(--s2); color: var(--text-3); font-size: 12px; }
+
   @media (max-width: 600px) {
     .song-requests-panel__connection-copy { align-items: flex-start; flex-direction: column; }
     .song-requests-panel__actions { justify-content: flex-start; }
