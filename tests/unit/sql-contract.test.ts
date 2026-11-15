@@ -381,8 +381,8 @@ describe("SQL contract", () => {
       ).all() as unknown as SchemaObject[];
       expect(objects.filter((object) => object.type === "table")).toHaveLength(87);
       expect(objects.filter((object) => object.type === "index")).toHaveLength(76);
-      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(162);
-      expect(objects).toHaveLength(325);
+      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(180);
+      expect(objects).toHaveLength(343);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

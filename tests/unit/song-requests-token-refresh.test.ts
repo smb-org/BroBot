@@ -20,6 +20,8 @@ afterEach(() => {
 const credentialsFor = async (database: TestD1Database, refreshToken: string): Promise<ModuleAlarmContext> => {
   await insertChannel(database, CHANNEL_ID);
   await insertMember(database, CHANNEL_ID, ACTOR_ID, "manager");
+  await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
+    .bind(CHANNEL_ID, ACTOR_ID, "2026-11-15T19:00:00.000Z").run();
   await database.prepare("INSERT INTO song_requests_connections (channel_id, state, updated_at) VALUES (?, 'connected', ?)")
     .bind(CHANNEL_ID, "2026-11-15T19:00:00.000Z").run();
   const environment = {

@@ -379,6 +379,7 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
       createChatVotingRepository(context.DB),
       {
         channelId,
+        ...(request.ballotId === undefined ? {} : { ballotId: request.ballotId }),
         kind: "options",
         optionCount: request.labels.length,
         durationSeconds: request.durationSeconds,

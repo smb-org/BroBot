@@ -26,7 +26,7 @@ test("connects mocked Spotify, votes on three tracks, and shows the winner as no
   ]);
 
   await page.goto(`${e2eWorkerOrigin}/channels/${channelId}/modules/song_requests`);
-  await expect(page.getByRole("heading", { name: "Spotify and song vote" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Song requests" })).toBeVisible();
   await expect(page.getByText("Spotify is not connected yet.")).toBeVisible();
   await page.getByRole("button", { name: "Connect Spotify" }).click();
   await expect(page.getByText("Spotify is connected.")).toBeVisible();
@@ -34,7 +34,8 @@ test("connects mocked Spotify, votes on three tracks, and shows the winner as no
   const overlayPage = await page.context().newPage();
   await overlayPage.goto(`/tests/e2e/fixtures/overlay-embed.html#token=${encodeURIComponent(overlay.overlayToken)}&origin=${encodeURIComponent(e2eWorkerOrigin)}`);
   const frame = overlayPage.frameLocator("#overlay-frame");
-  await expect(frame.locator(".song-requests-now-playing")).toBeVisible();
+  await expect(frame.locator(".song-requests-now-playing")).toBeAttached();
+  await expect(frame.locator(".song-requests-now-playing")).toHaveCSS("visibility", "hidden");
 
   const postEventSub = async (type: "stream.online" | "channel.chat.message", event: Record<string, unknown>): Promise<void> => {
     const messageId = `eventsub-song-${randomUUID()}`;
@@ -89,8 +90,7 @@ test("connects mocked Spotify, votes on three tracks, and shows the winner as no
   await page.getByRole("button", { name: "Search", exact: true }).click();
   for (const title of ["Glass Harbor", "Quiet Atlas", "Silver Current"]) await expect(page.getByText(title).first()).toBeVisible();
   for (const title of ["Glass Harbor", "Quiet Atlas", "Silver Current"]) {
-    const row = page.getByText(title).first().locator("xpath=ancestor::article");
-    await row.getByRole("button", { name: "Add to vote" }).click();
+    await page.getByRole("button", { name: `Add ${title} to vote` }).click();
   }
   const startedVoteResponse = page.waitForResponse((response) =>
     new URL(response.url()).pathname === `/api/channels/${channelId}/modules/song_requests/vote`,
@@ -132,8 +132,9 @@ test("connects mocked Spotify, votes on three tracks, and shows the winner as no
     const body = await response.json() as { requests: Array<{ title: string; state: string }> };
     return body.requests[0] ?? null;
   }, { timeout: 25_000 }).toMatchObject({ title: "Quiet Atlas", state: "submitted" });
-  await expect(frame.locator(".song-requests-now-playing__copy h2")).toHaveText("Quiet Atlas", { timeout: 30_000 });
-  await expect(frame.locator(".song-requests-now-playing__spotify")).toHaveText("Spotify");
+  await expect(frame.getByRole("link", { name: "Quiet Atlas" })).toBeVisible({ timeout: 30_000 });
+  await expect(frame.getByRole("region", { name: "Now playing" })).toBeVisible();
+  await expect(frame.getByText("Spotify", { exact: true })).toBeVisible();
 
   await overlayPage.close();
 });

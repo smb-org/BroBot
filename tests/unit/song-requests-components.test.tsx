@@ -45,6 +45,18 @@ describe("song request components", () => {
     expect(container.querySelector(".song-requests-now-playing__spotify")?.textContent.trim()).toBe("");
   });
 
+  it("keeps an unconfigured idle overlay invisible while reserving its size", () => {
+    const { container } = render(<SongRequestsNowPlaying
+      config={{ showCover: true, showRequester: true }}
+      state={{ revision: 0, serverNow: "2026-11-15T12:00:00.000Z", track: null, emptyText: "" }}
+      now={Date.parse("2026-11-15T12:00:00.000Z")}
+      language="en"
+    />);
+    const overlay = container.querySelector(".song-requests-now-playing");
+    expect(overlay).toHaveStyle({ width: "640px", height: "112px", visibility: "hidden" });
+    expect(overlay).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("labels the overlay editor controls and emits its fictional preview", () => {
     const onChange = vi.fn();
     const onPreviewState = vi.fn();
@@ -65,16 +77,87 @@ describe("song request components", () => {
     { state: "no_active_device", enabled: true, message: "Spotify found no active playback device. Start Spotify on a device." },
     { state: "reconnect_required", enabled: true, message: "The connection needs to be renewed." },
   ])("explains the $state connection state", async ({ state, enabled, message, errorMessage }) => {
+    const hasCredentials = enabled && state !== "not_connected";
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
-      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled, hasCredentials: enabled && state !== "not_connected", slot: enabled ? 2 : null, state, errorMessage: errorMessage ?? null, streamId: null, emptyText: "" }));
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled, hasCredentials, slot: enabled ? 2 : null, state, errorMessage: errorMessage ?? null, streamId: null, emptyText: "" }));
       if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: { emptyText: "Pick a song" }, revision: 3 }));
       return Promise.resolve(json({}));
     }));
     renderPanel();
     await screen.findByText(message);
-    if (enabled && state !== "not_connected") await screen.findByRole("button", { name: "Reconnect" });
+    if (enabled && hasCredentials) await screen.findByRole("button", { name: "Reconnect" });
+    if (!enabled) {
+      expect(screen.queryByRole("button", { name: "Connect Spotify" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Reconnect" })).not.toBeInTheDocument();
+    }
+    if (!hasCredentials) expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
+  });
+
+  it("shows the no-results empty state only after a search returns no tracks", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "" }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: { emptyText: "" }, revision: 3 }));
+      if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: [] }));
+      return Promise.resolve(json({}));
+    }));
+    renderPanel();
+
+    expect(screen.queryByText("No tracks found.")).not.toBeInTheDocument();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Track, Spotify link, or URI" }), { target: { value: "Silent Map" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(await screen.findByText("No tracks found.")).toBeInTheDocument();
+  });
+
+  it("submits Spotify search when Enter is pressed in the query field", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "" }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: { emptyText: "" }, revision: 3 }));
+      if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: [] }));
+      return Promise.resolve(json({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderPanel();
+    const field = await screen.findByRole("textbox", { name: "Track, Spotify link, or URI" });
+    fireEvent.change(field, { target: { value: "Silent Map" } });
+    fireEvent.keyDown(field, { key: "Enter", code: "Enter", charCode: 13 });
+
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([input]) => urlOf(input).pathname.endsWith("/search"))).toBe(true);
+    });
+  });
+
+  it("saves player empty text only after the Save action", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-song-request" }));
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "Pick a song" }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: { emptyText: "Pick a song" }, revision: 3 }));
+      return Promise.resolve(json({ settings: { emptyText: "Up next" }, revision: 4 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderPanel();
+    const field = await screen.findByRole("textbox", { name: "Player empty text" });
+    fireEvent.change(field, { target: { value: "Up next" } });
+
+    expect(fetcher.mock.calls.some(([input, init]) => urlOf(input).pathname.endsWith("/settings") && init?.method === "PATCH")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([input, init]) => urlOf(input).pathname.endsWith("/settings") && init?.method === "PATCH")).toBe(true);
+    });
+    const saveCall = fetcher.mock.calls.find(([input, init]) => urlOf(input).pathname.endsWith("/settings") && init?.method === "PATCH");
+    expect(JSON.parse(typeof saveCall?.[1]?.body === "string" ? saveCall[1].body : "{}")).toMatchObject({
+      revision: 3,
+      settings: { emptyText: "Up next" },
+    });
   });
 
   it("shows Spotify state and starts a vote from a deterministic three-track search", async () => {
@@ -101,11 +184,7 @@ describe("song request components", () => {
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
     await screen.findByText("Silver Current");
     for (const title of ["Glass Harbor", "Quiet Atlas", "Silver Current"]) {
-      const row = screen.getByText(title).closest("article");
-      if (row === null) throw new Error("Track row is missing.");
-      const add = row.querySelector("button");
-      if (add === null) throw new Error("Add button is missing.");
-      fireEvent.click(add);
+      fireEvent.click(screen.getByRole("button", { name: `Add ${title} to vote` }));
     }
     fireEvent.click(screen.getByRole("button", { name: "Start vote" }));
     await waitFor(() => { expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/vote"), expect.objectContaining({ method: "POST" })); });

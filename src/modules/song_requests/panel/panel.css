@@ -1,24 +1,53 @@
-@layer components.dashboard {
-  .song-requests-panel { display: grid; gap: 24px; max-width: 980px; color: var(--color-text); }
-  .song-requests-panel header h1, .song-requests-panel h2, .song-requests-panel h3, .song-requests-panel p { margin: 0; }
-  .song-requests-panel header p, .song-requests-panel p { color: var(--color-text-2); }
-  .song-requests-panel section { display: grid; gap: 12px; padding: 16px; background: var(--color-inspector); }
-  .song-requests-panel__section-head, .song-requests-panel__controls, .song-requests-panel__search { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
-  .song-requests-panel__section-head span { color: var(--color-text-2); }
-  .song-requests-panel__search label, .song-requests-panel__settings label { display: grid; flex: 1; gap: 6px; color: var(--color-text-2); }
-  .song-requests-panel input { min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--color-border-control); border-radius: 6px; background: var(--color-well); color: var(--color-text); }
-  .song-requests-panel__track-list, .song-requests-panel__selected, .song-requests-panel__requests { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-  .song-requests-panel__track-list article, .song-requests-panel__selected li, .song-requests-panel__requests li { display: flex; min-width: 0; align-items: center; gap: 12px; padding: 8px; background: var(--color-surface); }
-  .song-requests-panel__track-list img, .song-requests-panel__cover { width: 44px; height: 44px; flex: 0 0 44px; object-fit: cover; background: var(--color-well); }
-  .song-requests-panel__track-copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
-  .song-requests-panel__track-copy strong, .song-requests-panel__track-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .song-requests-panel__track-copy small { color: var(--color-text-3); }
-  .song-requests-panel__resolution { display: flex; flex-wrap: wrap; gap: 6px; }
-  .song-requests-panel__settings { grid-template-columns: 1fr auto; align-items: end; }
-  .song-requests-panel__feedback { min-height: 22px; }
+@layer components.modules {
+  .song-requests-panel {
+    display: grid;
+    align-content: start;
+    gap: var(--s4);
+    width: 100%;
+    min-width: 0;
+  }
+
+  .module-detail:has(.song-requests-panel) { width: 100%; max-width: none; }
+  .module-detail__content:has(.song-requests-panel) { width: 100%; min-width: 0; }
+
+  .song-requests-panel__connection-status { display: flex; align-items: center; gap: var(--s2); min-width: 0; min-height: calc(var(--s5) * 2); }
+  .song-requests-panel__connection-status > span:last-child { display: -webkit-box; min-width: 0; overflow: hidden; color: var(--text-2); overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .song-requests-panel__connection-copy { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); min-width: 0; }
+  .song-requests-panel__connection-copy .song-requests-panel__connection-status { flex: 1; }
+  .song-requests-panel__actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: var(--s2); }
+  .song-requests-panel__slot-count { min-height: var(--s5); color: var(--text-3); }
+  .song-requests-panel__feedback { display: block; height: calc(var(--s5) * 2); overflow: hidden; margin: 0; color: var(--text-2); }
+  .song-requests-panel__search-feedback { display: block; height: var(--s5); overflow: hidden; margin: 0; color: var(--text-2); }
+  .song-requests-panel__search { display: flex; align-items: end; flex-wrap: nowrap; gap: var(--s2); min-width: 0; }
+  .song-requests-panel__search > .ui-field { flex: 1 1 auto; min-width: 0; }
+  .song-requests-panel__search-button { flex: 0 0 auto; }
+  .song-requests-panel__list { display: grid; min-width: 0; }
+  .song-requests-panel__list [role="listitem"] { min-width: 0; }
+  .song-requests-panel__results-section .song-requests-panel__list { max-height: calc(var(--s10) * 8); overflow: auto; }
+  .song-requests-cockpit-action > .song-requests-panel__list { max-height: calc(var(--s10) * 6); overflow: auto; }
+  .song-requests-panel__candidate-section .ui-section__heading { align-items: center; }
+  .song-requests-panel__candidate-section .ui-section__heading h2 { flex: 0 1 auto; }
+  .song-requests-panel__candidate-section .ui-section__heading > .ui-button { flex: none; }
+  .song-requests-panel__subheading { margin: var(--s2) 0 0; color: var(--text-2); font-size: var(--text-section); font-weight: 600; }
+  .song-requests-panel__resolution { display: flex; flex-wrap: wrap; gap: var(--s1); }
+  .song-requests-panel__outcomes { display: grid; min-width: 0; }
+  .song-requests-panel__outcome { display: flex; min-width: 0; min-height: var(--s8); align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s2); border-bottom: 1px solid var(--line); }
+  .song-requests-panel__outcome time { flex: none; color: var(--text-3); }
+  .song-requests-panel__settings .ui-section__content { gap: var(--s3); }
+  .song-requests-cockpit-action { min-width: 0; }
+  .song-requests-cockpit-action__feedback { height: calc(var(--s5) * 3); overflow: hidden; margin: 0; color: var(--text-2); }
+  .song-requests-cockpit-action__candidates { display: grid; gap: var(--s2); min-width: 0; }
+  .song-requests-cockpit-action__candidates > strong { color: var(--text-2); font-size: var(--text-section); font-weight: 600; }
+
   @media (max-width: 600px) {
-    .song-requests-panel__section-head, .song-requests-panel__search { align-items: stretch; flex-direction: column; }
-    .song-requests-panel__track-list article, .song-requests-panel__requests li { flex-wrap: wrap; }
-    .song-requests-panel__settings { grid-template-columns: 1fr; }
+    .song-requests-panel__connection-copy { align-items: flex-start; flex-direction: column; }
+    .song-requests-panel__actions { justify-content: flex-start; }
+    .song-requests-panel__candidate-section .ui-section__heading { align-items: flex-start; }
+    .song-requests-panel__candidate-section .ui-section__heading > .ui-button { max-width: 50%; }
+  }
+
+  @media (max-width: 420px) {
+    .song-requests-panel__search-button { width: var(--control-height-touch); min-width: var(--control-height-touch); min-height: var(--control-height-touch); padding-inline: 0; }
+    .song-requests-panel__search-button-label { display: none; }
   }
 }

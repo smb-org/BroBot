@@ -53,7 +53,7 @@ export const createModuleSecretAccess = (
   };
   const read: ModuleSecretAccess["read"] = async (name) => (await readWithVersion(name))?.value ?? null;
 
-  const prepareWrite: ModuleSecretAccess["prepareWrite"] = async (name, value, actor, now, requirePreviousChange = false) => {
+  const prepareWrite: ModuleSecretAccess["prepareWrite"] = async (name, value, actor, now, requirePreviousChange = false, requireSpotifySlot = false) => {
     const keys = encryptionKeys();
     let ciphertext: string;
     try {
@@ -62,17 +62,20 @@ export const createModuleSecretAccess = (
       throw new Error("Module secret encryption failed.");
     }
     const authorization = authorizeModuleManagementMutation(channelId, actor, now);
+    const values = [channelId, moduleId, name, ciphertext, keys.active.id, now, actor.userId,
+      Number(requireSpotifySlot), channelId, ...authorization.values];
     return environment.DB.prepare(
       `INSERT INTO module_secrets
         (channel_id, module_id, name, ciphertext, key_id, revision, updated_at, updated_by)
-       SELECT ?, ?, ?, ?, ?, 1, ?, ? WHERE 1 = 1 ${requirePreviousChange ? "AND changes() > 0" : ""} ${authorization.sql}
+       SELECT ?, ?, ?, ?, ?, 1, ?, ? WHERE 1 = 1 ${requirePreviousChange ? "AND changes() > 0" : ""}
+         AND (? = 0 OR EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)) ${authorization.sql}
        ON CONFLICT (channel_id, module_id, name) DO UPDATE SET
          ciphertext = excluded.ciphertext,
          key_id = excluded.key_id,
          revision = module_secrets.revision + 1,
          updated_at = excluded.updated_at,
          updated_by = excluded.updated_by`,
-    ).bind(channelId, moduleId, name, ciphertext, keys.active.id, now, actor.userId, ...authorization.values);
+    ).bind(...values);
   };
 
   const prepareDelete: ModuleSecretAccess["prepareDelete"] = (name, actor, now, requirePreviousChange = false) => {
@@ -94,8 +97,10 @@ export const createModuleSecretAccess = (
     return environment.DB.prepare(
       `UPDATE module_secrets
           SET ciphertext = ?, key_id = ?, revision = revision + 1, updated_at = ?, updated_by = 'system'
-        WHERE channel_id = ? AND module_id = ? AND name = ? AND ciphertext = ?`,
-    ).bind(ciphertext, keys.active.id, now, channelId, moduleId, name, expectedVersion);
+        WHERE channel_id = ? AND module_id = ? AND name = ? AND ciphertext = ?
+          AND (? = 0 OR EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?))`,
+    ).bind(ciphertext, keys.active.id, now, channelId, moduleId, name, expectedVersion,
+      Number(moduleId === "song_requests"), channelId);
   };
 
   return { status, read, readWithVersion, prepareWrite, prepareDelete, prepareRotationWrite };

@@ -6,12 +6,13 @@ import {
   handleSongRequestsActivation,
   handleSubmitAlarm,
   pollSongRequestsPlayback,
+  spotifyAccessToken,
   processSongRequestsEvent,
   SONG_REQUESTS_ALARM,
   SONG_REQUESTS_SUBMIT_ALARM_PREFIX,
   MAX_BACKOFF_MS,
 } from "../../src/modules/song_requests/service";
-import { transitionRequest } from "../../src/modules/song_requests/adapters/d1";
+import { createNowPlayingSnapshot, transitionRequest } from "../../src/modules/song_requests/adapters/d1";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -34,6 +35,16 @@ const trackAt = (index: number): (typeof TRACKS)[number] => {
   if (track === undefined) throw new Error("Unknown fixture track.");
   return track;
 };
+const spotifyTrackFixture = {
+  id: "glassharbor01",
+  uri: "spotify:track:glassharbor01",
+  name: "Glass Harbor",
+  duration_ms: 201_000,
+  explicit: false,
+  artists: [{ id: "miravale01", name: "Mira Vale" }],
+  album: { name: "Quiet Atlas", images: [{ url: "https://i.scdn.co/image/fictional-cover-one", width: 640, height: 640 }] },
+  external_urls: { spotify: "https://open.spotify.com/track/glassharbor01" },
+};
 const databases: TestD1Database[] = [];
 
 const createContext = async (ballotId: string) => {
@@ -55,7 +66,11 @@ const createContext = async (ballotId: string) => {
      VALUES (?, ?, ?, ?, ?, 'open', ?)`,
   ).bind(ballotId, CHANNEL_ID, STREAM_ID, JSON.stringify(TRACKS), "moderator-fictional", "2026-11-15T19:00:00.000Z").run();
   const clear = vi.fn<ModuleAlarmContext["clear"]>(() => Promise.resolve());
-  const schedule = vi.fn<ModuleAlarmContext["schedule"]>(() => Promise.resolve());
+  const pendingAlarms = new Map<string, number>();
+  const schedule = vi.fn<ModuleAlarmContext["schedule"]>((key, deadline) => {
+    pendingAlarms.set(key, deadline);
+    return Promise.resolve();
+  });
   const publishModuleOverlayMessage = vi.fn<ModuleAlarmContext["publishModuleOverlayMessage"]>(() => Promise.resolve());
   const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({ sent: true, reason: null, retryable: false, delivery: "delivered" }));
   const context = {
@@ -74,6 +89,7 @@ const createContext = async (ballotId: string) => {
     sendChat,
     clear,
     schedule,
+    getAlarmDeadline: (key: string) => Promise.resolve(pendingAlarms.get(key) ?? null),
     publishModuleOverlayMessage,
   } as unknown as ModuleAlarmContext;
   return { database, context, clear, schedule, publishModuleOverlayMessage, sendChat };
@@ -208,6 +224,58 @@ describe("durable song vote results", () => {
       .bind(requestId).first()).toEqual({ state: "outcome_unknown", failure_reason: "network_or_timeout" });
   });
 
+  it("does not send a winner after deactivation completes during token acquisition", async () => {
+    const { database, context } = await createContext("ballot-deactivated-before-send");
+    await handleSongRequestDurableAction(context, voteResult("ballot-deactivated-before-send", [9, 2, 1]));
+    const requestId = await requestIdFor(database);
+    context.secrets.readWithVersion = async () => {
+      await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'song_requests'")
+        .bind(CHANNEL_ID).run();
+      await handleSongRequestsActivation(context, false);
+      return {
+        value: JSON.stringify({ accessToken: "spotify-access-fictional", refreshToken: "spotify-refresh-fictional", expiresAt: Date.parse("2099-01-01T00:00:00.000Z") }),
+        version: "encrypted-envelope-version",
+      };
+    };
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    await handleSubmitAlarm(context, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`);
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
+      .toEqual({ state: "failed", failure_reason: "module_disabled" });
+  });
+
+  it("reports an uncertain outcome when deactivation conflicts after Spotify received the POST", async () => {
+    const { database, context, sendChat } = await createContext("ballot-deactivated-after-send");
+    await handleSongRequestDurableAction(context, voteResult("ballot-deactivated-after-send", [9, 2, 1]));
+    const requestId = await requestIdFor(database);
+    let releasePost!: () => void;
+    let postStarted!: () => void;
+    const postStartedPromise = new Promise<void>((resolve) => { postStarted = resolve; });
+    const postResponse = new Promise<void>((resolve) => { releasePost = resolve; });
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      postStarted();
+      await postResponse;
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const submitting = handleSubmitAlarm(context, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`);
+    await postStartedPromise;
+
+    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(CHANNEL_ID).run();
+    await handleSongRequestsActivation(context, false);
+    releasePost();
+    await submitting;
+
+    expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
+      .toEqual({ state: "outcome_unknown", failure_reason: "submit_state_conflict" });
+    expect(sendChat.mock.calls[0]?.[0]).toContain("result is unclear");
+    expect(sendChat.mock.calls[0]?.[0]).not.toContain("was not queued");
+  });
+
   it("backs off a live poll while disconnected and keeps its schedule", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
@@ -232,7 +300,115 @@ describe("durable song vote results", () => {
     expect(schedule.mock.calls.at(-1)?.[0]).toBe(SONG_REQUESTS_ALARM);
   });
 
-  it("backs off when credentials are missing and caps retry-after at the maximum", async () => {
+  it("probes Spotify again after no_active_device and restores the connected state", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const { database, context, schedule } = await createContext("ballot-device-recovery");
+    await database.prepare("UPDATE song_requests_connections SET state = 'no_active_device' WHERE channel_id = ?")
+      .bind(CHANNEL_ID).run();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    await pollSongRequestsPlayback(context);
+
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(textOf(fetcher.mock.calls[0]?.[0])).toContain("/me/player/currently-playing");
+    expect(await database.prepare("SELECT state FROM song_requests_connections WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ state: "connected" });
+    expect(schedule).toHaveBeenCalledWith(SONG_REQUESTS_ALARM, NOW + 12_000, undefined, undefined);
+  });
+
+  it("treats a revoked Spotify slot as disconnected in token and polling paths", async () => {
+    const { database, context } = await createContext("ballot-revoked-slot-runtime");
+    await database.prepare("DELETE FROM spotify_channel_access WHERE channel_id = ?").bind(CHANNEL_ID).run();
+    expect(await spotifyAccessToken(context)).toBeNull();
+    await database.prepare("UPDATE song_requests_connections SET state = 'connected' WHERE channel_id = ?")
+      .bind(CHANNEL_ID).run();
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    await pollSongRequestsPlayback(context);
+    await handleSongRequestDurableAction(context, voteResult("ballot-revoked-slot-runtime", [9, 2, 1]));
+    const requestId = await requestIdFor(database);
+    await handleSubmitAlarm(context, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`);
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await database.prepare("SELECT state FROM song_requests_connections WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ state: "not_connected" });
+    expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
+      .toEqual({ state: "failed", failure_reason: "spotify_not_enabled" });
+  });
+
+  it("does not restore now playing or re-arm polling after stream.offline during a Spotify fetch", async () => {
+    const { database, context, schedule } = await createContext("ballot-poll-offline-race");
+    const db = database as unknown as D1Database;
+    await createNowPlayingSnapshot(db, CHANNEL_ID, STREAM_ID, spotifyTrackFixture, new Date(NOW - 12_000).toISOString(), 5_000);
+    context.streamState = async () => (await database.prepare("SELECT state FROM channel_stream_state WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ state: string }>())?.state === "online" ? "online" : "offline";
+    context.streamStartedAt = async () => {
+      const row = await database.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
+        .bind(CHANNEL_ID).first<{ state: string; stream_id: string | null }>();
+      return { streamId: row?.state === "online" ? row.stream_id : null, startedAt: null };
+    };
+    let releaseFetch!: () => void;
+    let fetchStarted!: () => void;
+    const fetchStartedPromise = new Promise<void>((resolve) => { fetchStarted = resolve; });
+    const responsePromise = new Promise<void>((resolve) => { releaseFetch = resolve; });
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      fetchStarted();
+      await responsePromise;
+      return new Response(JSON.stringify({ is_playing: true, progress_ms: 0, currently_playing_type: "track", item: spotifyTrackFixture }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const polling = pollSongRequestsPlayback(context);
+    await fetchStartedPromise;
+
+    await database.prepare("UPDATE channel_stream_state SET state = 'offline', stream_id = NULL WHERE channel_id = ?")
+      .bind(CHANNEL_ID).run();
+    const eventContext = {
+      ...context,
+      clearAlarm: vi.fn(() => Promise.resolve()),
+      scheduleAlarm: vi.fn(() => Promise.resolve()),
+      streamSession: { streamId: STREAM_ID },
+      streamStateTransitionAccepted: true,
+    } as unknown as ModuleExecutionContext;
+    await processSongRequestsEvent({
+      subscriptionType: "stream.offline",
+      channelId: CHANNEL_ID,
+      receivedAt: new Date(NOW).toISOString(),
+    } as unknown as ModuleEvent, eventContext);
+    releaseFetch();
+    await polling;
+
+    expect(await database.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ track_json: null });
+    expect(schedule.mock.calls.filter(([key]) => key === SONG_REQUESTS_ALARM)).toHaveLength(0);
+  });
+
+  it("reconciles an approved winner when its submit alarm could not be scheduled", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const { database, context, schedule } = await createContext("ballot-missed-submit-alarm");
+    schedule.mockRejectedValueOnce(new Error("Alarm storage is temporarily unavailable."));
+
+    await expect(handleSongRequestDurableAction(context, voteResult("ballot-missed-submit-alarm", [9, 2, 1])))
+      .rejects.toThrow("Alarm storage is temporarily unavailable.");
+    const requestId = await requestIdFor(database);
+    const submitAlarmKey = `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`;
+    expect(schedule.mock.calls.filter(([key]) => key === submitAlarmKey)).toHaveLength(1);
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(requestId).first())
+      .toEqual({ state: "approved" });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    await pollSongRequestsPlayback(context);
+
+    const submitCalls = schedule.mock.calls.filter(([key]) => key === submitAlarmKey);
+    expect(submitCalls).toHaveLength(2);
+    expect(submitCalls[1]).toEqual([submitAlarmKey, NOW, undefined, null, undefined, undefined, "submit"]);
+  });
+
+  it("honors the full Retry-After value when it exceeds the exponential backoff cap", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     const { database, context, schedule } = await createContext("ballot-poll-missing-token");
@@ -246,7 +422,7 @@ describe("durable song vote results", () => {
       .bind(CHANNEL_ID).first()).toEqual({ state: "not_connected", poll_failures: 1 });
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ error: { status: 429, message: "Rate limited" } }), {
       status: 429,
-      headers: { "Retry-After": String((MAX_BACKOFF_MS + 60_000) / 1_000) },
+      headers: { "Retry-After": "600" },
     }));
     vi.stubGlobal("fetch", fetcher);
     await database.prepare("UPDATE song_requests_connections SET state = 'connected' WHERE channel_id = ?").bind(CHANNEL_ID).run();
@@ -254,7 +430,7 @@ describe("durable song vote results", () => {
       value: JSON.stringify({ accessToken: "access", refreshToken: "refresh", expiresAt: NOW + 3_600_000 }), version: "version",
     });
     await pollSongRequestsPlayback(context);
-    expect(schedule.mock.calls.at(-1)?.[1]).toBe(NOW + MAX_BACKOFF_MS);
+    expect(schedule.mock.calls.at(-1)?.[1]).toBe(NOW + Math.max(MAX_BACKOFF_MS, 600_000));
   });
 
   it("clears the polling alarm on an accepted stream.offline event", async () => {

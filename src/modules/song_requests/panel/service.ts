@@ -25,7 +25,8 @@ export const request = async <T,>(channelId: string, part: string, method = "GET
   return await response.json<T>();
 };
 
-export interface SongRequestsSettingsRead { settings: Record<string, unknown>; revision: number }
+interface SongRequestsSettings { emptyText: string }
+export interface SongRequestsSettingsRead { settings: SongRequestsSettings; revision: number }
 
 export const readSettings = (channelId: string, signal?: AbortSignal): Promise<SongRequestsSettingsRead> =>
   request<SongRequestsSettingsRead>(channelId, "settings", "GET", undefined, signal);

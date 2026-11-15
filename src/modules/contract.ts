@@ -551,6 +551,8 @@ export type ModuleDurableAction = {
 };
 
 export interface ModuleChatVoteStartRequest {
+  /** A caller may persist its result mapping before the ballot is exposed. */
+  ballotId?: string;
   title: string;
   labels: readonly string[];
   durationSeconds: number;
@@ -593,6 +595,7 @@ export type ModuleActor = {
 export interface ModuleMutationActor {
   userId: string;
   sessionId?: string;
+  login?: string;
 }
 
 export interface ModuleMutationAuthorization {
@@ -648,7 +651,14 @@ export interface ModuleSecretAccess {
    */
   readWithVersion: (name: string) => Promise<{ value: string; version: string } | null>;
   /** The returned statement carries the management-role guard and can depend on the preceding batched mutation. */
-  prepareWrite: (name: string, value: string, actor: ModuleMutationActor, now: string, requirePreviousChange?: boolean) => Promise<D1PreparedStatement>;
+  prepareWrite: (
+    name: string,
+    value: string,
+    actor: ModuleMutationActor,
+    now: string,
+    requirePreviousChange?: boolean,
+    requireSpotifySlot?: boolean,
+  ) => Promise<D1PreparedStatement>;
   /** The returned statement carries the management-role guard and can depend on the preceding batched mutation. */
   prepareDelete: (name: string, actor: ModuleMutationActor, now: string, requirePreviousChange?: boolean) => D1PreparedStatement;
   /** Replaces an existing secret during token rotation only if its encrypted version is unchanged. */

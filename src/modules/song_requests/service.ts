@@ -7,6 +7,7 @@ import {
   clearSongRequestsForStreamEnd,
   finishVoteWithoutRequest,
   readSongRequest,
+  spotifySlotHeld,
   transitionRequest,
   voteRecord,
 } from "./adapters/d1";
@@ -52,6 +53,10 @@ export const spotifyAccessToken = async (
   context: Pick<ModuleAlarmContext, "DB" | "channelId" | "environment" | "secrets">,
   now = Date.now(),
 ): Promise<string | null> => {
+  if (!await spotifySlotHeld(context.DB, context.channelId)) {
+    await setConnectionState(context, "not_connected", new Date(now).toISOString());
+    return null;
+  }
   const stored = await context.secrets.readWithVersion(SONG_REQUESTS_CREDENTIAL_SECRET);
   const current = credentialsFrom(stored?.value ?? null);
   if (stored === null || current === null) {
@@ -59,7 +64,13 @@ export const spotifyAccessToken = async (
     return null;
   }
   if (context.environment === undefined) return null;
-  if (current.expiresAt > now + 60_000) return current.accessToken;
+  if (current.expiresAt > now + 60_000) {
+    if (!await spotifySlotHeld(context.DB, context.channelId)) {
+      await setConnectionState(context, "not_connected", new Date(now).toISOString());
+      return null;
+    }
+    return current.accessToken;
+  }
   try {
     const refreshed = await refreshSpotifyToken(context.environment, current.refreshToken);
     const next: SpotifyCredentials = {
@@ -75,7 +86,11 @@ export const spotifyAccessToken = async (
       new Date(now).toISOString(),
     );
     const result = await context.DB.batch([update]);
-    if ((result[0]?.meta.changes ?? 0) !== 1) {
+    if (!await spotifySlotHeld(context.DB, context.channelId)) {
+      await setConnectionState(context, "not_connected", new Date(now).toISOString());
+      return null;
+    }
+    if ((result[0]?.meta.changes ?? 0) < 1) {
       const latest = credentialsFrom((await context.secrets.readWithVersion(SONG_REQUESTS_CREDENTIAL_SECRET))?.value ?? null);
       if (latest === null) {
         await setConnectionState(context, "not_connected", new Date(now).toISOString());
@@ -88,6 +103,10 @@ export const spotifyAccessToken = async (
     await setConnectionState(context, "connected", new Date(now).toISOString());
     return next.accessToken;
   } catch (error) {
+    if (!await spotifySlotHeld(context.DB, context.channelId)) {
+      await setConnectionState(context, "not_connected", new Date(now).toISOString());
+      return null;
+    }
     if (error instanceof SpotifyRequestError && error.reason === "invalid_grant") {
       const latestStored = await context.secrets.readWithVersion(SONG_REQUESTS_CREDENTIAL_SECRET);
       const latest = credentialsFrom(latestStored?.value ?? null);
@@ -118,6 +137,62 @@ const updateConnectionForError = async (
   if (state !== null) {
     const message = state === "spotify_error" ? error.message.slice(0, 200) : null;
     await setConnectionState(context, state, new Date().toISOString(), message);
+  }
+};
+
+const submitClaimStillValid = async (context: ModuleAlarmContext, requestId: string): Promise<boolean> => {
+  const row = await readSongRequest(context.DB, context.channelId, requestId);
+  if (row === null || row.state !== "submitting") return false;
+  const now = new Date().toISOString();
+  const module = await context.DB.prepare("SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+    .bind(context.channelId).first<{ enabled: number }>();
+  if (module?.enabled !== 1) {
+    await transitionRequest(context.DB, {
+      channelId: context.channelId, requestId, fromState: "submitting", toState: "failed",
+      failureReason: "module_disabled", now,
+    });
+    return false;
+  }
+  if (!await spotifySlotHeld(context.DB, context.channelId)) {
+    await setConnectionState(context, "not_connected", now);
+    await transitionRequest(context.DB, {
+      channelId: context.channelId, requestId, fromState: "submitting", toState: "failed",
+      failureReason: "spotify_not_enabled", now,
+    });
+    return false;
+  }
+  const stream = await context.streamStartedAt();
+  if (await context.streamState() !== "online" || row.streamId === null || stream.streamId !== row.streamId) {
+    await transitionRequest(context.DB, {
+      channelId: context.channelId, requestId, fromState: "submitting", toState: "failed",
+      failureReason: "stream_offline", now,
+    });
+    return false;
+  }
+  return true;
+};
+
+const transitionAfterSpotifyPost = async (
+  context: ModuleAlarmContext,
+  requestId: string,
+  toState: "submitted" | "outcome_unknown" | "failed",
+  failureReason: string | null = null,
+): Promise<void> => {
+  const now = new Date().toISOString();
+  const transitioned = await transitionRequest(context.DB, {
+    channelId: context.channelId, requestId, fromState: "submitting", toState, failureReason, now,
+  });
+  if (transitioned) return;
+  const current = await readSongRequest(context.DB, context.channelId, requestId);
+  if (current?.state === "failed") {
+    await transitionRequest(context.DB, {
+      channelId: context.channelId,
+      requestId,
+      fromState: "failed",
+      toState: "outcome_unknown",
+      failureReason: "submit_state_conflict",
+      now: new Date().toISOString(),
+    });
   }
 };
 
@@ -160,12 +235,14 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
     return;
   }
   if (token === null) {
+    const failureReason = await spotifySlotHeld(context.DB, context.channelId) ? "reconnect_required" : "spotify_not_enabled";
     await transitionRequest(context.DB, {
       channelId: context.channelId, requestId, fromState: "submitting", toState: "failed",
-      failureReason: "reconnect_required", now: new Date().toISOString(),
+      failureReason, now: new Date().toISOString(),
     });
     return;
   }
+  if (!await submitClaimStillValid(context, requestId)) return;
   const enqueue = (): Promise<Response> => spotifyApiRequest(
     environment,
     token,
@@ -174,59 +251,39 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
   );
   try {
     await enqueue();
-    await transitionRequest(context.DB, {
-      channelId: context.channelId, requestId, fromState: "submitting", toState: "submitted",
-      now: new Date().toISOString(),
-    });
+    await transitionAfterSpotifyPost(context, requestId, "submitted");
   } catch (error) {
     if (!(error instanceof SpotifyRequestError)) {
-      await transitionRequest(context.DB, {
-        channelId: context.channelId, requestId, fromState: "submitting", toState: "outcome_unknown",
-        failureReason: "network_or_timeout", now: new Date().toISOString(),
-      });
+      await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "network_or_timeout");
       return;
     }
     await updateConnectionForError(context, error);
     if (error.status >= 500) {
-      await transitionRequest(context.DB, {
-        channelId: context.channelId, requestId, fromState: "submitting", toState: "outcome_unknown",
-        failureReason: "spotify_server_error", now: new Date().toISOString(),
-      });
+      await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "spotify_server_error");
       return;
     }
     if (error.status === 429) {
       if (error.retryAfterMs !== null && error.retryAfterMs <= 2_000) {
         await new Promise((resolve) => setTimeout(resolve, error.retryAfterMs ?? 0));
+        if (!await submitClaimStillValid(context, requestId)) return;
         try {
           await enqueue();
-          await transitionRequest(context.DB, {
-            channelId: context.channelId, requestId, fromState: "submitting", toState: "submitted",
-            now: new Date().toISOString(),
-          });
+          await transitionAfterSpotifyPost(context, requestId, "submitted");
           return;
         } catch (retryError) {
           if (retryError instanceof SpotifyRequestError) await updateConnectionForError(context, retryError);
           if (!(retryError instanceof SpotifyRequestError) || retryError.status >= 500) {
-            await transitionRequest(context.DB, {
-              channelId: context.channelId, requestId, fromState: "submitting", toState: "outcome_unknown",
-              failureReason: "retry_response_uncertain", now: new Date().toISOString(),
-            });
+            await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "retry_response_uncertain");
             return;
           }
         }
       }
-      await transitionRequest(context.DB, {
-        channelId: context.channelId, requestId, fromState: "submitting", toState: "failed",
-        failureReason: "rate_limited", now: new Date().toISOString(),
-      });
+      await transitionAfterSpotifyPost(context, requestId, "failed", "rate_limited");
       return;
     }
-    await transitionRequest(context.DB, {
-      channelId: context.channelId, requestId, fromState: "submitting", toState: "failed",
-      failureReason: error.status === 403 && error.reason !== "PREMIUM_REQUIRED" ? error.message.slice(0, 200)
-        : error.reason ?? `spotify_${String(error.status)}`,
-      now: new Date().toISOString(),
-    });
+    await transitionAfterSpotifyPost(context, requestId, "failed",
+      error.status === 403 && error.reason !== "PREMIUM_REQUIRED" ? error.message.slice(0, 200)
+        : error.reason ?? `spotify_${String(error.status)}`);
   }
 };
 
@@ -235,7 +292,7 @@ const failureMessage = (reason: string | null): { de: string; en: string } => {
     de: "Der Stream ist offline; der Song wurde nicht in Spotify eingereiht.",
     en: "The stream is offline; the song was not queued in Spotify.",
   };
-  if (reason === "outcome_unknown" || reason === "network_or_timeout" || reason === "spotify_server_error" || reason === "retry_response_uncertain" || reason === "submit_interrupted") return {
+  if (reason === "outcome_unknown" || reason === "network_or_timeout" || reason === "spotify_server_error" || reason === "retry_response_uncertain" || reason === "submit_interrupted" || reason === "submit_state_conflict") return {
     de: `Das Spotify-Ergebnis ist unklar (${reason}); bitte die Warteschlange prüfen.`,
     en: `The Spotify result is unclear (${reason}); check the queue before retrying.`,
   };
@@ -254,7 +311,7 @@ const announceSubmitResult = async (context: ModuleAlarmContext, requestId: stri
     ? language === "de"
       ? `„${row.title}“ wurde in Spotify eingereiht.`
       : `“${row.title}” was queued in Spotify.`
-    : failureMessage(row.failureReason)[language];
+    : failureMessage(row.state === "outcome_unknown" ? "outcome_unknown" : row.failureReason)[language];
   const delivery = await context.sendChat(
     message,
     `song-vote-queue:${row.operationId}`,
@@ -347,7 +404,7 @@ const recordPollFailure = async (context: ModuleAlarmContext, priorFailures: num
   let delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** (failures - 1));
   if (error instanceof SpotifyRequestError) {
     await updateConnectionForError(context, error);
-    if (error.status === 429 && error.retryAfterMs !== null) delay = Math.min(MAX_BACKOFF_MS, Math.max(delay, error.retryAfterMs));
+    if (error.status === 429 && error.retryAfterMs !== null) delay = Math.max(delay, error.retryAfterMs);
   }
   const now = Date.now();
   await context.DB.prepare(
@@ -356,6 +413,28 @@ const recordPollFailure = async (context: ModuleAlarmContext, priorFailures: num
      ON CONFLICT (channel_id) DO UPDATE SET poll_failures = excluded.poll_failures, updated_at = excluded.updated_at`,
   ).bind(context.channelId, new Date(now).toISOString(), failures).run();
   await context.schedule(SONG_REQUESTS_ALARM, now + delay, undefined, context.streamGeneration);
+};
+
+const reconcileApprovedSubmissionAlarms = async (context: ModuleAlarmContext): Promise<void> => {
+  const rows = await context.DB.prepare(
+    "SELECT id FROM song_requests WHERE channel_id = ? AND state = 'approved' ORDER BY created_at, id",
+  ).bind(context.channelId).all<{ id: string }>();
+  for (const row of rows.results) {
+    const alarmKey = `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${row.id}`;
+    if (context.getAlarmDeadline !== undefined && await context.getAlarmDeadline(alarmKey) !== null) continue;
+    await scheduleSubmitAlarm(context, row.id);
+  }
+};
+
+const playbackCycleIsCurrent = async (context: ModuleAlarmContext, streamId: string): Promise<boolean> => {
+  const [state, module, stream, slotHeld] = await Promise.all([
+    context.streamState(),
+    context.DB.prepare("SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(context.channelId).first<{ enabled: number }>(),
+    context.streamStartedAt(),
+    spotifySlotHeld(context.DB, context.channelId),
+  ]);
+  return state === "online" && module?.enabled === 1 && stream.streamId === streamId && slotHeld;
 };
 
 export const pollSongRequestsPlayback = async (context: ModuleAlarmContext): Promise<void> => {
@@ -368,22 +447,29 @@ export const pollSongRequestsPlayback = async (context: ModuleAlarmContext): Pro
   const connection = await context.DB.prepare("SELECT state, poll_failures FROM song_requests_connections WHERE channel_id = ?")
     .bind(context.channelId).first<{ state: string; poll_failures: number }>();
   const stream = await context.streamStartedAt();
+  await reconcileApprovedSubmissionAlarms(context);
   if (stream.streamId === null || context.environment === undefined) {
     await recordPollFailure(context, connection?.poll_failures ?? 0);
     return;
   }
-  if (connection?.state !== "connected") {
+  if (connection?.state !== "connected" && connection?.state !== "no_active_device") {
     await recordPollFailure(context, connection?.poll_failures ?? 0);
     return;
   }
   try {
-    const token = await spotifyAccessToken(context, now);
-    const currentConnection = await context.DB.prepare("SELECT state FROM song_requests_connections WHERE channel_id = ?")
-      .bind(context.channelId).first<{ state: string }>();
-    if (token === null || currentConnection?.state !== "connected") {
+    if (!await spotifySlotHeld(context.DB, context.channelId)) {
+      await setConnectionState(context, "not_connected", new Date(now).toISOString());
       await recordPollFailure(context, connection.poll_failures);
       return;
     }
+    const token = await spotifyAccessToken(context, now);
+    const currentConnection = await context.DB.prepare("SELECT state FROM song_requests_connections WHERE channel_id = ?")
+      .bind(context.channelId).first<{ state: string }>();
+    if (token === null || currentConnection?.state !== "connected" && currentConnection?.state !== "no_active_device") {
+      await recordPollFailure(context, connection.poll_failures);
+      return;
+    }
+    if (!await playbackCycleIsCurrent(context, stream.streamId)) return;
     const response = await spotifyApiRequest(context.environment, token, "me/player/currently-playing");
     let track: SpotifyTrack | null = null;
     let progressMs: number | null | undefined;
@@ -398,13 +484,25 @@ export const pollSongRequestsPlayback = async (context: ModuleAlarmContext): Pro
     } else {
       progressMs = null;
     }
-    const snapshot = await createNowPlayingSnapshot(context.DB, context.channelId, stream.streamId, track, new Date(now).toISOString(), progressMs);
+    if (!await playbackCycleIsCurrent(context, stream.streamId)) return;
+    const snapshot = await createNowPlayingSnapshot(
+      context.DB,
+      context.channelId,
+      stream.streamId,
+      track,
+      new Date(now).toISOString(),
+      progressMs,
+      { activeStreamId: stream.streamId },
+    );
+    if (!snapshot.committed || !await playbackCycleIsCurrent(context, stream.streamId)) return;
     await setConnectionState(context, "connected", new Date(now).toISOString());
     await context.DB.prepare("UPDATE song_requests_connections SET poll_failures = 0 WHERE channel_id = ? AND poll_failures > 0")
       .bind(context.channelId).run();
     if (snapshot.changed) await notifyNowPlaying(context, snapshot.revision);
+    if (!await playbackCycleIsCurrent(context, stream.streamId)) return;
     await context.schedule(SONG_REQUESTS_ALARM, Date.now() + POLL_INTERVAL_MS, undefined, context.streamGeneration);
   } catch (error) {
+    if (!await playbackCycleIsCurrent(context, stream.streamId)) return;
     await recordPollFailure(context, connection.poll_failures, error);
   }
 };

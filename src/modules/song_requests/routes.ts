@@ -5,7 +5,7 @@ import type { ModuleChatVoteStartResult, ModuleRouteEnvironment } from "../contr
 import { spotifySearchTracks, spotifyTrackById, SpotifyRequestError, type SpotifyEnvironment } from "./adapters/spotify";
 import { spotifyTrackIdFromInput } from "./domain/track";
 import { songVoteLabels } from "./domain/vote-labels";
-import { songRequestTrackFromSpotify } from "./adapters/d1";
+import { songRequestTrackFromSpotify, spotifySlotHeld } from "./adapters/d1";
 import { resolveUnknownRequest, latestSongRequestStreamId, recentSongRequests, recentSongVoteOutcomes } from "./adapters/d1";
 import { SONG_REQUESTS_CREDENTIAL_SECRET, SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM } from "./service";
 
@@ -22,9 +22,7 @@ const isModerator = (context: RouteContext): boolean => hasRequiredChannelRole(c
 const managerDenied = (context: RouteContext): Response => context.json({ error: "song_requests_manager_required" }, 403);
 const moderatorDenied = (context: RouteContext): Response => context.json({ error: "song_requests_moderator_required" }, 403);
 const spotifyEnvironment = (context: RouteContext): SpotifyEnvironment => context.env;
-const accessEnabled = async (context: RouteContext): Promise<boolean> => (await context.env.DB.prepare(
-  "SELECT 1 AS enabled FROM spotify_channel_access WHERE channel_id = ?",
-).bind(channel(context)).first()) !== null;
+const accessEnabled = async (context: RouteContext): Promise<boolean> => await spotifySlotHeld(context.env.DB, channel(context));
 const connectionRecord = async (context: RouteContext): Promise<{ state: string; error_message: string | null }> => (await context.env.DB.prepare(
   "SELECT state, error_message FROM song_requests_connections WHERE channel_id = ?",
 ).bind(channel(context)).first<{ state: string; error_message: string | null }>()) ?? { state: "not_connected", error_message: null };
@@ -99,18 +97,23 @@ songRequestsRoutes.get("/search", async (context) => {
   if (query.length === 0 || query.length > 200) return context.json({ error: "spotify_query_invalid" }, 400);
   let accessToken: string | null;
   try { accessToken = await token(context); } catch { return context.json({ error: "spotify_unavailable" }, 502); }
+  if (!await accessEnabled(context)) return context.json({ error: "spotify_not_enabled" }, 403);
   const state = await connectionRecord(context);
-  if (state.state !== "connected") return context.json({ error: `spotify_${state.state}`, message: state.error_message }, 409);
+  if (state.state !== "connected" && state.state !== "no_active_device") {
+    return context.json({ error: `spotify_${state.state}`, message: state.error_message }, 409);
+  }
   if (accessToken === null) return context.json({ error: "spotify_reconnect_required" }, 409);
+  let tracks;
   try {
     const id = spotifyTrackIdFromInput(query);
-    const tracks = id === null ? await spotifySearchTracks(spotifyEnvironment(context), accessToken, query) : [await spotifyTrackById(spotifyEnvironment(context), accessToken, id)];
-    return context.json({ tracks: tracks.map(songRequestTrackFromSpotify) });
+    tracks = id === null ? await spotifySearchTracks(spotifyEnvironment(context), accessToken, query) : [await spotifyTrackById(spotifyEnvironment(context), accessToken, id)];
   } catch (error) {
     if (error instanceof SpotifyRequestError) await updateConnectionFromRouteError(context, error);
     const status = error instanceof SpotifyRequestError ? error.status : 502;
     return context.json({ error: error instanceof SpotifyRequestError ? error.reason ?? `spotify_${String(status)}` : "spotify_unavailable" }, upstreamStatus(error));
   }
+  if (!await accessEnabled(context)) return context.json({ error: "spotify_not_enabled" }, 403);
+  return context.json({ tracks: tracks.map(songRequestTrackFromSpotify) });
 });
 
 songRequestsRoutes.post("/vote", async (context) => {
@@ -125,8 +128,11 @@ songRequestsRoutes.post("/vote", async (context) => {
   }
   let accessToken: string | null;
   try { accessToken = await token(context); } catch { return context.json({ error: "spotify_unavailable" }, 502); }
+  if (!await accessEnabled(context)) return context.json({ error: "spotify_not_enabled" }, 403);
   const connection = await connectionRecord(context);
-  if (connection.state !== "connected") return context.json({ error: "spotify_not_connected", message: connection.error_message }, 409);
+  if (connection.state !== "connected" && connection.state !== "no_active_device") {
+    return context.json({ error: "spotify_not_connected", message: connection.error_message }, 409);
+  }
   if (accessToken === null) return context.json({ error: "spotify_reconnect_required" }, 409);
   let tracks;
   try { tracks = await Promise.all(ids.map((id) => spotifyTrackById(spotifyEnvironment(context), accessToken, id as string))); }
@@ -134,21 +140,36 @@ songRequestsRoutes.post("/vote", async (context) => {
     if (error instanceof SpotifyRequestError) await updateConnectionFromRouteError(context, error);
     return context.json({ error: error instanceof SpotifyRequestError ? error.reason ?? "spotify_track_unavailable" : "spotify_unavailable" }, upstreamStatus(error));
   }
+  if (!await accessEnabled(context)) return context.json({ error: "spotify_not_enabled" }, 403);
   const labels = songVoteLabels(tracks);
   if (labels.length !== tracks.length) return context.json({ error: "song_vote_candidates_invalid" }, 400);
-  let started: ModuleChatVoteStartResult | undefined;
-  try { started = await context.get("startChatVote")?.(channel(context), { title: "Song vote", labels, durationSeconds: 90 }); }
-  catch (error) {
-    if (error instanceof RangeError) return context.json({ error: "song_vote_candidates_invalid" }, 400);
-    throw error;
-  }
-  if (started === undefined) return context.json({ error: "chat_vote_unavailable" }, 503);
-  if (started.status === "busy") return context.json({ error: "chat_vote_already_open" }, 409);
+  const startChatVote = context.get("startChatVote");
+  if (startChatVote === undefined) return context.json({ error: "chat_vote_unavailable" }, 503);
+  const ballotId = crypto.randomUUID();
   const now = new Date().toISOString();
   await context.env.DB.prepare(
     `INSERT INTO song_requests_votes (ballot_id, channel_id, stream_id, candidate_tracks_json, moderator_user_id, state, created_at)
      VALUES (?, ?, ?, ?, ?, 'open', ?)`,
-  ).bind(started.ballotId, channel(context), currentStreamId, JSON.stringify(tracks.map(songRequestTrackFromSpotify)), context.get("session").userId, now).run();
+  ).bind(ballotId, channel(context), currentStreamId, JSON.stringify(tracks.map(songRequestTrackFromSpotify)), context.get("session").userId, now).run();
+  const removeUnstartedMapping = async (): Promise<void> => {
+    await context.env.DB.prepare("DELETE FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ? AND state = 'open'")
+      .bind(channel(context), ballotId).run();
+  };
+  let started: ModuleChatVoteStartResult;
+  try { started = await startChatVote(channel(context), { ballotId, title: "Song vote", labels, durationSeconds: 90 }); }
+  catch (error) {
+    await removeUnstartedMapping();
+    if (error instanceof RangeError) return context.json({ error: "song_vote_candidates_invalid" }, 400);
+    throw error;
+  }
+  if (started.status === "busy") {
+    await removeUnstartedMapping();
+    return context.json({ error: "chat_vote_already_open" }, 409);
+  }
+  if (started.ballotId !== ballotId) {
+    await removeUnstartedMapping();
+    return context.json({ error: "chat_vote_unavailable" }, 503);
+  }
   return context.json({ ballotId: started.ballotId, tracks: tracks.map(songRequestTrackFromSpotify) }, 201);
 });
 

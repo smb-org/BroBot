@@ -768,12 +768,18 @@ authRouter.get("/auth/spotify/callback", async (context) => {
     if (token.refresh_token === undefined || token.refresh_token.length === 0) return oauthError(context, "spotify_callback_failed", 502);
     const write = await secret.prepareWrite(SONG_REQUESTS_CREDENTIAL_SECRET, credentials, {
       userId: session.userId,
-    }, now);
+      login: session.login,
+    }, now, false, true);
     const connection = context.env.DB.prepare(
-      `INSERT INTO song_requests_connections (channel_id, state, error_message, updated_at, poll_failures) VALUES (?, 'connected', NULL, ?, 0)
+      `INSERT INTO song_requests_connections (channel_id, state, error_message, updated_at, poll_failures)
+       SELECT ?, 'connected', NULL, ?, 0 WHERE changes() = 1
        ON CONFLICT (channel_id) DO UPDATE SET state = 'connected', error_message = NULL, updated_at = excluded.updated_at, poll_failures = 0`,
     ).bind(transaction.channelId, now);
-    await context.env.DB.batch([write, connection]);
+    const results = await context.env.DB.batch([write, connection]);
+    // D1 counts rows written by the panel revision triggers too, so test for "at least one".
+    if ((results[0]?.meta.changes ?? 0) < 1 || (results[1]?.meta.changes ?? 0) < 1) {
+      return oauthError(context, "spotify_channel_access_denied", 403);
+    }
     await notifyCommittedResources(context.env, transaction.channelId);
     const [stream, moduleActivation] = await Promise.all([
       context.env.DB.prepare("SELECT state FROM channel_stream_state WHERE channel_id = ?")

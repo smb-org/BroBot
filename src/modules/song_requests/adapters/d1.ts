@@ -91,7 +91,7 @@ const allowedTransitions: Readonly<Record<"new" | SongRequestState, readonly Son
   outcome_unknown: ["submitted", "failed"],
   rejected: [],
   removed: [],
-  failed: [],
+  failed: ["outcome_unknown"],
 };
 
 interface NewSongRequest {
@@ -112,6 +112,7 @@ export interface RequestTransition {
   now: string;
   failureReason?: string | null;
   streamId?: string | null;
+  activeStreamId?: string;
   expectedUpdatedBefore?: string;
   onlyIfOpenBallotId?: string;
   newRequest?: NewSongRequest;
@@ -157,6 +158,18 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
       conditions.push("updated_at < ?");
       bindings.push(input.expectedUpdatedBefore);
     }
+    if (input.activeStreamId !== undefined) {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM channel_stream_state
+         WHERE channel_id = ? AND state = 'online' AND stream_id = ?
+      )`);
+      conditions.push(`EXISTS (
+        SELECT 1 FROM channel_modules
+         WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1
+      )`);
+      conditions.push("EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)");
+      bindings.push(input.channelId, input.activeStreamId, input.channelId, input.channelId);
+    }
     transition = db.prepare(
       `UPDATE song_requests SET state = ?, failure_reason = ?, updated_at = ?,
          submitted_at = CASE WHEN ? = 'submitted' THEN ? ELSE submitted_at END,
@@ -165,7 +178,8 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
     ).bind(...bindings);
   }
   const results = await db.batch([transition, ...(input.companionStatements ?? [])]);
-  return results[0]?.meta.changes === 1 && results.slice(1).every((result) => result.meta.changes === 1);
+  // D1 counts rows written by the panel revision triggers too, so test for "at least one".
+  return (results[0]?.meta.changes ?? 0) > 0 && results.slice(1).every((result) => result.meta.changes > 0);
 };
 
 export const songRequestTrackFromSpotify = (track: SpotifyTrack): SongRequestTrack => {
@@ -181,6 +195,10 @@ export const songRequestTrackFromSpotify = (track: SpotifyTrack): SongRequestTra
     spotifyUrl: compact.spotifyUrl,
   };
 };
+
+export const spotifySlotHeld = async (db: D1Database, channelId: string): Promise<boolean> =>
+  (await db.prepare("SELECT 1 AS enabled FROM spotify_channel_access WHERE channel_id = ?")
+    .bind(channelId).first()) !== null;
 
 export const readSongRequest = async (db: D1Database, channelId: string, requestId: string): Promise<SongRequestRow | null> => {
   const row = await db.prepare(
@@ -296,7 +314,7 @@ export const finishVoteWithoutRequest = async (
     `UPDATE song_requests_votes SET state = ?, completed_at = ?
       WHERE channel_id = ? AND ballot_id = ? AND state = 'open'`,
   ).bind(state, now, channelId, ballotId).run();
-  return result.meta.changes === 1;
+  return result.meta.changes > 0;
 };
 
 export const createNowPlayingSnapshot = async (
@@ -306,7 +324,8 @@ export const createNowPlayingSnapshot = async (
   track: SpotifyTrack | null,
   now: string,
   progressMs?: number | null,
-): Promise<{ changed: boolean; revision: number; state: Record<string, unknown> | null }> => {
+  fence?: { activeStreamId: string },
+): Promise<{ changed: boolean; revision: number; state: Record<string, unknown> | null; committed: boolean }> => {
   const current = await db.prepare(
     "SELECT revision, track_json, request_id, progress_ms FROM song_requests_now_playing WHERE channel_id = ?",
   ).bind(channelId).first<{ revision: number; track_json: string | null; request_id: string | null; progress_ms: number | null }>();
@@ -327,11 +346,19 @@ export const createNowPlayingSnapshot = async (
   const changed = trackChanged || progressDropped;
   const nextProgress = track === null ? null : progressMs ?? current?.progress_ms ?? null;
   if (!changed && current !== null) {
-    await db.prepare("UPDATE song_requests_now_playing SET progress_ms = ? WHERE channel_id = ?")
-      .bind(nextProgress, channelId).run();
-    return { changed: false, revision: current.revision, state: null };
+    const progressUpdate = fence === undefined
+      ? db.prepare("UPDATE song_requests_now_playing SET progress_ms = ? WHERE channel_id = ?")
+        .bind(nextProgress, channelId)
+      : db.prepare(
+        `UPDATE song_requests_now_playing SET progress_ms = ? WHERE channel_id = ?
+          AND EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?)
+          AND EXISTS (SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1)
+          AND EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)`,
+      ).bind(nextProgress, channelId, channelId, fence.activeStreamId, channelId, channelId);
+    const result = await progressUpdate.run();
+    return { changed: false, revision: current.revision, state: null, committed: fence === undefined || result.meta.changes > 0 };
   }
-  if (!changed && current === null && track === null) return { changed: false, revision: 0, state: null };
+  if (!changed && current === null && track === null) return { changed: false, revision: 0, state: null, committed: true };
 
   let matched: SongRequestSqlRow | null = null;
   if (track !== null && changed) {
@@ -364,26 +391,39 @@ export const createNowPlayingSnapshot = async (
   };
   const serialized = state === null ? null : JSON.stringify(state);
   const revision = (current?.revision ?? 0) + Number(changed);
-  const snapshotWrite = db.prepare(
-    `INSERT INTO song_requests_now_playing (channel_id, revision, track_json, request_id, progress_ms, observed_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (channel_id) DO UPDATE SET revision = excluded.revision, track_json = excluded.track_json,
-       request_id = excluded.request_id, progress_ms = excluded.progress_ms, observed_at = excluded.observed_at`,
-  ).bind(channelId, revision, serialized, request?.requestId ?? (sameTrack ? current.request_id ?? null : null), nextProgress, now);
+  const snapshotWrite = fence === undefined
+    ? db.prepare(
+      `INSERT INTO song_requests_now_playing (channel_id, revision, track_json, request_id, progress_ms, observed_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (channel_id) DO UPDATE SET revision = excluded.revision, track_json = excluded.track_json,
+         request_id = excluded.request_id, progress_ms = excluded.progress_ms, observed_at = excluded.observed_at`,
+    ).bind(channelId, revision, serialized, request?.requestId ?? (sameTrack ? current.request_id ?? null : null), nextProgress, now)
+    : db.prepare(
+      `INSERT INTO song_requests_now_playing (channel_id, revision, track_json, request_id, progress_ms, observed_at)
+       SELECT ?, ?, ?, ?, ?, ?
+        WHERE EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?)
+          AND EXISTS (SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1)
+          AND EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)
+       ON CONFLICT (channel_id) DO UPDATE SET revision = excluded.revision, track_json = excluded.track_json,
+         request_id = excluded.request_id, progress_ms = excluded.progress_ms, observed_at = excluded.observed_at`,
+    ).bind(channelId, revision, serialized, request?.requestId ?? (sameTrack ? current.request_id ?? null : null), nextProgress, now,
+      channelId, fence.activeStreamId, channelId, channelId);
   if (request !== null) {
-    await transitionRequest(db, {
+    const committed = await transitionRequest(db, {
       channelId,
       requestId: request.requestId,
       fromState: "submitted",
       toState: "observed_playing",
       now,
       streamId,
+      ...(fence === undefined ? {} : { activeStreamId: fence.activeStreamId }),
       companionStatements: [snapshotWrite],
     });
-  } else {
-    await snapshotWrite.run();
+    return { changed: committed, revision, state: committed ? state : null, committed };
   }
-  return { changed: true, revision, state };
+  const result = await snapshotWrite.run();
+  const committed = result.meta.changes > 0;
+  return { changed: committed, revision, state: committed ? state : null, committed };
 };
 
 export const clearSongRequestsForStreamEnd = async (
