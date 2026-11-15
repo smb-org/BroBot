@@ -130,6 +130,80 @@ Worker mountet registrierte Router kanalbezogen unter
 `channel_modules` eine Zeile für den jeweiligen `channel_id` und `module_id`
 mit `enabled = 1` steht. Dafür ist kein Deploy erforderlich.
 
+Das Modul `song_requests` kapselt Spotify-HTTP-Aufrufe im Adapter
+`src/modules/song_requests/adapters/spotify.ts`. Die Callback-Route
+`GET /auth/spotify/callback` verwendet den Authorization-Code-Flow mit
+Client-Secret und HTTP-Basic-Authentisierung, ohne PKCE; der Rücksprung ist
+`${PUBLIC_ORIGIN}/auth/spotify/callback`. OAuth-State ist einmalig und an Kanal
+und startendes Mitglied gebunden. Der Callback prüft die aktuelle
+Kanalverwaltungsrolle erneut. Die verschlüsselte Modul-Secret-Zeile enthält
+Access- und Refresh-Token. Ausschließlich das ChannelObject erneuert Tokens;
+Worker-Routen lesen den Access-Token über einen ChannelObject-RPC. Eine
+Rotation ersetzt den Ciphertext nur bei passender Version. Ändert sich die
+Version zwischen Lesen und Schreiben, liest das Objekt den gespeicherten Token
+neu und verwendet keinen abgelaufenen Token. `invalid_grant` setzt den Zustand
+auf „erneut verbinden“.
+
+Der Plattformbetreiber gibt höchstens fünf Kanäle für Spotify frei. Im Cockpit
+startet ein Manager eine Abstimmung mit zwei bis fünf bestätigten Spotify-
+Tracks. `chat_voting` bleibt Eigentümer des Ballots und meldet das abgeschlossene
+Ergebnis über die schmale dauerhafte Contract-Aktion `chat_vote.result`; es
+importiert `song_requests` nicht. Ein eindeutiger Gewinner beansprucht die
+eindeutige Operation `mod_vote:<ballotId>` als `approved` im D1-Wunschbuch und
+plant den keyed Alarm `submit:<requestId>`. Dieser Alarm reiht den Track ein
+und sendet höchstens eine zusätzliche, automatisierte Statuszeile, die das
+Einreihen oder den Fehlergrund nennt. Das Ergebnis der `chat_voting`-Abstimmung
+bleibt davon unabhängig: Dispatchfehler werden protokolliert und blockieren
+weder das Schließen noch die Ergebnisansage. `transitionRequest` ist der einzige
+Schreiber von Wunschzuständen, validiert Übergänge und setzt `submitted_at` und
+weitere Übergangszeitpunkte. Ein `submitting`-Eintrag, der im Poll-Alarm älter
+als 60 Sekunden ist, wird als `outcome_unknown` mit `submit_interrupted`
+abgeschlossen. Klare Fehler werden `failed`; ein Timeout, Netzwerkfehler oder
+Serverfehler wird `outcome_unknown` und niemals automatisch erneut gesendet.
+Manager können diesen Zustand im Cockpit auf „gesendet“ oder „fehlgeschlagen“
+auflösen.
+
+Das Wunschbuch ist BroBots Zustandsliste, kein Spiegel der Spotify-Warteschlange:
+Spotify bietet für einzelne Einträge weder Idempotenz-Schlüssel noch Entfernen
+oder Umsortieren. Einreihen und Wiedergabesteuerung brauchen beim Streamer ein
+Premium-Konto und ein aktives Spotify-Gerät; BroBot startet Spotify nicht selbst.
+Spotify-Entwicklerregeln verlangen eine sichtbare Spotify-Nennung mit Link auf
+den Track oder das Cover. Die Integration synchronisiert Musik nicht mit dem
+Videobild und bewirbt keine Übertragung von Spotify-Audio.
+
+Solange der Stream läuft und das Modul aktiv ist, fragt ein kanalschlüssel-
+gebundener Modul-Alarm den aktuellen Spotify-Track alle zwölf Sekunden ab.
+Bei einer nicht verbundenen Integration, einem fehlenden Token oder einem
+vorübergehenden Fehler plant er den nächsten Versuch mit wachsendem Abstand bis
+zu fünf Minuten. Der Poll wird nach erfolgreichem OAuth-Callback und beim
+Aktivieren während eines laufenden Streams geplant; nur Stream-Ende oder das
+Deaktivieren des Moduls räumt ihn ab. Beim Deaktivieren werden offene Wünsche
+über `transitionRequest` abgelehnt oder fehlgeschlagen. Wird der Plattform-
+Spotify-Slot entzogen, löscht BroBot die gespeicherten Zugangsdaten und setzt
+den Verbindungsstatus auf „nicht verbunden“.
+
+Der Playback-Snapshot speichert außerdem `progress_ms`. Sinkt der Fortschritt
+bei demselben Track gegenüber der letzten Abfrage, gilt das als neuer Lauf;
+BroBot ordnet dann den nächsten ältesten eingereihten Wunsch dieses Tracks zu.
+Beim Stream-Ende bereinigt es auch offene Wunschzeilen ohne `stream_id`.
+Fehler, eine fehlende Verbindung oder ein fehlender Token planen den nächsten
+Versuch mit Backoff bis höchstens fünf Minuten; 429 berücksichtigt
+`Retry-After`. Nach einem OAuth-Callback und beim Aktivieren des Moduls während
+eines laufenden Streams wird der Poll-Alarm ebenfalls geplant. Nur
+`stream.offline` und die ausdrückliche Modul-Deaktivierung löschen ihn. Der
+aktuelle `progress_ms` wird pro Poll gespeichert, ohne die öffentliche
+Overlay-Revision zu erhöhen. Sinkt er beim selben Track gegenüber dem letzten
+Poll, gilt das als neuer Wiedergabelauf: der nächste älteste `submitted`-
+Eintrag desselben Tracks in derselben Stream-ID wird `observed_playing`. Ältere
+Streams können spätere Wiedergabe nicht beanspruchen. Beim `stream.offline`
+werden unbestätigte `submitted`-Einträge `not_observed`; offene oder unklare
+Wünsche werden über `transitionRequest` abgeschlossen. Auch Zeilen ohne
+Stream-ID werden bereinigt. Wünsche, deren Abstimmung während Offline endet,
+werden mit `stream_offline` abgelehnt, nicht als Abstimmung ohne Stimmen
+behandelt. Das Overlay lädt nach einem kleinen Revisionshinweis seinen Snapshot
+neu. Albumcover kommen von `i.scdn.co` und Titel sowie sichtbare Spotify-Nennung
+verlinken zurück zu Spotify.
+
 Module stellen Vorlagenwerte über `resolveTemplateValues(names, context)` und
 deklarierte Variablen über `templateFields` oder `templateVariables` bereit.
 Der Host extrahiert die Namen aus dem ursprünglichen Text, sammelt passende

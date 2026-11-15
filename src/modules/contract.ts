@@ -539,6 +539,27 @@ export type ModuleAction =
     recipientConfig?: { field: string; value: string };
   };
 
+/** Durable, host-dispatched actions shared by modules without importing one another. */
+export type ModuleDurableAction = {
+  kind: "chat_vote.result";
+  targetModuleId: "song_requests";
+  targetHandlerKey: string;
+  ballotId: string;
+  labels: readonly string[];
+  counts: readonly number[];
+  closedAt: string;
+};
+
+export interface ModuleChatVoteStartRequest {
+  title: string;
+  labels: readonly string[];
+  durationSeconds: number;
+}
+
+export type ModuleChatVoteStartResult =
+  | { status: "started"; ballotId: string }
+  | { status: "busy" };
+
 /**
  * What a module describes as the result of processing. It executes nothing
  * — per decision 0001 §13 it only describes desired actions, and only the
@@ -630,6 +651,8 @@ export interface ModuleSecretAccess {
   prepareWrite: (name: string, value: string, actor: ModuleMutationActor, now: string, requirePreviousChange?: boolean) => Promise<D1PreparedStatement>;
   /** The returned statement carries the management-role guard and can depend on the preceding batched mutation. */
   prepareDelete: (name: string, actor: ModuleMutationActor, now: string, requirePreviousChange?: boolean) => D1PreparedStatement;
+  /** Replaces an existing secret during token rotation only if its encrypted version is unchanged. */
+  prepareRotationWrite?: (name: string, value: string, expectedVersion: string, now: string) => Promise<D1PreparedStatement>;
 }
 
 /** Read-only view for resolving module template values, including version-guarded dependent writes. */
@@ -669,6 +692,8 @@ export interface ModuleAlarmPlan {
 
 export interface ModuleExecutionContext {
   DB: D1Database;
+  /** Encrypted module secrets scoped by the host to this event's channel and module. */
+  secrets?: ModuleSecretAccess;
   /** Worker environment used for authenticated host integrations. */
   environment?: Env;
   /** Twitch broadcaster ID for the event or redemption being processed. */
@@ -849,6 +874,8 @@ export interface ModuleAlarmContext {
   ) => Promise<"retain" | undefined>;
   /** Reconciles timer config and trigger inputs inside the channel object. */
   reconcileTimerSchedules?: (reason: ModuleScheduleInputChangeReason) => Promise<void>;
+  /** Sends a narrow durable action through the host to modules that declare a handler. */
+  dispatchDurableAction?: (action: ModuleDurableAction) => Promise<void>;
   /** Shared per-dispatch allowance for external provider requests. */
   externalFetchBudget?: ModuleExternalFetchBudget;
   /** Absolute statistics windows and age-bounded word counts held in the channel Durable Object. */
@@ -897,6 +924,8 @@ export interface ModuleAlarmContext {
     identity?: ModuleAlarmIdentity,
     /** Serialized lifecycle modules can omit this; the ChannelObject allocates it with the alarm write. */
     planSequence?: number,
+    /** Schedules a keyed alarm through a sibling handler registered by this module. */
+    handlerKey?: string,
   ) => Promise<void>;
   clear: (
     key: string,
@@ -2438,6 +2467,8 @@ export interface ModuleRouteVariables {
     alarmKey: string,
     invocation?: unknown,
   ) => Promise<unknown>;
+  /** Starts a persisted options ballot owned by chat_voting; callers supply only validated labels and timing. */
+  startChatVote?: (channelId: string, request: ModuleChatVoteStartRequest) => Promise<ModuleChatVoteStartResult>;
   prepareModuleAudit: PrepareModuleAudit;
   writeModuleAudit: WriteModuleAudit;
   listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];
@@ -2641,6 +2672,14 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   /** Lifecycle inputs this optional module must still receive while channel automation is paused. */
   pauseSafeEventSubTypes?: readonly string[];
   routes?: Hono<ModuleRouteEnvironment>;
+  /** Called by the host to start an options ballot through the chat_voting owner. */
+  startChatVote?: (
+    context: ModuleExecutionContext,
+    request: ModuleChatVoteStartRequest,
+    actor: ModuleMutationActor,
+  ) => Promise<ModuleChatVoteStartResult>;
+  /** Receives host-dispatched durable module actions such as a closed chat ballot. */
+  handleDurableAction?: (context: ModuleAlarmContext, action: ModuleDurableAction) => Promise<void>;
   /** Overlay presentation declarations, with view and editor chunks loaded on demand. */
   overlayElements?: readonly ModuleOverlayElementDefinition[];
   /** Realtime element kinds a later overlay slice will implement without registering an element UI yet. */

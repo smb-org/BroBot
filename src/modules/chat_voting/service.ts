@@ -786,6 +786,20 @@ export const closeChatVoteFromAlarm = async (
     deadlineRevision: closedVote.deadlineRevision ?? 0,
   });
 
+  try {
+    await context.dispatchDurableAction?.({
+      kind: "chat_vote.result",
+      targetModuleId: "song_requests",
+      targetHandlerKey: "submit",
+      ballotId: pollId,
+      labels: [...closedVote.labels],
+      counts: [...(closedVote.counts ?? snapshot.counts)],
+      closedAt: closedVote.closedAt ?? new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(`Song vote result dispatch failed for ballot ${pollId}.`, error);
+  }
+
   if (settings.announceResult && closedVote.resultDeliveryPending) {
     const language = await context.channelLanguage();
     const deliveryVote = await repository.byId(context.channelId, pollId);

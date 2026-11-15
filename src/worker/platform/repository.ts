@@ -56,6 +56,7 @@ export interface PlatformAuditPage {
 type PlatformAction =
   | "channel.released"
   | "channel.full_consent_changed"
+  | "platform.spotify_access_changed"
   | "member.added"
   | "member.role_changed"
   | "member.removed";
@@ -97,8 +98,8 @@ const prepareAuditEntry = (
   timestamp: string,
   channelId: string,
   action: PlatformAction,
-  before: PlatformChannel | ChannelMemberRecord | null,
-  after: PlatformChannel | ChannelMemberRecord | null,
+  before: object | null,
+  after: object | null,
 ): D1PreparedStatement => prepareAudit(
   db,
   actorId,
@@ -387,6 +388,91 @@ export const removePlatformMember = async (
   );
   const results = await db.batch([mutation, audit]);
   return (results[0]?.meta.changes ?? 0) > 0;
+};
+
+export interface PlatformSpotifyAccess {
+  slot: number;
+  channelId: string;
+  login: string;
+  displayName: string;
+  enabledAt: string;
+}
+
+export const listPlatformSpotifyAccess = async (db: D1Database): Promise<{
+  usedSlots: number;
+  limit: 5;
+  channels: PlatformSpotifyAccess[];
+}> => {
+  const result = await db.prepare(
+    `SELECT access.slot, access.channel_id, channel.login, channel.display_name, access.enabled_at
+       FROM spotify_channel_access AS access
+       JOIN channels AS channel ON channel.channel_id = access.channel_id
+      ORDER BY access.slot`,
+  ).all<{ slot: number; channel_id: string; login: string; display_name: string; enabled_at: string }>();
+  const channels = result.results.map((row) => ({
+    slot: row.slot,
+    channelId: row.channel_id,
+    login: row.login,
+    displayName: row.display_name,
+    enabledAt: row.enabled_at,
+  }));
+  return { usedSlots: channels.length, limit: 5, channels };
+};
+
+export const setPlatformSpotifyAccess = async (
+  db: D1Database,
+  actor: ActorContext,
+  channelId: string,
+  enabled: boolean,
+  timestamp: string,
+): Promise<"enabled" | "disabled" | "unchanged" | "limit"> => {
+  const existing = await db.prepare(
+    "SELECT slot FROM spotify_channel_access WHERE channel_id = ?",
+  ).bind(channelId).first<{ slot: number }>();
+  if (enabled && existing !== null || !enabled && existing === null) return "unchanged";
+  const mutation = enabled
+    ? db.prepare(
+      `INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at)
+       SELECT candidate.slot, ?, ?, ?
+         FROM (SELECT 1 AS slot UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5) AS candidate
+        WHERE NOT EXISTS (SELECT 1 FROM spotify_channel_access WHERE slot = candidate.slot)
+          AND NOT EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)
+        ORDER BY candidate.slot LIMIT 1
+       ON CONFLICT DO NOTHING`,
+    ).bind(channelId, actor.userId, timestamp, channelId)
+    : db.prepare("DELETE FROM spotify_channel_access WHERE channel_id = ?").bind(channelId);
+  const cleanup = enabled ? [] : [
+    db.prepare(
+      `DELETE FROM module_secrets
+        WHERE channel_id = ? AND module_id = 'song_requests' AND name = 'spotify_credentials'
+          AND NOT EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)`,
+    ).bind(channelId, channelId),
+    db.prepare(
+      `INSERT INTO song_requests_connections (channel_id, state, error_message, updated_at)
+       SELECT ?, 'not_connected', NULL, ?
+        WHERE NOT EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)
+       ON CONFLICT (channel_id) DO UPDATE SET state = 'not_connected', error_message = NULL, updated_at = excluded.updated_at`,
+    ).bind(channelId, timestamp, channelId),
+  ];
+  const audit = prepareAuditEntry(
+    db,
+    actor.userId,
+    timestamp,
+    channelId,
+    "platform.spotify_access_changed",
+    existing === null ? null : { channelId, slot: existing.slot, enabled: true },
+    enabled ? { channelId, enabled: true } : null,
+  );
+  const result = await db.batch([mutation, ...cleanup, audit]);
+  if ((result[0]?.meta.changes ?? 0) === 0) {
+    if (enabled) {
+      const count = await db.prepare("SELECT COUNT(*) AS count FROM spotify_channel_access")
+        .first<{ count: number }>();
+      return (count?.count ?? 0) >= 5 ? "limit" : "unchanged";
+    }
+    return "unchanged";
+  }
+  return enabled ? "enabled" : "disabled";
 };
 
 export const listPlatformAudit = async (

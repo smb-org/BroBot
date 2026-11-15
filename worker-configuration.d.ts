@@ -16,6 +16,8 @@ interface __BaseEnv_Env {
 	TOKEN_ENCRYPTION_KEYS: string;
 	OVERLAY_TOKEN_PEPPER: string;
 	PLATFORM_USER_IDS: string;
+	SPOTIFY_CLIENT_ID: string;
+	SPOTIFY_CLIENT_SECRET: string;
 	CHANNEL: DurableObjectNamespace<import("./src/worker/index").ChannelObject>;
 }
 declare namespace Cloudflare {
@@ -38,6 +40,8 @@ declare namespace Cloudflare {
 		TOKEN_ENCRYPTION_KEYS: string;
 		OVERLAY_TOKEN_PEPPER: string;
 		PLATFORM_USER_IDS: string;
+		SPOTIFY_CLIENT_ID: string;
+		SPOTIFY_CLIENT_SECRET: string;
 		CHANNEL: DurableObjectNamespace<import("./src/worker/index").ChannelObject>;
 	}
 	interface ProductionEnv {
@@ -55,6 +59,8 @@ declare namespace Cloudflare {
 		TOKEN_ENCRYPTION_KEYS: string;
 		OVERLAY_TOKEN_PEPPER: string;
 		PLATFORM_USER_IDS: string;
+		SPOTIFY_CLIENT_ID: string;
+		SPOTIFY_CLIENT_SECRET: string;
 		CHANNEL: DurableObjectNamespace<import("./src/worker/index").ChannelObject>;
 	}
 	interface Env extends __BaseEnv_Env {}
@@ -64,7 +70,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "APP_ENV" | "TIMEZONE" | "TWITCH_BOT_LOGIN" | "TWITCH_CLIENT_ID" | "TWITCH_CLIENT_SECRET" | "TWITCH_EVENTSUB_SECRET" | "PUBLIC_ORIGIN" | "SESSION_COOKIE_KEYS" | "TOKEN_ENCRYPTION_KEYS" | "OVERLAY_TOKEN_PEPPER" | "PLATFORM_USER_IDS">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "APP_ENV" | "TIMEZONE" | "TWITCH_BOT_LOGIN" | "TWITCH_CLIENT_ID" | "TWITCH_CLIENT_SECRET" | "TWITCH_EVENTSUB_SECRET" | "PUBLIC_ORIGIN" | "SESSION_COOKIE_KEYS" | "TOKEN_ENCRYPTION_KEYS" | "OVERLAY_TOKEN_PEPPER" | "PLATFORM_USER_IDS" | "SPOTIFY_CLIENT_ID" | "SPOTIFY_CLIENT_SECRET">> {}
 }
 
 // Begin runtime types

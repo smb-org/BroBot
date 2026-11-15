@@ -61,6 +61,7 @@ import { modulePoints } from "../module-points";
 import { moduleTempVipRoutes } from "../module-temp-vips";
 import { listChannelVips } from "../twitch/vips";
 import { createModuleSecretAccess } from "../module-secrets";
+import { createModuleActionExecutionContext } from "../module-action-context";
 import { liftModerationBan } from "../moderation";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../../modules/contracts/text-block-write-guard";
 import { effectiveEventTemplateDeclarations } from "../../modules/contracts/text-block-validation";
@@ -372,6 +373,16 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     return invocation === undefined
       ? object.runModuleAlarm(moduleId, handlerKey, alarmKey)
       : object.runModuleAlarm(moduleId, handlerKey, alarmKey, invocation);
+  });
+  context.set("startChatVote", async (channelId, request) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Chat vote access must use the authorized route channel.");
+    const chatVoting = MODULES.find((module) => module.id === "chat_voting");
+    if (chatVoting?.startChatVote === undefined) throw new Error("The chat vote service is unavailable.");
+    return await chatVoting.startChatVote(
+      createModuleActionExecutionContext(context.env, channelId, "chat_voting"),
+      request,
+      actorOf(context),
+    );
   });
   context.set("writeModuleDiagnostics", writeModuleDiagnostics);
   context.set("broadcasterHasScope", broadcasterHasScope);

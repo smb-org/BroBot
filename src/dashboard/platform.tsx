@@ -19,9 +19,11 @@ import {
   getPlatformAudit,
   getPlatformMembers,
   getPlatformOverview,
+  getPlatformSpotifyAccess,
   PanelApiError,
   fetchPlatformTwitchUserSuggestions,
   setPlatformFullConsent,
+  setPlatformSpotifyChannel,
 } from "./api";
 import { platformActionLabel, platformTexts, roleLabel } from "./labels";
 import { apiErrorText, dashboardCommonTexts, formatTimestamp, formatNumber } from "./locale";
@@ -130,6 +132,8 @@ const ChannelInspector = ({
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<PanelMember | null>(null);
   const [consentInProgress, setConsentInProgress] = useState(false);
+  const [spotifyAccess, setSpotifyAccess] = useState<Awaited<ReturnType<typeof getPlatformSpotifyAccess>> | null>(null);
+  const [spotifyBusy, setSpotifyBusy] = useState(false);
   const notifiedMembersError = useRef<string | null>(null);
 
   const loadMembers = async (): Promise<void> => {
@@ -159,6 +163,15 @@ const ChannelInspector = ({
     return () => { aborted = true; };
   }, [channel.channelId, onAuthenticationRequired, texts.error]);
 
+  const reloadSpotifyAccess = useCallback(async (): Promise<void> => {
+    try { setSpotifyAccess(await getPlatformSpotifyAccess()); }
+    catch (error: unknown) {
+      if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
+      notify({ tone: "error", message: errorText(error, texts.error) });
+    }
+  }, [onAuthenticationRequired, texts.error]);
+  useEffect(() => { void reloadSpotifyAccess(); }, [channel.channelId, reloadSpotifyAccess]);
+
   useEffect(() => {
     if (members.error === null) {
       notifiedMembersError.current = null;
@@ -180,6 +193,19 @@ const ChannelInspector = ({
     } finally {
       setConsentInProgress(false);
     }
+  };
+
+  const spotifyChannel = spotifyAccess?.channels.find((entry) => entry.channelId === channel.channelId);
+  const toggleSpotify = async (): Promise<void> => {
+    if (spotifyAccess === null) return;
+    setSpotifyBusy(true);
+    try {
+      await setPlatformSpotifyChannel(channel.channelId, spotifyChannel === undefined);
+      await reloadSpotifyAccess();
+    } catch (error: unknown) {
+      notify({ tone: "error", message: error instanceof PanelApiError && error.code === "spotify_access_limit" ? texts.spotifyLimit : errorText(error, texts.error) });
+      if (error instanceof PanelApiError && error.status === 401) onAuthenticationRequired();
+    } finally { setSpotifyBusy(false); }
   };
 
   const changeRole = async (member: PanelMember, role: "manager" | "operator"): Promise<void> => {
@@ -229,6 +255,13 @@ const ChannelInspector = ({
         />
       </section>
       <InvitationLink channel={channel} />
+      <section className="config-section platform-inspector-section" aria-label={texts.spotifyAccess}>
+        <div className="section-heading"><h3>{texts.spotifyAccess}</h3><span className="muted">{spotifyAccess === null ? "…" : texts.spotifyUsedSlots(String(spotifyAccess.usedSlots), String(spotifyAccess.limit))}</span></div>
+        <p className="muted">{spotifyAccess?.channels.map(({ slot, login }) => `${slot}. @${login}`).join(" · ") || "—"}</p>
+        <Button type="button" variant="secondary" disabled={spotifyBusy || spotifyAccess === null || spotifyChannel === undefined && spotifyAccess.usedSlots >= spotifyAccess.limit} onClick={() => { void toggleSpotify(); }}>
+          {spotifyChannel === undefined ? texts.spotifyEnabled : texts.spotifyDisabled}
+        </Button>
+      </section>
       <section className="config-section platform-inspector-section" aria-label={texts.addMember}>
         <div className="section-heading"><h3>{texts.addMember}</h3></div>
         <MemberGrantEditor

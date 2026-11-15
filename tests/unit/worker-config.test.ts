@@ -50,6 +50,8 @@ const environment = (
   SESSION_ENCRYPTION_KEYS: keyRing(2),
   OVERLAY_TOKEN_PEPPER: pepper,
   PLATFORM_USER_IDS: "[]",
+  SPOTIFY_CLIENT_ID: "test-spotify-client-id",
+  SPOTIFY_CLIENT_SECRET: "test-spotify-client-secret",
   ...overrides,
 } as Env);
 

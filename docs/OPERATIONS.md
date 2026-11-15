@@ -2,7 +2,7 @@
 
 ## Erstaufsetzen
 
-1. In der [Twitch Developer Console](https://dev.twitch.tv/console/apps) eine Twitch-Anwendung anlegen. Client-ID und Client-Secret gehören in den sicheren Betreiberbestand. Die spätere OAuth-Callback-URL muss unter `PUBLIC_ORIGIN` auf `/auth/twitch/callback` zeigen.
+1. In der [Twitch Developer Console](https://dev.twitch.tv/console/apps) eine Twitch-Anwendung anlegen. Client-ID und Client-Secret gehören in den sicheren Betreiberbestand. Die spätere OAuth-Callback-URL muss unter `PUBLIC_ORIGIN` auf `/auth/twitch/callback` zeigen. Für Spotify die zentrale Development-Mode-App verwenden und für Staging sowie Produktion `${PUBLIC_ORIGIN}/auth/spotify/callback` als Redirect-URI registrieren. Development Mode erlaubt höchstens fünf Spotify-Konten auf der Allowlist; das App-Eigentümerkonto braucht Premium. Der Plattformbetreiber kann höchstens fünf BroBot-Kanäle freischalten. Streamer benötigen für das Einreihen Premium und ein aktives Spotify-Gerät; Zuschauer verbinden Spotify nicht.
 2. Für jede Umgebung eine D1-Datenbank erzeugen, zum Beispiel:
 
    ```bash
@@ -23,11 +23,21 @@
    `TWITCH_EVENTSUB_SECRET` hat dasselbe Format; sein aktiver Eintrag signiert
    neue Abonnements, ausgemusterte Einträge werden während der Rotation noch
    gelesen. Für `OVERLAY_TOKEN_PEPPER` einen einzelnen, getrennten Wert und
-   für die übrigen Variablen echte Betreiber-Secrets festlegen. Das über
-   Client-Credentials bezogene App Access Token wird vom Worker verschlüsselt
-   in D1 zwischengespeichert und vor Ablauf erneuert; dafür gibt es kein
-   Refresh-Token und kein zusätzliches Secret. Die
-   Beispieldateien zeigen die genaue JSON-Struktur.
+   für die übrigen Variablen echte Betreiber-Secrets festlegen. `SPOTIFY_CLIENT_ID`
+   und `SPOTIFY_CLIENT_SECRET` sind Zugangsdaten der zentralen Spotify-App und
+   werden nur als Worker-Secrets gesetzt. Die lokale Beispielkonfiguration
+   enthält dafür nicht funktionsfähige Testwerte. Der Authorization-Code-Flow
+   mit Client-Secret und HTTP-Basic-Authentisierung tauscht die
+   Streamer-Autorisierung ein; PKCE wird nicht verwendet. Access- und
+   Refresh-Token werden je Kanal im verschlüsselten Modul-Secret gespeichert.
+   Nur das ChannelObject erneuert Access-Tokens; Worker-Routen beziehen sie
+   über einen ChannelObject-RPC. Kommt bei einer Erneuerung kein neues
+   Refresh-Token zurück, bleibt das bisherige erhalten. Bei einem Konflikt der
+   D1-Rotation wird der gespeicherte Token erneut gelesen und ein abgelaufener
+   Token nicht verwendet. `invalid_grant` erfordert eine neue Verbindung. Die
+   Beispieldateien zeigen die lokale Struktur. Wird der Plattform-Slot eines
+   Kanals entzogen, löscht BroBot dessen gespeicherte Spotify-Zugangsdaten und
+   setzt den Verbindungsstatus auf „nicht verbunden“.
 4. Für lokal `.dev.vars.example` nach `.dev.vars` kopieren und die Platzhalter ersetzen. Die produktiven Staging- und Production-Secrets werden einmalig mit `wrangler secret put` in Cloudflare gesetzt. `.env.staging` und `.env.production` bleiben nur als sicherer Betreiberbestand für den ausdrücklich benannten lokalen Notfallweg erhalten.
 5. Einen neuen Kanal gibt der Betreiber frei, indem er ihn in `channels` anlegt
    und den Broadcaster in `channel_members` einträgt. Der Bot wird anschließend
@@ -124,6 +134,24 @@ immer einen Zugang zu einem gespeicherten Overlay.
 | `SESSION_COOKIE_KEYS` | Schlüsselsatz für die Signatur der Session-Cookies | JSON `{"active":{"id":"...","key":"..."},"retired":[...]}`, Schlüssel 32 Byte base64url |
 | `TOKEN_ENCRYPTION_KEYS` | Schlüsselsatz für verschlüsselte Twitch-Login- und Bot-Tokens | JSON `{"active":{"id":"...","key":"..."},"retired":[...]}`, Schlüssel 32 Byte base64url |
 | `OVERLAY_TOKEN_PEPPER` | Pepper für die Hashes widerrufbarer Overlay-Tokens | 32 Byte base64url |
+| `SPOTIFY_CLIENT_ID` | Client-ID der zentralen Spotify-Development-App | Zeichenkette aus der Spotify Developer Console |
+| `SPOTIFY_CLIENT_SECRET` | Client-Secret derselben Spotify-App für den Authorization-Code-Austausch | vertrauliche Zeichenkette aus der Spotify Developer Console |
+
+Für lokale Läufe stehen die Namen mit nicht funktionsfähigen Werten in
+`.dev.vars.example`; lokal werden sie in `.dev.vars` gesetzt. Für Staging und
+Produktion fragt Wrangler die Werte interaktiv ab:
+
+```bash
+pnpm exec wrangler secret put SPOTIFY_CLIENT_ID --env staging
+pnpm exec wrangler secret put SPOTIFY_CLIENT_SECRET --env staging
+pnpm exec wrangler secret put SPOTIFY_CLIENT_ID --env production
+pnpm exec wrangler secret put SPOTIFY_CLIENT_SECRET --env production
+```
+
+Diese Worker-Secrets enthalten nur die App-Zugangsdaten. Streamer-Access- und
+Refresh-Tokens liegen je Kanal im verschlüsselten Modul-Secret `song_requests`;
+sie gehören nicht in die Wrangler-Konfiguration. Die Erneuerung erfolgt nur im
+ChannelObject; Worker-Routen lesen den Access-Token über dessen RPC.
 
 Die vier Schlüsselwerte (`TWITCH_EVENTSUB_SECRET`, `SESSION_COOKIE_KEYS`,
 `TOKEN_ENCRYPTION_KEYS` und `OVERLAY_TOKEN_PEPPER`) werden mit dem im
@@ -157,7 +185,7 @@ Betreiberbestand verschwinden.
 
 ### Cloudflare-Secrets, CI und GitHub
 
-Die sieben Anwendungs-Secrets werden je Umgebung einmalig beziehungsweise bei
+Die Anwendungs-Secrets werden je Umgebung einmalig beziehungsweise bei
 einer Rotation direkt in Cloudflare gepflegt. `wrangler secret put` fragt den
 Wert interaktiv ab; Secret-Werte nicht in Befehlszeilen, Shell-Historien oder
 Logs schreiben:
@@ -171,7 +199,9 @@ for environment in staging production; do
     PUBLIC_ORIGIN \
     SESSION_COOKIE_KEYS \
     TOKEN_ENCRYPTION_KEYS \
-    OVERLAY_TOKEN_PEPPER; do
+    OVERLAY_TOKEN_PEPPER \
+    SPOTIFY_CLIENT_ID \
+    SPOTIFY_CLIENT_SECRET; do
     pnpm exec wrangler secret put "$name" --env "$environment"
   done
 done

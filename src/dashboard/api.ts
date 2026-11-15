@@ -4,6 +4,7 @@ import type {
   PanelPlatformMembersResponse,
   PanelPlatformAuditResponse,
   PanelPlatformOverviewResponse,
+  PanelSpotifyAccessResponse,
   PanelChannelOverview,
   PanelChannelLocation,
   PanelChannelControls,
@@ -286,6 +287,15 @@ export const fetchChannels = (signal?: AbortSignal): Promise<PanelChannelsRespon
 
 export const getPlatformOverview = (): Promise<PanelPlatformOverviewResponse> =>
   requestJson<PanelPlatformOverviewResponse>("/api/platform");
+
+export const getPlatformSpotifyAccess = (): Promise<PanelSpotifyAccessResponse> =>
+  requestJson<PanelSpotifyAccessResponse>("/api/platform/spotify-channels");
+
+export const setPlatformSpotifyChannel = (channelId: string, enabled: boolean): Promise<{ enabled: boolean }> =>
+  requestMutation(`/api/platform/spotify-channels/${encodeURIComponent(channelId)}`, "PATCH", { enabled });
+
+export const startSongRequestVote = (channelId: string, trackIds: readonly string[]): Promise<{ ballotId: string }> =>
+  requestMutation(`${modulePath(channelId, "song_requests")}/vote`, "POST", { trackIds });
 
 export const fetchPlatformTwitchUserSuggestions = (
   query: string,

@@ -27,6 +27,8 @@ describe("Secret name drift", () => {
       "TOKEN_ENCRYPTION_KEYS",
       "OVERLAY_TOKEN_PEPPER",
       "PLATFORM_USER_IDS",
+      "SPOTIFY_CLIENT_ID",
+      "SPOTIFY_CLIENT_SECRET",
     ];
     const config = {
       secrets: { required: [...required] },

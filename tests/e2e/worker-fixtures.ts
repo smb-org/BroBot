@@ -18,6 +18,7 @@ const keyRing = (id: string, byte: number): string => JSON.stringify({
 /** Port of the e2e wrangler worker; override with WORKER_PORT to run checks in parallel. */
 export const e2eWorkerPort = process.env.WORKER_PORT ?? "8787";
 export const e2eWorkerOrigin = `http://127.0.0.1:${e2eWorkerPort}`;
+export const e2eSpotifyMockPort = process.env.SPOTIFY_MOCK_PORT ?? "8791";
 export const e2eWorkerPersist = process.env.E2E_WORKER_PERSIST ??
   mkdtempSync(join(tmpdir(), "brobot-e2e-worker-"));
 process.env.E2E_WORKER_PERSIST = e2eWorkerPersist;
@@ -37,6 +38,10 @@ export const e2eWorkerEnvironment: Record<string, string> = {
   TOKEN_ENCRYPTION_KEYS: keyRing("e2e-encryption", 2),
   OVERLAY_TOKEN_PEPPER: testKey(4),
   PLATFORM_USER_IDS: "[]",
+  SPOTIFY_CLIENT_ID: "e2e-spotify-client-id",
+  SPOTIFY_CLIENT_SECRET: "e2e-spotify-client-secret",
+  SPOTIFY_API_BASE: `http://127.0.0.1:${e2eSpotifyMockPort}/v1`,
+  SPOTIFY_ACCOUNTS_BASE: `http://127.0.0.1:${e2eSpotifyMockPort}`,
 };
 
 interface SeededE2EOverlay {
@@ -160,6 +165,32 @@ export const seedE2EOverlay = (channelId = e2eChannelId): SeededE2EOverlay => {
   applyMigrations();
   wrangler(["--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes", "--persist-to", e2eWorkerPersist, "--command", sql]);
   return { channelId, overlayId, overlayToken, channelLogin };
+};
+
+/** Seeds a manager, enabled vote modules, one Spotify allowlist slot, and the live now-playing element. */
+export const seedE2ESongRequests = (channelId: string): SeededE2EOverlay => {
+  const overlay = seedE2EOverlay(channelId);
+  const createdAt = new Date().toISOString();
+  const sql = `
+    INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision)
+      VALUES ('${channelId}', 'chat_voting', 1, '{}', 1), ('${channelId}', 'song_requests', 1, '{}', 1);
+    INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at)
+      VALUES (1, '${channelId}', 'user-e2e', '${createdAt}');
+    INSERT INTO overlay_elements
+      (element_id, channel_id, overlay_id, kind, label, config_json, x, y, scale_percent, z, in_composition)
+      VALUES ('element-song-requests-${channelId}', '${channelId}', '${overlay.overlayId}', 'song_requests.now_playing',
+        'Now playing', '{"showCover":true,"showRequester":true}', 520, 340, 100, 10, 1);
+    UPDATE overlays SET revision = revision + 1, updated_at = '${createdAt}' WHERE overlay_id = '${overlay.overlayId}';
+  `;
+  const result = spawnSync("./node_modules/.bin/wrangler", [
+    "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes",
+    "--persist-to", e2eWorkerPersist, "--command", sql,
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
+  });
+  if (result.status !== 0) throw new Error(`Song request e2e setup failed.\n${result.stdout}\n${result.stderr}`);
+  return overlay;
 };
 
 /** Seeds one real statistics word counter in the worker-backed overlay sandbox. */

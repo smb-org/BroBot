@@ -4,14 +4,14 @@ import {
   findChatVoteResultTextReferences,
   prepareChatVoteResultTextReferenceRewrite,
 } from "../contracts/chat-vote-result-text-references";
-import type { BotModule, JsonObject, ModuleLiveTileSnapshot, ModuleOverlayElementContext, ModuleTemplateUsageSource, ModuleVariableReferenceUsage, ModuleVariableReferences } from "../contract";
+import type { BotModule, JsonObject, ModuleChatVoteStartRequest, ModuleLiveTileSnapshot, ModuleOverlayElementContext, ModuleTemplateUsageSource, ModuleVariableReferenceUsage, ModuleVariableReferences } from "../contract";
 import { templateTextLength } from "../../contracts/template-text-length";
 import { channelVariableTemplateToken } from "../../contracts/channel-variable-template";
 import { createChatVotingRepository } from "./repository";
 import { CHAT_VOTING_CHAT_COMMANDS } from "./contracts/chat-commands";
 import { chatVotingDurationVariableCatalog, chatVotingOptionsVariableCatalog, chatVotingResultVariableCatalog, chatVotingTitleVariableCatalog } from "./contracts/template-variable-catalog";
-import { chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition, processChatVotingMessage } from "./service";
-import { CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsReadSchema, chatVotingSettingsSchema, type ChatVotingKind } from "./contracts";
+import { chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition, processChatVotingMessage, startChatVote } from "./service";
+import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_ELEMENT_KIND, CHAT_VOTING_HARD_LIMIT_MS, CHAT_VOTING_MODULE_ID, CHAT_VOTING_START_ANNOUNCEMENT_HANDLER, DEFAULT_CHAT_VOTING_SETTINGS, chatVotingPresetForKind, chatVotingSettingsReadSchema, chatVotingSettingsSchema, type ChatVotingKind } from "./contracts";
 import { chatVotingOverlayElements } from "./overlay/element";
 import { chatVotingRoutes } from "./routes";
 import { chatVotingImmediateActionTexts } from "./action-locale";
@@ -361,6 +361,46 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
   }],
   eventSubTypes: ["channel.chat.message"],
   alarms: [chatVotingAlarmDefinition, chatVotingStartAnnouncementAlarmDefinition],
+  startChatVote: async (context, request: ModuleChatVoteStartRequest, actor) => {
+    const channelId = context.channelId;
+    if (channelId === undefined) throw new Error("A channel is required to start a chat vote.");
+    const row = await context.DB.prepare(
+      "SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'chat_voting'",
+    ).bind(channelId).first<{ settings: string }>();
+    let settings = DEFAULT_CHAT_VOTING_SETTINGS;
+    if (row !== null) {
+      try {
+        const parsed = chatVotingSettingsReadSchema.safeParse(JSON.parse(row.settings) as unknown);
+        if (parsed.success) settings = parsed.data;
+      } catch { /* Invalid saved settings fall back to module defaults. */ }
+    }
+    const startedAt = Date.now();
+    const result = await startChatVote(
+      createChatVotingRepository(context.DB),
+      {
+        channelId,
+        kind: "options",
+        optionCount: request.labels.length,
+        durationSeconds: request.durationSeconds,
+        labels: request.labels,
+        title: request.title,
+        settings,
+        language: await context.channelLanguage(),
+        authorization: context.authorizeMutation(channelId, actor, new Date(startedAt).toISOString()),
+      },
+      context.ballots,
+      (ballotId, deadline, revision) => context.scheduleAlarm(
+        CHAT_VOTING_ALARM_HANDLER, ballotId, deadline, revision,
+      ),
+      (ballotId, deadline, revision) => context.scheduleAlarm(
+        CHAT_VOTING_START_ANNOUNCEMENT_HANDLER,
+        chatVotingStartAnnouncementAlarmKey(ballotId),
+        deadline,
+        revision,
+      ),
+    );
+    return result.status === "started" ? { status: "started", ballotId: result.vote.id } : { status: "busy" };
+  },
   overlayElements: chatVotingOverlayElements.map((element) => ({
     ...element,
     kind: CHAT_VOTING_ELEMENT_KIND,

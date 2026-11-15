@@ -24,6 +24,8 @@ export default defineConfig({
           SESSION_COOKIE_KEYS: testKeyRing("test-cookie", 1),
           SESSION_ENCRYPTION_KEYS: testKeyRing("test-encryption", 2),
           OVERLAY_TOKEN_PEPPER: testKey(4),
+          SPOTIFY_CLIENT_ID: "test-spotify-client-id",
+          SPOTIFY_CLIENT_SECRET: "test-spotify-client-secret",
           BETREIBER_USER_IDS: "[]",
         },
       },

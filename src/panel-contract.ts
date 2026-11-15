@@ -202,6 +202,12 @@ export interface PanelPlatformOverviewResponse {
   channels: PanelPlatformChannelOverview[];
 }
 
+export interface PanelSpotifyAccessResponse {
+  usedSlots: number;
+  limit: 5;
+  channels: { slot: number; channelId: string; login: string; displayName: string; enabledAt: string }[];
+}
+
 export interface PanelPlatformMembersResponse {
   members: PanelMember[];
   nextCursor: string | null;

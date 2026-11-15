@@ -1,0 +1,24 @@
+@layer components.dashboard {
+  .song-requests-panel { display: grid; gap: 24px; max-width: 980px; color: var(--color-text); }
+  .song-requests-panel header h1, .song-requests-panel h2, .song-requests-panel h3, .song-requests-panel p { margin: 0; }
+  .song-requests-panel header p, .song-requests-panel p { color: var(--color-text-2); }
+  .song-requests-panel section { display: grid; gap: 12px; padding: 16px; background: var(--color-inspector); }
+  .song-requests-panel__section-head, .song-requests-panel__controls, .song-requests-panel__search { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+  .song-requests-panel__section-head span { color: var(--color-text-2); }
+  .song-requests-panel__search label, .song-requests-panel__settings label { display: grid; flex: 1; gap: 6px; color: var(--color-text-2); }
+  .song-requests-panel input { min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--color-border-control); border-radius: 6px; background: var(--color-well); color: var(--color-text); }
+  .song-requests-panel__track-list, .song-requests-panel__selected, .song-requests-panel__requests { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .song-requests-panel__track-list article, .song-requests-panel__selected li, .song-requests-panel__requests li { display: flex; min-width: 0; align-items: center; gap: 12px; padding: 8px; background: var(--color-surface); }
+  .song-requests-panel__track-list img, .song-requests-panel__cover { width: 44px; height: 44px; flex: 0 0 44px; object-fit: cover; background: var(--color-well); }
+  .song-requests-panel__track-copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
+  .song-requests-panel__track-copy strong, .song-requests-panel__track-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .song-requests-panel__track-copy small { color: var(--color-text-3); }
+  .song-requests-panel__resolution { display: flex; flex-wrap: wrap; gap: 6px; }
+  .song-requests-panel__settings { grid-template-columns: 1fr auto; align-items: end; }
+  .song-requests-panel__feedback { min-height: 22px; }
+  @media (max-width: 600px) {
+    .song-requests-panel__section-head, .song-requests-panel__search { align-items: stretch; flex-direction: column; }
+    .song-requests-panel__track-list article, .song-requests-panel__requests li { flex-wrap: wrap; }
+    .song-requests-panel__settings { grid-template-columns: 1fr; }
+  }
+}

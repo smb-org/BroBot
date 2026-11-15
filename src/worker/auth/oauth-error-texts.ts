@@ -47,6 +47,22 @@ const OAUTH_ERROR_TEXTS = {
     de: "Twitch-Autorisierung konnte nicht abgeschlossen werden.",
     en: "Twitch authorization could not be completed.",
   },
+  spotify_authorization_denied: {
+    de: "Spotify-Autorisierung wurde abgelehnt.",
+    en: "Spotify authorization was declined.",
+  },
+  spotify_code_exchange_rejected: {
+    de: "Der Spotify-Code-Tausch wurde abgelehnt.",
+    en: "Spotify rejected the authorization code exchange.",
+  },
+  spotify_callback_failed: {
+    de: "Die Spotify-Verbindung konnte nicht abgeschlossen werden.",
+    en: "The Spotify connection could not be completed.",
+  },
+  spotify_channel_access_denied: {
+    de: "Nur ein Kanalmitglied mit Verwaltungsrechten darf Spotify verbinden.",
+    en: "Only a channel manager can connect Spotify.",
+  },
   channel_owner_only_consent_request: {
     de: "Nur der Kanalinhaber darf diese Zustimmung nachfordern.",
     en: "Only the channel owner can re-request this consent.",

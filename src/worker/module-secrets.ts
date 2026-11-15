@@ -83,7 +83,22 @@ export const createModuleSecretAccess = (
     ).bind(channelId, moduleId, name, ...authorization.values);
   };
 
-  return { status, read, readWithVersion, prepareWrite, prepareDelete };
+  const prepareRotationWrite: NonNullable<ModuleSecretAccess["prepareRotationWrite"]> = async (name, value, expectedVersion, now) => {
+    const keys = encryptionKeys();
+    let ciphertext: string;
+    try {
+      ciphertext = await encryptJson({ channelId, moduleId, name, value }, keys);
+    } catch {
+      throw new Error("Module secret encryption failed.");
+    }
+    return environment.DB.prepare(
+      `UPDATE module_secrets
+          SET ciphertext = ?, key_id = ?, revision = revision + 1, updated_at = ?, updated_by = 'system'
+        WHERE channel_id = ? AND module_id = ? AND name = ? AND ciphertext = ?`,
+    ).bind(ciphertext, keys.active.id, now, channelId, moduleId, name, expectedVersion);
+  };
+
+  return { status, read, readWithVersion, prepareWrite, prepareDelete, prepareRotationWrite };
 };
 
 /** Creates a runtime read-only view for module template providers. */

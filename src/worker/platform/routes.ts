@@ -26,6 +26,8 @@ import {
   getPlatformChannel,
   listPlatformAudit,
   listPlatformChannels,
+  listPlatformSpotifyAccess,
+  setPlatformSpotifyAccess,
 } from "./repository";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { CHANNEL_ROLES, PLATFORM_ASSIGNABLE_ROLES, type ChannelRole } from "../../contracts/values";
@@ -173,6 +175,20 @@ platformRouter.use("/api/platform/*", requirePlatform());
 
 platformRouter.get("/api/platform", async (context) =>
   context.json({ channels: await listPlatformChannels(context.env.DB) }));
+
+platformRouter.get("/api/platform/spotify-channels", async (context) =>
+  context.json(await listPlatformSpotifyAccess(context.env.DB)));
+
+platformRouter.patch("/api/platform/spotify-channels/:channelId", async (context) => {
+  const body = await readJson(context.req.raw);
+  const enabled = readBoolean(body?.enabled);
+  if (enabled === null) return context.json({ error: "spotify_access_invalid" }, 400);
+  const channelId = context.req.param("channelId");
+  if (await getPlatformChannel(context.env.DB, channelId) === null) return context.json({ error: "channel_not_found" }, 404);
+  const result = await setPlatformSpotifyAccess(context.env.DB, context.get("actor"), channelId, enabled, nowIso());
+  if (result === "limit") return context.json({ error: "spotify_access_limit" }, 409);
+  return context.json({ enabled: result === "enabled" || result === "unchanged" && enabled });
+});
 
 platformRouter.get("/api/platform/twitch/user-suggestions", async (context) => {
   const query = context.req.query("q") ?? "";
