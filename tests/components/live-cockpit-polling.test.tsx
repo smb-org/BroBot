@@ -83,10 +83,6 @@ afterEach(() => {
 describe("idle live cockpit polling", () => {
   it("keeps clock-driven ad freshness while revision-backed reads stay quiet during a connected minute", async () => {
     const paths: string[] = [];
-    const realSetTimeout = globalThis.setTimeout;
-    const waitOnRealClock = (duration: number): Promise<void> => new Promise((resolve) => {
-      realSetTimeout(resolve, duration);
-    });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(input, window.location.href);
       paths.push(url.pathname);
@@ -104,17 +100,19 @@ describe("idle live cockpit polling", () => {
     });
 
     await act(async () => {
-      await waitOnRealClock(50);
+      await vi.waitFor(() => {
+        expect(paths).toEqual(expect.arrayContaining([
+          `/api/channels/${channelId}/events`,
+          `/api/channels/${channelId}/overlays`,
+          `/api/channels/${channelId}/settings`,
+          `/api/channels/${channelId}/variables/availability`,
+          `/api/channels/${channelId}/modules/chat_voting/current`,
+          `/api/channels/${channelId}/modules/belabox/status`,
+          `/api/channels/${channelId}/modules/ads/schedule`,
+        ]));
+        expect(view.queryClient.isFetching()).toBe(0);
+      }, { timeout: 1_000, interval: 10 });
     });
-    expect(paths).toEqual(expect.arrayContaining([
-      `/api/channels/${channelId}/events`,
-      `/api/channels/${channelId}/overlays`,
-      `/api/channels/${channelId}/settings`,
-      `/api/channels/${channelId}/variables/availability`,
-      `/api/channels/${channelId}/modules/chat_voting/current`,
-      `/api/channels/${channelId}/modules/belabox/status`,
-      `/api/channels/${channelId}/modules/ads/schedule`,
-    ]));
     const initialRequestCount = paths.length;
 
     // Viewer counts and the mixed live-tile query retain their previous connected cadence.
@@ -137,10 +135,6 @@ describe("idle live cockpit polling", () => {
   it("keeps retrying failed revision-backed reads at the fallback interval while connected, then goes quiet", async () => {
     const counts = new Map<string, number>();
     const failing = ["/modules/chat_voting/current", "/modules/belabox/status"];
-    const realSetTimeout = globalThis.setTimeout;
-    const waitOnRealClock = (duration: number): Promise<void> => new Promise((resolve) => {
-      realSetTimeout(resolve, duration);
-    });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(input, window.location.href);
       const failingSuffix = failing.find((suffix) => url.pathname.endsWith(suffix));
@@ -162,8 +156,12 @@ describe("idle live cockpit polling", () => {
       gcTime: 600_000,
       staleTime: 600_000,
     });
-    await act(async () => { await waitOnRealClock(50); });
-    expect(failing.map((suffix) => counts.get(suffix))).toEqual([1, 1]);
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(failing.map((suffix) => counts.get(suffix))).toEqual([1, 1]);
+        expect(view.queryClient.isFetching()).toBe(0);
+      }, { timeout: 1_000, interval: 10 });
+    });
 
     // Both queries are in error without data: the connected cockpit still polls them at the 5 s fallback.
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });

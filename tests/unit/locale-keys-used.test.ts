@@ -164,6 +164,87 @@ export const readLive = (): string => locale.catalog.en.live;
     ]);
   });
 
+  it("keeps catalogue references carried by constrained generic namespace values", () => {
+    const projectRoot = createLocaleFixture(`
+export const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+`);
+    writeFileSync(path.join(projectRoot, "src/dashboard/usage.ts"), `
+export const serializeLocale = <T extends typeof import("./locale")>(namespace: T): string => JSON.stringify(namespace);
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
+  });
+
+  it("keeps catalogue references carried by typed this values", () => {
+    const projectRoot = createLocaleFixture(`
+export const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+`);
+    writeFileSync(path.join(projectRoot, "src/dashboard/usage.ts"), `
+export function serializeLocale(this: typeof import("./locale")): string {
+  return JSON.stringify(this);
+}
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([]);
+  });
+
+  it("does not treat a union-constrained generic as a catalogue reference", () => {
+    const projectRoot = createLocaleFixture(`
+export const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+`);
+    writeFileSync(path.join(projectRoot, "src/dashboard/usage.ts"), `
+export const noop = <T extends typeof import("./locale") | { other: string }>(namespace: T): void => {};
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/dashboard/locale.ts#catalog", key: "live" },
+      { catalog: "src/dashboard/locale.ts#catalog", key: "orphan" },
+    ]);
+  });
+
+  it("does not treat a nested union-constrained generic as a catalogue reference", () => {
+    const projectRoot = createLocaleFixture(`
+export const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+`);
+    writeFileSync(path.join(projectRoot, "src/dashboard/usage.ts"), `
+export const noop = <T extends typeof import("./locale") | { other: string }, U extends T>(namespace: U): void => {};
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/dashboard/locale.ts#catalog", key: "live" },
+      { catalog: "src/dashboard/locale.ts#catalog", key: "orphan" },
+    ]);
+  });
+
+  it("does not treat an intersection-constrained generic as a catalogue reference", () => {
+    const projectRoot = createLocaleFixture(`
+export const catalog = {
+  de: { live: "Verwendet", orphan: "Ungenutzt" },
+  en: { live: "Used", orphan: "Unused" },
+} as const;
+`);
+    writeFileSync(path.join(projectRoot, "src/dashboard/usage.ts"), `
+export const noop = <T extends typeof import("./locale") & { catalog: { de: { extra: string }; en: { extra: string } } }>(namespace: T): void => {};
+`);
+
+    expect(unusedLocaleKeys(projectRoot)).toEqual([
+      { catalog: "src/dashboard/locale.ts#catalog", key: "live" },
+      { catalog: "src/dashboard/locale.ts#catalog", key: "orphan" },
+    ]);
+  });
+
   it("fails safe for a catalogue used as a shorthand assignment default", () => {
     const projectRoot = createLocaleFixture(`
 const catalog = {

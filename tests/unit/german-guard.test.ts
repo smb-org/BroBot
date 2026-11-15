@@ -26,7 +26,7 @@ import { describe, expect, it } from "vitest";
  * additions are reviewed by hand for that.
  */
 const ALLOWLIST: Record<string, string> = {
-  "src/modules/channel_points/contracts.ts": "Bilingual DE/EN channel-points queue action name; only the German value is German.",
+  "src/modules/channel_points/contracts.ts": "Bilingual DE/EN channel-points queue action name and waiting count; only the German values are German.",
   "src/modules/channel_points/actions/chat-message.ts": "Bilingual DE/EN channel points chat-action refund text; only its German values are German.",
   "src/modules/channel_points/service.ts": "Bilingual DE/EN channel points redemption history reasons; only its German values are German.",
   "src/modules/channel_points/panel/locale.ts": "Bilingual DE/EN channel-points panel catalogue; only its German values are German.",

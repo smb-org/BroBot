@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { waitForWebFonts } from "./web-fonts";
+
 test("free-text overlay rows keep fixed columns and tracks at a fixed 480px inside the real canvas", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 600 });
   const measurements: Array<{
@@ -14,6 +16,7 @@ test("free-text overlay rows keep fixed columns and tracks at a fixed 480px insi
 
   for (const termCount of [0, 1, 5]) {
     await page.goto(`/tests/e2e/chat-voting-overlay-fixture.html?terms=${String(termCount)}`);
+    await waitForWebFonts(page);
     await expect(page.locator(".chat-voting-tally__option")).toHaveCount(5);
     measurements.push(await page.locator(".chat-voting-tally").evaluate((tally) => {
       const rectWidth = (element: Element): number => element.getBoundingClientRect().width;
@@ -60,6 +63,7 @@ test("vote question header stays fixed and clamps long text at 390px in the over
   for (const title of [null, "Pizza today?", longTitle]) {
     const parameters = new URLSearchParams({ mobile: "1", title: title ?? "" });
     await page.goto(`/tests/e2e/chat-voting-overlay-fixture.html?${parameters.toString()}`);
+    await waitForWebFonts(page);
     const header = page.locator(".chat-voting-tally__header");
     await expect(header).toBeVisible();
     await expect(header).toHaveText(title ?? "Voting");
@@ -95,6 +99,7 @@ test("countdown appearance and absence keep the header slot fixed at the canvas 
 
   for (const mode of ["timed", "open-ended", "off", "closed"]) {
     await page.goto(`/tests/e2e/chat-voting-overlay-fixture.html?countdown=${mode}`);
+    await waitForWebFonts(page);
     const header = page.locator(".chat-voting-tally__header");
     const countdown = page.locator(".chat-voting-tally__countdown");
     await expect(header).toBeVisible();
@@ -139,6 +144,7 @@ test("standard vote options keep the original narrow bars and strip sizing", asy
 
   for (const layout of layouts) {
     await page.goto(`/tests/e2e/chat-voting-overlay-fixture.html?preset=standard&narrow=1&layout=${layout}`);
+    await waitForWebFonts(page);
     const tally = page.locator(".chat-voting-tally");
     const rows = tally.locator(".chat-voting-tally__option");
     await expect(rows).toHaveCount(2);
@@ -212,6 +218,7 @@ test("colored strip rows keep counters on one line and labels readable at a 360p
   for (const colored of [false, true]) {
     const parameters = new URLSearchParams({ preset: "standard", mobile: "1", layout: "strip", colored: colored ? "1" : "0" });
     await page.goto(`/tests/e2e/chat-voting-overlay-fixture.html?${parameters.toString()}`);
+    await waitForWebFonts(page);
     const tally = page.locator(".chat-voting-tally");
     await expect(tally.locator(".chat-voting-tally__option")).toHaveCount(2);
     measurements.push(await tally.evaluate((element) => {

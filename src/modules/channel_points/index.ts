@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { BotModule, ModuleActivationResult, ModuleImmediateActionCondition } from "../contract";
-import { CHANNEL_POINTS_MODULE_ID, CHANNEL_POINTS_QUEUE_ACTION_NAME } from "./contracts";
+import { CHANNEL_POINTS_MODULE_ID, CHANNEL_POINTS_QUEUE_ACTION_NAME, CHANNEL_POINTS_QUEUE_WAITING_COUNT } from "./contracts";
 import { chatMessageAction } from "./actions/chat-message";
 import {
   CHANNEL_POINTS_LIFECYCLE_ALARM,
@@ -25,11 +25,24 @@ const queueAvailability: ModuleImmediateActionCondition = {
       if (!response.ok) throw new Error("Channel-points queue availability could not be loaded.");
       return await response.json();
     },
-    evaluate: (value) => ({
-      reason: null,
-      visible: typeof value === "object" && value !== null &&
-        Array.isArray((value as { items?: unknown }).items) && (value as { items: unknown[] }).items.length > 0,
-    }),
+    evaluate: (value) => {
+      const response = typeof value === "object" && value !== null ? value as { count?: unknown; items?: unknown } : null;
+      const items = Array.isArray(response?.items) ? response.items : null;
+      const declaredCount = response?.count;
+      const count = typeof declaredCount === "number" && Number.isSafeInteger(declaredCount) && declaredCount >= 0
+        ? declaredCount
+        : items?.length ?? 0;
+      return {
+        reason: null,
+        visible: count > 0,
+        ...(count === 0 ? {} : {
+          subtitle: {
+            de: CHANNEL_POINTS_QUEUE_WAITING_COUNT.de(count),
+            en: CHANNEL_POINTS_QUEUE_WAITING_COUNT.en(count),
+          },
+        }),
+      };
+    },
   },
 };
 

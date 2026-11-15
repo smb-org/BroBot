@@ -1,5 +1,5 @@
 import { PanelApiError } from "../../../contracts/panel-error";
-import { CHANNEL_POINTS_QUEUE_ACTION_NAME } from "../contracts";
+import { CHANNEL_POINTS_QUEUE_ACTION_NAME, CHANNEL_POINTS_QUEUE_WAITING_COUNT } from "../contracts";
 
 type ChannelPointsQueueLanguage = "de" | "en";
 
@@ -14,7 +14,7 @@ const createTexts = (language: ChannelPointsQueueLanguage) => {
     run: de ? "Ausführen" : "Run",
     refund: de ? "Erstatten" : "Refund",
     pending: de ? "Wird verarbeitet …" : "Processing …",
-    count: (count: number) => de ? `${String(count)} wartend` : `${String(count)} waiting`,
+    count: CHANNEL_POINTS_QUEUE_WAITING_COUNT[language],
     alreadyProcessed: de
       ? "Diese Einlösung wurde bereits verarbeitet."
       : "This redemption has already been processed.",

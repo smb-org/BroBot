@@ -1884,8 +1884,10 @@ describe("EventsPage failure cause icon", () => {
   });
 
   it("resets an oversized frozen head when manual scrolling returns to the top", async () => {
+    // Keep the 1,000-entry cap case while collapsing entries into one UI group; this test exercises refresh state, not rendering 1,000 distinct rows.
     const oversizedEntries = Array.from({ length: 1000 }, (_, index) => entry({
       eventId: `cap-${String(index)}`,
+      triggerId: "oversized-frozen-head",
       createdAt: new Date(Date.UTC(2026, 0, 1) + index * 1000).toISOString(),
     }));
     const head = eventHeadData(oversizedEntries, null, 10);
@@ -2006,8 +2008,10 @@ describe("EventsPage failure cause icon", () => {
   });
 
   it("queues a jump-triggered head refresh while another refresh is in flight", async () => {
+    // Keep the 1,000-entry cap case while collapsing entries into one UI group; this test exercises refresh state, not rendering 1,000 distinct rows.
     const entries = Array.from({ length: 1000 }, (_, index) => entry({
       eventId: `queue-cap-${String(index)}`,
+      triggerId: "oversized-queued-head",
       createdAt: new Date(Date.UTC(2026, 0, 1) + index * 1000).toISOString(),
     }));
     const pendingEntry = entry({ eventId: "queue-pending", createdAt: "2026-01-02T00:00:00.000Z", code: "host.chat.sent" });

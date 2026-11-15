@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelPointsQueueItem } from "../../src/modules/channel_points/contracts";
+import { CHANNEL_POINTS_QUEUE_WAITING_COUNT } from "../../src/modules/channel_points/contracts";
 import ChannelPointsQueueActionContent from "../../src/modules/channel_points/panel/queue-action-content";
 import { UiProvider } from "../../src/dashboard/ui";
 import { dismissToastsForScope, toastsSnapshot } from "../../src/dashboard/ui/toast-store";
@@ -88,8 +89,15 @@ describe("channel-points cockpit queue", () => {
       />
     </QueryClientProvider></UiProvider>);
 
-    expect(await screen.findByRole("button", { name: "Kanalpunkte-Warteschlange" })).toBeVisible();
+    const action = await screen.findByRole("button", { name: "Kanalpunkte-Warteschlange" });
+    expect(action).toBeVisible();
+    expect(within(action).getByText("1 wartend")).toBeInTheDocument();
     queryClient.clear();
+  });
+
+  it("localizes the neutral waiting-count subtitle", () => {
+    expect(CHANNEL_POINTS_QUEUE_WAITING_COUNT.de(2)).toBe("2 wartend");
+    expect(CHANNEL_POINTS_QUEUE_WAITING_COUNT.en(2)).toBe("2 waiting");
   });
 
   it("hides the cockpit action while the module is disabled", () => {
