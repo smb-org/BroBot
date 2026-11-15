@@ -1198,6 +1198,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-load-state__retry { flex: none; padding: 0; border: 0; color: var(--brand-text); background: transparent; font: inherit; cursor: pointer; white-space: nowrap; }
 .ui-load-state__retry:hover { color: var(--text); text-decoration: underline; }
 .ui-template-text-field__suggestions-dropdown { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; max-width: min(400px, calc(100vw - 70px)); max-height: min(440px, var(--available-height, calc(100vh - 24px))); overflow: hidden; padding: 8px; border: 1px solid var(--line-strong); border-radius: var(--r-container); background: var(--surface-raised); box-shadow: var(--shadow-floating); }
+.ui-template-text-field__suggestions-dropdown--anchor-width { width: min(var(--anchor-width), calc(100vw - 24px)); min-width: 0; max-width: calc(100vw - 24px); }
 .ui-template-text-field__suggestions { min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .ui-template-text-field__suggestions-group { margin: 0; }
 .ui-template-text-field__suggestions-group + .ui-template-text-field__suggestions-group { margin-top: var(--s2); }
@@ -1217,6 +1218,12 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 .ui-template-text-field__key-hints { display: flex; justify-content: center; gap: 14px; padding: 8px 0 0; color: var(--text-3); font-size: 12px; }
 .ui-template-text-field__key-hints > span { display: flex; align-items: center; gap: 4px; }
 .ui-template-text-field__key-hints kbd { padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; color: var(--text-2); font: inherit; }
+.ui-twitch-user-field { display: grid; min-width: 0; }
+.ui-twitch-user-field__anchor { width: 100%; min-width: 0; }
+.ui-twitch-user-field__status { display: flex; min-height: var(--s5); align-items: center; margin-top: var(--s1); color: var(--text-3); font-size: 12px; line-height: 1.4; }
+.ui-twitch-user-field__avatar { width: 28px; height: 28px; flex: none; border-radius: 50%; object-fit: cover; background: var(--surface-well); }
+.ui-twitch-user-field__avatar--empty { display: grid; place-items: center; color: var(--text-3); }
+.ui-twitch-user-field__live { flex: none; padding: 2px 7px; border: 1px solid var(--color-success-border); border-radius: var(--r-pill); color: var(--color-success-text); background: var(--color-success-surface); font-size: 11px; font-weight: 600; }
 .ui-expression-field { min-width: 0; }
 .ui-expression-field__input { min-height: 240px; resize: vertical; font-size: 13px; line-height: 1.55; }
 .ui-expression-field__signature { display: flex; align-items: center; min-width: 0; min-height: 24px; overflow: hidden; color: var(--text-3); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }

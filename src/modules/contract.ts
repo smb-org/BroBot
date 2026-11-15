@@ -9,7 +9,7 @@ import { prepareChannelModuleSettingsWrite } from "./repository/channel-module-s
 import type { ModerationResult, ModerationTimeoutExpectation } from "./contracts/moderation";
 import { templateTextLength } from "../contracts/template-text-length";
 import { channelVariableTemplateToken } from "../contracts/channel-variable-template";
-export type { PanelTemplateWarning } from "../panel-contract";
+export type { PanelTemplateWarning, PanelTwitchUser } from "../panel-contract";
 export type { ChatOutputTarget } from "../contracts/values";
 
 /** The default channel timezone used by host template values and channel settings. */

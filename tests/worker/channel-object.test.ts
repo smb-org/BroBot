@@ -178,6 +178,7 @@ const objectFor = (
 ): ChannelObject => {
   let transactionQueue = Promise.resolve();
   const chatterRows = new Map<string, { hmac: string; first_seen_at: string; last_seen_at: string }>();
+  const recentChatterRows = new Map<string, { user_id: string; login: string; display_name: string; profile_image_url: string | null; last_seen_at: string }>();
   const statisticsChatWindows = new Map<number, {
     stream_id: string | null;
     messages: number;
@@ -454,6 +455,42 @@ const objectFor = (
     }
     if (/^\s*SELECT hmac FROM active_chatters\b/iu.test(query)) {
       return { toArray: () => [...chatterRows.values()].map(({ hmac }) => ({ hmac })), one: () => undefined };
+    }
+    if (/^\s*SELECT MIN\(last_seen_at\) AS first_expiry FROM recent_chatters\b/iu.test(query)) {
+      const firstExpiry = [...recentChatterRows.values()].map((row) => row.last_seen_at).sort((a, b) => a.localeCompare(b))[0] ?? null;
+      return { toArray: () => [{ first_expiry: firstExpiry }], one: () => ({ first_expiry: firstExpiry }) };
+    }
+    if (/^\s*INSERT INTO recent_chatters\b/iu.test(query)) {
+      const [userId, login, displayName, lastSeenAt] = bindings as [string, string, string, string];
+      recentChatterRows.set(userId, {
+        user_id: userId,
+        login,
+        display_name: displayName,
+        profile_image_url: recentChatterRows.get(userId)?.profile_image_url ?? null,
+        last_seen_at: lastSeenAt,
+      });
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*DELETE FROM recent_chatters\s+WHERE last_seen_at <= \?/iu.test(query)) {
+      const cutoff = bindings[0];
+      for (const [userId, row] of recentChatterRows) {
+        if (typeof cutoff === "string" && row.last_seen_at <= cutoff) recentChatterRows.delete(userId);
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*DELETE FROM recent_chatters\s+WHERE user_id IN/iu.test(query)) {
+      const offset = bindings[0];
+      const newestFirst = [...recentChatterRows.values()].sort((a, b) => b.last_seen_at.localeCompare(a.last_seen_at) || a.user_id.localeCompare(b.user_id));
+      if (typeof offset === "number") for (const row of newestFirst.slice(offset)) recentChatterRows.delete(row.user_id);
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^\s*SELECT user_id, login, display_name, profile_image_url\s+FROM recent_chatters\b/iu.test(query)) {
+      const cutoff = bindings[0];
+      const rows = [...recentChatterRows.values()]
+        .filter((row) => typeof cutoff !== "string" || row.last_seen_at >= cutoff)
+        .sort((a, b) => b.last_seen_at.localeCompare(a.last_seen_at) || a.user_id.localeCompare(b.user_id))
+        .slice(0, 500);
+      return { toArray: () => rows, one: () => rows[0] };
     }
     if (/^\s*(?:INSERT OR IGNORE INTO|UPDATE) statistics_word_streams\b|^\s*SELECT distinct_words, expires_at(?:, current_batch)? FROM statistics_word_streams\b/iu.test(query)) {
       return { toArray: () => [], one: () => undefined };
@@ -1736,7 +1773,7 @@ describe("ChannelObject realtime path", () => {
     await expect(object.hasStatisticsWindows()).resolves.toBe(false);
   });
 
-  it("tracks unique chatters in a rolling window without storing their ids", async () => {
+  it("stores active-chatter count identities only as HMACs", async () => {
     vi.useFakeTimers();
     const startedAt = "2026-09-27T12:00:00.000Z";
     vi.setSystemTime(Date.parse(startedAt));
@@ -1767,6 +1804,35 @@ describe("ChannelObject realtime path", () => {
     expect(JSON.stringify(chatterRows)).not.toContain("viewer-1");
     expect(JSON.stringify(chatterRows)).not.toContain("viewer-2");
     expect(storage.list).not.toHaveBeenCalledWith(expect.objectContaining({ prefix: "chatter:" }));
+  });
+
+  it("matches recent chatter logins and display names, survives stream clearing, and expires after 60 minutes", async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.parse("2026-09-27T12:00:00.000Z");
+    vi.setSystemTime(startedAt);
+    const object = objectFor([]);
+
+    await object.recordChatActivity("viewer-1", true);
+    await object.recordRecentChatter({ userId: "viewer-1", login: "chatfreund", displayName: "Chatfreund" });
+    await object.recordRecentChatter({ userId: "viewer-2", login: "zuschauer", displayName: "Beispiel Gast" });
+
+    await expect(object.getRecentChatters("chat")).resolves.toEqual([{
+      userId: "viewer-1", login: "chatfreund", displayName: "Chatfreund", profileImageUrl: null,
+    }]);
+    await expect(object.getRecentChatters("beispiel")).resolves.toEqual([{
+      userId: "viewer-2", login: "zuschauer", displayName: "Beispiel Gast", profileImageUrl: null,
+    }]);
+
+    await object.clearActiveChatters();
+    expect(await object.getActiveChatterCount(60_000)).toBe(0);
+    await expect(object.getRecentChatters("chat")).resolves.toHaveLength(1);
+    const activeRows = storageOf(object).sql.exec("SELECT hmac FROM active_chatters").toArray();
+    expect(JSON.stringify(activeRows)).not.toContain("viewer-1");
+
+    vi.setSystemTime(startedAt + 60 * 60 * 1_000);
+    await object.alarm();
+    await expect(object.getRecentChatters("chat")).resolves.toEqual([]);
+    await expect(object.getRecentChatters("beispiel")).resolves.toEqual([]);
   });
 
   it("retains EventSub IDs for the full ten minute replay window at ten messages per second", async () => {

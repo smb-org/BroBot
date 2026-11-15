@@ -75,13 +75,14 @@ describe("manual shoutout", () => {
     return environmentFor(database);
   };
 
-  it("lets an operator send a shoutout by login", async () => {
+  it("lets an operator send a shoutout by resolved Twitch user", async () => {
     const environment = await asMember("operator");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "target-1", login: "streamerin", display_name: "Streamerin" }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 })));
 
-    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/shoutout", { login: "streamerin" }), environment);
+    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/shoutout", {
+      userId: "target-1", login: "beispielkanal", displayName: "Beispielkanal",
+    }), environment);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ sent: true });
@@ -89,7 +90,7 @@ describe("manual shoutout", () => {
       "SELECT code, detail_json FROM event_log WHERE channel_id = 'kanal-a'",
     ).first<{ code: string; detail_json: string }>();
     expect(event?.code).toBe("host.shoutout.sent");
-    expect(JSON.parse(event?.detail_json ?? "{}") as unknown).toMatchObject({ to: "target-1", toLogin: "streamerin" });
+    expect(JSON.parse(event?.detail_json ?? "{}") as unknown).toMatchObject({ to: "target-1", toLogin: "beispielkanal" });
   });
 
   it("rejects a shoutout after the raid module is disabled", async () => {
@@ -98,32 +99,31 @@ describe("manual shoutout", () => {
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
 
-    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/shoutout", { login: "streamerin" }), environment);
+    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/shoutout", { userId: "target-1", login: "beispielkanal" }), environment);
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "module_disabled" });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("reports an unknown login without calling shoutout", async () => {
+  it("rejects a raw login because the dashboard must send a resolved user", async () => {
     const environment = await asMember("manager");
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
 
-    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/shoutout", { login: "unbekannt" }), environment);
+    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/shoutout", { login: "chatfreund" }), environment);
 
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({ error: "twitch_user_not_found" });
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "twitch_user_invalid" });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("reports Twitch's rate limit as its own outcome", async () => {
     const environment = await asMember("broadcaster");
     vi.stubGlobal("fetch", vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "target-1", login: "streamerin", display_name: "Streamerin" }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: "slow down" }), { status: 429 })));
 
-    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/shoutout", { login: "streamerin" }), environment);
+    const response = await panelRouter.fetch(await requestFor("user-1", "/api/channels/kanal-a/shoutout", { userId: "target-1", login: "beispielkanal" }), environment);
 
     expect(response.status).toBe(429);
     // Issue #201 follow-up: the event-log diagnostic carries this same
@@ -142,7 +142,7 @@ describe("manual shoutout", () => {
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
 
-    const response = await panelRouter.fetch(await requestFor("outsider", "/api/channels/kanal-a/shoutout", { login: "streamerin" }), environment);
+    const response = await panelRouter.fetch(await requestFor("outsider", "/api/channels/kanal-a/shoutout", { userId: "target-1", login: "beispielkanal" }), environment);
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: "channel_access_denied" });

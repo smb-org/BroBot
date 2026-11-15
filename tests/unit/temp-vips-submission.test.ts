@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createTempVipSubmissionTracker } from "../../src/modules/temp_vips/panel/submission";
 import { grantTempVip } from "../../src/modules/temp_vips/panel/service";
 
+const target = { userId: "user-pixelpilz", login: "pixelpilz", displayName: "Pixelpilz" };
+
 describe("temporary VIP submission retries", () => {
   it("reuses the operation ID after a lost response and changes it when the payload changes", async () => {
     const ids = ["operation-first", "operation-changed"];
@@ -44,8 +46,8 @@ describe("temporary VIP submission retries", () => {
       return Promise.resolve(new Response(JSON.stringify({ status: "granted" })));
     }));
     try {
-      await expect(grantTempVip("channel_body_demo", "pixelpilz", 600_000)).rejects.toThrow();
-      await expect(grantTempVip("channel_body_demo", "pixelpilz", 600_000)).resolves.toMatchObject({ status: "granted" });
+      await expect(grantTempVip("channel_body_demo", target, 600_000)).rejects.toThrow();
+      await expect(grantTempVip("channel_body_demo", target, 600_000)).resolves.toMatchObject({ status: "granted" });
       expect(posted).toHaveLength(2);
       expect(posted[0]).toBe(posted[1]);
     } finally {
@@ -54,13 +56,13 @@ describe("temporary VIP submission retries", () => {
   });
 
   it("keeps the operation ID and grant payload through the panel service after a committed request loses its response", async () => {
-    const posted: Array<{ operationId: string; login: string; durationMs: number }> = [];
+    const posted: Array<{ operationId: string; userId: string; login: string; displayName: string; durationMs: number }> = [];
     const committed = new Set<string>();
     let appliedDurationMs = 0;
     let loseFirstResponse = true;
     const fetchMock = vi.fn((input: string, init?: { body?: string }): Promise<Response> => {
       if (input === "/api/csrf") return Promise.resolve(new Response(JSON.stringify({ token: "csrf_demo" })));
-      const request = JSON.parse(init?.body ?? "{}") as { operationId: string; login: string; durationMs: number };
+      const request = JSON.parse(init?.body ?? "{}") as { operationId: string; userId: string; login: string; displayName: string; durationMs: number };
       posted.push(request);
       if (!committed.has(request.operationId)) {
         committed.add(request.operationId);
@@ -75,9 +77,9 @@ describe("temporary VIP submission retries", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     try {
-      await expect(grantTempVip("channel_retry_demo", "pixelpilz", 600_000)).rejects.toThrow("response lost after server commit");
-      await expect(grantTempVip("channel_retry_demo", "pixelpilz", 600_000)).resolves.toMatchObject({ status: "granted" });
-      await expect(grantTempVip("channel_retry_demo", "pixelpilz", 1_200_000)).resolves.toMatchObject({ status: "granted" });
+      await expect(grantTempVip("channel_retry_demo", target, 600_000)).rejects.toThrow("response lost after server commit");
+      await expect(grantTempVip("channel_retry_demo", target, 600_000)).resolves.toMatchObject({ status: "granted" });
+      await expect(grantTempVip("channel_retry_demo", target, 1_200_000)).resolves.toMatchObject({ status: "granted" });
 
       expect(posted[0]?.operationId).toBe(posted[1]?.operationId);
       expect(posted[0]).toEqual(posted[1]);

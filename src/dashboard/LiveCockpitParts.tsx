@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { PanelApiError } from "../contracts/panel-error";
+import { resolveTwitchUserLogin } from "./api";
 import { canManage, hasRequiredChannelRole, type ChannelRole, type ChannelStreamState } from "../contracts/values";
 import type { PanelEventEntry } from "../panel-contract";
 import { MODULES } from "../modules/registry";
@@ -369,8 +370,13 @@ export const LiveCockpitEventFeed = ({ channelId, role, now, timeZone, eventQuer
     if (login === null) return;
     setBusyEntry(entry.eventId);
     try {
+      const user = entry.actorUserId === null
+        ? await resolveTwitchUserLogin(channelId, login)
+        : { userId: entry.actorUserId, login, displayName: entry.actorDisplayName ?? login, profileImageUrl: null };
       const formData = new FormData();
-      formData.set("login", login);
+      formData.set("userId", user.userId);
+      formData.set("login", user.login);
+      formData.set("displayName", user.displayName);
       await raidAction.execute({ channelId, language, formData });
       onMessage(`${labels.raidShoutoutSent} @${login}`);
     } catch (error: unknown) {

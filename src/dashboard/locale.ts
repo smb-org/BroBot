@@ -320,6 +320,54 @@ export const dashboardLanguage = (): DashboardLanguage => browserModuleLanguage(
 
 export const dashboardCommonTexts = (language: DashboardLanguage = dashboardLanguage()): DashboardCommonTexts => commonTexts[language];
 
+export interface TwitchUserFieldTexts {
+  suggestionTitle: string;
+  searching: string;
+  notFound: string;
+  lookupError: string;
+  partial: string;
+  live: string;
+  exactMatch: string;
+  suggestions: string;
+  noSuggestions: string;
+  navigate: string;
+  select: string;
+  close: string;
+}
+
+const twitchUserFieldCatalog: LocaleCatalog<TwitchUserFieldTexts> = {
+  de: {
+    suggestionTitle: "Twitch-Nutzer",
+    searching: "Suche läuft …",
+    notFound: "Nutzer nicht gefunden",
+    lookupError: "Nutzer konnten nicht gesucht werden.",
+    partial: "Einige Vorschläge konnten nicht geladen werden.",
+    live: "Live",
+    exactMatch: "Exakter Login",
+    suggestions: "Vorschläge",
+    noSuggestions: "Keine Vorschläge gefunden.",
+    navigate: "Navigieren",
+    select: "Auswählen",
+    close: "Schließen",
+  },
+  en: {
+    suggestionTitle: "Twitch users",
+    searching: "Searching …",
+    notFound: "User not found",
+    lookupError: "Users could not be searched.",
+    partial: "Some suggestions could not be loaded.",
+    live: "Live",
+    exactMatch: "Exact login",
+    suggestions: "Suggestions",
+    noSuggestions: "No suggestions found.",
+    navigate: "Navigate",
+    select: "Select",
+    close: "Close",
+  },
+};
+
+export const twitchUserFieldTexts = (language: DashboardLanguage = dashboardLanguage()): TwitchUserFieldTexts => twitchUserFieldCatalog[language];
+
 type ServerFieldErrorReasonCode =
   | "settings_payload_invalid"
   | "settings_revision_invalid"

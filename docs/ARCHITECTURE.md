@@ -568,6 +568,15 @@ Das Admin- und Mod-Panel ist die primäre Bedienoberfläche. Sein Grundgerüst g
 
 Serverdaten bleiben autoritativ: Eine Live-Nachricht meldet nur, dass sich etwas geändert hat; den aktuellen Stand lädt das Panel über die API nach. Das Textbefehle-Panel lädt und mutiert seine Liste über `/api/channels/:channelId/modules/text_commands/commands`; die Ansicht bleibt lazy und führt keinen Worker-, Repository- oder Adaptercode aus.
 
+Twitch-Zielnamen in Host- und Modulformularen verwenden `TwitchUserField` aus
+`src/dashboard/ui`. Es baut auf `InlineSuggestionPicker` auf, hält Vorschläge
+als Portal-Overlay und übergibt die aufgelöste Identität. Die Suche läuft über
+`GET /api/channels/:channelId/twitch/user-suggestions?q=`; der Host erlaubt die
+Route nur Kanalmitgliedern. Zuletzt aktive Chatter werden im ChannelObject
+begrenzt für höchstens 60 Minuten und höchstens 500 Konten gespeichert.
+Plattformweite Formulare verwenden dieselbe Komponente mit der geschützten
+Route `/api/platform/twitch/user-suggestions?q=`.
+
 Sichtbare Panel-Texte eines Moduls stehen gesammelt in dessen Panel-Locale.
 Die gemeinsame Sprachauflösung und Datumsformatierung liegt in
 `src/dashboard/locale.ts`; neue Ansichten verdrahten kein neues `de-DE`.

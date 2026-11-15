@@ -1051,21 +1051,38 @@ export const dispatchEventSubNotification = async (
         const belongsToChannel = sourceBroadcasterId === undefined || sourceBroadcasterId === null ||
           sourceBroadcasterId === event.channelId;
         const chatterUserId = textValue(event.payload.chatter_user_id);
+        const chatterUserLogin = textValue(event.payload.chatter_user_login);
+        const chatterUserName = textValue(event.payload.chatter_user_name);
         const isBotMessage = chatterUserId !== null && chatterUserId === await getCachedBotUserId(environment.DB);
         if (belongsToChannel && !isBotMessage) {
           const windowStart = dispatchState.streamState === "online"
             ? statisticsWindowStart(event.receivedAt)
             : null;
-          if (windowStart === null) {
-            await object.recordChatActivity(chatterUserId, trackActiveChatters);
-          } else {
-            await object.recordChatActivity(chatterUserId, trackActiveChatters, {
-              windowStart: new Date(windowStart).toISOString(),
-              receivedAt: event.receivedAt,
-              emotes: countStatisticsEmotes(event.payload),
-              streamId: dispatchState.streamId,
-              textFragments: statisticsWordsExcluded(event.payload) ? [] : statisticsTextFragments(event.payload),
-            });
+          try {
+            if (windowStart === null) {
+              await object.recordChatActivity(chatterUserId, trackActiveChatters);
+            } else {
+              await object.recordChatActivity(chatterUserId, trackActiveChatters, {
+                windowStart: new Date(windowStart).toISOString(),
+                receivedAt: event.receivedAt,
+                emotes: countStatisticsEmotes(event.payload),
+                streamId: dispatchState.streamId,
+                textFragments: statisticsWordsExcluded(event.payload) ? [] : statisticsTextFragments(event.payload),
+              });
+            }
+          } catch (error: unknown) {
+            console.warn("Channel chat activity could not be counted.", error);
+          }
+          if (chatterUserId !== null && chatterUserLogin !== null && chatterUserName !== null) {
+            try {
+              await object.recordRecentChatter({
+                userId: chatterUserId,
+                login: chatterUserLogin,
+                displayName: chatterUserName,
+              });
+            } catch (error: unknown) {
+              console.warn("Recent chatters could not be stored for Twitch user suggestions.", error);
+            }
           }
         }
       } catch (error: unknown) {

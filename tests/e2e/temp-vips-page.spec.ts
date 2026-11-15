@@ -174,6 +174,11 @@ const mockDashboard = async (page: Page, options: { missingBroadcasterScopes?: s
     if (url.pathname === `/api/channels/${channelId}/modules/temp_vips/existing-vips`) {
       return route.fulfill(json({ people: existingVips }));
     }
+    if (url.pathname === `/api/channels/${channelId}/twitch/user-suggestions`) {
+      const login = (url.searchParams.get("q") ?? "").toLowerCase();
+      const displayName = login.length === 0 ? "" : login.charAt(0).toUpperCase() + login.slice(1);
+      return route.fulfill(json({ users: login.length === 0 ? [] : [{ userId: `user-${login}`, login, displayName, profileImageUrl: null }], partial: false }));
+    }
     if (url.pathname === "/api/csrf") return route.fulfill(json({ token: "csrf-temp-vips-page" }));
 
     const grantPath = `/api/channels/${channelId}/modules/temp_vips/vips/grant`;
@@ -183,9 +188,9 @@ const mockDashboard = async (page: Page, options: { missingBroadcasterScopes?: s
       if (grantStatus !== "granted" && grantStatus !== "extended") return route.fulfill(json({ status: grantStatus }));
       const row = {
         ...(initialRows[0] as ModuleTempVipRow),
-        userId: `user_${String(body.login)}`,
+        userId: String(body.userId),
         login: String(body.login),
-        displayName: String(body.login),
+        displayName: String(body.displayName),
         source: "dashboard" as const,
         expiresAt: new Date(Date.now() + Number(body.durationMs)).toISOString(),
         removalFailedAt: null,
@@ -294,7 +299,8 @@ test("renders the sorted VIP list and dialogs at the requested widths with revie
   await page.goto(`/channels/${channelId}/modules/temp_vips?lang=de`);
   await page.getByRole("button", { name: "VIP vergeben", exact: true }).click();
   const grantDialog = page.getByRole("dialog", { name: "VIP vergeben" });
-  await grantDialog.getByRole("textbox", { name: "Name" }).fill("sternchenwerk");
+  await grantDialog.getByRole("combobox", { name: "Name" }).fill("sternchenwerk");
+  await page.getByRole("option", { name: /Sternchenwerk/u }).click();
   await grantDialog.getByRole("spinbutton", { name: "Dauer" }).fill("11");
   expect(await grantDialog.locator(".temp-vips-dialog__error").boundingBox()).not.toBeNull();
   const grantScreenshot = testInfo.outputPath("temp-vips-grant-dialog.png");
@@ -302,7 +308,7 @@ test("renders the sorted VIP list and dialogs at the requested widths with revie
   await grantDialog.getByRole("button", { name: "VIP vergeben", exact: true }).click();
   await expect(page.getByRole("listitem").filter({ hasText: "@sternchenwerk" })).toBeVisible();
   expect(api.grants).toHaveLength(1);
-  expect(api.grants[0]).toMatchObject({ login: "sternchenwerk", durationMs: 11 * 24 * 60 * 60 * 1000 });
+  expect(api.grants[0]).toMatchObject({ userId: "user-sternchenwerk", login: "sternchenwerk", durationMs: 11 * 24 * 60 * 60 * 1000 });
 
   const standardRow = page.locator(".temp-vips-row").filter({ hasText: "@pixelpilz" });
   await standardRow.getByRole("button", { name: "Verlängern" }).click();
@@ -418,12 +424,13 @@ test("offers the Grant VIP cockpit action with the channel default duration", as
   await action.click();
   const dialog = page.getByRole("dialog", { name: "VIP vergeben" });
   await expect(dialog.getByRole("spinbutton", { name: "Dauer" })).toHaveValue("7");
-  await dialog.getByRole("textbox", { name: "Twitch-Name" }).fill("wolkentanz");
+  await dialog.getByRole("combobox", { name: "Twitch-Name" }).fill("wolkentanz");
+  await page.getByRole("option", { name: /Wolkentanz/u }).click();
   await dialog.getByRole("spinbutton", { name: "Dauer" }).fill("6");
   await dialog.getByRole("button", { name: "Ausführen", exact: true }).click();
   await expect(dialog).toBeHidden();
   expect(api.grants).toHaveLength(1);
-  expect(api.grants[0]).toMatchObject({ login: "wolkentanz", durationMs: 6 * 24 * 60 * 60 * 1000 });
+  expect(api.grants[0]).toMatchObject({ userId: "user-wolkentanz", login: "wolkentanz", durationMs: 6 * 24 * 60 * 60 * 1000 });
 });
 
 test("uses saved duration settings in the grant dialog", async ({ page }) => {
@@ -454,7 +461,8 @@ test("reports a queued cockpit grant as pending", async ({ page }) => {
   await page.goto(`/channels/${channelId}?lang=de`);
   await page.locator(".live-cockpit-actions__grid").getByRole("button", { name: "VIP vergeben" }).click();
   const dialog = page.getByRole("dialog", { name: "VIP vergeben" });
-  await dialog.getByRole("textbox", { name: "Twitch-Name" }).fill("wolkentanz");
+  await dialog.getByRole("combobox", { name: "Twitch-Name" }).fill("wolkentanz");
+  await page.getByRole("option", { name: /Wolkentanz/u }).click();
   await dialog.getByRole("button", { name: "Ausführen", exact: true }).click();
   const action = page.locator(".live-cockpit-actions__grid .live-action").filter({
     has: page.getByRole("button", { name: "VIP vergeben" }),
@@ -511,7 +519,8 @@ test("reports an extended cockpit grant with the new expiry", async ({ page }) =
   await page.goto(`/channels/${channelId}?lang=de`);
   await page.locator(".live-cockpit-actions__grid").getByRole("button", { name: "VIP vergeben" }).click();
   const dialog = page.getByRole("dialog", { name: "VIP vergeben" });
-  await dialog.getByRole("textbox", { name: "Twitch-Name" }).fill("pixelpilz");
+  await dialog.getByRole("combobox", { name: "Twitch-Name" }).fill("pixelpilz");
+  await page.getByRole("option", { name: /Pixelpilz/u }).click();
   await dialog.getByRole("button", { name: "Ausführen", exact: true }).click();
   const action = page.locator(".live-cockpit-actions__grid .live-action").filter({
     has: page.getByRole("button", { name: "VIP vergeben" }),

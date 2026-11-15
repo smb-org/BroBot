@@ -432,6 +432,7 @@ const timerSkipReceiptsForSchedule = (
 };
 const LEGACY_ACTIVE_CHATTER_STREAM_KEY = "chatter:stream";
 const ACTIVE_CHATTER_TABLE = "active_chatters";
+const RECENT_CHATTER_TABLE = "recent_chatters";
 const STATISTICS_CHAT_WINDOW_TABLE = "statistics_chat_windows";
 const STATISTICS_WORD_STREAM_TABLE = "statistics_word_streams";
 const STATISTICS_CLIP_IMPORT_TABLE = "statistics_clip_imports";
@@ -453,6 +454,7 @@ const EVENTSUB_MESSAGE_ID_RETENTION_MS = EVENTSUB_REPLAY_WINDOW_MILLISECONDS + 2
 const ACTIVE_CHATTER_KEY_TABLE = "active_chatter_key";
 const ACTIVE_CHATTER_EXPIRY_KEY = "host:active_chatters_expiry";
 const ACTIVE_CHATTER_RETENTION_MS = 60 * 60 * 1_000;
+const MAX_RECENT_CHATTERS = 500;
 const ACTIVE_CHATTER_KEY_ROTATION_MS = 24 * 60 * 60 * 1_000;
 const MODULE_ALARM_OWNER_REVISIONS_KEY = "module_alarm:owner_revisions";
 const MODULE_ALARM_OWNER_REVISION_RETENTION_MS = 24 * 60 * 60 * 1_000;
@@ -952,6 +954,7 @@ export class ChannelObject extends DurableObject<Env> {
   private timerScheduleInitialization: Promise<void> | null = null;
   private timerOccurrenceQueues = new Map<string, Promise<void>>();
   private activeChatterSchemaReady = false;
+  private recentChatterSchemaReady = false;
   private statisticsSchemaReady = false;
   private eventSubMessageIdSchemaReady = false;
   private pointsSchemaReady = false;
@@ -1482,6 +1485,24 @@ export class ChannelObject extends DurableObject<Env> {
       )`,
     );
     this.activeChatterSchemaReady = true;
+  }
+
+  private ensureRecentChatterTable(): void {
+    if (this.recentChatterSchemaReady) return;
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${RECENT_CHATTER_TABLE} (
+        user_id TEXT PRIMARY KEY,
+        login TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        profile_image_url TEXT,
+        last_seen_at TEXT NOT NULL
+      )`,
+    );
+    this.ctx.storage.sql.exec(
+      `CREATE INDEX IF NOT EXISTS recent_chatters_last_seen_at_idx
+       ON ${RECENT_CHATTER_TABLE} (last_seen_at DESC)`,
+    );
+    this.recentChatterSchemaReady = true;
   }
 
   private ensureStatisticsSchema(): void {
@@ -3202,6 +3223,25 @@ export class ChannelObject extends DurableObject<Env> {
     return Math.min(firstSeen + ACTIVE_CHATTER_RETENTION_MS, keyCreatedAt + ACTIVE_CHATTER_KEY_ROTATION_MS);
   }
 
+  private recentChattersNextSweepSync(): number | null {
+    this.ensureRecentChatterTable();
+    const row = this.ctx.storage.sql.exec<{ first_expiry: string | null }>(
+      `SELECT MIN(last_seen_at) AS first_expiry FROM ${RECENT_CHATTER_TABLE}`,
+    ).toArray()[0];
+    if (row?.first_expiry == null) return null;
+    const firstSeen = Date.parse(row.first_expiry);
+    return Number.isFinite(firstSeen) ? firstSeen + ACTIVE_CHATTER_RETENTION_MS : Date.now();
+  }
+
+  private chatActivityNextSweepSync(): number | null {
+    const key = this.activeChatterKeyRowSync();
+    const activeExpiry = key === null ? null : this.activeChatterNextSweepSync(key.createdAt);
+    const suggestionExpiry = this.recentChattersNextSweepSync();
+    if (activeExpiry === null) return suggestionExpiry;
+    if (suggestionExpiry === null) return activeExpiry;
+    return Math.min(activeExpiry, suggestionExpiry);
+  }
+
   private recordActiveChatter(hmac: string, seenAt: string): void {
     this.ensureActiveChatterTable();
     this.ctx.storage.sql.exec(
@@ -3259,7 +3299,9 @@ export class ChannelObject extends DurableObject<Env> {
     this.clearActiveChatterRecordsSync();
     this.ctx.storage.sql.exec(`DELETE FROM ${ACTIVE_CHATTER_KEY_TABLE}`);
     this.ctx.storage.kv.delete(LEGACY_ACTIVE_CHATTER_STREAM_KEY);
-    this.clearActiveChatterExpiryEntrySync();
+    const nextSweep = this.recentChattersNextSweepSync();
+    if (nextSweep === null) this.clearActiveChatterExpiryEntrySync();
+    else this.writeActiveChatterExpiryEntrySync(nextSweep);
   }
 
   /** Keep schedule cache writes and their alarm reconciliation in one order. */
@@ -6040,6 +6082,89 @@ export class ChannelObject extends DurableObject<Env> {
     });
   }
 
+  /** Keeps public chatter identity fields for name suggestions for at most 60 minutes. */
+  public async recordRecentChatter(person: { userId: string; login: string; displayName: string }): Promise<void> {
+    if (person.userId.length === 0 || !/^[A-Za-z0-9_]{1,25}$/u.test(person.login) ||
+        person.displayName.length === 0 || person.displayName.length > 50) return;
+    const now = Date.now();
+    const seenAt = new Date(now).toISOString();
+    const deadline = Math.min(this.chatActivityNextSweepSync() ?? Number.POSITIVE_INFINITY, now + ACTIVE_CHATTER_RETENTION_MS);
+    await this.ensurePlatformActiveChatterAlarm(deadline);
+    await this.ctx.blockConcurrencyWhile(async () => {
+      this.ensureRecentChatterTable();
+      this.ctx.storage.transactionSync(() => {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO ${RECENT_CHATTER_TABLE} (user_id, login, display_name, profile_image_url, last_seen_at)
+           VALUES (?, ?, ?, NULL, ?)
+           ON CONFLICT(user_id) DO UPDATE SET
+             login = excluded.login,
+             display_name = excluded.display_name,
+             last_seen_at = excluded.last_seen_at`,
+          person.userId,
+          person.login,
+          person.displayName,
+          seenAt,
+        );
+        this.ctx.storage.sql.exec(
+          `DELETE FROM ${RECENT_CHATTER_TABLE} WHERE last_seen_at <= ?`,
+          new Date(now - ACTIVE_CHATTER_RETENTION_MS).toISOString(),
+        );
+        this.ctx.storage.sql.exec(
+          `DELETE FROM ${RECENT_CHATTER_TABLE}
+           WHERE user_id IN (
+             SELECT user_id FROM ${RECENT_CHATTER_TABLE}
+             ORDER BY last_seen_at DESC, user_id
+             LIMIT -1 OFFSET ?
+           )`,
+          MAX_RECENT_CHATTERS,
+        );
+        const nextSweep = this.chatActivityNextSweepSync();
+        if (nextSweep === null) this.clearActiveChatterExpiryEntrySync();
+        else this.writeActiveChatterExpiryEntrySync(nextSweep);
+      });
+      await this.scheduleEarliestAlarm();
+    });
+  }
+
+  /** Lists a bounded set of recent chatters whose login or display name starts with the query. */
+  public getRecentChatters(query: string, limit = 8): Promise<Array<{
+    userId: string;
+    login: string;
+    displayName: string;
+    profileImageUrl: string | null;
+  }>> {
+    if (!/^[A-Za-z0-9_]{1,25}$/u.test(query)) return Promise.resolve([]);
+    const boundedLimit = Number.isSafeInteger(limit) ? Math.max(1, Math.min(8, limit)) : 8;
+    const cutoff = new Date(Date.now() - ACTIVE_CHATTER_RETENTION_MS).toISOString();
+    try {
+      this.ensureRecentChatterTable();
+      return Promise.resolve(this.ctx.storage.sql.exec<{
+        user_id: string;
+        login: string;
+        display_name: string;
+        profile_image_url: string | null;
+      }>(
+        `SELECT user_id, login, display_name, profile_image_url
+           FROM ${RECENT_CHATTER_TABLE}
+          WHERE last_seen_at >= ?
+          ORDER BY last_seen_at DESC, user_id
+          LIMIT 500`,
+        cutoff,
+      ).toArray()
+        .filter((entry) => entry.login.toLocaleLowerCase("en-US").startsWith(query.toLocaleLowerCase("en-US")) ||
+          entry.display_name.toLocaleLowerCase("en-US").startsWith(query.toLocaleLowerCase("en-US")))
+        .slice(0, boundedLimit)
+        .map((entry) => ({
+          userId: entry.user_id,
+          login: entry.login,
+          displayName: entry.display_name,
+          profileImageUrl: entry.profile_image_url,
+        })));
+    } catch {
+      return Promise.resolve([]);
+    }
+  }
+
   public async getActiveChatterCount(windowMs: number): Promise<number> {
     await this.ensurePointRoundRecovery();
     if (!Number.isFinite(windowMs) || windowMs <= 0) return Promise.resolve(0);
@@ -6116,8 +6241,13 @@ export class ChannelObject extends DurableObject<Env> {
     await this.ctx.blockConcurrencyWhile(() => {
       this.ctx.storage.transactionSync(() => {
         this.ensureActiveChatterTable();
+        this.ensureRecentChatterTable();
         this.ctx.storage.sql.exec(
           `DELETE FROM ${ACTIVE_CHATTER_TABLE} WHERE last_seen_at <= ?`,
+          new Date(now - ACTIVE_CHATTER_RETENTION_MS).toISOString(),
+        );
+        this.ctx.storage.sql.exec(
+          `DELETE FROM ${RECENT_CHATTER_TABLE} WHERE last_seen_at <= ?`,
           new Date(now - ACTIVE_CHATTER_RETENTION_MS).toISOString(),
         );
         const key = this.activeChatterKeyRowSync();
@@ -6125,7 +6255,7 @@ export class ChannelObject extends DurableObject<Env> {
           this.clearActiveChatterStateSync();
           return;
         }
-        const nextSweep = key === null ? null : this.activeChatterNextSweepSync(key.createdAt);
+        const nextSweep = this.chatActivityNextSweepSync();
         if (nextSweep === null) this.clearActiveChatterStateSync();
         else this.writeActiveChatterExpiryEntrySync(nextSweep);
       });

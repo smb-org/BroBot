@@ -69,6 +69,7 @@ const environment = (database: TestD1Database, publish = vi.fn()) => {
     notifyScheduleInputsChanged: vi.fn().mockResolvedValue(undefined),
     reconcileTimerSchedules: vi.fn().mockResolvedValue(undefined),
     recordChatActivity: vi.fn().mockResolvedValue(0),
+    recordRecentChatter: vi.fn().mockResolvedValue(undefined),
     clearActiveChatters: vi.fn().mockResolvedValue(undefined),
     getActiveChatterCount: vi.fn().mockResolvedValue(0),
     getActiveChatter: vi.fn().mockResolvedValue(null),
@@ -1230,7 +1231,7 @@ describe("dispatch and execution", () => {
     }
   });
 
-  it("passes the chatter id through the existing channel object call when tracking is declared", async () => {
+  it("records active and recent chatter activity when tracking is declared", async () => {
     const database = new TestD1Database();
     try {
       await withBot(database);
@@ -1242,15 +1243,43 @@ describe("dispatch and execution", () => {
         channelId: "kanal-a",
         subscriptionType: CHAT_TYPE,
         triggerId: "activity-trigger",
-        payload: { message: { text: "hello" }, chatter_user_id: "viewer-1", chatter_user_login: "viewer-a" },
+        payload: { message: { text: "hello" }, chatter_user_id: "viewer-1", chatter_user_login: "viewer-a", chatter_user_name: "Viewer A" },
         receivedAt: NOW,
       }, vi.fn<typeof fetch>(), [tracker]);
 
       const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
         recordChatActivity: ReturnType<typeof vi.fn>;
+        recordRecentChatter: ReturnType<typeof vi.fn>;
       };
       expect(object.recordChatActivity).toHaveBeenCalledTimes(1);
       expect(object.recordChatActivity).toHaveBeenCalledWith("viewer-1", true);
+      expect(object.recordRecentChatter).toHaveBeenCalledWith({ userId: "viewer-1", login: "viewer-a", displayName: "Viewer A" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("records recent chatters even when no module requests active chatter counts", async () => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      const tracker = silentModule("tracker");
+      const runtime = environment(database);
+
+      await dispatchEventSubNotification(runtime, {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "recent-chatter-trigger",
+        payload: { message: { text: "hello" }, chatter_user_id: "viewer-1", chatter_user_login: "viewer-a", chatter_user_name: "Viewer A" },
+        receivedAt: NOW,
+      }, vi.fn<typeof fetch>(), [tracker]);
+
+      const object = runtime.CHANNEL.get(runtime.CHANNEL.idFromName("kanal-a")) as unknown as {
+        recordChatActivity: ReturnType<typeof vi.fn>;
+        recordRecentChatter: ReturnType<typeof vi.fn>;
+      };
+      expect(object.recordChatActivity).toHaveBeenCalledWith("viewer-1", false);
+      expect(object.recordRecentChatter).toHaveBeenCalledWith({ userId: "viewer-1", login: "viewer-a", displayName: "Viewer A" });
     } finally {
       database.close();
     }

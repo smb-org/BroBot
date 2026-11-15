@@ -1419,9 +1419,9 @@ describe("Dashboard skeleton", () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/channels") return jsonResponse({ channels: [alpha, beta], bot: alpha.bot });
-      if (path === "/api/channels/kanal-a/members/search") return jsonResponse({ user: {
-        userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: null,
-      } });
+      if (path === "/api/channels/kanal-a/twitch/user-suggestions") return jsonResponse({ users: [
+        { userId: "300", login: "neueperson", displayName: "Neue Person", profileImageUrl: null },
+      ], partial: false });
       if (path === "/api/channels/kanal-a/members") return jsonResponse({ members: [], broadcasterCount: 1, viewerUserId: "100", nextCursor: null });
       if (path === "/api/channels/kanal-b/members") return jsonResponse({ members: [], broadcasterCount: 1, viewerUserId: "200", nextCursor: null });
       return jsonResponse({}, 404);
@@ -1430,8 +1430,8 @@ describe("Dashboard skeleton", () => {
 
     render(<DashboardApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Zugriff vergeben" }));
-    const search = await screen.findByRole("textbox", { name: "Twitch-Name" });
-    fireEvent.change(search, { target: { value: "neue-person" } });
+    const search = await screen.findByRole("combobox", { name: "Twitch-Name" });
+    fireEvent.change(search, { target: { value: "neueperson" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     expect(await screen.findByText("Neue Person")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Weiter" }));
@@ -1737,11 +1737,11 @@ describe("Dashboard skeleton", () => {
       const path = url.pathname;
       if (path === "/api/channels/kanal-a/members" && init?.method === "POST") {
         addRequestCount += 1;
-        return jsonResponse({ member: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: "https://cdn.example/neue-person.png", role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" } }, 201);
+        return jsonResponse({ member: { userId: "300", login: "neueperson", displayName: "Neue Person", profileImageUrl: "https://cdn.example/neue-person.png", role: "operator", joinedAt: "2026-09-19T00:00:00.000Z" } }, 201);
       }
       if (path === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (path === "/api/channels/kanal-a/members") return jsonResponse({ members: [] });
-      if (path === "/api/channels/kanal-a/members/search") return jsonResponse({ user: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: "https://cdn.example/neue-person.png" } });
+      if (path === "/api/channels/kanal-a/twitch/user-suggestions") return jsonResponse({ users: [{ userId: "300", login: "neueperson", displayName: "Neue Person", profileImageUrl: "https://cdn.example/neue-person.png" }], partial: false });
       if (path === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       return jsonResponse({}, 404);
     });
@@ -1751,11 +1751,11 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
     fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
-    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
+    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neueperson" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     await screen.findByText("Neue Person");
 
-    const profileLink = screen.getByRole("link", { name: "twitch.tv/neue-person" });
+    const profileLink = screen.getByRole("link", { name: "twitch.tv/neueperson" });
     expect(profileLink).toHaveAttribute("target", "_blank");
     expect(profileLink.getAttribute("rel")?.split(/\s+/)).toEqual(expect.arrayContaining(["noopener", "noreferrer"]));
     expect(document.querySelector("img.member-avatar")).toHaveAttribute("src", "https://cdn.example/neue-person.png");
@@ -1780,7 +1780,7 @@ describe("Dashboard skeleton", () => {
       if (url.pathname === "/api/channels/kanal-a/members" && init?.method === "POST") addRequestCount += 1;
       if (url.pathname === "/api/channels") return jsonResponse({ channels: [channel], bot: channel.bot });
       if (url.pathname === "/api/channels/kanal-a/members") return jsonResponse({ members: [] });
-      if (url.pathname === "/api/channels/kanal-a/members/search") return jsonResponse({ user: { userId: "300", login: "neue-person", displayName: "Neue Person", profileImageUrl: null } });
+      if (url.pathname === "/api/channels/kanal-a/twitch/user-suggestions") return jsonResponse({ users: [{ userId: "300", login: "neueperson", displayName: "Neue Person", profileImageUrl: null }], partial: false });
       if (url.pathname === "/api/csrf") return jsonResponse({ token: "csrf-token" });
       return jsonResponse({}, 404);
     });
@@ -1790,7 +1790,7 @@ describe("Dashboard skeleton", () => {
     render(<DashboardApp />);
     await screen.findByRole("heading", { name: "Mitglieder", level: 1 });
     fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
-    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
+    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neueperson" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     await screen.findByText("Neue Person");
     fireEvent.click(screen.getByRole("button", { name: "Weiter" }));
@@ -1809,7 +1809,7 @@ describe("Dashboard skeleton", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
-    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
+    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neueperson" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     await screen.findByText("Neue Person");
     fireEvent.click(screen.getByRole("button", { name: "Weiter" }));
@@ -1889,7 +1889,7 @@ describe("Dashboard skeleton", () => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
       if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-token" }));
-      if (url.pathname === "/api/channels/kanal-a/members/search") return Promise.resolve(jsonResponse({ user: { userId: "new-user", login: "neue-person", displayName: "Neuer Stand", profileImageUrl: null } }));
+      if (url.pathname === "/api/channels/kanal-a/twitch/user-suggestions") return Promise.resolve(jsonResponse({ users: [{ userId: "new-user", login: "neueperson", displayName: "Neuer Stand", profileImageUrl: null }], partial: false }));
       if (url.pathname === "/api/channels/kanal-a/members" && init?.method === "POST") return Promise.resolve(jsonResponse({ member: newMember }, 201));
       if (url.pathname === "/api/channels/kanal-a/members") {
         memberRequestCount += 1;
@@ -1905,7 +1905,7 @@ describe("Dashboard skeleton", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Zugriff vergeben" }));
     await screen.findByLabelText("Twitch-Name");
 
-    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neue-person" } });
+    fireEvent.change(screen.getByLabelText("Twitch-Name"), { target: { value: "neueperson" } });
     fireEvent.click(screen.getByRole("button", { name: "Suchen" }));
     await screen.findByText("Neuer Stand");
     fireEvent.click(screen.getByRole("button", { name: "Weiter" }));

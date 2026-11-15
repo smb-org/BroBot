@@ -70,11 +70,11 @@ const mutate = async (channelId: string, path: string, body: Record<string, unkn
   });
 };
 
-export const grantTempVip = (channelId: string, login: string, durationMs: number): Promise<ModuleTempVipResult> =>
-  mutate(channelId, "/vips/grant", { login, durationMs });
+export const grantTempVip = (channelId: string, person: ModuleTempVipPerson, durationMs: number): Promise<ModuleTempVipResult> =>
+  mutate(channelId, "/vips/grant", { ...person, durationMs });
 
-export const addObservedTempVip = (channelId: string, login: string): Promise<ModuleTempVipResult> =>
-  mutate(channelId, "/vips/observed", { login });
+export const addObservedTempVip = (channelId: string, person: ModuleTempVipPerson): Promise<ModuleTempVipResult> =>
+  mutate(channelId, "/vips/observed", { ...person });
 
 export const classifyTempVip = (
   channelId: string,

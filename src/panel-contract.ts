@@ -259,6 +259,12 @@ export interface PanelTwitchUser {
   login: string;
   displayName: string;
   profileImageUrl: string | null;
+  isLive?: boolean;
+}
+
+export interface PanelTwitchUserSuggestionsResponse {
+  users: readonly PanelTwitchUser[];
+  partial: boolean;
 }
 
 export interface PanelSystemResponse {

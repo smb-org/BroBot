@@ -55,12 +55,18 @@ export const raidModule: BotModule<typeof raidSettingsSchema> = {
     icon: "shoutout",
     conditions: ["streamLive"],
     requiredRole: "operator",
-    content: { presentation: "popover", load: () => import("./panel/action-content") },
+    content: { presentation: "popover", hideSubmit: true, load: () => import("./panel/action-content") },
     errorMessage: raidImmediateActionTexts.error,
     execute: async ({ channelId, formData }) => {
+      const userId = formData.get("userId");
       const login = formData.get("login");
-      if (typeof login !== "string" || login.trim().length === 0) throw new Error("A channel login is required.");
-      await (await import("./panel/immediate-action-service")).sendManualShoutout(channelId, login.trim());
+      const displayName = formData.get("displayName");
+      if (typeof userId !== "string" || !/^[A-Za-z0-9_-]{1,32}$/u.test(userId) ||
+          typeof login !== "string" || !/^[A-Za-z0-9_]{1,25}$/u.test(login) ||
+          typeof displayName !== "string" || displayName.trim().length === 0) {
+        throw new Error("A resolved Twitch channel is required.");
+      }
+      await (await import("./panel/immediate-action-service")).sendManualShoutout(channelId, { userId, login, displayName });
     },
   }],
   handleEvent: (event, context) => processRaid(event, context.renderTemplate),

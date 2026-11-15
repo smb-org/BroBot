@@ -36,7 +36,7 @@ export const PANEL_RESOURCE_NOTIFIER_COVERAGE = {
     "/api/channels",
     "/api/csrf",
     "/api/platform",
-    "/api/platform/users",
+    "/api/platform/twitch/user-suggestions",
     "/api/platform/channels",
     "/api/platform/channels/:channelId/members",
     "/api/platform/audit",

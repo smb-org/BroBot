@@ -200,7 +200,7 @@ test("editor stage 2 pages fit at 1280px and 390px and produce review screenshot
   await page.goto(`/channels/${channel.channelId}/members`);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole("button", { name: "Zugriff vergeben" }).click();
-  await expect(page.getByRole("textbox", { name: "Twitch-Name" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Twitch-Name" })).toBeVisible();
   await capture(page, testInfo, "11-members");
 
   await page.goto("/platform");

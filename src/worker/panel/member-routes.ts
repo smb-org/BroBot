@@ -20,7 +20,7 @@ import {
 } from "../auth/guards";
 import { CHANNEL_ROLES, canManage, type AuditAction, type ChannelRole } from "../../contracts/values";
 import { revokeRealtimeUser } from "../realtime";
-import { fetchTwitchUserByLogin, type TwitchUser } from "../shoutout";
+import type { TwitchUser } from "../shoutout";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { measureServerTiming } from "../server-timing";
 
@@ -126,11 +126,6 @@ const memberResponseWithNames = (
   names: Map<string, TwitchUser>,
 ) => memberResponse(member, names.get(member.userId));
 
-const searchLogin = (value: string | undefined): string | null => {
-  const login = value?.trim() ?? "";
-  return login.length > 0 && login.length <= 25 && !/\s/.test(login) ? login : null;
-};
-
 const parseMemberLimit = (value: string | undefined): number | null => {
   if (value === undefined) return DEFAULT_MEMBER_LIMIT;
   if (!/^\d+$/.test(value)) return null;
@@ -173,19 +168,6 @@ memberRouter.get("/api/channels/:channelId/members", async (context) => {
     broadcasterCount,
     viewerUserId: context.get("session").userId,
   });
-});
-
-memberRouter.get("/api/channels/:channelId/members/search", async (context) => {
-  if (!canManageMembers(context.get("channelRole"))) return manageDenied(context);
-  const login = searchLogin(context.req.query("login"));
-  if (login === null) return context.json({ error: "twitch_login_invalid" }, 400);
-  try {
-    const user = await fetchTwitchUserByLogin(fetch, context.env, login);
-    if (user === null) return context.json({ error: "twitch_user_not_found" }, 404);
-    return context.json({ user });
-  } catch {
-    return context.json({ error: "twitch_user_search_failed" }, 502);
-  }
 });
 
 memberRouter.post("/api/channels/:channelId/members", async (context) => {

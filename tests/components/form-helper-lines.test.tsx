@@ -66,7 +66,7 @@ describe("helper text on every field (editor-konzept 3.0/15d)", () => {
     const response: PanelMembersResponse = { members: [member], nextCursor: null, broadcasterCount: 1, viewerUserId: "1" };
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
-      if (path.endsWith("/members/search")) return Promise.resolve(jsonResponse({ user: { userId: "2", login: "new_helper", displayName: "New Helper", profileImageUrl: null } }));
+      if (path.endsWith("/twitch/user-suggestions")) return Promise.resolve(jsonResponse({ users: [{ userId: "2", login: "new_helper", displayName: "New Helper", profileImageUrl: null }], partial: false }));
       return Promise.resolve(jsonResponse({}));
     }));
     renderWithQuery(
@@ -82,7 +82,7 @@ describe("helper text on every field (editor-konzept 3.0/15d)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Zugriff vergeben" }));
     const dialog = await screen.findByRole("dialog", { name: "Zugriff vergeben" });
     expectEveryFieldHasHelperText(dialog);
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "Twitch-Name" }), { target: { value: "new_helper" } });
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Twitch-Name" }), { target: { value: "new_helper" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Suchen" }));
     await within(dialog).findByRole("heading", { name: "Rolle vergeben" });
     expectEveryFieldHasHelperText(dialog);

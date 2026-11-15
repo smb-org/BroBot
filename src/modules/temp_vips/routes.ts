@@ -1,13 +1,12 @@
 import { Hono, type Context } from "hono";
 
 import { hasRequiredChannelRole } from "../../contracts/values";
-import { DEFAULT_CHANNEL_TIME_ZONE, type ModuleRouteEnvironment, type ModuleTempVipMode, type ModuleTempVipPerson } from "../contract";
+import { DEFAULT_CHANNEL_TIME_ZONE, type ModuleRouteEnvironment, type ModuleTempVipMode } from "../contract";
 import { TEMP_VIP_MINIMUM_DURATION_MS } from "./domain";
 import { channelDateTimeToEpoch } from "./domain/time-zone";
 import { tempVipsSettingsSchema } from "./contracts";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
-const HELIX_USERS_URL = "https://api.twitch.tv/helix/users";
 
 type RequestBody = Record<string, unknown>;
 
@@ -72,40 +71,12 @@ const actorFor = (context: RouteContext) => {
   return { userId: session.userId, login: session.login ?? session.userId };
 };
 
-const resolvePerson = async (context: RouteContext, value: unknown): Promise<
-  | { kind: "found"; person: ModuleTempVipPerson }
-  | { kind: "missing" }
-  | { kind: "unavailable" }
-> => {
-  if (typeof value !== "string") return { kind: "missing" };
-  const login = value.trim().replace(/^@/u, "").toLowerCase();
-  if (!/^[a-z0-9_]{1,25}$/u.test(login)) return { kind: "missing" };
-  try {
-    const accessToken = await context.get("measureServerTiming")("helix", () =>
-      context.get("getAppAccessToken")(context.env, new Date().toISOString()));
-    const result = await context.get("measureServerTiming")("helix", () => context.get("helixRequest")<{ data?: unknown }>({
-      url: HELIX_USERS_URL,
-      query: { login },
-      accessToken,
-      clientId: context.env.TWITCH_CLIENT_ID,
-    }));
-    if (!result.ok || !Array.isArray(result.data.data)) return { kind: "unavailable" };
-    const first: unknown = result.data.data[0];
-    if (first === undefined) return { kind: "missing" };
-    if (typeof first !== "object" || first === null ||
-        typeof Reflect.get(first, "id") !== "string" || typeof Reflect.get(first, "login") !== "string" ||
-        typeof Reflect.get(first, "display_name") !== "string") return { kind: "unavailable" };
-    return {
-      kind: "found",
-      person: {
-        userId: Reflect.get(first, "id") as string,
-        login: Reflect.get(first, "login") as string,
-        displayName: Reflect.get(first, "display_name") as string,
-      },
-    };
-  } catch {
-    return { kind: "unavailable" };
-  }
+const personFrom = (body: RequestBody) => {
+  const { userId, login, displayName } = body;
+  if (typeof userId !== "string" || !/^[A-Za-z0-9_-]{1,32}$/u.test(userId) ||
+      typeof login !== "string" || !/^[A-Za-z0-9_]{1,25}$/u.test(login) ||
+      typeof displayName !== "string" || displayName.trim().length === 0 || displayName.length > 100) return null;
+  return { userId, login, displayName };
 };
 
 const actionRequest = async (context: RouteContext): Promise<
@@ -157,10 +128,9 @@ tempVipsRoutes.post("/vips/observed", async (context) => {
   const access = context.get("tempVips")(routeParam(context, "channelId"));
   const denied = modeDenial(context, await access.mode(), "observe");
   if (denied !== null) return denied;
-  const resolved = await resolvePerson(context, request.body.login);
-  if (resolved.kind === "missing") return context.json({ error: "temp_vips_user_not_found" }, 404);
-  if (resolved.kind === "unavailable") return context.json({ error: "temp_vips_twitch_unavailable" }, 502);
-  const result = await access.addObserved({ operationId: request.operationId, person: resolved.person, actor: actorFor(context) });
+  const person = personFrom(request.body);
+  if (person === null) return context.json({ error: "temp_vips_user_not_found" }, 404);
+  const result = await access.addObserved({ operationId: request.operationId, person, actor: actorFor(context) });
   return context.json(result);
 });
 
@@ -222,12 +192,11 @@ tempVipsRoutes.post("/vips/grant", async (context) => {
     ? settings.defaultDurationDays * DAY_MS
     : durationFrom(request.body.durationMs);
   if (durationMs === null) return context.json({ error: "temp_vips_duration_invalid" }, 400);
-  const person = await resolvePerson(context, request.body.login);
-  if (person.kind === "missing") return context.json({ error: "temp_vips_user_not_found" }, 404);
-  if (person.kind === "unavailable") return context.json({ error: "temp_vips_twitch_unavailable" }, 502);
+  const person = personFrom(request.body);
+  if (person === null) return context.json({ error: "temp_vips_user_not_found" }, 404);
   const result = await context.get("tempVips")(routeParam(context, "channelId")).grant({
     operationId: request.operationId,
-    person: person.person,
+    person,
     grantedBy: actorFor(context),
     durationMs,
     maximumRemainingMs: settings.maximumDurationDays * DAY_MS,
