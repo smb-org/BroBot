@@ -35,10 +35,6 @@ interface CatalogueField {
   symbols: Set<ts.Symbol>;
 }
 
-const literalPropertyNamesCache = new WeakMap<ts.Expression, readonly string[]>();
-const catalogueValuesInTypeCache = new WeakMap<ts.Type, readonly CatalogueValue[]>();
-const catalogueValuesAtMemberCache = new WeakMap<ts.Expression, readonly CatalogueValue[]>();
-
 const typeParts = (type: ts.Type): ts.Type[] =>
   type.isUnionOrIntersection() ? type.types.flatMap(typeParts) : [type];
 
@@ -64,8 +60,6 @@ const isOnlyLocaleTextType = (checker: ts.TypeChecker, type: ts.Type): boolean =
   typeParts(type).every((part) => isLocaleTextPart(checker, part));
 
 const literalPropertyNames = (checker: ts.TypeChecker, expression: ts.Expression): string[] => {
-  const cached = literalPropertyNamesCache.get(expression);
-  if (cached !== undefined) return [...cached];
   const names = new Set<string>();
   const addTypeNames = (type: ts.Type): void => {
     if (type.isUnion()) {
@@ -88,9 +82,7 @@ const literalPropertyNames = (checker: ts.TypeChecker, expression: ts.Expression
     if (typeof constantValue === "string" || typeof constantValue === "number") names.add(String(constantValue));
   }
   addTypeNames(checker.getTypeAtLocation(expression));
-  const result = [...names];
-  literalPropertyNamesCache.set(expression, result);
-  return result;
+  return [...names];
 };
 
 const staticPropertyNames = (checker: ts.TypeChecker, name: ts.PropertyName): string[] => {
@@ -290,61 +282,21 @@ const catalogueValuesInType = (
   type: ts.Type,
   roots: ReadonlyMap<ts.Symbol, string>,
 ): CatalogueValue[] => {
-  const cached = catalogueValuesInTypeCache.get(type);
-  if (cached !== undefined) return [...cached];
   const values = new Map<string, CatalogueValue>();
-  const visitedTypes = new Set<ts.Type>();
-  const visitType = (part: ts.Type): void => {
-    if (visitedTypes.has(part)) return;
-    visitedTypes.add(part);
-    if ((part.flags & ts.TypeFlags.TypeParameter) !== 0) {
-      const constraint = checker.getBaseConstraintOfType(part);
-      if (constraint === undefined) return;
-      // Unions are visited member by member; an intersection keeps its merged property symbols,
-      // so scan it as a whole instead of flattening it back to the original catalogue root.
-      if (constraint.isUnion()) constraint.types.forEach(visitType);
-      else scanProperties(constraint);
-      return;
-    }
-    if ((part.flags & ts.TypeFlags.Object) === 0) return;
-    scanProperties(part);
-  };
-  const scanProperties = (scanned: ts.Type): void => {
-    for (const property of checker.getPropertiesOfType(scanned)) {
+  for (const part of typeParts(type)) {
+    for (const property of checker.getPropertiesOfType(part)) {
       const catalog = roots.get(unaliasSymbol(checker, property));
       if (catalog !== undefined) values.set(catalog, catalogueValue(catalog));
     }
-  };
-  typeParts(type).forEach(visitType);
-  const result = [...values.values()];
-  catalogueValuesInTypeCache.set(type, result);
-  return [...result];
+  }
+  return [...values.values()];
 };
 
 const catalogueValuesAtMember = (
   checker: ts.TypeChecker,
   expression: ts.PropertyAccessExpression | ts.ElementAccessExpression,
   roots: ReadonlyMap<ts.Symbol, string>,
-  symbolCache: WeakMap<ts.Node, ts.Symbol | null>,
 ): CatalogueValue[] => {
-  const cached = catalogueValuesAtMemberCache.get(expression);
-  if (cached !== undefined) return [...cached];
-  const member = ts.isPropertyAccessExpression(expression) ? expression.name : expression.argumentExpression;
-  const symbol = resolvedSymbol(checker, member, symbolCache);
-  const directCatalog = symbol === undefined ? undefined : roots.get(symbol);
-  if (directCatalog !== undefined) {
-    const result = [catalogueValue(directCatalog)];
-    catalogueValuesAtMemberCache.set(expression, result);
-    return result;
-  }
-  // Ordinary resolved properties cannot be catalogue roots. Keep the type fallback for
-  // computed and merged properties, while avoiding a full type-property scan for common members.
-  if (ts.isPropertyAccessExpression(expression)
-    && symbol !== undefined
-    && (symbol.flags & ts.SymbolFlags.Transient) === 0) {
-    catalogueValuesAtMemberCache.set(expression, []);
-    return [];
-  }
   const names = ts.isPropertyAccessExpression(expression)
     ? [expression.name.text]
     : literalPropertyNames(checker, expression.argumentExpression);
@@ -361,15 +313,15 @@ const catalogueValuesAtMember = (
     if (catalog !== undefined) values.set(catalog, catalogueValue(catalog));
   }
   if (values.size === 0) {
-    const catalog = symbol === undefined ? undefined : roots.get(symbol);
+    const member = ts.isPropertyAccessExpression(expression) ? expression.name : expression.argumentExpression;
+    const symbol = checker.getSymbolAtLocation(member);
+    const catalog = symbol === undefined ? undefined : roots.get(unaliasSymbol(checker, symbol));
     if (catalog !== undefined) values.set(catalog, catalogueValue(catalog));
   }
   if (values.size === 0) {
     for (const value of catalogueValuesInType(checker, type, roots)) values.set(value.catalog, value);
   }
-  const result = [...values.values()];
-  catalogueValuesAtMemberCache.set(expression, result);
-  return [...result];
+  return [...values.values()];
 };
 
 const resolveCatalogueValue = (
@@ -392,7 +344,7 @@ const resolveCatalogueValue = (
       const member = resolvedSymbol(checker, value.name, symbolCache);
       const catalog = member === undefined ? undefined : roots.get(member);
       resolved = catalog === undefined
-        ? catalogueValuesAtMember(checker, value, roots, symbolCache)[0] ?? null
+        ? catalogueValuesAtMember(checker, value, roots)[0] ?? null
         : catalogueValue(catalog);
     } else if (!owner.languageSelected) {
       resolved = value.name.text === "de" || value.name.text === "en"
@@ -405,7 +357,7 @@ const resolveCatalogueValue = (
     const owner = resolveCatalogueValue(checker, value.expression, roots, symbolCache, valueCache);
     const names = literalPropertyNames(checker, value.argumentExpression);
     if (owner === null) {
-      resolved = catalogueValuesAtMember(checker, value, roots, symbolCache)[0] ?? null;
+      resolved = catalogueValuesAtMember(checker, value, roots)[0] ?? null;
     } else if (!owner.languageSelected) {
       const languageNames = names.filter((name) => name === "de" || name === "en");
       resolved = names.length > 0 && languageNames.length === 0
@@ -468,35 +420,6 @@ const isDeclarationIdentifier = (node: ts.Node): boolean =>
   ts.isIdentifier(node)
   && !(ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node)
   && (node.parent as ts.Node & { name?: ts.Node }).name === node;
-
-const mayCarryCatalogueValue = (expression: ts.Expression): boolean => {
-  if (ts.isBinaryExpression(expression)) {
-    const operator = expression.operatorToken.kind;
-    return operator === ts.SyntaxKind.CommaToken
-      || operator === ts.SyntaxKind.BarBarToken
-      || operator === ts.SyntaxKind.AmpersandAmpersandToken
-      || operator === ts.SyntaxKind.QuestionQuestionToken
-      || (operator >= ts.SyntaxKind.FirstAssignment && operator <= ts.SyntaxKind.LastAssignment);
-  }
-  return ts.isIdentifier(expression)
-    || expression.kind === ts.SyntaxKind.ThisKeyword
-    || ts.isPropertyAccessExpression(expression)
-    || ts.isElementAccessExpression(expression)
-    || ts.isCallExpression(expression)
-    || ts.isNewExpression(expression)
-    || ts.isTaggedTemplateExpression(expression)
-    || ts.isConditionalExpression(expression)
-    || ts.isAwaitExpression(expression)
-    || ts.isYieldExpression(expression)
-    || ts.isParenthesizedExpression(expression)
-    || ts.isAsExpression(expression)
-    || ts.isTypeAssertionExpression(expression)
-    || ts.isSatisfiesExpression(expression)
-    || ts.isNonNullExpression(expression)
-    || ts.isJsxElement(expression)
-    || ts.isJsxSelfClosingElement(expression)
-    || ts.isJsxFragment(expression);
-};
 
 const propertyReads = (
   program: ts.Program,
@@ -589,16 +512,16 @@ const propertyReads = (
         const continuesAccess = (ts.isPropertyAccessExpression(node.parent) || ts.isElementAccessExpression(node.parent))
           && node.parent.expression === node;
         if (ts.isElementAccessExpression(node)) {
-          for (const value of catalogueValuesAtMember(checker, node, roots, symbolCache)) markAll(value);
+          for (const value of catalogueValuesAtMember(checker, node, roots)) markAll(value);
         } else if (memberValue !== null && !continuesAccess) {
           markAll(memberValue);
         } else if (memberValue === null) {
-          for (const value of catalogueValuesAtMember(checker, node, roots, symbolCache)) markAll(value);
+          for (const value of catalogueValuesAtMember(checker, node, roots)) markAll(value);
         }
       }
     }
 
-    if (ts.isExpression(node) && !isDeclarationIdentifier(node) && mayCarryCatalogueValue(node)) {
+    if (ts.isExpression(node) && !isDeclarationIdentifier(node)) {
       const value = resolveValue(node);
       const continuesAccess = (ts.isPropertyAccessExpression(node.parent) || ts.isElementAccessExpression(node.parent))
         && node.parent.expression === node;
@@ -616,8 +539,7 @@ const propertyReads = (
       } else if (value === null
         && !continuesAccess
         && !isHandledDestructuringSource
-        && !isWriteOnlyAccess(node)
-        && mayCarryCatalogueValue(node)) {
+        && !isWriteOnlyAccess(node)) {
         for (const carried of catalogueValuesInType(checker, checker.getTypeAtLocation(node), roots)) markAll(carried);
       }
     }
