@@ -1,7 +1,6 @@
 import type { CSSProperties, ReactElement } from "react";
 
 import type { OverlayElementEditorProps } from "../../contract";
-import { overlayAppearanceToJsonObject } from "../../../overlay/appearance";
 import { statisticsWordRankingLabels } from "./locale";
 import {
   DEFAULT_STATISTICS_WORD_RANKING_CONFIG,
@@ -39,22 +38,22 @@ export default function StatisticsWordRankingEditor({
   const number = new Intl.NumberFormat(language === "de" ? "de-DE" : "en-US", { maximumFractionDigits: 0 });
 
   const changeScope = (scope: StatisticsWordRankingScope): void => {
-    if (!readOnly) onChange({ ...values, scope, appearance: overlayAppearanceToJsonObject(values.appearance) });
+    if (!readOnly) onChange({ ...values, scope });
   };
 
   const changeCount = (rawCount: string): void => {
     if (readOnly || rawCount.trim().length === 0) return;
     const count = Number(rawCount);
     if (!Number.isSafeInteger(count) || count < 3 || count > 10) return;
-    onChange({ ...values, count, appearance: overlayAppearanceToJsonObject(values.appearance) });
+    onChange({ ...values, count });
   };
 
   const changeTitle = (title: string): void => {
-    if (!readOnly) onChange({ ...values, title, appearance: overlayAppearanceToJsonObject(values.appearance) });
+    if (!readOnly) onChange({ ...values, title });
   };
 
   const changeBars = (bars: boolean): void => {
-    if (!readOnly) onChange({ ...values, bars, appearance: overlayAppearanceToJsonObject(values.appearance) });
+    if (!readOnly) onChange({ ...values, bars });
   };
 
   return <div className="statistics-word-ranking-editor">

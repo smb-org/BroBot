@@ -118,7 +118,6 @@ describe("Votekick module", () => {
       defaultConfig: {
         showCountdown: true,
         hideAfterCloseSeconds: 15,
-        appearance: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
       },
     });
   });

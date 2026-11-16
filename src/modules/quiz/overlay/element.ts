@@ -1,15 +1,14 @@
 import type { JsonObject, ModuleLanguage, ModuleOverlaySnapshotContext } from "../../contract";
 import { QUIZ_SESSION_OVERLAY_ELEMENT_KIND } from "./kinds";
 import { quizOverlayTexts } from "./locale";
-import { DEFAULT_QUIZ_OVERLAY_CONFIG, loadQuizOverlayState, mergeQuizOverlayRealtimeState, parseQuizOverlayConfig, QUIZ_OVERLAY_APPEARANCE } from "./state";
+import { DEFAULT_QUIZ_OVERLAY_CONFIG, loadQuizOverlayState, mergeQuizOverlayRealtimeState, parseQuizOverlayConfig } from "./state";
 
 const german = quizOverlayTexts("de");
 const english = quizOverlayTexts("en");
 
 const quizSessionOverlayElement = {
   kind: QUIZ_SESSION_OVERLAY_ELEMENT_KIND,
-  configVersion: 2,
-  appearance: QUIZ_OVERLAY_APPEARANCE,
+  configVersion: 1,
   defaultSize: { width: 640, height: 360 },
   defaultConfig: DEFAULT_QUIZ_OVERLAY_CONFIG as unknown as JsonObject,
   previewState: (_config: JsonObject, language: ModuleLanguage, now: number): JsonObject => ({

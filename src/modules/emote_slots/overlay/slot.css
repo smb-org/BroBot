@@ -7,12 +7,19 @@
     grid-template-rows: 64px minmax(0, 1fr);
     align-items: center;
     gap: 10px;
-    padding: 16px 20px;
+    padding: var(--brobot-overlay-padding, 16px 20px);
     border: 2px solid var(--content-game-reel-border);
-    border-radius: 12px;
-    background-color: var(--overlay-appearance-background, #090C10);
-    color: var(--overlay-appearance-text, #F2F5F9);
-    font-family: Archivo, system-ui, sans-serif;
+    border-radius: var(--brobot-overlay-border-radius, 12px);
+    background-color: var(--brobot-overlay-background, var(--brobot-overlay-legacy-background, #090C10));
+    color: var(--brobot-overlay-text-color, var(--brobot-overlay-legacy-text-color, #F2F5F9));
+    font-family: var(--brobot-overlay-font-family, Archivo, system-ui, sans-serif);
+    font-size: var(--brobot-overlay-font-size, 16px);
+    font-weight: var(--brobot-overlay-font-weight, 400);
+    line-height: var(--brobot-overlay-line-height, normal);
+    letter-spacing: var(--brobot-overlay-letter-spacing, normal);
+    text-align: var(--brobot-overlay-text-align, start);
+    -webkit-text-stroke: var(--brobot-overlay-text-stroke, 0 transparent);
+    text-shadow: var(--brobot-overlay-text-shadow, none);
   }
 
   .emote-slot-overlay__spin { display: flex; align-items: center; gap: 16px; min-width: 0; }
@@ -27,20 +34,20 @@
     overflow: hidden;
     border: 2px solid var(--content-game-reel-border);
     border-radius: 6px;
-    background-color: var(--overlay-appearance-background, #090C10);
-    color: var(--overlay-appearance-text, #F2F5F9);
-    font-size: 38px;
+    background-color: var(--brobot-overlay-background, var(--brobot-overlay-legacy-background, #090C10));
+    color: var(--brobot-overlay-text-color, var(--brobot-overlay-legacy-text-color, #F2F5F9));
+    font-size: var(--brobot-overlay-font-size, 38px);
   }
   .emote-slot-overlay__reel img { width: 52px; height: 52px; object-fit: contain; }
-  .emote-slot-overlay__glyph { font-size: 38px; line-height: 1; }
-  .emote-slot-overlay__reel--code { border-style: dashed; border-color: var(--overlay-appearance-secondary-text, #C9D1DB); }
-  .emote-slot-overlay__code { box-sizing: border-box; max-width: 100%; padding-inline: 2px; overflow: hidden; font-size: 14px; line-height: 1.15; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
-  .emote-slot-overlay__result { display: grid; flex: 1; min-width: 0; gap: 0; text-align: right; }
+  .emote-slot-overlay__glyph { font-size: var(--brobot-overlay-font-size, 38px); line-height: var(--brobot-overlay-line-height, 1); }
+  .emote-slot-overlay__reel--code { border-style: dashed; border-color: var(--brobot-overlay-secondary-text-color, var(--brobot-overlay-legacy-secondary-text-color, #C9D1DB)); }
+  .emote-slot-overlay__code { box-sizing: border-box; max-width: 100%; padding-inline: 2px; overflow: hidden; font-size: var(--brobot-overlay-font-size, 14px); line-height: var(--brobot-overlay-line-height, 1.15); text-align: var(--brobot-overlay-text-align, center); text-overflow: ellipsis; white-space: nowrap; }
+  .emote-slot-overlay__result { display: grid; flex: 1; min-width: 0; gap: 0; text-align: var(--brobot-overlay-text-align, right); }
   .emote-slot-overlay__values { display: flex; align-items: baseline; justify-content: flex-end; min-width: 0; gap: 12px; }
-  .emote-slot-overlay__login { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 34px; font-weight: 700; line-height: 1.2; }
+  .emote-slot-overlay__login { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--brobot-overlay-font-size, 34px); font-weight: var(--brobot-overlay-font-weight, 700); line-height: var(--brobot-overlay-line-height, 1.2); }
   .emote-slot-overlay__jackpot { display: flex; align-items: center; justify-content: space-between; min-width: 0; }
-  .emote-slot-overlay__secondary { color: var(--overlay-appearance-secondary-text, #C9D1DB); font-size: 22px; line-height: 1.2; }
-  .emote-slot-overlay__main { color: var(--overlay-appearance-text, #F2F5F9); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 34px; font-weight: 600; line-height: 1.2; white-space: nowrap; }
+  .emote-slot-overlay__secondary { color: var(--brobot-overlay-secondary-text-color, var(--brobot-overlay-legacy-secondary-text-color, #C9D1DB)); font-size: var(--brobot-overlay-font-size, 22px); line-height: var(--brobot-overlay-line-height, 1.2); }
+  .emote-slot-overlay__main { color: var(--brobot-overlay-text-color, var(--brobot-overlay-legacy-text-color, #F2F5F9)); font-family: var(--brobot-overlay-font-family, "IBM Plex Mono", ui-monospace, monospace); font-size: var(--brobot-overlay-font-size, 34px); font-weight: var(--brobot-overlay-font-weight, 600); line-height: var(--brobot-overlay-line-height, 1.2); white-space: nowrap; }
   .emote-slot-overlay[data-jackpot-animation-running="true"] .emote-slot-overlay__jackpot .emote-slot-overlay__main {
     animation: emote-slot-jackpot-highlight 3s ease-out both;
     animation-delay: calc(0ms - var(--slot-presentation-elapsed));
@@ -64,8 +71,8 @@
     100% { transform: translateY(0); filter: none; opacity: 1; }
   }
   @keyframes emote-slot-jackpot-highlight {
-    from { transform: scale(1.04); color: var(--overlay-appearance-accent, #2ED3A3); }
-    to { transform: scale(1); color: var(--overlay-appearance-text, #F2F5F9); }
+    from { transform: scale(1.04); color: var(--brobot-overlay-accent-color, var(--brobot-overlay-legacy-accent-color, #2ED3A3)); }
+    to { transform: scale(1); color: var(--brobot-overlay-text-color, var(--brobot-overlay-legacy-text-color, #F2F5F9)); }
   }
 
   @media (prefers-reduced-motion: reduce) {

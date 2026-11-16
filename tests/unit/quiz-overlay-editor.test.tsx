@@ -15,7 +15,7 @@ describe("quiz overlay editor", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Show percentages" }));
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ showPercent: false }));
 
-    fireEvent.change(screen.getByLabelText("Correct answer colour"), { target: { value: "#225588" } });
+    fireEvent.change(screen.getByLabelText("Correct answer color"), { target: { value: "#225588" } });
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ correctColor: "#225588" }));
   });
 

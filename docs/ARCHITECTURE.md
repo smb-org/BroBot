@@ -708,17 +708,29 @@ Browserausgabe verwenden dieselbe React-Renderstrecke, damit Vorschau und
 Stream denselben Inhalt zeigen.
 
 Die Elementkonfiguration liegt als JSON am gespeicherten Element und wird über
-den `parseConfig`-Parser der jeweiligen Moduldeklaration eingelesen. Für Farben
-verwenden alle Elemente den gemeinsamen `appearance`-Block mit den Teilen
-`background`, `text`, `secondaryText` und `accent`, soweit sie diese in ihrer
-Ansicht tatsächlich nutzen. Die Deklaration enthält Teile und bisherige
-Standardfarben; der gemeinsame Dashboard-Editor zeigt dieselben Felder für
-Elemente mit und ohne eigenen Editor. Overlay-Ansichten setzen die geparsten
-Werte über gemeinsame CSS-Variablen am Element-Root. Die Parser übernehmen
-fehlende Werte aus den Defaults und lesen die früheren elementeigenen
-Farbschlüssel beim Übergang weiter ein. So bleiben gespeicherte Konfigurationen
-und elementeigene Optionen beim Speichern erhalten. `configVersion` wird bei
-Änderungen des Konfigurationsformats erhöht.
+den `parseConfig`-Parser der jeweiligen Moduldeklaration eingelesen. Gemeinsame
+Darstellungseinstellungen liegen ausschließlich im Style-Tab des
+Overlay-Editors. Dieser schreibt den verwalteten CSS-Block zwischen
+`OVERLAY_STYLE_BEGIN_MARKER` und `OVERLAY_STYLE_END_MARKER`. Regeln auf
+`[data-element="<id>"]` setzen CSS-Variablen für Text-, Sekundärtext- und
+Akzentfarbe, Hintergrund, Schrift, Abstände, Rahmen und Schatten. Die
+Modulansichten lesen die Variablen dort, wo das Element den jeweiligen Teil
+darstellt; ihre bisherigen Literale bleiben die Fallbacks. Für Text-Elemente
+greift derselbe Block zusätzlich auf `.brobot-module-text` und
+`.brobot-variable`.
+
+Ältere Elementkonfigurationen bleiben zur Laufzeit kompatibel: Quiz übernimmt
+`backgroundColor`, `textColor`, `secondaryColor` und `accentColor`, Slots
+übernehmen dieselben Hintergrund- und Textfarben sowie `highlightColor`, und
+Alerts übernehmen `textColor`. Diese Werte liegen im CSS unter den Style-Werten
+als Fallback. Öffnet der Editor ein Overlay, verschiebt er diese Farben in das
+Style-Dokument des Elements. Beim nächsten expliziten Speichern schreibt er sie
+in den verwalteten CSS-Block und entfernt die migrierten Schlüssel aus der
+Elementkonfiguration; `null` bedeutet weiterhin den bisherigen Standard.
+Elementoptionen wie `correctColor`, `borderColor`, Alert-`fontSize` oder
+`showCover` bleiben erhalten. Es gibt keine parallelen elementeigenen Felder
+für gemeinsame Farben. Spezielle Farben für einzelne Bestandteile bleiben im
+Element-Editor und verwenden `ColorField`.
 
 Für jedes gespeicherte Overlay können Broadcaster und Verwalter benannte
 Zugänge ausstellen. Ein Zugang ist an Kanal und Overlay gebunden. D1 speichert

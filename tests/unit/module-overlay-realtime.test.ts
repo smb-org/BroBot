@@ -21,7 +21,6 @@ const databaseFor = (overlayIds: readonly string[]) => {
 const declaration = (kind: `${string}.${string}`): ModuleOverlayElementDefinition => ({
   kind,
   configVersion: 1,
-  appearance: { parts: ["background", "text"], defaults: { background: "transparent", text: "#ffffff" } },
   defaultSize: { width: 100, height: 80 },
   defaultConfig: {},
   parseConfig: () => ({}),

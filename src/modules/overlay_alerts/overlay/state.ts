@@ -1,5 +1,4 @@
-import type { ModuleOverlayAppearanceDefinition, OverlayAppearanceConfig } from "../../contract";
-import { parseOverlayElementConfig } from "../../../overlay/appearance";
+import { isOverlayHexColor, parseModuleOverlayConfig } from "../../contract";
 
 export interface OverlayAlertPayload {
   operationId: string;
@@ -27,18 +26,11 @@ export interface OverlayAlertQueueState {
 
 export interface OverlayAlertConfig {
   fontSize: number;
-  appearance: OverlayAppearanceConfig;
+  textColor?: string | null;
 }
-
-export const OVERLAY_ALERT_APPEARANCE = {
-  parts: ["background", "text"],
-  defaults: { background: "rgb(16 20 27 / 84%)", text: "#ffffff" },
-  legacyFields: { text: "textColor" },
-} satisfies ModuleOverlayAppearanceDefinition;
 
 export const DEFAULT_OVERLAY_ALERT_CONFIG: OverlayAlertConfig = {
   fontSize: 32,
-  appearance: OVERLAY_ALERT_APPEARANCE.defaults,
 };
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -51,11 +43,13 @@ const isMediaUrl = (value: unknown): value is string =>
   typeof value === "string" && value.startsWith("/api/overlay/media/") && value.length <= 256;
 
 export const parseOverlayAlertConfig = (value: unknown): OverlayAlertConfig | null => {
-  return parseOverlayElementConfig(value, OVERLAY_ALERT_APPEARANCE, (input) => {
-    if (Object.keys(input).some((key) => key !== "fontSize")) return null;
+  return parseModuleOverlayConfig(value, (input) => {
+    if (Object.keys(input).some((key) => key !== "fontSize" && key !== "textColor")) return null;
     const fontSize = input.fontSize ?? DEFAULT_OVERLAY_ALERT_CONFIG.fontSize;
-    return isIntegerBetween(fontSize, 12, 72) ? { fontSize } : null;
-  }) as unknown as OverlayAlertConfig | null;
+    const textColor = input.textColor;
+    if (!isIntegerBetween(fontSize, 12, 72) || Object.hasOwn(input, "textColor") && textColor !== null && !isOverlayHexColor(textColor)) return null;
+    return { fontSize, ...(Object.hasOwn(input, "textColor") ? { textColor: textColor as string | null } : {}) };
+  });
 };
 
 export const parseOverlayAlertPayload = (value: unknown): QueuedOverlayAlert | null => {

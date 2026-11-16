@@ -40,7 +40,6 @@ describe("statistics word counter overlay", () => {
   it("provides a bilingual editor preview and stores the folded word", () => {
     expect(parseStatisticsWordCounterConfig({ word: "FAAAK" })).toEqual({
       word: "fak", label: "FAAAK", show: "both",
-      appearance: { background: "#0d1015", text: "#f2f5f9", secondaryText: "#a8b2c1" },
     });
     expect(parseStatisticsWordCounterConfig({ word: "fak and bak" })).toBeNull();
     expect(statisticsWordCounterOverlayElement.previewState?.({ word: "fak", label: "Fak", show: "both" }, "de", 0))
@@ -51,26 +50,10 @@ describe("statistics word counter overlay", () => {
 
     expect(screen.getByText(/Preview: hello · Stream 128 · Total 1,248/u)).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "FAAAK" } });
-    expect(onChange).toHaveBeenLastCalledWith({
-      word: "fak", label: "FAAAK", show: "both",
-      appearance: { background: "#0d1015", text: "#f2f5f9", secondaryText: "#a8b2c1" },
-    });
+    expect(onChange).toHaveBeenLastCalledWith({ word: "fak", label: "FAAAK", show: "both" });
     rerender(<StatisticsWordCounterEditor config={{ word: "fak", label: "FAAAK", show: "both" }} onChange={onChange} language="en" />);
     fireEvent.change(screen.getByRole("combobox", { name: "Show" }), { target: { value: "total" } });
-    expect(onChange).toHaveBeenLastCalledWith({
-      word: "fak", label: "FAAAK", show: "total",
-      appearance: { background: "#0d1015", text: "#f2f5f9", secondaryText: "#a8b2c1" },
-    });
-  });
-
-  it("keeps custom appearance colors when changing the configured word", () => {
-    const appearance = { background: "#112233", text: "#223344", secondaryText: "#334455" };
-    const onChange = vi.fn<(config: JsonObject) => void>();
-    render(<StatisticsWordCounterEditor config={{ word: "hello", label: "hello", show: "both", appearance }} onChange={onChange} language="en" />);
-
-    fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "FAAAK" } });
-
-    expect(onChange).toHaveBeenLastCalledWith({ word: "fak", label: "FAAAK", show: "both", appearance });
+    expect(onChange).toHaveBeenLastCalledWith({ word: "fak", label: "FAAAK", show: "total" });
   });
 
   it("applies bootstrap freshness independently for each word", () => {

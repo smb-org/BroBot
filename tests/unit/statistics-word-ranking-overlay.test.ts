@@ -30,15 +30,9 @@ describe("statistics word ranking state", () => {
   });
 
   it("validates scope, row count, title, and bars defaults", () => {
-    expect(parseStatisticsWordRankingConfig({})).toEqual({
-      scope: "stream", count: 5, bars: true,
-      appearance: { background: "#0d1015", text: "#f2f5f9", secondaryText: "#a8b2c1", accent: "#35557f" },
-    });
+    expect(parseStatisticsWordRankingConfig({})).toEqual({ scope: "stream", count: 5, bars: true });
     expect(parseStatisticsWordRankingConfig({ scope: "total", count: 10, title: "", bars: false }))
-      .toEqual({
-        scope: "total", count: 10, title: "", bars: false,
-        appearance: { background: "#0d1015", text: "#f2f5f9", secondaryText: "#a8b2c1", accent: "#35557f" },
-      });
+      .toEqual({ scope: "total", count: 10, title: "", bars: false });
     expect(parseStatisticsWordRankingConfig({ scope: "unknown" })).toBeNull();
     expect(parseStatisticsWordRankingConfig({ count: 2 })).toBeNull();
     expect(parseStatisticsWordRankingConfig({ title: "x".repeat(81) })).toBeNull();

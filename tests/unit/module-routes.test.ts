@@ -44,7 +44,6 @@ const testModule: BotModule<typeof testModuleSchema> = {
   overlayElements: [{
     kind: "test-modul.countdown",
     configVersion: 1,
-    appearance: { parts: ["background", "text"], defaults: { background: "transparent", text: "#ffffff" } },
     defaultSize: { width: 200, height: 80 },
     defaultConfig: {},
     parseConfig: () => ({}),
@@ -103,7 +102,6 @@ const quizOverlayTestModule: BotModule<typeof clipsTestSchema> = {
   overlayElements: [{
     kind: "quiz.session",
     configVersion: 1,
-    appearance: { parts: ["background", "text"], defaults: { background: "transparent", text: "#ffffff" } },
     defaultSize: { width: 300, height: 180 },
     defaultConfig: {},
     parseConfig: () => ({}),

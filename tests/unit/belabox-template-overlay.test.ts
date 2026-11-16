@@ -386,7 +386,7 @@ describe("BELABOX template variables and overlay metadata", () => {
     const element = belaboxModule.overlayElements?.find(({ kind }) => kind === "belabox.status");
     expect(element).toMatchObject({
       kind: "belabox.status",
-      configVersion: 2,
+      configVersion: 1,
       defaultSize: { width: 320, height: 40 },
       defaultConfig: { layout: "compact", unit: "kbps", hideWhenHealthy: false },
       mergeRealtimeStateOnModuleMessages: ["modul.belabox.sample"],
@@ -395,7 +395,6 @@ describe("BELABOX template variables and overlay metadata", () => {
     expect(element?.parseConfig({ layout: "detail", unit: "mbps", hideWhenHealthy: true }))
       .toEqual({
         layout: "detail", unit: "mbps", hideWhenHealthy: true,
-        appearance: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
       });
     expect(element?.parseConfig({ layout: "detail", unit: "mbps", hideWhenHealthy: true, html: "unsafe" }))
       .toBeNull();

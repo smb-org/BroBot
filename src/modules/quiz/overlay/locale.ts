@@ -19,6 +19,8 @@ const catalog = {
     showQuestionProgress: "Fragenfortschritt anzeigen",
     showPercent: "Prozentwerte anzeigen",
     correctColor: "Farbe der richtigen Antwort",
+    colorUnset: "Nicht gesetzt",
+    colorClear: "Farbe entfernen",
   },
   en: {
     previewQuestion: "Which city sits on the Spree?",
@@ -37,7 +39,9 @@ const catalog = {
     editorModuleLabel: "Quiz",
     showQuestionProgress: "Show question progress",
     showPercent: "Show percentages",
-    correctColor: "Correct answer colour",
+    correctColor: "Correct answer color",
+    colorUnset: "Not set",
+    colorClear: "Clear color",
   },
 } as const;
 

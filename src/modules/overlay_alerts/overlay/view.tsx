@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
-import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import { DEFAULT_OVERLAY_ALERT_CONFIG, parseOverlayAlertConfig, parseOverlayAlertQueueState } from "./state";
 
 import "./view.css";
@@ -83,7 +82,7 @@ const OverlayAlert = ({ config: rawConfig, state: rawState, now, mediaAccessToke
 
   if (current === null || !isActive) return null;
   const style = {
-    ...overlayAppearanceStyle(config.appearance),
+    ...(config.textColor === null || config.textColor === undefined ? {} : { "--brobot-overlay-legacy-text-color": config.textColor }),
     "--overlay-alert-font-size": `${String(config.fontSize)}px`,
   } as CSSProperties;
 

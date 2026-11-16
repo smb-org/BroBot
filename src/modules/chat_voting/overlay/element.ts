@@ -1,22 +1,16 @@
 import { CHAT_VOTING_TALLY_ELEMENT_KIND } from "./kinds";
 import { chatVotingOverlayLabels } from "./locale";
 import { mergeTallyRealtimeState } from "./tally-state";
-import type { JsonObject, ModuleLanguage, ModuleOverlayAppearanceDefinition } from "../../contract";
-import { parseOverlayElementConfig } from "../../../overlay/appearance";
+import type { JsonObject, ModuleLanguage } from "../../contract";
+import { parseModuleOverlayConfig } from "../../contract";
 
 const german = chatVotingOverlayLabels("de");
 const english = chatVotingOverlayLabels("en");
-const appearance = {
-  parts: ["background", "text"],
-  defaults: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
-} satisfies ModuleOverlayAppearanceDefinition;
-
 export const chatVotingOverlayElement = {
   kind: CHAT_VOTING_TALLY_ELEMENT_KIND,
-  configVersion: 2,
-  appearance,
+  configVersion: 1,
   defaultSize: { width: 480, height: 240 },
-  defaultConfig: { layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 15, width: 480, appearance: appearance.defaults },
+  defaultConfig: { layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 15, width: 480 },
   previewState: (_config: JsonObject, language: ModuleLanguage, now: number): JsonObject => ({
     pollId: "overlay-editor-preview",
     openedAt: new Date(now).toISOString(),
@@ -44,7 +38,7 @@ export const chatVotingOverlayElement = {
   editorModuleLabel: { de: german.editorModuleLabel, en: english.editorModuleLabel },
   reloadStateOnModuleMessages: ["modul.chat_voting.opened"],
   mergeRealtimeState: mergeTallyRealtimeState,
-  parseConfig: (raw: unknown) => parseOverlayElementConfig(raw, appearance, (config) => {
+  parseConfig: (raw: unknown) => parseModuleOverlayConfig(raw, (config) => {
     if (Object.keys(config).some((key) => !["layout", "showPercent", "showCountdown", "useVoteColors", "hideAfterCloseSeconds", "width"].includes(key))) return null;
     const layout = config.layout ?? "bars";
     const showPercent = config.showPercent ?? true;

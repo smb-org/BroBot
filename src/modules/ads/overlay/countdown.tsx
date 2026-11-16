@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactElement } from "react";
-import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import { adsCountdownLabels } from "./countdown-locale";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -78,7 +77,7 @@ const AdsCountdown = ({ config, state, language = "en" }: AdsCountdownProperties
     }
   }
 
-  return <span className="brobot-module-text" style={overlayAppearanceStyle(config.appearance)}>
+  return <span className="brobot-module-text">
     <span>{mainText}</span>
     {lines.map((line) => <span key={line}>{line}</span>)}
     {state.isSample === true ? <small>{labels.sample}</small> : null}

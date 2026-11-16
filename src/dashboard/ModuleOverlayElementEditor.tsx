@@ -1,11 +1,9 @@
 import { useCallback, type ComponentType, type ReactElement } from "react";
 
 import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
-import type { JsonObject, OverlayAppearanceConfig, OverlayElementEditorProps } from "../modules/contract";
-import { overlayAppearanceToJsonObject } from "../overlay/appearance";
+import type { JsonObject, OverlayElementEditorProps } from "../modules/contract";
 import { loadModuleOverlayElementEditor, retryModuleChunkLoad } from "./module-panel-loaders";
 import { RetryableLazy } from "./RetryableLazy";
-import { OverlayAppearanceEditor } from "./OverlayAppearanceEditor";
 import { Button, LoadStateLines } from "./ui";
 import { dashboardCommonTexts, dashboardTexts } from "./locale";
 
@@ -40,13 +38,6 @@ export const ModuleOverlayElementEditor = ({ kind, config, channelId, language, 
   const reservedHeight = moduleEditorReservedHeights[kind] ?? "calc(var(--s10) * 8)";
 
   return <div className="module-overlay-element-editor" data-kind={kind}>
-    <OverlayAppearanceEditor
-      definition={registered.definition.appearance}
-      value={config.appearance as OverlayAppearanceConfig}
-      language={language}
-      disabled={readOnly}
-      onChange={(appearance) => { if (!readOnly) onChange({ ...config, appearance: overlayAppearanceToJsonObject(appearance) }); }}
-    />
     {registered.definition.editor === undefined ? null : <div className="module-overlay-element-editor__element" style={{ minHeight: reservedHeight }}><RetryableLazy
         instanceKey={`${registered.moduleId}:overlay-editor:${kind}`}
         load={loadEditor}

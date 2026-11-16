@@ -1,5 +1,5 @@
 import type { JsonObject, ModuleLanguage } from "../../contract";
-import { DEFAULT_SLOT_OVERLAY_CONFIG, mergeSlotOverlayRealtimeState, parseSlotOverlayConfig, SLOT_OVERLAY_APPEARANCE, SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID } from "./state";
+import { DEFAULT_SLOT_OVERLAY_CONFIG, mergeSlotOverlayRealtimeState, parseSlotOverlayConfig, SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID } from "./state";
 import { emoteSlotOverlayLabels } from "./locale";
 import { EMOTE_SLOT_OVERLAY_ELEMENT_KIND } from "./kinds";
 
@@ -8,8 +8,7 @@ const english = emoteSlotOverlayLabels("en");
 
 export const emoteSlotOverlayElement = {
   kind: EMOTE_SLOT_OVERLAY_ELEMENT_KIND,
-  configVersion: 2,
-  appearance: SLOT_OVERLAY_APPEARANCE,
+  configVersion: 1,
   defaultSize: { width: 640, height: 160 },
   defaultConfig: DEFAULT_SLOT_OVERLAY_CONFIG,
   hideWhenModuleDisabled: true,
@@ -36,6 +35,7 @@ export const emoteSlotOverlayElement = {
   preserveRealtimeStateOnReload: true,
   parseConfig: (raw: unknown) => parseSlotOverlayConfig(raw),
   load: () => import("./slot"),
+  editor: () => import("./editor"),
 } as const;
 
 export const emoteSlotOverlayElements = [emoteSlotOverlayElement] as const;

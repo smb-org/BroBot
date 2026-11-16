@@ -1,6 +1,6 @@
 import type { JsonObject, ModuleOverlayElementDefinition } from "../../contract";
 import { overlayAlertElementTexts } from "./locale";
-import { DEFAULT_OVERLAY_ALERT_CONFIG, emptyOverlayAlertQueueState, OVERLAY_ALERT_APPEARANCE, parseOverlayAlertConfig, parseOverlayAlertQueueState, overlayAlertStateForBootstrap } from "./state";
+import { DEFAULT_OVERLAY_ALERT_CONFIG, emptyOverlayAlertQueueState, parseOverlayAlertConfig, parseOverlayAlertQueueState, overlayAlertStateForBootstrap } from "./state";
 
 const previewState = (_config: JsonObject, language: "de" | "en", now: number): JsonObject => {
   const state = emptyOverlayAlertQueueState(now);
@@ -20,8 +20,7 @@ const previewState = (_config: JsonObject, language: "de" | "en", now: number): 
 
 export const overlayAlertElement: ModuleOverlayElementDefinition = {
   kind: "overlay_alerts.alert",
-  configVersion: 2,
-  appearance: OVERLAY_ALERT_APPEARANCE,
+  configVersion: 1,
   defaultSize: { width: 640, height: 220 },
   defaultConfig: DEFAULT_OVERLAY_ALERT_CONFIG as unknown as JsonObject,
   previewState,

@@ -1,17 +1,21 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  migrateLegacyOverlayStyles,
+  replaceOverlayStyleBlock,
+  resolveOverlayElementColors,
+  type OverlayStyleDocument,
+} from "../../src/dashboard/overlay-style-model";
 import { MODULE_OVERLAY_ELEMENTS } from "../../src/modules/overlay-element-registry";
 
-// Literal copies of the pre-appearance defaults and stored shapes, independent of the element declarations.
+// Literal copies of pre-change configs and rendered colors, independent of module defaults.
 const plainText = { background: "transparent", text: "rgba(255, 255, 255, 0.96)" };
 const statisticsColors = { background: "#0d1015", text: "#f2f5f9", secondaryText: "#a8b2c1" };
 
 interface LegacyCase {
   kind: string;
-  /** The defaultConfig this element had before the shared appearance block. */
   oldDefault: Record<string, unknown>;
   oldColors: Record<string, string>;
-  /** Old stored config that carries custom colours, when the old element had any. */
   custom?: { stored: Record<string, unknown>; colors: Record<string, string>; specific: Record<string, unknown> };
 }
 
@@ -26,11 +30,7 @@ const cases: readonly LegacyCase[] = [
   { kind: "song_requests.now_playing", oldDefault: { showCover: true, showRequester: true }, oldColors: { background: "#0d1015", text: "#f2f5f9", secondaryText: "#c3cbd7", accent: "#1ed760" } },
   { kind: "statistics.word_counter", oldDefault: { word: "helo", label: "hello", show: "both" }, oldColors: statisticsColors },
   { kind: "statistics.word_ranking", oldDefault: { scope: "stream", count: 5, bars: true }, oldColors: { ...statisticsColors, accent: "#35557f" } },
-  {
-    kind: "text_library.block",
-    oldDefault: { blockName: "" },
-    oldColors: { background: "transparent", text: "rgba(255, 255, 255, 0.96)", secondaryText: "rgba(255, 255, 255, 0.78)" },
-  },
+  { kind: "text_library.block", oldDefault: { blockName: "" }, oldColors: { background: "transparent", text: "rgba(255, 255, 255, 0.96)", secondaryText: "rgba(255, 255, 255, 0.78)" } },
   { kind: "votekick.tally", oldDefault: { showCountdown: true, hideAfterCloseSeconds: 15 }, oldColors: plainText },
   {
     kind: "quiz.session",
@@ -40,10 +40,7 @@ const cases: readonly LegacyCase[] = [
     },
     oldColors: { background: "#10141b", text: "#f2f5f9", secondaryText: "#a8b2c1", accent: "#5fa4ff" },
     custom: {
-      stored: {
-        showQuestionProgress: false, showPercent: false, backgroundColor: "#111111", textColor: "#222222",
-        secondaryColor: "#333333", accentColor: "#444444", correctColor: "#555555",
-      },
+      stored: { showQuestionProgress: false, showPercent: false, backgroundColor: "#111111", textColor: "#222222", secondaryColor: "#333333", accentColor: "#444444", correctColor: "#555555" },
       colors: { background: "#111111", text: "#222222", secondaryText: "#333333", accent: "#444444" },
       specific: { showQuestionProgress: false, showPercent: false, correctColor: "#555555" },
     },
@@ -76,32 +73,81 @@ const definitionOf = (kind: string) => {
   return definition;
 };
 
-describe("overlay appearance: nothing is lost for stored configs", () => {
-  it("covers every registered element", () => {
+const styleFor = (colors: Readonly<Record<string, string>>): OverlayStyleDocument["elements"][string] => ({
+  ...(colors.background === undefined || colors.background === "transparent" || !/^#[0-9a-f]{6}$/iu.test(colors.background) ? {} : { background: { color: colors.background, opacityPercent: 100 } }),
+  ...(colors.text === undefined ? {} : { color: colors.text }),
+  ...(colors.secondaryText === undefined ? {} : { secondaryTextColor: colors.secondaryText }),
+  ...(colors.accent === undefined ? {} : { accentColor: colors.accent }),
+});
+
+describe("overlay style legacy compatibility", () => {
+  it("covers all 11 registered module elements", () => {
     const byName = (left: string, right: string): number => left.localeCompare(right);
     expect(cases.map((entry) => entry.kind).sort(byName)).toEqual(MODULE_OVERLAY_ELEMENTS.map(({ definition }) => definition.kind).sort(byName));
   });
 
-  it.each(cases)("$kind: the old default config keeps its colours and options", ({ kind, oldDefault, oldColors }) => {
+  it.each(cases)("$kind: default legacy config keeps its old rendered colors and options", ({ kind, oldDefault, oldColors }) => {
     const definition = definitionOf(kind);
     const parsed = definition.parseConfig(oldDefault);
-    const colorKeys = new Set(["backgroundColor", "textColor", "secondaryColor", "accentColor", "highlightColor"]);
+    const effective = resolveOverlayElementColors(kind, parsed ?? {}, {}, {});
 
     expect(parsed).not.toBeNull();
-    expect(parsed?.appearance).toEqual(oldColors);
-    expect(definition.appearance.defaults).toEqual(oldColors);
-    expect(parsed).toMatchObject(Object.fromEntries(Object.entries(oldDefault).filter(([key]) => !colorKeys.has(key))));
-    // The element's own new default must parse to the same effective result.
-    expect(definition.parseConfig(definition.defaultConfig)).toEqual(parsed);
+    expect(effective).toMatchObject(oldColors);
+    expect(effective.background).toBe(oldColors.background);
+    expect(effective.text).toBe(oldColors.text);
+    expect(parsed).toMatchObject(Object.fromEntries(Object.entries(oldDefault).filter(([key]) => !["backgroundColor", "textColor", "secondaryColor", "accentColor", "highlightColor"].includes(key))));
   });
 
-  it.each(cases.filter((entry) => entry.custom !== undefined))("$kind: custom stored colours migrate without loss", ({ kind, custom }) => {
+  it.each(cases.filter((entry) => entry.custom !== undefined))("$kind: opening migrates legacy colors to the Style document and preserves module options", ({ kind, custom }) => {
+    const legacy = custom;
+    if (legacy === undefined) throw new Error("Expected legacy config fixture.");
     const definition = definitionOf(kind);
-    const parsed = definition.parseConfig(custom?.stored);
+    const parsed = definition.parseConfig(legacy.stored);
+    const source = [{ id: "legacy-element", kind, config: parsed ?? {} }];
+    const migration = migrateLegacyOverlayStyles(source, { overlay: {}, elements: {} });
+    const storedCss = replaceOverlayStyleBlock("", migration.styles, ["legacy-element"]);
+    const effective = resolveOverlayElementColors(
+      kind,
+      migration.elements[0]?.config ?? {},
+      migration.styles.elements["legacy-element"] ?? {},
+      migration.styles.overlay,
+    );
 
-    expect(parsed?.appearance).toEqual(custom?.colors);
-    expect(parsed).toMatchObject(custom?.specific ?? {});
-    // Saving the migrated config again (as the editor does) is stable.
-    expect(definition.parseConfig(parsed)).toEqual(parsed);
+    expect(migration.styles.elements["legacy-element"]).toMatchObject(styleFor(legacy.colors));
+    expect(effective).toMatchObject(legacy.colors);
+    expect(migration.elements[0]?.config).toMatchObject(legacy.specific);
+    expect(migration.elements[0]?.config).not.toHaveProperty("backgroundColor");
+    expect(migration.elements[0]?.config).not.toHaveProperty("textColor");
+    expect(migration.elements[0]?.config).not.toHaveProperty("secondaryColor");
+    expect(migration.elements[0]?.config).not.toHaveProperty("accentColor");
+    expect(migration.elements[0]?.config).not.toHaveProperty("highlightColor");
+    expect(storedCss).toContain("--brobot-overlay-text-color");
+    expect(definition.parseConfig(migration.elements[0]?.config)).toMatchObject(legacy.specific);
+  });
+
+  it.each([
+    ["quiz.session", { backgroundColor: null, textColor: null, secondaryColor: null, accentColor: null, correctColor: "#32ca88", showPercent: false }, { showPercent: false, correctColor: "#32ca88" }],
+    ["overlay_alerts.alert", { textColor: null, fontSize: 56 }, { fontSize: 56 }],
+    ["emote_slots.slot", { backgroundColor: null, textColor: null, secondaryColor: null, highlightColor: null, borderColor: "#445566" }, { borderColor: "#445566" }],
+    ["emote_slots.slot", { backgroundColor: null, textColor: null, secondaryColor: null, highlightColor: null, borderColor: null }, { borderColor: "#353E4B" }],
+  ] as const)("%s: null legacy colors mean default and do not discard other values", (kind, raw, expected) => {
+    const definition = definitionOf(kind);
+    const parsed = definition.parseConfig(raw);
+    expect(parsed).not.toBeNull();
+    expect(parsed).toMatchObject(expected);
+    const migrated = migrateLegacyOverlayStyles([{ id: "null-element", kind, config: parsed ?? {} }], { overlay: {}, elements: {} });
+    const before = resolveOverlayElementColors(kind, parsed ?? {}, {}, {});
+    const after = resolveOverlayElementColors(kind, migrated.elements[0]?.config ?? {}, migrated.styles.elements["null-element"] ?? {}, {});
+    const normalizedColors = (colors: ReturnType<typeof resolveOverlayElementColors>) => ({
+      background: colors.background.toLowerCase(),
+      text: colors.text.toLowerCase(),
+      ...(colors.secondaryText === undefined ? {} : { secondaryText: colors.secondaryText.toLowerCase() }),
+      ...(colors.accent === undefined ? {} : { accent: colors.accent.toLowerCase() }),
+    });
+    expect(migrated.elements[0]?.config).toMatchObject(expected);
+    expect(migrated.elements[0]?.config).not.toHaveProperty("textColor");
+    expect(migrated.elements[0]?.config).not.toHaveProperty("backgroundColor");
+    expect(normalizedColors(after)).toEqual(normalizedColors(before));
+    expect(migrated.styles.elements["null-element"]).toBeDefined();
   });
 });

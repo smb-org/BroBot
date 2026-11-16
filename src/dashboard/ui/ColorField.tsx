@@ -13,6 +13,8 @@ export interface ColorFieldProps {
   disabled?: boolean;
   allowTransparent?: boolean;
   transparentLabel?: string;
+  transparentFallbackColor?: string;
+  memoryScope?: string;
 }
 
 const colorForInput = (value: string | undefined, fallback: string): string => {
@@ -33,15 +35,23 @@ export function ColorField({
   disabled = false,
   allowTransparent = false,
   transparentLabel,
+  transparentFallbackColor,
+  memoryScope,
 }: ColorFieldProps): ReactElement {
   const disabledReason = useDisabledFieldReason();
   const defaultColor = getComputedStyle(document.documentElement).getPropertyValue("--content-default").trim();
   const inputValue = colorForInput(value, defaultColor);
-  const lastSolidValue = useRef(value !== undefined && value !== "transparent" ? value : inputValue);
+  const lastSolidValue = useRef(value !== undefined && value !== "transparent" ? value : transparentFallbackColor ?? inputValue);
+  const previousMemoryScope = useRef(memoryScope);
   const isTransparent = allowTransparent && value === "transparent";
   useEffect(() => {
+    if (previousMemoryScope.current !== memoryScope) {
+      previousMemoryScope.current = memoryScope;
+      lastSolidValue.current = transparentFallbackColor ?? inputValue;
+      return;
+    }
     if (!isTransparent && value !== undefined) lastSolidValue.current = value;
-  }, [isTransparent, value]);
+  }, [inputValue, isTransparent, memoryScope, transparentFallbackColor, value]);
   const reasonId = disabledReason === null ? undefined : `${disabledReason.id}-color-${id}`;
   const unsetDescriptionId = `${id}-unset-note`;
   const describedBy = [reasonId, value === undefined ? unsetDescriptionId : undefined].filter((descriptionId) => descriptionId !== undefined).join(" ") || undefined;

@@ -1,16 +1,28 @@
 .brobot-variable,
 .brobot-module-text {
-  background-color: var(--overlay-appearance-background, transparent);
-  color: var(--overlay-appearance-text, rgba(255, 255, 255, 0.96));
-  font: 700 48px/1.1 system-ui, sans-serif;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  background-color: var(--brobot-overlay-background, var(--brobot-overlay-legacy-background, transparent));
+  color: var(--brobot-overlay-text-color, var(--brobot-overlay-legacy-text-color, rgba(255, 255, 255, 0.96)));
+  font-family: var(--brobot-overlay-font-family, system-ui, sans-serif);
+  font-size: var(--brobot-overlay-font-size, 48px);
+  font-weight: var(--brobot-overlay-font-weight, 700);
+  line-height: var(--brobot-overlay-line-height, 1.1);
+  letter-spacing: var(--brobot-overlay-letter-spacing, normal);
+  -webkit-text-stroke: var(--brobot-overlay-text-stroke, 0 transparent);
+  text-shadow: var(--brobot-overlay-text-shadow, 0 1px 3px rgba(0, 0, 0, 0.9));
+  padding: var(--brobot-overlay-padding, 0px);
+  border-radius: var(--brobot-overlay-border-radius, 0px);
 }
 
 .brobot-module-text__attribution {
   align-self: flex-end;
-  color: var(--overlay-appearance-secondary-text, rgba(255, 255, 255, 0.78));
-  font: 400 12px/1.2 system-ui, sans-serif;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  color: var(--brobot-overlay-secondary-text-color, var(--brobot-overlay-legacy-secondary-text-color, rgba(255, 255, 255, 0.78)));
+  font-family: var(--brobot-overlay-font-family, system-ui, sans-serif);
+  font-size: var(--brobot-overlay-font-size, 12px);
+  font-weight: var(--brobot-overlay-font-weight, 400);
+  line-height: var(--brobot-overlay-line-height, 1.2);
+  letter-spacing: var(--brobot-overlay-letter-spacing, normal);
+  -webkit-text-stroke: var(--brobot-overlay-text-stroke, 0 transparent);
+  text-shadow: var(--brobot-overlay-text-shadow, 0 1px 2px rgba(0, 0, 0, 0.9));
 }
 
 .brobot-module-text {

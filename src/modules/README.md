@@ -819,15 +819,10 @@ Palette-Zeile erhalten.
 
 ```ts
 overlayElements: [{
-  kind: "chat_voting.tally", configVersion: 2, defaultSize: { width: 480, height: 240 },
-  appearance: {
-    parts: ["background", "text"],
-    defaults: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
-  },
+  kind: "chat_voting.tally", configVersion: 1, defaultSize: { width: 480, height: 240 },
   defaultConfig: {
     layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true,
     hideAfterCloseSeconds: 15, width: 480,
-    appearance: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
   },
   parseConfig, load: () => import("./overlay/tally"),
   editorLabel: { de: "Abstimmungsergebnis", en: "Voting tally" },
@@ -837,21 +832,23 @@ overlayElements: [{
 }],
 ```
 
-`appearance` ist der verpflichtende gemeinsame Vertrag für die Darstellung
-jedes Overlay-Elements und der einzige Weg für seine gemeinsamen Farben.
-Jedes Element deklariert seine tatsächlich verwendeten Teile aus
-`background`, `text`, `secondaryText` und `accent` sowie deren bisherige
-Standardfarben. Das Dashboard rendert den gemeinsamen Abschnitt auch dann,
-wenn das Element keinen eigenen Editor hat. Die Ansicht liest die geparste
-Konfiguration über `overlayAppearanceStyle` und setzt damit die gemeinsamen
-CSS-Variablen am Element-Root; Stylesheets verwenden diese Variablen mit den
-bisherigen Farben als Fallback. `parseOverlayElementConfig` übernimmt die
-Validierung und ergänzt fehlende Werte mit den deklarierten Defaults. Bei
-bestehenden Farbfeldern nennt `legacyFields` die alten Konfigurationsschlüssel;
-der Parser migriert sie beim Lesen in `appearance`. Elementoptionen bleiben im
-elementeigenen Parser und dürfen durch die gemeinsame Darstellung nicht
-verloren gehen. Änderungen an `appearance` oder einer Farbmigration erhöhen
-`configVersion`.
+Der Style-Tab des Overlay-Editors ist der einzige Ort für gemeinsame
+Darstellungseinstellungen eines Elements. Er schreibt Styles in den
+verwalteten CSS-Block des Overlays und setzt am jeweiligen `[data-element]`-Root
+CSS-Variablen wie `--brobot-overlay-text-color`,
+`--brobot-overlay-secondary-text-color`, `--brobot-overlay-accent-color` und
+`--brobot-overlay-background`. Ansichten verwenden diese Variablen und behalten
+ihre bisherigen CSS-Farbwerte als Fallback. Elemente ohne sekundären oder
+Akzenttext ignorieren die entsprechende Variable. Overlay-Ansichten führen
+keine eigenen Felder für gemeinsame Farben ein.
+
+Bestehende Elementkonfigurationen mit Farben bleiben zur Laufzeit als Fallback
+gültig. Beim Öffnen übernimmt der Editor bekannte Legacy-Farben in das
+Style-Dokument des Elements; beim nächsten expliziten Speichern stehen sie im
+verwalteten CSS-Block und werden aus der Elementkonfiguration entfernt. Andere
+Elementoptionen bleiben erhalten. Farben für spezielle Teile wie die Quizfarbe
+der richtigen Antwort oder den Rahmen der Slot-Reels bleiben im
+Element-Editor und verwenden `ColorField`.
 
 **Grenzen:**
 

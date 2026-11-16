@@ -11,7 +11,6 @@ const moduleWithInitialState = (initialState: NonNullable<NonNullable<BotModule[
   overlayElements: [{
     kind: "ads.countdown",
     configVersion: 1,
-    appearance: { parts: ["background", "text"], defaults: { background: "transparent", text: "#ffffff" } },
     defaultSize: { width: 300, height: 80 },
     defaultConfig: {},
     parseConfig: () => ({}),

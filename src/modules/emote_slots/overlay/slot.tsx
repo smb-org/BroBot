@@ -1,7 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
-import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import { emoteSlotOverlayLabels } from "./locale";
 import { DEFAULT_SLOT_OVERLAY_CONFIG, isSlotOverlayState, parseSlotOverlayConfig, SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID } from "./state";
 import type { SlotOverlaySymbol } from "./state";
@@ -156,7 +155,10 @@ const SlotOverlay = ({ config, state, elementId = "standalone-slot" }: ModuleOve
   if (validState === null || (!isEditorPreview && (presentation === null || expiredSpinId === validState.spinId))) return null;
 
   const style = {
-    ...overlayAppearanceStyle(overlayConfig.appearance),
+    ...(overlayConfig.backgroundColor === null || overlayConfig.backgroundColor === undefined ? {} : { "--brobot-overlay-legacy-background": overlayConfig.backgroundColor }),
+    ...(overlayConfig.textColor === null || overlayConfig.textColor === undefined ? {} : { "--brobot-overlay-legacy-text-color": overlayConfig.textColor }),
+    ...(overlayConfig.secondaryColor === null || overlayConfig.secondaryColor === undefined ? {} : { "--brobot-overlay-legacy-secondary-text-color": overlayConfig.secondaryColor }),
+    ...(overlayConfig.highlightColor === null || overlayConfig.highlightColor === undefined ? {} : { "--brobot-overlay-legacy-accent-color": overlayConfig.highlightColor }),
     "--content-game-reel-border": overlayConfig.borderColor,
     "--slot-presentation-elapsed": `${String(animationOffset.elapsed)}ms`,
   } as CSSProperties;

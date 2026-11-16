@@ -22,7 +22,7 @@ const overlayViewBoundaryPattern = {
   message: "Panel views may not import overlay modules.",
 };
 const overlayEditorImportBoundaryPattern = {
-  regex: "(^|/)overlay/(?!canvas(?:\\.[^/]+)?$|appearance(?:\\.[^/]+)?$|model(?:\\.[^/]+)?$|variable\\.css(?:\\?inline)?$|tally/overlay-tally\\.css\\?inline$)",
+  regex: "(^|/)overlay/(?!canvas(?:\\.[^/]+)?$|model(?:\\.[^/]+)?$|variable\\.css(?:\\?inline)?$|tally/overlay-tally\\.css\\?inline$)",
   message: "The overlay editor may only import the shared canvas, model types and shared overlay styles.",
 };
 
@@ -58,7 +58,7 @@ const moduleIsolationPatterns = [
 
 const moduleOverlayIsolationPatterns = [
   {
-    regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:(?:\\.\\./)+overlay/(?:tally/OverlayTally|appearance)|(?:\\.\\./)+dashboard/(?:locale|ui)(?:\\.[^/]+)?|(?:\\.\\./)+contracts|(?:\\.\\./)+contract|contract|contracts|domain|service|repository|adapters|overlay|panel)(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))",
+    regex: "^\\.\\./(?:modules/|(?:\\.\\./)+modules/|(?!(?:(?:\\.\\./)+overlay/tally/OverlayTally|(?:\\.\\./)+dashboard/(?:locale|ui)(?:\\.[^/]+)?|(?:\\.\\./)+contracts|(?:\\.\\./)+contract|contract|contracts|domain|service|repository|adapters|overlay|panel)(?:\\.[^/]+)?(?:/|$))[^/]+(?:/|$))",
     message: "Module dürfen kein anderes Modul importieren.",
   },
   ...moduleIsolationPatterns.slice(1),
@@ -209,7 +209,7 @@ export default defineConfig(
   },
   {
     // The editor shares the canvas and variable styles with the live overlay renderer.
-    files: ["src/dashboard/OverlayEditorPage.tsx", "src/dashboard/ModuleOverlayElementEditor.tsx", "src/dashboard/OverlayAppearanceEditor.tsx"],
+    files: ["src/dashboard/OverlayEditorPage.tsx"],
     rules: {
       "no-restricted-imports": [
         "error",

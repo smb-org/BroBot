@@ -1,22 +1,16 @@
-import type { JsonObject, ModuleLanguage, ModuleOverlayAppearanceDefinition } from "../../contract";
-import { parseOverlayElementConfig } from "../../../overlay/appearance";
+import type { JsonObject, ModuleLanguage } from "../../contract";
+import { parseModuleOverlayConfig } from "../../contract";
 import { mergeVotekickRealtimeState } from "./state";
 import { votekickOverlayLabels } from "./locale";
 import { VOTEKICK_ELEMENT_KIND } from "./kinds";
 
 const german = votekickOverlayLabels("de");
 const english = votekickOverlayLabels("en");
-const appearance = {
-  parts: ["background", "text"],
-  defaults: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
-} satisfies ModuleOverlayAppearanceDefinition;
-
 export const votekickOverlayElement = {
   kind: VOTEKICK_ELEMENT_KIND,
-  configVersion: 2,
-  appearance,
+  configVersion: 1,
   defaultSize: { width: 480, height: 160 },
-  defaultConfig: { showCountdown: true, hideAfterCloseSeconds: 15, appearance: appearance.defaults },
+  defaultConfig: { showCountdown: true, hideAfterCloseSeconds: 15 },
   previewState: (_config: JsonObject, _language: ModuleLanguage, now: number): JsonObject => ({
     votekickId: "overlay-editor-preview",
     targetLogin: "sampleviewer",
@@ -36,7 +30,7 @@ export const votekickOverlayElement = {
   reloadStateOnModuleMessages: ["modul.votekick.opened"],
   mergeRealtimeStateOnModuleMessages: ["modul.votekick.tally"],
   mergeRealtimeState: mergeVotekickRealtimeState,
-  parseConfig: (raw: unknown) => parseOverlayElementConfig(raw, appearance, (config) => {
+  parseConfig: (raw: unknown) => parseModuleOverlayConfig(raw, (config) => {
     if (Object.keys(config).some((key) => !["showCountdown", "hideAfterCloseSeconds"].includes(key))) return null;
     const showCountdown = config.showCountdown ?? true;
     const hideAfterCloseSeconds = config.hideAfterCloseSeconds ?? 15;

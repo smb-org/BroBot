@@ -16,6 +16,5 @@ it("registers the overlay element without loading the votekick settings schema",
   expect(votekickOverlayElement.defaultConfig).toEqual({
     showCountdown: true,
     hideAfterCloseSeconds: 15,
-    appearance: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
   });
 });

@@ -1,7 +1,6 @@
 import type { ReactElement } from "react";
 
 import { UnitInput } from "../../../dashboard/ui";
-import { overlayAppearanceToJsonObject } from "../../../overlay/appearance";
 import type { OverlayElementEditorProps } from "../../contract";
 import { overlayAlertElementEditorTexts } from "./locale";
 import { DEFAULT_OVERLAY_ALERT_CONFIG, parseOverlayAlertConfig } from "./state";
@@ -18,7 +17,7 @@ export default function OverlayAlertEditor({ config, onChange, language = "de", 
       max={72}
       disabled={readOnly}
       onChange={(fontSize) => {
-        if (!readOnly && typeof fontSize === "number") onChange({ ...values, fontSize, appearance: overlayAppearanceToJsonObject(values.appearance) });
+        if (!readOnly && typeof fontSize === "number") onChange({ ...values, fontSize });
       }}
     />
   </div>;

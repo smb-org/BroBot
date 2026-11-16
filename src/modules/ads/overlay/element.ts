@@ -1,20 +1,14 @@
 import { ADS_COUNTDOWN_ELEMENT_KIND } from "./kinds";
 import { adsCountdownLabels } from "./countdown-locale";
-import type { JsonObject, ModuleLanguage, ModuleOverlayAppearanceDefinition } from "../../contract";
-import { parseOverlayElementConfig } from "../../../overlay/appearance";
+import type { JsonObject, ModuleLanguage } from "../../contract";
+import { parseModuleOverlayConfig } from "../../contract";
 
 const editorLabels = { de: adsCountdownLabels("de"), en: adsCountdownLabels("en") };
-const appearance = {
-  parts: ["background", "text"],
-  defaults: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
-} satisfies ModuleOverlayAppearanceDefinition;
-
 const adsCountdownElement = {
   kind: ADS_COUNTDOWN_ELEMENT_KIND,
-  configVersion: 3,
-  appearance,
+  configVersion: 2,
   defaultSize: { width: 300, height: 96 },
-  defaultConfig: { showSnoozeInfo: false, appearance: appearance.defaults },
+  defaultConfig: { showSnoozeInfo: false },
   previewState: (_config: JsonObject, _language: ModuleLanguage, now: number): JsonObject => ({
     nextAdAt: new Date(now + 150_000).toISOString(),
     duration: 180,
@@ -26,7 +20,7 @@ const adsCountdownElement = {
   editorLabel: { de: editorLabels.de.editorLabel, en: editorLabels.en.editorLabel },
   editorDescription: { de: editorLabels.de.editorDescription, en: editorLabels.en.editorDescription },
   editorModuleLabel: { de: editorLabels.de.editorModuleLabel, en: editorLabels.en.editorModuleLabel },
-  parseConfig: (raw: unknown) => parseOverlayElementConfig(raw, appearance, (config) => {
+  parseConfig: (raw: unknown) => parseModuleOverlayConfig(raw, (config) => {
     if (Object.keys(config).some((key) => key !== "showSnoozeInfo")) return null;
     const showSnoozeInfo = config.showSnoozeInfo;
     if (showSnoozeInfo !== undefined && typeof showSnoozeInfo !== "boolean") return null;

@@ -77,8 +77,9 @@ describe("overlay alerts state", () => {
   it("enforces overlay style bounds and duration bounds", () => {
     expect(parseOverlayAlertConfig({ textColor: "#ffffff", fontSize: 32 })).toEqual({
       fontSize: 32,
-      appearance: { background: "rgb(16 20 27 / 84%)", text: "#ffffff" },
+      textColor: "#ffffff",
     });
+    expect(parseOverlayAlertConfig({ textColor: null, fontSize: 56 })).toEqual({ fontSize: 56, textColor: null });
     expect(parseOverlayAlertConfig({ textColor: "<red>", fontSize: 1000 })).toBeNull();
     expect(parseOverlayAlertConfig({ textColor: "#ffffff", fontSize: 32, extra: true })).toBeNull();
     const payload = { operationId: "test", text: "Hi", durationSeconds: 2, volumePercent: 80 };

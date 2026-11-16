@@ -8,21 +8,28 @@
     grid-template-rows: auto minmax(0, 1fr);
     align-content: center;
     gap: 8px;
-    padding: 16px 20px;
+    padding: var(--brobot-overlay-padding, 16px 20px);
     overflow: hidden;
-    border-radius: 12px;
-    background: var(--overlay-appearance-background, #0d1015);
-    color: var(--overlay-appearance-text, #f2f5f9);
-    font-family: Archivo, system-ui, sans-serif;
+    border-radius: var(--brobot-overlay-border-radius, 12px);
+    background: var(--brobot-overlay-background, var(--brobot-overlay-legacy-background, #0d1015));
+    color: var(--brobot-overlay-text-color, var(--brobot-overlay-legacy-text-color, #f2f5f9));
+    font-family: var(--brobot-overlay-font-family, Archivo, system-ui, sans-serif);
+    font-size: var(--brobot-overlay-font-size, 16px);
+    font-weight: var(--brobot-overlay-font-weight, 400);
+    line-height: var(--brobot-overlay-line-height, normal);
+    letter-spacing: var(--brobot-overlay-letter-spacing, normal);
+    text-align: var(--brobot-overlay-text-align, start);
+    -webkit-text-stroke: var(--brobot-overlay-text-stroke, 0 transparent);
+    text-shadow: var(--brobot-overlay-text-shadow, none);
   }
 
   .statistics-word-counter__label {
     min-width: 0;
     margin: 0;
     overflow: hidden;
-    font-size: 20px;
-    font-weight: 600;
-    line-height: 1.2;
+    font-size: var(--brobot-overlay-font-size, 20px);
+    font-weight: var(--brobot-overlay-font-weight, 600);
+    line-height: var(--brobot-overlay-line-height, 1.2);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -47,25 +54,25 @@
   }
 
   .statistics-word-counter__caption {
-    color: var(--overlay-appearance-secondary-text, #a8b2c1);
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 1.2;
+    color: var(--brobot-overlay-secondary-text-color, var(--brobot-overlay-legacy-secondary-text-color, #a8b2c1));
+    font-size: var(--brobot-overlay-font-size, 12px);
+    font-weight: var(--brobot-overlay-font-weight, 500);
+    line-height: var(--brobot-overlay-line-height, 1.2);
   }
 
   .statistics-word-counter__value {
     display: block;
     /* Reserved width: digits grow to the right only, nothing to their left moves. */
     min-width: 8ch;
-    color: var(--overlay-appearance-text, #f2f5f9);
-    font-family: "IBM Plex Mono", ui-monospace, monospace;
-    font-size: 56px;
-    font-weight: 600;
+    color: var(--brobot-overlay-text-color, var(--brobot-overlay-legacy-text-color, #f2f5f9));
+    font-family: var(--brobot-overlay-font-family, "IBM Plex Mono", ui-monospace, monospace);
+    font-size: var(--brobot-overlay-font-size, 56px);
+    font-weight: var(--brobot-overlay-font-weight, 600);
     font-variant-numeric: tabular-nums;
-    line-height: 1.05;
-    text-align: left;
+    line-height: var(--brobot-overlay-line-height, 1.05);
+    text-align: var(--brobot-overlay-text-align, left);
     white-space: nowrap;
   }
 
-  .statistics-word-counter--both .statistics-word-counter__value { font-size: 32px; min-width: 7ch; }
+  .statistics-word-counter--both .statistics-word-counter__value { font-size: var(--brobot-overlay-font-size, 32px); min-width: 7ch; }
 }

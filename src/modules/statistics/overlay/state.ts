@@ -1,5 +1,5 @@
-import type { JsonObject, ModuleOverlayAppearanceDefinition, OverlayAppearanceConfig } from "../../contract";
-import { parseOverlayElementConfig } from "../../../overlay/appearance";
+import type { JsonObject } from "../../contract";
+import { parseModuleOverlayConfig } from "../../contract";
 import { foldStatisticsWord, tokenizeStatisticsWordDetails } from "../domain";
 
 export type StatisticsWordCounterShow = "stream" | "total" | "both";
@@ -8,13 +8,7 @@ export interface StatisticsWordCounterConfig {
   word: string;
   label: string;
   show: StatisticsWordCounterShow;
-  appearance: OverlayAppearanceConfig;
 }
-
-export const STATISTICS_WORD_COUNTER_APPEARANCE = {
-  parts: ["background", "text", "secondaryText"],
-  defaults: { background: "#0d1015", text: "#f2f5f9", secondaryText: "#a8b2c1" },
-} satisfies ModuleOverlayAppearanceDefinition;
 
 interface StatisticsWordCounterValue {
   streamCount: number;
@@ -33,16 +27,12 @@ export const DEFAULT_STATISTICS_WORD_COUNTER_CONFIG: StatisticsWordCounterConfig
   word: "hello",
   label: "hello",
   show: "both",
-  appearance: STATISTICS_WORD_COUNTER_APPEARANCE.defaults,
 };
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
-export const parseStatisticsWordCounterConfig = (raw: unknown): StatisticsWordCounterConfig | null => parseOverlayElementConfig(
-  raw,
-  STATISTICS_WORD_COUNTER_APPEARANCE,
-  (input) => {
+export const parseStatisticsWordCounterConfig = (raw: unknown): StatisticsWordCounterConfig | null => parseModuleOverlayConfig(raw, (input) => {
     if (Object.keys(input).some((key) => !["word", "label", "show"].includes(key)) || typeof input.word !== "string") return null;
     const tokenized = tokenizeStatisticsWordDetails([input.word]);
     if (tokenized.size !== 1) return null;
@@ -54,8 +44,7 @@ export const parseStatisticsWordCounterConfig = (raw: unknown): StatisticsWordCo
     if (typeof label !== "string" || label.length > 80 ||
         !(show === "stream" || show === "total" || show === "both")) return null;
     return { word: foldStatisticsWord(word), label, show };
-  },
-) as unknown as StatisticsWordCounterConfig | null;
+});
 
 const isCounterValue = (value: unknown): value is StatisticsWordCounterValue => {
   const input = record(value);
@@ -154,7 +143,6 @@ export const statisticsWordCounterStateToJson = (state: StatisticsWordCounterSta
 export {
   DEFAULT_STATISTICS_WORD_RANKING_CONFIG,
   parseStatisticsWordRankingConfig,
-  STATISTICS_WORD_RANKING_APPEARANCE,
   type StatisticsWordRankingScope,
 } from "./ranking-config";
 

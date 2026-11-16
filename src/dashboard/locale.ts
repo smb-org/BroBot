@@ -715,12 +715,13 @@ export interface OverlaysTexts {
   editorStyleSectionUnset: string;
   editorStyleFontFamily: string; editorStyleFontFamilyCount: (count: number, maximum: number) => string;
   editorStyleColorUnset: string; editorStyleColorClear: string;
-  editorStyleFontSize: string; editorStyleFontWeight: string; editorStyleColor: string;
+  editorStyleFontSize: string; editorStyleFontWeight: string; editorStyleColor: string; editorStyleSecondaryTextColor: string; editorStyleAccentColor: string;
   editorStyleAlignment: string; editorStyleAlignmentHint: string; editorStyleLeft: string; editorStyleCenter: string; editorStyleRight: string;
   editorStyleLineHeight: string; editorStyleLetterSpacing: string; editorStyleStrokeWidth: string; editorStyleStrokeColor: string;
   editorStyleShadowX: string; editorStyleShadowY: string; editorStyleShadowBlur: string; editorStyleShadowColor: string;
   editorStyleShadowXShort: string; editorStyleShadowYShort: string; editorStyleShadowBlurShort: string;
-  editorStyleBackgroundColor: string; editorStyleBackgroundOpacity: string; editorStylePadding: string; editorStyleRadius: string;
+  editorStyleBackgroundColor: string; editorStyleBackgroundOpacity: string; editorStyleBackgroundTransparent: string; editorStylePadding: string; editorStyleRadius: string;
+  editorStyleContrastGood: (ratio: string) => string; editorStyleContrastWarning: (ratio: string) => string; editorStyleContrastUnknown: string;
   editorStyleReset: string; editorStyleLocked: string; editorStyleRewrite: string; editorStyleOwnCssHint: string;
   editorStyleCodeHint: string; editorStyleCopy: string; editorStyleCopied: string; editorStyleCopyError: string; editorStyleCssLimit: string;
   editorNoElements: string; editorNoSelection: string; editorReadOnly: string;
@@ -796,13 +797,14 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorStyleFontSystem: "Systemschrift auswählen", editorStyleFontCustomHint: "Wähle eine Systemschrift oder gib einen eigenen Namen ein.",
     editorStyleFontFamily: "Schriftart oder eigener Name", editorStyleFontFamilyCount: (count, maximum) => `${String(count)} / ${String(maximum)} Zeichen`,
     editorStyleColorUnset: "Nicht gesetzt", editorStyleColorClear: "Farbe entfernen",
-    editorStyleFontSize: "Schriftgröße", editorStyleFontWeight: "Schriftstärke", editorStyleColor: "Textfarbe",
+    editorStyleFontSize: "Schriftgröße", editorStyleFontWeight: "Schriftstärke", editorStyleColor: "Textfarbe", editorStyleSecondaryTextColor: "Sekundäre Textfarbe", editorStyleAccentColor: "Akzentfarbe",
     editorStyleAlignment: "Anker", editorStyleAlignmentHint: "Legt die Wuchsrichtung fest.",
     editorStyleLeft: "Links", editorStyleCenter: "Mittig", editorStyleRight: "Rechts",
     editorStyleLineHeight: "Zeilenhöhe", editorStyleLetterSpacing: "Buchstabenabstand", editorStyleStrokeWidth: "Konturstärke", editorStyleStrokeColor: "Konturfarbe",
     editorStyleShadowX: "Schatten X-Versatz", editorStyleShadowY: "Schatten Y-Versatz", editorStyleShadowBlur: "Schattenunschärfe", editorStyleShadowColor: "Schattenfarbe",
     editorStyleShadowXShort: "X", editorStyleShadowYShort: "Y", editorStyleShadowBlurShort: "Unschärfe",
-    editorStyleBackgroundColor: "Hintergrundfarbe", editorStyleBackgroundOpacity: "Hintergrund-Deckkraft", editorStylePadding: "Innenabstand", editorStyleRadius: "Rundung",
+    editorStyleBackgroundColor: "Hintergrundfarbe", editorStyleBackgroundOpacity: "Hintergrund-Deckkraft", editorStyleBackgroundTransparent: "Transparent", editorStylePadding: "Innenabstand", editorStyleRadius: "Rundung",
+    editorStyleContrastGood: (ratio) => `Textkontrast ${ratio}:1 · mindestens 4,5:1`, editorStyleContrastWarning: (ratio) => `Textkontrast ${ratio}:1 · mindestens 4,5:1 erforderlich`, editorStyleContrastUnknown: "Textkontrast bei transparentem Hintergrund nicht berechenbar",
     editorStyleReset: "Stil zurücksetzen", editorStyleLocked: "Der Stilblock wurde im Code geändert oder enthält unbekannte CSS-Eigenschaften. Die Stilfelder sind gesperrt.",
     editorStyleRewrite: "Aus Editor neu schreiben", editorStyleOwnCssHint: "Eigenes CSS unterhalb des verwalteten Blocks gewinnt bei gleichen Eigenschaften.",
     editorStyleCodeHint: "Das Overlay-CSS ist die Quelle der Wahrheit. Änderungen bleiben im Entwurf, bis du speicherst.",
@@ -906,13 +908,14 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorStyleFontSystem: "Choose a system font", editorStyleFontCustomHint: "Choose a system font or enter a custom font name.",
     editorStyleFontFamily: "Font family or custom name", editorStyleFontFamilyCount: (count, maximum) => `${String(count)} / ${String(maximum)} characters`,
     editorStyleColorUnset: "Not set", editorStyleColorClear: "Clear color",
-    editorStyleFontSize: "Font size", editorStyleFontWeight: "Font weight", editorStyleColor: "Text color",
+    editorStyleFontSize: "Font size", editorStyleFontWeight: "Font weight", editorStyleColor: "Text color", editorStyleSecondaryTextColor: "Secondary text color", editorStyleAccentColor: "Accent color",
     editorStyleAlignment: "Anchor", editorStyleAlignmentHint: "Sets the growth direction.",
     editorStyleLeft: "Left", editorStyleCenter: "Center", editorStyleRight: "Right",
     editorStyleLineHeight: "Line height", editorStyleLetterSpacing: "Letter spacing", editorStyleStrokeWidth: "Outline width", editorStyleStrokeColor: "Outline color",
     editorStyleShadowX: "Shadow X offset", editorStyleShadowY: "Shadow Y offset", editorStyleShadowBlur: "Shadow blur", editorStyleShadowColor: "Shadow color",
     editorStyleShadowXShort: "X", editorStyleShadowYShort: "Y", editorStyleShadowBlurShort: "Blur",
-    editorStyleBackgroundColor: "Background color", editorStyleBackgroundOpacity: "Background opacity", editorStylePadding: "Padding", editorStyleRadius: "Corner radius",
+    editorStyleBackgroundColor: "Background color", editorStyleBackgroundOpacity: "Background opacity", editorStyleBackgroundTransparent: "Transparent", editorStylePadding: "Padding", editorStyleRadius: "Corner radius",
+    editorStyleContrastGood: (ratio) => `Text contrast ${ratio}:1 · minimum 4.5:1`, editorStyleContrastWarning: (ratio) => `Text contrast ${ratio}:1 · at least 4.5:1 is required`, editorStyleContrastUnknown: "Text contrast cannot be calculated on a transparent background",
     editorStyleReset: "Reset style", editorStyleLocked: "The style block was changed in code or contains unknown CSS properties. Style fields are locked.",
     editorStyleRewrite: "Rewrite from editor", editorStyleOwnCssHint: "Custom CSS below the managed block wins when it sets the same properties.",
     editorStyleCodeHint: "Overlay CSS is the source of truth. Changes stay in the draft until you save.",

@@ -1,22 +1,16 @@
-import type { JsonObject, ModuleOverlayAppearanceDefinition, ModuleOverlayElementDefinition } from "../../contract";
-import { parseOverlayElementConfig } from "../../../overlay/appearance";
+import type { JsonObject, ModuleOverlayElementDefinition } from "../../contract";
+import { parseModuleOverlayConfig } from "../../contract";
 import { BELABOX_STATUS_ELEMENT_KIND } from "./kinds";
 import { belaboxOverlayLabels } from "./locale";
 import { mergeBelaboxRealtimeState } from "./state";
 
 const german = belaboxOverlayLabels("de");
 const english = belaboxOverlayLabels("en");
-const appearance = {
-  parts: ["background", "text"],
-  defaults: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
-} satisfies ModuleOverlayAppearanceDefinition;
-
 const belaboxStatusOverlayElement: ModuleOverlayElementDefinition = {
   kind: BELABOX_STATUS_ELEMENT_KIND,
-  configVersion: 2,
-  appearance,
+  configVersion: 1,
   defaultSize: { width: 320, height: 40 },
-  defaultConfig: { layout: "compact", unit: "kbps", hideWhenHealthy: false, appearance: appearance.defaults },
+  defaultConfig: { layout: "compact", unit: "kbps", hideWhenHealthy: false },
   previewState: (_config: JsonObject, _language, now): JsonObject => ({
     sample: {
       at: new Date(now).toISOString(),
@@ -36,7 +30,7 @@ const belaboxStatusOverlayElement: ModuleOverlayElementDefinition = {
   mergeRealtimeStateOnModuleMessages: ["modul.belabox.sample"],
   mergeRealtimeState: mergeBelaboxRealtimeState,
   reloadStateOnHostEvents: ["stream.state.changed"],
-  parseConfig: (raw: unknown) => parseOverlayElementConfig(raw, appearance, (config) => {
+  parseConfig: (raw: unknown) => parseModuleOverlayConfig(raw, (config) => {
     if (Object.keys(config).some((key) => !["layout", "unit", "hideWhenHealthy"].includes(key))) return null;
     const layout = config.layout ?? "compact";
     const unit = config.unit ?? "kbps";

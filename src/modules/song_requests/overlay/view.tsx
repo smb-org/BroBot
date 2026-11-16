@@ -1,6 +1,5 @@
 import type { ReactElement } from "react";
 import type { ModuleOverlayElementProps } from "../../contract";
-import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import { SONG_REQUESTS_NOW_PLAYING_SIZE } from "./kinds";
 import { nowPlayingTexts } from "./locale";
 import { DEFAULT_NOW_PLAYING_CONFIG, parseNowPlayingConfig, parseNowPlayingState } from "./state";
@@ -18,7 +17,7 @@ export default function SongRequestsNowPlaying({ config: rawConfig, state: rawSt
   const idle = track === null && emptyText.trim().length === 0;
   return <section
     className={`song-requests-now-playing${idle ? " song-requests-now-playing--idle" : ""}`}
-    style={{ ...SONG_REQUESTS_NOW_PLAYING_SIZE, ...overlayAppearanceStyle(config.appearance), ...(idle ? { visibility: "hidden" as const } : {}) }}
+    style={{ ...SONG_REQUESTS_NOW_PLAYING_SIZE, ...(idle ? { visibility: "hidden" as const } : {}) }}
     aria-label={idle ? undefined : text.name}
     aria-hidden={idle || undefined}
     data-testid="song-requests-now-playing"

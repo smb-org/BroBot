@@ -54,7 +54,6 @@ const ALLOWLIST: Record<string, string> = {
   "src/dashboard/channel-settings-locale.ts": "Bilingual DE/EN channel settings text catalogue; only its `de` half is German.",
   "src/dashboard/labels.ts": "Bilingual DE/EN per-page text catalogue (members, platform, roles); only its `de` half is German.",
   "src/dashboard/chat-target-field-locale.ts": "Bilingual DE/EN chat target field catalogue; only its `de` half is German.",
-  "src/dashboard/overlay-appearance-locale.ts": "Bilingual DE/EN shared overlay appearance editor catalogue; only its `de` half is German.",
   "src/dashboard/token-chip-locale.ts": "Bilingual DE/EN token chip catalogue; only its `de` half is German.",
   "src/dashboard/module-labels.ts": "Bilingual DE/EN module name/status/workspace text catalogue; only its `de` half is German.",
   "src/modules/ads/panel/locale.ts": "Bilingual DE/EN ads panel text catalogue; only its `de` half is German.",

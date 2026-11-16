@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { JsonObject } from "../../src/modules/contract";
 import { emoteSlotOverlayElement } from "../../src/modules/emote_slots/overlay/element";
+import SlotOverlayEditor from "../../src/modules/emote_slots/overlay/editor";
 import SlotOverlay from "../../src/modules/emote_slots/overlay/slot";
 
 const spinState = (spinId: string, symbols: string[], spunAt: string, jackpot = false): JsonObject => ({
@@ -33,6 +34,21 @@ afterEach(() => {
 });
 
 describe("emote slot overlay", () => {
+  it("edits the retained border color with the shared ColorField and US label", () => {
+    const onChange = vi.fn<(config: JsonObject) => void>();
+    const { container } = render(<SlotOverlayEditor config={{ borderColor: "#445566" }} onChange={onChange} language="en" />);
+    const colorInput = screen.getByLabelText("Border color");
+
+    expect(colorInput).toHaveAttribute("type", "color");
+    expect(colorInput.closest(".ui-color-field")).not.toBeNull();
+    expect(colorInput).toHaveValue("#445566");
+    fireEvent.change(colorInput, { target: { value: "#abcdef" } });
+    expect(onChange).toHaveBeenLastCalledWith({ borderColor: "#abcdef" });
+    fireEvent.click(screen.getByRole("button", { name: "Clear color" }));
+    expect(onChange).toHaveBeenLastCalledWith({});
+    expect(container.querySelector('input[type="color"]')).not.toBeNull();
+  });
+
   it("shows booked spin symbols and net result for six seconds after the reel animation (protects=the latest booked spin displays its three reels and net result through the reel animation and for six seconds afterward; fails_when=the spin hides during animation or remains after its six-second presentation window; no_claim=realtime transport delivery to an OBS browser source)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));

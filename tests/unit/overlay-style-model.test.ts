@@ -5,10 +5,14 @@ import {
   OVERLAY_STYLE_END_MARKER,
   generateOverlayStyleBlock,
   generateOverlayStyleContent,
+  migrateLegacyOverlayStyles,
+  overlayElementTextColors,
   parseOverlayStyleBlock,
   replaceOverlayStyleBlock,
+  resolveOverlayElementColors,
   type OverlayStyleDocument,
 } from "../../src/dashboard/overlay-style-model";
+import { overlayAppearanceContrastRatio } from "../../src/dashboard/overlay-contrast";
 
 const styles: OverlayStyleDocument = {
   overlay: {
@@ -16,6 +20,8 @@ const styles: OverlayStyleDocument = {
     fontSize: 32,
     fontWeight: 600,
     color: "#ffffff",
+    secondaryTextColor: "#aabbcc",
+    accentColor: "#123456",
     textAlign: "center",
     lineHeight: 1.2,
     letterSpacing: -0.00000001,
@@ -26,12 +32,81 @@ const styles: OverlayStyleDocument = {
     borderRadius: 6,
   },
   elements: {
-    element_b: { fontFamily: "A \"quoted\" font", fontSize: 64, color: "#ffcc00", textAlign: "right" },
-    element_a: { fontWeight: 700, color: "#abcdef" },
+    element_b: { fontFamily: "A \"quoted\" font", fontSize: 64, color: "#ffcc00", secondaryTextColor: "#aabbcc", accentColor: "#123456", textAlign: "right" },
+    element_a: { fontWeight: 700, color: "#abcdef", secondaryTextColor: "#334455", accentColor: "#667788" },
   },
 };
 
 describe("overlay style block model", () => {
+  it("moves legacy module colors into element styles and keeps other config options", () => {
+    const migrated = migrateLegacyOverlayStyles([
+      {
+        id: "quiz-one",
+        kind: "quiz.session",
+        config: {
+          backgroundColor: "#112233",
+          textColor: null,
+          secondaryColor: "#445566",
+          accentColor: "#778899",
+          correctColor: "#32ca88",
+          showPercent: false,
+        },
+      },
+    ], { overlay: {}, elements: {} });
+
+    expect(migrated.styles.elements["quiz-one"]).toEqual({
+      background: { color: "#112233", opacityPercent: 100 },
+      color: "#f2f5f9",
+      secondaryTextColor: "#445566",
+      accentColor: "#778899",
+    });
+    expect(migrated.elements[0]?.config).toEqual({ correctColor: "#32ca88", showPercent: false });
+  });
+
+  it("includes the slot jackpot accent color in text contrast checks", () => {
+    const elementStyle = {
+      background: { color: "#555555", opacityPercent: 100 },
+      color: "#ffffff",
+      secondaryTextColor: "#eeeeee",
+      accentColor: "#777777",
+    };
+    const textColors = overlayElementTextColors("emote_slots.slot", {}, elementStyle, {});
+    const ratios = textColors.flatMap((color) => {
+      const ratio = overlayAppearanceContrastRatio(color, "#555555");
+      return ratio === null ? [] : [ratio];
+    });
+
+    expect(textColors).toContain("#777777");
+    expect(Math.min(...ratios)).toBeLessThan(4.5);
+  });
+
+  it("includes quiz correct-answer and song requester text in contrast checks", () => {
+    const quizColors = overlayElementTextColors("quiz.session", { correctColor: "#10141b" }, { color: "#ffffff" }, { background: { color: "#10141b", opacityPercent: 100 } });
+    const uppercaseQuizColors = overlayElementTextColors("quiz.session", { correctColor: "#ABCDEF" }, {}, {});
+    const requesterColors = overlayElementTextColors("song_requests.now_playing", {}, {}, {});
+    const styledRequesterColors = overlayElementTextColors("song_requests.now_playing", {}, { secondaryTextColor: "#445566" }, {});
+
+    expect(quizColors).toContain("#10141b");
+    expect(uppercaseQuizColors).toContain("#abcdef");
+    expect(requesterColors).toContain("#a8b2c1");
+    expect(styledRequesterColors).toContain("#445566");
+    expect(styledRequesterColors).not.toContain("#a8b2c1");
+  });
+
+  it("does not let migrated legacy colors override an existing overlay style", () => {
+    const overlayStyle = { color: "#ffffff", background: { color: "#202020", opacityPercent: 100 } };
+    const legacyConfig = { textColor: "#222222", backgroundColor: "#111111", showPercent: false };
+    const before = resolveOverlayElementColors("quiz.session", legacyConfig, {}, overlayStyle);
+    const migrated = migrateLegacyOverlayStyles([
+      { id: "quiz-inherited", kind: "quiz.session", config: legacyConfig },
+    ], { overlay: overlayStyle, elements: {} });
+    const after = resolveOverlayElementColors("quiz.session", migrated.elements[0]?.config ?? {}, migrated.styles.elements["quiz-inherited"] ?? {}, migrated.styles.overlay);
+
+    expect(after).toEqual(before);
+    expect(migrated.elements[0]?.config).toEqual({ showPercent: false });
+    expect(migrated.styles.elements["quiz-inherited"]).toBeUndefined();
+  });
+
   it("round-trips overlay and element styles through its deterministic CSS format", () => {
     const block = generateOverlayStyleBlock(styles);
     const parsed = parseOverlayStyleBlock(block);
@@ -53,6 +128,10 @@ describe("overlay style block model", () => {
     expect(content).toContain(".brobot-overlay :where(.brobot-variable, .brobot-module-text) {");
     expect(content).toContain('[data-element="element_a"] :where(.brobot-variable, .brobot-module-text) {');
     expect(content).toContain('[data-element="element_b"] :where(.brobot-variable, .brobot-module-text) {');
+    expect(content).toContain('[data-element="element_a"] {');
+    expect(content).toContain("--brobot-overlay-text-color: #abcdef;");
+    expect(content).toContain("--brobot-overlay-secondary-text-color: #334455;");
+    expect(content).toContain("--brobot-overlay-accent-color: #667788;");
   });
 
   it("reads the previous managed selector format and migrates it on the next write", () => {
