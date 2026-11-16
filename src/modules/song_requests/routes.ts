@@ -352,7 +352,10 @@ songRequestsRoutes.post("/requests/:requestId/remove", async (context) => {
   if (row.state !== "submitted" && row.state !== "outcome_unknown") return context.json({ error: "song_request_not_removable" }, 409);
   const changed = await transitionRequest(context.env.DB, {
     channelId: channel(context), requestId, fromState: row.state, toState: "removed",
-    failureReason: body.refund ? "moderator_removed_with_refund" : "moderator_removed",
+    // An unclear Spotify send may still have queued the song, so the result chat must keep saying so.
+    // An unclear Spotify send may still have queued the song, so the result chat must keep saying so.
+    failureReason: row.state === "outcome_unknown" ? "submit_outcome_uncertain"
+      : body.refund ? "moderator_removed_with_refund" : "moderator_removed",
     refundDue: body.refund,
     now: new Date().toISOString(),
   });

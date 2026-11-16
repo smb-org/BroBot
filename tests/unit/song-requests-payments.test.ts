@@ -326,6 +326,46 @@ describe("song request payments", () => {
     expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(1);
   });
 
+  it.each([true, false])("keeps the uncertain outcome when a moderator removes an unclear send (refund %s)", async (refund) => {
+    const harness = await createHarness({ paymentMode: "bot_points", mode: "automatic" }, { language: "en" });
+    await processSongRequestsEvent(harness.createEvent(`unclear_removal_${String(refund)}`), harness.context);
+    const row = await harness.database.prepare("SELECT id FROM song_requests WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ id: string }>();
+    if (row === null) throw new Error("The paid request was not recorded.");
+    harness.fetcher.mockImplementation((input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("me/player/queue")) return Promise.reject(new TypeError("Connection closed after Spotify accepted the queue command."));
+      return Promise.resolve(new Response(JSON.stringify({ tracks: { items: [{ ...track }] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    harness.sendChat.mockResolvedValueOnce({ sent: false, reason: "rate_limited", retryable: true, delivery: "not_attempted" });
+
+    await expect(handleSubmitAlarm(harness.alarmContext, `submit:${row.id}`)).rejects.toThrow("waiting for chat delivery");
+    expect(await harness.database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(row.id).first())
+      .toEqual({ state: "outcome_unknown" });
+
+    const response = await removeAppFor(harness.points).fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests/${row.id}/remove`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refund }),
+    }), { DB: harness.database as unknown as D1Database });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ state: "removed", refunded: refund });
+    expect(await harness.database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(row.id).first())
+      .toEqual({ state: "removed", failure_reason: "submit_outcome_uncertain" });
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(refund ? 1 : 0);
+
+    await handleSubmitAlarm(harness.alarmContext, `submit:${row.id}`);
+    expect(harness.sendChat).toHaveBeenLastCalledWith(
+      "The song may have been queued in Spotify; check Spotify before retrying.",
+      expect.any(String),
+      undefined,
+      undefined,
+      undefined,
+      { automated: true },
+    );
+  });
+
   it("charges once when the chat handler overlaps a submit alarm and refunds the ledger amount once", async () => {
     let releaseCharge!: () => void;
     let signalChargeStarted!: () => void;
