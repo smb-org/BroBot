@@ -21,6 +21,21 @@ export const OVERLAY_STREAM_DETAILS_CACHE_TTL_MS = 60_000;
 /** Maximum decoded size accepted for JSON responses from external providers. */
 export const PROVIDER_JSON_MAX_BYTES = 256 * 1024;
 
+type OverlayConfigRecord = Readonly<Record<string, unknown>>;
+
+/** Shared entry for overlay element config parsers: rejects anything that is not a plain object. */
+export const parseModuleOverlayConfig = <Config>(
+  raw: unknown,
+  parse: (config: OverlayConfigRecord) => Config | null,
+): Config | null => {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  return parse(raw as OverlayConfigRecord);
+};
+
+/** Legacy element colour keys hold #rrggbb values only. */
+export const isOverlayHexColor = (value: unknown): value is string =>
+  typeof value === "string" && /^#[0-9a-f]{6}$/iu.test(value);
+
 /** A blank chat template uses the same opt-out behavior across announcement editors. */
 export const hasChatMessage = (text: string): boolean => text.trim().length > 0;
 

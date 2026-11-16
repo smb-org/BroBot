@@ -2,9 +2,8 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { JsonObject } from "../../src/modules/contract";
-import SlotOverlayEditor from "../../src/modules/emote_slots/overlay/editor";
 import { emoteSlotOverlayElement } from "../../src/modules/emote_slots/overlay/element";
-import { DEFAULT_SLOT_OVERLAY_CONFIG, slotOverlayContrastRatio } from "../../src/modules/emote_slots/overlay/state";
+import SlotOverlayEditor from "../../src/modules/emote_slots/overlay/editor";
 import SlotOverlay from "../../src/modules/emote_slots/overlay/slot";
 
 const spinState = (spinId: string, symbols: string[], spunAt: string, jackpot = false): JsonObject => ({
@@ -35,6 +34,22 @@ afterEach(() => {
 });
 
 describe("emote slot overlay", () => {
+  it("edits the retained border color with the shared ColorField and US label", () => {
+    const onChange = vi.fn<(config: JsonObject) => void>();
+    const initialConfig = { borderColor: "#445566", backgroundColor: "#112233", textColor: "#223344", highlightColor: "#334455" };
+    const { container } = render(<SlotOverlayEditor config={initialConfig} onChange={onChange} language="en" />);
+    const colorInput = screen.getByLabelText("Border color");
+
+    expect(colorInput).toHaveAttribute("type", "color");
+    expect(colorInput.closest(".ui-color-field")).not.toBeNull();
+    expect(colorInput).toHaveValue("#445566");
+    fireEvent.change(colorInput, { target: { value: "#abcdef" } });
+    expect(onChange).toHaveBeenLastCalledWith({ ...initialConfig, borderColor: "#abcdef" });
+    fireEvent.click(screen.getByRole("button", { name: "Clear color" }));
+    expect(onChange).toHaveBeenLastCalledWith({ backgroundColor: "#112233", textColor: "#223344", highlightColor: "#334455" });
+    expect(container.querySelector('input[type="color"]')).not.toBeNull();
+  });
+
   it("shows booked spin symbols and net result for six seconds after the reel animation (protects=the latest booked spin displays its three reels and net result through the reel animation and for six seconds afterward; fails_when=the spin hides during animation or remains after its six-second presentation window; no_claim=realtime transport delivery to an OBS browser source)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
@@ -170,47 +185,4 @@ describe("emote slot overlay", () => {
     expect(firstReel).toHaveTextContent("oldwave");
   });
 
-  it("warns when an edited text color falls below 4.5:1 contrast (protects=overlay color edits disclose text contrast below the minimum and remain explicitly editable; fails_when=low-contrast text is accepted without a warning; no_claim=color perception on every display)", () => {
-    const onChange = vi.fn<(config: JsonObject) => void>();
-    const { rerender } = render(<SlotOverlayEditor config={DEFAULT_SLOT_OVERLAY_CONFIG} onChange={onChange} language="en" />);
-
-    expect(screen.getByRole("status")).toHaveAttribute("data-status", "ok");
-    fireEvent.change(screen.getByLabelText("Text color"), { target: { value: "#090C10" } });
-
-    expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_SLOT_OVERLAY_CONFIG, textColor: "#090c10" });
-    rerender(<SlotOverlayEditor config={{ ...DEFAULT_SLOT_OVERLAY_CONFIG, textColor: "#090c10" }} onChange={onChange} language="en" />);
-    expect(screen.getByRole("status")).toHaveAttribute("data-status", "warning");
-    expect(screen.getByRole("status")).toHaveTextContent("at least 4.5:1 is required");
-  });
-
-  it("uses a content highlight color that stays readable against the default background (protects=the jackpot highlight starts with a content color above 4.5:1 and ends with readable normal text; fails_when=the default highlight is a UI role color or either endpoint falls below 4.5:1; no_claim=every intermediate rendered pixel on every display)", () => {
-    expect(DEFAULT_SLOT_OVERLAY_CONFIG.highlightColor.toLowerCase()).toBe("#2ed3a3");
-    expect(slotOverlayContrastRatio(DEFAULT_SLOT_OVERLAY_CONFIG.highlightColor, DEFAULT_SLOT_OVERLAY_CONFIG.backgroundColor)).toBeGreaterThanOrEqual(4.5);
-    expect(slotOverlayContrastRatio(DEFAULT_SLOT_OVERLAY_CONFIG.textColor, DEFAULT_SLOT_OVERLAY_CONFIG.backgroundColor)).toBeGreaterThanOrEqual(4.5);
-  });
-
-  it("warns when a custom jackpot highlight falls below 4.5:1 while normal text remains readable (protects=the editor includes the animated jackpot color in its lowest text contrast; fails_when=an unreadable custom highlight reports the combination as OK; no_claim=contrast perception on every display)", () => {
-    const readableTextOnWhite = {
-      ...DEFAULT_SLOT_OVERLAY_CONFIG,
-      backgroundColor: "#ffffff",
-      textColor: "#000000",
-      secondaryColor: "#000000",
-      highlightColor: "#3fcf7f",
-    };
-    expect(slotOverlayContrastRatio(readableTextOnWhite.textColor, readableTextOnWhite.backgroundColor)).toBeGreaterThanOrEqual(4.5);
-    expect(slotOverlayContrastRatio(readableTextOnWhite.secondaryColor, readableTextOnWhite.backgroundColor)).toBeGreaterThanOrEqual(4.5);
-    expect(slotOverlayContrastRatio(readableTextOnWhite.highlightColor, readableTextOnWhite.backgroundColor)).toBeLessThan(4.5);
-
-    const onChange = vi.fn<(config: JsonObject) => void>();
-    const { rerender } = render(<SlotOverlayEditor config={readableTextOnWhite} onChange={onChange} language="en" />);
-
-    expect(screen.getByLabelText("Jackpot highlight color")).toHaveValue("#3fcf7f");
-    expect(screen.getByRole("status")).toHaveAttribute("data-status", "warning");
-    expect(screen.getByRole("status")).toHaveTextContent("at least 4.5:1 is required");
-
-    fireEvent.change(screen.getByLabelText("Jackpot highlight color"), { target: { value: "#000000" } });
-    expect(onChange).toHaveBeenCalledWith({ ...readableTextOnWhite, highlightColor: "#000000" });
-    rerender(<SlotOverlayEditor config={{ ...readableTextOnWhite, highlightColor: "#000000" }} onChange={onChange} language="en" />);
-    expect(screen.getByRole("status")).toHaveAttribute("data-status", "ok");
-  });
 });

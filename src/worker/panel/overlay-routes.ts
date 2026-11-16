@@ -8,7 +8,7 @@ import {
   type ApiErrorCode,
   type OverlayElementKind,
 } from "../../contracts/values";
-import { isOverlayCssSafe } from "../../contracts/overlay-css";
+import { OVERLAY_CSS_MAXIMUM_LENGTH, isOverlayCssSafe } from "../../contracts/overlay-css";
 import { templateTextLength } from "../../template";
 import {
   countOverlaysForChannel,
@@ -100,7 +100,7 @@ const updateOverlaySchema = z.object({
   name: nameSchema,
   width: z.number().int().min(64).max(3840),
   height: z.number().int().min(64).max(2160),
-  css: z.string().max(16_000),
+  css: z.string().max(OVERLAY_CSS_MAXIMUM_LENGTH),
   elements: z.array(elementSchema).max(OVERLAY_ELEMENT_MAXIMUM_COUNT),
   reconnectExpectation: z.object({
     elementId: z.string().regex(ID_PATTERN),

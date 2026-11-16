@@ -37,7 +37,11 @@ export default function StatisticsWordCounterEditor({ config, onChange, language
     if (readOnly) return;
     setWordInput(rawWord);
     const nextLabel = labelEdited ? labelInput : rawWord.trim();
-    const parsed = parseStatisticsWordCounterConfig({ word: rawWord, label: nextLabel, show: values.show });
+    const parsed = parseStatisticsWordCounterConfig({
+      word: rawWord,
+      label: nextLabel,
+      show: values.show,
+    });
     if (parsed === null) return;
     committedWord.current = parsed.word;
     if (!labelEdited) setLabelInput(nextLabel);

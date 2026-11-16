@@ -1,11 +1,11 @@
 import type { JsonObject, ModuleOverlayElementDefinition } from "../../contract";
+import { parseModuleOverlayConfig } from "../../contract";
 import { BELABOX_STATUS_ELEMENT_KIND } from "./kinds";
 import { belaboxOverlayLabels } from "./locale";
 import { mergeBelaboxRealtimeState } from "./state";
 
 const german = belaboxOverlayLabels("de");
 const english = belaboxOverlayLabels("en");
-
 const belaboxStatusOverlayElement: ModuleOverlayElementDefinition = {
   kind: BELABOX_STATUS_ELEMENT_KIND,
   configVersion: 1,
@@ -30,9 +30,7 @@ const belaboxStatusOverlayElement: ModuleOverlayElementDefinition = {
   mergeRealtimeStateOnModuleMessages: ["modul.belabox.sample"],
   mergeRealtimeState: mergeBelaboxRealtimeState,
   reloadStateOnHostEvents: ["stream.state.changed"],
-  parseConfig: (raw: unknown) => {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-    const config = raw as Readonly<Record<string, unknown>>;
+  parseConfig: (raw: unknown) => parseModuleOverlayConfig(raw, (config) => {
     if (Object.keys(config).some((key) => !["layout", "unit", "hideWhenHealthy"].includes(key))) return null;
     const layout = config.layout ?? "compact";
     const unit = config.unit ?? "kbps";
@@ -40,7 +38,7 @@ const belaboxStatusOverlayElement: ModuleOverlayElementDefinition = {
     if ((layout !== "compact" && layout !== "detail") || (unit !== "kbps" && unit !== "mbps") ||
         typeof hideWhenHealthy !== "boolean") return null;
     return { layout, unit, hideWhenHealthy };
-  },
+  }),
   load: () => import("./status"),
   editor: () => import("./editor"),
 };

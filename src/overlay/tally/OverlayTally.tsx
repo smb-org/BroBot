@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 
 import "./overlay-tally.css";
 
@@ -23,6 +23,7 @@ export interface OverlayTallyProps {
   width?: number;
   classPrefix?: string;
   className?: string;
+  style?: CSSProperties;
   children: ReactNode;
 }
 
@@ -55,6 +56,7 @@ export const OverlayTally = ({
   width = 480,
   classPrefix,
   className,
+  style,
   children,
 }: OverlayTallyProps): ReactElement | null => {
   const [, setClock] = useState(0);
@@ -91,7 +93,7 @@ export const OverlayTally = ({
   return <section
     className={classNames("brobot-module-text", "overlay-tally", classPrefix, className)}
     aria-label={title}
-    style={{ display: "grid", gap: "0.6em", width: `${String(width)}px`, minWidth: 0, boxSizing: "border-box" }}
+    style={{ ...style, display: "grid", gap: "0.6em", width: `${String(width)}px`, minWidth: 0, boxSizing: "border-box" }}
   >
     <div
       className={classNames("overlay-tally__header", classPrefix === undefined ? undefined : `${classPrefix}__header`)}

@@ -18,11 +18,9 @@ const catalog = {
     editorModuleLabel: "Quiz",
     showQuestionProgress: "Fragenfortschritt anzeigen",
     showPercent: "Prozentwerte anzeigen",
-    backgroundColor: "Hintergrundfarbe",
-    textColor: "Textfarbe",
-    secondaryColor: "Sekundärfarbe",
-    accentColor: "Akzentfarbe",
     correctColor: "Farbe der richtigen Antwort",
+    colorUnset: "Nicht gesetzt",
+    colorClear: "Farbe entfernen",
   },
   en: {
     previewQuestion: "Which city sits on the Spree?",
@@ -41,11 +39,9 @@ const catalog = {
     editorModuleLabel: "Quiz",
     showQuestionProgress: "Show question progress",
     showPercent: "Show percentages",
-    backgroundColor: "Background colour",
-    textColor: "Text colour",
-    secondaryColor: "Secondary colour",
-    accentColor: "Accent colour",
-    correctColor: "Correct answer colour",
+    correctColor: "Correct answer color",
+    colorUnset: "Not set",
+    colorClear: "Clear color",
   },
 } as const;
 

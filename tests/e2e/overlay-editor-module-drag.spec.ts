@@ -105,7 +105,7 @@ test("module overlay previews retain their styling and drag by measured bounds (
   releaseEditorRequest();
   await expect(page.locator(".module-overlay-element-editor select")).toBeVisible();
   const tallyEditor = page.locator(".module-overlay-element-editor");
-  await expect(tallyEditor).toHaveCSS("min-height", "364px");
+  await expect(tallyEditor.locator(".module-overlay-element-editor__element")).toHaveCSS("min-height", "364px");
   const switchBounds = await tallyEditor.locator(".ui-switch-row").boundingBox();
   const layoutBounds = await tallyEditor.locator('select[aria-label="Layout"]').evaluate((element) => {
     const rect = element.closest(".config-field")?.getBoundingClientRect();

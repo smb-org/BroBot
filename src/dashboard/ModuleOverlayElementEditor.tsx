@@ -21,11 +21,7 @@ interface ModuleOverlayElementEditorProperties {
   readOnlyReason?: string;
 }
 
-const moduleElementEditors = new Map(
-  MODULE_OVERLAY_ELEMENTS.flatMap((registered) => registered.definition.editor === undefined
-    ? []
-    : [[registered.definition.kind, registered] as const]),
-);
+const moduleElements = new Map(MODULE_OVERLAY_ELEMENTS.map((registered) => [registered.definition.kind, registered] as const));
 
 const moduleEditorReservedHeights: Readonly<Record<string, string>> = {
   "ads.countdown": "calc(var(--s10) * 8)",
@@ -36,30 +32,30 @@ const moduleEditorReservedHeights: Readonly<Record<string, string>> = {
 };
 
 export const ModuleOverlayElementEditor = ({ kind, config, channelId, language, onChange, onPreviewState, readOnly = false, readOnlyReason }: ModuleOverlayElementEditorProperties): ReactElement | null => {
-  const registered = moduleElementEditors.get(kind);
+  const registered = moduleElements.get(kind);
   const loadEditor = useCallback(() => loadModuleOverlayElementEditor(kind) as Promise<{ default: ComponentType<OverlayElementEditorProps> }>, [kind]);
   if (registered === undefined) return null;
   const reservedHeight = moduleEditorReservedHeights[kind] ?? "calc(var(--s10) * 8)";
 
-  return <div className="module-overlay-element-editor" data-kind={kind} style={{ minHeight: reservedHeight }}>
-    <RetryableLazy
-      instanceKey={`${registered.moduleId}:overlay-editor:${kind}`}
-      load={loadEditor}
-      onRetry={retryModuleChunkLoad}
-      properties={{
-        config,
-        language,
-        channelId,
-        onChange,
-        ...(onPreviewState === undefined ? {} : { onPreviewState }),
-        readOnly,
-        ...(readOnlyReason === undefined ? {} : { readOnlyReason }),
-      }}
-      loadingFallback={<div data-module-editor-fallback="true" aria-hidden="true"><LoadStateLines rows={1} height={34} /></div>}
-      renderError={(retry) => <div className="module-overlay-element-editor--error" role="alert">
-        <p>{dashboardTexts().module.componentLoadError}</p>
-        <Button size="compact" variant="neutral" onClick={retry}>{dashboardCommonTexts(language).retry}</Button>
-      </div>}
-    />
+  return <div className="module-overlay-element-editor" data-kind={kind}>
+    {registered.definition.editor === undefined ? null : <div className="module-overlay-element-editor__element" style={{ minHeight: reservedHeight }}><RetryableLazy
+        instanceKey={`${registered.moduleId}:overlay-editor:${kind}`}
+        load={loadEditor}
+        onRetry={retryModuleChunkLoad}
+        properties={{
+          config,
+          language,
+          channelId,
+          onChange,
+          ...(onPreviewState === undefined ? {} : { onPreviewState }),
+          readOnly,
+          ...(readOnlyReason === undefined ? {} : { readOnlyReason }),
+        }}
+        loadingFallback={<div data-module-editor-fallback="true" aria-hidden="true"><LoadStateLines rows={1} height={34} /></div>}
+        renderError={(retry) => <div className="module-overlay-element-editor--error" role="alert">
+          <p>{dashboardTexts().module.componentLoadError}</p>
+          <Button size="compact" variant="neutral" onClick={retry}>{dashboardCommonTexts(language).retry}</Button>
+        </div>}
+      /></div>}
   </div>;
 };

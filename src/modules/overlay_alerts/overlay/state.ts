@@ -1,3 +1,5 @@
+import { isOverlayHexColor, parseModuleOverlayConfig } from "../../contract";
+
 export interface OverlayAlertPayload {
   operationId: string;
   imageUrl?: string;
@@ -23,12 +25,11 @@ export interface OverlayAlertQueueState {
 }
 
 export interface OverlayAlertConfig {
-  textColor: string;
   fontSize: number;
+  textColor?: string | null;
 }
 
 export const DEFAULT_OVERLAY_ALERT_CONFIG: OverlayAlertConfig = {
-  textColor: "#ffffff",
   fontSize: 32,
 };
 
@@ -42,14 +43,13 @@ const isMediaUrl = (value: unknown): value is string =>
   typeof value === "string" && value.startsWith("/api/overlay/media/") && value.length <= 256;
 
 export const parseOverlayAlertConfig = (value: unknown): OverlayAlertConfig | null => {
-  const input = record(value);
-  if (input === null || Object.keys(input).some((key) => key !== "textColor" && key !== "fontSize")) return null;
-  const textColor = input.textColor ?? DEFAULT_OVERLAY_ALERT_CONFIG.textColor;
-  const fontSize = input.fontSize ?? DEFAULT_OVERLAY_ALERT_CONFIG.fontSize;
-  return typeof textColor === "string" && /^#[0-9a-f]{6}$/iu.test(textColor) &&
-    isIntegerBetween(fontSize, 12, 72)
-    ? { textColor, fontSize }
-    : null;
+  return parseModuleOverlayConfig(value, (input) => {
+    if (Object.keys(input).some((key) => key !== "fontSize" && key !== "textColor")) return null;
+    const fontSize = input.fontSize ?? DEFAULT_OVERLAY_ALERT_CONFIG.fontSize;
+    const textColor = input.textColor;
+    if (!isIntegerBetween(fontSize, 12, 72) || Object.hasOwn(input, "textColor") && textColor !== null && !isOverlayHexColor(textColor)) return null;
+    return { fontSize, ...(Object.hasOwn(input, "textColor") ? { textColor: textColor as string | null } : {}) };
+  });
 };
 
 export const parseOverlayAlertPayload = (value: unknown): QueuedOverlayAlert | null => {
@@ -191,3 +191,4 @@ export const renderOverlayAlertText = (template: string, values: OverlayAlertTem
     if (name === "input") return values.userInput;
     return values.rewardTitle;
   }).slice(0, 200);
+

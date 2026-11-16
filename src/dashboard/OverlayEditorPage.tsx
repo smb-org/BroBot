@@ -5,10 +5,11 @@ import { createPortal } from "react-dom";
 import { OVERLAY_ELEMENT_MAXIMUM_COUNT } from "../contracts/values";
 import { channelVariableTemplateToken } from "../contracts/channel-variable-template";
 import { templateTextLength } from "../template";
-import { sanitizeOverlayCss } from "../contracts/overlay-css";
+import { OVERLAY_CSS_MAXIMUM_LENGTH, sanitizeOverlayCss } from "../contracts/overlay-css";
 import type { PanelModuleState } from "../panel-contract";
 import { OverlayCanvas } from "../overlay/canvas";
 import type { BoundOverlayData, OverlayLanguage } from "../overlay/model";
+import { overlayAppearanceContrastRatio } from "./overlay-contrast";
 import { MODULE_OVERLAY_ELEMENTS } from "../modules/overlay-element-registry";
 import { MODULE_NAVIGATION_CATEGORIES, type JsonObject, type ModuleNavigationCategory, type ModuleOverlayElementDefinition } from "../modules/contract";
 import { MODULES } from "../modules/registry";
@@ -17,8 +18,13 @@ import { ModuleIcon } from "./module-panels";
 import variableViewCss from "../overlay/variable.css?inline";
 import { clampOverlayEditorPosition, isModuleOverlayElementAddable, overlayEditorMeasuredSize, UNMEASURED_ELEMENT_FALLBACK_SIZE, type OverlayEditorSize } from "./overlay-editor-model";
 import {
+  getOverlayElementStyle,
   parseOverlayStyleBlock,
+  migrateLegacyOverlayStyles,
+  migrateLegacyOverlayStylesToCss,
   replaceOverlayStyleBlock,
+  overlayElementTextColors,
+  resolveOverlayElementColors,
   type OverlayStyleAlignment,
   type OverlayStyle,
   type OverlayStyleDocument,
@@ -47,7 +53,7 @@ import "./overlay-editor.css";
 
 const installPreviewStylesheet = (
   frameDocument: Document,
-  attribute: "data-brobot-overlay-fonts-css" | "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css" | "data-brobot-overlay-quiz-css" | "data-brobot-overlay-statistics-css" | "data-brobot-overlay-statistics-ranking-css",
+  attribute: "data-brobot-overlay-fonts-css" | "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css" | "data-brobot-overlay-quiz-css" | "data-brobot-overlay-statistics-css" | "data-brobot-overlay-statistics-ranking-css" | "data-brobot-overlay-song-requests-css" | "data-brobot-overlay-alerts-css" | "data-brobot-overlay-song-queue-css",
   css: string,
 ): void => {
   let style = frameDocument.head.querySelector<HTMLStyleElement>(`style[${attribute}]`);
@@ -74,6 +80,7 @@ interface OverlayEditorSession {
   overlay: PanelOverlay;
   baseDraft: PanelOverlayDraft;
   initialDraft: PanelOverlayDraft;
+  initialStyleDocument: OverlayStyleDocument;
   initialCreateDraft: PanelOverlayDraft;
   selectedElementId: string | null;
   initialNotice: InitialNotice;
@@ -94,6 +101,7 @@ interface OverlayEditorWorkspaceProperties {
   overlay: PanelOverlay;
   baseDraft: PanelOverlayDraft;
   initialDraft: PanelOverlayDraft;
+  initialStyleDocument: OverlayStyleDocument;
   initialCreateDraft: PanelOverlayDraft;
   initialElementId: string | null;
   initialNotice: InitialNotice;
@@ -150,6 +158,7 @@ const styleSectionHasValues = (style: OverlayStyle, section: OverlayStyleSection
   switch (section) {
     case "font":
       return style.fontFamily !== undefined || style.fontSize !== undefined || style.fontWeight !== undefined || style.color !== undefined
+        || style.secondaryTextColor !== undefined || style.accentColor !== undefined
         || style.textAlign !== undefined || style.lineHeight !== undefined || style.letterSpacing !== undefined;
     case "outline":
       return style.stroke !== undefined;
@@ -176,6 +185,8 @@ const styleSectionSummary = (
       add(style.fontSize === undefined ? undefined : `${String(style.fontSize)} px`);
       add(style.fontWeight === undefined ? undefined : String(style.fontWeight));
       add(style.color);
+      add(style.secondaryTextColor);
+      add(style.accentColor);
       add(style.textAlign === "left" ? leftAlignmentLabel : style.textAlign === "center" ? centerAlignmentLabel : style.textAlign === "right" ? rightAlignmentLabel : undefined);
       add(style.lineHeight === undefined ? undefined : String(style.lineHeight));
       add(style.letterSpacing === undefined ? undefined : `${String(style.letterSpacing)} px`);
@@ -313,21 +324,42 @@ const initialSession = (
   createWizard: boolean,
 ): OverlayEditorSession => {
   const baseDraft = overlayDraft(overlay);
+  const parsedStyles = parseOverlayStyleBlock(baseDraft.css);
+  const originalStyles = parsedStyles.kind === "valid" ? parsedStyles.styles : emptyOverlayStyles();
+  const migration = migrateLegacyOverlayStyles(baseDraft.elements, originalStyles);
+  const migrationChanged = JSON.stringify(migration.styles) !== JSON.stringify(originalStyles) ||
+    JSON.stringify(migration.elements) !== JSON.stringify(baseDraft.elements);
+  const migrationWrite = parsedStyles.kind === "invalid" || (!migrationChanged && parsedStyles.kind === "missing")
+    ? null
+    : migrateLegacyOverlayStylesToCss(baseDraft.css, baseDraft.elements, originalStyles);
+  const appliedMigration = migrationWrite !== null &&
+    (migrationChanged || migrationWrite.css.length <= baseDraft.css.length)
+    ? migrationWrite
+    : null;
+  const migratedDraft = appliedMigration !== null
+    ? {
+      ...baseDraft,
+      css: appliedMigration.css,
+      elements: appliedMigration.elements,
+    }
+    : baseDraft;
+  const initialStyleDocument = appliedMigration?.styles ?? originalStyles;
   const selectedInitialId = baseDraft.elements[0]?.id ?? null;
   if (requestedVariable === undefined) {
-    return { overlay, baseDraft, initialDraft: baseDraft, initialCreateDraft: baseDraft, selectedElementId: selectedInitialId, initialNotice: null };
+    return { overlay, baseDraft, initialDraft: migratedDraft, initialStyleDocument, initialCreateDraft: baseDraft, selectedElementId: selectedInitialId, initialNotice: null };
   }
   if (!variables.some(({ name }) => name === requestedVariable)) {
-    return { overlay, baseDraft, initialDraft: baseDraft, initialCreateDraft: baseDraft, selectedElementId: selectedInitialId, initialNotice: { kind: "missing-variable", name: requestedVariable } };
+    return { overlay, baseDraft, initialDraft: migratedDraft, initialStyleDocument, initialCreateDraft: baseDraft, selectedElementId: selectedInitialId, initialNotice: { kind: "missing-variable", name: requestedVariable } };
   }
   if (baseDraft.elements.length >= OVERLAY_ELEMENT_MAXIMUM_COUNT) {
-    return { overlay, baseDraft, initialDraft: baseDraft, initialCreateDraft: baseDraft, selectedElementId: selectedInitialId, initialNotice: { kind: "element-limit" } };
+    return { overlay, baseDraft, initialDraft: migratedDraft, initialStyleDocument, initialCreateDraft: baseDraft, selectedElementId: selectedInitialId, initialNotice: { kind: "element-limit" } };
   }
   const element = createVariableElement(requestedVariable, baseDraft.elements);
   return {
     overlay,
     baseDraft,
-    initialDraft: createWizard ? baseDraft : { ...baseDraft, elements: [...baseDraft.elements, element] },
+    initialDraft: createWizard ? baseDraft : { ...migratedDraft, elements: [...migratedDraft.elements, element] },
+    initialStyleDocument,
     initialCreateDraft: createWizard ? { ...baseDraft, elements: [...baseDraft.elements, element] } : baseDraft,
     selectedElementId: createWizard ? selectedInitialId : element.id,
     initialNotice: null,
@@ -434,6 +466,7 @@ export function OverlayEditorPage({ channelId, overlayId, canManage, language, i
     overlay={session.overlay}
     baseDraft={session.baseDraft}
     initialDraft={session.initialDraft}
+    initialStyleDocument={session.initialStyleDocument}
     initialCreateDraft={session.initialCreateDraft}
     initialElementId={session.selectedElementId}
     initialNotice={session.initialNotice}
@@ -454,6 +487,7 @@ function OverlayEditorWorkspace({
   overlay,
   baseDraft,
   initialDraft,
+  initialStyleDocument,
   initialCreateDraft,
   initialElementId,
   initialNotice,
@@ -500,11 +534,14 @@ function OverlayEditorWorkspace({
   const [previewZoom, setPreviewZoom] = useState(100);
   const [modulePreviewStates, setModulePreviewStates] = useState<Readonly<Record<string, JsonObject>>>({});
   const [editorTab, setEditorTab] = useState<"properties" | "style" | "css">("properties");
-  const [styleTargetId, setStyleTargetId] = useState("overlay");
-  const [styleDocument, setStyleDocument] = useState<OverlayStyleDocument>(() => {
-    const parsed = parseOverlayStyleBlock(overlay.css);
-    return parsed.kind === "valid" ? parsed.styles : emptyOverlayStyles();
-  });
+  const [styleTargetId, setStyleTargetId] = useState(selectedElementId ?? "overlay");
+  // The Style tab follows the element selected on the canvas or in the list; the user can still pick another target.
+  const [styleTargetFollowedId, setStyleTargetFollowedId] = useState(selectedElementId);
+  if (selectedElementId !== styleTargetFollowedId) {
+    setStyleTargetFollowedId(selectedElementId);
+    if (selectedElementId !== null) setStyleTargetId(selectedElementId);
+  }
+  const [styleDocument, setStyleDocument] = useState<OverlayStyleDocument>(initialStyleDocument);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [previewFrameRoot, setPreviewFrameRoot] = useState<HTMLDivElement | null>(null);
   const previewFrameRootRef = useRef<HTMLDivElement | null>(null);
@@ -647,10 +684,27 @@ function OverlayEditorWorkspace({
     : "overlay";
   const targetStyle: OverlayStyle = effectiveStyleTargetId === "overlay"
     ? effectiveStyleDocument.overlay
-    : effectiveStyleDocument.elements[effectiveStyleTargetId] ?? {};
+    : { ...effectiveStyleDocument.overlay, ...getOverlayElementStyle(effectiveStyleDocument, effectiveStyleTargetId) };
   const elementHorizontalAnchor = (element: PanelOverlayElement): OverlayStyleAlignment =>
-    effectiveStyleDocument.elements[element.id]?.textAlign ?? effectiveStyleDocument.overlay.textAlign ?? "left";
+    getOverlayElementStyle(effectiveStyleDocument, element.id)?.textAlign ?? effectiveStyleDocument.overlay.textAlign ?? "left";
   const styleLockedReason = styleLocked ? labels.editorStyleLocked : "";
+  const styleContrastElement = effectiveStyleTargetId === "overlay"
+    ? selectedElement
+    : draft.elements.find(({ id }) => id === effectiveStyleTargetId) ?? null;
+  const styleContrastElementStyle = styleContrastElement === null ? {} : getOverlayElementStyle(effectiveStyleDocument, styleContrastElement.id) ?? {};
+  const selectedColors = styleContrastElement === null ? null : resolveOverlayElementColors(
+    styleContrastElement.kind, styleContrastElement.config, styleContrastElementStyle, effectiveStyleDocument.overlay,
+  );
+  const contrastRatios = styleContrastElement === null || selectedColors === null ? [] : overlayElementTextColors(
+    styleContrastElement.kind, styleContrastElement.config, styleContrastElementStyle, effectiveStyleDocument.overlay,
+  ).flatMap((foreground) => {
+    const ratio = overlayAppearanceContrastRatio(foreground, selectedColors.background);
+    return ratio === null ? [] : [ratio];
+  });
+  const contrastRatio = contrastRatios.length === 0 ? null : Math.min(...contrastRatios);
+  const contrastLabel = contrastRatio === null ? labels.editorStyleContrastUnknown
+    : contrastRatio < 4.5 ? labels.editorStyleContrastWarning(contrastRatio.toFixed(1))
+      : labels.editorStyleContrastGood(contrastRatio.toFixed(1));
   const fitScale = viewportSize.width === 0 || viewportSize.height === 0
     ? 1
     : Math.min(viewportSize.width / draft.width, viewportSize.height / draft.height);
@@ -709,7 +763,10 @@ function OverlayEditorWorkspace({
       import("../modules/quiz/overlay/view.css?inline"),
       import("../modules/statistics/overlay/view.css?inline"),
       import("../modules/statistics/overlay/ranking-view.css?inline"),
-    ]).then(([{ default: fontsCss }, { default: overlayTallyCss }, { default: slotCss }, { default: quizCss }, { default: statisticsCss }, { default: statisticsRankingCss }]) => {
+      import("../modules/song_requests/overlay/view.css?inline"),
+      import("../modules/overlay_alerts/overlay/view.css?inline"),
+      import("../modules/song_requests/overlay/queue-view.css?inline"),
+    ]).then(([{ default: fontsCss }, { default: overlayTallyCss }, { default: slotCss }, { default: quizCss }, { default: statisticsCss }, { default: statisticsRankingCss }, { default: songRequestsCss }, { default: alertsCss }, { default: songQueueCss }]) => {
       if (!frame.isConnected || frame.contentDocument !== frameDocument) return;
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-fonts-css", fontsCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-tally-css", overlayTallyCss);
@@ -717,6 +774,9 @@ function OverlayEditorWorkspace({
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-quiz-css", quizCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-statistics-css", statisticsCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-statistics-ranking-css", statisticsRankingCss);
+      installPreviewStylesheet(frameDocument, "data-brobot-overlay-song-requests-css", songRequestsCss);
+      installPreviewStylesheet(frameDocument, "data-brobot-overlay-alerts-css", alertsCss);
+      installPreviewStylesheet(frameDocument, "data-brobot-overlay-song-queue-css", songQueueCss);
       canvasRef.current = root;
       previewFrameRootRef.current = root;
       setPreviewFrameRoot(root);
@@ -822,10 +882,21 @@ function OverlayEditorWorkspace({
     setSaved(false);
     setError(undefined);
   }, [setError]);
-  const writeStyleDocument = (next: OverlayStyleDocument): void => {
-    setStyleDocument(next);
-    const css = replaceOverlayStyleBlock(draft.css, next, draft.elements.map(({ id }) => id));
-    setDraft((current) => ({ ...current, css }));
+  const writeStyleDocument = (next: OverlayStyleDocument, nextElements = draft.elements): void => {
+    const migrated = migrateLegacyOverlayStylesToCss(draft.css, nextElements, next);
+    if (migrated === null) {
+      const migration = migrateLegacyOverlayStyles(nextElements, next);
+      const css = replaceOverlayStyleBlock(draft.css, migration.styles, migration.elements.map(({ id }) => id));
+      const parsed = parseOverlayStyleBlock(css);
+      if (css.length <= OVERLAY_CSS_MAXIMUM_LENGTH || parsed.kind !== "valid") return;
+      setStyleDocument(parsed.styles);
+      setDraft((current) => ({ ...current, css, elements: migration.elements }));
+      setSaved(false);
+      setError(undefined);
+      return;
+    }
+    setStyleDocument(migrated.styles);
+    setDraft((current) => ({ ...current, css: migrated.css, elements: migrated.elements }));
     setSaved(false);
     setError(undefined);
   };
@@ -833,7 +904,7 @@ function OverlayEditorWorkspace({
   const updateStyleProperty = <Key extends keyof OverlayStyle>(property: Key, value: OverlayStyle[Key] | undefined): void => {
     const current = effectiveStyleTargetId === "overlay"
       ? effectiveStyleDocument.overlay
-      : effectiveStyleDocument.elements[effectiveStyleTargetId] ?? {};
+      : getOverlayElementStyle(effectiveStyleDocument, effectiveStyleTargetId) ?? {};
     const nextTarget: OverlayStyle = Object.fromEntries(Object.entries(current).filter(([key]) => key !== property));
     if (value !== undefined) Object.assign(nextTarget, { [property]: value });
     const next: OverlayStyleDocument = effectiveStyleTargetId === "overlay"
@@ -929,7 +1000,7 @@ function OverlayEditorWorkspace({
 
   const save = useCallback(async (revision = baseline.revision): Promise<string | null> => {
     if (!canManage || saving) return labels.editorSaveError;
-    if (draft.css.length > 16_000) {
+    if (draft.css.length > OVERLAY_CSS_MAXIMUM_LENGTH) {
       setError(labels.editorStyleCssLimit);
       return labels.editorStyleCssLimit;
     }
@@ -938,12 +1009,33 @@ function OverlayEditorWorkspace({
     setError(undefined);
     drag.current = null;
     try {
+      const parsedStyles = parseOverlayStyleBlock(draft.css);
+      let saveDraft = draft;
+      let saveStyleDocument: OverlayStyleDocument | null = null;
+      if (parsedStyles.kind !== "invalid") {
+        const originalStyles = parsedStyles.kind === "valid" ? parsedStyles.styles : emptyOverlayStyles();
+        const migration = migrateLegacyOverlayStyles(draft.elements, originalStyles);
+        const migrationChanged = JSON.stringify(migration.styles) !== JSON.stringify(originalStyles) ||
+          JSON.stringify(migration.elements) !== JSON.stringify(draft.elements);
+        const migrationWrite = migrationChanged
+          ? migrateLegacyOverlayStylesToCss(draft.css, draft.elements, originalStyles)
+          : null;
+        if (migrationWrite !== null) {
+          saveStyleDocument = migrationWrite.styles;
+          saveDraft = {
+            ...draft,
+            css: migrationWrite.css,
+            elements: migrationWrite.elements,
+          };
+        }
+      }
       const response = await saveOverlay(channelId, overlayId, revision, {
-        ...draft,
-        elements: draft.elements.map(saveableElement),
+        ...saveDraft,
+        elements: saveDraft.elements.map(saveableElement),
       });
       const nextDraft = overlayDraft(response.overlay);
       setDraft(nextDraft);
+      if (saveStyleDocument !== null) setStyleDocument(saveStyleDocument);
       setBaseline({ revision: response.overlay.revision, draft: nextDraft });
       setSelectedElementId((current) => nextDraft.elements.some(({ id }) => id === current) ? current : nextDraft.elements[0]?.id ?? null);
       setSaved(true);
@@ -1283,7 +1375,7 @@ function OverlayEditorWorkspace({
       saveDisabled: !canManage,
       ...(error === undefined ? {} : { error }),
       saved,
-      invalid: draft.css.length > 16_000,
+      invalid: draft.css.length > OVERLAY_CSS_MAXIMUM_LENGTH,
       invalidMessage: labels.editorStyleCssLimit,
       persistent: true,
       warnings: dirty ? [labels.editorUnsaved] : [],
@@ -1463,6 +1555,8 @@ function OverlayEditorWorkspace({
                 ]}
                 onChange={(value) => { if (value !== null) setStyleTargetId(value); }} />
               <p className="form-hint">{labels.editorStyleOwnCssHint}</p>
+              {/* Always rendered so the content below keeps its position when the target changes. */}
+              <p className="overlay-editor__style-contrast" data-status={styleContrastElement === null || contrastRatio === null ? "unknown" : contrastRatio < 4.5 ? "warning" : "ok"} role="status" aria-live="polite">{styleContrastElement === null ? "" : contrastLabel}</p>
               <div className="overlay-editor__style-lock" data-locked={styleLocked} {...(styleLocked ? { role: "status" } : { "aria-hidden": true })}>
                 {styleLocked ? <>
                   <p id="overlay-style-disabled-reason">{labels.editorStyleLocked}</p>
@@ -1509,6 +1603,14 @@ function OverlayEditorWorkspace({
                       ]}
                       onChange={(value) => { updateStyleProperty("textAlign", value === "left" || value === "center" || value === "right" ? value : undefined); }} />
                   </div>
+                  <div className="overlay-editor__style-pair overlay-editor__style-pair--colors">
+                    <ColorField key={`secondary:${effectiveStyleTargetId}`} id="overlay-editor-style-secondary-text-color" label={labels.editorStyleSecondaryTextColor} value={targetStyle.secondaryTextColor}
+                      unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
+                      onChange={(value) => { updateStyleProperty("secondaryTextColor", value); }} />
+                    <ColorField key={`accent:${effectiveStyleTargetId}`} id="overlay-editor-style-accent-color" label={labels.editorStyleAccentColor} value={targetStyle.accentColor}
+                      unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
+                      onChange={(value) => { updateStyleProperty("accentColor", value); }} />
+                  </div>
                   <div className="overlay-editor__style-pair">
                     {renderStyleNumber("overlay-editor-style-line-height", labels.editorStyleLineHeight, targetStyle.lineHeight,
                       (value) => { updateStyleProperty("lineHeight", value); }, { min: 0.5, max: 3 })}
@@ -1552,9 +1654,22 @@ function OverlayEditorWorkspace({
                 summary={styleSectionSummary(targetStyle, "background", labels.editorStyleSectionUnset, labels.editorStyleLeft, labels.editorStyleCenter, labels.editorStyleRight)} defaultExpanded={styleSectionHasValues(targetStyle, "background")}>
                 <div className="overlay-editor__style-grid">
                   <div className="overlay-editor__style-pair">
-                    <ColorField id="overlay-editor-style-background-color" label={labels.editorStyleBackgroundColor} value={targetStyle.background?.color}
+                    <ColorField id="overlay-editor-style-background-color" label={labels.editorStyleBackgroundColor}
+                      value={targetStyle.background?.opacityPercent === 0 ? "transparent" : targetStyle.background?.color}
                       unsetLabel={labels.editorStyleColorUnset} clearLabel={labels.editorStyleColorClear} disabled={!canEdit || styleLocked}
-                      onChange={(value) => { updateStyleProperty("background", value === undefined ? undefined : { color: value, opacityPercent: targetStyle.background?.opacityPercent ?? 100 }); }} />
+                      allowTransparent transparentLabel={labels.editorStyleBackgroundTransparent}
+                      memoryScope={effectiveStyleTargetId}
+                      {...(targetStyle.background?.color === undefined ? {} : { transparentFallbackColor: targetStyle.background.color })}
+                      onChange={(value) => {
+                        updateStyleProperty("background", value === undefined ? undefined : value === "transparent"
+                          ? { color: targetStyle.background?.color ?? "#000000", opacityPercent: 0 }
+                          : {
+                            color: value,
+                            opacityPercent: targetStyle.background?.opacityPercent === undefined || targetStyle.background.opacityPercent === 0
+                              ? 100
+                              : targetStyle.background.opacityPercent,
+                          });
+                      }} />
                     {renderStyleNumber("overlay-editor-style-background-opacity", labels.editorStyleBackgroundOpacity, targetStyle.background?.opacityPercent,
                       (value) => { updateStyleProperty("background", value === undefined ? undefined : { color: targetStyle.background?.color ?? "#000000", opacityPercent: Math.round(Math.max(0, Math.min(100, value))) }); }, { min: 0, max: 100, unit: "%" })}
                   </div>
@@ -1578,7 +1693,7 @@ function OverlayEditorWorkspace({
             <Button variant="neutral" onClick={() => { void copyCss(); }}>{labels.editorStyleCopy}</Button>
           </div>
           <DisabledFieldReasonContext.Provider value={null}>
-            <CodeField id="overlay-editor-css-code" className="overlay-editor__css-code" label={labels.editorCssTab} value={draft.css} maxLength={16000}
+            <CodeField id="overlay-editor-css-code" className="overlay-editor__css-code" label={labels.editorCssTab} value={draft.css} maxLength={OVERLAY_CSS_MAXIMUM_LENGTH}
               disabled={!canEdit} onChange={editCss} />
           </DisabledFieldReasonContext.Provider>
         </div>

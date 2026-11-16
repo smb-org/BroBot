@@ -58,10 +58,10 @@ const QuizOverlay = ({ config: rawConfig, state: rawState, language = "en" }: Mo
   const ranking = current.phase === "results" ? (current.ranking ?? []).slice(0, 10) : [];
   const maximumCorrect = Math.max(1, ...ranking.map(({ correct }) => correct));
   const style = {
-    "--quiz-background": config.backgroundColor,
-    "--quiz-text": config.textColor,
-    "--quiz-secondary": config.secondaryColor,
-    "--quiz-accent": config.accentColor,
+    ...(config.backgroundColor === null || config.backgroundColor === undefined ? {} : { "--brobot-overlay-legacy-background": config.backgroundColor }),
+    ...(config.textColor === null || config.textColor === undefined ? {} : { "--brobot-overlay-legacy-text-color": config.textColor }),
+    ...(config.secondaryColor === null || config.secondaryColor === undefined ? {} : { "--brobot-overlay-legacy-secondary-text-color": config.secondaryColor }),
+    ...(config.accentColor === null || config.accentColor === undefined ? {} : { "--brobot-overlay-legacy-accent-color": config.accentColor }),
     "--quiz-correct": config.correctColor,
   } as CSSProperties;
 

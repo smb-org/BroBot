@@ -1,4 +1,5 @@
 import type { JsonObject } from "../../contract";
+import { parseModuleOverlayConfig } from "../../contract";
 import { foldStatisticsWord, tokenizeStatisticsWordDetails } from "../domain";
 
 export type StatisticsWordCounterShow = "stream" | "total" | "both";
@@ -31,21 +32,19 @@ export const DEFAULT_STATISTICS_WORD_COUNTER_CONFIG: StatisticsWordCounterConfig
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
-export const parseStatisticsWordCounterConfig = (raw: unknown): StatisticsWordCounterConfig | null => {
-  const input = record(raw);
-  if (input === null || Object.keys(input).some((key) => !["word", "label", "show"].includes(key)) ||
-      typeof input.word !== "string") return null;
-  const tokenized = tokenizeStatisticsWordDetails([input.word]);
-  if (tokenized.size !== 1) return null;
-  const entry = tokenized.entries().next().value as [string, { count: number; displayWord: string }] | undefined;
-  if (entry === undefined) return null;
-  const [word, token] = entry;
-  const label = input.label ?? token.displayWord;
-  const show = input.show ?? DEFAULT_STATISTICS_WORD_COUNTER_CONFIG.show;
-  if (typeof label !== "string" || label.length > 80 ||
-      !(show === "stream" || show === "total" || show === "both")) return null;
-  return { word: foldStatisticsWord(word), label, show };
-};
+export const parseStatisticsWordCounterConfig = (raw: unknown): StatisticsWordCounterConfig | null => parseModuleOverlayConfig(raw, (input) => {
+    if (Object.keys(input).some((key) => !["word", "label", "show"].includes(key)) || typeof input.word !== "string") return null;
+    const tokenized = tokenizeStatisticsWordDetails([input.word]);
+    if (tokenized.size !== 1) return null;
+    const entry = tokenized.entries().next().value as [string, { count: number; displayWord: string }] | undefined;
+    if (entry === undefined) return null;
+    const [word, token] = entry;
+    const label = input.label ?? token.displayWord;
+    const show = input.show ?? DEFAULT_STATISTICS_WORD_COUNTER_CONFIG.show;
+    if (typeof label !== "string" || label.length > 80 ||
+        !(show === "stream" || show === "total" || show === "both")) return null;
+    return { word: foldStatisticsWord(word), label, show };
+});
 
 const isCounterValue = (value: unknown): value is StatisticsWordCounterValue => {
   const input = record(value);

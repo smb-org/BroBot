@@ -2,10 +2,10 @@ import { CHAT_VOTING_TALLY_ELEMENT_KIND } from "./kinds";
 import { chatVotingOverlayLabels } from "./locale";
 import { mergeTallyRealtimeState } from "./tally-state";
 import type { JsonObject, ModuleLanguage } from "../../contract";
+import { parseModuleOverlayConfig } from "../../contract";
 
 const german = chatVotingOverlayLabels("de");
 const english = chatVotingOverlayLabels("en");
-
 export const chatVotingOverlayElement = {
   kind: CHAT_VOTING_TALLY_ELEMENT_KIND,
   configVersion: 1,
@@ -38,9 +38,7 @@ export const chatVotingOverlayElement = {
   editorModuleLabel: { de: german.editorModuleLabel, en: english.editorModuleLabel },
   reloadStateOnModuleMessages: ["modul.chat_voting.opened"],
   mergeRealtimeState: mergeTallyRealtimeState,
-  parseConfig: (raw: unknown) => {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-    const config = raw as Record<string, unknown>;
+  parseConfig: (raw: unknown) => parseModuleOverlayConfig(raw, (config) => {
     if (Object.keys(config).some((key) => !["layout", "showPercent", "showCountdown", "useVoteColors", "hideAfterCloseSeconds", "width"].includes(key))) return null;
     const layout = config.layout ?? "bars";
     const showPercent = config.showPercent ?? true;
@@ -53,7 +51,7 @@ export const chatVotingOverlayElement = {
         typeof hideAfterCloseSeconds !== "number" || !Number.isSafeInteger(hideAfterCloseSeconds) ||
         hideAfterCloseSeconds < 0 || hideAfterCloseSeconds > 120) return null;
     return { layout, showPercent, showCountdown, useVoteColors, hideAfterCloseSeconds, width };
-  },
+  }),
   load: () => import("./tally"),
   editor: () => import("./editor"),
 };

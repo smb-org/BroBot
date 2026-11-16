@@ -393,7 +393,9 @@ describe("BELABOX template variables and overlay metadata", () => {
       reloadStateOnHostEvents: ["stream.state.changed"],
     });
     expect(element?.parseConfig({ layout: "detail", unit: "mbps", hideWhenHealthy: true }))
-      .toEqual({ layout: "detail", unit: "mbps", hideWhenHealthy: true });
+      .toEqual({
+        layout: "detail", unit: "mbps", hideWhenHealthy: true,
+      });
     expect(element?.parseConfig({ layout: "detail", unit: "mbps", hideWhenHealthy: true, html: "unsafe" }))
       .toBeNull();
     expect(element?.parseConfig({ layout: "wide" })).toBeNull();

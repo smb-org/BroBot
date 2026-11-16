@@ -155,10 +155,10 @@ const SlotOverlay = ({ config, state, elementId = "standalone-slot" }: ModuleOve
   if (validState === null || (!isEditorPreview && (presentation === null || expiredSpinId === validState.spinId))) return null;
 
   const style = {
-    "--content-game-reel-background": overlayConfig.backgroundColor,
-    "--content-game-reel-text": overlayConfig.textColor,
-    "--content-game-reel-secondary": overlayConfig.secondaryColor,
-    "--content-game-reel-highlight": overlayConfig.highlightColor,
+    ...(overlayConfig.backgroundColor === null || overlayConfig.backgroundColor === undefined ? {} : { "--brobot-overlay-legacy-background": overlayConfig.backgroundColor }),
+    ...(overlayConfig.textColor === null || overlayConfig.textColor === undefined ? {} : { "--brobot-overlay-legacy-text-color": overlayConfig.textColor }),
+    ...(overlayConfig.secondaryColor === null || overlayConfig.secondaryColor === undefined ? {} : { "--brobot-overlay-legacy-secondary-text-color": overlayConfig.secondaryColor }),
+    ...(overlayConfig.highlightColor === null || overlayConfig.highlightColor === undefined ? {} : { "--brobot-overlay-legacy-accent-color": overlayConfig.highlightColor }),
     "--content-game-reel-border": overlayConfig.borderColor,
     "--slot-presentation-elapsed": `${String(animationOffset.elapsed)}ms`,
   } as CSSProperties;

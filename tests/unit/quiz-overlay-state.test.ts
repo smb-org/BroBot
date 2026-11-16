@@ -42,10 +42,21 @@ describe("quiz overlay state", () => {
     expect(parseQuizOverlayConfig({ showPercent: false })).toMatchObject({
       showQuestionProgress: true,
       showPercent: false,
-      backgroundColor: "#10141b",
+      correctColor: "#32ca88",
     });
     expect(parseQuizOverlayConfig({ textColor: "url(javascript:alert(1))" })).toBeNull();
     expect(parseQuizOverlayConfig({ unsafe: true })).toBeNull();
+  });
+
+  it("accepts null legacy colors as defaults without losing quiz options", () => {
+    expect(parseQuizOverlayConfig({
+      showPercent: false,
+      backgroundColor: null,
+      textColor: null,
+      secondaryColor: null,
+      accentColor: null,
+      correctColor: null,
+    })).toMatchObject({ showQuestionProgress: true, showPercent: false, correctColor: "#32ca88" });
   });
 
   it("drops answer data from open phases while keeping reveal distribution and answer key", () => {

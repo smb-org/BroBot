@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 import { generateOverlayStyleBlock, OVERLAY_STYLE_BEGIN_MARKER, OVERLAY_STYLE_END_MARKER } from "../../src/dashboard/overlay-style-model";
+import { OVERLAY_CSS_MAXIMUM_LENGTH } from "../../src/contracts/overlay-css";
 import { OverlayCanvas } from "../../src/overlay/canvas";
 import { OverlayEditorPage } from "../../src/dashboard/OverlayEditorPage";
 import { dashboardDataKeys } from "../../src/dashboard/data/keys";
@@ -131,6 +132,212 @@ describe("Overlay composition editor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(savedBody).toMatchObject({ baseRevision: 2, elements: [{ x: 50 }] }));
+    view.unmount();
+  });
+
+  it("shows legacy module colors in Style and removes their config keys on explicit save", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const legacyElement = {
+      id: "quiz-element", kind: "quiz.session", label: "Quiz", variableName: null, text: "",
+      config: {
+        showQuestionProgress: false, showPercent: false, backgroundColor: "#112233", textColor: "#223344",
+        secondaryColor: "#334455", accentColor: "#445566", correctColor: "#556677",
+      },
+      x: 24, y: 32, scalePercent: 100, z: 0, inComposition: true,
+    };
+    const legacyOverlay = { ...initialOverlay, elements: [legacyElement] };
+    let savedBody: { css: string; elements: Array<{ config: Record<string, unknown> }> } | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay: legacyOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [{ id: "quiz", enabled: true, mandatory: false }] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        if (typeof init.body !== "string") throw new Error("Overlay save body must be JSON text.");
+        savedBody = JSON.parse(init.body) as typeof savedBody;
+        return Promise.resolve(jsonResponse({ overlay: { ...legacyOverlay, revision: 5 } }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Apply style to" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Element: Quiz", hidden: true }));
+    expect(screen.getByLabelText("Text color")).toHaveValue("#223344");
+    expect(screen.getByLabelText("Secondary text color")).toHaveValue("#334455");
+    expect(screen.getByLabelText("Accent color")).toHaveValue("#445566");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(savedBody).toBeDefined());
+    expect(savedBody?.elements[0]?.config).toEqual({ showQuestionProgress: false, showPercent: false, correctColor: "#556677" });
+    expect(savedBody?.css).toContain("--brobot-overlay-text-color: #223344;");
+    expect(savedBody?.css).toContain("--brobot-overlay-secondary-text-color: #334455;");
+    expect(savedBody?.css).toContain("--brobot-overlay-accent-color: #445566;");
+    view.unmount();
+  });
+
+  it("keeps legacy colours when duplicate style markers cannot be rewritten", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const legacyConfig = { showQuestionProgress: false, showPercent: false, textColor: "#223344", accentColor: "#445566" };
+    const legacyElement = {
+      id: "quiz-duplicate-marker", kind: "quiz.session", label: "Quiz", variableName: null, text: "",
+      config: legacyConfig, x: 24, y: 32, scalePercent: 100, z: 0, inComposition: true,
+    };
+    const duplicateMarkers = `${OVERLAY_STYLE_BEGIN_MARKER}\n${OVERLAY_STYLE_END_MARKER}\n${OVERLAY_STYLE_BEGIN_MARKER}\n${OVERLAY_STYLE_END_MARKER}`;
+    const legacyOverlay = { ...initialOverlay, css: duplicateMarkers, elements: [legacyElement] };
+    let savedBody: { css: string; elements: Array<{ config: Record<string, unknown> }> } | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay: legacyOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [{ id: "quiz", enabled: true, mandatory: false }] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        if (typeof init.body !== "string") throw new Error("Overlay save body must be JSON text.");
+        savedBody = JSON.parse(init.body) as typeof savedBody;
+        return Promise.resolve(jsonResponse({ overlay: { ...legacyOverlay, revision: 5 } }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rewrite from editor" }));
+    expect(screen.getByRole("button", { name: "Rewrite from editor" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Layout" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "X (px)" }), { target: { value: "25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(savedBody).toBeDefined());
+    expect(savedBody?.elements[0]?.config).toEqual(legacyConfig);
+    expect(savedBody?.css).toBe(duplicateMarkers);
+    view.unmount();
+  });
+
+  it("checks contrast for the element selected as the Style target", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const quizElement = (id: string, label: string, textColor: string) => ({
+      id, kind: "quiz.session", label, variableName: null, text: "",
+      config: { showQuestionProgress: true, showPercent: true, backgroundColor: "#10141b", textColor, correctColor: "#32ca88" },
+      x: 24, y: 32, scalePercent: 100, z: 0, inComposition: true,
+    });
+    const overlay = { ...initialOverlay, elements: [quizElement("quiz-safe", "Quiz safe", "#ffffff"), quizElement("quiz-low", "Quiz low", "#10141b")] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [{ id: "quiz", enabled: true, mandatory: false }] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    expect(document.querySelector(".overlay-editor__style-contrast")).toHaveAttribute("data-status", "ok");
+    fireEvent.click(screen.getByRole("combobox", { name: "Apply style to" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Element: Quiz low", hidden: true }));
+
+    expect(document.querySelector(".overlay-editor__style-contrast")).toHaveAttribute("data-status", "warning");
+    view.unmount();
+  });
+
+  it("makes the Style tab target the element selected in the element list", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const quizElement = (id: string, label: string) => ({
+      id, kind: "quiz.session", label, variableName: null, text: "",
+      config: { showQuestionProgress: true, showPercent: true, correctColor: "#32ca88" },
+      x: 24, y: 32, scalePercent: 100, z: 0, inComposition: true,
+    });
+    const overlay = { ...initialOverlay, elements: [quizElement("quiz-a", "Quiz A"), quizElement("quiz-b", "Quiz B")] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [{ id: "quiz", enabled: true, mandatory: false }] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    expect(screen.getByRole("combobox", { name: "Apply style to" })).toHaveTextContent("Element: Quiz A");
+    // The contrast line and the lock area always occupy their rows, so the Font section keeps its position.
+    const stylePositions = (): number[] => {
+      const contrast = document.querySelector(".overlay-editor__style-contrast");
+      const lock = document.querySelector(".overlay-editor__style-lock");
+      if (contrast === null || lock === null || contrast.parentElement === null) throw new Error("The reserved Style rows are missing.");
+      const siblings = Array.from(contrast.parentElement.children);
+      return [siblings.indexOf(contrast), siblings.indexOf(lock)];
+    };
+    const positionsBefore = stylePositions();
+    expect(document.querySelector(".overlay-editor__style-contrast")).toHaveAttribute("role", "status");
+    const row = document.querySelector('[data-element-row="quiz-b"] .overlay-editor__element-select');
+    if (row === null) throw new Error("The element row is missing.");
+    fireEvent.click(row);
+
+    expect(screen.getByRole("combobox", { name: "Apply style to" })).toHaveTextContent("Element: Quiz B");
+    expect(stylePositions()).toEqual(positionsBefore);
+    view.unmount();
+  });
+
+  it("migrates a null alert color to its default and preserves font size when saving", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const legacyElement = {
+      id: "alert-element", kind: "overlay_alerts.alert", label: "Alert", variableName: null, text: "",
+      config: { textColor: null, fontSize: 56 },
+      x: 24, y: 32, scalePercent: 100, z: 0, inComposition: true,
+    };
+    const legacyOverlay = { ...initialOverlay, elements: [legacyElement] };
+    let savedBody: { css: string; elements: Array<{ config: Record<string, unknown> }> } | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay: legacyOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [{ id: "overlay_alerts", enabled: true, mandatory: false }] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        if (typeof init.body !== "string") throw new Error("Overlay save body must be JSON text.");
+        savedBody = JSON.parse(init.body) as typeof savedBody;
+        return Promise.resolve(jsonResponse({ overlay: { ...legacyOverlay, revision: 5 } }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Apply style to" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Element: Alert", hidden: true }));
+    expect(screen.getByLabelText("Text color")).toHaveValue("#ffffff");
+    fireEvent.change(screen.getByLabelText("Text color"), { target: { value: "#eeeeee" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(savedBody).toBeDefined());
+    expect(savedBody?.elements[0]?.config).toEqual({ fontSize: 56 });
+    expect(savedBody?.css).toContain("--brobot-overlay-text-color: #eeeeee;");
     view.unmount();
   });
 
@@ -466,22 +673,22 @@ describe("Overlay composition editor", () => {
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     const previewFrame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
-    await waitFor(() => expect(previewFrame?.contentDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent).toContain(".brobot-overlay :where(.brobot-variable, .brobot-module-text)"));
-    const variableText = previewFrame?.contentDocument?.querySelector<HTMLElement>('[data-variable="score"]');
-    if (variableText === null || variableText === undefined) throw new Error("Overlay preview text is missing.");
-    const computedStyle = previewFrame?.contentWindow?.getComputedStyle(variableText);
+    await waitFor(() => expect(previewFrame?.contentDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent).toContain(".brobot-overlay {"));
+    const elementWrapper = previewFrame?.contentDocument?.querySelector<HTMLElement>('[data-element="element-a"]');
+    if (elementWrapper === null || elementWrapper === undefined) throw new Error("Overlay preview element is missing.");
+    const computedStyle = previewFrame?.contentWindow?.getComputedStyle(elementWrapper);
 
-    expect(computedStyle?.fontFamily).toContain("Arial");
-    expect(computedStyle?.fontSize).toBe("32px");
-    expect(computedStyle?.color).toBe("rgb(68, 85, 102)");
-    expect(computedStyle?.textAlign).toBe("right");
-    expect(computedStyle?.getPropertyValue("-webkit-text-stroke")).toContain("2px");
-    expect(computedStyle?.textShadow).toContain("1px 2px 3px");
+    expect(computedStyle?.getPropertyValue("--brobot-overlay-font-family")).toContain("Arial");
+    expect(computedStyle?.getPropertyValue("--brobot-overlay-font-size")).toBe("32px");
+    expect(computedStyle?.getPropertyValue("--brobot-overlay-text-color")).toBe("#445566");
+    expect(computedStyle?.getPropertyValue("--brobot-overlay-text-align")).toBe("right");
+    expect(computedStyle?.getPropertyValue("--brobot-overlay-text-stroke")).toContain("2px");
+    expect(computedStyle?.getPropertyValue("--brobot-overlay-text-shadow")).toContain("1px 2px 3px");
   });
 
-  it("locks legacy wrapper-target CSS until it is rewritten from the style editor", async () => {
+  it("reads the previous managed Style selector format without expanding CSS on open", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
-    const legacyCss = `${OVERLAY_STYLE_BEGIN_MARKER}\n.brobot-overlay {\n  color: #123456;\n}\n\n[data-element="element-a"] {\n  font-size: 28px;\n}\n${OVERLAY_STYLE_END_MARKER}`;
+    const legacyCss = `${OVERLAY_STYLE_BEGIN_MARKER}\n.brobot-overlay :where(.brobot-variable) {\n  font-size: 32px;\n  color: #ffffff;\n}\n\n[data-element="element-a"] :where(.brobot-variable) {\n  color: #445566;\n}\n${OVERLAY_STYLE_END_MARKER}`;
     const legacyOverlay = { ...initialOverlay, css: legacyCss };
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = requestUrl(input);
@@ -496,17 +703,74 @@ describe("Overlay composition editor", () => {
     render(<DashboardApp />);
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const previewFrame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
+    await waitFor(() => {
+      const installed = previewFrame?.contentDocument?.querySelector("style[data-brobot-overlay-css]")?.textContent ?? "";
+      expect(installed).toContain(".brobot-overlay :where(.brobot-variable)");
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    expect(screen.getByLabelText("Font size")).toHaveValue(32);
+    expect(screen.getByLabelText("Text color")).toHaveValue("#445566");
+  });
+
+  it("locks legacy wrapper-target CSS until it is rewritten from the style editor", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const legacyCss = `${OVERLAY_STYLE_BEGIN_MARKER}\n.brobot-overlay {\n  color: #123456;\n}\n\n[data-element="element-a"] {\n  font-size: 28px;\n}\n${OVERLAY_STYLE_END_MARKER}`;
+    const quizElement = {
+      id: "quiz-legacy", kind: "quiz.session", label: "Quiz legacy", variableName: null, text: "",
+      config: { showQuestionProgress: true, showPercent: false, textColor: "#223344" },
+      x: 24, y: 32, scalePercent: 100, z: 1, inComposition: true,
+    };
+    const legacyOverlay = { ...initialOverlay, css: legacyCss, elements: [...initialOverlay.elements, quizElement] };
+    let savedBody: { css: string; elements: Array<{ id: string; config: Record<string, unknown> }> } | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay: legacyOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [{ id: "quiz", enabled: true, mandatory: false }] }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        if (typeof init.body !== "string") throw new Error("Overlay save body must be JSON text.");
+        savedBody = JSON.parse(init.body) as typeof savedBody;
+        return Promise.resolve(jsonResponse({ overlay: {
+          ...legacyOverlay,
+          revision: 5,
+          css: savedBody?.css ?? legacyCss,
+          elements: legacyOverlay.elements.map((element) => {
+            const saved = savedBody?.elements.find(({ id }) => id === element.id);
+            return saved === undefined ? element : { ...element, ...saved };
+          }),
+        } }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
     expect(screen.getByRole("button", { name: "Rewrite from editor" })).toBeInTheDocument();
     expect(screen.getByLabelText("Font size")).toBeDisabled();
+    fireEvent.click(screen.getByRole("combobox", { name: "Apply style to" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Element: Quiz legacy", hidden: true }));
+    expect(screen.getByLabelText("Text color")).not.toHaveValue("#223344");
     fireEvent.click(screen.getByRole("button", { name: "Rewrite from editor" }));
+    expect(screen.getByLabelText("Text color")).toHaveValue("#223344");
 
     expect(screen.queryByRole("button", { name: "Rewrite from editor" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Text color")).toHaveValue("#223344");
     fireEvent.click(screen.getByRole("tab", { name: "CSS code" }));
     const css = document.querySelector<HTMLTextAreaElement>("#overlay-editor-css-code");
     if (css === null) throw new Error("CSS editor field is missing.");
     expect(css.value).not.toContain(".brobot-overlay {");
     expect(css.value).not.toContain('[data-element="element-a"] {');
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(savedBody).toBeDefined());
+    expect(savedBody?.elements.find(({ id }) => id === "quiz-legacy")?.config).toEqual({ showQuestionProgress: true, showPercent: false });
+    expect(savedBody?.css).toContain("--brobot-overlay-text-color: #223344;");
   });
 
   it("removes an element style rule when its final property is cleared", async () => {
@@ -831,6 +1095,8 @@ describe("Overlay composition editor", () => {
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Apply style to" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Overlay default", hidden: true }));
     const textColorInput = screen.getByLabelText("Text color");
     expect(textColorInput).toHaveValue("#123456");
     fireEvent.click(screen.getByRole("button", { name: "Clear color" }));
@@ -914,6 +1180,8 @@ describe("Overlay composition editor", () => {
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Apply style to" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Overlay default", hidden: true }));
 
     for (const title of ["Font", "Outline", "Shadow", "Background & spacing"]) {
       expect(screen.getByRole("button", { name: new RegExp(`^${title}`) })).toHaveAttribute("aria-expanded", "true");
@@ -922,6 +1190,153 @@ describe("Overlay composition editor", () => {
     expect(screen.getByText("2 px · #000000")).toBeInTheDocument();
     expect(screen.getByText("X 1 px · Y 2 px · 3 px · #112233")).toBeInTheDocument();
     expect(screen.getByText("#445566 · 75% · 8 px · 12 px")).toBeInTheDocument();
+  });
+
+  it("edits and saves one color for twenty fully styled elements with mixed fonts", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const ids = Array.from({ length: 20 }, (_unused, index) => `element-${String(index).padStart(2, "0")}`);
+    const elements = ids.map((id, index) => ({
+      ...initialOverlay.elements[0], id, label: `Score ${String(index + 1)}`, x: 24, y: 32, z: index,
+    }));
+    const originalCss = generateOverlayStyleBlock({
+      overlay: {},
+      elements: Object.fromEntries(ids.map((_id, index) => {
+        const suffix = String(index).padStart(2, "0");
+        return [`element-${suffix}`, {
+          fontFamily: `Font${suffix}${"A".repeat(74)}`,
+          fontSize: 80 + index,
+          fontWeight: ([400, 500, 600, 700] as const)[index % 4] ?? 400,
+          color: `#${(0x120000 + index * 0x101).toString(16).padStart(6, "0")}`,
+          secondaryTextColor: `#${(0x230000 + index * 0x101).toString(16).padStart(6, "0")}`,
+          accentColor: `#${(0x340000 + index * 0x101).toString(16).padStart(6, "0")}`,
+          textAlign: (["left", "center", "right"] as const)[index % 3] ?? "left",
+          lineHeight: 1 + index / 20,
+          letterSpacing: -20 + index * 2.01,
+          stroke: { width: 1 + index / 10, color: `#${(0x560000 + index * 0x101).toString(16).padStart(6, "0")}` },
+          shadow: {
+            x: -10 + index, y: 10 + index / 2, blur: index / 10,
+            color: `#${(0x670000 + index * 0x101).toString(16).padStart(6, "0")}`,
+          },
+          background: { color: `#${(0x450000 + index * 0x101).toString(16).padStart(6, "0")}`, opacityPercent: index + 1 },
+          padding: index * 2,
+          borderRadius: index * 3,
+        }];
+      })),
+    });
+    const styledOverlay = { ...initialOverlay, css: originalCss, elements };
+    let savedBody: { css: string } | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay: styledOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        if (typeof init.body !== "string") throw new Error("Overlay save body must be JSON text.");
+        const body = JSON.parse(init.body) as { css: string };
+        savedBody = body;
+        return Promise.resolve(jsonResponse({ overlay: { ...styledOverlay, css: body.css, revision: 5 } }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    const colorField = screen.getByLabelText("Text color");
+    fireEvent.change(colorField, { target: { value: "#abcdef" } });
+    expect(colorField).toHaveValue("#abcdef");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(savedBody).toBeDefined());
+    expect(savedBody?.css.length).toBeLessThanOrEqual(OVERLAY_CSS_MAXIMUM_LENGTH);
+    expect(savedBody?.css).toContain('[data-element="element-00"] :where(.brobot-variable, .brobot-module-text) {');
+    expect(savedBody?.css).toContain("  color: #abcdef;");
+    view.unmount();
+  });
+
+  it("keeps an over-limit Style edit in the draft and shows the CSS limit error", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const emptyBlock = generateOverlayStyleBlock({ overlay: {}, elements: {} });
+    const suffix = `\n/*${"x".repeat(OVERLAY_CSS_MAXIMUM_LENGTH - emptyBlock.length - 20)}*/`;
+    const oversizedAfterEditOverlay = { ...initialOverlay, css: `${emptyBlock}${suffix}` };
+    let putCount = 0;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") {
+        return Promise.resolve(jsonResponse({ overlay: oversizedAfterEditOverlay }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        putCount += 1;
+        return Promise.resolve(jsonResponse({ overlay: oversizedAfterEditOverlay }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    const colorField = screen.getByLabelText("Text color");
+    fireEvent.change(colorField, { target: { value: "#abcdef" } });
+
+    expect(colorField).toHaveValue("#abcdef");
+    expect(document.querySelector(".ui-save-bar__status")).toHaveTextContent(`Overlay CSS can contain at most ${OVERLAY_CSS_MAXIMUM_LENGTH.toLocaleString("en-US")} characters.`);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(document.querySelector(".ui-save-bar__status")).toHaveTextContent("Overlay CSS can contain at most");
+    expect(putCount).toBe(0);
+    fireEvent.click(screen.getByRole("tab", { name: "CSS code" }));
+    const cssField = document.querySelector<HTMLTextAreaElement>("#overlay-editor-css-code");
+    expect(cssField?.value).toContain("  color: #abcdef;");
+    view.unmount();
+  });
+
+  it("preserves a nonzero background opacity when the color changes", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const originalCss = generateOverlayStyleBlock({
+      overlay: {},
+      elements: { "element-a": { background: { color: "#445566", opacityPercent: 40 } } },
+    });
+    const styledOverlay = { ...initialOverlay, css: originalCss };
+    let savedBody: { css: string } | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") return Promise.resolve(jsonResponse({ overlay: styledOverlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        if (typeof init.body !== "string") throw new Error("Overlay save body must be JSON text.");
+        const body = JSON.parse(init.body) as { css: string };
+        savedBody = body;
+        return Promise.resolve(jsonResponse({ overlay: { ...styledOverlay, css: body.css, revision: 5 } }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    fireEvent.change(screen.getByLabelText("Background color"), { target: { value: "#123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(savedBody).toBeDefined());
+    expect(savedBody?.css).toContain("rgba(18, 52, 86, 0.4)");
+    view.unmount();
   });
 
   it("locks the style fields after a code edit and rewrites the managed block from the editor", async () => {
