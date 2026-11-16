@@ -129,17 +129,27 @@ export const requestSongChannelPointsAction: ChannelPointsActionDefinition<typeo
     if (redemption.userId.length === 0 || redemption.userLogin.length === 0 || redemption.userInput.trim().length === 0) return refund();
     const now = Number.isFinite(Date.parse(redemption.redeemedAt)) ? redemption.redeemedAt : new Date().toISOString();
     let scope: Awaited<ReturnType<typeof actionScope>>;
-    let reward: { id: string; max_per_user_per_stream: number | null; global_cooldown_seconds: number | null } | null;
+    let rewardLimits = redemption.rewardLimits;
     try {
       scope = await actionScope(context, now);
-      reward = await context.DB.prepare(
-        `SELECT id, max_per_user_per_stream, global_cooldown_seconds FROM channel_points_rewards
-          WHERE channel_id = ? AND twitch_reward_id = ? AND enabled = 1 AND twitch_state = 'active'`,
-      ).bind(channelId, redemption.rewardId).first();
+      if (rewardLimits === undefined) {
+        // Rows without a reward-limit snapshot use current values for backward compatibility.
+        const reward = await context.DB.prepare(
+          `SELECT max_per_user_per_stream, global_cooldown_seconds FROM channel_points_rewards
+            WHERE channel_id = ? AND twitch_reward_id = ? AND enabled = 1 AND twitch_state = 'active'`,
+        ).bind(channelId, redemption.rewardId).first<{
+          max_per_user_per_stream: number | null;
+          global_cooldown_seconds: number | null;
+        }>();
+        rewardLimits = reward === null ? undefined : {
+          maxPerUserPerStream: reward.max_per_user_per_stream,
+          globalCooldownSeconds: reward.global_cooldown_seconds,
+        };
+      }
     } catch {
       return "pending";
     }
-    if (scope === null || reward === null || !await spotifySlotHeld(context.DB, channelId)) return refund();
+    if (scope === null || rewardLimits === undefined || !await spotifySlotHeld(context.DB, channelId)) return refund();
 
     let track: SpotifyTrack | null;
     try {
@@ -158,8 +168,8 @@ export const requestSongChannelPointsAction: ChannelPointsActionDefinition<typeo
       track: songRequestTrackFromSpotify(track),
       requestType: "channel_points" as const,
       channelPointsRewardId: redemption.rewardId,
-      rewardMaxPerUserPerStream: reward.max_per_user_per_stream,
-      rewardGlobalCooldownSeconds: reward.global_cooldown_seconds,
+      rewardMaxPerUserPerStream: rewardLimits.maxPerUserPerStream,
+      rewardGlobalCooldownSeconds: rewardLimits.globalCooldownSeconds,
       streamId: scope.streamId,
       roundId: scope.roundId,
       settingsJson: scope.settingsJson,

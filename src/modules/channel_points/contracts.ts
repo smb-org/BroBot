@@ -34,6 +34,11 @@ export type ChannelPointsRedemptionStatus =
 export type TwitchRedemptionStatus = "FULFILLED" | "CANCELED";
 export type NormalizedTwitchRedemptionStatus = "unfulfilled" | "fulfilled" | "canceled" | "unknown";
 
+export interface ChannelPointsRewardLimits {
+  maxPerUserPerStream: number | null;
+  globalCooldownSeconds: number | null;
+}
+
 export interface ChannelPointsReward extends ChannelPointsRewardInput {
   id: string;
   twitchRewardId: string;
@@ -56,6 +61,7 @@ export interface ChannelPointsRedemption {
   pendingTwitchStatus: TwitchRedemptionStatus | null;
   providerModuleId?: string | null;
   providerActionId?: string | null;
+  providerRewardLimits?: ChannelPointsRewardLimits | null;
   outcomeReason: { de: string; en: string } | null;
   createdAt: string;
   updatedAt: string;

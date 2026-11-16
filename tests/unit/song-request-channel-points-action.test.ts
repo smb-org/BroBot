@@ -164,6 +164,42 @@ describe("song request channel-points action", () => {
     await expect(database.prepare("SELECT count(*) AS count FROM song_requests").first()).resolves.toEqual({ count: 1 });
   });
 
+  it("uses the redemption's latched reward limits after reward settings change", async () => {
+    const { database, context, fetcher } = await createFixture();
+    const settings = JSON.stringify({
+      mode: "moderated", paymentMode: "free",
+      rules: {
+        duplicateEnabled: false, songCooldownEnabled: false, personCooldownEnabled: false,
+        personOpenLimitEnabled: false, personRoundLimitEnabled: false, channelOpenLimitEnabled: false,
+        artistOpenLimitEnabled: false, maxTrackLengthEnabled: false, explicitAllowed: true,
+      },
+    });
+    await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(settings, CHANNEL_ID).run();
+    await database.prepare(
+      "UPDATE channel_points_rewards SET global_cooldown_seconds = NULL, max_per_user_per_stream = NULL WHERE channel_id = ?",
+    ).bind(CHANNEL_ID).run();
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify(trackWithId("glassharbor01")), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(trackWithId("quietatlas02")), { status: 200 }));
+
+    await expect(requestSongChannelPointsAction.execute(context, {
+      redemption, operationId: redemption.id, config: {},
+    })).resolves.toBe("pending");
+    await database.prepare("UPDATE channel_points_rewards SET max_per_user_per_stream = 1 WHERE channel_id = ?")
+      .bind(CHANNEL_ID).run();
+    const redemptionWithLatchedLimits = {
+      ...redemption,
+      id: "redemption-channel-points-latched-limits",
+      userInput: "spotify:track:quietatlas02",
+      rewardLimits: { maxPerUserPerStream: null, globalCooldownSeconds: null },
+    };
+
+    await expect(requestSongChannelPointsAction.execute(context, {
+      redemption: redemptionWithLatchedLimits, operationId: redemptionWithLatchedLimits.id, config: {},
+    })).resolves.toBe("pending");
+    await expect(database.prepare("SELECT count(*) AS count FROM song_requests").first()).resolves.toEqual({ count: 2 });
+  });
+
   it("closes the ledger on an external Twitch cancellation without creating another refund obligation", async () => {
     const { database, context } = await createFixture();
     await requestSongChannelPointsAction.execute(context, {

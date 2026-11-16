@@ -181,7 +181,8 @@ const drainProviderResolutionCallbacks = async (
     try {
       let providerModuleId = due.providerModuleId;
       let providerActionId = due.providerActionId;
-      if (providerModuleId === null || providerActionId === null) {
+      // Only rows predating migration 0095 have both provider IDs NULL and may fall back to the current reward.
+      if (providerModuleId === null && providerActionId === null) {
         const reward = await repository.getReward(channelId, due.redemption.rewardId);
         providerModuleId ??= reward?.actionModuleId ?? null;
         providerActionId ??= reward?.actionId ?? null;
@@ -303,12 +304,16 @@ const persistFromAction = async (
     providerModuleId: reward.actionModuleId,
     providerActionId: reward.actionId,
     providerActionConfig: reward.actionConfig,
+    providerRewardLimits: {
+      maxPerUserPerStream: reward.maxPerUserPerStream,
+      globalCooldownSeconds: reward.globalCooldownSeconds,
+    },
   }, now);
   if (!inserted || reward.mode === "queue") return;
   if (!await repository.claimRedemption(channelId, redemption.id, ["received"], expiredBeforeFor(now), now)) return;
   const claimed = await repository.getRedemption(channelId, redemption.id);
   if (claimed === null || claimed.status !== "running") return;
-  await runClaimedAction(environment, channelId, reward, claimed, context, authorize);
+  await runClaimedAction(environment, channelId, claimed, context, authorize);
 };
 
 const processNewRedemption = async (
@@ -357,6 +362,10 @@ const persistTwitchTerminalStatus = async (
       providerModuleId: reward.actionModuleId,
       providerActionId: reward.actionId,
       providerActionConfig: reward.actionConfig,
+      providerRewardLimits: {
+        maxPerUserPerStream: reward.maxPerUserPerStream,
+        globalCooldownSeconds: reward.globalCooldownSeconds,
+      },
     }, now);
     if (inserted) return;
   }
@@ -438,20 +447,24 @@ const redemptionRecord = (item: HelixRedemption) => redemptionFromHelix(item);
 const runClaimedAction = async (
   environment: Env,
   channelId: string,
-  reward: ChannelPointsReward,
   row: ChannelPointsRedemption,
   context: ModuleExecutionContext | null,
   authorize: ChannelPointsMutationAuthorization,
 ): Promise<Awaited<ReturnType<typeof applyOutcome>>> => {
   const repository = createChannelPointsRepository(environment.DB);
+  const legacyLatch = row.providerModuleId === null && row.providerActionId === null;
+  // Rows with NULL provider IDs predate migration 0095, so only those use the reward's current action.
+  const reward = legacyLatch ? await repository.getReward(channelId, row.rewardId) : null;
   const redemption = {
     id: row.redemptionId, rewardId: row.twitchRewardId, rewardTitle: row.rewardTitle, userId: row.userId,
     userLogin: row.userLogin, userName: row.userName, userInput: row.userInput, redeemedAt: row.redeemedAt,
+    ...(row.providerRewardLimits === null || row.providerRewardLimits === undefined
+      ? {} : { rewardLimits: row.providerRewardLimits }),
   };
-  // Rows with NULL provider IDs predate migration 0095, so only those use the reward's current action.
-  const actionModuleId = row.providerModuleId ?? reward.actionModuleId;
-  const actionId = row.providerActionId ?? reward.actionId;
-  const actionConfig = await repository.getProviderActionConfig(channelId, row.redemptionId) ?? reward.actionConfig;
+  const actionModuleId = legacyLatch ? reward?.actionModuleId ?? "" : row.providerModuleId ?? "";
+  const actionId = legacyLatch ? reward?.actionId ?? "" : row.providerActionId ?? "";
+  const actionConfig = await repository.getProviderActionConfig(channelId, row.redemptionId) ??
+    (legacyLatch ? reward?.actionConfig : undefined) ?? {};
   const outcome = await actionOutcome(
     environment, channelId, redemption, actionModuleId, actionId, actionConfig, context,
   );
@@ -491,7 +504,6 @@ const retryExisting = async (
   environment: Env,
   channelId: string,
   row: ChannelPointsRedemption,
-  reward: ChannelPointsReward,
   context: ModuleExecutionContext | null,
   authorize: ChannelPointsMutationAuthorization,
   now: string,
@@ -521,7 +533,7 @@ const retryExisting = async (
     await sendPendingTwitchPatch(environment, channelId, current, "running", authorize);
     return;
   }
-  await runClaimedAction(environment, channelId, reward, current, context, authorize);
+  await runClaimedAction(environment, channelId, current, context, authorize);
 };
 
 export const reconcileChannelPoints = async (
@@ -682,23 +694,23 @@ export const reconcileChannelPoints = async (
     }
   }
 
-  // Step 4: recover only actionable rows. A received row on a queue reward is latched into the queue.
+  // Step 4: only legacy NULL-latch rows read the reward's current mode; latched queue rows were queued at insertion.
   for (const row of await repository.listRetryable(channelId, expiredBeforeFor(now))) {
     try {
       if (!confirmedUnfulfilledIds.has(row.redemptionId)) continue;
       if (row.status === "failed_to_update" && row.pendingTwitchStatus === null) continue;
-      const reward = await repository.getReward(channelId, row.rewardId);
-      if (reward === null) continue;
-      if (row.twitchRewardId !== reward.twitchRewardId) continue;
-      if (row.status === "received" && reward.mode === "queue") {
-        await repository.updateRedemption(channelId, row.redemptionId, {
-          status: "queued", pendingTwitchStatus: null, claimedAt: null,
-        }, ["received"], now);
-        continue;
+      const legacyLatch = row.providerModuleId === null && row.providerActionId === null;
+      if (legacyLatch) {
+        const reward = await repository.getReward(channelId, row.rewardId);
+        if (reward === null || row.twitchRewardId !== reward.twitchRewardId || reward.twitchState !== "active") continue;
+        if (row.status === "received" && reward.mode === "queue") {
+          await repository.updateRedemption(channelId, row.redemptionId, {
+            status: "queued", pendingTwitchStatus: null, claimedAt: null,
+          }, ["received"], now);
+          continue;
+        }
       }
-      if (reward.twitchState !== "active") continue;
-      if (manageableIds !== null && !manageableIds.has(reward.twitchRewardId)) continue;
-      await retryExisting(environment, channelId, row, reward, options.context ?? null, authorize, now);
+      await retryExisting(environment, channelId, row, options.context ?? null, authorize, now);
     } catch {
       fail(row.rewardId, "unknown_status");
     }
@@ -872,7 +884,7 @@ const performQueueOperation = async (
 
   const reward = await repository.getReward(channelId, redemption.rewardId);
   if (reward === null) return { ok: false, reason: "unknown_status" };
-  return await runClaimedAction(environment, channelId, reward, redemption, null, authorize);
+  return await runClaimedAction(environment, channelId, redemption, null, authorize);
 };
 
 type RewardOperationResult =

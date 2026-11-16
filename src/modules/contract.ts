@@ -2165,6 +2165,7 @@ export interface ChannelPointsActionDefinition<ConfigSchema extends z.ZodType = 
       redemption: {
         id: string; rewardId: string; rewardTitle: string; userId: string; userLogin: string;
         userName: string; userInput: string; redeemedAt: string;
+        rewardLimits?: { maxPerUserPerStream: number | null; globalCooldownSeconds: number | null };
       };
       config: z.output<ConfigSchema>;
       operationId: string;

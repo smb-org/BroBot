@@ -1,6 +1,6 @@
 import type {
   ChannelPointsRedemption, ChannelPointsRedemptionStatus, ChannelPointsReward, ChannelPointsRewardInput,
-  TwitchRedemptionStatus,
+  ChannelPointsRewardLimits, TwitchRedemptionStatus,
 } from "./contracts";
 
 interface RewardRow {
@@ -17,6 +17,7 @@ interface RedemptionRow {
   provider_resolution_due?: TwitchRedemptionStatus | null;
   provider_module_id?: string | null; provider_action_id?: string | null;
   provider_action_config_json?: string | null;
+  provider_reward_limits_json?: string | null;
   created_at: string; updated_at: string;
 }
 const rewardFromRow = (row: RewardRow): ChannelPointsReward => ({
@@ -32,6 +33,8 @@ const redemptionFromRow = (row: RedemptionRow): ChannelPointsRedemption => ({
   userId: row.user_id, userLogin: row.user_login, userName: row.user_name, userInput: row.user_input,
   redeemedAt: row.redeemed_at, status: row.status, pendingTwitchStatus: row.pending_twitch_status,
   providerModuleId: row.provider_module_id ?? null, providerActionId: row.provider_action_id ?? null,
+  providerRewardLimits: row.provider_reward_limits_json == null
+    ? null : JSON.parse(row.provider_reward_limits_json) as ChannelPointsRewardLimits,
   outcomeReason: row.outcome_reason_json === null ? null : JSON.parse(row.outcome_reason_json) as { de: string; en: string },
   createdAt: row.created_at, updatedAt: row.updated_at,
 });
@@ -55,6 +58,7 @@ export interface ChannelPointsRepository {
     userInput: string; redeemedAt: string; initialStatus?: "queued" | "fulfilled" | "refunded" | "orphaned";
     initialOutcomeReason?: { de: string; en: string } | null;
     providerModuleId?: string; providerActionId?: string; providerActionConfig?: Record<string, unknown>;
+    providerRewardLimits?: ChannelPointsRewardLimits;
     providerResolutionDue?: TwitchRedemptionStatus;
   }, now: string): Promise<boolean>;
   getRedemption(channelId: string, id: string): Promise<ChannelPointsRedemption | null>;
@@ -197,13 +201,14 @@ export const createChannelPointsRepository = (db: D1Database): ChannelPointsRepo
     return result.meta.changes > 0;
   },
   async latchRedemption(channelId, redemption, now) {
-    const result = await db.prepare("INSERT OR IGNORE INTO channel_points_redemptions (channel_id,redemption_id,reward_id,twitch_reward_id,reward_title,user_id,user_login,user_name,user_input,redeemed_at,status,outcome_reason_json,provider_resolution_due,provider_module_id,provider_action_id,provider_action_config_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    const result = await db.prepare("INSERT OR IGNORE INTO channel_points_redemptions (channel_id,redemption_id,reward_id,twitch_reward_id,reward_title,user_id,user_login,user_name,user_input,redeemed_at,status,outcome_reason_json,provider_resolution_due,provider_module_id,provider_action_id,provider_action_config_json,provider_reward_limits_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
       .bind(channelId, redemption.id, redemption.rewardId, redemption.twitchRewardId, redemption.rewardTitle, redemption.userId, redemption.userLogin,
         redemption.userName, redemption.userInput, redemption.redeemedAt, redemption.initialStatus ?? "received",
         redemption.initialOutcomeReason === undefined || redemption.initialOutcomeReason === null
           ? null : JSON.stringify(redemption.initialOutcomeReason), redemption.providerResolutionDue ?? null,
         redemption.providerModuleId ?? null, redemption.providerActionId ?? null,
-        redemption.providerActionConfig === undefined ? null : JSON.stringify(redemption.providerActionConfig), now, now).run();
+        redemption.providerActionConfig === undefined ? null : JSON.stringify(redemption.providerActionConfig),
+        redemption.providerRewardLimits === undefined ? null : JSON.stringify(redemption.providerRewardLimits), now, now).run();
     return result.meta.changes > 0;
   },
   async getRedemption(channelId, id) {
