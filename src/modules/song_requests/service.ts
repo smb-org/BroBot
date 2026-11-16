@@ -424,14 +424,44 @@ const pointOperationAmount = (result: unknown): number | null => {
   return typeof amount === "number" && Number.isSafeInteger(amount) && amount > 0 ? amount : null;
 };
 
+const isSongRequestChargeVoid = (
+  operation: { kind: string; result: unknown } | null,
+  requestId: string,
+): boolean => operation?.kind === "refund" && typeof operation.result === "object" && operation.result !== null &&
+  !Array.isArray(operation.result) && Reflect.get(operation.result, "requestId") === requestId &&
+  Reflect.get(operation.result, "cancelled") === true && Reflect.get(operation.result, "purpose") === "cancel_charge";
+
+type SongRequestChargeOperation = { kind: "void" } | { kind: "stake"; amount: number };
+
+/** Claims the charge id in the ledger so no later stake can commit under that id. */
+const claimSongRequestCharge = async (
+  points: ModulePointsAccess,
+  requestId: string,
+): Promise<SongRequestChargeOperation> => {
+  const operationId = songRequestChargeOperationId(requestId);
+  try {
+    await points.apply(operationId, "refund", [], { requestId, cancelled: true, purpose: "cancel_charge" }, { requestId, purpose: "cancel_charge" });
+    return { kind: "void" };
+  } catch (error) {
+    const existing = await points.getOperation(operationId);
+    if (existing?.kind === "stake") {
+      const amount = pointOperationAmount(existing.result);
+      if (amount === null) throw new Error("song_request_charge_amount_missing", { cause: error });
+      return { kind: "stake", amount };
+    }
+    if (isSongRequestChargeVoid(existing, requestId)) return { kind: "void" };
+    throw error;
+  }
+};
+
+type SongRequestChargeResult = { status: "charged"; amount: number } | { status: "cancelled" } | { status: "failed" };
+
 const chargeSongRequest = async (
   points: ModulePointsAccess,
   row: NonNullable<Awaited<ReturnType<typeof readSongRequest>>>,
-): Promise<number | null> => {
-  if (row.requestType !== "bot_points" || row.chargedAmount < 1 || row.requesterUserId === null) return null;
+): Promise<SongRequestChargeResult> => {
+  if (row.requestType !== "bot_points" || row.chargedAmount < 1 || row.requesterUserId === null) return { status: "failed" };
   const operationId = songRequestChargeOperationId(row.requestId);
-  const existing = await points.getOperation(operationId);
-  if (existing !== null) return existing.kind === "stake" ? pointOperationAmount(existing.result) : null;
   try {
     const applied = await points.apply(operationId, "stake", [{
       accountId: row.requesterUserId,
@@ -441,10 +471,17 @@ const chargeSongRequest = async (
       accountId: "__house",
       delta: row.chargedAmount,
     }], { requestId: row.requestId, trackId: row.id, amount: row.chargedAmount }, { requestId: row.requestId });
-    return pointOperationAmount(applied.result);
-  } catch {
+    const amount = pointOperationAmount(applied.result);
+    return amount === null ? { status: "failed" } : { status: "charged", amount };
+  } catch (error) {
     const operation = await points.getOperation(operationId);
-    return operation?.kind === "stake" ? pointOperationAmount(operation.result) : null;
+    if (operation?.kind === "stake") {
+      const amount = pointOperationAmount(operation.result);
+      return amount === null ? { status: "failed" } : { status: "charged", amount };
+    }
+    if (isSongRequestChargeVoid(operation, row.requestId)) return { status: "cancelled" };
+    if (operation === null) return { status: "failed" };
+    throw error;
   }
 };
 
@@ -465,13 +502,12 @@ const refundSongRequest = async (
     await markSongRequestRefundComplete(db, channelId, row.requestId);
     return true;
   }
-  const charge = await points.getOperation(songRequestChargeOperationId(row.requestId));
-  if (charge === null || charge.kind !== "stake") {
+  const charge = await claimSongRequestCharge(points, row.requestId);
+  if (charge.kind === "void") {
     await markSongRequestRefundComplete(db, channelId, row.requestId);
     return true;
   }
-  const chargedAmount = pointOperationAmount(charge.result);
-  if (chargedAmount === null) throw new Error("song_request_charge_amount_missing");
+  const chargedAmount = charge.amount;
   if (row.requesterUserId === null) throw new Error("song_request_refund_account_missing");
   try {
     await points.apply(refundId, "refund", [{
@@ -489,6 +525,36 @@ const refundSongRequest = async (
   }
   await markSongRequestRefundComplete(db, channelId, row.requestId);
   return true;
+};
+
+const finalizeChargingSongRequest = async (
+  context: Pick<ModuleAlarmContext, "DB" | "channelId" | "points">,
+  requestId: string,
+  failureReason: string,
+  now: string,
+  expectedChargingBefore?: string,
+): Promise<{ changed: boolean; charge: SongRequestChargeOperation }> => {
+  const charge = await claimSongRequestCharge(context.points, requestId);
+  const changed = await transitionRequest(context.DB, {
+    channelId: context.channelId,
+    requestId,
+    fromState: "charging",
+    toState: "failed",
+    failureReason,
+    refundDue: charge.kind === "stake",
+    chargedAmount: charge.kind === "stake" ? charge.amount : 0,
+    ...(charge.kind === "stake" ? { chargedAt: now } : {}),
+    now,
+    ...(expectedChargingBefore === undefined ? {} : { expectedChargingBefore }),
+  });
+  if (charge.kind === "stake") {
+    const latest = await readSongRequest(context.DB, context.channelId, requestId);
+    if (latest !== null && !isOpenSongRequestState(latest.state) &&
+        await songRequestRefundIsDue(context.DB, context.channelId, requestId)) {
+      await refundRequestId(context, requestId);
+    }
+  }
+  return { changed, charge };
 };
 
 export const refundRequestId = async (
@@ -515,6 +581,10 @@ const failureMessage = (reason: string | null): { de: string; en: string } => {
   if (reason === "stream_offline") return {
     de: "Der Stream ist offline; der Song wurde nicht in Spotify eingereiht.",
     en: "The stream is offline; the song was not queued in Spotify.",
+  };
+  if (reason === "submit_outcome_uncertain") return {
+    de: "Der Song könnte in Spotify eingereiht worden sein; bitte prüfe Spotify vor einem erneuten Versuch.",
+    en: "The song may have been queued in Spotify; check Spotify before retrying.",
   };
   if (reason === "outcome_unknown" || reason === "network_or_timeout" || reason === "spotify_server_error" || reason === "retry_response_uncertain" || reason === "submit_interrupted" || reason === "submit_state_conflict") return {
     de: `Das Spotify-Ergebnis ist unklar (${reason}); bitte die Warteschlange prüfen.`,
@@ -623,31 +693,18 @@ export const reconcileStaleSongRequestCharges = async (
   const cutoff = new Date(now - IN_FLIGHT_MAX_AGE_MS).toISOString();
   const roundFilter = roundId === undefined ? "" : " AND round_id = ?";
   const statement = context.DB.prepare(
-    `SELECT id FROM song_requests WHERE channel_id = ? AND state = 'charging' AND updated_at < ?${roundFilter}
-      ORDER BY updated_at, id`,
+    `SELECT id FROM song_requests WHERE channel_id = ? AND state = 'charging' AND charging_since < ?${roundFilter}
+      ORDER BY charging_since, id`,
   );
   const rows = await (roundId === undefined ? statement.bind(context.channelId, cutoff) : statement.bind(context.channelId, cutoff, roundId))
     .all<{ id: string }>();
   let reconciled = 0;
   for (const row of rows.results) {
-    let charge: Awaited<ReturnType<ModulePointsAccess["getOperation"]>>;
-    try { charge = await context.points.getOperation(songRequestChargeOperationId(row.id)); }
-    catch { continue; }
-    const chargedAmount = charge?.kind === "stake" ? pointOperationAmount(charge.result) : null;
     const timestamp = new Date(now).toISOString();
-    const changed = await transitionRequest(context.DB, {
-      channelId: context.channelId,
-      requestId: row.id,
-      fromState: "charging",
-      toState: "failed",
-      failureReason: "charge_interrupted",
-      refundDue: true,
-      chargedAmount: chargedAmount ?? 0,
-      ...(chargedAmount === null ? {} : { chargedAt: timestamp }),
-      now: timestamp,
-      expectedUpdatedBefore: cutoff,
-    });
-    if (changed) reconciled += 1;
+    let finalized: Awaited<ReturnType<typeof finalizeChargingSongRequest>>;
+    try { finalized = await finalizeChargingSongRequest(context, row.id, "charge_interrupted", timestamp, cutoff); }
+    catch { continue; }
+    if (finalized.changed) reconciled += 1;
   }
   return reconciled;
 };
@@ -655,7 +712,7 @@ export const reconcileStaleSongRequestCharges = async (
 const hasFreshChargingSongRequests = async (db: D1Database, channelId: string, now = Date.now()): Promise<boolean> => {
   const cutoff = new Date(now - IN_FLIGHT_MAX_AGE_MS).toISOString();
   const row = await db.prepare(
-    "SELECT COUNT(*) AS count FROM song_requests WHERE channel_id = ? AND state = 'charging' AND updated_at >= ?",
+    "SELECT COUNT(*) AS count FROM song_requests WHERE channel_id = ? AND state = 'charging' AND charging_since >= ?",
   ).bind(channelId, cutoff).first<{ count: number }>();
   return (row?.count ?? 0) > 0;
 };
@@ -859,7 +916,9 @@ export const handleSongRequestsActivation = async (context: ModuleAlarmContext, 
         requestId: row.id,
         fromState: row.state,
         toState,
-        failureReason: "module_disabled",
+        failureReason: row.state === "submitting" || row.state === "outcome_unknown"
+          ? "submit_outcome_uncertain"
+          : "module_disabled",
         refundDue: true,
         now: new Date().toISOString(),
       });
@@ -1094,13 +1153,30 @@ const processSongRequestCommand = async (
   let current = await readSongRequest(context.DB, event.channelId, requestId);
   if (current === null) return { actions: [chatReply(event, text.spotifyUnavailable)], diagnostics: [] };
   if (requestType === "bot_points") {
-    const chargedAmount = await chargeSongRequest(context.points, current);
-    if (chargedAmount === null) {
-      const failed = await transitionRequest(context.DB, {
-        channelId: event.channelId, requestId, fromState: "charging", toState: "failed",
-        failureReason: "charge_failed", chargedAmount: 0, now: new Date().toISOString(),
-      });
-      if (!failed) {
+    const charge = await chargeSongRequest(context.points, current);
+    if (charge.status === "cancelled") {
+      const cancelledRequest = await readSongRequest(context.DB, event.channelId, requestId);
+      return {
+        actions: [chatReply(event, cancelledRequest === null
+          ? text.spotifyUnavailable
+          : text.rejected(text.reasons.request_unavailable)), await queueOverlayChange({ DB: context.DB, channelId: event.channelId })],
+        diagnostics: [],
+      };
+    }
+    if (charge.status === "failed") {
+      const finalized = await finalizeChargingSongRequest(
+        { DB: context.DB, channelId: event.channelId, points: context.points },
+        requestId,
+        "charge_failed",
+        new Date().toISOString(),
+      );
+      if (finalized.charge.kind === "stake") {
+        return {
+          actions: [chatReply(event, text.rejected(text.reasons.request_unavailable)), await queueOverlayChange({ DB: context.DB, channelId: event.channelId })],
+          diagnostics: [],
+        };
+      }
+      if (!finalized.changed) {
         current = await readSongRequest(context.DB, event.channelId, requestId);
         if (current !== null && !isOpenSongRequestState(current.state)) {
           return {
@@ -1111,6 +1187,7 @@ const processSongRequestCommand = async (
       }
       return { actions: [chatReply(event, text.insufficientPoints), await queueOverlayChange({ DB: context.DB, channelId: event.channelId })], diagnostics: [] };
     }
+    const chargedAmount = charge.amount;
     const toState = scope.settings.mode === "moderated" ? "pending_review" : "approved";
     const now = new Date().toISOString();
     const visible = await transitionRequest(context.DB, {
@@ -1126,17 +1203,12 @@ const processSongRequestCommand = async (
     if (!visible) {
       current = await readSongRequest(context.DB, event.channelId, requestId);
       if (current?.state === "charging") {
-        await transitionRequest(context.DB, {
-          channelId: event.channelId,
+        await finalizeChargingSongRequest(
+          { DB: context.DB, channelId: event.channelId, points: context.points },
           requestId,
-          fromState: "charging",
-          toState: "failed",
-          failureReason: "request_round_ended",
-          refundDue: true,
-          chargedAmount,
-          chargedAt: now,
+          "request_round_ended",
           now,
-        });
+        );
       } else if (current !== null) {
         await markSongRequestRefundDue(context.DB, event.channelId, requestId);
       }
@@ -1190,7 +1262,7 @@ export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSe
   if (event.subscriptionType === "stream.online") {
     const offlineRoundId = await closeOfflineSongRequestRound(context.DB, event.channelId);
     if (offlineRoundId !== null) {
-      await reconcileStaleSongRequestCharges({ DB: context.DB, channelId: event.channelId, points: context.points }, Date.parse(event.receivedAt), offlineRoundId);
+      await reconcileStaleSongRequestCharges({ DB: context.DB, channelId: event.channelId, points: context.points }, Date.now(), offlineRoundId);
       const cleanup = await cleanupSongRequestRound(context.DB, event.channelId, offlineRoundId, event.receivedAt, "offline_round_ended");
       if (cleanup.changed) actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: cleanup.revision } });
     }
@@ -1204,12 +1276,12 @@ export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSe
   } else if (event.subscriptionType === "stream.offline") {
     const streamId = context.streamSession?.streamId ?? null;
     if (streamId !== null) {
-      await reconcileStaleSongRequestCharges({ DB: context.DB, channelId: event.channelId, points: context.points }, Date.parse(event.receivedAt), streamId);
+      await reconcileStaleSongRequestCharges({ DB: context.DB, channelId: event.channelId, points: context.points }, Date.now(), streamId);
       const cleanup = await cleanupSongRequestRound(context.DB, event.channelId, streamId, event.receivedAt, "stream_ended");
       await retrySongRequestRefunds({ DB: context.DB, channelId: event.channelId, points: context.points }, streamId);
       if (cleanup.changed) actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: cleanup.revision } });
     } else {
-      await reconcileStaleSongRequestCharges({ DB: context.DB, channelId: event.channelId, points: context.points }, Date.parse(event.receivedAt));
+      await reconcileStaleSongRequestCharges({ DB: context.DB, channelId: event.channelId, points: context.points }, Date.now());
       const cleared = await clearSongRequestsForStreamEnd(context.DB, event.channelId, streamId, event.receivedAt);
       await retrySongRequestRefunds({ DB: context.DB, channelId: event.channelId, points: context.points });
       if (cleared.changed) actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: cleared.revision } });

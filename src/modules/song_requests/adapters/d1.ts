@@ -133,6 +133,7 @@ export interface RequestTransition {
   chargedAmount?: number;
   chargedAt?: string;
   expectedUpdatedBefore?: string;
+  expectedChargingBefore?: string;
   onlyIfOpenBallotId?: string;
   newRequest?: NewSongRequest;
   companionStatements?: readonly D1PreparedStatement[];
@@ -182,7 +183,8 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
          request_type, charged_amount, created_at, updated_at)
        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         WHERE 1 = 1${ballotGuard}${activeRoundGuard}
-       ON CONFLICT (operation_id) DO NOTHING`,
+       ON CONFLICT (operation_id) DO NOTHING
+       RETURNING id`,
     ).bind(...bindings);
   } else {
     const conditions: string[] = ["channel_id = ?", "id = ?", "state = ?"];
@@ -196,6 +198,10 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
     if (input.expectedUpdatedBefore !== undefined) {
       conditions.push("updated_at < ?");
       bindings.push(input.expectedUpdatedBefore);
+    }
+    if (input.expectedChargingBefore !== undefined) {
+      conditions.push("charging_since < ?");
+      bindings.push(input.expectedChargingBefore);
     }
     if (input.activeRoundId !== undefined) {
       conditions.push("round_id = ?");
@@ -244,13 +250,14 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
          charged_at = COALESCE(?, charged_at),
          refund_due = CASE WHEN ? = 1 AND request_type = 'bot_points' THEN 1
            WHEN ? = 0 THEN 0 ELSE refund_due END
-        WHERE ${conditions.join(" AND ")}`,
+        WHERE ${conditions.join(" AND ")}
+       RETURNING id`,
     ).bind(...bindings.slice(0, 9), input.refundDue === true ? 1 : input.refundDue === false ? 0 : null,
       input.refundDue === true ? 1 : input.refundDue === false ? 0 : null, ...bindings.slice(9));
   }
   const results = await db.batch([transition, ...(input.companionStatements ?? [])]);
-  // D1 counts rows written by the panel revision triggers too, so test for "at least one".
-  return (results[0]?.meta.changes ?? 0) > 0 && results.slice(1).every((result) => result.meta.changes > 0);
+  // RETURNING sees the matched request row directly, excluding panel revision trigger writes.
+  return (results[0]?.results.length ?? 0) > 0 && results.slice(1).every((result) => result.meta.changes > 0);
 };
 
 export interface SongRequestAdmissionInput {
@@ -814,7 +821,8 @@ export const clearSongRequestsForStreamEnd = async (
   for (const row of rows.results) {
     const toState: SongRequestState = row.state === "submitted" ? "not_observed"
       : row.state === "submitting" || row.state === "outcome_unknown" ? "failed" : "rejected";
-    const reason = row.state === "submitted" ? null : "stream_ended";
+    const reason = row.state === "submitted" ? null
+      : row.state === "submitting" || row.state === "outcome_unknown" ? "submit_outcome_uncertain" : "stream_ended";
     const changed = await transitionRequest(db, {
       channelId, requestId: row.id, fromState: row.state, toState, failureReason: reason,
       refundDue: row.state !== "submitted", now,
@@ -863,7 +871,7 @@ export const cleanupSongRequestRound = async (
       requestId: row.id,
       fromState: row.state,
       toState,
-      failureReason: reason,
+      failureReason: row.state === "submitting" || row.state === "outcome_unknown" ? "submit_outcome_uncertain" : reason,
       refundDue: reason === "module_disabled" || row.state !== "submitted",
       now,
     });

@@ -45,6 +45,7 @@ CREATE TABLE song_requests_next (
   failure_reason TEXT,
   stream_id TEXT,
   created_at TEXT NOT NULL,
+  charging_since TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL,
   submitted_at TEXT,
   observed_at TEXT,
@@ -73,6 +74,8 @@ ALTER TABLE song_requests_next RENAME TO song_requests;
 
 CREATE INDEX song_requests_channel_state_created_idx
   ON song_requests(channel_id, state, created_at, id);
+CREATE INDEX song_requests_charging_age_idx
+  ON song_requests(channel_id, state, charging_since, id);
 CREATE INDEX song_requests_stream_track_state_idx
   ON song_requests(channel_id, stream_id, track_id, state, created_at);
 CREATE INDEX song_requests_round_state_idx ON song_requests(channel_id, round_id, state, created_at, id);

@@ -245,7 +245,7 @@ describe("durable song vote results", () => {
 
     expect(fetcher).not.toHaveBeenCalled();
     expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
-      .toEqual({ state: "failed", failure_reason: "module_disabled" });
+      .toEqual({ state: "failed", failure_reason: "submit_outcome_uncertain" });
   });
 
   it("does not send a winner when deactivation completes during the final stream reads", async () => {
@@ -269,7 +269,7 @@ describe("durable song vote results", () => {
 
     expect(fetcher).not.toHaveBeenCalled();
     expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
-      .toEqual({ state: "failed", failure_reason: "module_disabled" });
+      .toEqual({ state: "failed", failure_reason: "submit_outcome_uncertain" });
   });
 
   it("does not send a winner when its Spotify slot is revoked during the final stream reads", async () => {
@@ -319,8 +319,8 @@ describe("durable song vote results", () => {
 
     // Deactivation already settled the row as failed; the late Spotify completion must not overwrite that decision.
     expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
-      .toEqual({ state: "failed", failure_reason: "module_disabled" });
-    expect(sendChat.mock.calls[0]?.[0]).toContain("module_disabled");
+      .toEqual({ state: "failed", failure_reason: "submit_outcome_uncertain" });
+    expect(sendChat.mock.calls[0]?.[0]).toContain("may have been queued in Spotify");
   });
 
   it("reports an uncertain outcome when the Spotify slot is revoked after Spotify received the POST", async () => {
@@ -587,9 +587,9 @@ describe("durable song vote results", () => {
     expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = 'request-approved'").first())
       .toEqual({ state: "rejected", failure_reason: "module_disabled" });
     expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = 'request-submitting'").first())
-      .toEqual({ state: "failed", failure_reason: "module_disabled" });
+      .toEqual({ state: "failed", failure_reason: "submit_outcome_uncertain" });
     expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = 'request-unknown'").first())
-      .toEqual({ state: "failed", failure_reason: "module_disabled" });
+      .toEqual({ state: "failed", failure_reason: "submit_outcome_uncertain" });
 
     await transitionRequest(db, {
       channelId: CHANNEL_ID, requestId: "request-late-vote", fromState: null, toState: "approved", now: new Date(NOW).toISOString(),

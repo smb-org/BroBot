@@ -5,7 +5,7 @@ import type { ModuleEvent, ModuleExecutionContext } from "../../src/modules/cont
 import { admitSongRequest, cleanupSongRequestRound, pendingSongRequestQueue, songRequestAdmissionFailure, transitionRequest } from "../../src/modules/song_requests/adapters/d1";
 import { songRequestsSettingsSchema, type SongRequestsSettings } from "../../src/modules/song_requests/contracts";
 import { readSongRequestQueueState } from "../../src/modules/song_requests/overlay/queue-state";
-import { processSongRequestsEvent, refundRequestId, songRequestChargeOperationId, songRequestRefundOperationId } from "../../src/modules/song_requests/service";
+import { processSongRequestsEvent, reconcileStaleSongRequestCharges, refundRequestId, songRequestChargeOperationId, songRequestRefundOperationId } from "../../src/modules/song_requests/service";
 import { modulePoints } from "../../src/worker/module-points";
 
 const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
@@ -438,5 +438,58 @@ describe("song request points ledger on a real ChannelObject", () => {
 
     expect(await points.balance("viewer-real-ledger")).toBe(100);
     expect(await points.getOperation(songRequestRefundOperationId(request.id))).toMatchObject({ kind: "refund" });
+
+    const cancelledRequestId = "real-ledger-cancelled-charge";
+    await transitionRequest(database, {
+      channelId,
+      requestId: cancelledRequestId,
+      fromState: null,
+      toState: "charging",
+      now: "2000-01-01T00:00:00.000Z",
+      newRequest: {
+        source: "points",
+        requestType: "bot_points",
+        track: {
+          id: "cancelled-track",
+          uri: "spotify:track:cancelled-track",
+          title: "Cancelled Track",
+          artists: [],
+          durationMs: 100_000,
+          explicit: false,
+          coverUrl: null,
+          spotifyUrl: "https://open.spotify.com/track/cancelled-track",
+        },
+        operationId: `sr:${cancelledRequestId}`,
+        streamId: "stream-real-ledger",
+        roundId: "stream-real-ledger",
+        chargedAmount: 13,
+        requesterUserId: "viewer-real-ledger",
+        requesterLogin: "ledger_viewer",
+        requesterDisplayName: "Ledger Viewer",
+      },
+    });
+    await database.prepare("UPDATE song_requests SET charging_since = '2000-01-01T00:00:00.000Z' WHERE id = ?")
+      .bind(cancelledRequestId).run();
+
+    expect(await reconcileStaleSongRequestCharges({ DB: database, channelId, points }, Date.now())).toBe(1);
+    expect(await database.prepare("SELECT state, refund_due FROM song_requests WHERE id = ?")
+      .bind(cancelledRequestId).first()).toEqual({ state: "failed", refund_due: 0 });
+    const cancelledOperationId = songRequestChargeOperationId(cancelledRequestId);
+    expect(await points.getOperation(cancelledOperationId)).toMatchObject({
+      kind: "refund",
+      result: { requestId: cancelledRequestId, cancelled: true },
+    });
+    let lateStakeError: unknown = null;
+    try {
+      await points.apply(cancelledOperationId, "stake", [
+        { accountId: "viewer-real-ledger", login: "ledger_viewer", delta: -13 },
+        { accountId: "__house", delta: 13 },
+      ], { requestId: cancelledRequestId, trackId: "late-track", amount: 13 }, { requestId: cancelledRequestId });
+    } catch (error) {
+      lateStakeError = error;
+    }
+    expect(lateStakeError).toBeInstanceOf(Error);
+    expect((lateStakeError as Error).message).toContain("operation_conflict");
+    expect(await points.balance("viewer-real-ledger")).toBe(100);
   });
 });

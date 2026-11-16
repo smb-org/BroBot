@@ -30,7 +30,10 @@ const createHarness = async (channelId: string) => {
   ]);
   const operations = new Map<string, { kind: string; result: unknown }>();
   const apply = vi.fn((operationId: string, kind: string, _movements: unknown[], result: unknown) => {
-    if (operations.has(operationId)) return Promise.resolve({ result: operations.get(operationId)?.result });
+    const existing = operations.get(operationId);
+    // Like the real ledger, an existing operation id with a different payload conflicts before anything is applied.
+    if (existing !== undefined && existing.kind !== kind) return Promise.reject(new Error("operation_conflict"));
+    if (existing !== undefined) return Promise.resolve({ result: existing.result });
     operations.set(operationId, { kind, result });
     return Promise.resolve({ result });
   });
@@ -92,7 +95,8 @@ const expectRefundedOnce = async (harness: Awaited<ReturnType<typeof createHarne
     expect(harness.operations.has(songRequestRefundOperationId(requestId))).toBe(true);
     await refundRequestId({ DB: harness.database as unknown as D1Database, channelId: harness.channelId, points: harness.points }, requestId);
   }
-  expect(harness.apply).toHaveBeenCalledTimes(requestIds.length);
+  // Charge claims have no movements; only real refunds move points.
+  expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0 && call[0].endsWith(":refund"))).toHaveLength(requestIds.length);
 };
 
 afterEach(() => {

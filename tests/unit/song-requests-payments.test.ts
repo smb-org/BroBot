@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext, ModulePointsAccess, ModuleRouteEnvironment } from "../../src/modules/contract";
 import { songRequestsSettingsSchema } from "../../src/modules/song_requests/contracts";
 import type { SongRequestsSettings } from "../../src/modules/song_requests/contracts";
-import { handleSubmitAlarm, pollSongRequestsPlayback, processSongRequestsEvent, reconcileStaleSongRequestCharges, refundRequestId, retrySongRequestRefunds, songRequestChargeOperationId, songRequestRefundOperationId } from "../../src/modules/song_requests/service";
+import { handleSongRequestsActivation, handleSubmitAlarm, pollSongRequestsPlayback, processSongRequestsEvent, reconcileStaleSongRequestCharges, refundRequestId, retrySongRequestRefunds, songRequestChargeOperationId, songRequestRefundOperationId } from "../../src/modules/song_requests/service";
 import { cleanupSongRequestRound, pendingSongRequestQueue, recentSongRequests, transitionRequest } from "../../src/modules/song_requests/adapters/d1";
 import { readSongRequestQueueState } from "../../src/modules/song_requests/overlay/queue-state";
 import { songRequestsRoutes } from "../../src/modules/song_requests/routes";
@@ -33,6 +33,7 @@ const createHarness = async (
     failCharge?: boolean;
     beforeChargeCommit?: () => Promise<void>;
     failRefundAttempts?: number;
+    language?: "de" | "en";
   } = {},
 ) => {
   const database = new TestD1Database();
@@ -52,7 +53,7 @@ const createHarness = async (
     database.prepare("INSERT INTO song_requests_connections (channel_id, state, updated_at) VALUES (?, 'connected', ?)")
       .bind(CHANNEL_ID, NOW),
   ]);
-  const operations = new Map<string, { kind: string; result: unknown; movements: string; payloadIdentity: string | undefined }>();
+  const operations = new Map<string, { kind: string; result: unknown; movements: string; payloadFingerprint: string }>();
   let failRefundAttempts = options.failRefundAttempts ?? 0;
   // In-memory ledger with the real rules: movements must sum to zero and only the house may go negative.
   const balances = new Map<string, number>();
@@ -68,21 +69,23 @@ const createHarness = async (
   const apply = vi.fn(async (operationId: string, kind: string, movements: unknown[], result: unknown, payloadIdentity?: unknown) => {
     if (kind === "stake") await options.beforeChargeCommit?.();
     if (kind === "stake" && options.failCharge === true) return Promise.reject(new Error("insufficient_points"));
-    if (kind === "refund" && failRefundAttempts > 0) {
+    if (kind === "refund" && movements.length > 0 && failRefundAttempts > 0) {
       failRefundAttempts -= 1;
       throw new Error("temporary_refund_failure");
     }
     const serializedMovements = JSON.stringify(movements);
-    const serializedPayloadIdentity = payloadIdentity === undefined ? undefined : JSON.stringify(payloadIdentity);
+    const payloadFingerprint = payloadIdentity === undefined
+      ? JSON.stringify({ result })
+      : JSON.stringify({ identity: payloadIdentity });
     const existing = operations.get(operationId);
     if (existing !== undefined) {
-      if (existing.kind !== kind || existing.movements !== serializedMovements || existing.payloadIdentity !== serializedPayloadIdentity) {
+      if (existing.kind !== kind || existing.movements !== serializedMovements || existing.payloadFingerprint !== payloadFingerprint) {
         throw new Error("operation_conflict");
       }
       return { result: existing.result };
     }
     applyMovements(movements);
-    operations.set(operationId, { kind, result, movements: serializedMovements, payloadIdentity: serializedPayloadIdentity });
+    operations.set(operationId, { kind, result, movements: serializedMovements, payloadFingerprint });
     return { result };
   });
   const points = {
@@ -104,10 +107,16 @@ const createHarness = async (
       CHANNEL: { idFromName: (name: string) => name, get: () => ({ getSpotifyAccessToken: () => Promise.resolve("spotify-access-fixture") }) },
     },
     points,
-    channelLanguage: () => Promise.resolve("en"),
+    channelLanguage: () => Promise.resolve(options.language ?? "en"),
     botUserId: () => Promise.resolve("bot-fixture"),
     scheduleAlarm: (_handlerKey: string, alarmKey: string) => { scheduledAlarms.push(alarmKey); return Promise.resolve(); },
   } as unknown as ModuleExecutionContext;
+  const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({
+    sent: true,
+    reason: null,
+    retryable: false,
+    delivery: "delivered",
+  }));
   const alarmContext = {
     DB: database as unknown as D1Database,
     channelId: CHANNEL_ID,
@@ -121,14 +130,14 @@ const createHarness = async (
     },
     streamState: () => Promise.resolve("online"),
     streamStartedAt: () => Promise.resolve({ streamId: "stream-payment-fixture", startedAt: NOW }),
-    channelLanguage: () => Promise.resolve("en"),
-    sendChat: vi.fn(() => Promise.resolve({ sent: true, reason: null, retryable: false, delivery: "delivered" as const })),
+    channelLanguage: () => Promise.resolve(options.language ?? "en"),
+    sendChat,
     schedule: vi.fn(() => Promise.resolve()),
     clear: vi.fn(() => Promise.resolve()),
     getAlarmDeadline: vi.fn(() => Promise.resolve(null)),
     publishModuleOverlayMessage: vi.fn(() => Promise.resolve()),
   } as unknown as ModuleAlarmContext;
-  const createEvent = (login: string, chatStatus: ModuleEvent<SongRequestsSettings>["chatStatus"] = ["viewer"]): ModuleEvent<SongRequestsSettings> => ({
+  const createEvent = (login: string, chatStatus: ModuleEvent<SongRequestsSettings>["chatStatus"] = ["viewer"], receivedAt = NOW): ModuleEvent<SongRequestsSettings> => ({
     channelId: CHANNEL_ID,
     subscriptionType: "channel.chat.message",
     triggerId: `message-${login}`,
@@ -140,11 +149,11 @@ const createHarness = async (
       message: { text: "!sr Glass Harbor", fragments: [{ type: "text", text: "!sr Glass Harbor" }] },
     },
     settings,
-    receivedAt: NOW,
+    receivedAt,
     actor: null,
     chatStatus,
   });
-  return { database, context, alarmContext, points, operations, scheduledAlarms, fetcher, apply, createEvent, balanceOf };
+  return { database, context, alarmContext, points, operations, scheduledAlarms, fetcher, apply, sendChat, createEvent, balanceOf };
 };
 
 const removeAppFor = (points: ModulePointsAccess) => {
@@ -208,10 +217,12 @@ describe("song request payments", () => {
     });
     await refundRequestId({ DB: harness.database as unknown as D1Database, channelId: CHANNEL_ID, points: harness.points }, row.id);
     await refundRequestId({ DB: harness.database as unknown as D1Database, channelId: CHANNEL_ID, points: harness.points }, row.id);
-    expect(harness.apply).toHaveBeenCalledTimes(2);
-    expect(harness.apply.mock.calls[1]?.[0]).toContain(":refund");
+    expect(harness.apply).toHaveBeenCalledTimes(3);
+    expect(harness.apply.mock.calls[1]?.[0]).toBe(songRequestChargeOperationId(row.id));
     expect(harness.apply.mock.calls[1]?.[1]).toBe("refund");
-    expect(harness.apply.mock.calls[1]?.[2]).toEqual([
+    expect(harness.apply.mock.calls[1]?.[2]).toEqual([]);
+    expect(harness.apply.mock.calls[2]?.[0]).toBe(songRequestRefundOperationId(row.id));
+    expect(harness.apply.mock.calls[2]?.[2]).toEqual([
       { accountId: "user-cedar_viewer", login: "cedar_viewer", delta: 13 },
       { accountId: "__house", delta: -13 },
     ]);
@@ -259,8 +270,60 @@ describe("song request payments", () => {
 
     expect(await harness.database.prepare("SELECT state, refund_due FROM song_requests WHERE id = ?")
       .bind(row.id).first()).toEqual({ state: "failed", refund_due: 0 });
-    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund")).toHaveLength(1);
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(1);
     expect(harness.operations.has(songRequestRefundOperationId(row.id))).toBe(true);
+  });
+
+  it.each([
+    ["de", "Der Song könnte in Spotify eingereiht worden sein; bitte prüfe Spotify vor einem erneuten Versuch."],
+    ["en", "The song may have been queued in Spotify; check Spotify before retrying."],
+  ] as const)("keeps a disabled pending submission uncertain in %s", async (language, expectedMessage) => {
+    const harness = await createHarness({ paymentMode: "bot_points", mode: "automatic" }, { language });
+    await processSongRequestsEvent(harness.createEvent(`disable_pending_${language}`), harness.context);
+    const row = await harness.database.prepare("SELECT id FROM song_requests WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ id: string }>();
+    if (row === null) throw new Error("The paid request was not recorded.");
+
+    let releasePost!: (response: Response) => void;
+    let signalPostStarted!: () => void;
+    const postStarted = new Promise<void>((resolve) => { signalPostStarted = resolve; });
+    const postResponse = new Promise<Response>((resolve) => { releasePost = resolve; });
+    harness.fetcher.mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("me/player/queue")) {
+        signalPostStarted();
+        return await postResponse;
+      }
+      return new Response(JSON.stringify({ tracks: { items: [{ ...track }] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const submit = handleSubmitAlarm(harness.alarmContext, `submit:${row.id}`);
+    await postStarted;
+    await harness.database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(CHANNEL_ID).run();
+
+    await handleSongRequestsActivation(harness.alarmContext, false);
+    expect(await harness.database.prepare("SELECT state, failure_reason, refund_due FROM song_requests WHERE id = ?")
+      .bind(row.id).first()).toEqual({ state: "failed", failure_reason: "submit_outcome_uncertain", refund_due: 0 });
+    expect(harness.balanceOf(`user-disable_pending_${language}`)).toBe(1_000);
+
+    releasePost(new Response(null, { status: 204 }));
+    await submit;
+    expect(harness.sendChat).toHaveBeenCalledWith(
+      expectedMessage,
+      expect.any(String),
+      undefined,
+      undefined,
+      undefined,
+      { automated: true },
+    );
+    expect(harness.sendChat.mock.calls[0]?.[0]).not.toContain("not queued in Spotify");
+    expect(await harness.database.prepare("SELECT state, failure_reason, refund_due FROM song_requests WHERE id = ?")
+      .bind(row.id).first()).toEqual({ state: "failed", failure_reason: "submit_outcome_uncertain", refund_due: 0 });
+    expect(harness.balanceOf(`user-disable_pending_${language}`)).toBe(1_000);
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(1);
   });
 
   it("charges once when the chat handler overlaps a submit alarm and refunds the ledger amount once", async () => {
@@ -296,8 +359,8 @@ describe("song request payments", () => {
     await refundRequestId({ DB: harness.database as unknown as D1Database, channelId: CHANNEL_ID, points: harness.points }, row.id);
 
     expect(harness.apply.mock.calls.filter((call) => call[1] === "stake")).toHaveLength(1);
-    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund")).toHaveLength(1);
-    expect(harness.apply.mock.calls.find((call) => call[1] === "refund")?.[2]).toEqual([
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(1);
+    expect(harness.apply.mock.calls.find((call) => call[1] === "refund" && call[2].length > 0)?.[2]).toEqual([
       { accountId: "user-single_charge_viewer", login: "single_charge_viewer", delta: 13 },
       { accountId: "__house", delta: -13 },
     ]);
@@ -345,6 +408,70 @@ describe("song request payments", () => {
       .toEqual({ state: "pending_review" });
   });
 
+  it("lets stale reconciliation claim the charge id before a delayed charge can commit", async () => {
+    let releaseCharge!: () => void;
+    let signalChargeStarted!: () => void;
+    const chargeGate = new Promise<void>((resolve) => { releaseCharge = resolve; });
+    const chargeStarted = new Promise<void>((resolve) => { signalChargeStarted = resolve; });
+    const harness = await createHarness({ paymentMode: "bot_points", mode: "moderated" }, {
+      beforeChargeCommit: async () => {
+        signalChargeStarted();
+        await chargeGate;
+      },
+    });
+    const command = processSongRequestsEvent(harness.createEvent("reconcile_wins_viewer"), harness.context);
+    await chargeStarted;
+    const row = await harness.database.prepare("SELECT id FROM song_requests WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ id: string }>();
+    if (row === null) throw new Error("The charging request was not recorded.");
+    await harness.database.prepare("UPDATE song_requests SET charging_since = '2000-01-01T00:00:00.000Z' WHERE id = ?")
+      .bind(row.id).run();
+
+    expect(await reconcileStaleSongRequestCharges(harness.alarmContext)).toBe(1);
+    expect(await harness.database.prepare("SELECT state, refund_due FROM song_requests WHERE id = ?").bind(row.id).first())
+      .toEqual({ state: "failed", refund_due: 0 });
+    expect(harness.operations.get(songRequestChargeOperationId(row.id))).toMatchObject({
+      kind: "refund",
+      result: { requestId: row.id, cancelled: true },
+      movements: "[]",
+    });
+
+    releaseCharge();
+    const result = await command;
+    expect(JSON.stringify(result.actions[0])).toContain("request is not available right now");
+    expect(harness.balanceOf("user-reconcile_wins_viewer")).toBe(1_000);
+    expect(harness.operations.has(songRequestRefundOperationId(row.id))).toBe(false);
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(0);
+  });
+
+  it("ages a charging row from D1 insertion time when the event timestamp is old", async () => {
+    let releaseCharge!: () => void;
+    let signalChargeStarted!: () => void;
+    const chargeGate = new Promise<void>((resolve) => { releaseCharge = resolve; });
+    const chargeStarted = new Promise<void>((resolve) => { signalChargeStarted = resolve; });
+    const harness = await createHarness({ paymentMode: "bot_points", mode: "moderated" }, {
+      beforeChargeCommit: async () => {
+        signalChargeStarted();
+        await chargeGate;
+      },
+    });
+    const command = processSongRequestsEvent(harness.createEvent("old_event_viewer", ["viewer"], "2000-01-01T00:00:00.000Z"), harness.context);
+    await chargeStarted;
+    const row = await harness.database.prepare("SELECT id, state, charging_since FROM song_requests WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ id: string; state: string; charging_since: string }>();
+    if (row === null) throw new Error("The charging request was not recorded.");
+    expect(row.state).toBe("charging");
+    expect(Date.parse(row.charging_since)).toBeGreaterThan(Date.parse("2000-01-01T00:01:00.000Z"));
+    expect(await reconcileStaleSongRequestCharges(harness.alarmContext, Date.now())).toBe(0);
+    expect(await harness.database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(row.id).first())
+      .toEqual({ state: "charging" });
+
+    releaseCharge();
+    await command;
+    expect(await harness.database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(row.id).first())
+      .toEqual({ state: "pending_review" });
+  });
+
   it("reconciles stale charging rows with or without a ledger charge", async () => {
     const harness = await createHarness({ paymentMode: "bot_points", mode: "moderated" });
     const insertCharging = async (requestId: string): Promise<void> => {
@@ -370,7 +497,7 @@ describe("song request payments", () => {
     };
     await insertCharging("stale_charged_request");
     await insertCharging("stale_uncharged_request");
-    await harness.database.prepare("UPDATE song_requests SET updated_at = '2000-01-01T00:00:00.000Z' WHERE channel_id = ?")
+    await harness.database.prepare("UPDATE song_requests SET charging_since = '2000-01-01T00:00:00.000Z' WHERE channel_id = ?")
       .bind(CHANNEL_ID).run();
     await harness.points.apply(songRequestChargeOperationId("stale_charged_request"), "stake", [
       { accountId: "user-stale_charged_request", login: "stale_charged_request", delta: -17 },
@@ -385,11 +512,77 @@ describe("song request payments", () => {
       .toEqual({ state: "failed", refund_due: 0 });
     expect(await harness.database.prepare("SELECT state, refund_due FROM song_requests WHERE id = 'stale_uncharged_request'").first())
       .toEqual({ state: "failed", refund_due: 0 });
-    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund")).toHaveLength(1);
-    expect(harness.apply.mock.calls.find((call) => call[1] === "refund")?.[2]).toEqual([
+    expect(harness.operations.get(songRequestChargeOperationId("stale_uncharged_request"))).toMatchObject({
+      kind: "refund",
+      result: { requestId: "stale_uncharged_request", cancelled: true },
+      movements: "[]",
+    });
+    expect(harness.apply.mock.calls.some((call) =>
+      call[0] === songRequestChargeOperationId("stale_charged_request") && call[1] === "refund" && call[2].length === 0,
+    )).toBe(true);
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(1);
+    expect(harness.apply.mock.calls.find((call) => call[1] === "refund" && call[2].length > 0)?.[2]).toEqual([
       { accountId: "user-stale_charged_request", login: "stale_charged_request", delta: 17 },
       { accountId: "__house", delta: -17 },
     ]);
+  });
+
+  it("does not refund a charged request when stale reconciliation loses its charging-state compare-and-set", async () => {
+    const harness = await createHarness({ paymentMode: "bot_points", mode: "moderated" });
+    const requestId = "reconcile_loses_compare_and_set";
+    await transitionRequest(harness.database as unknown as D1Database, {
+      channelId: CHANNEL_ID,
+      requestId,
+      fromState: null,
+      toState: "charging",
+      now: NOW,
+      newRequest: {
+        source: "points",
+        requestType: "bot_points",
+        track: { id: requestId, uri: `spotify:track:${requestId}`, title: requestId, artists: [], durationMs: 1, explicit: false, coverUrl: null, spotifyUrl: `https://open.spotify.com/track/${requestId}` },
+        operationId: `sr:${requestId}`,
+        streamId: "stream-payment-fixture",
+        roundId: "stream-payment-fixture",
+        chargedAmount: 17,
+        requesterUserId: `user-${requestId}`,
+        requesterLogin: requestId,
+        requesterDisplayName: requestId,
+      },
+    });
+    await harness.database.prepare("UPDATE song_requests SET charging_since = '2000-01-01T00:00:00.000Z' WHERE id = ?")
+      .bind(requestId).run();
+    const chargeId = songRequestChargeOperationId(requestId);
+    await harness.points.apply(chargeId, "stake", [
+      { accountId: `user-${requestId}`, login: requestId, delta: -17 },
+      { accountId: "__house", delta: 17 },
+    ], { requestId, trackId: requestId, amount: 17 }, { requestId });
+
+    const readOperation = (operationId: string) => Promise.resolve(harness.operations.get(operationId) ?? null);
+    let advanced = false;
+    vi.spyOn(harness.points, "getOperation").mockImplementation(async (operationId) => {
+      if (!advanced && operationId === chargeId) {
+        advanced = true;
+        expect(await transitionRequest(harness.database as unknown as D1Database, {
+          channelId: CHANNEL_ID, requestId, fromState: "charging", toState: "approved", chargedAmount: 17, chargedAt: NOW, now: NOW,
+        })).toBe(true);
+        expect(await transitionRequest(harness.database as unknown as D1Database, {
+          channelId: CHANNEL_ID, requestId, fromState: "approved", toState: "submitting", now: NOW,
+        })).toBe(true);
+        expect(await transitionRequest(harness.database as unknown as D1Database, {
+          channelId: CHANNEL_ID, requestId, fromState: "submitting", toState: "submitted", now: NOW,
+        })).toBe(true);
+        expect(await transitionRequest(harness.database as unknown as D1Database, {
+          channelId: CHANNEL_ID, requestId, fromState: "submitted", toState: "observed_playing", now: NOW,
+        })).toBe(true);
+      }
+      return await readOperation(operationId);
+    });
+
+    expect(await reconcileStaleSongRequestCharges(harness.alarmContext)).toBe(0);
+    expect(await harness.database.prepare("SELECT state, refund_due FROM song_requests WHERE id = ?").bind(requestId).first())
+      .toEqual({ state: "observed_playing", refund_due: 0 });
+    expect(harness.balanceOf(`user-${requestId}`)).toBe(983);
+    expect(harness.operations.has(songRequestRefundOperationId(requestId))).toBe(false);
   });
 
   it("reconciles stale charging rows before the Clear list cleanup", async () => {
@@ -414,7 +607,7 @@ describe("song request payments", () => {
         requesterDisplayName: requestId,
       },
     });
-    await harness.database.prepare("UPDATE song_requests SET updated_at = '2000-01-01T00:00:00.000Z' WHERE id = ?")
+    await harness.database.prepare("UPDATE song_requests SET charging_since = '2000-01-01T00:00:00.000Z' WHERE id = ?")
       .bind(requestId).run();
     await harness.points.apply(songRequestChargeOperationId(requestId), "stake", [
       { accountId: `user-${requestId}`, login: requestId, delta: -17 },
@@ -429,8 +622,8 @@ describe("song request payments", () => {
     expect(await response.json()).toEqual({ cleared: true });
     expect(await harness.database.prepare("SELECT state, refund_due FROM song_requests WHERE id = ?").bind(requestId).first())
       .toEqual({ state: "failed", refund_due: 0 });
-    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund")).toHaveLength(1);
-    expect(harness.apply.mock.calls.find((call) => call[1] === "refund")?.[2]).toEqual([
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(1);
+    expect(harness.apply.mock.calls.find((call) => call[1] === "refund" && call[2].length > 0)?.[2]).toEqual([
       { accountId: `user-${requestId}`, login: requestId, delta: 17 },
       { accountId: "__house", delta: -17 },
     ]);
@@ -453,7 +646,7 @@ describe("song request payments", () => {
     const row = await harness.database.prepare("SELECT id FROM song_requests WHERE channel_id = ?")
       .bind(CHANNEL_ID).first<{ id: string }>();
     if (row === null) throw new Error("The charging request was not recorded.");
-    await harness.database.prepare("UPDATE song_requests SET updated_at = '2000-01-01T00:00:00.000Z' WHERE id = ?")
+    await harness.database.prepare("UPDATE song_requests SET charging_since = '2000-01-01T00:00:00.000Z' WHERE id = ?")
       .bind(row.id).run();
     await reconcileStaleSongRequestCharges(harness.alarmContext);
     await cleanupSongRequestRound(harness.database as unknown as D1Database, CHANNEL_ID, "stream-payment-fixture", NOW, "module_disabled");
@@ -502,7 +695,7 @@ describe("song request payments", () => {
       method: "POST",
     }), { DB: harness.database as unknown as D1Database });
     expect(response.status).toBe(200);
-    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund")).toHaveLength(1);
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(1);
     expect(harness.operations.has(songRequestRefundOperationId(row.id))).toBe(true);
     expect(await harness.database.prepare("SELECT state, refund_due FROM song_requests WHERE id = ?")
       .bind(row.id).first()).toEqual({ state: "rejected", refund_due: 0 });
@@ -532,7 +725,7 @@ describe("song request payments", () => {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refund: false }),
     }), { DB: harness.database as unknown as D1Database });
     expect(response.status).toBe(409);
-    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund")).toHaveLength(2);
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(2);
     expect(await harness.database.prepare("SELECT refund_due FROM song_requests WHERE id = ?").bind(row.id).first())
       .toEqual({ refund_due: 1 });
 
@@ -540,7 +733,7 @@ describe("song request payments", () => {
     expect(await harness.database.prepare("SELECT refund_due FROM song_requests WHERE id = ?").bind(row.id).first())
       .toEqual({ refund_due: 0 });
     expect(harness.operations.has(songRequestRefundOperationId(row.id))).toBe(true);
-    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund")).toHaveLength(3);
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(3);
   });
 
   it("rejects a charged pre-submission request and refunds it", async () => {
@@ -590,7 +783,7 @@ describe("song request payments", () => {
     expect(refundResponse.status).toBe(200);
     expect(await refundResponse.json()).toEqual({ state: "removed", refunded: true });
     expect(withRefund.operations.has(songRequestRefundOperationId(second.id))).toBe(true);
-    expect(withRefund.apply).toHaveBeenCalledTimes(2);
+    expect(withRefund.apply).toHaveBeenCalledTimes(3);
   });
 
   it("marks a failed charge as failed and does not schedule Spotify submission", async () => {
