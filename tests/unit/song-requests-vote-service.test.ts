@@ -317,10 +317,10 @@ describe("durable song vote results", () => {
     releasePost();
     await submitting;
 
+    // Deactivation already settled the row as failed; the late Spotify completion must not overwrite that decision.
     expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
-      .toEqual({ state: "outcome_unknown", failure_reason: "submit_state_conflict" });
-    expect(sendChat.mock.calls[0]?.[0]).toContain("result is unclear");
-    expect(sendChat.mock.calls[0]?.[0]).not.toContain("was not queued");
+      .toEqual({ state: "failed", failure_reason: "module_disabled" });
+    expect(sendChat.mock.calls[0]?.[0]).toContain("module_disabled");
   });
 
   it("reports an uncertain outcome when the Spotify slot is revoked after Spotify received the POST", async () => {

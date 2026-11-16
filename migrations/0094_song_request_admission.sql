@@ -18,12 +18,73 @@ CREATE TABLE song_requests_offline_rounds (
   FOREIGN KEY (channel_id) REFERENCES channels(channel_id) ON DELETE CASCADE
 );
 
+DROP TRIGGER panel_rev_song_requests_insert;
+DROP TRIGGER panel_rev_song_requests_update;
+DROP TRIGGER panel_rev_song_requests_delete;
+
+CREATE TABLE song_requests_next (
+  id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('mod_vote', 'channel_points', 'points')),
+  track_id TEXT NOT NULL,
+  track_uri TEXT NOT NULL,
+  title TEXT NOT NULL,
+  artists_json TEXT NOT NULL,
+  duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+  explicit INTEGER NOT NULL CHECK (explicit IN (0, 1)),
+  cover_url TEXT,
+  spotify_url TEXT NOT NULL,
+  requester_user_id TEXT,
+  requester_login TEXT,
+  requester_display_name TEXT,
+  state TEXT NOT NULL CHECK (state IN (
+    'charging', 'pending_review', 'approved', 'submitting', 'submitted', 'observed_playing',
+    'not_observed', 'outcome_unknown', 'rejected', 'removed', 'failed'
+  )),
+  operation_id TEXT NOT NULL UNIQUE,
+  failure_reason TEXT,
+  stream_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  submitted_at TEXT,
+  observed_at TEXT,
+  round_id TEXT,
+  request_type TEXT NOT NULL DEFAULT 'vote'
+    CHECK (request_type IN ('vote', 'bot_points', 'free', 'channel_points')),
+  charged_amount INTEGER NOT NULL DEFAULT 0 CHECK (charged_amount >= 0),
+  charged_at TEXT,
+  refund_due INTEGER NOT NULL DEFAULT 0 CHECK (refund_due IN (0, 1)),
+  FOREIGN KEY (channel_id) REFERENCES channels(channel_id) ON DELETE CASCADE
+);
+
+INSERT INTO song_requests_next (
+  id, channel_id, source, track_id, track_uri, title, artists_json, duration_ms, explicit, cover_url, spotify_url,
+  requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason, stream_id,
+  created_at, updated_at, submitted_at, observed_at, round_id, request_type, charged_amount, charged_at, refund_due
+)
+SELECT
+  id, channel_id, source, track_id, track_uri, title, artists_json, duration_ms, explicit, cover_url, spotify_url,
+  requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason, stream_id,
+  created_at, updated_at, submitted_at, observed_at, round_id, request_type, charged_amount, charged_at, refund_due
+FROM song_requests;
+
+DROP TABLE song_requests;
+ALTER TABLE song_requests_next RENAME TO song_requests;
+
+CREATE INDEX song_requests_channel_state_created_idx
+  ON song_requests(channel_id, state, created_at, id);
+CREATE INDEX song_requests_stream_track_state_idx
+  ON song_requests(channel_id, stream_id, track_id, state, created_at);
 CREATE INDEX song_requests_round_state_idx ON song_requests(channel_id, round_id, state, created_at, id);
 CREATE INDEX song_requests_round_track_idx ON song_requests(channel_id, round_id, track_id, state, submitted_at);
 CREATE INDEX song_requests_round_requester_idx ON song_requests(channel_id, round_id, requester_user_id, state, created_at);
 CREATE INDEX song_requests_refund_due_idx ON song_requests(channel_id, refund_due, state, created_at);
 
-DROP TRIGGER panel_rev_song_requests_update;
+CREATE TRIGGER panel_rev_song_requests_insert AFTER INSERT ON song_requests BEGIN
+  INSERT INTO panel_resource_revisions
+  SELECT NEW.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'song_requests'
+  ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
+END;
 CREATE TRIGGER panel_rev_song_requests_update
 AFTER UPDATE OF id, channel_id, source, track_id, track_uri, title, artists_json, duration_ms, explicit,
   cover_url, spotify_url, requester_user_id, requester_login, requester_display_name, state, operation_id,
@@ -46,6 +107,11 @@ BEGIN
   ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
   INSERT INTO panel_resource_revisions
   SELECT OLD.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'song_requests' AND OLD.channel_id IS NOT NEW.channel_id
+  ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER panel_rev_song_requests_delete AFTER DELETE ON song_requests BEGIN
+  INSERT INTO panel_resource_revisions
+  SELECT OLD.channel_id, resource, 1 FROM panel_resource_dependencies WHERE source_table = 'song_requests'
   ON CONFLICT(channel_id, resource) DO UPDATE SET revision = revision + 1;
 END;
 

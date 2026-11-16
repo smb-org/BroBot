@@ -20,7 +20,9 @@ import {
   transitionRequest,
 } from "./adapters/d1";
 import {
+  songRequestRefundOperationId,
   retrySongRequestRefunds,
+  reconcileStaleSongRequestCharges,
   songRequestQueueOverlayPayload,
   SONG_REQUESTS_CREDENTIAL_SECRET,
   SONG_REQUESTS_HANDLER,
@@ -97,11 +99,19 @@ const retryRouteRefunds = async (context: RouteContext): Promise<void> => {
     channelId: channel(context),
     points: context.get("points")(channel(context)),
   });
-  if (pending > 0) {
+  const module = await context.env.DB.prepare(
+    "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'",
+  ).bind(channel(context)).first<{ enabled: number }>();
+  if (pending > 0 && module?.enabled === 1) {
     await context.get("scheduleModuleAlarm")(
       channel(context), "song_requests", SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + 60_000, null,
     );
   }
+};
+
+const routeRefundExists = async (context: RouteContext, requestId: string): Promise<boolean> => {
+  const operation = await context.get("points")(channel(context)).getOperation(songRequestRefundOperationId(requestId));
+  return operation?.kind === "refund";
 };
 
 export const songRequestsRoutes = new Hono<ModuleRouteEnvironment>();
@@ -336,7 +346,8 @@ songRequestsRoutes.post("/requests/:requestId/remove", async (context) => {
     if (!changed) return context.json({ error: "song_request_state_changed" }, 409);
     await retryRouteRefunds(context);
     await publishQueueState(context);
-    return context.json({ state: "rejected", refunded: row.requestType === "bot_points" && row.chargedAmount > 0 });
+    const refunded = row.requestType === "bot_points" && await routeRefundExists(context, requestId);
+    return context.json({ state: "rejected", refunded });
   }
   if (row.state !== "submitted" && row.state !== "outcome_unknown") return context.json({ error: "song_request_not_removable" }, 409);
   const changed = await transitionRequest(context.env.DB, {
@@ -348,7 +359,8 @@ songRequestsRoutes.post("/requests/:requestId/remove", async (context) => {
   if (!changed) return context.json({ error: "song_request_state_changed" }, 409);
   if (body.refund) await retryRouteRefunds(context);
   await publishQueueState(context);
-  return context.json({ state: "removed", refunded: body.refund && row.requestType === "bot_points" && row.chargedAmount > 0 });
+  const refunded = body.refund && row.requestType === "bot_points" && await routeRefundExists(context, requestId);
+  return context.json({ state: "removed", refunded });
 });
 
 songRequestsRoutes.post("/clear", async (context) => {
@@ -358,13 +370,18 @@ songRequestsRoutes.post("/clear", async (context) => {
   if (current.streamId === null && await closeOfflineSongRequestRound(context.env.DB, channel(context), current.roundId) === null) {
     return context.json({ cleared: false });
   }
+  const reconciledCharges = await reconcileStaleSongRequestCharges({
+    DB: context.env.DB,
+    channelId: channel(context),
+    points: context.get("points")(channel(context)),
+  }, Date.now(), current.roundId);
   const result = await cleanupSongRequestRound(context.env.DB, channel(context), current.roundId, new Date().toISOString(), "list_cleared");
   await retryRouteRefunds(context);
   await context.get("publishModuleOverlayMessage")(
     channel(context), "song_requests", "state_changed", "song_requests.now_playing", { revision: result.revision },
   );
   await publishQueueState(context);
-  return context.json({ cleared: result.changed });
+  return context.json({ cleared: result.changed || reconciledCharges > 0 });
 });
 
 songRequestsRoutes.post("/requests/:requestId/resolve", async (context) => {

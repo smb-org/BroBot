@@ -2,8 +2,9 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
-import { admitSongRequest, cleanupSongRequestRound, markSongRequestCharged, songRequestAdmissionFailure, transitionRequest } from "../../src/modules/song_requests/adapters/d1";
+import { admitSongRequest, cleanupSongRequestRound, pendingSongRequestQueue, songRequestAdmissionFailure, transitionRequest } from "../../src/modules/song_requests/adapters/d1";
 import { songRequestsSettingsSchema, type SongRequestsSettings } from "../../src/modules/song_requests/contracts";
+import { readSongRequestQueueState } from "../../src/modules/song_requests/overlay/queue-state";
 import { processSongRequestsEvent, refundRequestId, songRequestChargeOperationId, songRequestRefundOperationId } from "../../src/modules/song_requests/service";
 import { modulePoints } from "../../src/worker/module-points";
 
@@ -105,6 +106,7 @@ describe("song request admission on D1", () => {
       .bind(JSON.stringify(customSettings), CHANNEL_ID).run();
   };
   const markSubmitted = async (requestId: string, now = NOW): Promise<void> => {
+    await transitionRequest(database, { channelId: CHANNEL_ID, requestId, fromState: "charging", toState: "approved", chargedAmount: 1, chargedAt: now, now });
     await transitionRequest(database, { channelId: CHANNEL_ID, requestId, fromState: "approved", toState: "submitting", now });
     await transitionRequest(database, { channelId: CHANNEL_ID, requestId, fromState: "submitting", toState: "submitted", now });
   };
@@ -114,14 +116,36 @@ describe("song request admission on D1", () => {
     const results = await Promise.all(Array.from({ length: 24 }, (_value, index) =>
       admitSongRequest(database, requestInput(index))));
     const openCount = await database.prepare(
-      "SELECT COUNT(*) AS count FROM song_requests WHERE channel_id = ? AND state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')",
+      "SELECT COUNT(*) AS count FROM song_requests WHERE channel_id = ? AND state IN ('charging', 'pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')",
     ).bind(CHANNEL_ID).first<{ count: number }>();
     expect(results.filter((result) => result.accepted)).toHaveLength(10);
     expect(openCount?.count).toBe(10);
   });
 
+  it("holds paid admissions in charging while hiding them from queues and counting them toward caps", async () => {
+    const customSettings = songRequestsSettingsSchema.parse({ rules: {
+      duplicateEnabled: false,
+      personCooldownEnabled: false,
+      personOpenLimitEnabled: false,
+      personRoundLimitEnabled: false,
+      artistOpenLimitEnabled: false,
+      channelOpenLimit: 1,
+    } });
+    await configure(customSettings);
+    const first = requestInput(89, customSettings);
+    expect((await admitSongRequest(database, first)).accepted).toBe(true);
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(first.requestId).first())
+      .toEqual({ state: "charging" });
+    expect((await pendingSongRequestQueue(database, CHANNEL_ID, STREAM_ID)).requests).toHaveLength(0);
+    expect(await readSongRequestQueueState(database, CHANNEL_ID)).toMatchObject({ rows: [] });
+
+    const second = requestInput(88, customSettings);
+    expect((await admitSongRequest(database, second)).accepted).toBe(false);
+    expect((await songRequestAdmissionFailure(database, second)).code).toBe("channel_open_limit");
+  });
+
   it("does not insert a duplicate open track", async () => {
-    await database.prepare("DELETE FROM song_requests WHERE channel_id = ?").bind(CHANNEL_ID).run();
+    await configure(settings);
     const first = requestInput(90);
     expect((await admitSongRequest(database, first)).accepted).toBe(true);
     expect((await admitSongRequest(database, { ...requestInput(91), track: first.track })).accepted).toBe(false);
@@ -195,7 +219,6 @@ describe("song request admission on D1", () => {
     await configure(customSettings);
     const played = requestInput(123, customSettings);
     expect((await admitSongRequest(database, played)).accepted).toBe(true);
-    await markSongRequestCharged(database, CHANNEL_ID, played.requestId, NOW);
     await markSubmitted(played.requestId);
     await transitionRequest(database, {
       channelId: CHANNEL_ID, requestId: played.requestId, fromState: "submitted", toState: "observed_playing", now: NOW,
@@ -207,8 +230,7 @@ describe("song request admission on D1", () => {
     const rejected = { ...requestInput(127, customSettings), requesterUserId: "viewer-rejected-before-charge" };
     expect((await admitSongRequest(database, rejected)).accepted).toBe(true);
     await transitionRequest(database, {
-      channelId: CHANNEL_ID, requestId: rejected.requestId, fromState: "approved", toState: "rejected",
-      refundDue: true, now: NOW,
+      channelId: CHANNEL_ID, requestId: rejected.requestId, fromState: "charging", toState: "failed", now: NOW,
     });
     const retry = { ...requestInput(128, customSettings), requesterUserId: rejected.requesterUserId };
     expect((await admitSongRequest(database, retry)).accepted).toBe(true);

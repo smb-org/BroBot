@@ -15,7 +15,7 @@ import {
   finishVoteWithoutRequest,
   readOfflineSongRequestRound,
   readSongRequest,
-  markSongRequestCharged,
+  markSongRequestRefundDue,
   markSongRequestRefundComplete,
   songRequestRefundDueIds,
   songRequestRefundIsDue,
@@ -41,7 +41,7 @@ export const SONG_REQUESTS_SUBMIT_ALARM_PREFIX = "submit:";
 const POLL_INTERVAL_MS = 12_000;
 const BASE_BACKOFF_MS = 24_000;
 export const MAX_BACKOFF_MS = 5 * 60_000;
-const SUBMITTING_MAX_AGE_MS = 60_000;
+const IN_FLIGHT_MAX_AGE_MS = 60_000;
 const OFFLINE_POLL_INTERVAL_MS = 60_000;
 
 interface SpotifyCredentials { accessToken: string; refreshToken: string; expiresAt: number }
@@ -322,15 +322,6 @@ const transitionAfterSpotifyPost = async (
       failureReason: "submit_state_conflict",
       now: new Date().toISOString(),
     });
-  } else if (current?.state === "failed") {
-    await transitionRequest(context.DB, {
-      channelId: context.channelId,
-      requestId,
-      fromState: "failed",
-      toState: "outcome_unknown",
-      failureReason: "submit_state_conflict",
-      now: new Date().toISOString(),
-    });
   }
 };
 
@@ -351,14 +342,6 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
     await transitionRequest(context.DB, {
       channelId: context.channelId, requestId, fromState: "approved", toState: "rejected",
       failureReason: "stream_offline", refundDue: true, now,
-    });
-    return;
-  }
-  if (!await chargeSongRequest(context.DB, context.points, context.channelId, row)) {
-    await markSongRequestRefundComplete(context.DB, context.channelId, requestId);
-    await transitionRequest(context.DB, {
-      channelId: context.channelId, requestId, fromState: "approved", toState: "failed",
-      failureReason: "charge_failed", chargedAmount: 0, now: new Date().toISOString(),
     });
     return;
   }
@@ -435,20 +418,22 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
 export const songRequestChargeOperationId = (requestId: string): string => `sr:${requestId}:charge`;
 export const songRequestRefundOperationId = (requestId: string): string => `sr:${requestId}:refund`;
 
+const pointOperationAmount = (result: unknown): number | null => {
+  if (typeof result !== "object" || result === null || Array.isArray(result)) return null;
+  const amount: unknown = Reflect.get(result, "amount");
+  return typeof amount === "number" && Number.isSafeInteger(amount) && amount > 0 ? amount : null;
+};
+
 const chargeSongRequest = async (
-  db: D1Database,
   points: ModulePointsAccess,
-  channelId: string,
   row: NonNullable<Awaited<ReturnType<typeof readSongRequest>>>,
-): Promise<boolean> => {
-  if (row.requestType !== "bot_points" || row.chargedAmount < 1 || row.requesterUserId === null) return true;
+): Promise<number | null> => {
+  if (row.requestType !== "bot_points" || row.chargedAmount < 1 || row.requesterUserId === null) return null;
   const operationId = songRequestChargeOperationId(row.requestId);
-  if (await points.getOperation(operationId) !== null) {
-    await markSongRequestCharged(db, channelId, row.requestId, new Date().toISOString());
-    return true;
-  }
+  const existing = await points.getOperation(operationId);
+  if (existing !== null) return existing.kind === "stake" ? pointOperationAmount(existing.result) : null;
   try {
-    await points.apply(operationId, "stake", [{
+    const applied = await points.apply(operationId, "stake", [{
       accountId: row.requesterUserId,
       login: row.requesterLogin ?? row.requesterUserId,
       delta: -row.chargedAmount,
@@ -456,12 +441,10 @@ const chargeSongRequest = async (
       accountId: "__house",
       delta: row.chargedAmount,
     }], { requestId: row.requestId, trackId: row.id, amount: row.chargedAmount }, { requestId: row.requestId });
-    await markSongRequestCharged(db, channelId, row.requestId, new Date().toISOString());
-    return true;
+    return pointOperationAmount(applied.result);
   } catch {
-    if (await points.getOperation(operationId) === null) return false;
-    await markSongRequestCharged(db, channelId, row.requestId, new Date().toISOString());
-    return true;
+    const operation = await points.getOperation(operationId);
+    return operation?.kind === "stake" ? pointOperationAmount(operation.result) : null;
   }
 };
 
@@ -471,25 +454,38 @@ const refundSongRequest = async (
   channelId: string,
   row: NonNullable<Awaited<ReturnType<typeof readSongRequest>>>,
 ): Promise<boolean> => {
-  if (row.requestType !== "bot_points" || row.chargedAmount < 1 || row.requesterUserId === null) {
+  if (row.requestType !== "bot_points") {
     await markSongRequestRefundComplete(db, channelId, row.requestId);
     return true;
   }
-  if (await points.getOperation(songRequestChargeOperationId(row.requestId)) === null) return false;
   const refundId = songRequestRefundOperationId(row.requestId);
-  if (await points.getOperation(refundId) === null) {
-    try {
-      await points.apply(refundId, "refund", [{
-        accountId: row.requesterUserId,
-        login: row.requesterLogin ?? row.requesterUserId,
-        delta: row.chargedAmount,
-      }, {
-        accountId: "__house",
-        delta: -row.chargedAmount,
-      }], { requestId: row.requestId, amount: row.chargedAmount }, { requestId: row.requestId });
-    } catch (error) {
-      if (await points.getOperation(refundId) === null) throw error;
-    }
+  const existingRefund = await points.getOperation(refundId);
+  if (existingRefund !== null) {
+    if (existingRefund.kind !== "refund") throw new Error("song_request_refund_operation_conflict");
+    await markSongRequestRefundComplete(db, channelId, row.requestId);
+    return true;
+  }
+  const charge = await points.getOperation(songRequestChargeOperationId(row.requestId));
+  if (charge === null || charge.kind !== "stake") {
+    await markSongRequestRefundComplete(db, channelId, row.requestId);
+    return true;
+  }
+  const chargedAmount = pointOperationAmount(charge.result);
+  if (chargedAmount === null) throw new Error("song_request_charge_amount_missing");
+  if (row.requesterUserId === null) throw new Error("song_request_refund_account_missing");
+  try {
+    await points.apply(refundId, "refund", [{
+      accountId: row.requesterUserId,
+      login: row.requesterLogin ?? row.requesterUserId,
+      delta: chargedAmount,
+    }, {
+      accountId: "__house",
+      delta: -chargedAmount,
+    }], { requestId: row.requestId, amount: chargedAmount }, { requestId: row.requestId });
+  } catch (error) {
+    const completed = await points.getOperation(refundId);
+    if (completed === null) throw error;
+    if (completed.kind !== "refund") throw new Error("song_request_refund_operation_conflict", { cause: error });
   }
   await markSongRequestRefundComplete(db, channelId, row.requestId);
   return true;
@@ -533,7 +529,7 @@ const failureMessage = (reason: string | null): { de: string; en: string } => {
 
 const announceSubmitResult = async (context: ModuleAlarmContext, requestId: string): Promise<void> => {
   const row = await readSongRequest(context.DB, context.channelId, requestId);
-  if (row === null || row.state === "approved" || row.state === "submitting") return;
+  if (row === null || row.state === "charging" || row.state === "approved" || row.state === "submitting") return;
   const language = await context.channelLanguage();
   const message = row.state === "submitted"
     ? language === "de"
@@ -557,6 +553,7 @@ export const handleSubmitAlarm = async (context: ModuleAlarmContext, alarmKey: s
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(requestId)) return;
   const request = await readSongRequest(context.DB, context.channelId, requestId);
   if (request === null) return;
+  if (request.state === "charging") return;
   if (request.state === "approved") await submitRequest(context, requestId);
   const current = await readSongRequest(context.DB, context.channelId, requestId);
   if (current?.state === "failed" || current?.state === "rejected") await refundRequestId(context, requestId);
@@ -618,8 +615,59 @@ const notifyNowPlaying = async (context: Pick<ModuleAlarmContext, "publishModule
   await context.publishModuleOverlayMessage("state_changed", "song_requests.now_playing", { revision });
 };
 
+export const reconcileStaleSongRequestCharges = async (
+  context: Pick<ModuleAlarmContext, "DB" | "channelId" | "points">,
+  now = Date.now(),
+  roundId?: string,
+): Promise<number> => {
+  const cutoff = new Date(now - IN_FLIGHT_MAX_AGE_MS).toISOString();
+  const roundFilter = roundId === undefined ? "" : " AND round_id = ?";
+  const statement = context.DB.prepare(
+    `SELECT id FROM song_requests WHERE channel_id = ? AND state = 'charging' AND updated_at < ?${roundFilter}
+      ORDER BY updated_at, id`,
+  );
+  const rows = await (roundId === undefined ? statement.bind(context.channelId, cutoff) : statement.bind(context.channelId, cutoff, roundId))
+    .all<{ id: string }>();
+  let reconciled = 0;
+  for (const row of rows.results) {
+    let charge: Awaited<ReturnType<ModulePointsAccess["getOperation"]>>;
+    try { charge = await context.points.getOperation(songRequestChargeOperationId(row.id)); }
+    catch { continue; }
+    const chargedAmount = charge?.kind === "stake" ? pointOperationAmount(charge.result) : null;
+    const timestamp = new Date(now).toISOString();
+    const changed = await transitionRequest(context.DB, {
+      channelId: context.channelId,
+      requestId: row.id,
+      fromState: "charging",
+      toState: "failed",
+      failureReason: "charge_interrupted",
+      refundDue: true,
+      chargedAmount: chargedAmount ?? 0,
+      ...(chargedAmount === null ? {} : { chargedAt: timestamp }),
+      now: timestamp,
+      expectedUpdatedBefore: cutoff,
+    });
+    if (changed) reconciled += 1;
+  }
+  return reconciled;
+};
+
+const hasFreshChargingSongRequests = async (db: D1Database, channelId: string, now = Date.now()): Promise<boolean> => {
+  const cutoff = new Date(now - IN_FLIGHT_MAX_AGE_MS).toISOString();
+  const row = await db.prepare(
+    "SELECT COUNT(*) AS count FROM song_requests WHERE channel_id = ? AND state = 'charging' AND updated_at >= ?",
+  ).bind(channelId, cutoff).first<{ count: number }>();
+  return (row?.count ?? 0) > 0;
+};
+
+const scheduleFreshChargingReconciliation = async (context: ModuleAlarmContext, now = Date.now()): Promise<boolean> => {
+  if (!await hasFreshChargingSongRequests(context.DB, context.channelId, now)) return false;
+  await context.schedule(SONG_REQUESTS_ALARM, now + IN_FLIGHT_MAX_AGE_MS, undefined, null);
+  return true;
+};
+
 const ageSubmittingRequests = async (context: ModuleAlarmContext, now: number): Promise<void> => {
-  const cutoff = new Date(now - SUBMITTING_MAX_AGE_MS).toISOString();
+  const cutoff = new Date(now - IN_FLIGHT_MAX_AGE_MS).toISOString();
   const rows = await context.DB.prepare(
     "SELECT id FROM song_requests WHERE channel_id = ? AND state = 'submitting' AND updated_at < ? ORDER BY updated_at, id",
   ).bind(context.channelId, cutoff).all<{ id: string }>();
@@ -691,20 +739,20 @@ export const pollSongRequestsPlayback = async (
   _ownerRevision?: number,
   invocation?: unknown,
 ): Promise<void> => {
-  const pendingRefunds = await retrySongRequestRefunds(context);
-  if (typeof invocation === "object" && invocation !== null && (invocation as Record<string, unknown>).kind === "disconnect") {
-    if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
-    else await context.clear(SONG_REQUESTS_ALARM);
-    await notifyQueueOverlay(context);
-    return;
-  }
   const now = Date.now();
+  await reconcileStaleSongRequestCharges(context, now);
   await ageSubmittingRequests(context, now);
   const module = await context.DB.prepare("SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
     .bind(context.channelId).first<{ enabled: number; settings: string }>();
+  const pendingRefunds = await retrySongRequestRefunds(context);
+  if (typeof invocation === "object" && invocation !== null && (invocation as Record<string, unknown>).kind === "disconnect") {
+    if (module?.enabled === 1 && pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
+    else if (!await scheduleFreshChargingReconciliation(context, now)) await context.clear(SONG_REQUESTS_ALARM);
+    await notifyQueueOverlay(context);
+    return;
+  }
   if (module?.enabled !== 1) {
-    if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
-    else await context.clear(SONG_REQUESTS_ALARM);
+    if (!await scheduleFreshChargingReconciliation(context, now)) await context.clear(SONG_REQUESTS_ALARM);
     return;
   }
   let settings: SongRequestsSettings;
@@ -724,7 +772,7 @@ export const pollSongRequestsPlayback = async (
     backoffBase = OFFLINE_POLL_INTERVAL_MS;
   } else {
     if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
-    else await context.clear(SONG_REQUESTS_ALARM);
+    else if (!await scheduleFreshChargingReconciliation(context, now)) await context.clear(SONG_REQUESTS_ALARM);
     return;
   }
   if (roundId === null) {
@@ -798,6 +846,7 @@ export const pollSongRequestsPlayback = async (
 
 export const handleSongRequestsActivation = async (context: ModuleAlarmContext, enabled: boolean): Promise<void> => {
   if (!enabled) {
+    await reconcileStaleSongRequestCharges(context);
     const rows = await context.DB.prepare(
       `SELECT id, state FROM song_requests WHERE channel_id = ?
         AND state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown') ORDER BY created_at, id`,
@@ -828,9 +877,8 @@ export const handleSongRequestsActivation = async (context: ModuleAlarmContext, 
       await retrySongRequestRefunds(context, offlineRoundId);
       if (cleanup.changed) await notifyNowPlaying(context, cleanup.revision);
     }
-    const pendingRefunds = await retrySongRequestRefunds(context);
-    if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
-    else await context.clear(SONG_REQUESTS_ALARM);
+    await retrySongRequestRefunds(context);
+    if (!await scheduleFreshChargingReconciliation(context)) await context.clear(SONG_REQUESTS_ALARM);
     await notifyQueueOverlay(context);
     return;
   }
@@ -844,6 +892,7 @@ export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmCont
   let settings: SongRequestsSettings;
   try { settings = songRequestsSettingsSchema.parse(JSON.parse(module.settings) as unknown); }
   catch { settings = songRequestsSettingsSchema.parse({}); }
+  await reconcileStaleSongRequestCharges(context);
   const pendingRefunds = await retrySongRequestRefunds(context);
   const stream = await context.DB.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
     .bind(context.channelId).first<{ state: string; stream_id: string | null }>();
@@ -857,7 +906,7 @@ export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmCont
       }
       if (await retrySongRequestRefunds(context) > 0) {
         await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
-      } else await context.clear(SONG_REQUESTS_ALARM);
+      } else if (!await scheduleFreshChargingReconciliation(context)) await context.clear(SONG_REQUESTS_ALARM);
       await notifyQueueOverlay(context);
       return;
     }
@@ -868,7 +917,7 @@ export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmCont
       await context.schedule(SONG_REQUESTS_ALARM, Date.now() + OFFLINE_POLL_INTERVAL_MS, undefined, null);
     } else {
       if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
-      else await context.clear(SONG_REQUESTS_ALARM);
+      else if (!await scheduleFreshChargingReconciliation(context)) await context.clear(SONG_REQUESTS_ALARM);
     }
     return;
   }
@@ -876,7 +925,7 @@ export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmCont
     await context.schedule(SONG_REQUESTS_ALARM, Date.now() + POLL_INTERVAL_MS, undefined, context.streamGeneration);
   } else {
     if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
-    else await context.clear(SONG_REQUESTS_ALARM);
+    else if (!await scheduleFreshChargingReconciliation(context)) await context.clear(SONG_REQUESTS_ALARM);
   }
   await notifyQueueOverlay(context);
 };
@@ -1042,16 +1091,64 @@ const processSongRequestCommand = async (
   }
   const row = await readSongRequest(context.DB, event.channelId, requestId);
   if (row === null) return { actions: [chatReply(event, text.spotifyUnavailable)], diagnostics: [] };
-  if (requestType === "bot_points" && !await chargeSongRequest(context.DB, context.points, event.channelId, row)) {
-    await markSongRequestRefundComplete(context.DB, event.channelId, requestId);
-    await transitionRequest(context.DB, {
-      channelId: event.channelId, requestId, fromState: row.state, toState: "failed",
-      failureReason: "charge_failed", chargedAmount: 0, now: new Date().toISOString(),
-    });
-    return { actions: [chatReply(event, text.insufficientPoints), await queueOverlayChange({ DB: context.DB, channelId: event.channelId })], diagnostics: [] };
-  }
   let current = await readSongRequest(context.DB, event.channelId, requestId);
   if (current === null) return { actions: [chatReply(event, text.spotifyUnavailable)], diagnostics: [] };
+  if (requestType === "bot_points") {
+    const chargedAmount = await chargeSongRequest(context.points, current);
+    if (chargedAmount === null) {
+      const failed = await transitionRequest(context.DB, {
+        channelId: event.channelId, requestId, fromState: "charging", toState: "failed",
+        failureReason: "charge_failed", chargedAmount: 0, now: new Date().toISOString(),
+      });
+      if (!failed) {
+        current = await readSongRequest(context.DB, event.channelId, requestId);
+        if (current !== null && !isOpenSongRequestState(current.state)) {
+          return {
+            actions: [chatReply(event, text.rejected(text.reasons.request_unavailable)), await queueOverlayChange({ DB: context.DB, channelId: event.channelId })],
+            diagnostics: [],
+          };
+        }
+      }
+      return { actions: [chatReply(event, text.insufficientPoints), await queueOverlayChange({ DB: context.DB, channelId: event.channelId })], diagnostics: [] };
+    }
+    const toState = scope.settings.mode === "moderated" ? "pending_review" : "approved";
+    const now = new Date().toISOString();
+    const visible = await transitionRequest(context.DB, {
+      channelId: event.channelId,
+      requestId,
+      fromState: "charging",
+      toState,
+      chargedAmount,
+      chargedAt: now,
+      activeRoundId: scope.roundId,
+      now,
+    });
+    if (!visible) {
+      current = await readSongRequest(context.DB, event.channelId, requestId);
+      if (current?.state === "charging") {
+        await transitionRequest(context.DB, {
+          channelId: event.channelId,
+          requestId,
+          fromState: "charging",
+          toState: "failed",
+          failureReason: "request_round_ended",
+          refundDue: true,
+          chargedAmount,
+          chargedAt: now,
+          now,
+        });
+      } else if (current !== null) {
+        await markSongRequestRefundDue(context.DB, event.channelId, requestId);
+      }
+      await refundRequestId({ DB: context.DB, channelId: event.channelId, points: context.points }, requestId);
+      return {
+        actions: [chatReply(event, text.rejected(text.reasons.request_unavailable)), await queueOverlayChange({ DB: context.DB, channelId: event.channelId })],
+        diagnostics: [],
+      };
+    }
+    current = await readSongRequest(context.DB, event.channelId, requestId);
+    if (current === null) return { actions: [chatReply(event, text.spotifyUnavailable)], diagnostics: [] };
+  }
   if ((current.state === "pending_review" || current.state === "approved") &&
       !await requestRoundIsCurrent(context.DB, event.channelId, current)) {
     await transitionRequest(context.DB, {
@@ -1093,23 +1190,26 @@ export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSe
   if (event.subscriptionType === "stream.online") {
     const offlineRoundId = await closeOfflineSongRequestRound(context.DB, event.channelId);
     if (offlineRoundId !== null) {
+      await reconcileStaleSongRequestCharges({ DB: context.DB, channelId: event.channelId, points: context.points }, Date.parse(event.receivedAt), offlineRoundId);
       const cleanup = await cleanupSongRequestRound(context.DB, event.channelId, offlineRoundId, event.receivedAt, "offline_round_ended");
       if (cleanup.changed) actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: cleanup.revision } });
     }
-    const pendingRefunds = await retrySongRequestRefunds({ DB: context.DB, channelId: event.channelId, points: context.points });
+    await retrySongRequestRefunds({ DB: context.DB, channelId: event.channelId, points: context.points });
     if (enabled?.enabled === 1) {
       await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + POLL_INTERVAL_MS);
-    } else if (pendingRefunds > 0) {
-      await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
-    }
+    } else if (await hasFreshChargingSongRequests(context.DB, event.channelId)) {
+      await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + IN_FLIGHT_MAX_AGE_MS, undefined, null);
+    } else await context.clearAlarm(SONG_REQUESTS_ALARM);
     actions.push(await queueOverlayChange({ DB: context.DB, channelId: event.channelId }));
   } else if (event.subscriptionType === "stream.offline") {
     const streamId = context.streamSession?.streamId ?? null;
     if (streamId !== null) {
+      await reconcileStaleSongRequestCharges({ DB: context.DB, channelId: event.channelId, points: context.points }, Date.parse(event.receivedAt), streamId);
       const cleanup = await cleanupSongRequestRound(context.DB, event.channelId, streamId, event.receivedAt, "stream_ended");
       await retrySongRequestRefunds({ DB: context.DB, channelId: event.channelId, points: context.points }, streamId);
       if (cleanup.changed) actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: cleanup.revision } });
     } else {
+      await reconcileStaleSongRequestCharges({ DB: context.DB, channelId: event.channelId, points: context.points }, Date.parse(event.receivedAt));
       const cleared = await clearSongRequestsForStreamEnd(context.DB, event.channelId, streamId, event.receivedAt);
       await retrySongRequestRefunds({ DB: context.DB, channelId: event.channelId, points: context.points });
       if (cleared.changed) actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: cleared.revision } });
@@ -1117,11 +1217,15 @@ export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSe
     if (enabled?.enabled === 1 && settings.alsoOffline) {
       await ensureOfflineSongRequestRound(context.DB, event.channelId, event.receivedAt);
       await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + OFFLINE_POLL_INTERVAL_MS, undefined, null);
-    } else {
+    } else if (enabled?.enabled === 1) {
       if ((await songRequestRefundDueIds(context.DB, event.channelId)).length > 0) {
         await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
+      } else if (await hasFreshChargingSongRequests(context.DB, event.channelId)) {
+        await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + IN_FLIGHT_MAX_AGE_MS, undefined, null);
       } else await context.clearAlarm(SONG_REQUESTS_ALARM);
-    }
+    } else if (await hasFreshChargingSongRequests(context.DB, event.channelId)) {
+      await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + IN_FLIGHT_MAX_AGE_MS, undefined, null);
+    } else await context.clearAlarm(SONG_REQUESTS_ALARM);
     if (streamId !== null) {
       const snapshot = await context.DB.prepare("SELECT revision FROM song_requests_now_playing WHERE channel_id = ?")
         .bind(event.channelId).first<{ revision: number }>();

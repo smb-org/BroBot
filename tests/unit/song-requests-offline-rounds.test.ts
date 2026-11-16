@@ -73,7 +73,7 @@ const createHarness = async (channelId: string) => {
         });
       }
     }
-    operations.set(songRequestChargeOperationId(requestId), { kind: "stake", result: { requestId } });
+    operations.set(songRequestChargeOperationId(requestId), { kind: "stake", result: { requestId, amount: 11 } });
   };
   const alarmContext = {
     DB: database as unknown as D1Database,

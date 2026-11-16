@@ -13,7 +13,7 @@ export interface SongRequestTrack {
   spotifyUrl: string;
 }
 
-export type SongRequestState = "pending_review" | "approved" | "submitting" | "submitted" | "observed_playing" |
+export type SongRequestState = "charging" | "pending_review" | "approved" | "submitting" | "submitted" | "observed_playing" |
   "not_observed" | "outcome_unknown" | "rejected" | "removed" | "failed";
 type SongRequestType = "vote" | "bot_points" | "free" | "channel_points";
 
@@ -92,7 +92,8 @@ const rowToRequest = (row: SongRequestSqlRow): SongRequestRow => {
 };
 
 const allowedTransitions: Readonly<Record<"new" | SongRequestState, readonly SongRequestState[]>> = {
-  new: ["pending_review", "approved", "rejected"],
+  new: ["charging", "pending_review", "approved", "rejected"],
+  charging: ["pending_review", "approved", "failed"],
   pending_review: ["approved", "rejected", "failed"],
   approved: ["submitting", "rejected", "failed"],
   submitting: ["submitted", "outcome_unknown", "failed", "rejected"],
@@ -102,7 +103,7 @@ const allowedTransitions: Readonly<Record<"new" | SongRequestState, readonly Son
   outcome_unknown: ["submitted", "failed", "removed"],
   rejected: [],
   removed: [],
-  failed: ["outcome_unknown"],
+  failed: [],
 };
 
 interface NewSongRequest {
@@ -130,6 +131,7 @@ export interface RequestTransition {
   activeStreamId?: string;
   activeRoundId?: string;
   chargedAmount?: number;
+  chargedAt?: string;
   expectedUpdatedBefore?: string;
   onlyIfOpenBallotId?: string;
   newRequest?: NewSongRequest;
@@ -185,7 +187,7 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
   } else {
     const conditions: string[] = ["channel_id = ?", "id = ?", "state = ?"];
     const bindings: (string | number | null)[] = [input.toState, reason, input.now, input.toState, input.now, input.toState, input.now,
-      input.chargedAmount ?? null,
+      input.chargedAmount ?? null, input.chargedAt ?? null,
       input.channelId, input.requestId, input.fromState];
     if (input.streamId !== undefined) {
       conditions.push("stream_id IS ?");
@@ -239,11 +241,12 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
          submitted_at = CASE WHEN ? = 'submitted' THEN ? ELSE submitted_at END,
          observed_at = CASE WHEN ? = 'observed_playing' THEN ? ELSE observed_at END,
          charged_amount = COALESCE(?, charged_amount),
-         refund_due = CASE WHEN ? = 1 AND request_type = 'bot_points' AND charged_amount > 0 THEN 1
+         charged_at = COALESCE(?, charged_at),
+         refund_due = CASE WHEN ? = 1 AND request_type = 'bot_points' THEN 1
            WHEN ? = 0 THEN 0 ELSE refund_due END
         WHERE ${conditions.join(" AND ")}`,
-    ).bind(...bindings.slice(0, 8), input.refundDue === true ? 1 : input.refundDue === false ? 0 : null,
-      input.refundDue === true ? 1 : input.refundDue === false ? 0 : null, ...bindings.slice(8));
+    ).bind(...bindings.slice(0, 9), input.refundDue === true ? 1 : input.refundDue === false ? 0 : null,
+      input.refundDue === true ? 1 : input.refundDue === false ? 0 : null, ...bindings.slice(9));
   }
   const results = await db.batch([transition, ...(input.companionStatements ?? [])]);
   // D1 counts rows written by the panel revision triggers too, so test for "at least one".
@@ -267,7 +270,7 @@ export interface SongRequestAdmissionInput {
   now: string;
 }
 
-const OPEN_REQUEST_SQL = "state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')";
+const OPEN_REQUEST_SQL = "state IN ('charging', 'pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')";
 const OPEN_OR_PLAYING_REQUEST_SQL = `(${OPEN_REQUEST_SQL} OR (state = 'removed' AND submitted_at IS NOT NULL))`;
 
 /** Inserts only when all configured limits and the current stream/offline round still match. */
@@ -367,7 +370,8 @@ export const admitSongRequest = async (
   ).bind(
     input.requestId, input.channelId, input.track.id, input.track.uri, input.track.title, artistsJson,
     input.track.durationMs, Number(input.track.explicit), input.track.coverUrl, input.track.spotifyUrl,
-    input.requesterUserId, input.requesterLogin, input.requesterDisplayName, input.initialState, input.operationId,
+    input.requesterUserId, input.requesterLogin, input.requesterDisplayName,
+    input.requestType === "bot_points" ? "charging" : input.initialState, input.operationId,
     input.streamId, input.roundId, input.requestType,
     input.requestType === "bot_points" ? input.settings.botPointsCost : 0, input.now, input.now,
     input.channelId, input.settingsJson, input.channelId, input.requestType, input.channelId,
@@ -532,18 +536,21 @@ export const readSongRequest = async (db: D1Database, channelId: string, request
   return row === null ? null : rowToRequest(row);
 };
 
-export const markSongRequestCharged = async (db: D1Database, channelId: string, requestId: string, now: string): Promise<void> => {
-  await db.prepare("UPDATE song_requests SET charged_at = COALESCE(charged_at, ?) WHERE channel_id = ? AND id = ?")
-    .bind(now, channelId, requestId).run();
-};
-
 export const songRequestRefundIsDue = async (db: D1Database, channelId: string, requestId: string): Promise<boolean> =>
   (await db.prepare("SELECT refund_due FROM song_requests WHERE channel_id = ? AND id = ?")
     .bind(channelId, requestId).first<{ refund_due: number }>())?.refund_due === 1;
 
 export const markSongRequestRefundComplete = async (db: D1Database, channelId: string, requestId: string): Promise<void> => {
-  await db.prepare("UPDATE song_requests SET refund_due = 0 WHERE channel_id = ? AND id = ? AND refund_due = 1")
+  await db.prepare("UPDATE song_requests SET refund_due = 0 WHERE channel_id = ? AND id = ? AND refund_due = 1 AND state != 'charging'")
     .bind(channelId, requestId).run();
+};
+
+export const markSongRequestRefundDue = async (db: D1Database, channelId: string, requestId: string): Promise<void> => {
+  await db.prepare(
+    `UPDATE song_requests SET refund_due = 1
+      WHERE channel_id = ? AND id = ? AND request_type = 'bot_points' AND refund_due = 0
+        AND state IN ('observed_playing', 'not_observed', 'rejected', 'removed', 'failed')`,
+  ).bind(channelId, requestId).run();
 };
 
 export const songRequestRefundDueIds = async (
@@ -568,7 +575,7 @@ export const recentSongRequests = async (db: D1Database, channelId: string, roun
             requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason,
             stream_id, round_id, request_type, charged_amount, created_at, updated_at
        FROM song_requests
-      WHERE channel_id = ? AND round_id IS ?
+      WHERE channel_id = ? AND round_id IS ? AND state != 'charging'
       ORDER BY created_at DESC, id DESC LIMIT 50`,
   ).bind(channelId, roundId).all<SongRequestSqlRow>();
   return rows.results.map(rowToRequest);
