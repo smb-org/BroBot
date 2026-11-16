@@ -151,6 +151,101 @@ describe("song request admission on D1", () => {
     expect((await admitSongRequest(database, { ...requestInput(91), track: first.track })).accepted).toBe(false);
   });
 
+  it("admits an older channel-points request after a newer request has already passed admission", async () => {
+    const customSettings = songRequestsSettingsSchema.parse({ rules: {
+      duplicateEnabled: true,
+      songCooldownEnabled: true,
+      songCooldownMinutes: 60,
+      personCooldownEnabled: true,
+      personCooldownMinutes: 5,
+      personOpenLimitEnabled: false,
+      personRoundLimitEnabled: true,
+      personRoundLimit: 1,
+      channelOpenLimitEnabled: false,
+      artistOpenLimitEnabled: false,
+    } });
+    await configure(customSettings);
+    const older = {
+      ...requestInput(180, customSettings),
+      requestType: "channel_points" as const,
+      channelPointsRewardId: "reward-admission-order",
+      rewardMaxPerUserPerStream: 1,
+      rewardGlobalCooldownSeconds: 30,
+      now: "2026-11-15T19:59:00.000Z",
+    };
+    const newer = {
+      ...requestInput(181, customSettings),
+      requestType: "channel_points" as const,
+      channelPointsRewardId: older.channelPointsRewardId,
+      rewardMaxPerUserPerStream: older.rewardMaxPerUserPerStream,
+      rewardGlobalCooldownSeconds: older.rewardGlobalCooldownSeconds,
+      requesterUserId: older.requesterUserId,
+      requesterLogin: older.requesterLogin,
+      requesterDisplayName: older.requesterDisplayName,
+      track: older.track,
+      now: "2026-11-15T20:00:00.000Z",
+    };
+
+    expect((await admitSongRequest(database, newer)).accepted).toBe(true);
+    expect(await transitionRequest(database, {
+      channelId: CHANNEL_ID, requestId: newer.requestId, fromState: "approved", toState: "submitting", now: newer.now,
+    })).toBe(true);
+    expect(await transitionRequest(database, {
+      channelId: CHANNEL_ID, requestId: newer.requestId, fromState: "submitting", toState: "submitted", now: newer.now,
+    })).toBe(true);
+    expect((await admitSongRequest(database, older)).accepted).toBe(true);
+  });
+
+  it("rejects an older retried request when a newer one already took the last open slot", async () => {
+    const customSettings = songRequestsSettingsSchema.parse({ rules: {
+      duplicateEnabled: false,
+      songCooldownEnabled: false,
+      personCooldownEnabled: false,
+      personOpenLimitEnabled: false,
+      personRoundLimitEnabled: false,
+      channelOpenLimitEnabled: true,
+      channelOpenLimit: 1,
+      artistOpenLimitEnabled: false,
+    } });
+    await configure(customSettings);
+    const older = { ...requestInput(184, customSettings), now: "2026-11-15T19:59:00.000Z" };
+    const newer = { ...requestInput(185, customSettings), now: "2026-11-15T20:00:00.000Z" };
+
+    expect((await admitSongRequest(database, newer)).accepted).toBe(true);
+    expect((await admitSongRequest(database, older)).accepted).toBe(false);
+    expect((await songRequestAdmissionFailure(database, older)).code).toBe("channel_open_limit");
+  });
+
+  it("rejects an in-order channel-points request inside the reward cooldown window", async () => {
+    const customSettings = songRequestsSettingsSchema.parse({ rules: {
+      duplicateEnabled: false,
+      songCooldownEnabled: false,
+      personCooldownEnabled: false,
+      personOpenLimitEnabled: false,
+      personRoundLimitEnabled: false,
+      channelOpenLimitEnabled: false,
+      artistOpenLimitEnabled: false,
+    } });
+    await configure(customSettings);
+    const earlier = {
+      ...requestInput(182, customSettings),
+      requestType: "channel_points" as const,
+      channelPointsRewardId: "reward-in-order-cooldown",
+      rewardGlobalCooldownSeconds: 30,
+      now: "2026-11-15T19:59:00.000Z",
+    };
+    const later = {
+      ...requestInput(183, customSettings),
+      requestType: "channel_points" as const,
+      channelPointsRewardId: earlier.channelPointsRewardId,
+      rewardGlobalCooldownSeconds: earlier.rewardGlobalCooldownSeconds,
+      now: "2026-11-15T19:59:15.000Z",
+    };
+
+    expect((await admitSongRequest(database, earlier)).accepted).toBe(true);
+    expect((await admitSongRequest(database, later)).accepted).toBe(false);
+  });
+
   it.each([
     { name: "explicit permission", settings: { rules: { explicitAllowed: false } }, track: { explicit: true }, expected: "explicit_not_allowed" },
     { name: "maximum track length", settings: { rules: { maxTrackLengthMinutes: 2 } }, track: {}, expected: "track_too_long" },

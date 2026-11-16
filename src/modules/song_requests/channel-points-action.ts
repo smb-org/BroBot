@@ -128,12 +128,13 @@ export const requestSongChannelPointsAction: ChannelPointsActionDefinition<typeo
     const channelId = context.channelId;
     if (redemption.userId.length === 0 || redemption.userLogin.length === 0 || redemption.userInput.trim().length === 0) return refund();
     const now = Number.isFinite(Date.parse(redemption.redeemedAt)) ? redemption.redeemedAt : new Date().toISOString();
+    const legacyProvider = redemption.providerIsLatched !== true;
     let scope: Awaited<ReturnType<typeof actionScope>>;
     let rewardLimits = redemption.rewardLimits;
     try {
       scope = await actionScope(context, now);
-      if (rewardLimits === undefined) {
-        // Rows without a reward-limit snapshot use current values for backward compatibility.
+      // Latched rows without limits snapshots predate 0096; Twitch already enforced their reward limits.
+      if (rewardLimits === undefined && legacyProvider) {
         const reward = await context.DB.prepare(
           `SELECT max_per_user_per_stream, global_cooldown_seconds FROM channel_points_rewards
             WHERE channel_id = ? AND twitch_reward_id = ? AND enabled = 1 AND twitch_state = 'active'`,
@@ -149,7 +150,8 @@ export const requestSongChannelPointsAction: ChannelPointsActionDefinition<typeo
     } catch {
       return "pending";
     }
-    if (scope === null || rewardLimits === undefined || !await spotifySlotHeld(context.DB, channelId)) return refund();
+    if (scope === null || (legacyProvider && rewardLimits === undefined) ||
+        !await spotifySlotHeld(context.DB, channelId)) return refund();
 
     let track: SpotifyTrack | null;
     try {
@@ -168,8 +170,8 @@ export const requestSongChannelPointsAction: ChannelPointsActionDefinition<typeo
       track: songRequestTrackFromSpotify(track),
       requestType: "channel_points" as const,
       channelPointsRewardId: redemption.rewardId,
-      rewardMaxPerUserPerStream: rewardLimits.maxPerUserPerStream,
-      rewardGlobalCooldownSeconds: rewardLimits.globalCooldownSeconds,
+      rewardMaxPerUserPerStream: rewardLimits?.maxPerUserPerStream ?? null,
+      rewardGlobalCooldownSeconds: rewardLimits?.globalCooldownSeconds ?? null,
       streamId: scope.streamId,
       roundId: scope.roundId,
       settingsJson: scope.settingsJson,

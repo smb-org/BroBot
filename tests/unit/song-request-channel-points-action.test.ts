@@ -133,6 +133,73 @@ describe("song request channel-points action", () => {
     await expect(database.prepare("SELECT count(*) AS count FROM song_requests").first()).resolves.toEqual({ count: 1 });
   });
 
+  it("skips current reward limits for provider-latched rows without a limits snapshot", async () => {
+    const { database, context, fetcher } = await createFixture();
+    const settings = JSON.stringify({
+      mode: "moderated", paymentMode: "free",
+      rules: {
+        duplicateEnabled: false, songCooldownEnabled: false, personCooldownEnabled: false,
+        personOpenLimitEnabled: false, personRoundLimitEnabled: false, channelOpenLimitEnabled: false,
+        artistOpenLimitEnabled: false, maxTrackLengthEnabled: false, explicitAllowed: true,
+      },
+    });
+    await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(settings, CHANNEL_ID).run();
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify(trackWithId("glassharbor01")), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(trackWithId("quietatlas02")), { status: 200 }));
+    const firstRedemption = { ...redemption, providerIsLatched: true };
+
+    await expect(requestSongChannelPointsAction.execute(context, {
+      redemption: firstRedemption, operationId: firstRedemption.id, config: {},
+    })).resolves.toBe("pending");
+    await database.prepare("UPDATE channel_points_rewards SET max_per_user_per_stream = 1 WHERE channel_id = ?")
+      .bind(CHANNEL_ID).run();
+    const retriedRedemption = {
+      ...redemption,
+      id: "redemption-channel-points-latched-without-limits",
+      userInput: "spotify:track:quietatlas02",
+      providerIsLatched: true,
+    };
+
+    await expect(requestSongChannelPointsAction.execute(context, {
+      redemption: retriedRedemption, operationId: retriedRedemption.id, config: {},
+    })).resolves.toBe("pending");
+    await expect(database.prepare("SELECT count(*) AS count FROM song_requests").first()).resolves.toEqual({ count: 2 });
+  });
+
+  it("uses current reward limits for legacy rows with NULL provider IDs", async () => {
+    const { database, context, fetcher } = await createFixture();
+    const settings = JSON.stringify({
+      mode: "moderated", paymentMode: "free",
+      rules: {
+        duplicateEnabled: false, songCooldownEnabled: false, personCooldownEnabled: false,
+        personOpenLimitEnabled: false, personRoundLimitEnabled: false, channelOpenLimitEnabled: false,
+        artistOpenLimitEnabled: false, maxTrackLengthEnabled: false, explicitAllowed: true,
+      },
+    });
+    await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(settings, CHANNEL_ID).run();
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify(trackWithId("glassharbor01")), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(trackWithId("quietatlas02")), { status: 200 }));
+
+    await expect(requestSongChannelPointsAction.execute(context, {
+      redemption, operationId: redemption.id, config: {},
+    })).resolves.toBe("pending");
+    await database.prepare("UPDATE channel_points_rewards SET max_per_user_per_stream = 1 WHERE channel_id = ?")
+      .bind(CHANNEL_ID).run();
+    const legacyRedemption = {
+      ...redemption,
+      id: "redemption-channel-points-legacy-current-limit",
+      userInput: "spotify:track:quietatlas02",
+      providerIsLatched: false,
+    };
+
+    await expect(requestSongChannelPointsAction.execute(context, {
+      redemption: legacyRedemption, operationId: legacyRedemption.id, config: {},
+    })).resolves.toHaveProperty("refund");
+    await expect(database.prepare("SELECT count(*) AS count FROM song_requests").first()).resolves.toEqual({ count: 1 });
+  });
+
   it("applies the reward global cooldown alongside song-request rules", async () => {
     const { database, context, fetcher } = await createFixture();
     const settings = JSON.stringify({

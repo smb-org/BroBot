@@ -137,7 +137,7 @@ const applyOutcome = async (
 const actionOutcome = async (
   environment: Env,
   channelId: string,
-  redemption: NonNullable<ReturnType<typeof redemptionFromEventSub>>,
+  redemption: NonNullable<ReturnType<typeof redemptionFromEventSub>> & { providerIsLatched?: boolean },
   actionModuleId: string,
   actionId: string,
   actionConfig: Record<string, unknown>,
@@ -458,6 +458,7 @@ const runClaimedAction = async (
   const redemption = {
     id: row.redemptionId, rewardId: row.twitchRewardId, rewardTitle: row.rewardTitle, userId: row.userId,
     userLogin: row.userLogin, userName: row.userName, userInput: row.userInput, redeemedAt: row.redeemedAt,
+    providerIsLatched: !legacyLatch,
     ...(row.providerRewardLimits === null || row.providerRewardLimits === undefined
       ? {} : { rewardLimits: row.providerRewardLimits }),
   };
