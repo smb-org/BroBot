@@ -236,11 +236,22 @@ describe("Overlay composition editor", () => {
 
     expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Style editor" }));
+    // The contrast line and the lock area always occupy their rows, so the Font section keeps its position.
+    const stylePositions = (): number[] => {
+      const contrast = document.querySelector(".overlay-editor__style-contrast");
+      const lock = document.querySelector(".overlay-editor__style-lock");
+      if (contrast === null || lock === null || contrast.parentElement === null) throw new Error("The reserved Style rows are missing.");
+      const siblings = Array.from(contrast.parentElement.children);
+      return [siblings.indexOf(contrast), siblings.indexOf(lock)];
+    };
+    const positionsBefore = stylePositions();
+    expect(document.querySelector(".overlay-editor__style-contrast")).toHaveAttribute("role", "status");
     const row = document.querySelector('[data-element-row="quiz-b"] .overlay-editor__element-select');
     if (row === null) throw new Error("The element row is missing.");
     fireEvent.click(row);
 
     expect(screen.getByRole("combobox", { name: "Apply style to" })).toHaveTextContent("Element: Quiz B");
+    expect(stylePositions()).toEqual(positionsBefore);
     view.unmount();
   });
 

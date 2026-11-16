@@ -51,7 +51,7 @@ import "./overlay-editor.css";
 
 const installPreviewStylesheet = (
   frameDocument: Document,
-  attribute: "data-brobot-overlay-fonts-css" | "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css" | "data-brobot-overlay-quiz-css" | "data-brobot-overlay-statistics-css" | "data-brobot-overlay-statistics-ranking-css" | "data-brobot-overlay-song-requests-css" | "data-brobot-overlay-alerts-css",
+  attribute: "data-brobot-overlay-fonts-css" | "data-brobot-overlay-tally-css" | "data-brobot-overlay-slot-css" | "data-brobot-overlay-quiz-css" | "data-brobot-overlay-statistics-css" | "data-brobot-overlay-statistics-ranking-css" | "data-brobot-overlay-song-requests-css" | "data-brobot-overlay-alerts-css" | "data-brobot-overlay-song-queue-css",
   css: string,
 ): void => {
   let style = frameDocument.head.querySelector<HTMLStyleElement>(`style[${attribute}]`);
@@ -761,7 +761,8 @@ function OverlayEditorWorkspace({
       import("../modules/statistics/overlay/ranking-view.css?inline"),
       import("../modules/song_requests/overlay/view.css?inline"),
       import("../modules/overlay_alerts/overlay/view.css?inline"),
-    ]).then(([{ default: fontsCss }, { default: overlayTallyCss }, { default: slotCss }, { default: quizCss }, { default: statisticsCss }, { default: statisticsRankingCss }, { default: songRequestsCss }, { default: alertsCss }]) => {
+      import("../modules/song_requests/overlay/queue-view.css?inline"),
+    ]).then(([{ default: fontsCss }, { default: overlayTallyCss }, { default: slotCss }, { default: quizCss }, { default: statisticsCss }, { default: statisticsRankingCss }, { default: songRequestsCss }, { default: alertsCss }, { default: songQueueCss }]) => {
       if (!frame.isConnected || frame.contentDocument !== frameDocument) return;
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-fonts-css", fontsCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-tally-css", overlayTallyCss);
@@ -771,6 +772,7 @@ function OverlayEditorWorkspace({
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-statistics-ranking-css", statisticsRankingCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-song-requests-css", songRequestsCss);
       installPreviewStylesheet(frameDocument, "data-brobot-overlay-alerts-css", alertsCss);
+      installPreviewStylesheet(frameDocument, "data-brobot-overlay-song-queue-css", songQueueCss);
       canvasRef.current = root;
       previewFrameRootRef.current = root;
       setPreviewFrameRoot(root);
@@ -1536,7 +1538,8 @@ function OverlayEditorWorkspace({
                 ]}
                 onChange={(value) => { if (value !== null) setStyleTargetId(value); }} />
               <p className="form-hint">{labels.editorStyleOwnCssHint}</p>
-              {selectedElement === null ? null : <p className="overlay-editor__style-contrast" data-status={contrastRatio === null ? "unknown" : contrastRatio < 4.5 ? "warning" : "ok"} role="status" aria-live="polite">{contrastLabel}</p>}
+              {/* Always rendered so the content below keeps its position when the target changes. */}
+              <p className="overlay-editor__style-contrast" data-status={styleContrastElement === null || contrastRatio === null ? "unknown" : contrastRatio < 4.5 ? "warning" : "ok"} role="status" aria-live="polite">{styleContrastElement === null ? "" : contrastLabel}</p>
               <div className="overlay-editor__style-lock" data-locked={styleLocked} {...(styleLocked ? { role: "status" } : { "aria-hidden": true })}>
                 {styleLocked ? <>
                   <p id="overlay-style-disabled-reason">{labels.editorStyleLocked}</p>

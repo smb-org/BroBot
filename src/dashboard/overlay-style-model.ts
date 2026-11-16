@@ -544,6 +544,7 @@ const defaultElementColors: Readonly<Record<string, Readonly<Record<string, stri
   "belabox.status": { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
   "chat_voting.tally": { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
   "song_requests.now_playing": { background: "#0d1015", text: "#f2f5f9", secondaryText: "#c3cbd7", tertiaryText: "#a8b2c1", accent: "#1ed760" },
+  "song_requests.queue": { background: "#0d1015", text: "#f2f5f9", secondaryText: "#c3cbd7", accent: "#8ab4ff" },
   "statistics.word_counter": { background: "#0d1015", text: "#f2f5f9", secondaryText: "#a8b2c1" },
   "statistics.word_ranking": { background: "#0d1015", text: "#f2f5f9", secondaryText: "#a8b2c1", accent: "#35557f" },
   "text_library.block": { background: "transparent", text: "rgba(255, 255, 255, 0.96)", secondaryText: "rgba(255, 255, 255, 0.78)" },
@@ -555,6 +556,7 @@ const defaultElementColors: Readonly<Record<string, Readonly<Record<string, stri
 
 const contrastTextParts: Readonly<Record<string, readonly ("text" | "secondaryText" | "accent")[]>> = {
   "song_requests.now_playing": ["text", "secondaryText", "accent"],
+  "song_requests.queue": ["text", "secondaryText"],
   "statistics.word_counter": ["text", "secondaryText"],
   "statistics.word_ranking": ["text", "secondaryText"],
   "text_library.block": ["text", "secondaryText"],

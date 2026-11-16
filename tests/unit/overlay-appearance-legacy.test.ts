@@ -28,6 +28,7 @@ const cases: readonly LegacyCase[] = [
     oldColors: plainText,
   },
   { kind: "song_requests.now_playing", oldDefault: { showCover: true, showRequester: true }, oldColors: { background: "#0d1015", text: "#f2f5f9", secondaryText: "#c3cbd7", accent: "#1ed760" } },
+  { kind: "song_requests.queue", oldDefault: {}, oldColors: { background: "#0d1015", text: "#f2f5f9", secondaryText: "#c3cbd7", accent: "#8ab4ff" } },
   { kind: "statistics.word_counter", oldDefault: { word: "helo", label: "hello", show: "both" }, oldColors: statisticsColors },
   { kind: "statistics.word_ranking", oldDefault: { scope: "stream", count: 5, bars: true }, oldColors: { ...statisticsColors, accent: "#35557f" } },
   { kind: "text_library.block", oldDefault: { blockName: "" }, oldColors: { background: "transparent", text: "rgba(255, 255, 255, 0.96)", secondaryText: "rgba(255, 255, 255, 0.78)" } },
@@ -81,7 +82,7 @@ const styleFor = (colors: Readonly<Record<string, string>>): OverlayStyleDocumen
 });
 
 describe("overlay style legacy compatibility", () => {
-  it("covers all 11 registered module elements", () => {
+  it("covers all 12 registered module elements", () => {
     const byName = (left: string, right: string): number => left.localeCompare(right);
     expect(cases.map((entry) => entry.kind).sort(byName)).toEqual(MODULE_OVERLAY_ELEMENTS.map(({ definition }) => definition.kind).sort(byName));
   });

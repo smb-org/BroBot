@@ -1069,8 +1069,13 @@ test("the overlay style lock strip keeps its height as locked content is cleared
     const lockedFontSection = await measureDocumentBox(page, '.overlay-editor__style-section[data-style-section="font"]');
     await strip.getByRole("button").click();
     await expect(strip).toHaveAttribute("data-locked", "false");
-    expect(await measureDocumentBox(page, ".overlay-editor__style-lock")).toEqual(lockedStrip);
-    expect(await measureDocumentBox(page, '.overlay-editor__style-section[data-style-section="font"]')).toEqual(lockedFontSection);
+    // Only the rare locked state is taller; once the user rewrites the block the strip keeps one reserved line.
+    const unlockedStrip = await measureDocumentBox(page, ".overlay-editor__style-lock");
+    const unlockedFontSection = await measureDocumentBox(page, '.overlay-editor__style-section[data-style-section="font"]');
+    expect(unlockedStrip[1]).toBe(lockedStrip[1]);
+    expect(unlockedStrip[3]).toBeLessThanOrEqual(24);
+    expect(unlockedStrip[3]).toBeLessThan(lockedStrip[3]);
+    expect(unlockedFontSection[1]).toBeCloseTo(lockedFontSection[1] - (lockedStrip[3] - unlockedStrip[3]), 1);
     await page.unrouteAll();
   }
 });

@@ -100,7 +100,7 @@
 .overlay-editor__editor-tabs button[aria-selected="true"] { border-bottom-color: var(--brand); color: var(--text); }
 .overlay-editor__properties [role="tabpanel"] { min-width: 0; }
 .overlay-editor__style-fields { display: grid; min-width: 0; gap: var(--s3); container-type: inline-size; container-name: overlay-style; }
-.overlay-editor__style-contrast { margin: calc(var(--s2) * -1) 0 0; color: var(--color-success-text); font-size: 12px; line-height: 1.4; }
+.overlay-editor__style-contrast { min-height: calc(12px * 1.4); margin: calc(var(--s2) * -1) 0 0; color: var(--color-success-text); font-size: 12px; line-height: 1.4; }
 .overlay-editor__style-contrast[data-status="warning"] { color: var(--color-orange-text); }
 .overlay-editor__style-contrast[data-status="unknown"] { color: var(--text-3); }
 .overlay-editor__style-section { min-width: 0; border-bottom: 1px solid var(--line); }
@@ -142,8 +142,9 @@
 .ui-color-field__transparent input { flex: none; }
 .ui-color-field__controls:has(.ui-color-field__transparent) { flex-wrap: wrap; }
 .ui-color-field__controls:has(.ui-color-field__transparent) > .ui-color-field__transparent { order: 1; flex-basis: 100%; }
-.overlay-editor__style-lock { box-sizing: border-box; display: grid; height: 148px; align-content: start; gap: var(--s2); padding: var(--s3); border: 1px solid var(--warn); border-radius: var(--r-control); background: var(--warning-surface); color: var(--text); }
-.overlay-editor__style-lock[data-locked="false"] { border-color: transparent; background: transparent; }
+/* One line of reserved room while unlocked; the rare locked state grows to fit its message and button. */
+.overlay-editor__style-lock { box-sizing: border-box; display: grid; min-height: calc(var(--s4) + var(--s1)); align-content: start; gap: var(--s2); }
+.overlay-editor__style-lock[data-locked="true"] { padding: var(--s3); border: 1px solid var(--warn); border-radius: var(--r-control); background: var(--warning-surface); color: var(--text); }
 .overlay-editor__style-lock p, .overlay-editor__code-actions p { margin: 0; }
 .overlay-editor__style-actions, .overlay-editor__code-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2); }
 .overlay-editor__css-code textarea { display: block; width: 100%; min-height: 320px; resize: vertical; padding: var(--s3); border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface-well); color: var(--text); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; tab-size: 2; }

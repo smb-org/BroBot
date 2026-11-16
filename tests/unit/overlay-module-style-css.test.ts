@@ -20,6 +20,7 @@ const viewCssByKind: readonly {
   { kind: "belabox.status", cssPaths: ["../../src/overlay/variable.css"], rootClass: "brobot-module-text", fallbacks: ["transparent", "rgba(255, 255, 255, 0.96)"], usesAccent: false },
   { kind: "chat_voting.tally", cssPaths: ["../../src/overlay/variable.css", "../../src/overlay/tally/overlay-tally.css"], rootClass: "brobot-module-text", fallbacks: ["transparent", "rgba(255, 255, 255, 0.96)"], usesAccent: false },
   { kind: "song_requests.now_playing", cssPaths: ["../../src/modules/song_requests/overlay/view.css"], rootClass: "song-requests-now-playing", fallbacks: ["#0d1015", "#f2f5f9", "#c3cbd7", "#a8b2c1", "#1ed760"], usesAccent: true },
+  { kind: "song_requests.queue", cssPaths: ["../../src/modules/song_requests/overlay/queue-view.css"], rootClass: "song-request-queue-overlay", fallbacks: ["#0d1015", "#f2f5f9", "#c3cbd7", "#a8b2c1", "#8ab4ff"], usesAccent: true },
   { kind: "statistics.word_counter", cssPaths: ["../../src/modules/statistics/overlay/view.css"], rootClass: "statistics-word-counter", fallbacks: ["#0d1015", "#f2f5f9", "#a8b2c1"], usesAccent: false },
   { kind: "statistics.word_ranking", cssPaths: ["../../src/modules/statistics/overlay/ranking-view.css"], rootClass: "statistics-word-ranking", fallbacks: ["#0d1015", "#f2f5f9", "#a8b2c1", "#35557f"], usesAccent: true },
   { kind: "text_library.block", cssPaths: ["../../src/overlay/variable.css"], rootClass: "brobot-module-text", fallbacks: ["transparent", "rgba(255, 255, 255, 0.96)", "rgba(255, 255, 255, 0.78)"], usesAccent: false },
