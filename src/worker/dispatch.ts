@@ -1452,6 +1452,22 @@ export const dispatchEventSubNotification = async (
             points,
             tempVips: moduleTempVips(environment.CHANNEL, event.channelId),
             ...(moduleChannelNamespace === undefined ? {} : {
+              channelPoints: {
+                resolveRedemption: async (operationId, status) => await Promise.resolve<unknown>(moduleChannelNamespace
+                  .get(moduleChannelNamespace.idFromName(event.channelId))
+                  .runModuleAlarm("channel_points", "serialized-lifecycle", "channel-points",
+                    { kind: "redemption.resolve", id: operationId, status })) === true,
+                readRedemptionStatus: async (operationId) => {
+                  const status = await Promise.resolve<unknown>(moduleChannelNamespace
+                    .get(moduleChannelNamespace.idFromName(event.channelId))
+                    .runModuleAlarm("channel_points", "serialized-lifecycle", "channel-points",
+                      { kind: "redemption.status", id: operationId }));
+                  return status === "UNFULFILLED" || status === "FULFILLED" || status === "CANCELED"
+                    ? status : "unavailable";
+                },
+              },
+            }),
+            ...(moduleChannelNamespace === undefined ? {} : {
               overlayAlertQueue: {
                 enqueue: (operationId, alert) => moduleChannelNamespace.get(moduleChannelNamespace.idFromName(event.channelId))
                   .enqueueOverlayAlert(operationId, alert),

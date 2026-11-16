@@ -213,6 +213,8 @@ describe("submit claim guard on real D1", () => {
       context.set("channelRole", "operator");
       context.set("points", () => points);
       context.set("publishModuleOverlayMessage", () => Promise.resolve());
+      context.set("scheduleModuleAlarm", () => Promise.resolve());
+      context.set("runModuleAlarm", () => Promise.resolve());
       await next();
     });
     app.route("/channels/:channelId", songRequestsRoutes);

@@ -247,6 +247,37 @@ Bot-Punkte verwenden Belastung und Erstattung stabile, an die Request-ID
 gebundene Operations-IDs. Das Ausschalten des Punkte-Moduls blockiert die
 Punkte-Zahlungsart, schaltet sie aber nicht still auf kostenlos um.
 
+Eine Channel-Points-Belohnung verwendet dieselbe `channelPointsActions`-Schnittstelle
+wie andere Anbieteraktionen und verlangt Eingabetext sowie automatische
+Einlösung. Die Twitch-Redemption-ID ist zugleich die Operation- und Request-ID.
+Der Anbieter liest Titel oder Spotify-Link aus `user_input`, prüft die
+Reward-Grenzen `max_per_user_per_stream` und `global_cooldown_seconds` zusätzlich
+zu den Song-Request-Regeln und legt den Wunsch über dieselbe bedingte
+Admission im D1-Ledger an. Diese Zahlungsart schreibt weder eine Punktebelastung
+noch `sr:<id>:charge`. Wiederholte Aktionen lesen nur den vorhandenen
+Ledger-Zustand und lösen keine zweite Spotify-Suche oder Einreihung aus.
+
+Ein terminaler Song-Request-Übergang schreibt zugleich
+`channel_points_resolution_due`: nach bestätigtem Spotify-POST oder einer
+Moderatorauflösung `FULFILLED`, nach Ablehnung oder Fehler `CANCELED`. Vor dem
+Übergang plant BroBot den Wiederholungsalarm; danach versucht es die offene
+Verpflichtung sofort über den serialisierten `channel_points`-Claimpfad
+abzuarbeiten. Der dauerhafte Ledger-Eintrag bleibt bis zur bestätigten
+Twitch-Auflösung stehen und wird bei Fehlern, Alarmwiederholung, Bereinigung,
+Stream-Ende oder Modulabschaltung erneut versucht. Damit haben direkte
+Moderatorentscheidungen keinen Bedarf an einer späteren „Mit Twitch
+synchronisieren“-Aktion. Ein vor der Spotify-Einreihung gelesener Twitch-Status
+verhindert, dass eine bereits stornierte oder erfüllte Redemption eingereiht
+wird. Terminalzustände, die Twitch oder eine Bedienperson an anderer Stelle
+gesetzt hat, werden per `onRedemptionResolved` an den Anbieter gemeldet; dieser
+schließt das Wunschbuch ohne zweite Erstattungs- oder Auflösungsanforderung.
+Moderierte Song-Wünsche erscheinen deshalb nicht zusätzlich in der allgemeinen
+Channel-Points-Warteschlange. Nach der Spotify-Einreihung ist bei Entfernen nur
+das Entfernen aus BroBots Wunschbuch möglich; Twitch kann eine erfüllte
+Redemption nicht erstatten. Migration `0095_song_request_channel_points_resolution.sql`
+speichert den Redemption-Bezug und beide dauerhaft wiederholbaren
+Auflösungsverpflichtungen.
+
 Das Queue-Overlay rendert die offenen Einträge aus dem BroBot-Ledger, nicht
 Spotify-Queue-Daten. Seine 2 bis 20 Zeilen-Slots bleiben reserviert, auch wenn
 weniger Einträge vorhanden sind. Der Realtime-Zustand wird auf 20 Zeilen,

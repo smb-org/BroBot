@@ -63,6 +63,9 @@ const createTexts = (language: ModuleLanguage) => {
     actionNeedsInput: de
       ? "Diese Aktion benötigt eine Zuschauereingabe."
       : "This action requires viewer input.",
+    automaticModeRequired: de
+      ? "Diese Aktion muss automatisch ausgeführt werden."
+      : "This action must run automatically.",
     actionUnknown: de ? "Diese Aktion ist nicht mehr verfügbar." : "This action is no longer available.",
     actionProviderDisabled: de ? "Das Modul für diese Aktion ist ausgeschaltet." : "The module providing this action is off.",
     actionProvidersUnavailable: de

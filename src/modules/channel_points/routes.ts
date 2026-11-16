@@ -65,6 +65,7 @@ const validateAction = async (input: ReturnType<typeof channelPointsRewardInputS
   if (action === undefined) return "channel_points_action_unknown";
   if (!action.configSchema.safeParse(input.actionConfig).success) return "channel_points_action_config_invalid";
   if (action.requiresUserInput === true && !input.isUserInputRequired) return "channel_points_action_needs_input";
+  if (action.requiresAutomaticMode === true && input.mode !== "auto") return "channel_points_action_needs_auto";
   return null;
 };
 

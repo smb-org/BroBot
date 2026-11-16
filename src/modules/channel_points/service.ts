@@ -1,5 +1,6 @@
 import type { AuthorizeModuleMutation, ModuleAlarmContext, ModuleAlarmDefinition, ModuleEvent, ModuleExecutionContext, ModuleMutationActor, ModuleResult } from "../contract";
 import type { ChannelPointsActionOutcome } from "./domain/redemption";
+import { channelPointsProviderResolutionTexts } from "./domain/locale";
 import {
   channelPointsActionTransition, eventSubRedemptionStatus, helixRedemptionStatus,
   redemptionFromEventSub, redemptionFromHelix, rewardSnapshotFromEventSub,
@@ -99,6 +100,7 @@ const applyOutcome = async (
   outcome: ChannelPointsActionOutcome,
   now: string,
   authorize: ChannelPointsMutationAuthorization,
+  providerResolutionDue?: TwitchRedemptionStatus,
 ): Promise<{ ok: true; status: "pending" | "fulfilled" | "refunded" } | { ok: false; reason: ChannelPointsHelixReason }> => {
   const repository = createChannelPointsRepository(environment.DB);
   const transition = channelPointsActionTransition("auto", outcome);
@@ -107,6 +109,7 @@ const applyOutcome = async (
     pendingTwitchStatus: transition.pendingTwitchStatus ?? null,
     outcomeReason: transition.outcomeReason ?? null,
     claimedAt: transition.status === "pending" || transition.status === "running" ? now : null,
+    ...(providerResolutionDue === undefined ? {} : { providerResolutionDue }),
   }, ["running"], now);
   if (!recorded) return { ok: false, reason: "precondition_failed" };
   if (transition.pendingTwitchStatus === undefined) return { ok: true, status: "pending" };
@@ -164,6 +167,115 @@ const actionOutcome = async (
   }
 };
 
+const drainProviderResolutionCallbacks = async (
+  environment: Env,
+  channelId: string,
+): Promise<boolean> => {
+  const repository = createChannelPointsRepository(environment.DB);
+  const dueRows = await repository.listProviderResolutionDue(channelId, 100);
+  const { MODULES } = await import("../registry");
+  let remaining = false;
+  for (const due of dueRows) {
+    try {
+      const provider = due.providerModuleId === null ? undefined : MODULES.find(({ id }) => id === due.providerModuleId);
+      const action = provider?.channelPointsActions?.find(({ id }) => id === due.providerActionId);
+      if (action?.onRedemptionResolved !== undefined) {
+        const context = (await loadActionContext()).createModuleActionExecutionContext(
+          environment, channelId, provider?.id ?? due.providerModuleId ?? "channel_points",
+        );
+        await action.onRedemptionResolved(context, due.redemption.redemptionId, due.status);
+      }
+      await repository.clearProviderResolutionDue(channelId, due.redemption.redemptionId, due.status);
+    } catch {
+      remaining = true;
+    }
+  }
+  return remaining || (await repository.listProviderResolutionDue(channelId, 1)).length > 0;
+};
+
+const resolveSongRequestRedemption = async (
+  environment: Env,
+  channelId: string,
+  operationId: string,
+  status: TwitchRedemptionStatus,
+): Promise<boolean> => {
+  const repository = createChannelPointsRepository(environment.DB);
+  const current = await repository.getRedemption(channelId, operationId);
+  if (current === null) return false;
+  if (current.status === "fulfilled") return status === "FULFILLED";
+  if (current.status === "refunded") return status === "CANCELED";
+  if (current.status !== "pending") return false;
+  const reason = {
+    de: channelPointsProviderResolutionTexts.canceled.de,
+    en: channelPointsProviderResolutionTexts.canceled.en,
+  };
+  const now = new Date().toISOString();
+  const claimed = await repository.claimRedemption(
+    channelId,
+    operationId,
+    ["pending"],
+    // A pushed resolution outranks the pending action's lease: the action itself reported pending and is idle.
+    now,
+    now,
+    undefined,
+    {
+      pendingTwitchStatus: status,
+      outcomeReason: status === "CANCELED" ? reason : current.outcomeReason ?? reason,
+    },
+  );
+  if (!claimed) return false;
+  const active = await repository.getRedemption(channelId, operationId);
+  if (active === null || active.status !== "running") return false;
+  const outcome: ChannelPointsActionOutcome = status === "FULFILLED" ? "fulfilled" : { refund: reason };
+  const applied = await applyOutcome(
+    environment, channelId, active.twitchRewardId, operationId, outcome, new Date().toISOString(),
+    () => Promise.resolve(true),
+  );
+  return applied.ok && applied.status === (status === "FULFILLED" ? "fulfilled" : "refunded");
+};
+
+const readCurrentTwitchRedemptionStatus = async (
+  environment: Env,
+  channelId: string,
+  operationId: string,
+): Promise<"UNFULFILLED" | TwitchRedemptionStatus | "unavailable"> => {
+  const repository = createChannelPointsRepository(environment.DB);
+  const current = await repository.getRedemption(channelId, operationId);
+  if (current === null) return "unavailable";
+  if (current.status === "fulfilled") return "FULFILLED";
+  if (current.status === "refunded") return "CANCELED";
+  const helix = await loadHelix();
+  let result: Awaited<ReturnType<typeof helix.listRedemptionsByIds>>;
+  try {
+    result = await helix.listRedemptionsByIds(
+      environment, channelId, current.twitchRewardId, [operationId], () => Promise.resolve(true),
+    );
+  } catch {
+    return "unavailable";
+  }
+  if (!result.ok) {
+    if (result.reason === "not_found") {
+      await confirmTwitchRewardDeleted(environment, channelId, current.twitchRewardId, new Date().toISOString());
+      return "CANCELED";
+    }
+    return "unavailable";
+  }
+  const remote = result.data.find(({ id }) => id === operationId);
+  if (remote === undefined) return "unavailable";
+  const remoteStatus = helixRedemptionStatus(remote.status);
+  if (remoteStatus === "unknown") return "unavailable";
+  if (remoteStatus === "unfulfilled") return "UNFULFILLED";
+  const terminalStatus: TwitchRedemptionStatus = remoteStatus === "fulfilled" ? "FULFILLED" : "CANCELED";
+  await repository.updateRedemption(channelId, operationId, {
+    status: terminalStatus === "FULFILLED" ? "fulfilled" : "refunded",
+    pendingTwitchStatus: null,
+    outcomeReason: current.outcomeReason,
+    claimedAt: null,
+    providerResolutionDue: terminalStatus,
+  }, redemptionStatuses, new Date().toISOString());
+  return terminalStatus;
+};
+
 const persistFromAction = async (
   environment: Env,
   channelId: string,
@@ -179,6 +291,8 @@ const persistFromAction = async (
     rewardId: reward.id,
     twitchRewardId: redemption.rewardId,
     ...(reward.mode === "queue" ? { initialStatus: "queued" as const } : {}),
+    providerModuleId: reward.actionModuleId,
+    providerActionId: reward.actionId,
   }, now);
   if (!inserted || reward.mode === "queue") return;
   if (!await repository.claimRedemption(channelId, redemption.id, ["received"], expiredBeforeFor(now), now)) return;
@@ -229,6 +343,9 @@ const persistTwitchTerminalStatus = async (
       rewardId: reward.id,
       twitchRewardId: redemption.rewardId,
       initialStatus: status === "fulfilled" ? "fulfilled" : "refunded",
+      providerResolutionDue: status === "fulfilled" ? "FULFILLED" : "CANCELED",
+      providerModuleId: reward.actionModuleId,
+      providerActionId: reward.actionId,
     }, now);
     if (inserted) return;
   }
@@ -253,6 +370,7 @@ const persistTwitchTerminalStatus = async (
     pendingTwitchStatus: null,
     outcomeReason,
     claimedAt: null,
+    providerResolutionDue: status === "fulfilled" ? "FULFILLED" : "CANCELED",
   }, redemptionStatuses, now);
 };
 
@@ -513,6 +631,7 @@ export const reconcileChannelPoints = async (
           };
           await repository.updateRedemption(channelId, row.redemptionId, {
             status: terminalStatus, pendingTwitchStatus: null, outcomeReason, claimedAt: null,
+            providerResolutionDue: status === "fulfilled" ? "FULFILLED" : "CANCELED",
           }, redemptionStatuses, now);
         }
       } catch {
@@ -575,6 +694,9 @@ export const reconcileChannelPoints = async (
 type LifecycleActor = ModuleMutationActor;
 type ChannelPointsLifecycleInvocation =
   | { kind: "event"; event: ModuleEvent }
+  | { kind: "retry" }
+  | { kind: "redemption.resolve"; id: string; status: TwitchRedemptionStatus }
+  | { kind: "redemption.status"; id: string }
   | { kind: "reconcile"; actor: LifecycleActor; now: string; force: boolean }
   | { kind: "redemption.run"; actor: LifecycleActor; now: string; id: string }
   | { kind: "redemption.refund"; actor: LifecycleActor; now: string; id: string }
@@ -659,7 +781,7 @@ const performQueueOperation = async (
     channelId, invocation.id, claimableStatuses,
     invocation.kind === "redemption.refund" ? now : expiredBeforeFor(now), now, claimGuard,
     invocation.kind === "redemption.refund"
-      ? { pendingTwitchStatus: "CANCELED", outcomeReason: operatorRefundReason }
+      ? { pendingTwitchStatus: "CANCELED", outcomeReason: operatorRefundReason, providerResolutionDue: "CANCELED" }
       : undefined,
   );
   if (!claimed) {
@@ -682,7 +804,7 @@ const performQueueOperation = async (
   }
   if (invocation.kind === "redemption.refund") {
     return await applyOutcome(environment, channelId, redemption.twitchRewardId, redemption.redemptionId,
-      { refund: operatorRefundReason }, now, authorize);
+      { refund: operatorRefundReason }, now, authorize, "CANCELED");
   }
 
   const helix = await loadHelix();
@@ -715,10 +837,17 @@ const performQueueOperation = async (
     return { ok: false, error: "channel_points_redemption_missing_on_twitch" };
   }
   const remoteStatus = helixRedemptionStatus(remoteRedemption.status);
+  if (remoteStatus === "unknown") {
+    await repository.updateRedemption(channelId, redemption.redemptionId, {
+      status: "pending", pendingTwitchStatus: null, outcomeReason: null, claimedAt: null,
+    }, ["running"], now);
+    return { ok: false, error: "channel_points_twitch_status_unavailable" };
+  }
   if (remoteStatus !== "unfulfilled") {
     const status = remoteStatus === "fulfilled" ? "fulfilled" : "refunded";
     await repository.updateRedemption(channelId, redemption.redemptionId, {
       status, pendingTwitchStatus: null, outcomeReason: redemption.outcomeReason, claimedAt: null,
+      providerResolutionDue: remoteStatus === "fulfilled" ? "FULFILLED" : "CANCELED",
     }, ["running"], now);
     return { ok: false, error: "channel_points_already_resolved_on_twitch", status };
   }
@@ -737,7 +866,7 @@ type RewardOperationResult =
 const performRewardMutation = async (
   environment: Env,
   channelId: string,
-  invocation: Exclude<ChannelPointsLifecycleInvocation, { kind: "event" | "reconcile" | "activation" | "redemption.run" | "redemption.refund" }>,
+  invocation: Exclude<ChannelPointsLifecycleInvocation, { kind: "event" | "retry" | "redemption.resolve" | "redemption.status" | "reconcile" | "activation" | "redemption.run" | "redemption.refund" }>,
   authorizeManagementMutation: AuthorizeModuleMutation,
 ): Promise<RewardOperationResult> => {
   const repository = createChannelPointsRepository(environment.DB);
@@ -892,6 +1021,14 @@ const decodeLifecycleInvocation = (value: unknown): ChannelPointsLifecycleInvoca
   if (value.kind === "event" && isRecord(value.event) && typeof value.event.channelId === "string") {
     return { kind: "event", event: value.event as unknown as ModuleEvent };
   }
+  if (value.kind === "retry") return { kind: "retry" };
+  if (value.kind === "redemption.resolve" && typeof value.id === "string" &&
+      (value.status === "FULFILLED" || value.status === "CANCELED")) {
+    return { kind: "redemption.resolve", id: value.id, status: value.status };
+  }
+  if (value.kind === "redemption.status" && typeof value.id === "string") {
+    return { kind: "redemption.status", id: value.id };
+  }
   const actor = lifecycleActor(value.actor);
   if (value.kind === "activation" && actor !== null) return { kind: "activation", actor };
   if (value.kind === "reconcile" && actor !== null && typeof value.now === "string") {
@@ -926,24 +1063,59 @@ export const channelPointsLifecycleAlarm: ModuleAlarmDefinition = {
       throw new Error("Channel-points lifecycle invocation is invalid.");
     }
     const channelId = context.channelId;
+    // Write the retry alarm before a claim or Twitch call so a crash cannot strand the lease.
+    await context.schedule(
+      CHANNEL_POINTS_LIFECYCLE_ALARM,
+      Date.now() + REDEMPTION_CLAIM_LEASE_MS,
+      undefined,
+      null,
+      undefined,
+      undefined,
+      CHANNEL_POINTS_LIFECYCLE_HANDLER,
+    );
+    let result: unknown;
     if (invocation.kind === "event") {
       if (invocation.event.channelId !== channelId) throw new Error("Channel-points event crossed its channel boundary.");
-      return await processChannelPointsEventInLane(invocation.event, environment, null);
-    }
-    if (invocation.kind === "activation") {
-      return await activationSync(environment, channelId, invocation.actor, context.authorizeManagementMutation);
-    }
-    if (invocation.kind === "reconcile") {
+      result = await processChannelPointsEventInLane(invocation.event, environment, null);
+    } else if (invocation.kind === "retry") {
+      result = await reconcileChannelPoints(environment, channelId, new Date().toISOString(), {
+        force: true,
+        authorize: () => Promise.resolve(true),
+      });
+    } else if (invocation.kind === "redemption.resolve") {
+      result = await resolveSongRequestRedemption(environment, channelId, invocation.id, invocation.status);
+    } else if (invocation.kind === "redemption.status") {
+      result = await readCurrentTwitchRedemptionStatus(environment, channelId, invocation.id);
+    } else if (invocation.kind === "activation") {
+      result = await activationSync(environment, channelId, invocation.actor, context.authorizeManagementMutation);
+    } else if (invocation.kind === "reconcile") {
       const authorize = authorizeCurrentMutation(environment.DB, channelId, invocation.actor, context.authorizeMutation);
-      if (!await authorize()) return "precondition_failed";
-      if (!await moduleIsEnabled(environment.DB, channelId)) return { error: "channel_points_module_disabled" };
-      return await reconcileChannelPoints(environment, channelId, invocation.now, {
+      if (!await authorize()) result = "precondition_failed";
+      else if (!await moduleIsEnabled(environment.DB, channelId)) result = { error: "channel_points_module_disabled" };
+      else result = await reconcileChannelPoints(environment, channelId, invocation.now, {
         force: invocation.force, authorize,
       });
+    } else if (invocation.kind === "redemption.run" || invocation.kind === "redemption.refund") {
+      result = await performQueueOperation(environment, channelId, invocation, context.authorizeMutation);
+    } else {
+      result = await performRewardMutation(environment, channelId, invocation, context.authorizeManagementMutation);
     }
-    if (invocation.kind === "redemption.run" || invocation.kind === "redemption.refund") {
-      return await performQueueOperation(environment, channelId, invocation, context.authorizeMutation);
+    const callbackPending = await drainProviderResolutionCallbacks(environment, channelId);
+    const repository = createChannelPointsRepository(environment.DB);
+    const retryPending = await repository.hasLifecycleRetryWork(channelId);
+    if (callbackPending || retryPending) {
+      await context.schedule(
+        CHANNEL_POINTS_LIFECYCLE_ALARM,
+        Date.now() + REDEMPTION_CLAIM_LEASE_MS,
+        undefined,
+        null,
+        undefined,
+        undefined,
+        CHANNEL_POINTS_LIFECYCLE_HANDLER,
+      );
+    } else {
+      await context.clear(CHANNEL_POINTS_LIFECYCLE_ALARM);
     }
-    return await performRewardMutation(environment, channelId, invocation, context.authorizeManagementMutation);
+    return result;
   },
 };

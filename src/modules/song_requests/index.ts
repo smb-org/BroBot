@@ -18,6 +18,7 @@ import { songRequestsNowPlayingElement } from "./overlay/element";
 import { songRequestsQueueElement } from "./overlay/queue-element";
 import { songRequestsActionTexts } from "./panel/action-locale";
 import { songRequestQueueSubtitle } from "./panel/queue-action-locale";
+import { requestSongChannelPointsAction } from "./channel-points-action";
 
 const queueAvailability: ModuleImmediateActionCondition = {
   query: {
@@ -51,6 +52,7 @@ export const songRequestsModule: BotModule<typeof songRequestsSettingsSchema> = 
   defaultSettings: songRequestsSettingsSchema.parse({}),
   defaultEnabled: false,
   panelManagesSettings: true,
+  channelPointsActions: [requestSongChannelPointsAction],
   settingsChangedAlarm: { handlerKey: SONG_REQUESTS_LIFECYCLE_HANDLER, alarmKey: "settings" },
   chatCommands: [{
     name: "!sr",

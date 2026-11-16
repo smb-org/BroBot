@@ -163,6 +163,7 @@ const removeAppFor = (points: ModulePointsAccess) => {
     context.set("points", () => points);
     context.set("publishModuleOverlayMessage", vi.fn(() => Promise.resolve()));
     context.set("scheduleModuleAlarm", vi.fn(() => Promise.resolve()));
+    context.set("runModuleAlarm", vi.fn(() => Promise.resolve()));
     await next();
   });
   app.route("/channels/:channelId", songRequestsRoutes);

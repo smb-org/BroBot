@@ -1,4 +1,4 @@
-import type { ModuleAlarmContext, ModuleDurableAction, ModuleEvent, ModuleExecutionContext, ModuleResult, ModulePointsAccess } from "../contract";
+import type { ModuleAlarmContext, ModuleChannelPointsAccess, ModuleChannelPointsStatus, ModuleDurableAction, ModuleEvent, ModuleExecutionContext, ModuleResult, ModulePointsAccess } from "../contract";
 import { voteWinner } from "./domain/vote-result";
 import { isSpotifyTrack, spotifyTrackIdFromInput, type SpotifyTrack } from "./domain/track";
 import { canUseFreeSongRequest, isOpenSongRequestState } from "./domain/rules";
@@ -15,6 +15,8 @@ import {
   finishVoteWithoutRequest,
   readOfflineSongRequestRound,
   readSongRequest,
+  clearSongRequestChannelPointResolution,
+  songRequestChannelPointResolutionDue,
   markSongRequestRefundDue,
   markSongRequestRefundComplete,
   songRequestRefundDueIds,
@@ -25,7 +27,7 @@ import {
   transitionRequest,
   voteRecord,
 } from "./adapters/d1";
-import type { SongRequestState } from "./adapters/d1";
+import type { SongRequestRow, SongRequestState } from "./adapters/d1";
 import { SpotifyRequestError, refreshSpotifyToken, spotifyApiRequest, spotifySearchTracks, spotifyTrackById } from "./adapters/spotify";
 import { readSongRequestQueueState } from "./overlay/queue-state";
 
@@ -43,6 +45,74 @@ const BASE_BACKOFF_MS = 24_000;
 export const MAX_BACKOFF_MS = 5 * 60_000;
 const IN_FLIGHT_MAX_AGE_MS = 60_000;
 const OFFLINE_POLL_INTERVAL_MS = 60_000;
+const CHANNEL_POINT_RESOLUTION_RETRY_MS = 15_000;
+
+const deliverChannelPointResolutionObligations = async (
+  db: D1Database,
+  channelId: string,
+  channelPoints: ModuleChannelPointsAccess | undefined,
+): Promise<boolean> => {
+  const due = await songRequestChannelPointResolutionDue(db, channelId);
+  if (due.length === 0) return false;
+  if (channelPoints === undefined) return true;
+  let retry = false;
+  for (const obligation of due) {
+    try {
+      if (await channelPoints.resolveRedemption(obligation.operationId, obligation.status)) {
+        await clearSongRequestChannelPointResolution(db, channelId, obligation.requestId, obligation.status);
+      } else retry = true;
+    } catch {
+      retry = true;
+    }
+  }
+  return retry || (await songRequestChannelPointResolutionDue(db, channelId, 1)).length > 0;
+};
+
+const flushChannelPointResolutions = async (context: ModuleAlarmContext): Promise<void> => {
+  const pending = await deliverChannelPointResolutionObligations(context.DB, context.channelId, context.channelPoints);
+  if (pending) {
+    await context.schedule(
+      "channel-point-resolutions",
+      Date.now() + CHANNEL_POINT_RESOLUTION_RETRY_MS,
+      undefined,
+      null,
+      undefined,
+      undefined,
+      SONG_REQUESTS_LIFECYCLE_HANDLER,
+    );
+  } else {
+    await context.clear("channel-point-resolutions");
+  }
+};
+
+const scheduleChannelPointResolutionRetry = async (context: ModuleAlarmContext): Promise<void> => {
+  await context.schedule(
+    "channel-point-resolutions",
+    Date.now() + CHANNEL_POINT_RESOLUTION_RETRY_MS,
+    undefined,
+    null,
+    undefined,
+    undefined,
+    SONG_REQUESTS_LIFECYCLE_HANDLER,
+  );
+};
+
+const flushChannelPointResolutionsFromEvent = async (context: ModuleExecutionContext): Promise<void> => {
+  const channelId = context.channelId;
+  if (channelId === undefined) return;
+  const pending = await deliverChannelPointResolutionObligations(context.DB, channelId, context.channelPoints);
+  if (pending) {
+    await context.scheduleAlarm(
+      SONG_REQUESTS_LIFECYCLE_HANDLER,
+      "channel-point-resolutions",
+      Date.now() + CHANNEL_POINT_RESOLUTION_RETRY_MS,
+      undefined,
+      null,
+    );
+  } else {
+    await context.clearAlarm("channel-point-resolutions");
+  }
+};
 
 interface SpotifyCredentials { accessToken: string; refreshToken: string; expiresAt: number }
 const credentialsFrom = (value: string | null): SpotifyCredentials | null => {
@@ -231,6 +301,37 @@ export const holdSubmitClaim = async (
   return claim.meta.changes > 0;
 };
 
+const scheduleSubmitRetry = async (context: ModuleAlarmContext, requestId: string): Promise<void> => {
+  await context.schedule(
+    `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`,
+    Date.now() + CHANNEL_POINT_RESOLUTION_RETRY_MS,
+    undefined,
+    null,
+    undefined,
+    undefined,
+    SONG_REQUESTS_SUBMIT_HANDLER,
+  );
+};
+
+const channelPointStatusBeforeSubmit = async (
+  context: ModuleAlarmContext,
+  row: SongRequestRow,
+): Promise<ModuleChannelPointsStatus> => {
+  if (row.requestType !== "channel_points") return "UNFULFILLED";
+  if (context.channelPoints === undefined) {
+    await scheduleSubmitRetry(context, row.requestId);
+    return "unavailable";
+  }
+  try {
+    const status = await context.channelPoints.readRedemptionStatus(row.operationId);
+    if (status === "unavailable") await scheduleSubmitRetry(context, row.requestId);
+    return status;
+  } catch {
+    await scheduleSubmitRetry(context, row.requestId);
+    return "unavailable";
+  }
+};
+
 const submitClaimStillValid = async (context: ModuleAlarmContext, requestId: string): Promise<boolean> => {
   const row = await readSongRequest(context.DB, context.channelId, requestId);
   if (row === null || row.state !== "submitting") return false;
@@ -259,7 +360,20 @@ const submitClaimStillValid = async (context: ModuleAlarmContext, requestId: str
     });
     return false;
   }
-  if (await holdSubmitClaim(context.DB, context.channelId, requestId, row.roundId)) return true;
+  if (await channelPointStatusBeforeSubmit(context, row) !== "UNFULFILLED") return false;
+  if (await holdSubmitClaim(context.DB, context.channelId, requestId, row.roundId)) {
+    const current = await readSongRequest(context.DB, context.channelId, requestId);
+    if (current === null || current.state !== "submitting") return false;
+    if (await channelPointStatusBeforeSubmit(context, current) === "UNFULFILLED") return true;
+    const latest = await readSongRequest(context.DB, context.channelId, requestId);
+    if (latest?.state === "submitting") {
+      await transitionRequest(context.DB, {
+        channelId: context.channelId, requestId, fromState: "submitting", toState: "approved",
+        now: new Date().toISOString(),
+      });
+    }
+    return false;
+  }
 
   const current = await readSongRequest(context.DB, context.channelId, requestId);
   if (current === null || current.state !== "submitting") return false;
@@ -345,6 +459,7 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
     });
     return;
   }
+  if (await channelPointStatusBeforeSubmit(context, row) !== "UNFULFILLED") return;
   if (!await transitionRequest(context.DB, { channelId: context.channelId, requestId, fromState: "approved", toState: "submitting", now })) return;
   const environment = context.environment;
   if (environment === undefined) {
@@ -618,13 +733,16 @@ const announceSubmitResult = async (context: ModuleAlarmContext, requestId: stri
 };
 
 export const handleSubmitAlarm = async (context: ModuleAlarmContext, alarmKey: string): Promise<void> => {
+  await flushChannelPointResolutions(context);
   if (!alarmKey.startsWith(SONG_REQUESTS_SUBMIT_ALARM_PREFIX)) return;
   const requestId = alarmKey.slice(SONG_REQUESTS_SUBMIT_ALARM_PREFIX.length);
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(requestId)) return;
+  await scheduleChannelPointResolutionRetry(context);
   const request = await readSongRequest(context.DB, context.channelId, requestId);
   if (request === null) return;
   if (request.state === "charging") return;
   if (request.state === "approved") await submitRequest(context, requestId);
+  await flushChannelPointResolutions(context);
   const current = await readSongRequest(context.DB, context.channelId, requestId);
   if (current?.state === "failed" || current?.state === "rejected") await refundRequestId(context, requestId);
   await announceSubmitResult(context, requestId);
@@ -902,6 +1020,8 @@ export const pollSongRequestsPlayback = async (
 };
 
 export const handleSongRequestsActivation = async (context: ModuleAlarmContext, enabled: boolean): Promise<void> => {
+  await flushChannelPointResolutions(context);
+  await scheduleChannelPointResolutionRetry(context);
   if (!enabled) {
     await reconcileStaleSongRequestCharges(context);
     const rows = await context.DB.prepare(
@@ -937,6 +1057,7 @@ export const handleSongRequestsActivation = async (context: ModuleAlarmContext, 
       if (cleanup.changed) await notifyNowPlaying(context, cleanup.revision);
     }
     await retrySongRequestRefunds(context);
+    await flushChannelPointResolutions(context);
     if (!await scheduleFreshChargingReconciliation(context)) await context.clear(SONG_REQUESTS_ALARM);
     await notifyQueueOverlay(context);
     return;
@@ -945,9 +1066,11 @@ export const handleSongRequestsActivation = async (context: ModuleAlarmContext, 
 };
 
 export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmContext): Promise<void> => {
+  await flushChannelPointResolutions(context);
   const module = await context.DB.prepare("SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
     .bind(context.channelId).first<{ enabled: number; settings: string }>();
   if (module?.enabled !== 1) return;
+  await scheduleChannelPointResolutionRetry(context);
   let settings: SongRequestsSettings;
   try { settings = songRequestsSettingsSchema.parse(JSON.parse(module.settings) as unknown); }
   catch { settings = songRequestsSettingsSchema.parse({}); }
@@ -966,6 +1089,7 @@ export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmCont
       if (await retrySongRequestRefunds(context) > 0) {
         await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
       } else if (!await scheduleFreshChargingReconciliation(context)) await context.clear(SONG_REQUESTS_ALARM);
+      await flushChannelPointResolutions(context);
       await notifyQueueOverlay(context);
       return;
     }
@@ -978,6 +1102,7 @@ export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmCont
       if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
       else if (!await scheduleFreshChargingReconciliation(context)) await context.clear(SONG_REQUESTS_ALARM);
     }
+    await flushChannelPointResolutions(context);
     return;
   }
   if (stream?.state === "online" && stream.stream_id !== null) {
@@ -986,6 +1111,7 @@ export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmCont
     if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
     else if (!await scheduleFreshChargingReconciliation(context)) await context.clear(SONG_REQUESTS_ALARM);
   }
+  await flushChannelPointResolutions(context);
   await notifyQueueOverlay(context);
 };
 
@@ -1253,6 +1379,13 @@ const processSongRequestCommand = async (
 export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSettings>, context: ModuleExecutionContext): Promise<ModuleResult> => {
   if (event.subscriptionType === "channel.chat.message") return await processSongRequestCommand(event, context);
   if (context.streamStateTransitionAccepted !== true) return { actions: [], diagnostics: [] };
+  await context.scheduleAlarm(
+    SONG_REQUESTS_LIFECYCLE_HANDLER,
+    "channel-point-resolutions",
+    Date.now() + CHANNEL_POINT_RESOLUTION_RETRY_MS,
+    undefined,
+    null,
+  );
   const actions: ModuleResult["actions"][number][] = [];
   const enabled = await context.DB.prepare("SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
     .bind(event.channelId).first<{ enabled: number; settings: string }>();
@@ -1305,6 +1438,7 @@ export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSe
     }
     actions.push(await queueOverlayChange({ DB: context.DB, channelId: event.channelId }));
   }
+  await flushChannelPointResolutionsFromEvent(context);
   return { actions, diagnostics: [] };
 };
 

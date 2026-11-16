@@ -718,6 +718,8 @@ export interface ModuleExecutionContext {
   overlayAlertQueue?: ModuleOverlayAlertQueueAccess;
   /** Returns the same host context with module-owned ledgers bound to another registered module. */
   forModule?: (moduleId: string) => ModuleExecutionContext;
+  /** Narrow channel-points redemption operations used by reward action providers. */
+  channelPoints?: ModuleChannelPointsAccess;
   authorizeMutation: AuthorizeModuleMutation;
   /** Ephemeral ballot access bound to the event channel and executing module. */
   ballots: ModuleBallotAccess;
@@ -870,6 +872,8 @@ export interface ModuleAlarmContext {
   authorizeMutation?: AuthorizeModuleMutation;
   authorizeManagementMutation?: AuthorizeModuleMutation;
   channelId: string;
+  /** Narrow channel-points resolution operations used by song requests. */
+  channelPoints?: ModuleChannelPointsAccess;
   /** Full identity and D1 plan sequence for the alarm currently being handled. */
   alarmIdentity?: ModuleAlarmIdentity | null;
   alarmPlanSequence?: number;
@@ -994,6 +998,16 @@ export interface ModuleAlarmContext {
   streamStartedAt: () => Promise<{ streamId: string | null; startedAt: string | null }>;
   /** Writes diagnostics through the host event-log boundary. */
   writeDiagnostics?: (triggerId: string, diagnostics: readonly ModuleDiagnostic[], now: string) => Promise<unknown>;
+}
+
+export type ModuleChannelPointsTerminalStatus = "FULFILLED" | "CANCELED";
+export type ModuleChannelPointsStatus = "UNFULFILLED" | ModuleChannelPointsTerminalStatus | "unavailable";
+
+export interface ModuleChannelPointsAccess {
+  /** Claims and resolves one pending redemption through the channel-points lifecycle. */
+  resolveRedemption: (operationId: string, status: ModuleChannelPointsTerminalStatus) => Promise<boolean>;
+  /** Reads Twitch's current redemption status before the song is sent to Spotify. */
+  readRedemptionStatus: (operationId: string) => Promise<ModuleChannelPointsStatus>;
 }
 
 export interface ModuleStatisticsWindow {
@@ -2142,6 +2156,8 @@ export interface ChannelPointsActionDefinition<ConfigSchema extends z.ZodType = 
   editor?: () => Promise<{ default: ComponentType<ChannelPointsActionEditorProperties> }>;
   /** Whether this action requires the reward to request viewer text input. */
   requiresUserInput?: boolean;
+  /** Whether this action must be attached to an automatic channel-points reward. */
+  requiresAutomaticMode?: boolean;
   /** Executes the action with the provider module's normal host context. */
   execute: (
     context: ModuleExecutionContext,
@@ -2154,6 +2170,12 @@ export interface ChannelPointsActionDefinition<ConfigSchema extends z.ZodType = 
       operationId: string;
     },
   ) => Promise<"fulfilled" | { refund: { de: string; en: string } } | "pending">;
+  /** Reports a terminal status learned from Twitch outside this action's execution. */
+  onRedemptionResolved?: (
+    context: ModuleExecutionContext,
+    operationId: string,
+    status: ModuleChannelPointsTerminalStatus,
+  ) => Promise<void>;
 }
 
 /** A registered channel-points action with the id of its owning module. */

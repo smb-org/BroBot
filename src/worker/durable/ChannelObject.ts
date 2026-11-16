@@ -4136,6 +4136,22 @@ export class ChannelObject extends DurableObject<Env> {
         authorizeManagementMutation: authorizeModuleManagementMutation,
       } : {}),
       channelId,
+      ...(moduleId === "song_requests" ? {
+        channelPoints: {
+          resolveRedemption: async (operationId, status) => await this.runModuleAlarm(
+            "channel_points", "serialized-lifecycle", "channel-points",
+            { kind: "redemption.resolve", id: operationId, status },
+          ) === true,
+          readRedemptionStatus: async (operationId) => {
+            const status: unknown = await this.runModuleAlarm(
+              "channel_points", "serialized-lifecycle", "channel-points",
+              { kind: "redemption.status", id: operationId },
+            );
+            return status === "UNFULFILLED" || status === "FULFILLED" || status === "CANCELED"
+              ? status : "unavailable";
+          },
+        },
+      } : {}),
       writeModuleAudit: (entry, changedAt, options) => writeModuleAudit(
         this.env.DB, options?.actorUserId ?? "system", changedAt,
         { ...entry, channelId, moduleId }, options?.actorUserId === undefined ? "system" : "member", options,

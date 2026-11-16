@@ -504,6 +504,8 @@ describe("temporary VIP channel-points action on local D1", () => {
         authorizeMutation: authorizeModuleMutation,
         authorizeManagementMutation: authorizeModuleMutation,
         channelId,
+        schedule: () => Promise.resolve(),
+        clear: () => Promise.resolve(),
       } as never, "channel-points", Date.parse(baseNow), undefined, {
         kind: "redemption.refund",
         actor: { userId: channelId },

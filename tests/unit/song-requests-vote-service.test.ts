@@ -181,7 +181,8 @@ describe("durable song vote results", () => {
     expect(await database.prepare("SELECT state FROM song_requests_votes WHERE ballot_id = ?").bind("ballot-offline").first())
       .toEqual({ state: "queued" });
     expect(fetcher).not.toHaveBeenCalled();
-    expect(schedule).toHaveBeenCalledOnce();
+    // One call schedules the vote retry, one persists the channel-point resolution retry.
+    expect(schedule).toHaveBeenCalledTimes(2);
     expect(sendChat.mock.calls[0]?.[0]).toContain("stream is offline");
     expect(sendChat.mock.calls[0]?.[5]).toEqual({ automated: true });
   });
@@ -510,7 +511,7 @@ describe("durable song vote results", () => {
   it("clears the polling alarm on an accepted stream.offline event", async () => {
     const { context } = await createContext("ballot-stream-offline");
     const clearAlarm = vi.fn(() => Promise.resolve());
-    const scheduleAlarm = vi.fn(() => Promise.resolve());
+    const scheduleAlarm = vi.fn<ModuleExecutionContext["scheduleAlarm"]>(() => Promise.resolve());
     const eventContext = {
       ...context,
       clearAlarm,
@@ -527,7 +528,8 @@ describe("durable song vote results", () => {
     await processSongRequestsEvent(event, eventContext);
 
     expect(clearAlarm).toHaveBeenCalledWith("poll");
-    expect(scheduleAlarm).not.toHaveBeenCalled();
+    expect(scheduleAlarm).toHaveBeenCalledOnce();
+    expect(scheduleAlarm.mock.calls[0]?.[1]).toBe("channel-point-resolutions");
   });
 
   it("ages stale submitting rows and routes the outcome through the ledger transition", async () => {

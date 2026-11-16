@@ -24,6 +24,19 @@ export const createModuleActionExecutionContext = (
     ballots: moduleBallots(environment.CHANNEL, channelId, moduleId),
     points: modulePoints(environment.CHANNEL, channelId, moduleId),
     tempVips: moduleTempVips(environment.CHANNEL, channelId),
+    channelPoints: {
+      resolveRedemption: async (operationId, status) => await Promise.resolve<unknown>(object.runModuleAlarm(
+        "channel_points", "serialized-lifecycle", "channel-points",
+        { kind: "redemption.resolve", id: operationId, status },
+      )) === true,
+      readRedemptionStatus: async (operationId) => {
+        const status = await Promise.resolve<unknown>(object.runModuleAlarm(
+          "channel_points", "serialized-lifecycle", "channel-points",
+          { kind: "redemption.status", id: operationId },
+        ));
+        return status === "UNFULFILLED" || status === "FULFILLED" || status === "CANCELED" ? status : "unavailable";
+      },
+    },
     overlayAlertQueue: {
       enqueue: (operationId, alert) => object.enqueueOverlayAlert(operationId, alert),
       advance: () => object.advanceOverlayAlertQueue(),

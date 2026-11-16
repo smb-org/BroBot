@@ -121,6 +121,8 @@ const activationContext = (database: TestD1Database, serialize = false) => {
       authorizeMutation: authorizeModuleMutation,
       authorizeManagementMutation: authorizeModuleManagementMutation,
       channelId,
+      schedule: () => Promise.resolve(),
+      clear: () => Promise.resolve(),
     } as never,
     alarmKey,
     Date.now(),
@@ -310,6 +312,8 @@ describe("channel points redemption processing", () => {
       authorizeMutation: authorizeModuleMutation,
       authorizeManagementMutation: authorizeModuleManagementMutation,
       channelId,
+      schedule: () => Promise.resolve(),
+      clear: () => Promise.resolve(),
     } as never, CHANNEL_POINTS_LIFECYCLE_ALARM, Date.now(), undefined, {
       kind: "reward.create", actor: { userId: "operator_one" }, now, id: "reward_local_created",
       reward: { ...reward, title: "Recovered reward" },
