@@ -733,6 +733,8 @@ export interface ModuleExecutionContext {
   overlayAlertQueue?: ModuleOverlayAlertQueueAccess;
   /** Returns the same host context with module-owned ledgers bound to another registered module. */
   forModule?: (moduleId: string) => ModuleExecutionContext;
+  /** Narrow channel-points redemption operations used by reward action providers. */
+  channelPoints?: ModuleChannelPointsAccess;
   authorizeMutation: AuthorizeModuleMutation;
   /** Ephemeral ballot access bound to the event channel and executing module. */
   ballots: ModuleBallotAccess;
@@ -796,6 +798,16 @@ export interface ModuleExecutionContext {
   channelTimeZone: () => Promise<string>;
   /** Null streamGeneration marks a stream-independent timer alarm; undefined keeps legacy version guards. */
   scheduleAlarm: (
+    handlerKey: string,
+    alarmKey: string,
+    deadline: number,
+    ownerRevision?: number,
+    streamGeneration?: number | null,
+    identity?: ModuleAlarmIdentity,
+    planSequence?: number,
+  ) => Promise<void>;
+  /** Schedules a keyed alarm without postponing an earlier scheduled attempt. */
+  scheduleAlarmIfEarlier?: (
     handlerKey: string,
     alarmKey: string,
     deadline: number,
@@ -885,6 +897,8 @@ export interface ModuleAlarmContext {
   authorizeMutation?: AuthorizeModuleMutation;
   authorizeManagementMutation?: AuthorizeModuleMutation;
   channelId: string;
+  /** Narrow channel-points resolution operations used by song requests. */
+  channelPoints?: ModuleChannelPointsAccess;
   /** Full identity and D1 plan sequence for the alarm currently being handled. */
   alarmIdentity?: ModuleAlarmIdentity | null;
   alarmPlanSequence?: number;
@@ -952,6 +966,16 @@ export interface ModuleAlarmContext {
     /** Schedules a keyed alarm through a sibling handler registered by this module. */
     handlerKey?: string,
   ) => Promise<void>;
+  /** Schedules a keyed alarm without postponing an earlier scheduled attempt. */
+  scheduleIfEarlier?: (
+    key: string,
+    deadline: number,
+    ownerRevision?: number,
+    streamGeneration?: number | null,
+    identity?: ModuleAlarmIdentity,
+    planSequence?: number,
+    handlerKey?: string,
+  ) => Promise<void>;
   clear: (
     key: string,
     ownerRevision?: number,
@@ -1009,6 +1033,16 @@ export interface ModuleAlarmContext {
   streamStartedAt: () => Promise<{ streamId: string | null; startedAt: string | null }>;
   /** Writes diagnostics through the host event-log boundary. */
   writeDiagnostics?: (triggerId: string, diagnostics: readonly ModuleDiagnostic[], now: string) => Promise<unknown>;
+}
+
+export type ModuleChannelPointsTerminalStatus = "FULFILLED" | "CANCELED";
+export type ModuleChannelPointsStatus = "UNFULFILLED" | ModuleChannelPointsTerminalStatus | "unavailable";
+
+export interface ModuleChannelPointsAccess {
+  /** Claims and resolves one pending redemption through the channel-points lifecycle. */
+  resolveRedemption: (operationId: string, status: ModuleChannelPointsTerminalStatus) => Promise<boolean>;
+  /** Reads Twitch's current redemption status before the song is sent to Spotify. */
+  readRedemptionStatus: (operationId: string) => Promise<ModuleChannelPointsStatus>;
 }
 
 export interface ModuleStatisticsWindow {
@@ -2157,6 +2191,8 @@ export interface ChannelPointsActionDefinition<ConfigSchema extends z.ZodType = 
   editor?: () => Promise<{ default: ComponentType<ChannelPointsActionEditorProperties> }>;
   /** Whether this action requires the reward to request viewer text input. */
   requiresUserInput?: boolean;
+  /** Whether this action must be attached to an automatic channel-points reward. */
+  requiresAutomaticMode?: boolean;
   /** Executes the action with the provider module's normal host context. */
   execute: (
     context: ModuleExecutionContext,
@@ -2164,11 +2200,19 @@ export interface ChannelPointsActionDefinition<ConfigSchema extends z.ZodType = 
       redemption: {
         id: string; rewardId: string; rewardTitle: string; userId: string; userLogin: string;
         userName: string; userInput: string; redeemedAt: string;
+        rewardLimits?: { maxPerUserPerStream: number | null; globalCooldownSeconds: number | null };
+        providerIsLatched?: boolean;
       };
       config: z.output<ConfigSchema>;
       operationId: string;
     },
   ) => Promise<"fulfilled" | { refund: { de: string; en: string } } | "pending">;
+  /** Reports a terminal status learned from Twitch outside this action's execution. */
+  onRedemptionResolved?: (
+    context: ModuleExecutionContext,
+    operationId: string,
+    status: ModuleChannelPointsTerminalStatus,
+  ) => Promise<void>;
 }
 
 /** A registered channel-points action with the id of its owning module. */
@@ -2496,6 +2540,15 @@ export interface ModuleRouteVariables {
   ) => Promise<unknown>;
   /** Schedules a module-owned keyed alarm for a route that transitions work into an alarm-driven phase. */
   scheduleModuleAlarm: (
+    channelId: string,
+    moduleId: string,
+    handlerKey: string,
+    alarmKey: string,
+    deadline: number,
+    streamGeneration?: number | null,
+  ) => Promise<void>;
+  /** Schedules a module alarm without postponing an earlier attempt. */
+  scheduleModuleAlarmIfEarlier?: (
     channelId: string,
     moduleId: string,
     handlerKey: string,

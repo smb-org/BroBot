@@ -245,6 +245,9 @@ const sqlGetFixtures = new Map<string, string>([
   ["ballotGuard"," AND EXISTS (SELECT 1 FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ? AND state = 'open')"],
   ["OPEN_REQUEST_SQL", "state IN ('charging', 'pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')"],
   ["OPEN_OR_PLAYING_REQUEST_SQL", "(state IN ('charging', 'pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown') OR (state = 'removed' AND submitted_at IS NOT NULL))"],
+  ["REQUEST_TIME_SQL", "(SELECT at FROM request_time)"],
+  ["NOT_AFTER_REQUEST_SQL", "prior.created_at <= ?"],
+  ["NOT_AFTER_SUBMISSION_SQL", "prior.submitted_at <= ?"],
   ["conditions.join(\" AND \")", "channel_id = ? AND id = ? AND state = ?"],
   ["roundFilter", " AND round_id = ?"],
   ["roundFenceSql", " AND EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?)"],
@@ -397,9 +400,9 @@ describe("SQL contract", () => {
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
       expect(objects.filter((object) => object.type === "table")).toHaveLength(88);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(81);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(83);
       expect(objects.filter((object) => object.type === "trigger")).toHaveLength(180);
-      expect(objects).toHaveLength(349);
+      expect(objects).toHaveLength(351);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),
@@ -410,6 +413,9 @@ describe("SQL contract", () => {
       expect([...tableColumns("channel_stream_state")]).toEqual(expect.arrayContaining([
         "checked_at", "eventsub_changed_at",
       ]));
+      const songRequestConnectionColumns = [...tableColumns("song_requests_connections")];
+      expect(songRequestConnectionColumns).toHaveLength(6);
+      expect(songRequestConnectionColumns).toContain("poll_backoff_until");
       expect([...tableColumns("blitz_questions")]).toContain("search_text");
       expect([...tableColumns("twitch_login_identity")]).toEqual(expect.arrayContaining([
         "refresh_lease_owner", "refresh_lease_until",

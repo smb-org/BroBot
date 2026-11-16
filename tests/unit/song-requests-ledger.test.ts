@@ -138,6 +138,86 @@ describe("song request ledger", () => {
       .toEqual({ state: "submitted", submitted_at: "2026-11-15T20:00:00.000Z" });
   });
 
+  it("persists Twitch resolution obligations with final channel-points ledger states", async () => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    const request = (requestId: string, state: "pending_review" | "approved") => transitionRequest(db, {
+      channelId: CHANNEL_ID,
+      requestId,
+      fromState: null,
+      toState: state,
+      now: NOW,
+      newRequest: {
+        source: "channel_points",
+        channelPointsRewardId: "reward-fictional",
+        track: {
+          id: spotifyTrack.id,
+          uri: spotifyTrack.uri,
+          title: spotifyTrack.name,
+          artists: ["Mira Vale"],
+          durationMs: spotifyTrack.duration_ms,
+          explicit: false,
+          coverUrl: null,
+          spotifyUrl: spotifyTrack.external_urls.spotify,
+        },
+        operationId: requestId,
+        streamId: STREAM_ID,
+        roundId: STREAM_ID,
+      },
+    });
+
+    await expect(request("channel-points-submit", "approved")).resolves.toBe(true);
+    await expect(transitionRequest(db, {
+      channelId: CHANNEL_ID, requestId: "channel-points-submit", fromState: "approved", toState: "submitting", now: NOW,
+    })).resolves.toBe(true);
+    await expect(transitionRequest(db, {
+      channelId: CHANNEL_ID, requestId: "channel-points-submit", fromState: "submitting", toState: "submitted", now: NOW,
+    })).resolves.toBe(true);
+    await expect(database.prepare(
+      "SELECT request_type, source, charged_amount, channel_points_reward_id, channel_points_resolution_due FROM song_requests WHERE id = ?",
+    ).bind("channel-points-submit").first()).resolves.toEqual({
+      request_type: "channel_points", source: "channel_points", charged_amount: 0,
+      channel_points_reward_id: "reward-fictional", channel_points_resolution_due: "FULFILLED",
+    });
+
+    await expect(request("channel-points-reject", "pending_review")).resolves.toBe(true);
+    await expect(transitionRequest(db, {
+      channelId: CHANNEL_ID, requestId: "channel-points-reject", fromState: "pending_review", toState: "rejected",
+      failureReason: "moderator_rejected", refundDue: true, now: NOW,
+    })).resolves.toBe(true);
+    await expect(database.prepare(
+      "SELECT charged_amount, refund_due, channel_points_resolution_due FROM song_requests WHERE id = ?",
+    ).bind("channel-points-reject").first()).resolves.toEqual({
+      charged_amount: 0, refund_due: 0, channel_points_resolution_due: "CANCELED",
+    });
+  });
+
+  it("clears the outgoing Twitch obligation when an external terminal status closes a request", async () => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    await transitionRequest(db, {
+      channelId: CHANNEL_ID, requestId: "external-channel-points", fromState: null, toState: "pending_review", now: NOW,
+      newRequest: {
+        source: "channel_points", requestType: "channel_points", channelPointsRewardId: "reward-fictional",
+        track: {
+          id: spotifyTrack.id, uri: spotifyTrack.uri, title: spotifyTrack.name, artists: ["Mira Vale"],
+          durationMs: spotifyTrack.duration_ms, explicit: false, coverUrl: null, spotifyUrl: spotifyTrack.external_urls.spotify,
+        },
+        operationId: "external-channel-points", streamId: STREAM_ID, roundId: STREAM_ID,
+      },
+    });
+    await database.prepare(
+      "UPDATE song_requests SET channel_points_resolution_due = 'CANCELED' WHERE id = ?",
+    ).bind("external-channel-points").run();
+    await transitionRequest(db, {
+      channelId: CHANNEL_ID, requestId: "external-channel-points", fromState: "pending_review", toState: "rejected",
+      failureReason: "twitch_canceled", now: NOW, suppressChannelPointsResolution: true,
+    });
+    await expect(database.prepare(
+      "SELECT state, channel_points_resolution_due FROM song_requests WHERE id = ?",
+    ).bind("external-channel-points").first()).resolves.toEqual({ state: "rejected", channel_points_resolution_due: null });
+  });
+
   it("matches the oldest same-stream request, leaves manual tracks unmatched, and avoids unchanged writes", async () => {
     const database = await createDatabase();
     await addVote(database, "ballot-old-stream", "2026-11-14T19:00:00.000Z", "stream-old");

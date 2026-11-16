@@ -87,6 +87,22 @@ const expectRequest = (
 };
 
 describe("channel points Helix wrapper", () => {
+  it("allows a local Helix mock while keeping the production endpoint fixed", async () => {
+    const localCapture = captureRequests([{ data: [] }]);
+    await getManageableRewards(
+      { ...environment, APP_ENV: "local", TWITCH_API_BASE: "https://helix.mock" },
+      "channel_fictional", () => Promise.resolve(true), localCapture.fetcher,
+    );
+    expect(localCapture.calls[0]?.url.origin).toBe("https://helix.mock");
+
+    const productionCapture = captureRequests([{ data: [] }]);
+    await getManageableRewards(
+      { ...environment, APP_ENV: "production", TWITCH_API_BASE: "https://helix.mock" },
+      "channel_fictional", () => Promise.resolve(true), productionCapture.fetcher,
+    );
+    expect(productionCapture.calls[0]?.url.origin).toBe("https://api.twitch.tv");
+  });
+
   it("gets manageable rewards and decodes enabled nested limits from a realistic response", async () => {
     const capture = captureRequests([
       { data: [responseReward()], pagination: { cursor: "rewards_next" } },

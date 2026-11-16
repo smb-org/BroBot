@@ -29,6 +29,7 @@ import {
   SONG_REQUESTS_ALARM,
   SONG_REQUESTS_SUBMIT_HANDLER,
   SONG_REQUESTS_SUBMIT_ALARM_PREFIX,
+  SONG_REQUESTS_LIFECYCLE_HANDLER,
 } from "./service";
 import { songRequestsSettingsSchema } from "./contracts";
 
@@ -39,6 +40,31 @@ const bodyFrom = async (request: Request): Promise<Body | null> => {
   catch { return null; }
 };
 const channel = (context: RouteContext): string => context.req.param("channelId") ?? "";
+const scheduleAlarmIfEarlier = (
+  context: RouteContext,
+  moduleId: string,
+  handlerKey: string,
+  alarmKey: string,
+  deadline: number,
+  streamGeneration?: number | null,
+): Promise<void> => (context.get("scheduleModuleAlarmIfEarlier") ?? context.get("scheduleModuleAlarm"))(
+  channel(context), moduleId, handlerKey, alarmKey, deadline, streamGeneration,
+);
+const flushChannelPointResolutions = async (context: RouteContext): Promise<void> => {
+  await context.get("runModuleAlarm")(
+    channel(context), "song_requests", SONG_REQUESTS_LIFECYCLE_HANDLER, "channel-point-resolutions",
+  );
+};
+const scheduleChannelPointResolutionRetry = async (context: RouteContext): Promise<void> => {
+  await scheduleAlarmIfEarlier(
+    context,
+    "song_requests",
+    SONG_REQUESTS_LIFECYCLE_HANDLER,
+    "channel-point-resolutions",
+    Date.now() + 15_000,
+    null,
+  );
+};
 const upstreamStatus = (error: unknown): ContentfulStatusCode => error instanceof SpotifyRequestError && error.status >= 400 && error.status < 600 ? error.status as ContentfulStatusCode : 502;
 const isManager = (context: RouteContext): boolean => canManage(context.get("channelRole"));
 const isModerator = (context: RouteContext): boolean => hasRequiredChannelRole(context.get("channelRole"), "operator");
@@ -103,8 +129,8 @@ const retryRouteRefunds = async (context: RouteContext): Promise<void> => {
     "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'",
   ).bind(channel(context)).first<{ enabled: number }>();
   if (pending > 0 && module?.enabled === 1) {
-    await context.get("scheduleModuleAlarm")(
-      channel(context), "song_requests", SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + 60_000, null,
+    await scheduleAlarmIfEarlier(
+      context, "song_requests", SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + 60_000, null,
     );
   }
 };
@@ -317,6 +343,7 @@ songRequestsRoutes.post("/requests/:requestId/reject", async (context) => {
   if (!isModerator(context)) return moderatorDenied(context);
   const requestId = context.req.param("requestId");
   await retryRouteRefunds(context);
+  await scheduleChannelPointResolutionRetry(context);
   const changed = await transitionRequest(context.env.DB, {
     channelId: channel(context), requestId, fromState: "pending_review", toState: "rejected",
     failureReason: "moderator_rejected", refundDue: true, now: new Date().toISOString(),
@@ -325,6 +352,7 @@ songRequestsRoutes.post("/requests/:requestId/reject", async (context) => {
     await retryRouteRefunds(context);
     return context.json({ error: "song_request_not_pending_review" }, 409);
   }
+  await flushChannelPointResolutions(context);
   await retryRouteRefunds(context);
   await publishQueueState(context);
   return context.json({ state: "rejected" });
@@ -337,22 +365,27 @@ songRequestsRoutes.post("/requests/:requestId/remove", async (context) => {
   const requestId = context.req.param("requestId");
   const row = await readSongRequest(context.env.DB, channel(context), requestId);
   if (row === null) return context.json({ error: "song_request_missing" }, 404);
+  if (body.refund && row.requestType === "channel_points" && row.state === "submitted") {
+    return context.json({ error: "song_request_channel_points_already_fulfilled" }, 409);
+  }
   await retryRouteRefunds(context);
   if (row.state === "pending_review" || row.state === "approved") {
+    await scheduleChannelPointResolutionRetry(context);
     const changed = await transitionRequest(context.env.DB, {
       channelId: channel(context), requestId, fromState: row.state, toState: "rejected",
       failureReason: "moderator_removed_before_submission", refundDue: true, now: new Date().toISOString(),
     });
     if (!changed) return context.json({ error: "song_request_state_changed" }, 409);
+    await flushChannelPointResolutions(context);
     await retryRouteRefunds(context);
     await publishQueueState(context);
     const refunded = row.requestType === "bot_points" && await routeRefundExists(context, requestId);
     return context.json({ state: "rejected", refunded });
   }
   if (row.state !== "submitted" && row.state !== "outcome_unknown") return context.json({ error: "song_request_not_removable" }, 409);
+  await scheduleChannelPointResolutionRetry(context);
   const changed = await transitionRequest(context.env.DB, {
     channelId: channel(context), requestId, fromState: row.state, toState: "removed",
-    // An unclear Spotify send may still have queued the song, so the result chat must keep saying so.
     // An unclear Spotify send may still have queued the song, so the result chat must keep saying so.
     failureReason: row.state === "outcome_unknown" ? "submit_outcome_uncertain"
       : body.refund ? "moderator_removed_with_refund" : "moderator_removed",
@@ -360,6 +393,7 @@ songRequestsRoutes.post("/requests/:requestId/remove", async (context) => {
     now: new Date().toISOString(),
   });
   if (!changed) return context.json({ error: "song_request_state_changed" }, 409);
+  await flushChannelPointResolutions(context);
   if (body.refund) await retryRouteRefunds(context);
   await publishQueueState(context);
   const refunded = body.refund && row.requestType === "bot_points" && await routeRefundExists(context, requestId);
@@ -378,7 +412,9 @@ songRequestsRoutes.post("/clear", async (context) => {
     channelId: channel(context),
     points: context.get("points")(channel(context)),
   }, Date.now(), current.roundId);
+  await scheduleChannelPointResolutionRetry(context);
   const result = await cleanupSongRequestRound(context.env.DB, channel(context), current.roundId, new Date().toISOString(), "list_cleared");
+  await flushChannelPointResolutions(context);
   await retryRouteRefunds(context);
   await context.get("publishModuleOverlayMessage")(
     channel(context), "song_requests", "state_changed", "song_requests.now_playing", { revision: result.revision },
@@ -393,11 +429,13 @@ songRequestsRoutes.post("/requests/:requestId/resolve", async (context) => {
   const state = body?.state;
   if (state !== "submitted" && state !== "failed") return context.json({ error: "song_request_resolution_invalid" }, 400);
   await retryRouteRefunds(context);
+  await scheduleChannelPointResolutionRetry(context);
   const changed = await resolveUnknownRequest(context.env.DB, channel(context), context.req.param("requestId"), state, new Date().toISOString());
   if (!changed) {
     await retryRouteRefunds(context);
     return context.json({ error: "song_request_not_outcome_unknown" }, 409);
   }
+  await flushChannelPointResolutions(context);
   if (state === "failed") {
     await retryRouteRefunds(context);
   }

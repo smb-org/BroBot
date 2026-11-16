@@ -72,6 +72,8 @@ const makeApp = (database: TestD1Database, role: "operator" | "manager" | "membe
         authorizeMutation: authorizeModuleMutation,
         authorizeManagementMutation: authorizeModuleManagementMutation,
         channelId: requestChannelId,
+        schedule: () => Promise.resolve(),
+        clear: () => Promise.resolve(),
       } as never, CHANNEL_POINTS_LIFECYCLE_HANDLER, Date.now(), undefined, invocation));
     await next();
   });
@@ -180,7 +182,7 @@ describe("channel points routes", () => {
     });
   });
 
-  it("runs a queued redemption once and fulfills it in Twitch", async () => {
+  it("runs a legacy queued redemption with NULL latched IDs using the reward's current action", async () => {
     database = createDatabase();
     seedQueuedRedemption("redemption_run");
 
@@ -198,6 +200,31 @@ describe("channel points routes", () => {
     );
     expect(mocks.updateRedemptionStatus).toHaveBeenCalledWith(
       expect.anything(), channelId, "reward_twitch", ["redemption_run"], "FULFILLED", expect.any(Function),
+    );
+  });
+
+  it("runs a queued redemption through its latched action after the reward changes", async () => {
+    database = createDatabase();
+    seedQueuedRedemption("redemption_latched_action");
+    database.sqlite.prepare(`UPDATE channel_points_redemptions
+      SET provider_module_id='channel_points', provider_action_id='chat-message',
+          provider_action_config_json='{"message":"Hello"}'
+      WHERE channel_id=? AND redemption_id=?`).run(channelId, "redemption_latched_action");
+    database.sqlite.prepare(`UPDATE channel_points_rewards
+      SET action_module_id='song_requests', action_id='request-song', action_config_json='{}'
+      WHERE channel_id=? AND id=?`).run(channelId, "reward_local");
+
+    const response = await makeApp(database, "operator").request(
+      "/api/channels/channel_points/modules/channel_points/redemptions/redemption_latched_action/run",
+      { method: "POST" }, routeEnvironment(database),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, status: "fulfilled" });
+    expect(mocks.sendChat).toHaveBeenCalledTimes(1);
+    expect(mocks.sendChat).toHaveBeenCalledWith("Hello", "redemption_latched_action");
+    expect(mocks.updateRedemptionStatus).toHaveBeenCalledWith(
+      expect.anything(), channelId, "reward_twitch", ["redemption_latched_action"], "FULFILLED", expect.any(Function),
     );
   });
 
@@ -600,6 +627,39 @@ describe("channel points routes", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
     expect(mocks.manageable).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires song-request rewards to collect viewer input and run automatically", async () => {
+    database = createDatabase();
+    database.sqlite.prepare(
+      "INSERT INTO channel_modules (channel_id,module_id,enabled,settings) VALUES (?,'song_requests',1,'{}')",
+    ).run(channelId);
+    const body = {
+      title: "Request a song", prompt: "Enter a track", cost: 500, backgroundColor: null,
+      isUserInputRequired: false, globalCooldownSeconds: null, maxPerStream: null,
+      maxPerUserPerStream: null, actionModuleId: "song_requests", actionId: "request-song",
+      actionConfig: {}, mode: "queue", enabled: true,
+    };
+    const inputResponse = await makeApp(database, "manager").request(
+      "/api/channels/channel_points/modules/channel_points/rewards",
+      { method: "POST", body: JSON.stringify(body) }, routeEnvironment(database),
+    );
+    expect(inputResponse.status).toBe(422);
+    expect(await inputResponse.json()).toEqual({ error: "channel_points_action_needs_input" });
+
+    const modeResponse = await makeApp(database, "manager").request(
+      "/api/channels/channel_points/modules/channel_points/rewards",
+      { method: "POST", body: JSON.stringify({ ...body, isUserInputRequired: true }) }, routeEnvironment(database),
+    );
+    expect(modeResponse.status).toBe(422);
+    expect(await modeResponse.json()).toEqual({ error: "channel_points_action_needs_auto" });
+
+    const validResponse = await makeApp(database, "manager").request(
+      "/api/channels/channel_points/modules/channel_points/rewards",
+      { method: "POST", body: JSON.stringify({ ...body, isUserInputRequired: true, mode: "auto" }) }, routeEnvironment(database),
+    );
+    expect(validResponse.status).toBe(201);
+    expect(mocks.create).toHaveBeenCalledOnce();
   });
 
   it("enforces the 50-active-reward limit before calling Helix", async () => {

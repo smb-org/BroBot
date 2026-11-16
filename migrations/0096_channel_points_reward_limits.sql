@@ -1,0 +1,1 @@
+ALTER TABLE channel_points_redemptions ADD COLUMN provider_reward_limits_json TEXT;

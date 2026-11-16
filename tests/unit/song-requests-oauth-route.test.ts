@@ -71,10 +71,10 @@ describe("Spotify callback authorization", () => {
        VALUES (?, 'online', ?, 'eventsub', ?, ?)`,
     ).bind(CHANNEL_ID, "2026-11-15T19:00:00.000Z", "stream-fictional-live", "2026-11-15T19:00:00.000Z").run();
 
-    const scheduleModuleAlarm = vi.fn(() => Promise.resolve());
+    const scheduleModuleAlarmIfEarlier = vi.fn(() => Promise.resolve());
     const environment = {
       DB: database as unknown as D1Database,
-      CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ scheduleModuleAlarm }) },
+      CHANNEL: { idFromName: (channelId: string) => channelId, get: () => ({ scheduleModuleAlarmIfEarlier }) },
       PUBLIC_ORIGIN: "https://brobot.example",
       APP_ENV: "local",
       SESSION_COOKIE_KEYS: SESSION_KEYS,
@@ -101,7 +101,7 @@ describe("Spotify callback authorization", () => {
 
     expect(response.status).toBe(302);
     expect(response.headers.get("Location")).toContain("/channels/song-requests-oauth-role/modules/song_requests?spotify=connected");
-    expect(scheduleModuleAlarm).toHaveBeenCalledWith("song_requests", "poll", "poll", expect.any(Number));
+    expect(scheduleModuleAlarmIfEarlier).toHaveBeenCalledWith("song_requests", "poll", "poll", expect.any(Number));
     expect(await database.prepare("SELECT state FROM song_requests_connections WHERE channel_id = ?")
       .bind(CHANNEL_ID).first()).toEqual({ state: "connected" });
   });

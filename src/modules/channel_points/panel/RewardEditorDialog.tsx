@@ -182,6 +182,7 @@ const mappedApiError = (
   if (error.code === "channel_points_reward_limit") return { fields, message: labels.rewardLimit };
   if (error.code?.includes("config_invalid") === true) fields.actionConfig = labels.invalidActionConfig;
   if (error.code === "channel_points_action_needs_input") fields.action = labels.inputRequiredError;
+  if (error.code === "channel_points_action_needs_auto") fields.action = labels.automaticModeRequired;
   if (error.code === "channel_points_action_unknown") fields.action = labels.actionUnknown;
   if (error.code === "channel_points_invalid_reward") {
     const details = error.details;
@@ -384,6 +385,7 @@ export default function RewardEditorDialog({ channelId, language, reward, module
       actionId: selected.actionId,
       actionConfig: defaultActionConfig(selected.moduleId, selected.actionId),
       isUserInputRequired: action.requiresUserInput === true ? true : current.isUserInputRequired,
+      mode: action.requiresAutomaticMode === true ? "auto" : current.mode,
     }));
   };
 
@@ -523,11 +525,15 @@ export default function RewardEditorDialog({ channelId, language, reward, module
 
           <SegmentChoice
             label={labels.mode}
+            {...(selectedAction?.requiresAutomaticMode === true ? { hint: labels.automaticModeRequired } : {})}
             value={draft.value.mode}
             onChange={(mode) => update((current) => ({ ...current, mode }))}
             options={[
               { value: "auto", label: labels.modeAutomatic, description: labels.modeAutomaticDescription },
-              { value: "queue", label: labels.modeQueue, description: labels.modeQueueDescription },
+              {
+                value: "queue", label: labels.modeQueue, description: labels.modeQueueDescription,
+                disabled: selectedAction?.requiresAutomaticMode === true,
+              },
             ]}
             reserveError
           />

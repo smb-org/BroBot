@@ -7,7 +7,7 @@ export interface SegmentChoiceProps<T extends string = string> {
   hint?: string;
   value: T;
   onChange: (value: T) => void;
-  options: readonly ({ value: T; label: string; compactLabel?: string; description?: string })[];
+  options: readonly ({ value: T; label: string; compactLabel?: string; description?: string; disabled?: boolean })[];
   size?: "form" | "compact";
   name?: string;
   disabled?: boolean;
@@ -29,9 +29,14 @@ export function SegmentChoice<T extends string>({ label, hint, value, onChange, 
     if (delta === 0 || disabled || options.length < 2) return;
     const currentValue = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-value]")?.dataset.value;
     const currentIndex = Math.max(0, options.findIndex((option) => option.value === currentValue));
-    const nextIndex = (currentIndex + delta + options.length) % options.length;
+    let nextIndex = currentIndex;
+    for (let attempt = 0; attempt < options.length; attempt += 1) {
+      nextIndex = (nextIndex + delta + options.length) % options.length;
+      const candidate = options[nextIndex];
+      if (candidate !== undefined && candidate.disabled !== true) break;
+    }
     const next = options[nextIndex];
-    if (next === undefined) return;
+    if (next === undefined || next.disabled === true || nextIndex === currentIndex) return;
     event.preventDefault();
     onChange(next.value);
     const nextButton = event.currentTarget.children.item(nextIndex);
@@ -48,7 +53,7 @@ export function SegmentChoice<T extends string>({ label, hint, value, onChange, 
         className={`segment-choice__option${value === option.value ? " is-selected" : ""}`}
         aria-label={option.label}
         aria-pressed={value === option.value}
-        disabled={disabled}
+        disabled={disabled || option.disabled === true}
         onClick={() => { onChange(option.value); }}
       >
         <span className="segment-choice__label">

@@ -934,6 +934,36 @@ alarms: [{
   über `ModuleAlarmContext.writeDiagnostics` in das Ereignisprotokoll geschrieben
   werden; Details bleiben dabei auf feste Codes begrenzt.
 
+### Channel-Points-Aktionen (`channelPointsActions`)
+
+Ein Modul kann `ChannelPointsActionDefinition` bereitstellen. Der Host führt
+`execute` für die Twitch-Redemption-ID aus; diese ID ist der stabile
+Operationsschlüssel. Die Aktion kann `requiresUserInput` und
+`requiresAutomaticMode` deklarieren. Beim Speichern prüft der Host diese
+Anforderungen und der gemeinsame Reward-Editor sperrt die dazugehörigen
+Einstellungen.
+
+`execute` liefert `fulfilled`, eine lokalisierte Erstattungsbegründung oder
+`pending`. `pending` bedeutet, dass der Anbieter den externen Vorgang noch
+verfolgt. Der Host persistiert die Redemption vor dem Aufruf und ruft die Aktion
+bei Wiederholung unter derselben ID erneut auf; Anbieter müssen daher ihren
+eigenen Ledger-Zustand prüfen und wiederholte Aufrufe idempotent beantworten.
+`onRedemptionResolved(context, operationId, status)` meldet dem Anbieter eine
+terminal von Twitch oder einer Bedienperson gesetzte Auflösung. Die Meldung
+wird aus einem dauerhaften Callback-Feld wiederholt, bis der Anbieter sie
+bestätigt.
+
+Aktionen mit späterer Erfüllung erhalten über
+`ModuleExecutionContext.channelPoints` beziehungsweise
+`ModuleAlarmContext.channelPoints` nur zwei Operationen: eine offene Redemption
+mit `FULFILLED` oder `CANCELED` auflösen und den aktuellen Twitch-Status lesen.
+Der Host führt beide Operationen durch den bestehenden serialisierten
+Channel-Points-Claim- und Leasepfad aus. Module speichern ihre eigene
+Auflösungsverpflichtung dauerhaft, planen einen Wiederholungsalarm vor dem
+finalen Ledger-Übergang und löschen sie erst nach bestätigter Auflösung.
+Redemption-Status aus Helix sind dabei die Twitch-Werte `UNFULFILLED`,
+`FULFILLED` und `CANCELED`.
+
 ### Host-Variablen und Kanalvariablen
 
 `src/template-variables.ts` deklariert Namen, Kontexte, Gruppen und maximale

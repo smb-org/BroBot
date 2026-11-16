@@ -271,6 +271,21 @@ describe("channel points panel", () => {
     expect(within(dialog).getByText("Diese Aktion benötigt eine Zuschauereingabe.")).toBeVisible();
   });
 
+  it("disables only Queue when the selected action must run automatically", async () => {
+    const dialog = await openNewReward();
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Aktion" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Song anfordern", hidden: true }));
+
+    expect(within(dialog).getByText("Diese Aktion muss automatisch ausgeführt werden.")).toBeVisible();
+    const automatic = within(dialog).getByRole("button", { name: "Automatisch" });
+    const queue = within(dialog).getByRole("button", { name: "Warteschlange" });
+    expect(automatic).toBeEnabled();
+    expect(automatic).toHaveAttribute("aria-pressed", "true");
+    expect(queue).toBeDisabled();
+    fireEvent.click(queue);
+    expect(automatic).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("inserts a chat placeholder chip at the saved cursor position", async () => {
     const dialog = await openNewReward();
     const template = await within(dialog).findByLabelText("Chat-Nachricht");

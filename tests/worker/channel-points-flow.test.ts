@@ -1,15 +1,18 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
+import type { ModuleAlarmContext, ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
 import { createChannelPointsRepository } from "../../src/modules/channel_points/repository";
 import {
   CHANNEL_POINTS_LIFECYCLE_ALARM,
   CHANNEL_POINTS_LIFECYCLE_HANDLER,
+  channelPointsLifecycleAlarm,
   processChannelPointsEvent,
   reconcileChannelPoints,
 } from "../../src/modules/channel_points/service";
 import type { ChannelPointsRewardInput } from "../../src/modules/channel_points/contracts";
+import { transitionRequest } from "../../src/modules/song_requests/adapters/d1";
+import { handleSongRequestsSettingsChanged } from "../../src/modules/song_requests/service";
 
 const mocks = vi.hoisted(() => ({
   update: vi.fn(), list: vi.fn(), listByIds: vi.fn(), manageable: vi.fn(), setEnabled: vi.fn(),
@@ -96,6 +99,70 @@ const helixRedemption = (
   reward: { id: rewardId, title: rewardTitle, prompt: "Say hello", cost: 10 },
 });
 
+const lifecycleContext = () => ({
+  DB: database,
+  environment,
+  channelId,
+  authorizeMutation: () => ({ sql: "", values: [] }),
+  authorizeManagementMutation: () => ({ sql: "", values: [] }),
+  schedule: vi.fn(async () => {}),
+  clear: vi.fn(async () => {}),
+}) as unknown as ModuleAlarmContext;
+
+const seedSongRequest = async (requestId: string, state: "pending_review" | "approved" = "pending_review"): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{"mode":"moderated"}')
+     ON CONFLICT (channel_id, module_id) DO UPDATE SET enabled = 1, settings = excluded.settings`,
+  ).bind(channelId).run();
+  await transitionRequest(database, {
+    channelId,
+    requestId,
+    fromState: null,
+    toState: state,
+    now,
+    newRequest: {
+      source: "channel_points",
+      requestType: "channel_points",
+      channelPointsRewardId: "reward_twitch",
+      track: {
+        id: "glassharbor01", uri: "spotify:track:glassharbor01", title: "Glass Harbor", artists: ["Mira Vale"],
+        durationMs: 201_000, explicit: false, coverUrl: null, spotifyUrl: "fictional-track",
+      },
+      operationId: requestId,
+      streamId: "stream-fictional",
+      roundId: "stream-fictional",
+      requesterUserId: "viewer_one",
+      requesterLogin: "viewer_demo",
+      requesterDisplayName: "Viewer Demo",
+    },
+  });
+};
+
+const providerResolutionDue = async (id: string): Promise<string | null> => (await database.prepare(
+  "SELECT provider_resolution_due FROM channel_points_redemptions WHERE channel_id=? AND redemption_id=?",
+).bind(channelId, id).first<{ provider_resolution_due: string | null }>())?.provider_resolution_due ?? null;
+
+const seedSongProviderRedemption = async (id: string): Promise<void> => {
+  const repository = createChannelPointsRepository(database);
+  await repository.latchRedemption(channelId, {
+    id,
+    rewardId: "reward_local",
+    twitchRewardId: "reward_twitch",
+    rewardTitle: "Request a song",
+    userId: "viewer_one",
+    userLogin: "viewer_demo",
+    userName: "Viewer Demo",
+    userInput: "spotify:track:glassharbor01",
+    redeemedAt: now,
+    providerModuleId: "song_requests",
+    providerActionId: "request-song",
+  }, now);
+  // A pending action leaves its claim time behind, so a push resolution has to cope with a fresh lease.
+  await repository.updateRedemption(channelId, id, {
+    status: "pending", pendingTwitchStatus: null, outcomeReason: null, claimedAt: new Date().toISOString(),
+  }, ["received"], now);
+};
+
 describe("channel points redemption flow on local D1", () => {
   const sendChat = vi.fn();
   const context = { DB: database, environment, channelId, sendChat } as unknown as ModuleExecutionContext;
@@ -142,6 +209,204 @@ describe("channel points redemption flow on local D1", () => {
     expect(mocks.update.mock.calls[0]?.[4]).toBe("FULFILLED");
     await expect(repository.getRedemption(channelId, "redemption_duplicate"))
       .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+  });
+
+  it.each([
+    ["FULFILLED", "fulfilled"],
+    ["CANCELED", "refunded"],
+  ] as const)("pushes a pending redemption to Twitch as %s", async (status, localStatus) => {
+    const id = `redemption_push_${status.toLowerCase()}`;
+    await repository.latchRedemption(channelId, {
+      id,
+      rewardId: "reward_local",
+      twitchRewardId: "reward_twitch",
+      rewardTitle: "Request a song",
+      userId: "viewer_one",
+      userLogin: "viewer_demo",
+      userName: "Viewer Demo",
+      userInput: "spotify:track:glassharbor01",
+      redeemedAt: now,
+      providerModuleId: "song_requests",
+      providerActionId: "request-song",
+    }, now);
+    await repository.updateRedemption(channelId, id, {
+      status: "pending", pendingTwitchStatus: null, outcomeReason: null, claimedAt: new Date().toISOString(),
+    }, ["received"], now);
+
+    await expect(channelPointsLifecycleAlarm.handle(
+      lifecycleContext(), CHANNEL_POINTS_LIFECYCLE_ALARM, Date.now(), undefined,
+      { kind: "redemption.resolve", id, status },
+    )).resolves.toBe(true);
+
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.update.mock.calls[0]?.[4]).toBe(status);
+    await expect(repository.getRedemption(channelId, id)).resolves.toMatchObject({
+      status: localStatus, pendingTwitchStatus: null,
+    });
+    await expect(providerResolutionDue(id)).resolves.toBeNull();
+  });
+
+  it.each([
+    ["canceled", "rejected", "CANCELED"],
+    ["fulfilled", "removed", "FULFILLED"],
+  ] as const)("closes the song ledger on an external Twitch %s without another PATCH", async (eventStatus, requestState, dueStatus) => {
+    const id = `redemption_external_${eventStatus}`;
+    await seedSongRequest(id);
+    await seedSongProviderRedemption(id);
+    const original = redemptionEvent(id);
+    const event: ModuleEvent = {
+      ...original,
+      subscriptionType: "channel.channel_points_custom_reward_redemption.update",
+      payload: { ...original.payload, status: eventStatus },
+    };
+
+    await channelPointsLifecycleAlarm.handle(
+      lifecycleContext(), CHANNEL_POINTS_LIFECYCLE_ALARM, Date.now(), undefined,
+      { kind: "event", event },
+    );
+
+    expect(mocks.update).not.toHaveBeenCalled();
+    await expect(database.prepare("SELECT state, refund_due, channel_points_resolution_due FROM song_requests WHERE id=?")
+      .bind(id).first()).resolves.toEqual({
+      state: requestState, refund_due: 0, channel_points_resolution_due: null,
+    });
+    await expect(repository.getRedemption(channelId, id)).resolves.toMatchObject({
+      status: dueStatus === "FULFILLED" ? "fulfilled" : "refunded",
+    });
+    await expect(providerResolutionDue(id)).resolves.toBeNull();
+  });
+
+  it("refunds a song request from the generic reward queue once and lets the provider close its ledger row", async () => {
+    const id = "redemption_operator_refund_song";
+    await seedSongRequest(id);
+    await seedSongProviderRedemption(id);
+    // Operators can only act on a pending row once its action lease has lapsed.
+    await database.prepare("UPDATE channel_points_redemptions SET claimed_at=NULL WHERE channel_id=? AND redemption_id=?")
+      .bind(channelId, id).run();
+
+    await expect(channelPointsLifecycleAlarm.handle(
+      lifecycleContext(), CHANNEL_POINTS_LIFECYCLE_ALARM, Date.now(), undefined,
+      { kind: "redemption.refund", id, now, actor: { userId: channelId } },
+    )).resolves.toMatchObject({ ok: true, status: "refunded" });
+
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.update.mock.calls[0]?.[4]).toBe("CANCELED");
+    await expect(database.prepare("SELECT state, refund_due, channel_points_resolution_due FROM song_requests WHERE id=?")
+      .bind(id).first()).resolves.toEqual({ state: "rejected", refund_due: 0, channel_points_resolution_due: null });
+    await expect(repository.getRedemption(channelId, id)).resolves.toMatchObject({ status: "refunded" });
+    await expect(providerResolutionDue(id)).resolves.toBeNull();
+  });
+
+  it("sends one Twitch PATCH while an earlier push resolution is still in flight", async () => {
+    const id = "redemption_overlapping_push";
+    await seedSongRequest(id);
+    await seedSongProviderRedemption(id);
+    const resolve = () => channelPointsLifecycleAlarm.handle(
+      lifecycleContext(), CHANNEL_POINTS_LIFECYCLE_ALARM, Date.now(), undefined,
+      { kind: "redemption.resolve", id, status: "CANCELED" },
+    );
+
+    let releasePatch: () => void = () => {};
+    mocks.update.mockImplementationOnce(() => new Promise((done) => {
+      releasePatch = () => { done({ ok: true, data: [] }); };
+    }));
+    const first = resolve();
+    await vi.waitFor(() => { expect(mocks.update).toHaveBeenCalledTimes(1); });
+
+    // The first PATCH is still in flight and holds the claim.
+    await expect(resolve()).resolves.toBe(false);
+    releasePatch();
+    await expect(first).resolves.toBe(true);
+
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    await expect(repository.getRedemption(channelId, id)).resolves.toMatchObject({ status: "refunded" });
+  });
+
+  it("lets exactly one of a concurrent approve and reject win and persists only the winner's obligation", async () => {
+    const id = "redemption_decision_race";
+    await seedSongRequest(id);
+    const base = { channelId, requestId: id, fromState: "pending_review", now } as const;
+
+    const [approved, rejected] = await Promise.all([
+      transitionRequest(database, { ...base, toState: "approved" }),
+      transitionRequest(database, { ...base, toState: "rejected", failureReason: "rejected_by_moderator" }),
+    ]);
+
+    expect([approved, rejected].filter(Boolean)).toHaveLength(1);
+    await expect(database.prepare("SELECT state, channel_points_resolution_due FROM song_requests WHERE id=?")
+      .bind(id).first()).resolves.toEqual(rejected
+      ? { state: "rejected", channel_points_resolution_due: "CANCELED" }
+      : { state: "approved", channel_points_resolution_due: null });
+  });
+
+  it("refuses a moderator approval after Twitch canceled the redemption", async () => {
+    const id = "redemption_cancel_before_approve";
+    await seedSongRequest(id);
+    await seedSongProviderRedemption(id);
+    const original = redemptionEvent(id);
+    await channelPointsLifecycleAlarm.handle(lifecycleContext(), CHANNEL_POINTS_LIFECYCLE_ALARM, Date.now(), undefined, {
+      kind: "event",
+      event: {
+        ...original,
+        subscriptionType: "channel.channel_points_custom_reward_redemption.update",
+        payload: { ...original.payload, status: "canceled" },
+      },
+    });
+
+    await expect(transitionRequest(database, {
+      channelId, requestId: id, fromState: "pending_review", toState: "approved", now,
+    })).resolves.toBe(false);
+
+    expect(mocks.update).not.toHaveBeenCalled();
+    await expect(database.prepare("SELECT state, channel_points_resolution_due FROM song_requests WHERE id=?")
+      .bind(id).first()).resolves.toEqual({ state: "rejected", channel_points_resolution_due: null });
+  });
+
+  it("retries a persisted Twitch obligation after the ledger transition committed but the PATCH failed", async () => {
+    const id = "redemption_crash_after_transition";
+    await seedSongRequest(id);
+    await seedSongProviderRedemption(id);
+    // The ledger committed the rejection and its obligation; the process died before any Twitch call.
+    await transitionRequest(database, {
+      channelId, requestId: id, fromState: "pending_review", toState: "rejected",
+      failureReason: "rejected_by_moderator", now,
+    });
+    await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id=? AND module_id='song_requests'")
+      .bind(channelId).run();
+    const alarmContext = {
+      DB: database,
+      channelId,
+      schedule: vi.fn(() => Promise.resolve()),
+      clear: vi.fn(() => Promise.resolve()),
+      channelPoints: {
+        resolveRedemption: async (operationId: string, status: "FULFILLED" | "CANCELED") => await channelPointsLifecycleAlarm.handle(
+          lifecycleContext(), CHANNEL_POINTS_LIFECYCLE_ALARM, Date.now(), undefined,
+          { kind: "redemption.resolve", id: operationId, status },
+        ) === true,
+        readRedemptionStatus: () => Promise.resolve("UNFULFILLED" as const),
+      },
+    } as unknown as ModuleAlarmContext;
+    const obligation = () => database.prepare("SELECT channel_points_resolution_due AS due FROM song_requests WHERE id=?")
+      .bind(id).first<{ due: string | null }>();
+    mocks.update.mockResolvedValueOnce({ ok: false, reason: "unknown_status" });
+
+    await handleSongRequestsSettingsChanged(alarmContext);
+    await expect(obligation()).resolves.toEqual({ due: "CANCELED" });
+
+    // The lease of the failed PATCH expires; Twitch still lists the redemption as open.
+    await database.prepare("UPDATE channel_points_redemptions SET claimed_at='2000-01-01T00:00:00.000Z' WHERE channel_id=? AND redemption_id=?")
+      .bind(channelId, id).run();
+    mocks.list.mockResolvedValue({ ok: true, data: [helixRedemption(id, "UNFULFILLED", "reward_twitch", "Request a song")] });
+    await channelPointsLifecycleAlarm.handle(
+      lifecycleContext(), CHANNEL_POINTS_LIFECYCLE_ALARM, Date.now(), undefined, { kind: "retry" },
+    );
+    await handleSongRequestsSettingsChanged(alarmContext);
+    await handleSongRequestsSettingsChanged(alarmContext);
+
+    await expect(obligation()).resolves.toEqual({ due: null });
+    await expect(repository.getRedemption(channelId, id)).resolves.toMatchObject({ status: "refunded" });
+    expect(mocks.update).toHaveBeenCalledTimes(2);
+    expect(mocks.update.mock.calls.every((call) => call[4] === "CANCELED")).toBe(true);
   });
 
   it("keeps a Twitch terminal event when an older action PATCH finishes afterward", async () => {

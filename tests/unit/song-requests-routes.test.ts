@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleAlarmContext, ModuleChatVoteStartRequest, ModuleRouteEnvironment } from "../../src/modules/contract";
+import { transitionRequest } from "../../src/modules/song_requests/adapters/d1";
 import { songRequestsRoutes } from "../../src/modules/song_requests/routes";
 import { handleSongRequestDurableAction, spotifyAccessToken } from "../../src/modules/song_requests/service";
 import { beginSpotifyOAuth, spotifyOAuthStateCookie } from "../../src/worker/auth/spotify-oauth";
@@ -29,6 +30,62 @@ afterEach(() => {
 });
 
 describe("song request routes", () => {
+  it("does not offer a Twitch refund for a fulfilled channel-point request", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    await insertChannel(database, CHANNEL_ID);
+    const requestId = "channel-points-already-submitted";
+    const db = database as unknown as D1Database;
+    const track = spotifyTrack(TRACK_IDS[0] ?? "glassharbor01");
+    await transitionRequest(db, {
+      channelId: CHANNEL_ID,
+      requestId,
+      fromState: null,
+      toState: "approved",
+      now: "2026-11-16T19:00:00.000Z",
+      newRequest: {
+        source: "channel_points",
+        requestType: "channel_points",
+        channelPointsRewardId: "reward-fictional",
+        track: {
+          id: track.id,
+          uri: track.uri,
+          title: track.name,
+          artists: track.artists.map(({ name }) => name),
+          durationMs: track.duration_ms,
+          explicit: track.explicit,
+          coverUrl: null,
+          spotifyUrl: track.external_urls.spotify,
+        },
+        operationId: requestId,
+        streamId: "stream-fictional-current",
+      },
+    });
+    await transitionRequest(db, {
+      channelId: CHANNEL_ID, requestId, fromState: "approved", toState: "submitting", now: "2026-11-16T19:01:00.000Z",
+    });
+    await transitionRequest(db, {
+      channelId: CHANNEL_ID, requestId, fromState: "submitting", toState: "submitted", now: "2026-11-16T19:02:00.000Z",
+    });
+
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "operator");
+      await next();
+    });
+    app.route("/channels/:channelId", songRequestsRoutes);
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests/${requestId}/remove`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refund: true }),
+    }), { DB: db });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "song_request_channel_points_already_fulfilled" });
+    await expect(database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(requestId).first())
+      .resolves.toEqual({ state: "submitted" });
+  });
+
   it("starts reconnect OAuth without deleting the current Spotify credentials", async () => {
     const database = new TestD1Database();
     databases.push(database);

@@ -51,8 +51,24 @@ import type {
 import { withBroadcasterToken, type BroadcasterTokenResult } from "../auth/broadcaster-token";
 import { helixRequest } from "./helix";
 
-const REWARDS_URL = "https://api.twitch.tv/helix/channel_points/custom_rewards";
-const REDEMPTIONS_URL = "https://api.twitch.tv/helix/channel_points/custom_rewards/redemptions";
+declare global {
+  interface Env {
+    TWITCH_API_BASE?: string;
+  }
+}
+
+const configuredHelixBase = (environment: Env): string => {
+  const fallback = "https://api.twitch.tv";
+  if (environment.APP_ENV !== "local" || environment.TWITCH_API_BASE === undefined) return fallback;
+  const base = new URL(environment.TWITCH_API_BASE);
+  if ((base.protocol !== "https:" && base.protocol !== "http:") || base.username !== "" || base.password !== "") {
+    throw new Error("Twitch endpoint override is invalid.");
+  }
+  return base.toString().replace(/\/+$/u, "");
+};
+
+const rewardsUrl = (environment: Env): string => `${configuredHelixBase(environment)}/helix/channel_points/custom_rewards`;
+const redemptionsUrl = (environment: Env): string => `${configuredHelixBase(environment)}/helix/channel_points/custom_rewards/redemptions`;
 const nullableString = z.string().nullish().transform((value) => value ?? null);
 const nullableInteger = z.number().int().nullish().transform((value) => value ?? null);
 const rewardSchema = z.object({
@@ -174,7 +190,7 @@ export const getManageableRewards = async (
   const cursors = new Set<string>();
   for (let page = 0; page < 100; page += 1) {
     const current = await request({
-      environment, broadcasterId, scope: "channel:read:redemptions", url: REWARDS_URL,
+      environment, broadcasterId, scope: "channel:read:redemptions", url: rewardsUrl(environment),
       query: { broadcaster_id: broadcasterId, only_manageable_rewards: "true", first: "50", after },
       schema: rewardsPageSchema, authorize, fetcher,
     });
@@ -191,7 +207,7 @@ export const getManageableRewards = async (
 export const createCustomReward = (
   environment: Env, broadcasterId: string, input: ChannelPointsRewardInput, authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
 ): Promise<ChannelPointsHelixResult<HelixCustomReward[]>> => request({
-  environment, broadcasterId, scope: "channel:manage:redemptions", url: REWARDS_URL, method: "POST",
+  environment, broadcasterId, scope: "channel:manage:redemptions", url: rewardsUrl(environment), method: "POST",
   query: { broadcaster_id: broadcasterId }, body: payloadFromInput(input), schema: rewardsEnvelopeSchema, authorize, fetcher,
 });
 
@@ -199,7 +215,7 @@ export const updateCustomReward = (
   environment: Env, broadcasterId: string, rewardId: string, input: ChannelPointsRewardInput,
   authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
 ): Promise<ChannelPointsHelixResult<HelixCustomReward[]>> => request({
-  environment, broadcasterId, scope: "channel:manage:redemptions", url: REWARDS_URL, method: "PATCH",
+  environment, broadcasterId, scope: "channel:manage:redemptions", url: rewardsUrl(environment), method: "PATCH",
   query: { broadcaster_id: broadcasterId, id: rewardId }, body: payloadFromInput(input),
   schema: rewardsEnvelopeSchema, authorize, fetcher,
 });
@@ -207,7 +223,7 @@ export const updateCustomReward = (
 export const deleteCustomReward = (
   environment: Env, broadcasterId: string, rewardId: string, authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
 ): Promise<ChannelPointsHelixResult<unknown[]>> => request({
-  environment, broadcasterId, scope: "channel:manage:redemptions", url: REWARDS_URL, method: "DELETE",
+  environment, broadcasterId, scope: "channel:manage:redemptions", url: rewardsUrl(environment), method: "DELETE",
   query: { broadcaster_id: broadcasterId, id: rewardId }, schema: emptyResponseSchema, authorize, fetcher,
 });
 
@@ -216,7 +232,7 @@ export const setCustomRewardEnabled = async (
   authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
 ): Promise<ChannelPointsHelixResult<HelixCustomReward[]>> => {
   return request({
-    environment, broadcasterId, scope: "channel:manage:redemptions", url: REWARDS_URL, method: "PATCH",
+    environment, broadcasterId, scope: "channel:manage:redemptions", url: rewardsUrl(environment), method: "PATCH",
     query: { broadcaster_id: broadcasterId, id: rewardId }, body: { is_enabled: enabled },
     schema: rewardsEnvelopeSchema, authorize, fetcher,
   });
@@ -227,7 +243,7 @@ export const updateRedemptionStatus = async (
   status: TwitchRedemptionStatus, authorize: () => Promise<boolean>, fetcher: typeof fetch = fetch,
 ): Promise<ChannelPointsHelixResult<unknown[]>> => {
   if (redemptionIds.length < 1 || redemptionIds.length > 50) return { ok: false, reason: "invalid_input" };
-  const url = new URL(REDEMPTIONS_URL);
+  const url = new URL(redemptionsUrl(environment));
   url.searchParams.set("broadcaster_id", broadcasterId);
   url.searchParams.set("reward_id", rewardId);
   for (const id of redemptionIds) url.searchParams.append("id", id);
@@ -245,7 +261,7 @@ export const listUnfulfilledRedemptions = async (
   const cursors = new Set<string>();
   for (let page = 0; page < 100; page += 1) {
     const current = await request({
-      environment, broadcasterId, scope: "channel:read:redemptions", url: REDEMPTIONS_URL,
+      environment, broadcasterId, scope: "channel:read:redemptions", url: redemptionsUrl(environment),
       query: { broadcaster_id: broadcasterId, reward_id: rewardId, status: "UNFULFILLED", first: "50", after },
       schema: redemptionPageSchema, authorize, fetcher,
     });
@@ -269,7 +285,7 @@ export const listRedemptionsByIds = async (
   let after: string | undefined;
   const cursors = new Set<string>();
   for (let page = 0; page < 100; page += 1) {
-    const url = new URL(REDEMPTIONS_URL);
+    const url = new URL(redemptionsUrl(environment));
     for (const id of redemptionIds) url.searchParams.append("id", id);
     url.searchParams.set("broadcaster_id", broadcasterId);
     url.searchParams.set("reward_id", rewardId);

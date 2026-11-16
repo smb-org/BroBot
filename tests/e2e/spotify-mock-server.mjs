@@ -25,11 +25,22 @@ const tracks = [
 ];
 let queue = [];
 let current = null;
+const redemptions = new Map();
 
 const json = (response, status, value) => {
   response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   response.end(JSON.stringify(value));
 };
+
+const readJson = (request) => new Promise((resolve, reject) => {
+  let body = "";
+  request.setEncoding("utf8");
+  request.on("data", (chunk) => { body += chunk; });
+  request.on("end", () => {
+    try { resolve(JSON.parse(body)); } catch (error) { reject(error); }
+  });
+  request.on("error", reject);
+});
 
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
@@ -41,8 +52,48 @@ const server = createServer((request, response) => {
   if (url.pathname === "/__test/reset" && request.method === "POST") {
     queue = [];
     current = null;
+    redemptions.clear();
     response.writeHead(204);
     response.end();
+    return;
+  }
+  if (url.pathname === "/__test/redemptions" && request.method === "POST") {
+    void readJson(request).then((value) => {
+      if (typeof value !== "object" || value === null || typeof value.id !== "string" ||
+          typeof value.status !== "string" || !["UNFULFILLED", "FULFILLED", "CANCELED"].includes(value.status)) {
+        json(response, 400, { error: "redemption_invalid" });
+        return;
+      }
+      redemptions.set(value.id, value);
+      json(response, 201, { accepted: true });
+    }).catch(() => json(response, 400, { error: "redemption_invalid" }));
+    return;
+  }
+  if (url.pathname === "/__test/redemptions" && request.method === "GET") {
+    json(response, 200, { items: [...redemptions.values()].map(({ id, status }) => ({ id, status })) });
+    return;
+  }
+  if (url.pathname === "/helix/channel_points/custom_rewards/redemptions" && request.method === "GET") {
+    const ids = url.searchParams.getAll("id");
+    json(response, 200, { data: ids.flatMap((id) => {
+      const redemption = redemptions.get(id);
+      return redemption === undefined ? [] : [redemption];
+    }), pagination: {} });
+    return;
+  }
+  if (url.pathname === "/helix/channel_points/custom_rewards/redemptions" && request.method === "PATCH") {
+    void readJson(request).then((value) => {
+      if (typeof value !== "object" || value === null ||
+          (value.status !== "FULFILLED" && value.status !== "CANCELED")) {
+        json(response, 400, { error: "redemption_status_invalid" });
+        return;
+      }
+      for (const id of url.searchParams.getAll("id")) {
+        const redemption = redemptions.get(id);
+        if (redemption !== undefined) redemptions.set(id, { ...redemption, status: value.status });
+      }
+      json(response, 200, { data: [] });
+    }).catch(() => json(response, 400, { error: "redemption_status_invalid" }));
     return;
   }
   if (url.pathname === "/authorize" && request.method === "GET") {

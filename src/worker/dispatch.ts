@@ -1452,6 +1452,22 @@ export const dispatchEventSubNotification = async (
             points,
             tempVips: moduleTempVips(environment.CHANNEL, event.channelId),
             ...(moduleChannelNamespace === undefined ? {} : {
+              channelPoints: {
+                resolveRedemption: async (operationId, status) => await Promise.resolve<unknown>(moduleChannelNamespace
+                  .get(moduleChannelNamespace.idFromName(event.channelId))
+                  .runModuleAlarm("channel_points", "serialized-lifecycle", "channel-points",
+                    { kind: "redemption.resolve", id: operationId, status })) === true,
+                readRedemptionStatus: async (operationId) => {
+                  const status = await Promise.resolve<unknown>(moduleChannelNamespace
+                    .get(moduleChannelNamespace.idFromName(event.channelId))
+                    .runModuleAlarm("channel_points", "serialized-lifecycle", "channel-points",
+                      { kind: "redemption.status", id: operationId }));
+                  return status === "UNFULFILLED" || status === "FULFILLED" || status === "CANCELED"
+                    ? status : "unavailable";
+                },
+              },
+            }),
+            ...(moduleChannelNamespace === undefined ? {} : {
               overlayAlertQueue: {
                 enqueue: (operationId, alert) => moduleChannelNamespace.get(moduleChannelNamespace.idFromName(event.channelId))
                   .enqueueOverlayAlert(operationId, alert),
@@ -1516,6 +1532,12 @@ export const dispatchEventSubNotification = async (
                   ownerRevision, streamGeneration, identity, planSequence);
               }
             },
+            scheduleAlarmIfEarlier: async (handlerKey, alarmKey, deadline, ownerRevision, streamGeneration, identity, planSequence) => {
+              if (environment.CHANNEL === undefined) return;
+              await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId))
+                .scheduleModuleAlarmIfEarlier(module.id, handlerKey, alarmKey, deadline,
+                  ownerRevision, streamGeneration, identity, planSequence);
+            },
             clearAlarm: async (alarmKey, ownerRevision, streamGeneration, expectedIdentity, planSequence) => {
               if (environment.CHANNEL === undefined) return;
               const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId));
@@ -1572,6 +1594,12 @@ export const dispatchEventSubNotification = async (
             if (environment.CHANNEL === undefined) return;
             await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId))
               .scheduleModuleAlarm(moduleId, handlerKey, alarmKey, deadline, ownerRevision, streamGeneration, identity, planSequence);
+          },
+          scheduleAlarmIfEarlier: async (handlerKey, alarmKey, deadline, ownerRevision, streamGeneration, identity, planSequence) => {
+            if (environment.CHANNEL === undefined) return;
+            await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId))
+              .scheduleModuleAlarmIfEarlier(moduleId, handlerKey, alarmKey, deadline,
+                ownerRevision, streamGeneration, identity, planSequence);
           },
           clearAlarm: async (alarmKey, ownerRevision, streamGeneration, identity, planSequence) => {
             if (environment.CHANNEL === undefined) return;

@@ -245,6 +245,8 @@ describe("song request offline rounds", () => {
       context.set("channelRole", "operator");
       context.set("points", () => harness.points);
       context.set("publishModuleOverlayMessage", publish);
+      context.set("scheduleModuleAlarm", vi.fn(() => Promise.resolve()));
+      context.set("runModuleAlarm", vi.fn(() => Promise.resolve()));
       await next();
     });
     app.route("/channels/:channelId", songRequestsRoutes);

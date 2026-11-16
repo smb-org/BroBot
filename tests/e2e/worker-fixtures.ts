@@ -42,6 +42,7 @@ export const e2eWorkerEnvironment: Record<string, string> = {
   SPOTIFY_CLIENT_SECRET: "e2e-spotify-client-secret",
   SPOTIFY_API_BASE: `http://127.0.0.1:${e2eSpotifyMockPort}/v1`,
   SPOTIFY_ACCOUNTS_BASE: `http://127.0.0.1:${e2eSpotifyMockPort}`,
+  TWITCH_API_BASE: `http://127.0.0.1:${e2eSpotifyMockPort}`,
 };
 
 interface SeededE2EOverlay {
@@ -201,6 +202,43 @@ export const seedE2ESongRequests = (channelId: string, settings: Readonly<Record
     env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
   });
   if (result.status !== 0) throw new Error(`Song request e2e setup failed.\n${result.stdout}\n${result.stderr}`);
+  return overlay;
+};
+
+/** Seeds an automatic channel-points reward provider and a valid broadcaster token for lifecycle calls. */
+export const seedE2EChannelPointsSongRequests = (
+  channelId: string,
+  settings: Readonly<Record<string, unknown>> = {},
+): SeededE2EOverlay => {
+  const overlay = seedE2ESongRequests(channelId, settings);
+  const createdAt = new Date().toISOString();
+  const accessToken = encryptJson({ token: "fictional-twitch-access-token" }, e2eWorkerEnvironment.TOKEN_ENCRYPTION_KEYS ?? "");
+  const refreshToken = encryptJson({ token: "fictional-twitch-refresh-token" }, e2eWorkerEnvironment.TOKEN_ENCRYPTION_KEYS ?? "");
+  const tokenScopes = JSON.stringify(["channel:read:redemptions", "channel:manage:redemptions"]);
+  const sql = `
+    INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision)
+      VALUES ('${channelId}', 'channel_points', 1, '{}', 1);
+    INSERT INTO twitch_login_identity
+      (user_id, login, scopes_json, token_scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+       expires_at, status, created_at, updated_at)
+      VALUES ('${channelId}', '${overlay.channelLogin}', '[]', '${tokenScopes}', '${accessToken}', '${refreshToken}',
+        '2099-01-01T00:00:00.000Z', 'connected', '${createdAt}', '${createdAt}');
+    INSERT INTO channel_points_rewards
+      (channel_id, id, twitch_reward_id, title, prompt, cost, background_color, is_user_input_required,
+       global_cooldown_seconds, max_per_stream, max_per_user_per_stream, action_module_id, action_id,
+       action_config_json, mode, enabled, twitch_state, created_at, updated_at)
+      VALUES ('${channelId}', 'reward-song-request-${channelId}', 'reward-twitch-${channelId}', 'Request a song',
+        'Enter a track', 500, NULL, 1, NULL, NULL, NULL, 'song_requests', 'request-song', '{}',
+        'auto', 1, 'active', '${createdAt}', '${createdAt}');
+  `;
+  const result = spawnSync("./node_modules/.bin/wrangler", [
+    "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes",
+    "--persist-to", e2eWorkerPersist, "--command", sql,
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
+  });
+  if (result.status !== 0) throw new Error(`Channel-points song request setup failed.\n${result.stdout}\n${result.stderr}`);
   return overlay;
 };
 
