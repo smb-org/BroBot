@@ -153,7 +153,7 @@ describe("song request admission on D1", () => {
 
   it("admits an older channel-points request after a newer request has already passed admission", async () => {
     const customSettings = songRequestsSettingsSchema.parse({ rules: {
-      duplicateEnabled: true,
+      duplicateEnabled: false,
       songCooldownEnabled: true,
       songCooldownMinutes: 60,
       personCooldownEnabled: true,
@@ -214,6 +214,25 @@ describe("song request admission on D1", () => {
     expect((await admitSongRequest(database, newer)).accepted).toBe(true);
     expect((await admitSongRequest(database, older)).accepted).toBe(false);
     expect((await songRequestAdmissionFailure(database, older)).code).toBe("channel_open_limit");
+  });
+
+  it("rejects an older retried request for a track a newer request already queued", async () => {
+    const customSettings = songRequestsSettingsSchema.parse({ rules: {
+      duplicateEnabled: true,
+      songCooldownEnabled: false,
+      personCooldownEnabled: false,
+      personOpenLimitEnabled: false,
+      personRoundLimitEnabled: false,
+      channelOpenLimitEnabled: false,
+      artistOpenLimitEnabled: false,
+    } });
+    await configure(customSettings);
+    const older = { ...requestInput(186, customSettings), now: "2026-11-15T19:59:00.000Z" };
+    const newer = { ...requestInput(187, customSettings), track: older.track, now: "2026-11-15T20:00:00.000Z" };
+
+    expect((await admitSongRequest(database, newer)).accepted).toBe(true);
+    expect((await admitSongRequest(database, older)).accepted).toBe(false);
+    expect((await songRequestAdmissionFailure(database, older)).code).toBe("already_requested");
   });
 
   it("rejects an in-order channel-points request inside the reward cooldown window", async () => {

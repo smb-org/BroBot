@@ -372,7 +372,6 @@ export const admitSongRequest = async (
           SELECT 1 FROM song_requests AS prior
            WHERE prior.channel_id = ? AND prior.round_id = ? AND prior.track_id = ?
              AND ${OPEN_OR_PLAYING_REQUEST_SQL}
-             AND prior.created_at <= ${REQUEST_TIME_SQL}
         ))
         AND (? = 0 OR NOT EXISTS (
           SELECT 1 FROM song_requests AS prior
@@ -481,9 +480,9 @@ export const songRequestAdmissionFailure = async (
     const duplicate = await db.prepare(
       `SELECT prior.id, prior.created_at FROM song_requests AS prior
         WHERE prior.channel_id = ? AND prior.round_id = ? AND prior.track_id = ?
-          AND ${OPEN_OR_PLAYING_REQUEST_SQL} AND ${NOT_AFTER_REQUEST_SQL}
+          AND ${OPEN_OR_PLAYING_REQUEST_SQL}
         ORDER BY prior.created_at, prior.id LIMIT 1`,
-    ).bind(input.channelId, input.roundId, input.track.id, ...requestTimeBound(input))
+    ).bind(input.channelId, input.roundId, input.track.id)
       .first<{ id: string; created_at: string }>();
     if (duplicate !== null) {
       const row = await db.prepare(
