@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 
 import { Switch as SwitchPrimitive } from "./primitives/switch";
 import { LockedReason } from "./LockedReason";
@@ -14,9 +14,11 @@ export interface SwitchRowProps {
   disabled?: boolean;
   pending?: boolean;
   lockedReason?: string;
+  /** Optional value control rendered between the label and the switch, for one-line rules. */
+  control?: ReactNode;
 }
 
-export function SwitchRow({ label, ariaLabel, description, hint, checked, onChange, invalid = false, disabled = false, pending = false, lockedReason }: SwitchRowProps) {
+export function SwitchRow({ control, label, ariaLabel, description, hint, checked, onChange, invalid = false, disabled = false, pending = false, lockedReason }: SwitchRowProps) {
   const id = useId();
   const labelId = `${id}-label`;
   const descriptionId = `${id}-description`;
@@ -30,6 +32,7 @@ export function SwitchRow({ label, ariaLabel, description, hint, checked, onChan
       <strong id={labelId}>{label}</strong>
       {description === undefined ? null : <small id={descriptionId}>{description}</small>}
     </span>
+    {control === undefined ? null : <span className="ui-switch-row__control">{control}</span>}
     <SwitchPrimitive
       aria-label={ariaLabel}
       aria-labelledby={ariaLabel === undefined ? labelId : undefined}

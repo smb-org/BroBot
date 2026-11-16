@@ -1,6 +1,6 @@
 export const songRequestsActionTexts = {
   de: {
-    name: "Song-Abstimmung starten", search: "Spotify-Suche", query: "Song, Spotify-Link oder URI", searchButton: "Suchen",
+    name: "Song-Abstimmung starten", queueName: "Song-Warteschlange", search: "Spotify-Suche", query: "Song, Spotify-Link oder URI", searchButton: "Suchen",
     add: "Hinzufügen", addTrack: (title: string) => `${title} hinzufügen`, added: "Hinzugefügt",
     candidate: "Kandidat", removeTrack: (title: string) => `${title} aus den Kandidaten entfernen`,
     selected: "Kandidaten", emptyCandidates: "Noch keine Kandidaten", emptyResults: "Keine Songs gefunden.",
@@ -9,7 +9,7 @@ export const songRequestsActionTexts = {
     error: "Song-Abstimmung konnte nicht gestartet werden.", busy: "Es läuft bereits eine Abstimmung.",
   },
   en: {
-    name: "Start song vote", search: "Spotify search", query: "Track, Spotify link, or URI", searchButton: "Search",
+    name: "Start song vote", queueName: "Song request queue", search: "Spotify search", query: "Track, Spotify link, or URI", searchButton: "Search",
     add: "Add", addTrack: (title: string) => `Add ${title}`, added: "Added",
     candidate: "Candidate", removeTrack: (title: string) => `Remove ${title} from candidates`,
     selected: "Candidates", emptyCandidates: "No candidates yet", emptyResults: "No tracks found.",

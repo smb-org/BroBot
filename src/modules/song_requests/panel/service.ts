@@ -1,3 +1,5 @@
+import type { SongRequestsSettings } from "../contracts";
+
 const route = (channelId: string, part: string): string => `/api/channels/${encodeURIComponent(channelId)}/modules/song_requests/${part}`;
 
 /** Module-owned JSON request; mutations fetch a CSRF token first. Failures throw an Error whose message is the API error code. */
@@ -25,11 +27,10 @@ export const request = async <T,>(channelId: string, part: string, method = "GET
   return await response.json<T>();
 };
 
-interface SongRequestsSettings { emptyText: string }
 export interface SongRequestsSettingsRead { settings: SongRequestsSettings; revision: number }
 
 export const readSettings = (channelId: string, signal?: AbortSignal): Promise<SongRequestsSettingsRead> =>
   request<SongRequestsSettingsRead>(channelId, "settings", "GET", undefined, signal);
 
-export const saveSettings = (channelId: string, revision: number, emptyText: string): Promise<SongRequestsSettingsRead> =>
-  request<SongRequestsSettingsRead>(channelId, "settings", "PATCH", { revision, settings: { emptyText } });
+export const saveSettings = (channelId: string, revision: number, settings: SongRequestsSettings): Promise<SongRequestsSettingsRead> =>
+  request<SongRequestsSettingsRead>(channelId, "settings", "PATCH", { revision, settings });

@@ -1723,6 +1723,7 @@ describe("panel resource revisions", () => {
         "faq_entry_user_cooldowns",
         "faq_order_revision",
         "oauth_transactions",
+        "song_requests_offline_rounds",
         "panel_event_log_retention_resources",
         "panel_global_resource_revisions",
         "panel_global_resource_publications",

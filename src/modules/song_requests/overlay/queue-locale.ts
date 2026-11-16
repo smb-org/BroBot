@@ -1,0 +1,26 @@
+export const songRequestQueueTexts = {
+  de: {
+    name: "Song-Wunschliste",
+    title: "Song-Wünsche",
+    requesterVote: "Song-Abstimmung",
+    requesterUnknown: "Zuschauer",
+    typePoints: "Bot-Punkte",
+    typeFree: "Kostenlos",
+    typeChannelPoints: "Kanalpunkte",
+    typeVote: "Abstimmung",
+    description: "Zeigt die Song-Wunschliste aus BroBots Ledger.",
+    moduleLabel: "Song-Wünsche",
+  },
+  en: {
+    name: "Song request queue",
+    title: "Song requests",
+    requesterVote: "Song vote",
+    requesterUnknown: "Viewer",
+    typePoints: "Bot points",
+    typeFree: "Free",
+    typeChannelPoints: "Channel points",
+    typeVote: "Vote",
+    description: "Shows the song request list from BroBot's ledger.",
+    moduleLabel: "Song requests",
+  },
+} as const;

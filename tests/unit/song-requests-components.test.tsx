@@ -5,10 +5,12 @@ import { DashboardDataProvider } from "../../src/dashboard/data/provider";
 import SongRequestsPanel from "../../src/modules/song_requests/panel";
 import SongRequestsNowPlaying from "../../src/modules/song_requests/overlay/view";
 import SongRequestsNowPlayingEditor from "../../src/modules/song_requests/overlay/editor";
+import { songRequestsSettingsSchema } from "../../src/modules/song_requests/contracts";
 
 const track = { id: "glassharbor01", title: "Glass Harbor", artists: ["Mira Vale"], coverUrl: "https://i.scdn.co/image/fictional-cover", spotifyUrl: "https://open.spotify.com/track/glassharbor01" };
 const urlOf = (input: RequestInfo | URL): URL => new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.origin);
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status });
+const settings = (emptyText = "") => songRequestsSettingsSchema.parse({ emptyText });
 const renderPanel = (): void => {
   render(<DashboardDataProvider><SongRequestsPanel channelId="channel-fictional" language="en" canManage canOperate /></DashboardDataProvider>);
 };
@@ -80,9 +82,9 @@ describe("song request components", () => {
     const hasCredentials = enabled && state !== "not_connected";
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
-      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled, hasCredentials, slot: enabled ? 2 : null, state, errorMessage: errorMessage ?? null, streamId: null, emptyText: "" }));
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled, hasCredentials, slot: enabled ? 2 : null, state, errorMessage: errorMessage ?? null, streamId: null, emptyText: "", pointsEnabled: true }));
       if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
-      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: { emptyText: "Pick a song" }, revision: 3 }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings("Pick a song"), revision: 3 }));
       return Promise.resolve(json({}));
     }));
     renderPanel();
@@ -98,9 +100,9 @@ describe("song request components", () => {
   it("shows the no-results empty state only after a search returns no tracks", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
-      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "" }));
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
       if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
-      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: { emptyText: "" }, revision: 3 }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 3 }));
       if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: [] }));
       return Promise.resolve(json({}));
     }));
@@ -116,9 +118,9 @@ describe("song request components", () => {
   it("submits Spotify search when Enter is pressed in the query field", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
-      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "" }));
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
       if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
-      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: { emptyText: "" }, revision: 3 }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 3 }));
       if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: [] }));
       return Promise.resolve(json({}));
     });
@@ -137,10 +139,10 @@ describe("song request components", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-song-request" }));
-      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "Pick a song" }));
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "Pick a song", pointsEnabled: true }));
       if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
-      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: { emptyText: "Pick a song" }, revision: 3 }));
-      return Promise.resolve(json({ settings: { emptyText: "Up next" }, revision: 4 }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings("Pick a song"), revision: 3 }));
+      return Promise.resolve(json({ settings: settings("Up next"), revision: 4 }));
     });
     vi.stubGlobal("fetch", fetcher);
     renderPanel();
@@ -160,6 +162,57 @@ describe("song request components", () => {
     });
   });
 
+  it("explains that saved bot point mode is unavailable while points is disabled", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({
+        enabled: true, hasCredentials: true, slot: 2, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: false,
+      }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 3 }));
+      return Promise.resolve(json({}));
+    }));
+    renderPanel();
+
+    expect(await screen.findByText(/The points module is disabled/u)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Switch to free" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Bot points" })).not.toBeInTheDocument();
+  });
+
+  it("switches the saved payment mode between free and bot points explicitly", async () => {
+    let savedSettings = settings();
+    let revision = 3;
+    const respond = (input: Parameters<typeof fetch>[0], init?: RequestInit): Response => {
+      const url = urlOf(input);
+      if (url.pathname === "/api/csrf") return json({ token: "csrf-payment-mode" });
+      if (url.pathname.endsWith("/connection")) return json({
+        enabled: true, hasCredentials: true, slot: 2, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true,
+      });
+      if (url.pathname.endsWith("/requests")) return json({ requests: [], voteOutcomes: [] });
+      if (url.pathname.endsWith("/settings") && init?.method === "PATCH") {
+        const body = JSON.parse(typeof init.body === "string" ? init.body : "{}") as { settings?: unknown };
+        savedSettings = songRequestsSettingsSchema.parse(body.settings);
+        revision += 1;
+        return json({ settings: savedSettings, revision });
+      }
+      if (url.pathname.endsWith("/settings")) return json({ settings: savedSettings, revision });
+      return json({});
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => Promise.resolve(respond(input, init)));
+    vi.stubGlobal("fetch", fetcher);
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Free" }));
+    expect(await screen.findByLabelText("Free requests from role")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => { expect(savedSettings.paymentMode).toBe("free"); });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Bot points" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => { expect(savedSettings.paymentMode).toBe("bot_points"); });
+    expect(fetcher.mock.calls.filter(([input, init]) => urlOf(input).pathname.endsWith("/settings") && init?.method === "PATCH")).toHaveLength(2);
+  });
+
   it("shows Spotify state and starts a vote from a deterministic three-track search", async () => {
     const searchTracks = [
       { ...track, id: "glassharbor01", spotifyUrl: "https://open.spotify.com/track/glassharbor01" },
@@ -169,9 +222,9 @@ describe("song request components", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-e2e" }));
-      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 3, state: "connected", streamId: "stream-fictional", emptyText: "" }));
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 3, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
       if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [{ ballotId: "ballot-tie", state: "tie", createdAt: "2026-11-15T19:00:00.000Z" }] }));
-      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: { emptyText: "Pick a song" }, revision: 3 }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings("Pick a song"), revision: 3 }));
       if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: searchTracks }));
       if (url.pathname.endsWith("/vote")) return Promise.resolve(json({ ballotId: "ballot-fictional" }, 201));
       return Promise.resolve(json({}));
@@ -191,5 +244,43 @@ describe("song request components", () => {
     const voteCall = fetcher.mock.calls.find(([input]) => urlOf(input).pathname.endsWith("/vote"));
     const body = voteCall?.[1]?.body;
     expect(JSON.parse(typeof body === "string" ? body : "{}")).toEqual({ trackIds: ["glassharbor01", "quietatlas02", "silvercurrent03"] });
+  });
+
+  it("offers removal per request, with the refund choice only for paid submitted requests, behind a confirmation", async () => {
+    const row = (requestId: string, title: string, state: string, requestType: string, chargedAmount: number) => ({
+      requestId, state, title, artists: ["Mira Vale"], coverUrl: null, spotifyUrl: `https://open.spotify.com/track/${requestId}`,
+      failureReason: null, source: "points", requestType, chargedAmount, requesterDisplayName: "Fictional Viewer", requesterLogin: "fictional_viewer", createdAt: "2026-11-15T19:00:00.000Z",
+    });
+    const requests = [
+      row("waiting01", "Waiting Track", "pending_review", "bot_points", 25),
+      row("paid02", "Paid Track", "submitted", "bot_points", 25),
+      row("free03", "Free Track", "submitted", "free", 0),
+    ];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-remove" }));
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 1, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests, voteOutcomes: [] }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 1 }));
+      return Promise.resolve(json({ state: "removed" }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderPanel();
+    await screen.findByText("Paid Track");
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions: Free Track" }));
+    expect(await screen.findByRole("menuitem", { name: "Remove" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Remove and refund" })).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions: Paid Track" }));
+    expect(await screen.findByRole("menuitem", { name: "Remove and refund" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove and refund" }));
+    expect(fetcher.mock.calls.some(([input]) => urlOf(input).pathname.endsWith("/remove"))).toBe(false);
+    fireEvent.click(await screen.findByRole("button", { name: "Remove and refund" }));
+    await waitFor(() => {
+      const call = fetcher.mock.calls.find(([input]) => urlOf(input).pathname.endsWith("/requests/paid02/remove"));
+      expect(JSON.parse(typeof call?.[1]?.body === "string" ? call[1].body : "{}")).toEqual({ refund: true });
+    });
   });
 });

@@ -168,12 +168,13 @@ export const seedE2EOverlay = (channelId = e2eChannelId): SeededE2EOverlay => {
 };
 
 /** Seeds a manager, enabled vote modules, one Spotify allowlist slot, and the live now-playing element. */
-export const seedE2ESongRequests = (channelId: string): SeededE2EOverlay => {
+export const seedE2ESongRequests = (channelId: string, settings: Readonly<Record<string, unknown>> = {}): SeededE2EOverlay => {
   const overlay = seedE2EOverlay(channelId);
   const createdAt = new Date().toISOString();
+  const settingsJson = JSON.stringify(settings).replaceAll("'", "''");
   const sql = `
     INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision)
-      VALUES ('${channelId}', 'chat_voting', 1, '{}', 1), ('${channelId}', 'song_requests', 1, '{}', 1);
+      VALUES ('${channelId}', 'chat_voting', 1, '{}', 1), ('${channelId}', 'song_requests', 1, '${settingsJson}', 1);
     INSERT OR REPLACE INTO bot_identity
       (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, created_at, updated_at)
       VALUES (1, 'bot-e2e', 'brobot-e2e', '[]', 'test-access', 'test-refresh', '2099-01-01T00:00:00.000Z', '${createdAt}', '${createdAt}');
@@ -186,6 +187,10 @@ export const seedE2ESongRequests = (channelId: string): SeededE2EOverlay => {
       (element_id, channel_id, overlay_id, kind, label, config_json, x, y, scale_percent, z, in_composition)
       VALUES ('element-song-requests-${channelId}', '${channelId}', '${overlay.overlayId}', 'song_requests.now_playing',
         'Now playing', '{"showCover":true,"showRequester":true}', 520, 340, 100, 10, 1);
+    INSERT INTO overlay_elements
+      (element_id, channel_id, overlay_id, kind, label, config_json, x, y, scale_percent, z, in_composition)
+      VALUES ('element-song-request-queue-${channelId}', '${channelId}', '${overlay.overlayId}', 'song_requests.queue',
+        'Song requests', '{}', 520, 470, 100, 11, 1);
     UPDATE overlays SET revision = revision + 1, updated_at = '${createdAt}' WHERE overlay_id = '${overlay.overlayId}';
   `;
   const result = spawnSync("./node_modules/.bin/wrangler", [

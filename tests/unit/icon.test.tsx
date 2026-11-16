@@ -84,6 +84,9 @@ const iconNames: Readonly<Record<IconName, true>> = {
   drag: true,
   token: true,
   variable: true,
+  coins: true,
+  gift: true,
+  music: true,
 };
 
 afterEach(cleanup);

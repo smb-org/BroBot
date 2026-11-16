@@ -1,0 +1,54 @@
+@layer components.modules {
+  .song-request-queue-overlay {
+    box-sizing: border-box;
+    display: grid;
+    grid-template-rows: 40px 1fr;
+    gap: 0;
+    overflow: hidden;
+    padding: 10px 14px;
+    color: #f2f5f9;
+    background: #0d1015;
+    border: 1px solid #2a3240;
+    border-radius: 12px;
+    font-family: Archivo, system-ui, sans-serif;
+  }
+
+  .song-request-queue-overlay__title {
+    align-self: center;
+    margin: 0;
+    overflow: hidden;
+    color: #f2f5f9;
+    font-size: 16px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .song-request-queue-overlay__rows {
+    display: grid;
+    grid-template-rows: repeat(var(--song-request-row-count), 42px);
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .song-request-queue-overlay__row {
+    display: grid;
+    grid-template-columns: 30px 28px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    height: 42px;
+    border-top: 1px solid #1b212b;
+  }
+
+  .song-request-queue-overlay__index { color: #a8b2c1; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .song-request-queue-overlay__type { display: grid; place-items: center; color: #8ab4ff; }
+  .song-request-queue-overlay__copy { display: grid; min-width: 0; line-height: 1.25; }
+  .song-request-queue-overlay__copy strong,
+  .song-request-queue-overlay__copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .song-request-queue-overlay__copy strong { font-size: 13px; font-weight: 650; }
+  .song-request-queue-overlay__copy span { color: #c3cbd7; font-size: 11px; }
+  .song-request-queue-overlay__row.is-empty { border-top-color: transparent; }
+}
