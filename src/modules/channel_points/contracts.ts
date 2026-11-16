@@ -54,6 +54,8 @@ export interface ChannelPointsRedemption {
   redeemedAt: string;
   status: ChannelPointsRedemptionStatus;
   pendingTwitchStatus: TwitchRedemptionStatus | null;
+  providerModuleId?: string | null;
+  providerActionId?: string | null;
   outcomeReason: { de: string; en: string } | null;
   createdAt: string;
   updatedAt: string;

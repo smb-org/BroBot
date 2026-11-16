@@ -13,6 +13,7 @@ import {
 } from "../../src/modules/channel_points/service";
 import { createChannelPointsRepository } from "../../src/modules/channel_points/repository";
 import type { ChannelPointsRewardInput } from "../../src/modules/channel_points/contracts";
+import { transitionRequest } from "../../src/modules/song_requests/adapters/d1";
 import { createWriteInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const mocks = vi.hoisted(() => ({
@@ -208,6 +209,8 @@ describe("channel points redemption processing", () => {
     expect(mocks.update).toHaveBeenCalledTimes(1);
     await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
       .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+    await expect(createChannelPointsRepository(database as unknown as D1Database).getProviderActionConfig(channelId, "redemption_one"))
+      .resolves.toEqual(reward.actionConfig);
   });
 
   it("recovers a Twitch reward after management authorization expires during creation", async () => {
@@ -579,6 +582,72 @@ describe("channel points redemption processing", () => {
     expect(mocks.update).toHaveBeenCalledTimes(2);
     await expect(createChannelPointsRepository(database as unknown as D1Database).getRedemption(channelId, "redemption_one"))
       .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+  });
+
+  it("keeps a pending song redemption under its latched action after the reward changes", async () => {
+    const id = "redemption_latched_song_action";
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id,module_id,enabled,settings) VALUES (?,'song_requests',1,'{}')",
+    ).bind(channelId).run();
+    await transitionRequest(database as unknown as D1Database, {
+      channelId,
+      requestId: id,
+      fromState: null,
+      toState: "pending_review",
+      now,
+      newRequest: {
+        source: "channel_points",
+        requestType: "channel_points",
+        channelPointsRewardId: "reward_twitch",
+        track: {
+          id: "fixturetrack01", uri: "spotify:track:fixturetrack01", title: "Fixture Track", artists: ["Fixture Artist"],
+          durationMs: 201_000, explicit: false, coverUrl: null, spotifyUrl: "fictional-track",
+        },
+        operationId: id,
+        streamId: "stream-fictional",
+        roundId: "stream-fictional",
+        requesterUserId: "viewer_one",
+        requesterLogin: "viewer_demo",
+        requesterDisplayName: "Viewer Demo",
+      },
+    });
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    await repository.latchRedemption(channelId, {
+      id,
+      rewardId: "reward_local",
+      twitchRewardId: "reward_twitch",
+      rewardTitle: "Fictional reward",
+      userId: "viewer_one",
+      userLogin: "viewer_demo",
+      userName: "Viewer Demo",
+      userInput: "spotify:track:fixturetrack01",
+      redeemedAt: now,
+      providerModuleId: "song_requests",
+      providerActionId: "request-song",
+      providerActionConfig: {},
+    }, now);
+    await repository.updateRedemption(channelId, id, {
+      status: "pending", pendingTwitchStatus: null, outcomeReason: null, claimedAt: "2000-01-01T00:00:00.000Z",
+    }, ["received"], now);
+    mocks.listByIds.mockResolvedValueOnce({ ok: true, data: [helixRedemption(id, "UNFULFILLED")] });
+    const retryContext = {
+      ...context,
+      forModule: () => context,
+    } as ModuleExecutionContext;
+
+    await reconcileChannelPoints(
+      { DB: database as unknown as D1Database } as Env,
+      channelId,
+      now,
+      { force: true, context: retryContext },
+    );
+
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+    await expect(repository.getRedemption(channelId, id))
+      .resolves.toMatchObject({ status: "pending", providerModuleId: "song_requests", providerActionId: "request-song" });
+    await expect(database.prepare("SELECT state FROM song_requests WHERE channel_id=? AND id=?")
+      .bind(channelId, id).first()).resolves.toEqual({ state: "pending_review" });
   });
 
   it("adopts a known reward update and marks a known removal without touching foreign rewards", async () => {

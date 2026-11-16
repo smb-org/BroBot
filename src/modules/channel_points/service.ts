@@ -137,19 +137,21 @@ const applyOutcome = async (
 const actionOutcome = async (
   environment: Env,
   channelId: string,
-  reward: ChannelPointsReward,
   redemption: NonNullable<ReturnType<typeof redemptionFromEventSub>>,
+  actionModuleId: string,
+  actionId: string,
+  actionConfig: Record<string, unknown>,
   context: ModuleExecutionContext | null,
 ): Promise<ChannelPointsActionOutcome> => {
   const { MODULES } = await import("../registry");
-  const provider = MODULES.find((module) => module.id === reward.actionModuleId);
-  const action = provider?.channelPointsActions?.find((item) => item.id === reward.actionId);
+  const provider = MODULES.find((module) => module.id === actionModuleId);
+  const action = provider?.channelPointsActions?.find((item) => item.id === actionId);
   if (provider === undefined || action === undefined) return { refund: missingAction };
   const enabled = await environment.DB.prepare(
     "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = ?",
   ).bind(channelId, provider.id).first<{ enabled: number }>();
   if (enabled?.enabled !== 1) return { refund: providerDisabled };
-  const parsedConfig = action.configSchema.safeParse(reward.actionConfig);
+  const parsedConfig = action.configSchema.safeParse(actionConfig);
   if (!parsedConfig.success) return { refund: missingAction };
   const actionContext = context === null
     ? (await loadActionContext()).createModuleActionExecutionContext(environment, channelId, provider.id)
@@ -177,11 +179,18 @@ const drainProviderResolutionCallbacks = async (
   let remaining = false;
   for (const due of dueRows) {
     try {
-      const provider = due.providerModuleId === null ? undefined : MODULES.find(({ id }) => id === due.providerModuleId);
-      const action = provider?.channelPointsActions?.find(({ id }) => id === due.providerActionId);
+      let providerModuleId = due.providerModuleId;
+      let providerActionId = due.providerActionId;
+      if (providerModuleId === null || providerActionId === null) {
+        const reward = await repository.getReward(channelId, due.redemption.rewardId);
+        providerModuleId ??= reward?.actionModuleId ?? null;
+        providerActionId ??= reward?.actionId ?? null;
+      }
+      const provider = providerModuleId === null ? undefined : MODULES.find(({ id }) => id === providerModuleId);
+      const action = provider?.channelPointsActions?.find(({ id }) => id === providerActionId);
       if (action?.onRedemptionResolved !== undefined) {
         const context = (await loadActionContext()).createModuleActionExecutionContext(
-          environment, channelId, provider?.id ?? due.providerModuleId ?? "channel_points",
+          environment, channelId, provider?.id ?? providerModuleId ?? "channel_points",
         );
         await action.onRedemptionResolved(context, due.redemption.redemptionId, due.status);
       }
@@ -293,6 +302,7 @@ const persistFromAction = async (
     ...(reward.mode === "queue" ? { initialStatus: "queued" as const } : {}),
     providerModuleId: reward.actionModuleId,
     providerActionId: reward.actionId,
+    providerActionConfig: reward.actionConfig,
   }, now);
   if (!inserted || reward.mode === "queue") return;
   if (!await repository.claimRedemption(channelId, redemption.id, ["received"], expiredBeforeFor(now), now)) return;
@@ -346,6 +356,7 @@ const persistTwitchTerminalStatus = async (
       providerResolutionDue: status === "fulfilled" ? "FULFILLED" : "CANCELED",
       providerModuleId: reward.actionModuleId,
       providerActionId: reward.actionId,
+      providerActionConfig: reward.actionConfig,
     }, now);
     if (inserted) return;
   }
@@ -432,11 +443,18 @@ const runClaimedAction = async (
   context: ModuleExecutionContext | null,
   authorize: ChannelPointsMutationAuthorization,
 ): Promise<Awaited<ReturnType<typeof applyOutcome>>> => {
+  const repository = createChannelPointsRepository(environment.DB);
   const redemption = {
     id: row.redemptionId, rewardId: row.twitchRewardId, rewardTitle: row.rewardTitle, userId: row.userId,
     userLogin: row.userLogin, userName: row.userName, userInput: row.userInput, redeemedAt: row.redeemedAt,
   };
-  const outcome = await actionOutcome(environment, channelId, reward, redemption, context);
+  // Rows with NULL provider IDs predate migration 0095, so only those use the reward's current action.
+  const actionModuleId = row.providerModuleId ?? reward.actionModuleId;
+  const actionId = row.providerActionId ?? reward.actionId;
+  const actionConfig = await repository.getProviderActionConfig(channelId, row.redemptionId) ?? reward.actionConfig;
+  const outcome = await actionOutcome(
+    environment, channelId, redemption, actionModuleId, actionId, actionConfig, context,
+  );
   return await applyOutcome(environment, channelId, row.twitchRewardId, row.redemptionId, outcome, new Date().toISOString(), authorize);
 };
 

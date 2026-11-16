@@ -16,6 +16,7 @@ interface RedemptionRow {
   pending_twitch_status: TwitchRedemptionStatus | null; outcome_reason_json: string | null; claimed_at: string | null;
   provider_resolution_due?: TwitchRedemptionStatus | null;
   provider_module_id?: string | null; provider_action_id?: string | null;
+  provider_action_config_json?: string | null;
   created_at: string; updated_at: string;
 }
 const rewardFromRow = (row: RewardRow): ChannelPointsReward => ({
@@ -30,6 +31,7 @@ const redemptionFromRow = (row: RedemptionRow): ChannelPointsRedemption => ({
   redemptionId: row.redemption_id, rewardId: row.reward_id, twitchRewardId: row.twitch_reward_id, rewardTitle: row.reward_title,
   userId: row.user_id, userLogin: row.user_login, userName: row.user_name, userInput: row.user_input,
   redeemedAt: row.redeemed_at, status: row.status, pendingTwitchStatus: row.pending_twitch_status,
+  providerModuleId: row.provider_module_id ?? null, providerActionId: row.provider_action_id ?? null,
   outcomeReason: row.outcome_reason_json === null ? null : JSON.parse(row.outcome_reason_json) as { de: string; en: string },
   createdAt: row.created_at, updatedAt: row.updated_at,
 });
@@ -52,9 +54,11 @@ export interface ChannelPointsRepository {
     id: string; rewardId: string; twitchRewardId: string; rewardTitle: string; userId: string; userLogin: string; userName: string;
     userInput: string; redeemedAt: string; initialStatus?: "queued" | "fulfilled" | "refunded" | "orphaned";
     initialOutcomeReason?: { de: string; en: string } | null;
-    providerModuleId?: string; providerActionId?: string; providerResolutionDue?: TwitchRedemptionStatus;
+    providerModuleId?: string; providerActionId?: string; providerActionConfig?: Record<string, unknown>;
+    providerResolutionDue?: TwitchRedemptionStatus;
   }, now: string): Promise<boolean>;
   getRedemption(channelId: string, id: string): Promise<ChannelPointsRedemption | null>;
+  getProviderActionConfig(channelId: string, id: string): Promise<Record<string, unknown> | null>;
   updateRedemption(channelId: string, id: string, change: { status: ChannelPointsRedemptionStatus; pendingTwitchStatus?: TwitchRedemptionStatus | null; outcomeReason?: { de: string; en: string } | null; claimedAt?: string | null; providerResolutionDue?: TwitchRedemptionStatus | null }, fromStatuses: readonly ChannelPointsRedemptionStatus[], now: string): Promise<boolean>;
   claimRedemption(
     channelId: string,
@@ -193,17 +197,25 @@ export const createChannelPointsRepository = (db: D1Database): ChannelPointsRepo
     return result.meta.changes > 0;
   },
   async latchRedemption(channelId, redemption, now) {
-    const result = await db.prepare("INSERT OR IGNORE INTO channel_points_redemptions (channel_id,redemption_id,reward_id,twitch_reward_id,reward_title,user_id,user_login,user_name,user_input,redeemed_at,status,outcome_reason_json,provider_resolution_due,provider_module_id,provider_action_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    const result = await db.prepare("INSERT OR IGNORE INTO channel_points_redemptions (channel_id,redemption_id,reward_id,twitch_reward_id,reward_title,user_id,user_login,user_name,user_input,redeemed_at,status,outcome_reason_json,provider_resolution_due,provider_module_id,provider_action_id,provider_action_config_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
       .bind(channelId, redemption.id, redemption.rewardId, redemption.twitchRewardId, redemption.rewardTitle, redemption.userId, redemption.userLogin,
         redemption.userName, redemption.userInput, redemption.redeemedAt, redemption.initialStatus ?? "received",
         redemption.initialOutcomeReason === undefined || redemption.initialOutcomeReason === null
           ? null : JSON.stringify(redemption.initialOutcomeReason), redemption.providerResolutionDue ?? null,
-        redemption.providerModuleId ?? null, redemption.providerActionId ?? null, now, now).run();
+        redemption.providerModuleId ?? null, redemption.providerActionId ?? null,
+        redemption.providerActionConfig === undefined ? null : JSON.stringify(redemption.providerActionConfig), now, now).run();
     return result.meta.changes > 0;
   },
   async getRedemption(channelId, id) {
     const row = await db.prepare("SELECT * FROM channel_points_redemptions WHERE channel_id=? AND redemption_id=?").bind(channelId, id).first<RedemptionRow>();
     return row === null ? null : redemptionFromRow(row);
+  },
+  async getProviderActionConfig(channelId, id) {
+    const row = await db.prepare("SELECT provider_action_config_json FROM channel_points_redemptions WHERE channel_id=? AND redemption_id=?")
+      .bind(channelId, id).first<{ provider_action_config_json: string | null }>();
+    return row?.provider_action_config_json == null
+      ? null
+      : JSON.parse(row.provider_action_config_json) as Record<string, unknown>;
   },
   async updateRedemption(channelId, id, change, fromStatuses, now) {
     if (fromStatuses.length === 0) return false;
@@ -254,12 +266,14 @@ export const createChannelPointsRepository = (db: D1Database): ChannelPointsRepo
     return { items, cursor: hasMore && last !== undefined ? last.redeemedAt + "~" + last.redemptionId : null };
   },
   async listQueuedRedemptions(channelId, limit) {
-    const rows = await db.prepare(`SELECT redemptions.*, rewards.action_module_id, rewards.action_id
+    const rows = await db.prepare(`SELECT redemptions.*,
+          COALESCE(redemptions.provider_module_id, rewards.action_module_id) AS action_module_id,
+          COALESCE(redemptions.provider_action_id, rewards.action_id) AS action_id
       FROM channel_points_redemptions AS redemptions
       LEFT JOIN channel_points_rewards AS rewards
         ON rewards.channel_id=redemptions.channel_id AND rewards.id=redemptions.reward_id
       WHERE redemptions.channel_id=? AND redemptions.status IN ('queued','pending')
-        AND COALESCE(redemptions.provider_module_id, '') != 'song_requests'
+        AND COALESCE(redemptions.provider_module_id, rewards.action_module_id, '') != 'song_requests'
       ORDER BY redemptions.redeemed_at ASC,redemptions.redemption_id ASC
       LIMIT ?`)
       .bind(channelId, limit).all<RedemptionRow & { action_module_id: string | null; action_id: string | null }>();

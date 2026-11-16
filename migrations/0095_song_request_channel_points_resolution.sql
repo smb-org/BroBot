@@ -9,6 +9,7 @@ ALTER TABLE channel_points_redemptions ADD COLUMN provider_resolution_due TEXT
   CHECK (provider_resolution_due IS NULL OR provider_resolution_due IN ('FULFILLED', 'CANCELED'));
 ALTER TABLE channel_points_redemptions ADD COLUMN provider_module_id TEXT;
 ALTER TABLE channel_points_redemptions ADD COLUMN provider_action_id TEXT;
+ALTER TABLE channel_points_redemptions ADD COLUMN provider_action_config_json TEXT;
 
 CREATE INDEX channel_points_provider_resolution_due_idx
   ON channel_points_redemptions(channel_id, provider_resolution_due, redeemed_at, redemption_id);

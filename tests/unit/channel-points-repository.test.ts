@@ -104,7 +104,7 @@ describe("channel-points redemption repository", () => {
         status: "queued", pendingTwitchStatus: null, outcomeReason: null, claimedAt: null,
       }, ["received"], NOW);
     };
-    await latch("generic_redemption", "reward_a", null);
+    await latch("generic_redemption", "reward_a", { providerModuleId: "channel_points", providerActionId: "chat-message" });
     await latch("song_redemption", "reward_b", { providerModuleId: "song_requests", providerActionId: "request-song" });
     await database.prepare("UPDATE channel_points_rewards SET action_module_id='song_requests', action_id='request-song' WHERE id='reward_a'").run();
     await database.prepare("UPDATE channel_points_rewards SET action_module_id='channel_points', action_id='chat-message' WHERE id='reward_b'").run();
