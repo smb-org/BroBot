@@ -22,6 +22,7 @@ import {
   parseOverlayStyleBlock,
   migrateLegacyOverlayStyles,
   migrateLegacyOverlayStylesToCss,
+  replaceOverlayStyleBlock,
   overlayElementTextColors,
   resolveOverlayElementColors,
   type OverlayStyleAlignment,
@@ -883,7 +884,17 @@ function OverlayEditorWorkspace({
   }, [setError]);
   const writeStyleDocument = (next: OverlayStyleDocument, nextElements = draft.elements): void => {
     const migrated = migrateLegacyOverlayStylesToCss(draft.css, nextElements, next);
-    if (migrated === null) return;
+    if (migrated === null) {
+      const migration = migrateLegacyOverlayStyles(nextElements, next);
+      const css = replaceOverlayStyleBlock(draft.css, migration.styles, migration.elements.map(({ id }) => id));
+      const parsed = parseOverlayStyleBlock(css);
+      if (css.length <= OVERLAY_CSS_MAXIMUM_LENGTH || parsed.kind !== "valid") return;
+      setStyleDocument(parsed.styles);
+      setDraft((current) => ({ ...current, css, elements: migration.elements }));
+      setSaved(false);
+      setError(undefined);
+      return;
+    }
     setStyleDocument(migrated.styles);
     setDraft((current) => ({ ...current, css: migrated.css, elements: migrated.elements }));
     setSaved(false);

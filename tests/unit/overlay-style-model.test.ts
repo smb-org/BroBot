@@ -11,6 +11,7 @@ import {
   parseOverlayStyleBlock,
   replaceOverlayStyleBlock,
   resolveOverlayElementColors,
+  type OverlayStyle,
   type OverlayStyleDocument,
 } from "../../src/dashboard/overlay-style-model";
 import { overlayAppearanceContrastRatio } from "../../src/dashboard/overlay-contrast";
@@ -37,6 +38,31 @@ const styles: OverlayStyleDocument = {
     element_b: { fontFamily: "A \"quoted\" font", fontSize: 64, color: "#ffcc00", secondaryTextColor: "#aabbcc", accentColor: "#123456", textAlign: "right" },
     element_a: { fontWeight: 700, color: "#abcdef", secondaryTextColor: "#334455", accentColor: "#667788" },
   },
+};
+
+const fullyStyledElement = (index: number): OverlayStyle => {
+  const suffix = String(index).padStart(2, "0");
+  return {
+    fontFamily: `Font${suffix}${"A".repeat(74)}`,
+    fontSize: 80 + index,
+    fontWeight: ([400, 500, 600, 700] as const)[index % 4] ?? 400,
+    color: `#${(0x120000 + index * 0x101).toString(16).padStart(6, "0")}`,
+    secondaryTextColor: `#${(0x230000 + index * 0x101).toString(16).padStart(6, "0")}`,
+    accentColor: `#${(0x340000 + index * 0x101).toString(16).padStart(6, "0")}`,
+    textAlign: (["left", "center", "right"] as const)[index % 3] ?? "left",
+    lineHeight: 1 + index / 20,
+    letterSpacing: -20 + index * 2.01,
+    stroke: { width: 1 + index / 10, color: `#${(0x560000 + index * 0x101).toString(16).padStart(6, "0")}` },
+    shadow: {
+      x: -10 + index,
+      y: 10 + index / 2,
+      blur: index / 10,
+      color: `#${(0x670000 + index * 0x101).toString(16).padStart(6, "0")}`,
+    },
+    background: { color: `#${(0x450000 + index * 0x101).toString(16).padStart(6, "0")}`, opacityPercent: index + 1 },
+    padding: index * 2,
+    borderRadius: index * 3,
+  };
 };
 
 describe("overlay style block model", () => {
@@ -200,35 +226,21 @@ describe("overlay style block model", () => {
     });
   });
 
-  it("keeps twenty fully styled elements under the CSS limit with a stable compact block", () => {
+  it("keeps twenty fully styled elements and origin main CSS headroom under the shared limit", () => {
     const styles: OverlayStyleDocument = {
-      overlay: {},
-      elements: Object.fromEntries(Array.from({ length: 20 }, (_unused, index) => {
-        const suffix = String(index).padStart(2, "0");
-        return [`element-${suffix}`, {
-      fontFamily: "Arial",
-          fontSize: 20 + index,
-          fontWeight: ([400, 500, 600, 700] as const)[index % 4] ?? 400,
-          color: `#${(0x120000 + index * 0x101).toString(16).padStart(6, "0")}`,
-          secondaryTextColor: `#${(0x230000 + index * 0x101).toString(16).padStart(6, "0")}`,
-          accentColor: `#${(0x340000 + index * 0x101).toString(16).padStart(6, "0")}`,
-          textAlign: (["left", "center", "right"] as const)[index % 3] ?? "left",
-          lineHeight: 1 + index / 20,
-          letterSpacing: index / 10,
-          stroke: { width: 1 + index / 10, color: "#000000" },
-          shadow: { x: index / 10, y: 2, blur: 4 + index / 10, color: "#010203" },
-          background: { color: `#${(0x450000 + index * 0x101).toString(16).padStart(6, "0")}`, opacityPercent: 40 + index },
-          padding: 8 + index / 10,
-          borderRadius: 12 + index / 10,
-        }];
-      })),
+      overlay: fullyStyledElement(20),
+      elements: Object.fromEntries(Array.from({ length: 20 }, (_unused, index) => [
+        `element-${String(index).padStart(2, "0")}`,
+        fullyStyledElement(index),
+      ])),
     };
     const block = generateOverlayStyleBlock(styles);
     const parsed = parseOverlayStyleBlock(block);
+    const originMainCssHeadroom = 16_000 - 9_408;
 
-    expect(block.length).toBeLessThanOrEqual(OVERLAY_CSS_MAXIMUM_LENGTH);
+    expect(block.length + originMainCssHeadroom).toBeLessThanOrEqual(OVERLAY_CSS_MAXIMUM_LENGTH);
     expect(parsed.kind).toBe("valid");
-    if (parsed.kind !== "valid") throw new Error("The compact style block did not parse.");
+    if (parsed.kind !== "valid") throw new Error("The fully styled block did not parse.");
     expect(generateOverlayStyleBlock(parsed.styles)).toHaveLength(block.length);
     const unchanged = migrateLegacyOverlayStylesToCss(block, Array.from({ length: 20 }, (_unused, index) => ({
       id: `element-${String(index).padStart(2, "0")}`,
@@ -236,19 +248,28 @@ describe("overlay style block model", () => {
       config: {},
     })), parsed.styles);
     expect(unchanged).not.toBeNull();
-    expect(unchanged?.css.length).toBeLessThanOrEqual(block.length);
     expect(unchanged?.css.length).toBeLessThanOrEqual(OVERLAY_CSS_MAXIMUM_LENGTH);
-    expect(block.match(/\[data-element="element-\d+"\] \{/gu)).toHaveLength(20);
-    expect(block.match(/:is\(\[data-element=/gu)).toHaveLength(1);
-    expect(block).toContain("font-size: var(--brobot-overlay-font-size);");
+    expect(block.match(/^\[data-element="element-\d+"\] \{$/gmu)).toHaveLength(20);
+    expect(block).not.toContain(":is(");
+    expect(block).toContain("font-size: 80px;");
+    expect(block).not.toContain("font-size: var(--brobot-overlay-font-size);");
   });
 
-  it("keeps managed text color ahead of earlier user CSS after open and save", () => {
+  it.each([
+    ["direct color", ".brobot-variable { color: #ff0000; }"],
+    ["custom property", ".brobot-variable { --brobot-overlay-text-color: #ff0000; color: var(--brobot-overlay-text-color); }"],
+  ])("keeps managed text color ahead of earlier user CSS using a %s after open and save", (_description, userRule) => {
     const previousBlock = `${OVERLAY_STYLE_BEGIN_MARKER}\n[data-element="element-a"] :where(.brobot-variable, .brobot-module-text) {\n  font-size: 32px;\n  color: #008000;\n}\n${OVERLAY_STYLE_END_MARKER}`;
-    const original = `.brobot-variable { color: #ff0000; }\n${previousBlock}`;
+    const original = `${userRule}\n${previousBlock}`;
     const parsed = parseOverlayStyleBlock(original);
     if (parsed.kind !== "valid") throw new Error("Previous style block did not parse.");
-    const saved = replaceOverlayStyleBlock(original, parsed.styles, ["element-a"]);
+    const elementStyle = parsed.styles.elements["element-a"];
+    if (elementStyle === undefined) throw new Error("Element style was not parsed.");
+    const editedStyles: OverlayStyleDocument = {
+      ...parsed.styles,
+      elements: { ...parsed.styles.elements, "element-a": { ...elementStyle, fontWeight: 700 } },
+    };
+    const saved = replaceOverlayStyleBlock(original, editedStyles, ["element-a"]);
     const renderTextColor = (css: string): string | undefined => {
       const testDocument = document as unknown as {
         createElement: (tagName: string) => HTMLElement;
@@ -273,7 +294,7 @@ describe("overlay style block model", () => {
           const variable = /^var\((--[a-z-]+)\)$/u.exec(declaration)?.[1];
           const rendered = variable === undefined
             ? declaration
-            : getComputedStyle(text.parentElement ?? root).getPropertyValue(variable).trim();
+            : getComputedStyle(text).getPropertyValue(variable).trim();
           const probe = testDocument.createElement("span");
           probe.style.color = rendered;
           color = getComputedStyle(probe).color;
@@ -287,6 +308,47 @@ describe("overlay style block model", () => {
 
     expect(renderTextColor(original)).toBe("rgb(0, 128, 0)");
     expect(renderTextColor(saved)).toBe("rgb(0, 128, 0)");
+  });
+
+  it("writes origin-main literal declarations byte for byte", () => {
+    const style: OverlayStyle = {
+      fontFamily: "Arial",
+      fontSize: 32,
+      fontWeight: 600,
+      color: "#abcdef",
+      textAlign: "center",
+      lineHeight: 1.25,
+      letterSpacing: 2,
+      stroke: { width: 2, color: "#000000" },
+      shadow: { x: 1, y: 2, blur: 3, color: "#112233" },
+      background: { color: "#445566", opacityPercent: 40 },
+      padding: 8,
+      borderRadius: 12,
+    };
+    const content = generateOverlayStyleContent({ overlay: style, elements: { "literal-element": style } });
+    const literalRules = content.split("\n\n").filter((rule) =>
+      rule.startsWith(".brobot-overlay :where(.brobot-variable, .brobot-module-text) {") ||
+      rule.startsWith('[data-element="literal-element"] :where(.brobot-variable, .brobot-module-text) {'));
+    const expectedDeclarations = [
+      "  font-family: \"Arial\", system-ui, sans-serif;",
+      "  font-size: 32px;",
+      "  font-weight: 600;",
+      "  color: #abcdef;",
+      "  text-align: center;",
+      "  line-height: 1.25;",
+      "  letter-spacing: 2px;",
+      "  -webkit-text-stroke: 2px #000000;",
+      "  text-shadow: 1px 2px 3px #112233;",
+      "  background-color: rgba(68, 85, 102, 0.4);",
+      "  padding: 8px;",
+      "  border-radius: 12px;",
+    ];
+    const expectedRule = (selector: string): string => `${selector} {\n${expectedDeclarations.join("\n")}\n}`;
+
+    expect(literalRules).toEqual([
+      expectedRule(".brobot-overlay :where(.brobot-variable, .brobot-module-text)"),
+      expectedRule('[data-element="literal-element"] :where(.brobot-variable, .brobot-module-text)'),
+    ]);
   });
 
   it("parses, edits, and saves element styles for prototype-named IDs", () => {
