@@ -905,7 +905,8 @@ const recordPollFailure = async (
      VALUES (?, 'not_connected', NULL, ?, ?)
      ON CONFLICT (channel_id) DO UPDATE SET poll_failures = excluded.poll_failures, updated_at = excluded.updated_at`,
   ).bind(context.channelId, new Date(now).toISOString(), failures).run();
-  await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, now + delay, undefined, streamGeneration);
+  // A failure backoff is a "not before" deadline, so it replaces an earlier alarm.
+  await context.schedule(SONG_REQUESTS_ALARM, now + delay, undefined, streamGeneration);
 };
 
 const reconcileApprovedSubmissionAlarms = async (context: ModuleAlarmContext): Promise<void> => {

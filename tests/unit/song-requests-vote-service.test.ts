@@ -569,6 +569,32 @@ describe("durable song vote results", () => {
     expect(schedule.mock.calls.at(-1)?.[1]).toBe(NOW + Math.max(MAX_BACKOFF_MS, 600_000));
   });
 
+  it("does not let an earlier alarm shorten a Retry-After backoff", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const { context, schedule } = await createContext("ballot-poll-backoff-earlier-alarm");
+    // An earlier poll alarm (a replaced claim) already exists; "if earlier" scheduling would keep it.
+    const alarms = new Map<string, number>([[SONG_REQUESTS_ALARM, NOW + 12_000]]);
+    const scheduleIfEarlier = vi.fn<ModuleAlarmContext["schedule"]>((key, deadline) => {
+      const current = alarms.get(key);
+      if (current === undefined || deadline < current) alarms.set(key, deadline);
+      return Promise.resolve();
+    });
+    schedule.mockImplementation((key, deadline) => {
+      alarms.set(key, deadline);
+      return Promise.resolve();
+    });
+    const raceContext = { ...context, scheduleIfEarlier } as ModuleAlarmContext;
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ error: { status: 429, message: "Rate limited" } }),
+      { status: 429, headers: { "Retry-After": "120" } },
+    )));
+
+    await pollSongRequestsPlayback(raceContext);
+
+    expect(alarms.get(SONG_REQUESTS_ALARM)).toBe(NOW + 120_000);
+  });
+
   it("clears the polling alarm on an accepted stream.offline event", async () => {
     const { context } = await createContext("ballot-stream-offline");
     const clearAlarm = vi.fn(() => Promise.resolve());
