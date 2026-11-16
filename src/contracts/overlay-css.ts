@@ -1,3 +1,5 @@
+export const OVERLAY_CSS_MAXIMUM_LENGTH = 16_000;
+
 interface CssResource {
   start: number;
   end: number;

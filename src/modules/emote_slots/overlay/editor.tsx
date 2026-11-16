@@ -14,7 +14,11 @@ const SlotOverlayEditor = ({ config, onChange, language = "en", readOnly = false
       onChange={(borderColor) => {
         if (readOnly) return;
         if (borderColor !== undefined) onChange({ ...values, borderColor });
-        else onChange({});
+        else {
+          const next = { ...config };
+          delete next.borderColor;
+          onChange(next);
+        }
       }} />
   </div>;
 };

@@ -6,6 +6,7 @@ import {
   generateOverlayStyleBlock,
   generateOverlayStyleContent,
   migrateLegacyOverlayStyles,
+  migrateLegacyOverlayStylesToCss,
   overlayElementTextColors,
   parseOverlayStyleBlock,
   replaceOverlayStyleBlock,
@@ -13,6 +14,7 @@ import {
   type OverlayStyleDocument,
 } from "../../src/dashboard/overlay-style-model";
 import { overlayAppearanceContrastRatio } from "../../src/dashboard/overlay-contrast";
+import { OVERLAY_CSS_MAXIMUM_LENGTH } from "../../src/contracts/overlay-css";
 
 const styles: OverlayStyleDocument = {
   overlay: {
@@ -93,7 +95,7 @@ describe("overlay style block model", () => {
     expect(styledRequesterColors).not.toContain("#a8b2c1");
   });
 
-  it("does not let migrated legacy colors override an existing overlay style", () => {
+  it("keeps a legacy color visible above an existing overlay style after migration", () => {
     const overlayStyle = { color: "#ffffff", background: { color: "#202020", opacityPercent: 100 } };
     const legacyConfig = { textColor: "#222222", backgroundColor: "#111111", showPercent: false };
     const before = resolveOverlayElementColors("quiz.session", legacyConfig, {}, overlayStyle);
@@ -104,7 +106,102 @@ describe("overlay style block model", () => {
 
     expect(after).toEqual(before);
     expect(migrated.elements[0]?.config).toEqual({ showPercent: false });
-    expect(migrated.styles.elements["quiz-inherited"]).toBeUndefined();
+    expect(migrated.styles.elements["quiz-inherited"]).toEqual({
+      color: "#222222",
+      background: { color: "#111111", opacityPercent: 100 },
+    });
+  });
+
+  it("preserves every effective color across legacy, element, and overlay combinations", () => {
+    const properties = [
+      { legacyKey: "textColor", styleKey: "color", resultKey: "text" },
+      { legacyKey: "backgroundColor", styleKey: "background", resultKey: "background" },
+      { legacyKey: "secondaryColor", styleKey: "secondaryTextColor", resultKey: "secondaryText" },
+      { legacyKey: "accentColor", styleKey: "accentColor", resultKey: "accent" },
+    ] as const;
+    const legacyValues = [undefined, null, "#222222"] as const;
+    const overlayValues = [undefined, "#ffffff"] as const;
+    const elementValues = [undefined, "#111111"] as const;
+    const styleValue = (styleKey: typeof properties[number]["styleKey"], value: string): OverlayStyleDocument["overlay"] =>
+      styleKey === "background" ? { background: { color: value, opacityPercent: 100 } } : { [styleKey]: value };
+
+    for (const property of properties) {
+      for (const legacyValue of legacyValues) {
+        for (const overlayValue of overlayValues) {
+          for (const elementValue of elementValues) {
+            const config = legacyValue === undefined ? {} : { [property.legacyKey]: legacyValue };
+            const overlay = overlayValue === undefined ? {} : styleValue(property.styleKey, overlayValue);
+            const element = elementValue === undefined ? {} : styleValue(property.styleKey, elementValue);
+            const before = resolveOverlayElementColors("quiz.session", config, element, overlay)[property.resultKey];
+            const migrated = migrateLegacyOverlayStyles([
+              { id: "matrix-element", kind: "quiz.session", config },
+            ], { overlay, elements: { "matrix-element": element } });
+            const after = resolveOverlayElementColors(
+              "quiz.session",
+              migrated.elements[0]?.config ?? {},
+              migrated.styles.elements["matrix-element"] ?? {},
+              migrated.styles.overlay,
+            )[property.resultKey];
+
+            expect(after, JSON.stringify({ ...property, legacyValue, overlayValue, elementValue })).toBe(before);
+            if (legacyValue === "#222222" && elementValue === undefined) {
+              const migratedElement = migrated.styles.elements["matrix-element"];
+              expect(property.styleKey === "background" ? migratedElement?.background?.color : migratedElement?.[property.styleKey]).toBe("#222222");
+            }
+            if (legacyValue !== undefined) expect(migrated.elements[0]?.config).not.toHaveProperty(property.legacyKey);
+          }
+        }
+      }
+    }
+  });
+
+  it("commits legacy migration only when a valid runtime style block was written", () => {
+    const elements = [{ id: "legacy-quiz", kind: "quiz.session", config: { textColor: "#223344", showPercent: false } }];
+    const duplicateMarkers = `${OVERLAY_STYLE_BEGIN_MARKER}\n${OVERLAY_STYLE_END_MARKER}\n${OVERLAY_STYLE_BEGIN_MARKER}\n${OVERLAY_STYLE_END_MARKER}`;
+
+    expect(migrateLegacyOverlayStylesToCss(duplicateMarkers, elements, { overlay: {}, elements: {} })).toBeNull();
+
+    const valid = migrateLegacyOverlayStylesToCss("", elements, { overlay: {}, elements: {} });
+    expect(valid).not.toBeNull();
+    expect(valid?.elements[0]?.config).toEqual({ showPercent: false });
+    expect(parseOverlayStyleBlock(valid?.css ?? "")).toMatchObject({
+      kind: "valid",
+      styles: { elements: { "legacy-quiz": { color: "#223344" } } },
+    });
+  });
+
+  it("keeps twenty fully styled elements under the CSS limit with a stable compact block", () => {
+    const styles: OverlayStyleDocument = {
+      overlay: {},
+      elements: Object.fromEntries(Array.from({ length: 20 }, (_unused, index) => {
+        const suffix = String(index).padStart(2, "0");
+        return [`element-${suffix}`, {
+      fontFamily: "Arial",
+          fontSize: 20 + index,
+          fontWeight: ([400, 500, 600, 700] as const)[index % 4] ?? 400,
+          color: `#${String(0x120000 + index * 0x101).padStart(6, "0")}`,
+          secondaryTextColor: `#${String(0x230000 + index * 0x101).padStart(6, "0")}`,
+          accentColor: `#${String(0x340000 + index * 0x101).padStart(6, "0")}`,
+          textAlign: (["left", "center", "right"] as const)[index % 3] ?? "left",
+          lineHeight: 1 + index / 20,
+          letterSpacing: index / 10,
+          stroke: { width: 1 + index / 10, color: "#000000" },
+          shadow: { x: index / 10, y: 2, blur: 4 + index / 10, color: "#010203" },
+          background: { color: `#${String(0x450000 + index * 0x101).padStart(6, "0")}`, opacityPercent: 40 + index },
+          padding: 8 + index / 10,
+          borderRadius: 12 + index / 10,
+        }];
+      })),
+    };
+    const block = generateOverlayStyleBlock(styles);
+    const parsed = parseOverlayStyleBlock(block);
+
+    expect(block.length).toBeLessThanOrEqual(OVERLAY_CSS_MAXIMUM_LENGTH);
+    expect(parsed.kind).toBe("valid");
+    if (parsed.kind !== "valid") throw new Error("The compact style block did not parse.");
+    expect(generateOverlayStyleBlock(parsed.styles)).toHaveLength(block.length);
+    expect(block.match(/\[data-element="element-\d+"\] \{/gu)).toHaveLength(20);
+    expect(block).not.toContain(" :where(.brobot-variable, .brobot-module-text)");
   });
 
   it("round-trips overlay and element styles through its deterministic CSS format", () => {
@@ -125,9 +222,10 @@ describe("overlay style block model", () => {
   it("targets the rendered variable text for overlay and element styles", () => {
     const content = generateOverlayStyleContent(styles);
 
-    expect(content).toContain(".brobot-overlay :where(.brobot-variable, .brobot-module-text) {");
-    expect(content).toContain('[data-element="element_a"] :where(.brobot-variable, .brobot-module-text) {');
-    expect(content).toContain('[data-element="element_b"] :where(.brobot-variable, .brobot-module-text) {');
+    expect(content).toContain(".brobot-overlay {");
+    expect(content).toContain('[data-element="element_a"] {');
+    expect(content).toContain('[data-element="element_b"] {');
+    expect(content).not.toContain(":where(");
     expect(content).toContain('[data-element="element_a"] {');
     expect(content).toContain("--brobot-overlay-text-color: #abcdef;");
     expect(content).toContain("--brobot-overlay-secondary-text-color: #334455;");
@@ -154,8 +252,8 @@ describe("overlay style block model", () => {
 
     expect(migrated.startsWith(prefix)).toBe(true);
     expect(migrated.endsWith(suffix)).toBe(true);
-    expect(migrated).toContain(".brobot-overlay :where(.brobot-variable, .brobot-module-text) {");
-    expect(migrated).toContain('[data-element="element_a"] :where(.brobot-variable, .brobot-module-text) {');
+    expect(migrated).toContain(".brobot-overlay {");
+    expect(migrated).toContain('[data-element="element_a"] {');
     expect(migrated).not.toContain(":where(.brobot-variable) {");
     expect(parseOverlayStyleBlock(migrated).kind).toBe("valid");
   });
@@ -189,7 +287,7 @@ describe("overlay style block model", () => {
   ] as const)("writes the %s composition anchor from managed alignment", (alignment, translation) => {
     const content = generateOverlayStyleContent({ overlay: {}, elements: { "element-a": { textAlign: alignment } } });
 
-    expect(content).toContain(`.brobot-overlay .brobot-overlay-composition-element[data-element="element-a"] {\n  --brobot-overlay-anchor-x: ${translation};\n}`);
+    expect(content).toContain(`[data-element="element-a"] {\n  --brobot-overlay-text-align: ${alignment};\n  --brobot-overlay-anchor-x: ${translation};\n}`);
     expect(parseOverlayStyleBlock(generateOverlayStyleBlock({ overlay: {}, elements: { "element-a": { textAlign: alignment } } }))).toMatchObject({
       kind: "valid",
       styles: { elements: { "element-a": { textAlign: alignment } } },

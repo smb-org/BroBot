@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { OVERLAY_ELEMENT_MAXIMUM_COUNT } from "../contracts/values";
 import { channelVariableTemplateToken } from "../contracts/channel-variable-template";
 import { templateTextLength } from "../template";
-import { sanitizeOverlayCss } from "../contracts/overlay-css";
+import { OVERLAY_CSS_MAXIMUM_LENGTH, sanitizeOverlayCss } from "../contracts/overlay-css";
 import type { PanelModuleState } from "../panel-contract";
 import { OverlayCanvas } from "../overlay/canvas";
 import type { BoundOverlayData, OverlayLanguage } from "../overlay/model";
@@ -20,9 +20,9 @@ import { clampOverlayEditorPosition, isModuleOverlayElementAddable, overlayEdito
 import {
   parseOverlayStyleBlock,
   migrateLegacyOverlayStyles,
+  migrateLegacyOverlayStylesToCss,
   overlayElementTextColors,
   resolveOverlayElementColors,
-  replaceOverlayStyleBlock,
   type OverlayStyleAlignment,
   type OverlayStyle,
   type OverlayStyleDocument,
@@ -325,21 +325,23 @@ const initialSession = (
   const parsedStyles = parseOverlayStyleBlock(baseDraft.css);
   const originalStyles = parsedStyles.kind === "valid" ? parsedStyles.styles : emptyOverlayStyles();
   const migration = migrateLegacyOverlayStyles(baseDraft.elements, originalStyles);
-  const canWriteMigration = parsedStyles.kind !== "invalid";
   const migrationChanged = JSON.stringify(migration.styles) !== JSON.stringify(originalStyles) ||
     JSON.stringify(migration.elements) !== JSON.stringify(baseDraft.elements);
-  const normalizedCss = canWriteMigration
-    ? replaceOverlayStyleBlock(baseDraft.css, migration.styles, baseDraft.elements.map(({ id }) => id))
-    : baseDraft.css;
-  const cssNeedsNormalization = parsedStyles.kind === "valid" && normalizedCss !== baseDraft.css;
-  const migratedDraft = canWriteMigration && (migrationChanged || cssNeedsNormalization)
+  const migrationWrite = parsedStyles.kind === "invalid" || (!migrationChanged && parsedStyles.kind === "missing")
+    ? null
+    : migrateLegacyOverlayStylesToCss(baseDraft.css, baseDraft.elements, originalStyles);
+  const appliedMigration = migrationWrite !== null &&
+    (migrationChanged || migrationWrite.css.length <= baseDraft.css.length)
+    ? migrationWrite
+    : null;
+  const migratedDraft = appliedMigration !== null
     ? {
       ...baseDraft,
-      css: normalizedCss,
-      elements: migration.elements,
+      css: appliedMigration.css,
+      elements: appliedMigration.elements,
     }
     : baseDraft;
-  const initialStyleDocument = migration.styles;
+  const initialStyleDocument = appliedMigration?.styles ?? originalStyles;
   const selectedInitialId = baseDraft.elements[0]?.id ?? null;
   if (requestedVariable === undefined) {
     return { overlay, baseDraft, initialDraft: migratedDraft, initialStyleDocument, initialCreateDraft: baseDraft, selectedElementId: selectedInitialId, initialNotice: null };
@@ -530,7 +532,7 @@ function OverlayEditorWorkspace({
   const [previewZoom, setPreviewZoom] = useState(100);
   const [modulePreviewStates, setModulePreviewStates] = useState<Readonly<Record<string, JsonObject>>>({});
   const [editorTab, setEditorTab] = useState<"properties" | "style" | "css">("properties");
-  const [styleTargetId, setStyleTargetId] = useState("overlay");
+  const [styleTargetId, setStyleTargetId] = useState(selectedElementId ?? "overlay");
   // The Style tab follows the element selected on the canvas or in the list; the user can still pick another target.
   const [styleTargetFollowedId, setStyleTargetFollowedId] = useState(selectedElementId);
   if (selectedElementId !== styleTargetFollowedId) {
@@ -879,9 +881,10 @@ function OverlayEditorWorkspace({
     setError(undefined);
   }, [setError]);
   const writeStyleDocument = (next: OverlayStyleDocument, nextElements = draft.elements): void => {
-    setStyleDocument(next);
-    const css = replaceOverlayStyleBlock(draft.css, next, nextElements.map(({ id }) => id));
-    setDraft((current) => ({ ...current, css, elements: nextElements }));
+    const migrated = migrateLegacyOverlayStylesToCss(draft.css, nextElements, next);
+    if (migrated === null) return;
+    setStyleDocument(migrated.styles);
+    setDraft((current) => ({ ...current, css: migrated.css, elements: migrated.elements }));
     setSaved(false);
     setError(undefined);
   };
@@ -914,8 +917,7 @@ function OverlayEditorWorkspace({
 
   const rewriteStylesFromEditor = (): void => {
     if (!canEdit || !styleLocked) return;
-    const migration = migrateLegacyOverlayStyles(draft.elements, effectiveStyleDocument);
-    writeStyleDocument(migration.styles, migration.elements);
+    writeStyleDocument(effectiveStyleDocument);
   };
 
   const resetTargetStyle = (): void => {
@@ -986,7 +988,7 @@ function OverlayEditorWorkspace({
 
   const save = useCallback(async (revision = baseline.revision): Promise<string | null> => {
     if (!canManage || saving) return labels.editorSaveError;
-    if (draft.css.length > 16_000) {
+    if (draft.css.length > OVERLAY_CSS_MAXIMUM_LENGTH) {
       setError(labels.editorStyleCssLimit);
       return labels.editorStyleCssLimit;
     }
@@ -1003,12 +1005,15 @@ function OverlayEditorWorkspace({
         const migration = migrateLegacyOverlayStyles(draft.elements, originalStyles);
         const migrationChanged = JSON.stringify(migration.styles) !== JSON.stringify(originalStyles) ||
           JSON.stringify(migration.elements) !== JSON.stringify(draft.elements);
-        if (parsedStyles.kind === "valid" || migrationChanged) {
-          saveStyleDocument = migration.styles;
+        const migrationWrite = migrationChanged
+          ? migrateLegacyOverlayStylesToCss(draft.css, draft.elements, originalStyles)
+          : null;
+        if (migrationWrite !== null) {
+          saveStyleDocument = migrationWrite.styles;
           saveDraft = {
             ...draft,
-            css: replaceOverlayStyleBlock(draft.css, migration.styles, draft.elements.map(({ id }) => id)),
-            elements: migration.elements,
+            css: migrationWrite.css,
+            elements: migrationWrite.elements,
           };
         }
       }
@@ -1358,7 +1363,7 @@ function OverlayEditorWorkspace({
       saveDisabled: !canManage,
       ...(error === undefined ? {} : { error }),
       saved,
-      invalid: draft.css.length > 16_000,
+      invalid: draft.css.length > OVERLAY_CSS_MAXIMUM_LENGTH,
       invalidMessage: labels.editorStyleCssLimit,
       persistent: true,
       warnings: dirty ? [labels.editorUnsaved] : [],
@@ -1646,7 +1651,12 @@ function OverlayEditorWorkspace({
                       onChange={(value) => {
                         updateStyleProperty("background", value === undefined ? undefined : value === "transparent"
                           ? { color: targetStyle.background?.color ?? "#000000", opacityPercent: 0 }
-                          : { color: value, opacityPercent: 100 });
+                          : {
+                            color: value,
+                            opacityPercent: targetStyle.background?.opacityPercent === undefined || targetStyle.background.opacityPercent === 0
+                              ? 100
+                              : targetStyle.background.opacityPercent,
+                          });
                       }} />
                     {renderStyleNumber("overlay-editor-style-background-opacity", labels.editorStyleBackgroundOpacity, targetStyle.background?.opacityPercent,
                       (value) => { updateStyleProperty("background", value === undefined ? undefined : { color: targetStyle.background?.color ?? "#000000", opacityPercent: Math.round(Math.max(0, Math.min(100, value))) }); }, { min: 0, max: 100, unit: "%" })}
@@ -1671,7 +1681,7 @@ function OverlayEditorWorkspace({
             <Button variant="neutral" onClick={() => { void copyCss(); }}>{labels.editorStyleCopy}</Button>
           </div>
           <DisabledFieldReasonContext.Provider value={null}>
-            <CodeField id="overlay-editor-css-code" className="overlay-editor__css-code" label={labels.editorCssTab} value={draft.css} maxLength={16000}
+            <CodeField id="overlay-editor-css-code" className="overlay-editor__css-code" label={labels.editorCssTab} value={draft.css} maxLength={OVERLAY_CSS_MAXIMUM_LENGTH}
               disabled={!canEdit} onChange={editCss} />
           </DisabledFieldReasonContext.Provider>
         </div>

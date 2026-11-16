@@ -36,16 +36,17 @@ afterEach(() => {
 describe("emote slot overlay", () => {
   it("edits the retained border color with the shared ColorField and US label", () => {
     const onChange = vi.fn<(config: JsonObject) => void>();
-    const { container } = render(<SlotOverlayEditor config={{ borderColor: "#445566" }} onChange={onChange} language="en" />);
+    const initialConfig = { borderColor: "#445566", backgroundColor: "#112233", textColor: "#223344", highlightColor: "#334455" };
+    const { container } = render(<SlotOverlayEditor config={initialConfig} onChange={onChange} language="en" />);
     const colorInput = screen.getByLabelText("Border color");
 
     expect(colorInput).toHaveAttribute("type", "color");
     expect(colorInput.closest(".ui-color-field")).not.toBeNull();
     expect(colorInput).toHaveValue("#445566");
     fireEvent.change(colorInput, { target: { value: "#abcdef" } });
-    expect(onChange).toHaveBeenLastCalledWith({ borderColor: "#abcdef" });
+    expect(onChange).toHaveBeenLastCalledWith({ ...initialConfig, borderColor: "#abcdef" });
     fireEvent.click(screen.getByRole("button", { name: "Clear color" }));
-    expect(onChange).toHaveBeenLastCalledWith({});
+    expect(onChange).toHaveBeenLastCalledWith({ backgroundColor: "#112233", textColor: "#223344", highlightColor: "#334455" });
     expect(container.querySelector('input[type="color"]')).not.toBeNull();
   });
 

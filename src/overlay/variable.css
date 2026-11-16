@@ -1,5 +1,6 @@
 .brobot-variable,
 .brobot-module-text {
+  text-align: var(--brobot-overlay-text-align, start);
   background-color: var(--brobot-overlay-background, var(--brobot-overlay-legacy-background, transparent));
   color: var(--brobot-overlay-text-color, var(--brobot-overlay-legacy-text-color, rgba(255, 255, 255, 0.96)));
   font-family: var(--brobot-overlay-font-family, system-ui, sans-serif);
