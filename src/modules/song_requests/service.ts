@@ -861,6 +861,27 @@ const hasFreshChargingSongRequests = async (db: D1Database, channelId: string, n
   return (row?.count ?? 0) > 0;
 };
 
+const nextSongRequestMaintenanceDeadline = async (db: D1Database, channelId: string, now: number): Promise<number | null> => {
+  const cutoff = new Date(now - IN_FLIGHT_MAX_AGE_MS).toISOString();
+  const [charging, submitting] = await Promise.all([
+    db.prepare(
+      `SELECT MIN(charging_since) AS started_at FROM song_requests
+        WHERE channel_id = ? AND state = 'charging' AND charging_since >= ?`,
+    ).bind(channelId, cutoff).first<{ started_at: string | null }>(),
+    db.prepare(
+      `SELECT MIN(updated_at) AS started_at FROM song_requests
+        WHERE channel_id = ? AND state = 'submitting' AND updated_at >= ?`,
+    ).bind(channelId, cutoff).first<{ started_at: string | null }>(),
+  ]);
+  const deadlines = [charging?.started_at, submitting?.started_at]
+    .flatMap((startedAt) => {
+      if (startedAt === null || startedAt === undefined) return [];
+      const startedAtMs = Date.parse(startedAt);
+      return Number.isFinite(startedAtMs) ? [startedAtMs + IN_FLIGHT_MAX_AGE_MS + 1] : [];
+    });
+  return deadlines.length === 0 ? null : Math.min(...deadlines);
+};
+
 const scheduleFreshChargingReconciliation = async (context: ModuleAlarmContext, now = Date.now()): Promise<boolean> => {
   if (!await hasFreshChargingSongRequests(context.DB, context.channelId, now)) return false;
   await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, now + IN_FLIGHT_MAX_AGE_MS, undefined, null);
@@ -901,10 +922,13 @@ const recordPollFailure = async (
   }
   const now = Date.now();
   await context.DB.prepare(
-    `INSERT INTO song_requests_connections (channel_id, state, error_message, updated_at, poll_failures)
-     VALUES (?, 'not_connected', NULL, ?, ?)
-     ON CONFLICT (channel_id) DO UPDATE SET poll_failures = excluded.poll_failures, updated_at = excluded.updated_at`,
-  ).bind(context.channelId, new Date(now).toISOString(), failures).run();
+    `INSERT INTO song_requests_connections (channel_id, state, error_message, updated_at, poll_failures, poll_backoff_until)
+     VALUES (?, 'not_connected', NULL, ?, ?, ?)
+     ON CONFLICT (channel_id) DO UPDATE SET
+       poll_failures = excluded.poll_failures,
+       updated_at = excluded.updated_at,
+       poll_backoff_until = excluded.poll_backoff_until`,
+  ).bind(context.channelId, new Date(now).toISOString(), failures, now + delay).run();
   // A failure backoff is a "not before" deadline, so it replaces an earlier alarm.
   await context.schedule(SONG_REQUESTS_ALARM, now + delay, undefined, streamGeneration);
 };
@@ -981,9 +1005,18 @@ export const pollSongRequestsPlayback = async (
     if (pendingRefunds > 0) await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
     return;
   }
-  const connection = await context.DB.prepare("SELECT state, poll_failures FROM song_requests_connections WHERE channel_id = ?")
-    .bind(context.channelId).first<{ state: string; poll_failures: number }>();
+  const connection = await context.DB.prepare(
+    "SELECT state, poll_failures, poll_backoff_until FROM song_requests_connections WHERE channel_id = ?",
+  ).bind(context.channelId).first<{ state: string; poll_failures: number; poll_backoff_until: number | null }>();
   await reconcileApprovedSubmissionAlarms(context);
+  if (connection?.poll_backoff_until !== null && connection?.poll_backoff_until !== undefined && connection.poll_backoff_until > now) {
+    let nextDeadline = connection.poll_backoff_until;
+    if (pendingRefunds > 0) nextDeadline = Math.min(nextDeadline, now + BASE_BACKOFF_MS);
+    const maintenanceDeadline = await nextSongRequestMaintenanceDeadline(context.DB, context.channelId, now);
+    if (maintenanceDeadline !== null) nextDeadline = Math.min(nextDeadline, maintenanceDeadline);
+    await context.schedule(SONG_REQUESTS_ALARM, nextDeadline, undefined, streamGeneration);
+    return;
+  }
   if (context.environment === undefined) {
     await recordPollFailure(context, connection?.poll_failures ?? 0, undefined, streamGeneration, backoffBase);
     return;
@@ -1032,7 +1065,10 @@ export const pollSongRequestsPlayback = async (
     );
     if (!snapshot.committed || !await playbackCycleIsCurrent(context, roundId)) return;
     await setConnectionState(context, "connected", new Date(now).toISOString());
-    await context.DB.prepare("UPDATE song_requests_connections SET poll_failures = 0 WHERE channel_id = ? AND poll_failures > 0")
+    await context.DB.prepare(
+      `UPDATE song_requests_connections SET poll_failures = 0, poll_backoff_until = NULL
+        WHERE channel_id = ? AND (poll_failures > 0 OR poll_backoff_until IS NOT NULL)`,
+    )
       .bind(context.channelId).run();
     if (snapshot.changed) {
       await notifyNowPlaying(context, snapshot.revision);
@@ -1144,11 +1180,19 @@ export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmCont
 
 export const handleSongRequestsLifecycleAlarm = async (
   context: ModuleAlarmContext,
-  _alarmKey: string,
+  alarmKey: string,
   _deadline: number,
   _ownerRevision: number | undefined,
   invocation?: unknown,
 ): Promise<void> => {
+  if (typeof invocation === "object" && invocation !== null && (invocation as Record<string, unknown>).kind === "queue-overlay") {
+    await notifyQueueOverlay(context);
+    return;
+  }
+  if (alarmKey === "channel-point-resolutions") {
+    await flushChannelPointResolutions(context);
+    return;
+  }
   if (typeof invocation === "object" && invocation !== null && typeof (invocation as Record<string, unknown>).enabled === "boolean") {
     await handleSongRequestsActivation(context, (invocation as Record<string, unknown>).enabled as boolean);
     return;

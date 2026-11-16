@@ -15,6 +15,7 @@ import { spotifyTrackIdFromInput, type SpotifyTrack } from "./domain/track";
 import { songRequestChannelPointsTexts } from "./channel-points-locale";
 import { songRequestsSettingsSchema } from "./contracts";
 import { SpotifyRequestError, spotifySearchTracks, spotifyTrackById } from "./adapters/spotify";
+import { SONG_REQUESTS_LIFECYCLE_HANDLER } from "./service";
 
 const requestSongConfigSchema = z.object({});
 const refund = () => ({
@@ -26,6 +27,10 @@ const refund = () => ({
 
 const scheduleAutomaticSubmit = async (context: ModuleExecutionContext, requestId: string): Promise<void> => {
   await context.scheduleAlarm("submit", `submit:${requestId}`, Date.now(), undefined, null);
+};
+
+const notifyQueueOverlay = async (context: ModuleExecutionContext): Promise<void> => {
+  await context.runModuleAlarm?.(SONG_REQUESTS_LIFECYCLE_HANDLER, "queue-overlay", { kind: "queue-overlay" });
 };
 
 const reportExisting = async (context: ModuleExecutionContext, operationId: string) => {
@@ -102,7 +107,10 @@ const terminalCallback = async (
       suppressChannelPointsResolution: true,
       now: new Date().toISOString(),
     });
-    if (changed) return;
+    if (changed) {
+      await notifyQueueOverlay(context);
+      return;
+    }
   }
   throw new Error("The song-request ledger changed during external Twitch resolution.");
 };
@@ -198,6 +206,7 @@ export const requestSongChannelPointsAction: ChannelPointsActionDefinition<typeo
       }
       return refund();
     }
+    await notifyQueueOverlay(context);
     return "pending";
   },
   onRedemptionResolved: terminalCallback,

@@ -5,6 +5,7 @@ import type { SongRequestsSettings } from "../../src/modules/song_requests/contr
 import {
   handleSongRequestDurableAction,
   handleSongRequestsActivation,
+  handleSongRequestsLifecycleAlarm,
   handleSubmitAlarm,
   pollSongRequestsPlayback,
   spotifyAccessToken,
@@ -431,6 +432,7 @@ describe("durable song vote results", () => {
     await database.prepare("UPDATE song_requests_connections SET state = 'connected' WHERE channel_id = ?").bind(CHANNEL_ID).run();
     const reconnectFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", reconnectFetch);
+    vi.setSystemTime(NOW + 24_000);
     await pollSongRequestsPlayback(context);
     expect(reconnectFetch).toHaveBeenCalledOnce();
     expect(schedule.mock.calls.at(-1)?.[0]).toBe(SONG_REQUESTS_ALARM);
@@ -565,8 +567,9 @@ describe("durable song vote results", () => {
     context.secrets.readWithVersion = () => Promise.resolve({
       value: JSON.stringify({ accessToken: "access", refreshToken: "refresh", expiresAt: NOW + 3_600_000 }), version: "version",
     });
+    vi.setSystemTime(NOW + 24_000);
     await pollSongRequestsPlayback(context);
-    expect(schedule.mock.calls.at(-1)?.[1]).toBe(NOW + Math.max(MAX_BACKOFF_MS, 600_000));
+    expect(schedule.mock.calls.at(-1)?.[1]).toBe(NOW + 24_000 + Math.max(MAX_BACKOFF_MS, 600_000));
   });
 
   it("does not let an earlier alarm shorten a Retry-After backoff", async () => {
@@ -593,6 +596,71 @@ describe("durable song vote results", () => {
     await pollSongRequestsPlayback(raceContext);
 
     expect(alarms.get(SONG_REQUESTS_ALARM)).toBe(NOW + 120_000);
+  });
+
+  it("keeps a 120-second Spotify backoff while channel-point resolution retries every 15 seconds", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const { database, context, schedule } = await createContext("ballot-poll-backoff-resolution");
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { status: 429, message: "Rate limited" } }), {
+        status: 429,
+        headers: { "Retry-After": "120" },
+      }))
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetcher);
+    await pollSongRequestsPlayback(context);
+    expect(await database.prepare("SELECT poll_backoff_until FROM song_requests_connections WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ poll_backoff_until: NOW + 120_000 });
+
+    await transitionRequest(context.DB, {
+      channelId: CHANNEL_ID,
+      requestId: "channel-point-resolution-retry",
+      fromState: null,
+      toState: "pending_review",
+      now: new Date(NOW).toISOString(),
+      newRequest: {
+        source: "channel_points",
+        requestType: "channel_points",
+        channelPointsRewardId: "reward-fictional",
+        track: trackAt(0),
+        operationId: "channel-point-resolution-retry",
+        streamId: STREAM_ID,
+        roundId: STREAM_ID,
+      },
+    });
+    await transitionRequest(context.DB, {
+      channelId: CHANNEL_ID,
+      requestId: "channel-point-resolution-retry",
+      fromState: "pending_review",
+      toState: "rejected",
+      failureReason: "moderator_rejected",
+      refundDue: true,
+      now: new Date(NOW).toISOString(),
+    });
+    const resolveRedemption = vi.fn(() => Promise.resolve(false));
+    const alarmContext = {
+      ...context,
+      channelPoints: { resolveRedemption, readRedemptionStatus: vi.fn(() => Promise.resolve("UNFULFILLED" as const)) },
+    } as ModuleAlarmContext;
+
+    await handleSongRequestsLifecycleAlarm(alarmContext, "channel-point-resolutions", NOW, undefined);
+    for (let elapsed = 15_000; elapsed < 120_000; elapsed += 15_000) {
+      vi.setSystemTime(NOW + elapsed);
+      await handleSongRequestsLifecycleAlarm(alarmContext, "channel-point-resolutions", NOW + elapsed, undefined);
+      await pollSongRequestsPlayback(alarmContext);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(await database.prepare("SELECT poll_failures FROM song_requests_connections WHERE channel_id = ?")
+        .bind(CHANNEL_ID).first()).toEqual({ poll_failures: 1 });
+      expect(schedule.mock.calls.filter(([key]) => key === SONG_REQUESTS_ALARM).at(-1)?.[1]).toBe(NOW + 120_000);
+    }
+
+    expect(resolveRedemption).toHaveBeenCalledTimes(8);
+    expect(schedule.mock.calls.filter(([key]) => key === "channel-point-resolutions")).toHaveLength(8);
+    vi.setSystemTime(NOW + 120_000);
+    await pollSongRequestsPlayback(alarmContext);
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("clears the polling alarm on an accepted stream.offline event", async () => {

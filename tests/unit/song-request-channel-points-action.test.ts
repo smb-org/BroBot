@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModuleAlarmContext, ModuleExecutionContext } from "../../src/modules/contract";
 import { readSongRequest, transitionRequest } from "../../src/modules/song_requests/adapters/d1";
 import { requestSongChannelPointsAction } from "../../src/modules/song_requests/channel-points-action";
-import { handleSongRequestsActivation, handleSubmitAlarm } from "../../src/modules/song_requests/service";
+import {
+  handleSongRequestsActivation,
+  handleSongRequestsLifecycleAlarm,
+  handleSubmitAlarm,
+  SONG_REQUESTS_LIFECYCLE_HANDLER,
+} from "../../src/modules/song_requests/service";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -54,17 +59,33 @@ const createFixture = async () => {
   })));
   vi.stubGlobal("fetch", fetcher);
   const scheduleAlarm = vi.fn(() => Promise.resolve());
+  const publishModuleOverlayMessage = vi.fn<ModuleAlarmContext["publishModuleOverlayMessage"]>(() => Promise.resolve());
+  const lifecycleContext = {
+    DB: database,
+    channelId: CHANNEL_ID,
+    schedule: vi.fn<ModuleAlarmContext["schedule"]>(() => Promise.resolve()),
+    clear: vi.fn<ModuleAlarmContext["clear"]>(() => Promise.resolve()),
+    publishModuleOverlayMessage,
+  } as unknown as ModuleAlarmContext;
+  const runModuleAlarm = vi.fn<NonNullable<ModuleExecutionContext["runModuleAlarm"]>>(async (handlerKey, alarmKey, invocation) => {
+    if (handlerKey === "access_token") return "spotify-access-fixture";
+    if (handlerKey === SONG_REQUESTS_LIFECYCLE_HANDLER) {
+      await handleSongRequestsLifecycleAlarm(lifecycleContext, alarmKey, Date.parse(NOW), undefined, invocation);
+      return undefined;
+    }
+    return undefined;
+  });
   const pointStake = vi.fn(() => Promise.resolve({ ok: true }));
   const pointGetOperation = vi.fn(() => Promise.resolve(null));
   const context = {
     DB: database,
     channelId: CHANNEL_ID,
     environment: { APP_ENV: "production" },
-    runModuleAlarm: vi.fn(() => Promise.resolve("spotify-access-fixture")),
+    runModuleAlarm,
     scheduleAlarm,
     points: { stake: pointStake, getOperation: pointGetOperation },
   } as unknown as ModuleExecutionContext;
-  return { database, context, fetcher, scheduleAlarm, pointStake, pointGetOperation };
+  return { database, context, fetcher, scheduleAlarm, pointStake, pointGetOperation, publishModuleOverlayMessage };
 };
 
 const redemption = {
@@ -103,6 +124,24 @@ describe("song request channel-points action", () => {
       channel_points_reward_id: redemption.rewardId,
       state: "pending_review",
     });
+  });
+
+  it("emits one queue_changed overlay message after a successful channel-points admission", async () => {
+    const { context, publishModuleOverlayMessage } = await createFixture();
+
+    await expect(requestSongChannelPointsAction.execute(context, {
+      redemption, operationId: redemption.id, config: {},
+    })).resolves.toBe("pending");
+    await expect(requestSongChannelPointsAction.execute(context, {
+      redemption, operationId: redemption.id, config: {},
+    })).resolves.toBe("pending");
+
+    expect(publishModuleOverlayMessage).toHaveBeenCalledOnce();
+    expect(publishModuleOverlayMessage).toHaveBeenCalledWith(
+      "queue_changed",
+      "song_requests.queue",
+      expect.any(Object),
+    );
   });
 
   it("applies the reward per-user limit in addition to song-request rules", async () => {
@@ -268,7 +307,7 @@ describe("song request channel-points action", () => {
   });
 
   it("closes the ledger on an external Twitch cancellation without creating another refund obligation", async () => {
-    const { database, context } = await createFixture();
+    const { database, context, publishModuleOverlayMessage } = await createFixture();
     await requestSongChannelPointsAction.execute(context, {
       redemption, operationId: redemption.id, config: {},
     });
@@ -280,10 +319,14 @@ describe("song request channel-points action", () => {
     await expect(database.prepare(
       "SELECT channel_points_resolution_due FROM song_requests WHERE id = ?",
     ).bind(redemption.id).first()).resolves.toEqual({ channel_points_resolution_due: null });
+    expect(publishModuleOverlayMessage).toHaveBeenCalledTimes(2);
+    expect(publishModuleOverlayMessage).toHaveBeenLastCalledWith(
+      "queue_changed", "song_requests.queue", expect.any(Object),
+    );
   });
 
   it("closes an externally fulfilled request without sending a cancellation", async () => {
-    const { database, context } = await createFixture();
+    const { database, context, publishModuleOverlayMessage } = await createFixture();
     await requestSongChannelPointsAction.execute(context, {
       redemption, operationId: redemption.id, config: {},
     });
@@ -295,6 +338,10 @@ describe("song request channel-points action", () => {
     await expect(database.prepare(
       "SELECT channel_points_resolution_due FROM song_requests WHERE id = ?",
     ).bind(redemption.id).first()).resolves.toEqual({ channel_points_resolution_due: null });
+    expect(publishModuleOverlayMessage).toHaveBeenCalledTimes(2);
+    expect(publishModuleOverlayMessage).toHaveBeenLastCalledWith(
+      "queue_changed", "song_requests.queue", expect.any(Object),
+    );
   });
 
   it("does not enqueue a song when Twitch canceled its redemption before Spotify submission", async () => {
