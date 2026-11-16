@@ -20,7 +20,7 @@ import {
   transitionRequest,
 } from "./adapters/d1";
 import {
-  refundRequestId,
+  retrySongRequestRefunds,
   songRequestQueueOverlayPayload,
   SONG_REQUESTS_CREDENTIAL_SECRET,
   SONG_REQUESTS_HANDLER,
@@ -89,6 +89,19 @@ const publishQueueState = async (context: RouteContext): Promise<void> => {
     "song_requests.queue",
     await songRequestQueueOverlayPayload(context.env.DB, channel(context)),
   );
+};
+
+const retryRouteRefunds = async (context: RouteContext): Promise<void> => {
+  const pending = await retrySongRequestRefunds({
+    DB: context.env.DB,
+    channelId: channel(context),
+    points: context.get("points")(channel(context)),
+  });
+  if (pending > 0) {
+    await context.get("scheduleModuleAlarm")(
+      channel(context), "song_requests", SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + 60_000, null,
+    );
+  }
 };
 
 export const songRequestsRoutes = new Hono<ModuleRouteEnvironment>();
@@ -293,12 +306,16 @@ songRequestsRoutes.post("/requests/:requestId/approve", async (context) => {
 songRequestsRoutes.post("/requests/:requestId/reject", async (context) => {
   if (!isModerator(context)) return moderatorDenied(context);
   const requestId = context.req.param("requestId");
+  await retryRouteRefunds(context);
   const changed = await transitionRequest(context.env.DB, {
     channelId: channel(context), requestId, fromState: "pending_review", toState: "rejected",
-    failureReason: "moderator_rejected", now: new Date().toISOString(),
+    failureReason: "moderator_rejected", refundDue: true, now: new Date().toISOString(),
   });
-  if (!changed) return context.json({ error: "song_request_not_pending_review" }, 409);
-  await refundRequestId({ DB: context.env.DB, channelId: channel(context), points: context.get("points")(channel(context)) }, requestId);
+  if (!changed) {
+    await retryRouteRefunds(context);
+    return context.json({ error: "song_request_not_pending_review" }, 409);
+  }
+  await retryRouteRefunds(context);
   await publishQueueState(context);
   return context.json({ state: "rejected" });
 });
@@ -310,13 +327,14 @@ songRequestsRoutes.post("/requests/:requestId/remove", async (context) => {
   const requestId = context.req.param("requestId");
   const row = await readSongRequest(context.env.DB, channel(context), requestId);
   if (row === null) return context.json({ error: "song_request_missing" }, 404);
+  await retryRouteRefunds(context);
   if (row.state === "pending_review" || row.state === "approved") {
     const changed = await transitionRequest(context.env.DB, {
       channelId: channel(context), requestId, fromState: row.state, toState: "rejected",
-      failureReason: "moderator_removed_before_submission", now: new Date().toISOString(),
+      failureReason: "moderator_removed_before_submission", refundDue: true, now: new Date().toISOString(),
     });
     if (!changed) return context.json({ error: "song_request_state_changed" }, 409);
-    await refundRequestId({ DB: context.env.DB, channelId: channel(context), points: context.get("points")(channel(context)) }, requestId);
+    await retryRouteRefunds(context);
     await publishQueueState(context);
     return context.json({ state: "rejected", refunded: row.requestType === "bot_points" && row.chargedAmount > 0 });
   }
@@ -324,10 +342,11 @@ songRequestsRoutes.post("/requests/:requestId/remove", async (context) => {
   const changed = await transitionRequest(context.env.DB, {
     channelId: channel(context), requestId, fromState: row.state, toState: "removed",
     failureReason: body.refund ? "moderator_removed_with_refund" : "moderator_removed",
+    refundDue: body.refund,
     now: new Date().toISOString(),
   });
   if (!changed) return context.json({ error: "song_request_state_changed" }, 409);
-  if (body.refund) await refundRequestId({ DB: context.env.DB, channelId: channel(context), points: context.get("points")(channel(context)) }, requestId);
+  if (body.refund) await retryRouteRefunds(context);
   await publishQueueState(context);
   return context.json({ state: "removed", refunded: body.refund && row.requestType === "bot_points" && row.chargedAmount > 0 });
 });
@@ -336,10 +355,11 @@ songRequestsRoutes.post("/clear", async (context) => {
   if (!isModerator(context)) return moderatorDenied(context);
   const current = await currentRequestRound(context);
   if (current === null) return context.json({ error: "stream_offline" }, 409);
-  if (current.streamId === null) await closeOfflineSongRequestRound(context.env.DB, channel(context));
+  if (current.streamId === null && await closeOfflineSongRequestRound(context.env.DB, channel(context), current.roundId) === null) {
+    return context.json({ cleared: false });
+  }
   const result = await cleanupSongRequestRound(context.env.DB, channel(context), current.roundId, new Date().toISOString(), "list_cleared");
-  const points = context.get("points")(channel(context));
-  for (const requestId of result.refundableRequestIds) await refundRequestId({ DB: context.env.DB, channelId: channel(context), points }, requestId);
+  await retryRouteRefunds(context);
   await context.get("publishModuleOverlayMessage")(
     channel(context), "song_requests", "state_changed", "song_requests.now_playing", { revision: result.revision },
   );
@@ -352,9 +372,15 @@ songRequestsRoutes.post("/requests/:requestId/resolve", async (context) => {
   const body = await bodyFrom(context.req.raw);
   const state = body?.state;
   if (state !== "submitted" && state !== "failed") return context.json({ error: "song_request_resolution_invalid" }, 400);
+  await retryRouteRefunds(context);
   const changed = await resolveUnknownRequest(context.env.DB, channel(context), context.req.param("requestId"), state, new Date().toISOString());
-  if (!changed) return context.json({ error: "song_request_not_outcome_unknown" }, 409);
-  if (state === "failed") await refundRequestId({ DB: context.env.DB, channelId: channel(context), points: context.get("points")(channel(context)) }, context.req.param("requestId"));
+  if (!changed) {
+    await retryRouteRefunds(context);
+    return context.json({ error: "song_request_not_outcome_unknown" }, 409);
+  }
+  if (state === "failed") {
+    await retryRouteRefunds(context);
+  }
   await publishQueueState(context);
   return context.json({ state });
 });

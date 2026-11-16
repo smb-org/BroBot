@@ -125,6 +125,7 @@ export interface RequestTransition {
   toState: SongRequestState;
   now: string;
   failureReason?: string | null;
+  refundDue?: boolean;
   streamId?: string | null;
   activeStreamId?: string;
   activeRoundId?: string;
@@ -237,9 +238,12 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
       `UPDATE song_requests SET state = ?, failure_reason = ?, updated_at = ?,
          submitted_at = CASE WHEN ? = 'submitted' THEN ? ELSE submitted_at END,
          observed_at = CASE WHEN ? = 'observed_playing' THEN ? ELSE observed_at END,
-         charged_amount = COALESCE(?, charged_amount)
+         charged_amount = COALESCE(?, charged_amount),
+         refund_due = CASE WHEN ? = 1 AND request_type = 'bot_points' AND charged_amount > 0 THEN 1
+           WHEN ? = 0 THEN 0 ELSE refund_due END
         WHERE ${conditions.join(" AND ")}`,
-    ).bind(...bindings);
+    ).bind(...bindings.slice(0, 8), input.refundDue === true ? 1 : input.refundDue === false ? 0 : null,
+      input.refundDue === true ? 1 : input.refundDue === false ? 0 : null, ...bindings.slice(8));
   }
   const results = await db.batch([transition, ...(input.companionStatements ?? [])]);
   // D1 counts rows written by the panel revision triggers too, so test for "at least one".
@@ -318,19 +322,21 @@ export const admitSongRequest = async (
            WHERE prior.channel_id = ? AND prior.round_id = ? AND prior.track_id = ?
              AND ${OPEN_OR_PLAYING_REQUEST_SQL}
         ))
-        AND (? = 0 OR (? = 1 AND NOT EXISTS (
+        AND (? = 0 OR NOT EXISTS (
           SELECT 1 FROM song_requests AS prior
-           WHERE prior.channel_id = ? AND prior.round_id = ? AND prior.track_id = ?
+           WHERE prior.channel_id = ? AND prior.track_id = ?
+             AND (? = 0 OR prior.round_id = ?)
              AND prior.submitted_at IS NOT NULL
-        )) OR (? = 0 AND NOT EXISTS (
-          SELECT 1 FROM song_requests AS prior
-           WHERE prior.channel_id = ? AND prior.round_id = ? AND prior.track_id = ?
-             AND prior.submitted_at >= ?
-        )))
+             AND (? = 1 OR prior.submitted_at >= ?)
+        ))
         AND (? = 0 OR (
           SELECT COUNT(*) FROM song_requests AS prior
            WHERE prior.channel_id = ? AND prior.round_id = ? AND prior.requester_user_id = ?
-             AND ${OPEN_REQUEST_SQL} AND prior.created_at >= ?
+             AND (${OPEN_REQUEST_SQL}
+               OR (prior.request_type = 'free' AND prior.state != 'failed')
+               OR (prior.charged_at IS NOT NULL AND prior.state != 'failed'))
+             AND (prior.state != 'rejected' OR prior.request_type = 'free' OR prior.charged_at IS NOT NULL)
+             AND prior.created_at >= ?
         ) = 0)
         AND (? = 0 OR (
           SELECT COUNT(*) FROM song_requests AS prior
@@ -371,8 +377,8 @@ export const admitSongRequest = async (
     input.track.durationMs, rules.maxTrackLengthMinutes * 60_000,
     Number(rules.blockTracksEnabled), input.track.id, blockedTrackIdsJson, Number(rules.blockArtistsEnabled), artistsJson, blockedArtistsJson,
     Number(rules.duplicateEnabled), input.channelId, input.roundId, input.track.id,
-    Number(rules.songCooldownEnabled), Number(rules.songCooldownOncePerRound), input.channelId, input.roundId,
-    input.track.id, Number(rules.songCooldownOncePerRound), input.channelId, input.roundId, input.track.id, songCooldownAt,
+    Number(rules.songCooldownEnabled), input.channelId, input.track.id, Number(rules.songCooldownOncePerRound),
+    input.roundId, Number(rules.songCooldownOncePerRound), songCooldownAt,
     Number(rules.personCooldownEnabled && rules.personCooldownMinutes > 0), input.channelId, input.roundId,
     input.requesterUserId, personCooldownAt,
     Number(rules.personOpenLimitEnabled), input.channelId, input.roundId, input.requesterUserId, rules.personOpenLimit,
@@ -419,14 +425,23 @@ export const songRequestAdmissionFailure = async (
     const cutoff = rules.songCooldownOncePerRound
       ? null
       : new Date(Date.parse(input.now) - rules.songCooldownMinutes * 60_000).toISOString();
+    const roundFilter = rules.songCooldownOncePerRound ? " AND round_id = ?" : "";
+    const cooldownBindings: (string | number | null)[] = rules.songCooldownOncePerRound
+      ? [input.channelId, input.roundId, input.track.id]
+      : [input.channelId, input.track.id];
+    if (cutoff !== null) cooldownBindings.push(cutoff);
     const recent = await count(
-      `SELECT COUNT(*) AS count FROM song_requests WHERE channel_id = ? AND round_id = ? AND track_id = ? AND submitted_at IS NOT NULL${cutoff === null ? "" : " AND submitted_at >= ?"}`,
-      cutoff === null ? [input.channelId, input.roundId, input.track.id] : [input.channelId, input.roundId, input.track.id, cutoff],
+      `SELECT COUNT(*) AS count FROM song_requests WHERE channel_id = ?${roundFilter} AND track_id = ? AND submitted_at IS NOT NULL${cutoff === null ? "" : " AND submitted_at >= ?"}`,
+      cooldownBindings,
     );
     if (recent > 0) return { code: "song_cooldown" };
   }
   if (rules.personCooldownEnabled && rules.personCooldownMinutes > 0 && await count(
-    `SELECT COUNT(*) AS count FROM song_requests WHERE channel_id = ? AND round_id = ? AND requester_user_id = ? AND ${OPEN_REQUEST_SQL} AND created_at >= ?`,
+    `SELECT COUNT(*) AS count FROM song_requests AS prior WHERE prior.channel_id = ? AND prior.round_id = ? AND prior.requester_user_id = ?
+       AND (${OPEN_REQUEST_SQL} OR (prior.request_type = 'free' AND prior.state != 'failed')
+         OR (prior.charged_at IS NOT NULL AND prior.state != 'failed'))
+       AND (prior.state != 'rejected' OR prior.request_type = 'free' OR prior.charged_at IS NOT NULL)
+       AND prior.created_at >= ?`,
     [input.channelId, input.roundId, input.requesterUserId, new Date(Date.parse(input.now) - rules.personCooldownMinutes * 60_000).toISOString()],
   ) > 0) return { code: "person_cooldown" };
   if (rules.personOpenLimitEnabled && await count(
@@ -482,11 +497,11 @@ export const closeOfflineSongRequestRound = async (
   channelId: string,
   expectedRoundId?: string,
 ): Promise<string | null> => {
-  const roundId = await readOfflineSongRequestRound(db, channelId);
-  if (roundId === null || expectedRoundId !== undefined && expectedRoundId !== roundId) return null;
-  await db.prepare("DELETE FROM song_requests_offline_rounds WHERE channel_id = ? AND round_id = ?")
-    .bind(channelId, roundId).run();
-  return roundId;
+  const statement = expectedRoundId === undefined
+    ? db.prepare("DELETE FROM song_requests_offline_rounds WHERE channel_id = ? RETURNING round_id").bind(channelId)
+    : db.prepare("DELETE FROM song_requests_offline_rounds WHERE channel_id = ? AND round_id = ? RETURNING round_id")
+      .bind(channelId, expectedRoundId);
+  return (await statement.first<{ round_id: string }>())?.round_id ?? null;
 };
 
 export const songRequestTrackFromSpotify = (track: SpotifyTrack): SongRequestTrack => {
@@ -515,6 +530,36 @@ export const readSongRequest = async (db: D1Database, channelId: string, request
        FROM song_requests WHERE channel_id = ? AND id = ? LIMIT 1`,
   ).bind(channelId, requestId).first<SongRequestSqlRow>();
   return row === null ? null : rowToRequest(row);
+};
+
+export const markSongRequestCharged = async (db: D1Database, channelId: string, requestId: string, now: string): Promise<void> => {
+  await db.prepare("UPDATE song_requests SET charged_at = COALESCE(charged_at, ?) WHERE channel_id = ? AND id = ?")
+    .bind(now, channelId, requestId).run();
+};
+
+export const songRequestRefundIsDue = async (db: D1Database, channelId: string, requestId: string): Promise<boolean> =>
+  (await db.prepare("SELECT refund_due FROM song_requests WHERE channel_id = ? AND id = ?")
+    .bind(channelId, requestId).first<{ refund_due: number }>())?.refund_due === 1;
+
+export const markSongRequestRefundComplete = async (db: D1Database, channelId: string, requestId: string): Promise<void> => {
+  await db.prepare("UPDATE song_requests SET refund_due = 0 WHERE channel_id = ? AND id = ? AND refund_due = 1")
+    .bind(channelId, requestId).run();
+};
+
+export const songRequestRefundDueIds = async (
+  db: D1Database,
+  channelId: string,
+  roundId?: string,
+): Promise<string[]> => {
+  const roundFilter = roundId === undefined ? "" : " AND round_id = ?";
+  const statement = db.prepare(
+    `SELECT id FROM song_requests WHERE channel_id = ? AND refund_due = 1
+       AND state IN ('observed_playing', 'not_observed', 'rejected', 'removed', 'failed')${roundFilter}
+      ORDER BY created_at, id`,
+  );
+  const rows = await (roundId === undefined ? statement.bind(channelId) : statement.bind(channelId, roundId))
+    .all<{ id: string }>();
+  return rows.results.map((row) => row.id);
 };
 
 export const recentSongRequests = async (db: D1Database, channelId: string, roundId: string | null): Promise<SongRequestRow[]> => {
@@ -751,21 +796,24 @@ export const clearSongRequestsForStreamEnd = async (
   channelId: string,
   streamId: string | null,
   now: string,
-): Promise<{ changed: boolean; revision: number }> => {
+): Promise<{ changed: boolean; revision: number; refundableRequestIds: string[] }> => {
   const rows = await db.prepare(
     `SELECT id, state FROM song_requests
       WHERE channel_id = ? AND (round_id = ? OR (round_id IS NULL AND (stream_id = ? OR stream_id IS NULL)))
         AND state IN ('submitted', 'pending_review', 'approved', 'submitting', 'outcome_unknown')`,
   ).bind(channelId, streamId, streamId).all<{ id: string; state: SongRequestState }>();
   let requestsChanged = false;
+  const refundableRequestIds: string[] = [];
   for (const row of rows.results) {
     const toState: SongRequestState = row.state === "submitted" ? "not_observed"
-      : row.state === "submitting" ? "outcome_unknown"
-        : row.state === "outcome_unknown" ? "failed" : "rejected";
+      : row.state === "submitting" || row.state === "outcome_unknown" ? "failed" : "rejected";
     const reason = row.state === "submitted" ? null : "stream_ended";
-    requestsChanged = await transitionRequest(db, {
-      channelId, requestId: row.id, fromState: row.state, toState, failureReason: reason, now,
-    }) || requestsChanged;
+    const changed = await transitionRequest(db, {
+      channelId, requestId: row.id, fromState: row.state, toState, failureReason: reason,
+      refundDue: row.state !== "submitted", now,
+    });
+    requestsChanged = changed || requestsChanged;
+    if (changed && row.state !== "submitted") refundableRequestIds.push(row.id);
   }
   const current = await db.prepare(
     "SELECT revision, track_json FROM song_requests_now_playing WHERE channel_id = ?",
@@ -780,6 +828,7 @@ export const clearSongRequestsForStreamEnd = async (
   return {
     changed: requestsChanged || hasTrack,
     revision: (current?.revision ?? 0) + Number(hasTrack),
+    refundableRequestIds,
   };
 };
 
@@ -800,7 +849,7 @@ export const cleanupSongRequestRound = async (
   const refundableRequestIds: string[] = [];
   for (const row of rows.results) {
     const toState: SongRequestState = row.state === "submitted"
-      ? reason === "module_disabled" ? "removed" : "not_observed"
+      ? reason === "module_disabled" || reason === "list_cleared" ? "removed" : "not_observed"
       : row.state === "submitting" || row.state === "outcome_unknown" ? "failed" : "rejected";
     const changed = await transitionRequest(db, {
       channelId,
@@ -808,6 +857,7 @@ export const cleanupSongRequestRound = async (
       fromState: row.state,
       toState,
       failureReason: reason,
+      refundDue: reason === "module_disabled" || row.state !== "submitted",
       now,
     });
     requestsChanged = changed || requestsChanged;
@@ -856,6 +906,8 @@ export const resolveUnknownRequest = async (
   now: string,
 ): Promise<boolean> => {
   return await transitionRequest(db, {
-    channelId, requestId, fromState: "outcome_unknown", toState: state, failureReason: null, now,
+    channelId, requestId, fromState: "outcome_unknown", toState: state, failureReason: null,
+    refundDue: state === "failed",
+    now,
   });
 };

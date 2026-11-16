@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModuleEvent, ModuleExecutionContext, ModulePointsAccess, ModuleRouteEnvironment } from "../../src/modules/contract";
 import { songRequestsSettingsSchema } from "../../src/modules/song_requests/contracts";
 import type { SongRequestsSettings } from "../../src/modules/song_requests/contracts";
-import { processSongRequestsEvent, refundRequestId, songRequestRefundOperationId } from "../../src/modules/song_requests/service";
-import { transitionRequest } from "../../src/modules/song_requests/adapters/d1";
+import { processSongRequestsEvent, refundRequestId, retrySongRequestRefunds, songRequestRefundOperationId } from "../../src/modules/song_requests/service";
+import { cleanupSongRequestRound, transitionRequest } from "../../src/modules/song_requests/adapters/d1";
 import { songRequestsRoutes } from "../../src/modules/song_requests/routes";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -26,7 +26,13 @@ const databases: TestD1Database[] = [];
 
 const createHarness = async (
   rawSettings: unknown,
-  options: { pointsEnabled?: boolean; explicit?: boolean; failCharge?: boolean } = {},
+  options: {
+    pointsEnabled?: boolean;
+    explicit?: boolean;
+    failCharge?: boolean;
+    beforeChargeCommit?: () => Promise<void>;
+    failRefundAttempts?: number;
+  } = {},
 ) => {
   const database = new TestD1Database();
   databases.push(database);
@@ -46,11 +52,29 @@ const createHarness = async (
       .bind(CHANNEL_ID, NOW),
   ]);
   const operations = new Map<string, { kind: string; result: unknown }>();
-  const apply = vi.fn((operationId: string, kind: string, _movements: unknown[], result: unknown) => {
+  let failRefundAttempts = options.failRefundAttempts ?? 0;
+  // In-memory ledger with the real rules: movements must sum to zero and only the house may go negative.
+  const balances = new Map<string, number>();
+  const balanceOf = (accountId: string): number => balances.get(accountId) ?? (accountId === "__house" ? 0 : 1_000);
+  const applyMovements = (movements: unknown[]): void => {
+    const deltas = movements as { accountId: string; delta: number }[];
+    if (deltas.reduce((sum, movement) => sum + movement.delta, 0) !== 0) throw new Error("ledger_not_zero_sum");
+    const next = new Map<string, number>();
+    for (const { accountId, delta } of deltas) next.set(accountId, (next.get(accountId) ?? balanceOf(accountId)) + delta);
+    for (const [accountId, balance] of next) if (accountId !== "__house" && balance < 0) throw new Error("insufficient_balance");
+    for (const [accountId, balance] of next) balances.set(accountId, balance);
+  };
+  const apply = vi.fn(async (operationId: string, kind: string, movements: unknown[], result: unknown) => {
+    if (kind === "stake") await options.beforeChargeCommit?.();
     if (kind === "stake" && options.failCharge === true) return Promise.reject(new Error("insufficient_points"));
+    if (kind === "refund" && failRefundAttempts > 0) {
+      failRefundAttempts -= 1;
+      throw new Error("temporary_refund_failure");
+    }
     if (operations.has(operationId)) return Promise.resolve({ result: operations.get(operationId)?.result });
+    applyMovements(movements);
     operations.set(operationId, { kind, result });
-    return Promise.resolve({ result });
+    return { result };
   });
   const points = {
     apply,
@@ -91,7 +115,7 @@ const createHarness = async (
     actor: null,
     chatStatus,
   });
-  return { database, context, points, operations, scheduledAlarms, fetcher, apply, createEvent };
+  return { database, context, points, operations, scheduledAlarms, fetcher, apply, createEvent, balanceOf };
 };
 
 const removeAppFor = (points: ModulePointsAccess) => {
@@ -100,6 +124,7 @@ const removeAppFor = (points: ModulePointsAccess) => {
     context.set("channelRole", "operator");
     context.set("points", () => points);
     context.set("publishModuleOverlayMessage", vi.fn(() => Promise.resolve()));
+    context.set("scheduleModuleAlarm", vi.fn(() => Promise.resolve()));
     await next();
   });
   app.route("/channels/:channelId", songRequestsRoutes);
@@ -128,7 +153,7 @@ describe("song request payments", () => {
     expect(row).toMatchObject({ request_type: "free", charged_amount: 0, state: "pending_review" });
     if (row === null) throw new Error("The free request was not recorded.");
     await transitionRequest(harness.database as unknown as D1Database, {
-      channelId: CHANNEL_ID, requestId: row.id, fromState: "pending_review", toState: "rejected", now: NOW,
+      channelId: CHANNEL_ID, requestId: row.id, fromState: "pending_review", toState: "rejected", refundDue: true, now: NOW,
     });
     await refundRequestId({ DB: harness.database as unknown as D1Database, channelId: CHANNEL_ID, points: harness.points }, row.id);
     expect(harness.apply).not.toHaveBeenCalled();
@@ -141,19 +166,96 @@ describe("song request payments", () => {
     expect(harness.apply).toHaveBeenCalledTimes(1);
     expect(harness.apply.mock.calls[0]?.[0]).toContain(":charge");
     expect(harness.apply.mock.calls[0]?.[1]).toBe("stake");
-    expect(harness.apply.mock.calls[0]?.[2]).toEqual([{ accountId: "user-cedar_viewer", login: "cedar_viewer", delta: -13 }]);
+    expect(harness.apply.mock.calls[0]?.[2]).toEqual([
+      { accountId: "user-cedar_viewer", login: "cedar_viewer", delta: -13 },
+      { accountId: "__house", delta: 13 },
+    ]);
     const row = await harness.database.prepare("SELECT id, state, charged_amount FROM song_requests WHERE channel_id = ?")
       .bind(CHANNEL_ID).first<{ id: string; state: string; charged_amount: number }>();
     expect(row).toMatchObject({ state: "approved", charged_amount: 13 });
     if (row === null) throw new Error("The paid request was not recorded.");
     await transitionRequest(harness.database as unknown as D1Database, {
-      channelId: CHANNEL_ID, requestId: row.id, fromState: "approved", toState: "rejected", now: NOW,
+      channelId: CHANNEL_ID, requestId: row.id, fromState: "approved", toState: "rejected", refundDue: true, now: NOW,
     });
     await refundRequestId({ DB: harness.database as unknown as D1Database, channelId: CHANNEL_ID, points: harness.points }, row.id);
     await refundRequestId({ DB: harness.database as unknown as D1Database, channelId: CHANNEL_ID, points: harness.points }, row.id);
     expect(harness.apply).toHaveBeenCalledTimes(2);
     expect(harness.apply.mock.calls[1]?.[0]).toContain(":refund");
     expect(harness.apply.mock.calls[1]?.[1]).toBe("refund");
+    expect(harness.apply.mock.calls[1]?.[2]).toEqual([
+      { accountId: "user-cedar_viewer", login: "cedar_viewer", delta: 13 },
+      { accountId: "__house", delta: -13 },
+    ]);
+    expect(harness.balanceOf("user-cedar_viewer")).toBe(1_000);
+    expect(harness.balanceOf("__house")).toBe(0);
+  });
+
+  it("refunds once when moderation rejects before the charge commits", async () => {
+    let releaseCharge!: () => void;
+    let signalChargeStarted!: () => void;
+    const chargeGate = new Promise<void>((resolve) => { releaseCharge = resolve; });
+    const chargeStarted = new Promise<void>((resolve) => { signalChargeStarted = resolve; });
+    const harness = await createHarness({ paymentMode: "bot_points", mode: "moderated" }, {
+      beforeChargeCommit: async () => {
+        signalChargeStarted();
+        await chargeGate;
+      },
+    });
+    const command = processSongRequestsEvent(harness.createEvent("race_viewer"), harness.context);
+    await chargeStarted;
+    const row = await harness.database.prepare("SELECT id FROM song_requests WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ id: string }>();
+    if (row === null) throw new Error("The moderated request was not recorded.");
+
+    const response = await removeAppFor(harness.points).fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests/${row.id}/reject`, {
+      method: "POST",
+    }), { DB: harness.database as unknown as D1Database });
+    expect(response.status).toBe(200);
+    releaseCharge();
+    const result = await command;
+
+    expect(result.actions[0]).toMatchObject({ kind: "chat", automated: false });
+    expect(JSON.stringify(result.actions[0])).toContain("rejected");
+    expect(JSON.stringify(result.actions[0])).not.toContain("accepted");
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund")).toHaveLength(1);
+    expect(harness.operations.has(songRequestRefundOperationId(row.id))).toBe(true);
+    expect(await harness.database.prepare("SELECT state, refund_due FROM song_requests WHERE id = ?")
+      .bind(row.id).first()).toEqual({ state: "rejected", refund_due: 0 });
+  });
+
+  it("reconciles a terminal refund after cleanup could no longer select the row", async () => {
+    const harness = await createHarness({ paymentMode: "bot_points", mode: "moderated" }, { failRefundAttempts: 2 });
+    await processSongRequestsEvent(harness.createEvent("retry_refund_viewer"), harness.context);
+    const row = await harness.database.prepare("SELECT id FROM song_requests WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ id: string }>();
+    if (row === null) throw new Error("The moderated request was not recorded.");
+
+    const cleanup = await cleanupSongRequestRound(
+      harness.database as unknown as D1Database,
+      CHANNEL_ID,
+      "stream-payment-fixture",
+      NOW,
+      "list_cleared",
+    );
+    expect(cleanup.refundableRequestIds).toContain(row.id);
+    await expect(refundRequestId({ DB: harness.database as unknown as D1Database, channelId: CHANNEL_ID, points: harness.points }, row.id))
+      .rejects.toThrow("temporary_refund_failure");
+    expect(await harness.database.prepare("SELECT refund_due FROM song_requests WHERE id = ?").bind(row.id).first())
+      .toEqual({ refund_due: 1 });
+
+    const response = await removeAppFor(harness.points).fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests/${row.id}/remove`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refund: false }),
+    }), { DB: harness.database as unknown as D1Database });
+    expect(response.status).toBe(409);
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund")).toHaveLength(2);
+    expect(await harness.database.prepare("SELECT refund_due FROM song_requests WHERE id = ?").bind(row.id).first())
+      .toEqual({ refund_due: 1 });
+
+    await retrySongRequestRefunds({ DB: harness.database as unknown as D1Database, channelId: CHANNEL_ID, points: harness.points });
+    expect(await harness.database.prepare("SELECT refund_due FROM song_requests WHERE id = ?").bind(row.id).first())
+      .toEqual({ refund_due: 0 });
+    expect(harness.operations.has(songRequestRefundOperationId(row.id))).toBe(true);
+    expect(harness.apply.mock.calls.filter((call) => call[1] === "refund")).toHaveLength(3);
   });
 
   it("rejects a charged pre-submission request and refunds it", async () => {

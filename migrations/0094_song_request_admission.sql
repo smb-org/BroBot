@@ -2,6 +2,8 @@ ALTER TABLE song_requests ADD COLUMN round_id TEXT;
 ALTER TABLE song_requests ADD COLUMN request_type TEXT NOT NULL DEFAULT 'vote'
   CHECK (request_type IN ('vote', 'bot_points', 'free', 'channel_points'));
 ALTER TABLE song_requests ADD COLUMN charged_amount INTEGER NOT NULL DEFAULT 0 CHECK (charged_amount >= 0);
+ALTER TABLE song_requests ADD COLUMN charged_at TEXT;
+ALTER TABLE song_requests ADD COLUMN refund_due INTEGER NOT NULL DEFAULT 0 CHECK (refund_due IN (0, 1));
 UPDATE song_requests
    SET round_id = stream_id,
        request_type = CASE WHEN source = 'mod_vote' THEN 'vote' ELSE 'bot_points' END;
@@ -19,6 +21,7 @@ CREATE TABLE song_requests_offline_rounds (
 CREATE INDEX song_requests_round_state_idx ON song_requests(channel_id, round_id, state, created_at, id);
 CREATE INDEX song_requests_round_track_idx ON song_requests(channel_id, round_id, track_id, state, submitted_at);
 CREATE INDEX song_requests_round_requester_idx ON song_requests(channel_id, round_id, requester_user_id, state, created_at);
+CREATE INDEX song_requests_refund_due_idx ON song_requests(channel_id, refund_due, state, created_at);
 
 DROP TRIGGER panel_rev_song_requests_update;
 CREATE TRIGGER panel_rev_song_requests_update

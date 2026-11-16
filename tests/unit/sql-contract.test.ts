@@ -246,6 +246,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["OPEN_REQUEST_SQL", "state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')"],
   ["OPEN_OR_PLAYING_REQUEST_SQL", "(state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown') OR (state = 'removed' AND submitted_at IS NOT NULL))"],
   ["conditions.join(\" AND \")", "channel_id = ? AND id = ? AND state = ?"],
+  ["roundFilter", " AND round_id = ?"],
   ["roundFenceSql", " AND EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?)"],
   ["activeRoundGuard", `
        AND ? = ?
@@ -396,9 +397,9 @@ describe("SQL contract", () => {
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
       expect(objects.filter((object) => object.type === "table")).toHaveLength(88);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(79);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(80);
       expect(objects.filter((object) => object.type === "trigger")).toHaveLength(180);
-      expect(objects).toHaveLength(347);
+      expect(objects).toHaveLength(348);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

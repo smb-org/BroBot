@@ -1,8 +1,11 @@
 import { env } from "cloudflare:workers";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { admitSongRequest, songRequestAdmissionFailure, transitionRequest } from "../../src/modules/song_requests/adapters/d1";
-import { songRequestsSettingsSchema } from "../../src/modules/song_requests/contracts";
+import type { ModuleEvent, ModuleExecutionContext } from "../../src/modules/contract";
+import { admitSongRequest, cleanupSongRequestRound, markSongRequestCharged, songRequestAdmissionFailure, transitionRequest } from "../../src/modules/song_requests/adapters/d1";
+import { songRequestsSettingsSchema, type SongRequestsSettings } from "../../src/modules/song_requests/contracts";
+import { processSongRequestsEvent, refundRequestId, songRequestChargeOperationId, songRequestRefundOperationId } from "../../src/modules/song_requests/service";
+import { modulePoints } from "../../src/worker/module-points";
 
 const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
   query: "?raw",
@@ -39,6 +42,16 @@ const settings = songRequestsSettingsSchema.parse({ rules: {
   artistOpenLimitEnabled: false,
 } });
 const settingsJson = JSON.stringify(settings);
+const ledgerTrack = {
+  id: "realledgertrack01",
+  uri: "spotify:track:realledgertrack01",
+  name: "Ledger Track",
+  duration_ms: 190_000,
+  explicit: false,
+  artists: [{ id: "fictionalartist01", name: "Fictional Artist" }],
+  album: { name: "Ledger Test", images: [] },
+  external_urls: { spotify: "spotify-link-fixture" },
+};
 
 beforeAll(async () => {
   for (const path of Object.keys(migrationSources).sort((left, right) => left.localeCompare(right))) {
@@ -87,6 +100,7 @@ const requestInput = (index: number, customSettings = settings) => ({
 describe("song request admission on D1", () => {
   const configure = async (customSettings: ReturnType<typeof songRequestsSettingsSchema.parse>): Promise<void> => {
     await database.prepare("DELETE FROM song_requests WHERE channel_id = ?").bind(CHANNEL_ID).run();
+    await database.prepare("UPDATE channel_stream_state SET state = 'online', stream_id = ? WHERE channel_id = ?").bind(STREAM_ID, CHANNEL_ID).run();
     await database.prepare("UPDATE channel_modules SET settings = ? WHERE channel_id = ? AND module_id = 'song_requests'")
       .bind(JSON.stringify(customSettings), CHANNEL_ID).run();
   };
@@ -154,6 +168,52 @@ describe("song request admission on D1", () => {
     expect((await songRequestAdmissionFailure(database, second)).code).toBe("song_cooldown");
   });
 
+  it("keeps a cleared submitted live request reserved as removed until the round ends", async () => {
+    const defaults = songRequestsSettingsSchema.parse({});
+    await configure(defaults);
+    const first = requestInput(122, defaults);
+    expect((await admitSongRequest(database, first)).accepted).toBe(true);
+    await markSubmitted(first.requestId);
+
+    const cleanup = await cleanupSongRequestRound(database, CHANNEL_ID, STREAM_ID, NOW, "list_cleared");
+
+    expect(cleanup.refundableRequestIds).not.toContain(first.requestId);
+    expect(await database.prepare("SELECT state, submitted_at FROM song_requests WHERE id = ?")
+      .bind(first.requestId).first()).toEqual({ state: "removed", submitted_at: NOW });
+  });
+
+  it("keeps the personal cooldown after playback starts and releases a rejected uncharged request", async () => {
+    const customSettings = songRequestsSettingsSchema.parse({ rules: {
+      duplicateEnabled: false,
+      personCooldownEnabled: true,
+      personCooldownMinutes: 5,
+      personOpenLimitEnabled: false,
+      personRoundLimitEnabled: false,
+      channelOpenLimitEnabled: false,
+      artistOpenLimitEnabled: false,
+    } });
+    await configure(customSettings);
+    const played = requestInput(123, customSettings);
+    expect((await admitSongRequest(database, played)).accepted).toBe(true);
+    await markSongRequestCharged(database, CHANNEL_ID, played.requestId, NOW);
+    await markSubmitted(played.requestId);
+    await transitionRequest(database, {
+      channelId: CHANNEL_ID, requestId: played.requestId, fromState: "submitted", toState: "observed_playing", now: NOW,
+    });
+    const cooledDown = { ...requestInput(124, customSettings), requesterUserId: played.requesterUserId };
+    expect((await admitSongRequest(database, cooledDown)).accepted).toBe(false);
+    expect((await songRequestAdmissionFailure(database, cooledDown)).code).toBe("person_cooldown");
+
+    const rejected = { ...requestInput(127, customSettings), requesterUserId: "viewer-rejected-before-charge" };
+    expect((await admitSongRequest(database, rejected)).accepted).toBe(true);
+    await transitionRequest(database, {
+      channelId: CHANNEL_ID, requestId: rejected.requestId, fromState: "approved", toState: "rejected",
+      refundDue: true, now: NOW,
+    });
+    const retry = { ...requestInput(128, customSettings), requesterUserId: rejected.requesterUserId };
+    expect((await admitSongRequest(database, retry)).accepted).toBe(true);
+  });
+
   it("counts a submitted song against the configured minute cooldown and releases it after the window", async () => {
     const customSettings = songRequestsSettingsSchema.parse({ rules: {
       duplicateEnabled: false,
@@ -174,6 +234,37 @@ describe("song request admission on D1", () => {
 
     const later = { ...requestInput(127, customSettings), track: first.track, now: "2026-11-15T21:01:00.000Z" };
     expect((await admitSongRequest(database, later)).accepted).toBe(true);
+  });
+
+  it("keeps the minute-based song cooldown across round boundaries", async () => {
+    const customSettings = songRequestsSettingsSchema.parse({ rules: {
+      duplicateEnabled: false,
+      songCooldownEnabled: true,
+      songCooldownOncePerRound: false,
+      songCooldownMinutes: 60,
+      personCooldownEnabled: false,
+      personOpenLimitEnabled: false,
+      personRoundLimitEnabled: false,
+      channelOpenLimitEnabled: false,
+      artistOpenLimitEnabled: false,
+    } });
+    await configure(customSettings);
+    const first = requestInput(125, customSettings);
+    expect((await admitSongRequest(database, first)).accepted).toBe(true);
+    await markSubmitted(first.requestId);
+
+    await database.prepare("UPDATE channel_stream_state SET stream_id = ? WHERE channel_id = ?")
+      .bind("stream-admission-next", CHANNEL_ID).run();
+    const nextRound = {
+      ...requestInput(126, customSettings),
+      streamId: "stream-admission-next",
+      roundId: "stream-admission-next",
+      track: first.track,
+      now: "2026-11-15T20:30:00.000Z",
+    };
+
+    expect((await admitSongRequest(database, nextRound)).accepted).toBe(false);
+    expect((await songRequestAdmissionFailure(database, nextRound)).code).toBe("song_cooldown");
   });
 
   it("counts a submitted artist against the open artist cap", async () => {
@@ -236,6 +327,94 @@ describe("song request admission on D1", () => {
 
     const enabled = songRequestsSettingsSchema.parse({ ...disabled, alsoOffline: true });
     await configure(enabled);
+    await database.prepare("UPDATE channel_stream_state SET state = 'offline', stream_id = NULL WHERE channel_id = ?")
+      .bind(CHANNEL_ID).run();
     expect((await admitSongRequest(database, offlineInput(enabled, 151))).accepted).toBe(true);
+  });
+});
+
+describe("song request points ledger on a real ChannelObject", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("charges and refunds with zero-sum movements in the real points ledger", async () => {
+    const channelId = "song-requests-real-ledger";
+    const requestSettings = songRequestsSettingsSchema.parse({
+      paymentMode: "bot_points",
+      botPointsCost: 13,
+      mode: "moderated",
+      rules: { personCooldownEnabled: false, personOpenLimitEnabled: false, personRoundLimitEnabled: false },
+    });
+    const requestSettingsJson = JSON.stringify(requestSettings);
+    await database.prepare("INSERT INTO channels (channel_id, login, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(channelId, channelId, channelId, NOW, NOW).run();
+    await database.batch([
+      database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'song_requests', 1, ?, 1)")
+        .bind(channelId, requestSettingsJson),
+      database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES (?, 'points', 1, '{}', 1)")
+        .bind(channelId),
+      database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES ((SELECT COALESCE(MAX(slot), 0) + 1 FROM spotify_channel_access), ?, 'operator', ?)")
+        .bind(channelId, NOW),
+      database.prepare("INSERT INTO channel_stream_state (channel_id, state, changed_at, source, stream_id) VALUES (?, 'online', ?, 'eventsub', ?)")
+        .bind(channelId, NOW, "stream-real-ledger"),
+      database.prepare("INSERT INTO song_requests_connections (channel_id, state, updated_at) VALUES (?, 'connected', ?)")
+        .bind(channelId, NOW),
+    ]);
+
+    const namespace = (env as unknown as { CHANNEL: Env["CHANNEL"] }).CHANNEL;
+    const points = modulePoints(namespace, channelId, "song_requests");
+    await points.touchAccount("viewer-real-ledger", "ledger_viewer", 100);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ tracks: { items: [ledgerTrack] } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const event: ModuleEvent<SongRequestsSettings> = {
+      channelId,
+      subscriptionType: "channel.chat.message",
+      triggerId: "real-ledger-message",
+      payload: {
+        chatter_user_id: "viewer-real-ledger",
+        chatter_user_login: "ledger_viewer",
+        chatter_user_name: "Ledger Viewer",
+        message_id: "real-ledger-message",
+        message: { text: "!sr Ledger Track", fragments: [{ type: "text", text: "!sr Ledger Track" }] },
+      },
+      settings: requestSettings,
+      receivedAt: NOW,
+      actor: null,
+      chatStatus: ["viewer"],
+    };
+    const context = {
+      DB: database,
+      channelId,
+      environment: {
+        APP_ENV: "test",
+        CHANNEL: { idFromName: (name: string) => name, get: () => ({ getSpotifyAccessToken: () => Promise.resolve("spotify-access-fixture") }) },
+      },
+      points,
+      channelLanguage: () => Promise.resolve("en"),
+      botUserId: () => Promise.resolve("bot-fixture"),
+      scheduleAlarm: () => Promise.resolve(),
+    } as unknown as ModuleExecutionContext;
+
+    const accepted = await processSongRequestsEvent(event, context);
+    const request = await database.prepare("SELECT id FROM song_requests WHERE channel_id = ?")
+      .bind(channelId).first<{ id: string }>();
+    expect(accepted.actions[0]).toMatchObject({ kind: "chat", automated: false });
+    expect(JSON.stringify(accepted.actions[0])).toContain("accepted");
+    expect(await points.balance("viewer-real-ledger")).toBe(87);
+    if (request === null) throw new Error("The paid song request was not recorded.");
+    expect(await points.getOperation(songRequestChargeOperationId(request.id))).toMatchObject({ kind: "stake" });
+
+    expect(await transitionRequest(database, {
+      channelId, requestId: request.id, fromState: "pending_review", toState: "rejected", refundDue: true, now: NOW,
+    })).toBe(true);
+    await refundRequestId({ DB: database, channelId, points }, request.id);
+
+    expect(await points.balance("viewer-real-ledger")).toBe(100);
+    expect(await points.getOperation(songRequestRefundOperationId(request.id))).toMatchObject({ kind: "refund" });
   });
 });

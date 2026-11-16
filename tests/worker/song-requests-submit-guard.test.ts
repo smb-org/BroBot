@@ -1,8 +1,11 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
+import { Hono } from "hono";
 
+import type { ModulePointsAccess, ModuleRouteEnvironment } from "../../src/modules/contract";
 import { createNowPlayingSnapshot, createVoteRequestClaim } from "../../src/modules/song_requests/adapters/d1";
 import type { SpotifyTrack } from "../../src/modules/song_requests/domain/track";
+import { songRequestsRoutes } from "../../src/modules/song_requests/routes";
 import { holdSubmitClaim } from "../../src/modules/song_requests/service";
 
 const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
@@ -132,6 +135,101 @@ describe("submit claim guard on real D1", () => {
     expect(await holdSubmitClaim(database, onChannel, "request-1", onRoundId)).toBe(true);
     expect(await requestsRevision(onChannel)).toBe(before);
     expect(await holdSubmitClaim(database, onChannel, "request-1", "offline-round-stale")).toBe(false);
+  });
+
+  it("does not let a second stale Clear list close a replacement offline round", async () => {
+    const channelId = "guard-overlapping-offline-clear";
+    const originalRoundId = await seedOffline(channelId, true);
+    const replacementRoundId = "offline-round-replacement";
+    let replacementCreated = false;
+    let currentRoundReads = 0;
+    let closeRoundReads = 0;
+    let releaseRoundReads!: () => void;
+    const roundReadsReady = new Promise<void>((resolve) => { releaseRoundReads = resolve; });
+    let releaseReplacementCreated!: () => void;
+    const replacementCreatedPromise = new Promise<void>((resolve) => { releaseReplacementCreated = resolve; });
+
+    const createReplacementRound = async (): Promise<void> => {
+      if (replacementCreated) return;
+      replacementCreated = true;
+      await database.batch([
+        database.prepare("INSERT INTO song_requests_offline_rounds (channel_id, round_id, created_at) VALUES (?, ?, ?)")
+          .bind(channelId, replacementRoundId, NOW),
+        database.prepare(
+          `INSERT INTO song_requests (id, channel_id, source, track_id, track_uri, title, artists_json, duration_ms, explicit,
+             spotify_url, state, operation_id, request_type, charged_amount, stream_id, round_id, created_at, updated_at)
+           VALUES ('request-in-replacement-round', ?, 'points', 'replacement-track', 'spotify:track:replacement-track',
+             'Replacement Track', '[]', 180000, 0, 'https://open.spotify.com/track/replacement-track',
+             'pending_review', 'operation-replacement-round', 'free', 0, NULL, ?, ?, ?)`,
+        ).bind(channelId, replacementRoundId, NOW, NOW),
+      ]);
+      releaseReplacementCreated();
+    };
+
+    const interleavingDatabase = {
+      prepare: (sql: string) => {
+        let statement = database.prepare(sql);
+        const wrapped = {
+          unwrap: () => statement,
+          bind: (...values: Parameters<typeof statement.bind>) => {
+            statement = statement.bind(...values);
+            return wrapped;
+          },
+          first: async <T>() => {
+            if (sql.includes("SELECT round_id FROM song_requests_offline_rounds") && currentRoundReads < 2) {
+              const value = await statement.first<T>();
+              currentRoundReads += 1;
+              if (currentRoundReads === 2) releaseRoundReads();
+              await roundReadsReady;
+              return value;
+            }
+            if (sql.includes("SELECT round_id FROM song_requests_offline_rounds")) {
+              closeRoundReads += 1;
+              if (closeRoundReads === 2) await replacementCreatedPromise;
+            }
+            const value = await statement.first<T>();
+            if (sql.startsWith("DELETE FROM song_requests_offline_rounds") && value !== null) await createReplacementRound();
+            return value;
+          },
+          all: <T>() => statement.all<T>(),
+          run: async () => {
+            const result = await statement.run();
+            if (sql.startsWith("DELETE FROM song_requests_offline_rounds") && result.meta.changes > 0) await createReplacementRound();
+            return result;
+          },
+        };
+        return wrapped;
+      },
+      batch: (statements: readonly { unwrap?: () => D1PreparedStatement }[]) =>
+        database.batch(statements.map((candidate) => candidate.unwrap?.() ?? (candidate as unknown as D1PreparedStatement))),
+    } as unknown as D1Database;
+
+    const points = {
+      apply: () => Promise.reject(new Error("No paid request is expected in this route test.")),
+      getOperation: () => Promise.resolve(null),
+    } as unknown as ModulePointsAccess;
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "operator");
+      context.set("points", () => points);
+      context.set("publishModuleOverlayMessage", () => Promise.resolve());
+      await next();
+    });
+    app.route("/channels/:channelId", songRequestsRoutes);
+    const request = async (): Promise<Response> => await app.fetch(
+      new Request(`https://brobot.example/channels/${channelId}/clear`, { method: "POST" }),
+      { DB: interleavingDatabase },
+    );
+
+    const responses = await Promise.all([request(), request()]);
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(await Promise.all(responses.map(async (response) => await response.json()))).toContainEqual({ cleared: false });
+    expect(await database.prepare("SELECT round_id FROM song_requests_offline_rounds WHERE channel_id = ?")
+      .bind(channelId).first()).toEqual({ round_id: replacementRoundId });
+    expect(await database.prepare("SELECT state, round_id FROM song_requests WHERE id = 'request-in-replacement-round'").first())
+      .toEqual({ state: "pending_review", round_id: replacementRoundId });
+    expect(originalRoundId).not.toBe(replacementRoundId);
   });
 
   it("commits the poll snapshot only for the current enabled offline round", async () => {
