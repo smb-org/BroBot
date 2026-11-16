@@ -72,4 +72,44 @@ describe("channel-points redemption repository", () => {
     expect(queue.map(({ redemption }) => redemption.redemptionId).sort((left, right) => left.localeCompare(right)))
       .toEqual(["generic_queued_redemption"]);
   });
+
+  it("decides queue ownership by the redemption, not by the reward's current action", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    await insertChannel(database, CHANNEL_ID);
+    const repository = createChannelPointsRepository(database as unknown as D1Database);
+    const reward: ChannelPointsRewardInput = {
+      title: "Reward",
+      prompt: null,
+      cost: 10,
+      backgroundColor: null,
+      isUserInputRequired: false,
+      globalCooldownSeconds: null,
+      maxPerStream: null,
+      maxPerUserPerStream: null,
+      actionModuleId: "channel_points",
+      actionId: "chat-message",
+      actionConfig: {},
+      mode: "queue",
+      enabled: true,
+    };
+    await repository.insertReward(CHANNEL_ID, reward, "reward_a", "twitch_reward_a", NOW);
+    await repository.insertReward(CHANNEL_ID, reward, "reward_b", "twitch_reward_b", NOW);
+    const latch = async (id: string, rewardId: string, provider: { providerModuleId: string; providerActionId: string } | null) => {
+      await repository.latchRedemption(CHANNEL_ID, {
+        id, rewardId, twitchRewardId: "twitch_" + rewardId, rewardTitle: "Reward", userId: "viewer_one",
+        userLogin: "viewer_demo", userName: "Viewer Demo", userInput: "hello", redeemedAt: NOW, ...provider,
+      }, NOW);
+      await repository.updateRedemption(CHANNEL_ID, id, {
+        status: "queued", pendingTwitchStatus: null, outcomeReason: null, claimedAt: null,
+      }, ["received"], NOW);
+    };
+    await latch("generic_redemption", "reward_a", null);
+    await latch("song_redemption", "reward_b", { providerModuleId: "song_requests", providerActionId: "request-song" });
+    await database.prepare("UPDATE channel_points_rewards SET action_module_id='song_requests', action_id='request-song' WHERE id='reward_a'").run();
+    await database.prepare("UPDATE channel_points_rewards SET action_module_id='channel_points', action_id='chat-message' WHERE id='reward_b'").run();
+
+    const queue = await repository.listQueuedRedemptions(CHANNEL_ID, 100);
+    expect(queue.map(({ redemption }) => redemption.redemptionId)).toEqual(["generic_redemption"]);
+  });
 });
