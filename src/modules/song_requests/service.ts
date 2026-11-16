@@ -360,19 +360,31 @@ const submitClaimStillValid = async (context: ModuleAlarmContext, requestId: str
     });
     return false;
   }
-  if (await channelPointStatusBeforeSubmit(context, row) !== "UNFULFILLED") return false;
-  if (await holdSubmitClaim(context.DB, context.channelId, requestId, row.roundId)) {
-    const current = await readSongRequest(context.DB, context.channelId, requestId);
-    if (current === null || current.state !== "submitting") return false;
-    if (await channelPointStatusBeforeSubmit(context, current) === "UNFULFILLED") return true;
-    const latest = await readSongRequest(context.DB, context.channelId, requestId);
-    if (latest?.state === "submitting") {
+  const initialTwitchStatus = await channelPointStatusBeforeSubmit(context, row);
+  if (initialTwitchStatus !== "UNFULFILLED") {
+    if (initialTwitchStatus === "unavailable") {
       await transitionRequest(context.DB, {
         channelId: context.channelId, requestId, fromState: "submitting", toState: "approved",
         now: new Date().toISOString(),
       });
     }
     return false;
+  }
+  if (await holdSubmitClaim(context.DB, context.channelId, requestId, row.roundId)) {
+    const current = await readSongRequest(context.DB, context.channelId, requestId);
+    if (current === null || current.state !== "submitting") return false;
+    if (await channelPointStatusBeforeSubmit(context, current) === "UNFULFILLED") {
+      if (await holdSubmitClaim(context.DB, context.channelId, requestId, current.roundId)) return true;
+    } else {
+      const latest = await readSongRequest(context.DB, context.channelId, requestId);
+      if (latest?.state === "submitting") {
+        await transitionRequest(context.DB, {
+          channelId: context.channelId, requestId, fromState: "submitting", toState: "approved",
+          now: new Date().toISOString(),
+        });
+      }
+      return false;
+    }
   }
 
   const current = await readSongRequest(context.DB, context.channelId, requestId);

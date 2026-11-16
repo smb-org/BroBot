@@ -528,10 +528,12 @@ export default function RewardEditorDialog({ channelId, language, reward, module
             {...(selectedAction?.requiresAutomaticMode === true ? { hint: labels.automaticModeRequired } : {})}
             value={draft.value.mode}
             onChange={(mode) => update((current) => ({ ...current, mode }))}
-            disabled={selectedAction?.requiresAutomaticMode === true}
             options={[
               { value: "auto", label: labels.modeAutomatic, description: labels.modeAutomaticDescription },
-              { value: "queue", label: labels.modeQueue, description: labels.modeQueueDescription },
+              {
+                value: "queue", label: labels.modeQueue, description: labels.modeQueueDescription,
+                disabled: selectedAction?.requiresAutomaticMode === true,
+              },
             ]}
             reserveError
           />

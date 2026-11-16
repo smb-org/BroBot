@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   processAdPrewarning: vi.fn().mockResolvedValue(undefined),
@@ -7,6 +7,11 @@ const mocks = vi.hoisted(() => ({
   getAdSchedule: vi.fn(),
   getAppAccessToken: vi.fn(),
   helixRequest: vi.fn(),
+  channelPointManageable: vi.fn(),
+  channelPointList: vi.fn(),
+  channelPointListByIds: vi.fn(),
+  channelPointUpdate: vi.fn(),
+  channelPointSetEnabled: vi.fn(),
   createModuleSecretAccess: vi.fn(() => ({
     status: () => Promise.resolve({ configured: true, updatedAt: "2026-10-05T00:00:00.000Z" }),
     read: () => Promise.resolve("http://relay.belabox.net:8080/relay-key"),
@@ -22,6 +27,13 @@ vi.mock("../../src/modules/ads/adapters/prewarning-alarm", () => ({ refreshAdPre
 vi.mock("../../src/modules/ads/adapters/ad-schedule", () => ({ getAdSchedule: mocks.getAdSchedule }));
 vi.mock("../../src/worker/app-token", () => ({ getAppAccessToken: mocks.getAppAccessToken }));
 vi.mock("../../src/worker/twitch/helix", () => ({ helixRequest: mocks.helixRequest }));
+vi.mock("../../src/worker/twitch/channel-points", () => ({
+  getManageableRewards: mocks.channelPointManageable,
+  listUnfulfilledRedemptions: mocks.channelPointList,
+  listRedemptionsByIds: mocks.channelPointListByIds,
+  updateRedemptionStatus: mocks.channelPointUpdate,
+  setCustomRewardEnabled: mocks.channelPointSetEnabled,
+}));
 vi.mock("../../src/worker/module-secrets", () => ({
   createModuleSecretAccess: mocks.createModuleSecretAccess,
   createModuleSecretReadAccess: vi.fn(() => ({
@@ -51,6 +63,12 @@ import type {
   ModuleExecutionContext,
   ModuleExternalFetchBudget,
 } from "../../src/modules/contract";
+import type { ChannelPointsRewardInput } from "../../src/modules/channel_points/contracts";
+import {
+  CHANNEL_POINTS_LIFECYCLE_ALARM,
+  CHANNEL_POINTS_LIFECYCLE_HANDLER,
+} from "../../src/modules/channel_points/service";
+import { createChannelPointsRepository } from "../../src/modules/channel_points/repository";
 import {
   emptyDurableTimerState,
   TIMER_DURABLE_STATE_KEY,
@@ -75,6 +93,30 @@ import {
 } from "../../src/worker/durable/module-alarm-registry";
 import { REALTIME_PRINCIPAL_HEADER, REALTIME_PROTOCOL } from "../../src/worker/realtime-protocol";
 import { jsonResponse } from "../unit/fixtures";
+
+const migrationSources = import.meta.glob<string>("../../migrations/*.sql", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+
+const migrationStatements = (source: string): string[] => {
+  const segments = source.split(/\r?\n/u).map((line) => line.replace(/^\s*--.*$/u, "")).join("\n").split(";");
+  const statements: string[] = [];
+  let trigger: string[] | null = null;
+  for (const segment of segments) {
+    const statement = segment.trim();
+    if (statement.length === 0) continue;
+    if (trigger !== null) {
+      if (statement.toUpperCase() === "END") {
+        statements.push(`${trigger.join(";")};${statement}`);
+        trigger = null;
+      } else trigger.push(statement);
+    } else if (/^CREATE\s+TRIGGER\b/iu.test(statement)) trigger = [statement];
+    else statements.push(statement);
+  }
+  return statements;
+};
 
 const validPrincipal = (
   overrides: Partial<RealtimePanelPrincipal> = {},
@@ -714,6 +756,119 @@ describe("ChannelObject realtime path", () => {
     mocks.getAdSchedule.mockReset();
     mocks.getAppAccessToken.mockReset();
     mocks.helixRequest.mockReset();
+    mocks.channelPointManageable.mockReset();
+    mocks.channelPointList.mockReset();
+    mocks.channelPointListByIds.mockReset();
+    mocks.channelPointUpdate.mockReset();
+    mocks.channelPointSetEnabled.mockReset();
+  });
+
+  describe("scheduled channel-points lifecycle retries", () => {
+    const channelId = "channel_points_scheduled_retry";
+    const now = "2026-11-16T12:00:00.000Z";
+    const redemptionId = "redemption_scheduled_retry";
+    const database = (env as unknown as { DB: D1Database }).DB;
+
+    beforeAll(async () => {
+      for (const path of Object.keys(migrationSources).sort((left, right) => left.localeCompare(right))) {
+        for (const statement of migrationStatements(migrationSources[path] ?? "")) await database.prepare(statement).run();
+      }
+    });
+
+    it("retries a failed Twitch PATCH through ChannelObject.alarm", async () => {
+      await database.prepare(
+        `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(channel_id) DO NOTHING`,
+      ).bind(channelId, channelId, channelId, now, now).run();
+      await database.prepare("DELETE FROM channel_points_redemptions WHERE channel_id = ?").bind(channelId).run();
+      await database.prepare("DELETE FROM channel_points_rewards WHERE channel_id = ?").bind(channelId).run();
+      await database.prepare(
+        `INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'channel_points', 1, '{}')
+         ON CONFLICT(channel_id, module_id) DO UPDATE SET enabled = 1, settings = '{}'`,
+      ).bind(channelId).run();
+      const repository = createChannelPointsRepository(database);
+      const reward: ChannelPointsRewardInput = {
+        title: "Scheduled reward",
+        prompt: null,
+        cost: 10,
+        backgroundColor: null,
+        isUserInputRequired: false,
+        globalCooldownSeconds: null,
+        maxPerStream: null,
+        maxPerUserPerStream: null,
+        actionModuleId: "channel_points",
+        actionId: "chat-message",
+        actionConfig: { message: "Hi {user}" },
+        mode: "auto",
+        enabled: true,
+      };
+      await repository.insertReward(channelId, reward, "scheduled_reward", "scheduled_twitch_reward", now);
+      await repository.latchRedemption(channelId, {
+        id: redemptionId,
+        rewardId: "scheduled_reward",
+        twitchRewardId: "scheduled_twitch_reward",
+        rewardTitle: "Scheduled reward",
+        userId: "viewer_one",
+        userLogin: "viewer_demo",
+        userName: "Viewer Demo",
+        userInput: "",
+        redeemedAt: now,
+      }, now);
+      await repository.updateRedemption(channelId, redemptionId, {
+        status: "failed_to_update",
+        pendingTwitchStatus: "FULFILLED",
+        outcomeReason: null,
+        claimedAt: "2000-01-01T00:00:00.000Z",
+      }, ["received"], now);
+      mocks.channelPointManageable.mockResolvedValue({
+        ok: true,
+        data: [{
+          id: "scheduled_twitch_reward",
+          title: "Scheduled reward",
+          prompt: null,
+          cost: 10,
+          is_enabled: true,
+          background_color: null,
+          is_user_input_required: false,
+          global_cooldown_seconds: null,
+          max_per_stream: null,
+          max_per_user_per_stream: null,
+          is_paused: null,
+          is_in_stock: null,
+          should_redemptions_skip_request_queue: false,
+        }],
+      });
+      mocks.channelPointList.mockResolvedValue({ ok: true, data: [] });
+      mocks.channelPointListByIds.mockResolvedValue({
+        ok: true,
+        data: [{
+          id: redemptionId,
+          broadcaster_id: channelId,
+          broadcaster_login: channelId,
+          broadcaster_name: channelId,
+          user_id: "viewer_one",
+          user_login: "viewer_demo",
+          user_name: "Viewer Demo",
+          user_input: "",
+          redeemed_at: now,
+          status: "UNFULFILLED",
+          reward: { id: "scheduled_twitch_reward", title: "Scheduled reward", prompt: null, cost: 10 },
+        }],
+      });
+      mocks.channelPointUpdate.mockResolvedValue({ ok: true, data: [] });
+      const object = objectFor([], database, new Map(), channelId);
+
+      await object.scheduleModuleAlarm(
+        "channel_points", CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, Date.now() - 1,
+      );
+      await object.alarm();
+
+      expect(mocks.channelPointUpdate).toHaveBeenCalledWith(
+        expect.anything(), channelId, "scheduled_twitch_reward", [redemptionId], "FULFILLED", expect.any(Function),
+      );
+      await expect(repository.getRedemption(channelId, redemptionId))
+        .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+    });
   });
 
   const adSchedule = (nextAdAt: string | null): AdsSchedule => ({

@@ -1056,7 +1056,8 @@ const decodeLifecycleInvocation = (value: unknown): ChannelPointsLifecycleInvoca
 export const channelPointsLifecycleAlarm: ModuleAlarmDefinition = {
   key: CHANNEL_POINTS_LIFECYCLE_HANDLER,
   handle: async (context: ModuleAlarmContext, _alarmKey: string, _deadline: number, _revision, rawInvocation) => {
-    const invocation = decodeLifecycleInvocation(rawInvocation);
+    const invocation: ChannelPointsLifecycleInvocation | null = rawInvocation === undefined
+      ? { kind: "retry" } : decodeLifecycleInvocation(rawInvocation);
     const environment = context.environment;
     if (invocation === null || environment === undefined || context.authorizeMutation === undefined ||
         context.authorizeManagementMutation === undefined) {

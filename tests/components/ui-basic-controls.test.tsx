@@ -78,6 +78,23 @@ describe("basic UI controls", () => {
     expect(screen.getByRole("button", { name: "Second" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("keeps disabled segments inert and skips them during keyboard navigation", () => {
+    const onChange = vi.fn();
+    renderUi(<SegmentChoice label="Mode" value="automatic" onChange={onChange} options={[
+      { value: "automatic", label: "Automatic" },
+      { value: "queue", label: "Queue", disabled: true },
+      { value: "other", label: "Other" },
+    ]} />);
+
+    const queue = screen.getByRole("button", { name: "Queue" });
+    expect(queue).toBeDisabled();
+    fireEvent.click(queue);
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Automatic" }), { key: "ArrowRight" });
+    expect(onChange).toHaveBeenCalledWith("other");
+  });
+
   it("supports an opt-in wrapping segment layout without changing its options", () => {
     const onChange = vi.fn();
     renderUi(<SegmentChoice label="Chat target" value="default" onChange={onChange} wrap options={[

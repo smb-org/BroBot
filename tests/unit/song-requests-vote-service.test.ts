@@ -113,6 +113,18 @@ const requestIdFor = async (database: TestD1Database): Promise<string> => {
   return row.id;
 };
 
+const createChannelPointSubmitRequest = async (
+  database: TestD1Database,
+  context: ModuleAlarmContext,
+  ballotId: string,
+): Promise<string> => {
+  await handleSongRequestDurableAction(context, voteResult(ballotId, [9, 2, 1]));
+  const requestId = await requestIdFor(database);
+  await database.prepare("UPDATE song_requests SET request_type = 'channel_points' WHERE channel_id = ? AND id = ?")
+    .bind(CHANNEL_ID, requestId).run();
+  return requestId;
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -247,6 +259,55 @@ describe("durable song vote results", () => {
     expect(fetcher).not.toHaveBeenCalled();
     expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
       .toEqual({ state: "failed", failure_reason: "submit_outcome_uncertain" });
+  });
+
+  it("returns a submitting channel-point request to approved when the pre-submit Twitch check is unavailable", async () => {
+    const { database, context, schedule } = await createContext("ballot-channel-points-unavailable");
+    const requestId = await createChannelPointSubmitRequest(database, context, "ballot-channel-points-unavailable");
+    context.channelPoints = {
+      resolveRedemption: () => Promise.resolve(true),
+      readRedemptionStatus: vi.fn<NonNullable<ModuleAlarmContext["channelPoints"]>["readRedemptionStatus"]>()
+        .mockResolvedValueOnce("UNFULFILLED")
+        .mockResolvedValueOnce("unavailable"),
+    };
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    await handleSubmitAlarm(context, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`);
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await database.prepare("SELECT state FROM song_requests WHERE channel_id = ? AND id = ?")
+      .bind(CHANNEL_ID, requestId).first()).toEqual({ state: "approved" });
+    expect(schedule).toHaveBeenCalledWith(
+      `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`, expect.any(Number), undefined, null, undefined, undefined, "submit",
+    );
+  });
+
+  it("does not enqueue when deactivation closes the request during the final Twitch status check", async () => {
+    const { database, context } = await createContext("ballot-channel-points-disabled-during-final-twitch-check");
+    const requestId = await createChannelPointSubmitRequest(database, context, "ballot-channel-points-disabled-during-final-twitch-check");
+    let readCount = 0;
+    context.channelPoints = {
+      resolveRedemption: () => Promise.resolve(true),
+      readRedemptionStatus: vi.fn<NonNullable<ModuleAlarmContext["channelPoints"]>["readRedemptionStatus"]>(async () => {
+        readCount += 1;
+        if (readCount === 3) {
+          await database.prepare("UPDATE channel_modules SET enabled = 0 WHERE channel_id = ? AND module_id = 'song_requests'")
+            .bind(CHANNEL_ID).run();
+          await handleSongRequestsActivation(context, false);
+        }
+        return "UNFULFILLED";
+      }),
+    };
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+
+    await handleSubmitAlarm(context, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`);
+
+    expect(readCount).toBe(3);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE channel_id = ? AND id = ?")
+      .bind(CHANNEL_ID, requestId).first()).toEqual({ state: "failed", failure_reason: "submit_outcome_uncertain" });
   });
 
   it("does not send a winner when deactivation completes during the final stream reads", async () => {
