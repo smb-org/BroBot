@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
+import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import { STATISTICS_WORD_RANKING_DEFAULT_SIZE } from "./kinds";
 import { statisticsWordRankingLabels } from "./locale";
 import {
@@ -25,7 +26,7 @@ const StatisticsWordRanking = ({ config: rawConfig, state: rawState, language = 
   const rows = Array.from({ length: config.count }, (_, index) => entries[index] ?? null);
 
   return <section className={`statistics-word-ranking${title.length === 0 ? " statistics-word-ranking--no-title" : ""}`}
-    style={{ ...STATISTICS_WORD_RANKING_DEFAULT_SIZE, "--word-ranking-count": String(config.count) } as CSSProperties}
+    style={{ ...STATISTICS_WORD_RANKING_DEFAULT_SIZE, ...overlayAppearanceStyle(config.appearance), "--word-ranking-count": String(config.count) } as CSSProperties}
     aria-label={title.length > 0 ? title : labels.elementLabel}
     data-stream-live={config.scope === "stream" ? String(scope?.streamIsLive ?? false) : undefined}
     data-testid="statistics-word-ranking">

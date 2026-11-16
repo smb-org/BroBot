@@ -15,6 +15,7 @@ const moduleWithElements = (id: string, kinds: readonly string[]): BotModule => 
   overlayElements: kinds.map((kind): ModuleOverlayElementDefinition => ({
     kind: kind as `${string}.${string}`,
     configVersion: 1,
+    appearance: { parts: ["background", "text"], defaults: { background: "transparent", text: "#ffffff" } },
     defaultSize: { width: 200, height: 80 },
     defaultConfig: {},
     parseConfig: (raw) => typeof raw === "object" && raw !== null && !Array.isArray(raw)
@@ -42,15 +43,18 @@ describe("module overlay element declarations", () => {
 
     expect(countdown).toMatchObject({
       kind: "ads.countdown",
-      configVersion: 2,
+      configVersion: 3,
       defaultSize: { width: 300, height: 96 },
       defaultConfig: { showSnoozeInfo: false },
     });
     expect(typeof countdown?.parseConfig).toBe("function");
     expect(typeof countdown?.load).toBe("function");
     expect(typeof countdown?.initialState).toBe("function");
-    expect(countdown?.parseConfig({})).toEqual({ showSnoozeInfo: false });
-    expect(countdown?.parseConfig({ showSnoozeInfo: true })).toEqual({ showSnoozeInfo: true });
+    expect(countdown?.parseConfig({})).toEqual({
+      showSnoozeInfo: false,
+      appearance: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
+    });
+    expect(countdown?.parseConfig({ showSnoozeInfo: true })).toMatchObject({ showSnoozeInfo: true });
     expect(countdown?.parseConfig({ showSnoozeInfo: "yes" })).toBeNull();
     expect(countdown?.parseConfig({ html: "<b>unsafe</b>" })).toBeNull();
   });
@@ -60,12 +64,15 @@ describe("module overlay element declarations", () => {
 
     expect(tally).toMatchObject({
       kind: "chat_voting.tally",
-      configVersion: 1,
+      configVersion: 2,
       defaultSize: { width: 480, height: 240 },
       defaultConfig: { layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 15, width: 480 },
     });
     expect(tally?.parseConfig({ layout: "strip", showPercent: false, hideAfterCloseSeconds: 0 }))
-      .toEqual({ layout: "strip", showPercent: false, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 0, width: 480 });
+      .toEqual({
+        layout: "strip", showPercent: false, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 0, width: 480,
+        appearance: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
+      });
     expect(tally?.parseConfig({ showCountdown: false })).toMatchObject({ showCountdown: false });
     expect(tally?.parseConfig({ width: 199 })).toBeNull();
     expect(tally?.parseConfig({ width: 1921 })).toBeNull();
@@ -84,7 +91,7 @@ describe("module overlay element declarations", () => {
 
     expect(quiz).toMatchObject({
       kind: "quiz.session",
-      configVersion: 1,
+      configVersion: 2,
       defaultSize: { width: 640, height: 360 },
       defaultConfig: { showQuestionProgress: true, showPercent: true },
       mergeRealtimeStateOnModuleMessages: ["modul.quiz.phase", "modul.quiz.results", "modul.quiz.cancel"],
@@ -92,11 +99,8 @@ describe("module overlay element declarations", () => {
     expect(quiz?.parseConfig({ showPercent: false })).toEqual({
       showQuestionProgress: true,
       showPercent: false,
-      backgroundColor: "#10141b",
-      textColor: "#f2f5f9",
-      secondaryColor: "#a8b2c1",
-      accentColor: "#5fa4ff",
       correctColor: "#32ca88",
+      appearance: { background: "#10141b", text: "#f2f5f9", secondaryText: "#a8b2c1", accent: "#5fa4ff" },
     });
     expect(quiz?.parseConfig({ unsafe: true })).toBeNull();
     expect(quiz?.initialStateFromSnapshot).toBeTypeOf("function");

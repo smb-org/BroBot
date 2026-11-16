@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
+import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import { Icon } from "../../../dashboard/ui/Icon";
 import { quizOverlayTexts } from "./locale";
 import { DEFAULT_QUIZ_OVERLAY_CONFIG, QUIZ_RESULTS_DISPLAY_MS, parseQuizOverlayConfig, parseQuizOverlayState } from "./state";
@@ -58,10 +59,7 @@ const QuizOverlay = ({ config: rawConfig, state: rawState, language = "en" }: Mo
   const ranking = current.phase === "results" ? (current.ranking ?? []).slice(0, 10) : [];
   const maximumCorrect = Math.max(1, ...ranking.map(({ correct }) => correct));
   const style = {
-    "--quiz-background": config.backgroundColor,
-    "--quiz-text": config.textColor,
-    "--quiz-secondary": config.secondaryColor,
-    "--quiz-accent": config.accentColor,
+    ...overlayAppearanceStyle(config.appearance),
     "--quiz-correct": config.correctColor,
   } as CSSProperties;
 

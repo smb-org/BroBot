@@ -1,4 +1,10 @@
-import type { JsonObject, ModuleOverlaySnapshotContext } from "../../contract";
+import type {
+  JsonObject,
+  ModuleOverlayAppearanceDefinition,
+  ModuleOverlaySnapshotContext,
+  OverlayAppearanceConfig,
+} from "../../contract";
+import { isOverlayAppearanceColor, parseOverlayElementConfig } from "../../../overlay/appearance";
 import { quizTextLength } from "../domain/sets";
 
 type QuizOverlayPhase = "idle" | "announce" | "open" | "reveal" | "results";
@@ -33,21 +39,21 @@ export interface QuizOverlayState {
 export interface QuizOverlayConfig {
   showQuestionProgress: boolean;
   showPercent: boolean;
-  backgroundColor: string;
-  textColor: string;
-  secondaryColor: string;
-  accentColor: string;
   correctColor: string;
+  appearance: OverlayAppearanceConfig;
 }
+
+export const QUIZ_OVERLAY_APPEARANCE = {
+  parts: ["background", "text", "secondaryText", "accent"],
+  defaults: { background: "#10141b", text: "#f2f5f9", secondaryText: "#a8b2c1", accent: "#5fa4ff" },
+  legacyFields: { background: "backgroundColor", text: "textColor", secondaryText: "secondaryColor", accent: "accentColor" },
+} satisfies ModuleOverlayAppearanceDefinition;
 
 export const DEFAULT_QUIZ_OVERLAY_CONFIG: QuizOverlayConfig = {
   showQuestionProgress: true,
   showPercent: true,
-  backgroundColor: "#10141b",
-  textColor: "#f2f5f9",
-  secondaryColor: "#a8b2c1",
-  accentColor: "#5fa4ff",
   correctColor: "#32ca88",
+  appearance: QUIZ_OVERLAY_APPEARANCE.defaults,
 };
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -58,29 +64,18 @@ const isNonNegativeInteger = (value: unknown): value is number =>
 const isDateString = (value: unknown): value is string =>
   typeof value === "string" && Number.isFinite(Date.parse(value));
 
-const isColor = (value: unknown): value is string => typeof value === "string" && /^#[0-9a-f]{6}$/iu.test(value);
-
-export const parseQuizOverlayConfig = (value: unknown): QuizOverlayConfig | null => {
-  const config = record(value);
-  if (config === null || Object.keys(config).some((key) => ![
-    "showQuestionProgress", "showPercent", "backgroundColor", "textColor", "secondaryColor", "accentColor", "correctColor",
-  ].includes(key))) return null;
-
-  const parsed = {
-    showQuestionProgress: config.showQuestionProgress ?? DEFAULT_QUIZ_OVERLAY_CONFIG.showQuestionProgress,
-    showPercent: config.showPercent ?? DEFAULT_QUIZ_OVERLAY_CONFIG.showPercent,
-    backgroundColor: config.backgroundColor ?? DEFAULT_QUIZ_OVERLAY_CONFIG.backgroundColor,
-    textColor: config.textColor ?? DEFAULT_QUIZ_OVERLAY_CONFIG.textColor,
-    secondaryColor: config.secondaryColor ?? DEFAULT_QUIZ_OVERLAY_CONFIG.secondaryColor,
-    accentColor: config.accentColor ?? DEFAULT_QUIZ_OVERLAY_CONFIG.accentColor,
-    correctColor: config.correctColor ?? DEFAULT_QUIZ_OVERLAY_CONFIG.correctColor,
-  };
-  return typeof parsed.showQuestionProgress === "boolean" && typeof parsed.showPercent === "boolean" &&
-    isColor(parsed.backgroundColor) && isColor(parsed.textColor) && isColor(parsed.secondaryColor) &&
-    isColor(parsed.accentColor) && isColor(parsed.correctColor)
-    ? parsed as QuizOverlayConfig
-    : null;
-};
+export const parseQuizOverlayConfig = (value: unknown): QuizOverlayConfig | null => parseOverlayElementConfig(
+  value,
+  QUIZ_OVERLAY_APPEARANCE,
+  (config) => {
+    if (Object.keys(config).some((key) => !["showQuestionProgress", "showPercent", "correctColor"].includes(key))) return null;
+    const showQuestionProgress = config.showQuestionProgress ?? DEFAULT_QUIZ_OVERLAY_CONFIG.showQuestionProgress;
+    const showPercent = config.showPercent ?? DEFAULT_QUIZ_OVERLAY_CONFIG.showPercent;
+    const correctColor = config.correctColor ?? DEFAULT_QUIZ_OVERLAY_CONFIG.correctColor;
+    return typeof showQuestionProgress === "boolean" && typeof showPercent === "boolean" &&
+      isOverlayAppearanceColor(correctColor) ? { showQuestionProgress, showPercent, correctColor } : null;
+  },
+) as unknown as QuizOverlayConfig | null;
 
 /** Accepts only the fields needed to display the current phase and drops answers outside reveal. */
 export const parseQuizOverlayState = (value: unknown): QuizOverlayState | null => {

@@ -89,7 +89,7 @@ describe("ads countdown overlay element", () => {
     expect(text).not.toBeNull();
     expect(text?.children).toHaveLength(2);
     expect(variableCss).toContain(".brobot-variable,\n.brobot-module-text {");
-    expect(variableCss).toContain("color: rgba(255, 255, 255, 0.96);");
+    expect(variableCss).toContain("color: var(--overlay-appearance-text, rgba(255, 255, 255, 0.96));");
     expect(variableCss).toContain("font: 700 48px/1.1 system-ui, sans-serif;");
     expect(variableCss).toContain("text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);");
     expect(variableCss).toContain("display: flex;\n  flex-direction: column;");

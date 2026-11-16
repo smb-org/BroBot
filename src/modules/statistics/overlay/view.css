@@ -1,9 +1,6 @@
 @layer components.overlay {
   .statistics-word-counter {
-    /* Own fixed colors: the overlay bundle has no dashboard tokens and the OBS background is transparent. */
-    --word-counter-background: #0d1015;
-    --word-counter-text: #f2f5f9;
-    --word-counter-secondary: #a8b2c1;
+    /* Fallback colors keep this overlay independent of dashboard tokens. */
     box-sizing: border-box;
     display: grid;
     width: 100%;
@@ -14,8 +11,8 @@
     padding: 16px 20px;
     overflow: hidden;
     border-radius: 12px;
-    background: var(--word-counter-background);
-    color: var(--word-counter-text);
+    background: var(--overlay-appearance-background, #0d1015);
+    color: var(--overlay-appearance-text, #f2f5f9);
     font-family: Archivo, system-ui, sans-serif;
   }
 
@@ -50,7 +47,7 @@
   }
 
   .statistics-word-counter__caption {
-    color: var(--word-counter-secondary);
+    color: var(--overlay-appearance-secondary-text, #a8b2c1);
     font-size: 12px;
     font-weight: 500;
     line-height: 1.2;
@@ -60,7 +57,7 @@
     display: block;
     /* Reserved width: digits grow to the right only, nothing to their left moves. */
     min-width: 8ch;
-    color: var(--word-counter-text);
+    color: var(--overlay-appearance-text, #f2f5f9);
     font-family: "IBM Plex Mono", ui-monospace, monospace;
     font-size: 56px;
     font-weight: 600;

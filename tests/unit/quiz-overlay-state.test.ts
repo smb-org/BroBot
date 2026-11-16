@@ -42,7 +42,12 @@ describe("quiz overlay state", () => {
     expect(parseQuizOverlayConfig({ showPercent: false })).toMatchObject({
       showQuestionProgress: true,
       showPercent: false,
-      backgroundColor: "#10141b",
+      appearance: {
+        background: "#10141b",
+        text: "#f2f5f9",
+        secondaryText: "#a8b2c1",
+        accent: "#5fa4ff",
+      },
     });
     expect(parseQuizOverlayConfig({ textColor: "url(javascript:alert(1))" })).toBeNull();
     expect(parseQuizOverlayConfig({ unsafe: true })).toBeNull();

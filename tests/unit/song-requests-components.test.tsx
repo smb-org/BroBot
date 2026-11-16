@@ -62,7 +62,7 @@ describe("song request components", () => {
     const onPreviewState = vi.fn();
     render(<SongRequestsNowPlayingEditor config={{}} onChange={onChange} onPreviewState={onPreviewState} language="en" />);
     fireEvent.click(screen.getByRole("checkbox", { name: "Show cover" }));
-    expect(onChange).toHaveBeenCalledWith({ showCover: false, showRequester: true });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ showCover: false, showRequester: true }));
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     expect(onPreviewState).toHaveBeenCalledTimes(1);
     expect(onPreviewState.mock.calls[0]).toMatchObject([{ track: { title: "Glass Harbor", artist: "Mira Vale" } }]);

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
+import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import { belaboxOverlayLabels } from "./locale";
 
 const record = (value: unknown): Readonly<Record<string, unknown>> | null =>
@@ -45,6 +46,7 @@ const Status = ({ config, state, now, language = "en" }: ModuleOverlayElementPro
     className={`brobot-module-text belabox-status belabox-status--${phase}`}
     aria-label={fresh ? phaseText : labels.noData}
     style={{
+      ...overlayAppearanceStyle(config.appearance),
       boxSizing: "border-box",
       display: "grid",
       width: "320px",

@@ -1,4 +1,5 @@
-import type { JsonObject, ModuleLanguage } from "../../contract";
+import type { ModuleLanguage, ModuleOverlayAppearanceDefinition, OverlayAppearanceConfig } from "../../contract";
+import { isOverlayAppearanceColor, parseOverlayElementConfig } from "../../../overlay/appearance";
 
 export interface SlotOverlaySymbol {
   source: "emoji" | "twitch" | "seven_tv";
@@ -23,25 +24,38 @@ export interface SlotOverlayState {
 export const SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID = "overlay-editor-preview";
 
 export const DEFAULT_SLOT_OVERLAY_CONFIG = {
-  backgroundColor: "#090C10",
-  textColor: "#F2F5F9",
-  secondaryColor: "#C9D1DB",
-  highlightColor: "#2ED3A3",
+  appearance: {
+    background: "#090C10",
+    text: "#F2F5F9",
+    secondaryText: "#C9D1DB",
+    accent: "#2ED3A3",
+  },
   borderColor: "#353E4B",
 } as const;
 
-export type SlotOverlayConfig = typeof DEFAULT_SLOT_OVERLAY_CONFIG;
+export const SLOT_OVERLAY_APPEARANCE = {
+  parts: ["background", "text", "secondaryText", "accent"],
+  defaults: DEFAULT_SLOT_OVERLAY_CONFIG.appearance,
+  legacyFields: { background: "backgroundColor", text: "textColor", secondaryText: "secondaryColor", accent: "highlightColor" },
+} satisfies ModuleOverlayAppearanceDefinition;
+
+export type SlotOverlayConfig = {
+  appearance: OverlayAppearanceConfig;
+  borderColor: string;
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const isColor = (value: unknown): value is string => typeof value === "string" && /^#[0-9a-f]{6}$/iu.test(value);
-
-export const parseSlotOverlayConfig = (raw: unknown): SlotOverlayConfig | null => {
-  if (!isRecord(raw) || Object.keys(raw).some((key) => !Object.hasOwn(DEFAULT_SLOT_OVERLAY_CONFIG, key))) return null;
-  const config = { ...DEFAULT_SLOT_OVERLAY_CONFIG, ...raw };
-  return Object.values(config).every(isColor) ? config : null;
-};
+export const parseSlotOverlayConfig = (raw: unknown): SlotOverlayConfig | null => parseOverlayElementConfig(
+  raw,
+  SLOT_OVERLAY_APPEARANCE,
+  (config) => {
+    if (Object.keys(config).some((key) => key !== "borderColor")) return null;
+    const borderColor = config.borderColor ?? DEFAULT_SLOT_OVERLAY_CONFIG.borderColor;
+    return isOverlayAppearanceColor(borderColor) ? { borderColor } : null;
+  },
+) as unknown as SlotOverlayConfig | null;
 
 const isOverlaySymbol = (value: unknown): value is SlotOverlaySymbol => {
   if (!isRecord(value) || !(value.source === "emoji" || value.source === "twitch" || value.source === "seven_tv") ||
@@ -78,21 +92,3 @@ export const mergeSlotOverlayRealtimeState = (
   return mergeSlotOverlayState(current, incoming) as unknown as Readonly<Record<string, unknown>>;
 };
 
-const linearize = (channel: number): number => {
-  const value = channel / 255;
-  return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-};
-
-const relativeLuminance = (hex: string): number => {
-  const red = Number.parseInt(hex.slice(1, 3), 16);
-  const green = Number.parseInt(hex.slice(3, 5), 16);
-  const blue = Number.parseInt(hex.slice(5, 7), 16);
-  return 0.2126 * linearize(red) + 0.7152 * linearize(green) + 0.0722 * linearize(blue);
-};
-
-export const slotOverlayContrastRatio = (foreground: string, background: string): number => {
-  const luminances = [relativeLuminance(foreground), relativeLuminance(background)].sort((left, right) => right - left);
-  return ((luminances[0] ?? 0) + 0.05) / ((luminances[1] ?? 0) + 0.05);
-};
-
-export const slotOverlayConfigToJson = (config: SlotOverlayConfig): JsonObject => config;

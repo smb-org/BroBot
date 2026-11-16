@@ -343,9 +343,21 @@ export interface OverlayElementEditorProps {
   readOnlyReason?: string;
 }
 
+export type OverlayAppearancePart = "background" | "text" | "secondaryText" | "accent";
+
+export type OverlayAppearanceConfig = Partial<Record<OverlayAppearancePart, string>>;
+
+export interface ModuleOverlayAppearanceDefinition {
+  parts: readonly OverlayAppearancePart[];
+  defaults: OverlayAppearanceConfig;
+  /** Legacy top-level config keys migrated by the shared parser. */
+  legacyFields?: Partial<Record<OverlayAppearancePart, string>>;
+}
+
 export interface ModuleOverlayElementDefinition {
   kind: `${string}.${string}`;
   configVersion: number;
+  appearance: ModuleOverlayAppearanceDefinition;
   defaultSize: { width: number; height: number };
   defaultConfig: JsonObject;
   /** Editor-only sample state used when no live module state is available. */

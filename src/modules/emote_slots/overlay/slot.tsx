@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
+import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import { emoteSlotOverlayLabels } from "./locale";
 import { DEFAULT_SLOT_OVERLAY_CONFIG, isSlotOverlayState, parseSlotOverlayConfig, SLOT_OVERLAY_EDITOR_PREVIEW_SPIN_ID } from "./state";
 import type { SlotOverlaySymbol } from "./state";
@@ -155,10 +156,7 @@ const SlotOverlay = ({ config, state, elementId = "standalone-slot" }: ModuleOve
   if (validState === null || (!isEditorPreview && (presentation === null || expiredSpinId === validState.spinId))) return null;
 
   const style = {
-    "--content-game-reel-background": overlayConfig.backgroundColor,
-    "--content-game-reel-text": overlayConfig.textColor,
-    "--content-game-reel-secondary": overlayConfig.secondaryColor,
-    "--content-game-reel-highlight": overlayConfig.highlightColor,
+    ...overlayAppearanceStyle(overlayConfig.appearance),
     "--content-game-reel-border": overlayConfig.borderColor,
     "--slot-presentation-elapsed": `${String(animationOffset.elapsed)}ms`,
   } as CSSProperties;

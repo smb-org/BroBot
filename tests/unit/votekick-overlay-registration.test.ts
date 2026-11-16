@@ -13,5 +13,9 @@ it("registers the overlay element without loading the votekick settings schema",
   const { votekickOverlayElement } = await import("../../src/modules/votekick/overlay/element");
 
   expect(votekickOverlayElement.kind).toBe("votekick.tally");
-  expect(votekickOverlayElement.defaultConfig).toEqual({ showCountdown: true, hideAfterCloseSeconds: 15 });
+  expect(votekickOverlayElement.defaultConfig).toEqual({
+    showCountdown: true,
+    hideAfterCloseSeconds: 15,
+    appearance: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
+  });
 });

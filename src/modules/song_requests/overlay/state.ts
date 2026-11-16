@@ -1,18 +1,30 @@
-import type { JsonObject } from "../../contract";
+import type { JsonObject, ModuleOverlayAppearanceDefinition, OverlayAppearanceConfig } from "../../contract";
+import { parseOverlayElementConfig } from "../../../overlay/appearance";
 
-export interface NowPlayingConfig { showCover: boolean; showRequester: boolean }
+export interface NowPlayingConfig { showCover: boolean; showRequester: boolean; appearance: OverlayAppearanceConfig }
 interface NowPlayingTrack { id: string; title: string; artist: string; coverUrl: string | null; spotifyUrl: string; requester: string | null; source: string }
 export interface NowPlayingState { revision: number; track: NowPlayingTrack | null; serverNow: string; emptyText?: string }
-export const DEFAULT_NOW_PLAYING_CONFIG: NowPlayingConfig = { showCover: true, showRequester: true };
+export const SONG_REQUESTS_NOW_PLAYING_APPEARANCE = {
+  parts: ["background", "text", "secondaryText", "accent"],
+  defaults: { background: "#0d1015", text: "#f2f5f9", secondaryText: "#c3cbd7", accent: "#1ed760" },
+} satisfies ModuleOverlayAppearanceDefinition;
+export const DEFAULT_NOW_PLAYING_CONFIG: NowPlayingConfig = {
+  showCover: true,
+  showRequester: true,
+  appearance: SONG_REQUESTS_NOW_PLAYING_APPEARANCE.defaults,
+};
 
 const record = (value: unknown): Record<string, unknown> | null => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
-export const parseNowPlayingConfig = (raw: unknown): NowPlayingConfig | null => {
-  const input = record(raw);
-  if (input === null || Object.keys(input).some((key) => !["showCover", "showRequester"].includes(key))) return null;
-  const showCover = input.showCover ?? true;
-  const showRequester = input.showRequester ?? true;
-  return typeof showCover === "boolean" && typeof showRequester === "boolean" ? { showCover, showRequester } : null;
-};
+export const parseNowPlayingConfig = (raw: unknown): NowPlayingConfig | null => parseOverlayElementConfig(
+  raw,
+  SONG_REQUESTS_NOW_PLAYING_APPEARANCE,
+  (input) => {
+    if (Object.keys(input).some((key) => !["showCover", "showRequester"].includes(key))) return null;
+    const showCover = input.showCover ?? true;
+    const showRequester = input.showRequester ?? true;
+    return typeof showCover === "boolean" && typeof showRequester === "boolean" ? { showCover, showRequester } : null;
+  },
+) as unknown as NowPlayingConfig | null;
 export const parseNowPlayingState = (raw: unknown): NowPlayingState | null => {
   const input = record(raw);
   if (input === null || !Number.isSafeInteger(input.revision) || typeof input.serverNow !== "string" || !Number.isFinite(Date.parse(input.serverNow))) return null;

@@ -1,7 +1,7 @@
 import type { JsonObject, ModuleOverlayElementContext, ModuleOverlayElementDefinition } from "../../contract";
 import { SONG_REQUESTS_NOW_PLAYING_KIND, SONG_REQUESTS_NOW_PLAYING_SIZE } from "./kinds";
 import { nowPlayingTexts } from "./locale";
-import { DEFAULT_NOW_PLAYING_CONFIG, mergeNowPlayingRevision, nowPlayingStateJson, parseNowPlayingConfig, parseNowPlayingState } from "./state";
+import { DEFAULT_NOW_PLAYING_CONFIG, mergeNowPlayingRevision, nowPlayingStateJson, parseNowPlayingConfig, parseNowPlayingState, SONG_REQUESTS_NOW_PLAYING_APPEARANCE } from "./state";
 
 const sample = (now: number): JsonObject => nowPlayingStateJson({
   revision: 1,
@@ -11,7 +11,8 @@ const sample = (now: number): JsonObject => nowPlayingStateJson({
 
 export const songRequestsNowPlayingElement: ModuleOverlayElementDefinition = {
   kind: SONG_REQUESTS_NOW_PLAYING_KIND,
-  configVersion: 1,
+  configVersion: 2,
+  appearance: SONG_REQUESTS_NOW_PLAYING_APPEARANCE,
   defaultSize: SONG_REQUESTS_NOW_PLAYING_SIZE,
   defaultConfig: DEFAULT_NOW_PLAYING_CONFIG as unknown as JsonObject,
   previewState: (_config, _language, now) => sample(now),

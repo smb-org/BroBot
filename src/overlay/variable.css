@@ -1,14 +1,14 @@
 .brobot-variable,
 .brobot-module-text {
-  background-color: transparent;
-  color: rgba(255, 255, 255, 0.96);
+  background-color: var(--overlay-appearance-background, transparent);
+  color: var(--overlay-appearance-text, rgba(255, 255, 255, 0.96));
   font: 700 48px/1.1 system-ui, sans-serif;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
 }
 
 .brobot-module-text__attribution {
   align-self: flex-end;
-  color: rgba(255, 255, 255, 0.78);
+  color: var(--overlay-appearance-secondary-text, rgba(255, 255, 255, 0.78));
   font: 400 12px/1.2 system-ui, sans-serif;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }

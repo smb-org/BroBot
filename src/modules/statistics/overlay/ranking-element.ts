@@ -6,6 +6,7 @@ import {
 import { statisticsWordRankingLabels } from "./locale";
 import {
   DEFAULT_STATISTICS_WORD_RANKING_CONFIG,
+  STATISTICS_WORD_RANKING_APPEARANCE,
   mergeStatisticsWordRankingRealtimeState,
   parseStatisticsWordRankingConfig,
   statisticsWordRankingStateToJson,
@@ -60,7 +61,8 @@ const previewState = (rawConfig: JsonObject, _language: "de" | "en", now: number
 
 export const statisticsWordRankingOverlayElement: ModuleOverlayElementDefinition = {
   kind: STATISTICS_WORD_RANKING_ELEMENT_KIND,
-  configVersion: 1,
+  configVersion: 2,
+  appearance: STATISTICS_WORD_RANKING_APPEARANCE,
   defaultSize: STATISTICS_WORD_RANKING_DEFAULT_SIZE,
   defaultConfig: DEFAULT_STATISTICS_WORD_RANKING_CONFIG as unknown as JsonObject,
   previewState,

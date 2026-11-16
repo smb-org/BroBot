@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { OverlayElementEditorProps } from "../../contract";
+import { overlayAppearanceToJsonObject } from "../../../overlay/appearance";
 import { foldStatisticsWord } from "../domain";
 import { statisticsWordCounterLabels } from "./locale";
 import {
@@ -37,22 +38,27 @@ export default function StatisticsWordCounterEditor({ config, onChange, language
     if (readOnly) return;
     setWordInput(rawWord);
     const nextLabel = labelEdited ? labelInput : rawWord.trim();
-    const parsed = parseStatisticsWordCounterConfig({ word: rawWord, label: nextLabel, show: values.show });
+    const parsed = parseStatisticsWordCounterConfig({
+      word: rawWord,
+      label: nextLabel,
+      show: values.show,
+      appearance: overlayAppearanceToJsonObject(values.appearance),
+    });
     if (parsed === null) return;
     committedWord.current = parsed.word;
     if (!labelEdited) setLabelInput(nextLabel);
-    onChange({ ...values, ...parsed });
+    onChange({ ...values, ...parsed, appearance: overlayAppearanceToJsonObject(values.appearance) });
   };
 
   const changeLabel = (nextLabel: string): void => {
     if (readOnly) return;
     setLabelInput(nextLabel);
     setLabelEdited(true);
-    onChange({ ...values, label: nextLabel });
+    onChange({ ...values, label: nextLabel, appearance: overlayAppearanceToJsonObject(values.appearance) });
   };
 
   const changeShow = (show: StatisticsWordCounterShow): void => {
-    if (!readOnly) onChange({ ...values, show });
+    if (!readOnly) onChange({ ...values, show, appearance: overlayAppearanceToJsonObject(values.appearance) });
   };
 
   const wordIsValid = parseStatisticsWordCounterConfig({ word: wordInput }) !== null;

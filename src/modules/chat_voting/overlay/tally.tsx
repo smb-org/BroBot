@@ -1,6 +1,7 @@
 import { useMemo, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
+import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import { rankVoteTerms } from "../domain";
 import { chatVoteDefaultColorAt } from "../contracts/vote-colors";
 import { chatVotingOverlayLabels } from "./locale";
@@ -54,6 +55,7 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
     hideAfterCloseSeconds={hideAfterCloseSeconds}
     countdownRemainingLabel={labels.countdownRemaining}
     width={width}
+    style={overlayAppearanceStyle(config.appearance)}
     classPrefix="chat-voting-tally"
     className={`chat-voting-tally--${layout}`}
   >

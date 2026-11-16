@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
+import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import { STATISTICS_WORD_COUNTER_DEFAULT_SIZE } from "./kinds";
 import { statisticsWordCounterLabels } from "./locale";
 import {
@@ -28,7 +29,7 @@ const StatisticsWordCounter = ({ config: rawConfig, state: rawState, language = 
       count: config.show === "stream" ? value.streamCount : value.totalCount }];
 
   return <section className={`statistics-word-counter${config.show === "both" ? " statistics-word-counter--both" : ""}`}
-    style={STATISTICS_WORD_COUNTER_DEFAULT_SIZE} aria-label={config.label} data-stream-live={String(value.streamIsLive)} data-testid="statistics-word-counter">
+    style={{ ...STATISTICS_WORD_COUNTER_DEFAULT_SIZE, ...overlayAppearanceStyle(config.appearance) }} aria-label={config.label} data-stream-live={String(value.streamIsLive)} data-testid="statistics-word-counter">
     <h2 className="statistics-word-counter__label" title={config.label}>{config.label}</h2>
     <div className="statistics-word-counter__counts">
       {counters.map(({ key, label, count }) => <div className="statistics-word-counter__count" key={key}>

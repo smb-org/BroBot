@@ -11,8 +11,8 @@
     padding: 12px 18px;
     overflow: hidden;
     border-radius: 12px;
-    background: rgb(16 20 27 / 84%);
-    color: var(--overlay-alert-text-color);
+    background: var(--overlay-appearance-background, rgb(16 20 27 / 84%));
+    color: var(--overlay-appearance-text, #ffffff);
     font-family: Archivo, system-ui, sans-serif;
   }
 

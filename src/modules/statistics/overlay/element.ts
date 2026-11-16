@@ -10,6 +10,7 @@ import { STATISTICS_WORD_COUNTER_DEFAULT_SIZE, STATISTICS_WORD_COUNTER_ELEMENT_K
 import { statisticsWordCounterLabels } from "./locale";
 import {
   DEFAULT_STATISTICS_WORD_COUNTER_CONFIG,
+  STATISTICS_WORD_COUNTER_APPEARANCE,
   mergeStatisticsWordCounterRealtimeState,
   parseStatisticsWordCounterConfig,
   statisticsWordCounterStateToJson,
@@ -111,7 +112,8 @@ const previewState = (rawConfig: JsonObject, _language: "de" | "en", now: number
 
 export const statisticsWordCounterOverlayElement: ModuleOverlayElementDefinition = {
   kind: STATISTICS_WORD_COUNTER_ELEMENT_KIND,
-  configVersion: 1,
+  configVersion: 2,
+  appearance: STATISTICS_WORD_COUNTER_APPEARANCE,
   defaultSize: STATISTICS_WORD_COUNTER_DEFAULT_SIZE,
   defaultConfig: DEFAULT_STATISTICS_WORD_COUNTER_CONFIG as unknown as JsonObject,
   previewState,

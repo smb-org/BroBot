@@ -1,9 +1,5 @@
 @layer components.overlay {
   .statistics-word-ranking {
-    --word-counter-background: #0d1015;
-    --word-counter-text: #f2f5f9;
-    --word-counter-secondary: #a8b2c1;
-    --word-ranking-bar-color: #35557f;
     box-sizing: border-box;
     display: grid;
     width: 100%;
@@ -16,8 +12,8 @@
     padding: 12px 16px;
     overflow: hidden;
     border-radius: 12px;
-    background: var(--word-counter-background);
-    color: var(--word-counter-text);
+    background: var(--overlay-appearance-background, #0d1015);
+    color: var(--overlay-appearance-text, #f2f5f9);
     font-family: Archivo, system-ui, sans-serif;
   }
 
@@ -73,7 +69,7 @@
     inset: 2px auto 2px 0;
     width: var(--word-ranking-bar-width);
     border-radius: 3px;
-    background: var(--word-ranking-bar-color);
+    background: var(--overlay-appearance-accent, #35557f);
     opacity: 0.55;
   }
 
@@ -86,7 +82,7 @@
   }
 
   .statistics-word-ranking__rank {
-    color: var(--word-counter-secondary);
+    color: var(--overlay-appearance-secondary-text, #a8b2c1);
     font-family: "IBM Plex Mono", ui-monospace, monospace;
     font-size: 12px;
     font-variant-numeric: tabular-nums;
@@ -101,7 +97,7 @@
   }
 
   .statistics-word-ranking__count {
-    color: var(--word-counter-text);
+    color: var(--overlay-appearance-text, #f2f5f9);
     font-family: "IBM Plex Mono", ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
     text-align: right;
@@ -110,6 +106,6 @@
 
   .statistics-word-ranking__row--without-bars .statistics-word-ranking__word,
   .statistics-word-ranking__row--without-bars .statistics-word-ranking__count {
-    color: var(--word-counter-text);
+    color: var(--overlay-appearance-text, #f2f5f9);
   }
 }

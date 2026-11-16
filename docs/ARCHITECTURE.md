@@ -707,6 +707,19 @@ und über `overlay.changed` an verbundene Quellen gemeldet. Der Editor und die
 Browserausgabe verwenden dieselbe React-Renderstrecke, damit Vorschau und
 Stream denselben Inhalt zeigen.
 
+Die Elementkonfiguration liegt als JSON am gespeicherten Element und wird über
+den `parseConfig`-Parser der jeweiligen Moduldeklaration eingelesen. Für Farben
+verwenden alle Elemente den gemeinsamen `appearance`-Block mit den Teilen
+`background`, `text`, `secondaryText` und `accent`, soweit sie diese in ihrer
+Ansicht tatsächlich nutzen. Die Deklaration enthält Teile und bisherige
+Standardfarben; der gemeinsame Dashboard-Editor zeigt dieselben Felder für
+Elemente mit und ohne eigenen Editor. Overlay-Ansichten setzen die geparsten
+Werte über gemeinsame CSS-Variablen am Element-Root. Die Parser übernehmen
+fehlende Werte aus den Defaults und lesen die früheren elementeigenen
+Farbschlüssel beim Übergang weiter ein. So bleiben gespeicherte Konfigurationen
+und elementeigene Optionen beim Speichern erhalten. `configVersion` wird bei
+Änderungen des Konfigurationsformats erhöht.
+
 Für jedes gespeicherte Overlay können Broadcaster und Verwalter benannte
 Zugänge ausstellen. Ein Zugang ist an Kanal und Overlay gebunden. D1 speichert
 den Pepper-Hash zur Prüfung sowie den

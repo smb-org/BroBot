@@ -1,6 +1,7 @@
 import { useMemo, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
+import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import { OverlayTally, OverlayTallyOptions } from "../../../overlay/tally/OverlayTally";
 import { votekickOverlayLabels } from "./locale";
 import { isVotekickOverlayState } from "./state";
@@ -24,6 +25,7 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
     showCountdown={config.showCountdown !== false && open}
     hideAfterCloseSeconds={hideAfterCloseSeconds}
     countdownRemainingLabel={labels.countdownRemaining}
+    style={overlayAppearanceStyle(config.appearance)}
     summary={summary}
     className="votekick-tally"
   >

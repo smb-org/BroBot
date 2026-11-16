@@ -57,8 +57,12 @@ describe("votekick overlay tally", () => {
   });
 
   it("defaults and validates the overlay config and exposes localized editor controls", () => {
-    expect(votekickOverlayElement.defaultConfig).toEqual({ showCountdown: true, hideAfterCloseSeconds: 15 });
-    expect(votekickOverlayElement.parseConfig({})).toEqual({ showCountdown: true, hideAfterCloseSeconds: 15 });
+    expect(votekickOverlayElement.defaultConfig).toEqual({
+      showCountdown: true,
+      hideAfterCloseSeconds: 15,
+      appearance: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
+    });
+    expect(votekickOverlayElement.parseConfig({})).toEqual(votekickOverlayElement.defaultConfig);
     expect(votekickOverlayElement.parseConfig({ hideAfterCloseSeconds: 121 })).toBeNull();
     const onChange = vi.fn<(config: JsonObject) => void>();
     render(<VotekickOverlayEditor config={{ showCountdown: true, hideAfterCloseSeconds: 15 }} onChange={onChange} language="en" />);

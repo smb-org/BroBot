@@ -1,16 +1,22 @@
-import type { JsonObject, ModuleLanguage } from "../../contract";
+import type { JsonObject, ModuleLanguage, ModuleOverlayAppearanceDefinition } from "../../contract";
+import { parseOverlayElementConfig } from "../../../overlay/appearance";
 import { mergeVotekickRealtimeState } from "./state";
 import { votekickOverlayLabels } from "./locale";
 import { VOTEKICK_ELEMENT_KIND } from "./kinds";
 
 const german = votekickOverlayLabels("de");
 const english = votekickOverlayLabels("en");
+const appearance = {
+  parts: ["background", "text"],
+  defaults: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
+} satisfies ModuleOverlayAppearanceDefinition;
 
 export const votekickOverlayElement = {
   kind: VOTEKICK_ELEMENT_KIND,
-  configVersion: 1,
+  configVersion: 2,
+  appearance,
   defaultSize: { width: 480, height: 160 },
-  defaultConfig: { showCountdown: true, hideAfterCloseSeconds: 15 },
+  defaultConfig: { showCountdown: true, hideAfterCloseSeconds: 15, appearance: appearance.defaults },
   previewState: (_config: JsonObject, _language: ModuleLanguage, now: number): JsonObject => ({
     votekickId: "overlay-editor-preview",
     targetLogin: "sampleviewer",
@@ -30,16 +36,14 @@ export const votekickOverlayElement = {
   reloadStateOnModuleMessages: ["modul.votekick.opened"],
   mergeRealtimeStateOnModuleMessages: ["modul.votekick.tally"],
   mergeRealtimeState: mergeVotekickRealtimeState,
-  parseConfig: (raw: unknown) => {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-    const config = raw as Record<string, unknown>;
+  parseConfig: (raw: unknown) => parseOverlayElementConfig(raw, appearance, (config) => {
     if (Object.keys(config).some((key) => !["showCountdown", "hideAfterCloseSeconds"].includes(key))) return null;
     const showCountdown = config.showCountdown ?? true;
     const hideAfterCloseSeconds = config.hideAfterCloseSeconds ?? 15;
     if (typeof showCountdown !== "boolean" || typeof hideAfterCloseSeconds !== "number" ||
         !Number.isSafeInteger(hideAfterCloseSeconds) || hideAfterCloseSeconds < 0 || hideAfterCloseSeconds > 120) return null;
     return { showCountdown, hideAfterCloseSeconds };
-  },
+  }),
   load: () => import("./tally"),
   editor: () => import("./editor"),
 };

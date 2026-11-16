@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 
 import type { ModuleOverlayElementProps } from "../../contract";
+import { overlayAppearanceStyle } from "../../../overlay/appearance";
 import type { TextBlockConditions } from "../contracts";
 import { textBlockTimeConditionsMatch } from "../domain";
 
@@ -75,7 +76,7 @@ const dataAt = (state: TextBlockState, now: number): Readonly<Record<string, str
   return values;
 };
 
-const TextBlockOverlayElement = ({ state: rawState, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
+const TextBlockOverlayElement = ({ config, state: rawState, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
   const parsed = textBlockState(rawState);
   const serverNow = parsed === null ? Number.NaN : Date.parse(parsed.serverNow);
   const [clock, setClock] = useState(() => ({ serverNow: Number.NaN, offset: Number.NaN, now: serverNow }));
@@ -103,7 +104,7 @@ const TextBlockOverlayElement = ({ state: rawState, language = "en" }: ModuleOve
     return next === undefined && current === undefined ? "" : remainingText(next ?? current ?? now, now, language);
   });
   if (output.trim().length === 0 || /\{[a-z][a-z0-9_.]{0,63}\}/u.test(output)) return null;
-  return <span className="brobot-module-text"><span>{output}</span>{selected.attributions?.map((attribution) => <small className="brobot-module-text__attribution" key={attribution}>{attribution}</small>)}</span>;
+  return <span className="brobot-module-text" style={overlayAppearanceStyle(config.appearance)}><span>{output}</span>{selected.attributions?.map((attribution) => <small className="brobot-module-text__attribution" key={attribution}>{attribution}</small>)}</span>;
 };
 
 export default TextBlockOverlayElement;

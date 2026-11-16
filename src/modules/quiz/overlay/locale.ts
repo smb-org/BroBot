@@ -18,10 +18,6 @@ const catalog = {
     editorModuleLabel: "Quiz",
     showQuestionProgress: "Fragenfortschritt anzeigen",
     showPercent: "Prozentwerte anzeigen",
-    backgroundColor: "Hintergrundfarbe",
-    textColor: "Textfarbe",
-    secondaryColor: "Sekundärfarbe",
-    accentColor: "Akzentfarbe",
     correctColor: "Farbe der richtigen Antwort",
   },
   en: {
@@ -41,10 +37,6 @@ const catalog = {
     editorModuleLabel: "Quiz",
     showQuestionProgress: "Show question progress",
     showPercent: "Show percentages",
-    backgroundColor: "Background colour",
-    textColor: "Text colour",
-    secondaryColor: "Secondary colour",
-    accentColor: "Accent colour",
     correctColor: "Correct answer colour",
   },
 } as const;

@@ -1,0 +1,37 @@
+@layer components.dashboard {
+  .overlay-appearance-editor {
+    padding-bottom: var(--s4);
+    margin-bottom: var(--s4);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .overlay-appearance-editor__fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--s3);
+  }
+
+  .overlay-appearance-editor__contrast {
+    min-height: var(--s4);
+    margin: 0;
+    color: var(--color-success-text);
+    font-size: 12px;
+  }
+
+  .overlay-appearance-editor__contrast[data-status="warning"] { color: var(--color-orange-text); }
+
+  .ui-color-field__transparent {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: var(--s1);
+    color: var(--text-2);
+    font-size: 12px;
+  }
+
+  .ui-color-field__transparent input { flex: none; }
+
+  @media (max-width: 600px) {
+    .overlay-appearance-editor__fields { grid-template-columns: minmax(0, 1fr); }
+  }
+}

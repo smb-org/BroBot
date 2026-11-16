@@ -1,3 +1,6 @@
+import type { ModuleOverlayAppearanceDefinition, OverlayAppearanceConfig } from "../../contract";
+import { parseOverlayElementConfig } from "../../../overlay/appearance";
+
 export interface OverlayAlertPayload {
   operationId: string;
   imageUrl?: string;
@@ -23,13 +26,19 @@ export interface OverlayAlertQueueState {
 }
 
 export interface OverlayAlertConfig {
-  textColor: string;
   fontSize: number;
+  appearance: OverlayAppearanceConfig;
 }
 
+export const OVERLAY_ALERT_APPEARANCE = {
+  parts: ["background", "text"],
+  defaults: { background: "rgb(16 20 27 / 84%)", text: "#ffffff" },
+  legacyFields: { text: "textColor" },
+} satisfies ModuleOverlayAppearanceDefinition;
+
 export const DEFAULT_OVERLAY_ALERT_CONFIG: OverlayAlertConfig = {
-  textColor: "#ffffff",
   fontSize: 32,
+  appearance: OVERLAY_ALERT_APPEARANCE.defaults,
 };
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -42,14 +51,11 @@ const isMediaUrl = (value: unknown): value is string =>
   typeof value === "string" && value.startsWith("/api/overlay/media/") && value.length <= 256;
 
 export const parseOverlayAlertConfig = (value: unknown): OverlayAlertConfig | null => {
-  const input = record(value);
-  if (input === null || Object.keys(input).some((key) => key !== "textColor" && key !== "fontSize")) return null;
-  const textColor = input.textColor ?? DEFAULT_OVERLAY_ALERT_CONFIG.textColor;
-  const fontSize = input.fontSize ?? DEFAULT_OVERLAY_ALERT_CONFIG.fontSize;
-  return typeof textColor === "string" && /^#[0-9a-f]{6}$/iu.test(textColor) &&
-    isIntegerBetween(fontSize, 12, 72)
-    ? { textColor, fontSize }
-    : null;
+  return parseOverlayElementConfig(value, OVERLAY_ALERT_APPEARANCE, (input) => {
+    if (Object.keys(input).some((key) => key !== "fontSize")) return null;
+    const fontSize = input.fontSize ?? DEFAULT_OVERLAY_ALERT_CONFIG.fontSize;
+    return isIntegerBetween(fontSize, 12, 72) ? { fontSize } : null;
+  }) as unknown as OverlayAlertConfig | null;
 };
 
 export const parseOverlayAlertPayload = (value: unknown): QueuedOverlayAlert | null => {
@@ -191,3 +197,4 @@ export const renderOverlayAlertText = (template: string, values: OverlayAlertTem
     if (name === "input") return values.userInput;
     return values.rewardTitle;
   }).slice(0, 200);
+

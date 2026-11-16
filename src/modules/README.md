@@ -819,14 +819,39 @@ Palette-Zeile erhalten.
 
 ```ts
 overlayElements: [{
-  kind: "chat_voting.tally", configVersion: 1, defaultSize: { width: 480, height: 240 },
-  defaultConfig: {}, parseConfig, load: () => import("./overlay/tally"),
+  kind: "chat_voting.tally", configVersion: 2, defaultSize: { width: 480, height: 240 },
+  appearance: {
+    parts: ["background", "text"],
+    defaults: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
+  },
+  defaultConfig: {
+    layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true,
+    hideAfterCloseSeconds: 15, width: 480,
+    appearance: { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
+  },
+  parseConfig, load: () => import("./overlay/tally"),
   editorLabel: { de: "Abstimmungsergebnis", en: "Voting tally" },
   editorDescription: { de: "Live-Balken der Abstimmung.", en: "Live bars for the current vote." },
   initialState: (db, channelId) => readOpenTally(db, channelId),
   mergeRealtimeState: (current, incoming) => ({ ...current, ...incoming }),
 }],
 ```
+
+`appearance` ist der verpflichtende gemeinsame Vertrag für die Darstellung
+jedes Overlay-Elements und der einzige Weg für seine gemeinsamen Farben.
+Jedes Element deklariert seine tatsächlich verwendeten Teile aus
+`background`, `text`, `secondaryText` und `accent` sowie deren bisherige
+Standardfarben. Das Dashboard rendert den gemeinsamen Abschnitt auch dann,
+wenn das Element keinen eigenen Editor hat. Die Ansicht liest die geparste
+Konfiguration über `overlayAppearanceStyle` und setzt damit die gemeinsamen
+CSS-Variablen am Element-Root; Stylesheets verwenden diese Variablen mit den
+bisherigen Farben als Fallback. `parseOverlayElementConfig` übernimmt die
+Validierung und ergänzt fehlende Werte mit den deklarierten Defaults. Bei
+bestehenden Farbfeldern nennt `legacyFields` die alten Konfigurationsschlüssel;
+der Parser migriert sie beim Lesen in `appearance`. Elementoptionen bleiben im
+elementeigenen Parser und dürfen durch die gemeinsame Darstellung nicht
+verloren gehen. Änderungen an `appearance` oder einer Farbmigration erhöhen
+`configVersion`.
 
 **Grenzen:**
 
