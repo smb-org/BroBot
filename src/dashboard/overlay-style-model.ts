@@ -69,6 +69,16 @@ const propertyOrder = [
 const markerPrefixStartPattern = /\/\*\s*brobot:style:(?:begin|end)\b/gu;
 const elementIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 
+const ownRecordValue = <Value>(record: Readonly<Record<string, Value>>, key: string): Value | undefined =>
+  Object.hasOwn(record, key) ? record[key] : undefined;
+
+const setOwnRecordValue = <Value>(record: Record<string, Value>, key: string, value: Value): void => {
+  Object.defineProperty(record, key, { configurable: true, enumerable: true, value, writable: true });
+};
+
+export const getOverlayElementStyle = (styles: OverlayStyleDocument, elementId: string): OverlayStyle | undefined =>
+  ownRecordValue(styles.elements, elementId);
+
 // Code-point order keeps the generated block identical across browser locales.
 const compareCodePoints = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 const hexColorPattern = /^#[0-9a-f]{6}$/u;
@@ -234,27 +244,71 @@ const hasStyle = (style: OverlayStyle): boolean => styleDeclarations(style).leng
 const anchorTranslation = (alignment: OverlayStyleAlignment): string =>
   alignment === "center" ? "-50%" : alignment === "right" ? "-100%" : "0%";
 
+const directStyleVariables: Readonly<Record<string, string>> = {
+  "font-family": "--brobot-overlay-font-family",
+  "font-size": "--brobot-overlay-font-size",
+  "font-weight": "--brobot-overlay-font-weight",
+  color: "--brobot-overlay-text-color",
+  "--brobot-overlay-secondary-text-color": "inherit",
+  "--brobot-overlay-accent-color": "inherit",
+  "text-align": "--brobot-overlay-text-align",
+  "line-height": "--brobot-overlay-line-height",
+  "letter-spacing": "--brobot-overlay-letter-spacing",
+  "-webkit-text-stroke": "--brobot-overlay-text-stroke",
+  "text-shadow": "--brobot-overlay-text-shadow",
+  "background-color": "--brobot-overlay-background",
+  padding: "--brobot-overlay-padding",
+  "border-radius": "--brobot-overlay-border-radius",
+};
+
+const directStyleDeclarations = (style: OverlayStyle): readonly string[] => styleDeclarations(style).flatMap((line) => {
+  const declaration = /^ {2}([a-z-]+): .+;$/u.exec(line);
+  const property = declaration?.[1];
+  const variable = property === undefined ? undefined : directStyleVariables[property];
+  return property === undefined || variable === undefined ? [] : [`  ${property}: ${variable === "inherit" ? variable : `var(${variable})`};`];
+});
+
+const elementStyleSelector = (elementIds: readonly string[]): string => {
+  const selectors = elementIds.map((elementId) => `[data-element="${elementId}"]`);
+  const target = selectors.length === 1 ? selectors[0] : `:is(${selectors.join(",")})`;
+  return `${target ?? ""} :where(.brobot-variable, .brobot-module-text) {`;
+};
+
 const styleRules = (styles: OverlayStyleDocument): readonly string[] => {
   const rules: string[] = [];
   if (hasStyle(styles.overlay)) {
     const rootDeclarations = styleRootDeclarations(styles.overlay);
     if (rootDeclarations.length > 0) rules.push(`.brobot-overlay {\n${rootDeclarations.join("\n")}\n}`);
+    const directDeclarations = directStyleDeclarations(styles.overlay);
+    if (directDeclarations.length > 0) rules.push(`.brobot-overlay :where(.brobot-variable, .brobot-module-text) {\n${directDeclarations.join("\n")}\n}`);
   }
   const elementGroups = new Map<string, { ids: string[]; declarations: readonly string[] }>();
+  const elementDirectGroups = new Map<string, { ids: string[]; declarations: readonly string[] }>();
   for (const elementId of Object.keys(styles.elements).filter((id) => elementIdPattern.test(id)).sort(compareCodePoints)) {
-    const style = styles.elements[elementId];
+    const style = ownRecordValue(styles.elements, elementId);
     if (style !== undefined && hasStyle(style)) {
       const declarations = styleRootDeclarations(style);
-      if (declarations.length === 0) continue;
-      const key = declarations.join("\n");
-      const group = elementGroups.get(key);
-      if (group === undefined) elementGroups.set(key, { ids: [elementId], declarations });
-      else group.ids.push(elementId);
+      if (declarations.length > 0) {
+        const key = declarations.join("\n");
+        const group = elementGroups.get(key);
+        if (group === undefined) elementGroups.set(key, { ids: [elementId], declarations });
+        else group.ids.push(elementId);
+      }
+      const directDeclarations = directStyleDeclarations(style);
+      if (directDeclarations.length > 0) {
+        const key = directDeclarations.join("\n");
+        const group = elementDirectGroups.get(key);
+        if (group === undefined) elementDirectGroups.set(key, { ids: [elementId], declarations: directDeclarations });
+        else group.ids.push(elementId);
+      }
     }
   }
   for (const { ids, declarations } of elementGroups.values()) {
     const selectors = ids.map((elementId) => `[data-element="${elementId}"]`).join(", ");
     rules.push(`${selectors} {\n${declarations.join("\n")}\n}`);
+  }
+  for (const { ids, declarations } of elementDirectGroups.values()) {
+    rules.push(`${elementStyleSelector(ids)}\n${declarations.join("\n")}\n}`);
   }
   return rules;
 };
@@ -475,6 +529,10 @@ const parseContent = (content: string): OverlayStyleDocument | null => {
   const elementStyleRulesSeen = new Set<string>();
   const elementRootRulesSeen = new Set<string>();
   const sameStyle = (left: OverlayStyle, right: OverlayStyle): boolean => JSON.stringify(left) === JSON.stringify(right);
+  const matchesGeneratedDirectRule = (style: OverlayStyle, lines: readonly string[]): boolean =>
+    directStyleDeclarations(style).join("\n") === lines.join("\n");
+  const isGeneratedDirectRule = (lines: readonly string[]): boolean =>
+    lines.some((line) => line.includes("var(") || line.endsWith(": inherit;"));
   const setOverlayStyle = (style: OverlayStyle): boolean => {
     if (overlayStyleSeen && !sameStyle(styles.overlay, style)) return false;
     styles.overlay = style;
@@ -482,9 +540,9 @@ const parseContent = (content: string): OverlayStyleDocument | null => {
     return true;
   };
   const setElementStyle = (elementId: string, style: OverlayStyle): boolean => {
-    const previous = styles.elements[elementId];
+    const previous = ownRecordValue(styles.elements, elementId);
     if (previous !== undefined && !sameStyle(previous, style)) return false;
-    styles.elements[elementId] = style;
+    setOwnRecordValue(styles.elements, elementId, style);
     return true;
   };
   for (const rule of rules) {
@@ -494,12 +552,18 @@ const parseContent = (content: string): OverlayStyleDocument | null => {
     const overlayRootSelector = selectorLine === ".brobot-overlay {";
     const overlayAnchorSelector = selectorLine === ".brobot-overlay .brobot-overlay-composition-element {";
     const elementStyleMatch = selectorLine === undefined ? null : /^\[data-element="([A-Za-z0-9_-]{1,64})"\] :where\(\.brobot-variable, \.brobot-module-text\) \{$/u.exec(selectorLine);
+    const elementStyleGroupMatch = selectorLine === undefined ? null : /^:is\((\[data-element="[A-Za-z0-9_-]{1,64}"\](?:,\[data-element="[A-Za-z0-9_-]{1,64}"\])*)\) :where\(\.brobot-variable, \.brobot-module-text\) \{$/u.exec(selectorLine);
+    const elementStyleIds = elementStyleMatch?.[1] === undefined
+      ? elementStyleGroupMatch?.[1] === undefined
+        ? []
+        : Array.from(elementStyleGroupMatch[1].matchAll(/\[data-element="([A-Za-z0-9_-]{1,64})"\]/gu), (match) => match[1]).filter((id): id is string => id !== undefined)
+      : [elementStyleMatch[1]];
     const rootElementIds = selectorLine?.startsWith("[data-element=")
       ? Array.from(selectorLine.matchAll(/\[data-element="([A-Za-z0-9_-]{1,64})"\]/gu), (match) => match[1]).filter((id): id is string => id !== undefined)
       : [];
     const elementRootSelector = rootElementIds.length > 0 && selectorLine === `${rootElementIds.map((id) => `[data-element="${id}"]`).join(", ")} {`;
     const elementAnchorMatch = selectorLine === undefined ? null : /^\.brobot-overlay \.brobot-overlay-composition-element\[data-element="([A-Za-z0-9_-]{1,64})"\] \{$/u.exec(selectorLine);
-    if (!overlayStyleSelector && !overlayRootSelector && !overlayAnchorSelector && elementStyleMatch === null && !elementRootSelector && elementAnchorMatch === null) return null;
+    if (!overlayStyleSelector && !overlayRootSelector && !overlayAnchorSelector && elementStyleIds.length === 0 && !elementRootSelector && elementAnchorMatch === null) return null;
     const closing = lines.pop();
     if (closing !== "}") return null;
     if (overlayAnchorSelector || elementAnchorMatch !== null) {
@@ -509,7 +573,7 @@ const parseContent = (content: string): OverlayStyleDocument | null => {
       const alignment = anchorMatch[1] === "-50%" ? "center" : anchorMatch[1] === "-100%" ? "right" : "left";
       const currentAlignment = overlayAnchorSelector
         ? styles.overlay.textAlign
-        : elementAnchorMatch?.[1] === undefined ? undefined : styles.elements[elementAnchorMatch[1]]?.textAlign;
+        : elementAnchorMatch?.[1] === undefined ? undefined : ownRecordValue(styles.elements, elementAnchorMatch[1])?.textAlign;
       if (currentAlignment !== alignment) return null;
       continue;
     }
@@ -531,12 +595,28 @@ const parseContent = (content: string): OverlayStyleDocument | null => {
       continue;
     }
     const parsed = parseDeclarations(lines);
+    if (isGeneratedDirectRule(lines)) {
+      if (parsed !== null) return null;
+      if (overlayStyleSelector) {
+        if (overlayStyleRuleSeen || !overlayRootRuleSeen || !matchesGeneratedDirectRule(styles.overlay, lines)) return null;
+        overlayStyleRuleSeen = true;
+        continue;
+      }
+      if (elementStyleIds.length === 0 || elementStyleIds.some((id) => elementStyleRulesSeen.has(id)) ||
+        elementStyleIds.some((id, index) => index > 0 && id <= (elementStyleIds[index - 1] ?? "")) ||
+        elementStyleIds.some((id) => {
+          const style = ownRecordValue(styles.elements, id);
+          return style === undefined || !matchesGeneratedDirectRule(style, lines);
+        })) return null;
+      for (const elementId of elementStyleIds) elementStyleRulesSeen.add(elementId);
+      continue;
+    }
     if (parsed === null) return null;
     if (overlayStyleSelector) {
       if (overlayStyleRuleSeen || !setOverlayStyle(parsed)) return null;
       overlayStyleRuleSeen = true;
     } else {
-      const elementId = elementStyleMatch?.[1];
+      const elementId = elementStyleIds.length === 1 && elementStyleGroupMatch === null ? elementStyleIds[0] : undefined;
       if (elementId === undefined || elementStyleRulesSeen.has(elementId) || !setElementStyle(elementId, parsed)) return null;
       elementStyleRulesSeen.add(elementId);
     }
@@ -584,7 +664,10 @@ export const replaceOverlayStyleBlock = (
     elements: Object.fromEntries(elementIds
       .filter((elementId) => elementIdPattern.test(elementId))
       .sort(compareCodePoints)
-      .flatMap((elementId) => styles.elements[elementId] === undefined ? [] : [[elementId, styles.elements[elementId]]])),
+      .flatMap((elementId) => {
+        const style = ownRecordValue(styles.elements, elementId);
+        return style === undefined ? [] : [[elementId, style]];
+      })),
   };
   const content = generateOverlayStyleContent(managedStyles);
   const parsed = parseOverlayStyleBlock(css);
@@ -651,7 +734,10 @@ const legacyFieldForStyle = (kind: string, styleKey: keyof OverlayStyle): string
 const legacyStyleColor = (kind: string, config: Readonly<Record<string, unknown>>, styleKey: keyof OverlayStyle): string | undefined => {
   const field = legacyFieldForStyle(kind, styleKey);
   const value = field === undefined ? undefined : config[field];
-  return typeof value === "string" ? value : undefined;
+  if (typeof value === "string") return value;
+  if (value !== null || field === undefined) return undefined;
+  const defaultPart = styleKey === "color" ? "text" : styleKey === "secondaryTextColor" ? "secondaryText" : styleKey === "accentColor" ? "accent" : "background";
+  return defaultElementColors[kind]?.[defaultPart]?.toLowerCase();
 };
 
 const styleBackgroundColor = (style: OverlayStyle | undefined): string | undefined => {
@@ -736,7 +822,7 @@ export const migrateLegacyOverlayStyles = <Element extends LegacyOverlayElementC
     const fields = legacyColorFields[element.kind] ?? [];
     if (fields.length === 0) return { ...element, config: { ...element.config } };
     const config: Record<string, unknown> = { ...element.config };
-    const style: OverlayStyle = { ...(migratedStyles[element.id] ?? {}) };
+    const style: OverlayStyle = { ...(ownRecordValue(migratedStyles, element.id) ?? {}) };
     let changed = false;
     for (const [legacyKey, styleKey] of fields) {
       if (!Object.hasOwn(config, legacyKey)) continue;
@@ -744,7 +830,7 @@ export const migrateLegacyOverlayStyles = <Element extends LegacyOverlayElementC
       if (value !== null && (typeof value !== "string" || !hexColorPattern.test(value.toLowerCase()))) continue;
       changed = true;
       Reflect.deleteProperty(config, legacyKey);
-      if (style[styleKey] !== undefined || (value === null && styles.overlay[styleKey] !== undefined)) continue;
+      if (style[styleKey] !== undefined) continue;
       const defaultPart = styleKey === "color" ? "text" : styleKey === "secondaryTextColor" ? "secondaryText" : styleKey === "accentColor" ? "accent" : "background";
       const color = value === null ? defaultElementColors[element.kind]?.[defaultPart] : value.toLowerCase();
       if (color === undefined || !hexColorPattern.test(color.toLowerCase())) continue;
@@ -754,7 +840,7 @@ export const migrateLegacyOverlayStyles = <Element extends LegacyOverlayElementC
       else if (styleKey === "accentColor") style.accentColor = color.toLowerCase();
     }
     if (!changed) return { ...element, config };
-    if (Object.keys(style).length > 0) migratedStyles[element.id] = style;
+    if (Object.keys(style).length > 0) setOwnRecordValue(migratedStyles, element.id, style);
     return { ...element, config };
   });
   return { elements: migratedElements, styles: { overlay: styles.overlay, elements: migratedStyles } };
@@ -777,7 +863,10 @@ export const migrateLegacyOverlayStylesToCss = <Element extends LegacyOverlayEle
       .map(({ id }) => id)
       .filter((id) => elementIdPattern.test(id))
       .sort(compareCodePoints)
-      .flatMap((id) => migration.styles.elements[id] === undefined ? [] : [[id, migration.styles.elements[id]]])),
+      .flatMap((id) => {
+        const style = ownRecordValue(migration.styles.elements, id);
+        return style === undefined ? [] : [[id, style]];
+      })),
   };
   if (generateOverlayStyleContent(parsed.styles) !== generateOverlayStyleContent(expectedStyles)) return null;
   return { css: nextCss, elements: migration.elements, styles: parsed.styles };

@@ -18,6 +18,7 @@ import { ModuleIcon } from "./module-panels";
 import variableViewCss from "../overlay/variable.css?inline";
 import { clampOverlayEditorPosition, isModuleOverlayElementAddable, overlayEditorMeasuredSize, UNMEASURED_ELEMENT_FALLBACK_SIZE, type OverlayEditorSize } from "./overlay-editor-model";
 import {
+  getOverlayElementStyle,
   parseOverlayStyleBlock,
   migrateLegacyOverlayStyles,
   migrateLegacyOverlayStylesToCss,
@@ -682,14 +683,14 @@ function OverlayEditorWorkspace({
     : "overlay";
   const targetStyle: OverlayStyle = effectiveStyleTargetId === "overlay"
     ? effectiveStyleDocument.overlay
-    : { ...effectiveStyleDocument.overlay, ...effectiveStyleDocument.elements[effectiveStyleTargetId] };
+    : { ...effectiveStyleDocument.overlay, ...getOverlayElementStyle(effectiveStyleDocument, effectiveStyleTargetId) };
   const elementHorizontalAnchor = (element: PanelOverlayElement): OverlayStyleAlignment =>
-    effectiveStyleDocument.elements[element.id]?.textAlign ?? effectiveStyleDocument.overlay.textAlign ?? "left";
+    getOverlayElementStyle(effectiveStyleDocument, element.id)?.textAlign ?? effectiveStyleDocument.overlay.textAlign ?? "left";
   const styleLockedReason = styleLocked ? labels.editorStyleLocked : "";
   const styleContrastElement = effectiveStyleTargetId === "overlay"
     ? selectedElement
     : draft.elements.find(({ id }) => id === effectiveStyleTargetId) ?? null;
-  const styleContrastElementStyle = styleContrastElement === null ? {} : effectiveStyleDocument.elements[styleContrastElement.id] ?? {};
+  const styleContrastElementStyle = styleContrastElement === null ? {} : getOverlayElementStyle(effectiveStyleDocument, styleContrastElement.id) ?? {};
   const selectedColors = styleContrastElement === null ? null : resolveOverlayElementColors(
     styleContrastElement.kind, styleContrastElement.config, styleContrastElementStyle, effectiveStyleDocument.overlay,
   );
@@ -892,7 +893,7 @@ function OverlayEditorWorkspace({
   const updateStyleProperty = <Key extends keyof OverlayStyle>(property: Key, value: OverlayStyle[Key] | undefined): void => {
     const current = effectiveStyleTargetId === "overlay"
       ? effectiveStyleDocument.overlay
-      : effectiveStyleDocument.elements[effectiveStyleTargetId] ?? {};
+      : getOverlayElementStyle(effectiveStyleDocument, effectiveStyleTargetId) ?? {};
     const nextTarget: OverlayStyle = Object.fromEntries(Object.entries(current).filter(([key]) => key !== property));
     if (value !== undefined) Object.assign(nextTarget, { [property]: value });
     const next: OverlayStyleDocument = effectiveStyleTargetId === "overlay"
