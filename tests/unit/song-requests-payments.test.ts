@@ -343,7 +343,7 @@ describe("song request payments", () => {
     });
     harness.sendChat.mockResolvedValueOnce({ sent: false, reason: "rate_limited", retryable: true, delivery: "not_attempted" });
 
-    await expect(handleSubmitAlarm(harness.alarmContext, `submit:${row.id}`)).rejects.toThrow("waiting for chat delivery");
+    await expect(handleSubmitAlarm(harness.alarmContext, `submit:${row.id}`)).resolves.toBe("retry");
     expect(await harness.database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(row.id).first())
       .toEqual({ state: "outcome_unknown" });
 

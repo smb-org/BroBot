@@ -737,7 +737,7 @@ type ModuleAlarmPlanFenceRecord = {
   cleared: boolean;
   updatedAt: number;
 };
-type AlarmHandlerResult = undefined | "retain";
+type AlarmHandlerResult = undefined | "retain" | "retry";
 type AlarmHandler = (key: string, entry: AlarmScheduleEntry, now: number, nowIso: string) => Promise<AlarmHandlerResult>;
 type AlarmHandlerRegistration = {
   handle: AlarmHandler;
@@ -3815,6 +3815,8 @@ export class ChannelObject extends DurableObject<Env> {
     streamGeneration?: number | null,
     identity?: ModuleAlarmIdentity,
     planSequence?: number,
+    onlyIfEarlier = false,
+    advanceClaimed = false,
   ): Promise<void> {
     if (!Number.isFinite(deadline)) {
       await this.clearAlarmEntry(key, ownerRevision, streamGeneration, identity, planSequence);
@@ -3823,6 +3825,10 @@ export class ChannelObject extends DurableObject<Env> {
     await this.mutateAlarmSchedule(async (table, storage) => {
       if (!await this.acceptAlarmStreamGeneration(storage, key, streamGeneration)) return;
       if (ownerRevision !== undefined && !await this.acceptAlarmOwnerRevision(storage, key, ownerRevision)) return;
+      const currentEntry = table[key];
+      if (onlyIfEarlier && identity === undefined && planSequence === undefined && currentEntry !== undefined &&
+          !(advanceClaimed && currentEntry.claimUntil !== undefined) &&
+          alarmAttemptAt(currentEntry) <= deadline) return;
       if (identity !== undefined || planSequence !== undefined) {
         const modulePrefix = "module:";
         const moduleSeparator = key.startsWith(modulePrefix) ? key.indexOf(":", modulePrefix.length) : -1;
@@ -4120,6 +4126,7 @@ export class ChannelObject extends DurableObject<Env> {
     alarmIdentity?: ModuleAlarmIdentity,
     alarmPlanSequence?: number,
     sendChatImpl: typeof sendChatMessage = sendChatMessage,
+    runningAlarmKey?: string,
   ): ModuleAlarmContext {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Module alarms require a named Durable Object.");
@@ -4310,6 +4317,25 @@ export class ChannelObject extends DurableObject<Env> {
           scheduledStreamGeneration,
           identity,
           planSequence,
+        );
+      },
+      scheduleIfEarlier: async (key, deadline, ownerRevision, scheduledStreamGeneration, identity, planSequence, scheduledHandlerKey) => {
+        const moduleAlarms = MODULES.find((module) => module.id === moduleId)?.alarms ?? [];
+        const targetHandlerKey = scheduledHandlerKey ?? (moduleAlarms.some((alarm) => alarm.key === key) ? key : registration.key);
+        const scheduledRegistration = moduleAlarms.find((alarm) => alarm.key === targetHandlerKey);
+        if (scheduledHandlerKey !== undefined && scheduledRegistration === undefined) {
+          throw new Error(`Unknown module alarm handler ${moduleId}.${scheduledHandlerKey}.`);
+        }
+        await this.scheduleModuleAlarmIfEarlierInternal(
+          moduleId,
+          targetHandlerKey,
+          key,
+          deadline,
+          ownerRevision,
+          scheduledStreamGeneration,
+          identity,
+          planSequence,
+          runningAlarmKey === key,
         );
       },
       clear: async (key, ownerRevision, scheduledStreamGeneration, expectedIdentity, planSequence) => {
@@ -9398,13 +9424,14 @@ export class ChannelObject extends DurableObject<Env> {
         handle: async (key, entry) => {
           const execute = () => registration.handle(
             this.moduleAlarmContext(moduleId, registration, externalFetchBudget, entry.streamGeneration,
-              entry.identity, entry.planSequence),
+              entry.identity, entry.planSequence, undefined,
+              key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key),
             key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
             entry.deadline,
             entry.ownerRevision,
           );
           const result = await this.runModuleAlarmHandler(moduleId, registration.key, execute);
-          return result === "retain" ? "retain" : undefined;
+          return result === "retain" || result === "retry" ? result : undefined;
         },
       });
     }
@@ -9448,6 +9475,7 @@ export class ChannelObject extends DurableObject<Env> {
       try {
         const result = await registration.handle(key, entry, now, nowIso);
         if (result === "retain") await this.retainAlarmEntry(key, claimed);
+        else if (result === "retry") await this.rescheduleFailedAlarm(key, claimed, registration.retryDelaysMs);
         else await this.completeAlarmEntry(key, claimed);
       } catch (error: unknown) {
         console.error(`Alarm handler ${entry.handler} failed for ${key}.`, error);
@@ -9707,6 +9735,60 @@ export class ChannelObject extends DurableObject<Env> {
       streamGeneration,
       identity,
       planSequence,
+    );
+  }
+
+  /** Schedule one module alarm only when it advances that key's next attempt. */
+  public async scheduleModuleAlarmIfEarlier(
+    moduleId: string,
+    handlerKey: string,
+    alarmKey: string,
+    deadline: number,
+    ownerRevision?: number,
+    streamGeneration?: number | null,
+    identity?: ModuleAlarmIdentity,
+    planSequence?: number,
+  ): Promise<void> {
+    await this.scheduleModuleAlarmIfEarlierInternal(
+      moduleId,
+      handlerKey,
+      alarmKey,
+      deadline,
+      ownerRevision,
+      streamGeneration,
+      identity,
+      planSequence,
+      false,
+    );
+  }
+
+  private async scheduleModuleAlarmIfEarlierInternal(
+    moduleId: string,
+    handlerKey: string,
+    alarmKey: string,
+    deadline: number,
+    ownerRevision: number | undefined,
+    streamGeneration: number | null | undefined,
+    identity: ModuleAlarmIdentity | undefined,
+    planSequence: number | undefined,
+    advanceClaimed: boolean,
+  ): Promise<void> {
+    await this.ensurePointRoundRecovery();
+    const registration = MODULES.find((module) => module.id === moduleId)?.alarms?.find((alarm) => alarm.key === handlerKey);
+    if (registration === undefined || alarmKey.length === 0) {
+      throw new Error(`Unknown module alarm ${moduleId}.${handlerKey}.`);
+    }
+    await this.scheduleAlarmEntry(
+      `module:${moduleId}:${alarmKey}`,
+      `module:${moduleId}:${registration.key}`,
+      deadline,
+      undefined,
+      ownerRevision,
+      streamGeneration,
+      identity,
+      planSequence,
+      true,
+      advanceClaimed,
     );
   }
 

@@ -40,14 +40,24 @@ const bodyFrom = async (request: Request): Promise<Body | null> => {
   catch { return null; }
 };
 const channel = (context: RouteContext): string => context.req.param("channelId") ?? "";
+const scheduleAlarmIfEarlier = (
+  context: RouteContext,
+  moduleId: string,
+  handlerKey: string,
+  alarmKey: string,
+  deadline: number,
+  streamGeneration?: number | null,
+): Promise<void> => (context.get("scheduleModuleAlarmIfEarlier") ?? context.get("scheduleModuleAlarm"))(
+  channel(context), moduleId, handlerKey, alarmKey, deadline, streamGeneration,
+);
 const flushChannelPointResolutions = async (context: RouteContext): Promise<void> => {
   await context.get("runModuleAlarm")(
     channel(context), "song_requests", SONG_REQUESTS_LIFECYCLE_HANDLER, "channel-point-resolutions",
   );
 };
 const scheduleChannelPointResolutionRetry = async (context: RouteContext): Promise<void> => {
-  await context.get("scheduleModuleAlarm")(
-    channel(context),
+  await scheduleAlarmIfEarlier(
+    context,
     "song_requests",
     SONG_REQUESTS_LIFECYCLE_HANDLER,
     "channel-point-resolutions",
@@ -119,8 +129,8 @@ const retryRouteRefunds = async (context: RouteContext): Promise<void> => {
     "SELECT enabled FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'",
   ).bind(channel(context)).first<{ enabled: number }>();
   if (pending > 0 && module?.enabled === 1) {
-    await context.get("scheduleModuleAlarm")(
-      channel(context), "song_requests", SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + 60_000, null,
+    await scheduleAlarmIfEarlier(
+      context, "song_requests", SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + 60_000, null,
     );
   }
 };

@@ -1096,7 +1096,7 @@ export const channelPointsLifecycleAlarm: ModuleAlarmDefinition = {
     }
     const channelId = context.channelId;
     // Write the retry alarm before a claim or Twitch call so a crash cannot strand the lease.
-    await context.schedule(
+    await (context.scheduleIfEarlier ?? context.schedule)(
       CHANNEL_POINTS_LIFECYCLE_ALARM,
       Date.now() + REDEMPTION_CLAIM_LEASE_MS,
       undefined,
@@ -1136,7 +1136,7 @@ export const channelPointsLifecycleAlarm: ModuleAlarmDefinition = {
     const repository = createChannelPointsRepository(environment.DB);
     const retryPending = await repository.hasLifecycleRetryWork(channelId);
     if (callbackPending || retryPending) {
-      await context.schedule(
+      await (context.scheduleIfEarlier ?? context.schedule)(
         CHANNEL_POINTS_LIFECYCLE_ALARM,
         Date.now() + REDEMPTION_CLAIM_LEASE_MS,
         undefined,

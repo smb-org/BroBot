@@ -75,6 +75,10 @@ export const createModuleActionExecutionContext = (
     scheduleAlarm: async (handlerKey, alarmKey, deadline, ownerRevision, streamGeneration, identity, planSequence) => {
       await object.scheduleModuleAlarm(moduleId, handlerKey, alarmKey, deadline, ownerRevision, streamGeneration, identity, planSequence);
     },
+    scheduleAlarmIfEarlier: async (handlerKey, alarmKey, deadline, ownerRevision, streamGeneration, identity, planSequence) => {
+      await object.scheduleModuleAlarmIfEarlier(moduleId, handlerKey, alarmKey, deadline,
+        ownerRevision, streamGeneration, identity, planSequence);
+    },
     clearAlarm: async (alarmKey, ownerRevision, streamGeneration, identity, planSequence) => {
       await object.clearModuleAlarm(moduleId, alarmKey, ownerRevision, streamGeneration, identity, planSequence);
     },

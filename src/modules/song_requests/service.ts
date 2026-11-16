@@ -47,6 +47,20 @@ const IN_FLIGHT_MAX_AGE_MS = 60_000;
 const OFFLINE_POLL_INTERVAL_MS = 60_000;
 const CHANNEL_POINT_RESOLUTION_RETRY_MS = 15_000;
 
+const scheduleAlarmIfEarlier = async (
+  context: ModuleAlarmContext,
+  ...args: Parameters<ModuleAlarmContext["schedule"]>
+): Promise<void> => {
+  await (context.scheduleIfEarlier ?? context.schedule)(...args);
+};
+
+const scheduleEventAlarmIfEarlier = async (
+  context: ModuleExecutionContext,
+  ...args: Parameters<ModuleExecutionContext["scheduleAlarm"]>
+): Promise<void> => {
+  await (context.scheduleAlarmIfEarlier ?? context.scheduleAlarm)(...args);
+};
+
 const deliverChannelPointResolutionObligations = async (
   db: D1Database,
   channelId: string,
@@ -71,7 +85,7 @@ const deliverChannelPointResolutionObligations = async (
 const flushChannelPointResolutions = async (context: ModuleAlarmContext): Promise<void> => {
   const pending = await deliverChannelPointResolutionObligations(context.DB, context.channelId, context.channelPoints);
   if (pending) {
-    await context.schedule(
+    await scheduleAlarmIfEarlier(context,
       "channel-point-resolutions",
       Date.now() + CHANNEL_POINT_RESOLUTION_RETRY_MS,
       undefined,
@@ -86,7 +100,7 @@ const flushChannelPointResolutions = async (context: ModuleAlarmContext): Promis
 };
 
 const scheduleChannelPointResolutionRetry = async (context: ModuleAlarmContext): Promise<void> => {
-  await context.schedule(
+  await scheduleAlarmIfEarlier(context,
     "channel-point-resolutions",
     Date.now() + CHANNEL_POINT_RESOLUTION_RETRY_MS,
     undefined,
@@ -102,7 +116,7 @@ const flushChannelPointResolutionsFromEvent = async (context: ModuleExecutionCon
   if (channelId === undefined) return;
   const pending = await deliverChannelPointResolutionObligations(context.DB, channelId, context.channelPoints);
   if (pending) {
-    await context.scheduleAlarm(
+    await scheduleEventAlarmIfEarlier(context,
       SONG_REQUESTS_LIFECYCLE_HANDLER,
       "channel-point-resolutions",
       Date.now() + CHANNEL_POINT_RESOLUTION_RETRY_MS,
@@ -302,7 +316,7 @@ export const holdSubmitClaim = async (
 };
 
 const scheduleSubmitRetry = async (context: ModuleAlarmContext, requestId: string): Promise<void> => {
-  await context.schedule(
+  await scheduleAlarmIfEarlier(context,
     `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`,
     Date.now() + CHANNEL_POINT_RESOLUTION_RETRY_MS,
     undefined,
@@ -724,9 +738,9 @@ const failureMessage = (reason: string | null): { de: string; en: string } => {
   };
 };
 
-const announceSubmitResult = async (context: ModuleAlarmContext, requestId: string): Promise<void> => {
+const announceSubmitResult = async (context: ModuleAlarmContext, requestId: string): Promise<boolean> => {
   const row = await readSongRequest(context.DB, context.channelId, requestId);
-  if (row === null || row.state === "charging" || row.state === "approved" || row.state === "submitting") return;
+  if (row === null || row.state === "charging" || row.state === "approved" || row.state === "submitting") return false;
   const language = await context.channelLanguage();
   const message = row.state === "submitted"
     ? language === "de"
@@ -741,10 +755,10 @@ const announceSubmitResult = async (context: ModuleAlarmContext, requestId: stri
     undefined,
     { automated: true },
   );
-  if (delivery.retryable) throw new Error("The song queue result is waiting for chat delivery.");
+  return delivery.retryable;
 };
 
-export const handleSubmitAlarm = async (context: ModuleAlarmContext, alarmKey: string): Promise<void> => {
+export const handleSubmitAlarm = async (context: ModuleAlarmContext, alarmKey: string): Promise<undefined | "retry"> => {
   await flushChannelPointResolutions(context);
   if (!alarmKey.startsWith(SONG_REQUESTS_SUBMIT_ALARM_PREFIX)) return;
   const requestId = alarmKey.slice(SONG_REQUESTS_SUBMIT_ALARM_PREFIX.length);
@@ -757,7 +771,7 @@ export const handleSubmitAlarm = async (context: ModuleAlarmContext, alarmKey: s
   await flushChannelPointResolutions(context);
   const current = await readSongRequest(context.DB, context.channelId, requestId);
   if (current?.state === "failed" || current?.state === "rejected") await refundRequestId(context, requestId);
-  await announceSubmitResult(context, requestId);
+  if (await announceSubmitResult(context, requestId)) return "retry";
   await notifyQueueOverlay(context);
 };
 
@@ -849,7 +863,7 @@ const hasFreshChargingSongRequests = async (db: D1Database, channelId: string, n
 
 const scheduleFreshChargingReconciliation = async (context: ModuleAlarmContext, now = Date.now()): Promise<boolean> => {
   if (!await hasFreshChargingSongRequests(context.DB, context.channelId, now)) return false;
-  await context.schedule(SONG_REQUESTS_ALARM, now + IN_FLIGHT_MAX_AGE_MS, undefined, null);
+  await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, now + IN_FLIGHT_MAX_AGE_MS, undefined, null);
   return true;
 };
 
@@ -891,7 +905,7 @@ const recordPollFailure = async (
      VALUES (?, 'not_connected', NULL, ?, ?)
      ON CONFLICT (channel_id) DO UPDATE SET poll_failures = excluded.poll_failures, updated_at = excluded.updated_at`,
   ).bind(context.channelId, new Date(now).toISOString(), failures).run();
-  await context.schedule(SONG_REQUESTS_ALARM, now + delay, undefined, streamGeneration);
+  await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, now + delay, undefined, streamGeneration);
 };
 
 const reconcileApprovedSubmissionAlarms = async (context: ModuleAlarmContext): Promise<void> => {
@@ -933,7 +947,7 @@ export const pollSongRequestsPlayback = async (
     .bind(context.channelId).first<{ enabled: number; settings: string }>();
   const pendingRefunds = await retrySongRequestRefunds(context);
   if (typeof invocation === "object" && invocation !== null && (invocation as Record<string, unknown>).kind === "disconnect") {
-    if (module?.enabled === 1 && pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
+    if (module?.enabled === 1 && pendingRefunds > 0) await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
     else if (!await scheduleFreshChargingReconciliation(context, now)) await context.clear(SONG_REQUESTS_ALARM);
     await notifyQueueOverlay(context);
     return;
@@ -958,12 +972,12 @@ export const pollSongRequestsPlayback = async (
     interval = OFFLINE_POLL_INTERVAL_MS;
     backoffBase = OFFLINE_POLL_INTERVAL_MS;
   } else {
-    if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
+    if (pendingRefunds > 0) await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
     else if (!await scheduleFreshChargingReconciliation(context, now)) await context.clear(SONG_REQUESTS_ALARM);
     return;
   }
   if (roundId === null) {
-    if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
+    if (pendingRefunds > 0) await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
     return;
   }
   const connection = await context.DB.prepare("SELECT state, poll_failures FROM song_requests_connections WHERE channel_id = ?")
@@ -1024,7 +1038,7 @@ export const pollSongRequestsPlayback = async (
       await notifyQueueOverlay(context);
     }
     if (!await playbackCycleIsCurrent(context, roundId)) return;
-    await context.schedule(SONG_REQUESTS_ALARM, Date.now() + interval, undefined, streamGeneration);
+    await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, Date.now() + interval, undefined, streamGeneration);
   } catch (error) {
     if (!await playbackCycleIsCurrent(context, roundId)) return;
     await recordPollFailure(context, connection.poll_failures, error, streamGeneration, backoffBase);
@@ -1099,7 +1113,7 @@ export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmCont
         if (cleanup.changed) await notifyNowPlaying(context, cleanup.revision);
       }
       if (await retrySongRequestRefunds(context) > 0) {
-        await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
+        await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
       } else if (!await scheduleFreshChargingReconciliation(context)) await context.clear(SONG_REQUESTS_ALARM);
       await flushChannelPointResolutions(context);
       await notifyQueueOverlay(context);
@@ -1109,18 +1123,18 @@ export const handleSongRequestsSettingsChanged = async (context: ModuleAlarmCont
     const connection = await context.DB.prepare("SELECT state FROM song_requests_connections WHERE channel_id = ?")
       .bind(context.channelId).first<{ state: string }>();
     if (await spotifySlotHeld(context.DB, context.channelId) && (connection?.state === "connected" || connection?.state === "no_active_device")) {
-      await context.schedule(SONG_REQUESTS_ALARM, Date.now() + OFFLINE_POLL_INTERVAL_MS, undefined, null);
+      await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, Date.now() + OFFLINE_POLL_INTERVAL_MS, undefined, null);
     } else {
-      if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
+      if (pendingRefunds > 0) await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
       else if (!await scheduleFreshChargingReconciliation(context)) await context.clear(SONG_REQUESTS_ALARM);
     }
     await flushChannelPointResolutions(context);
     return;
   }
   if (stream?.state === "online" && stream.stream_id !== null) {
-    await context.schedule(SONG_REQUESTS_ALARM, Date.now() + POLL_INTERVAL_MS, undefined, context.streamGeneration);
+    await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, Date.now() + POLL_INTERVAL_MS, undefined, context.streamGeneration);
   } else {
-    if (pendingRefunds > 0) await context.schedule(SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
+    if (pendingRefunds > 0) await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
     else if (!await scheduleFreshChargingReconciliation(context)) await context.clear(SONG_REQUESTS_ALARM);
   }
   await flushChannelPointResolutions(context);
@@ -1391,7 +1405,7 @@ const processSongRequestCommand = async (
 export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSettings>, context: ModuleExecutionContext): Promise<ModuleResult> => {
   if (event.subscriptionType === "channel.chat.message") return await processSongRequestCommand(event, context);
   if (context.streamStateTransitionAccepted !== true) return { actions: [], diagnostics: [] };
-  await context.scheduleAlarm(
+  await scheduleEventAlarmIfEarlier(context,
     SONG_REQUESTS_LIFECYCLE_HANDLER,
     "channel-point-resolutions",
     Date.now() + CHANNEL_POINT_RESOLUTION_RETRY_MS,
@@ -1413,9 +1427,9 @@ export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSe
     }
     await retrySongRequestRefunds({ DB: context.DB, channelId: event.channelId, points: context.points });
     if (enabled?.enabled === 1) {
-      await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + POLL_INTERVAL_MS);
+      await scheduleEventAlarmIfEarlier(context, SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + POLL_INTERVAL_MS);
     } else if (await hasFreshChargingSongRequests(context.DB, event.channelId)) {
-      await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + IN_FLIGHT_MAX_AGE_MS, undefined, null);
+      await scheduleEventAlarmIfEarlier(context, SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + IN_FLIGHT_MAX_AGE_MS, undefined, null);
     } else await context.clearAlarm(SONG_REQUESTS_ALARM);
     actions.push(await queueOverlayChange({ DB: context.DB, channelId: event.channelId }));
   } else if (event.subscriptionType === "stream.offline") {
@@ -1433,15 +1447,15 @@ export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSe
     }
     if (enabled?.enabled === 1 && settings.alsoOffline) {
       await ensureOfflineSongRequestRound(context.DB, event.channelId, event.receivedAt);
-      await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + OFFLINE_POLL_INTERVAL_MS, undefined, null);
+      await scheduleEventAlarmIfEarlier(context, SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + OFFLINE_POLL_INTERVAL_MS, undefined, null);
     } else if (enabled?.enabled === 1) {
       if ((await songRequestRefundDueIds(context.DB, event.channelId)).length > 0) {
-        await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
+        await scheduleEventAlarmIfEarlier(context, SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + BASE_BACKOFF_MS, undefined, null);
       } else if (await hasFreshChargingSongRequests(context.DB, event.channelId)) {
-        await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + IN_FLIGHT_MAX_AGE_MS, undefined, null);
+        await scheduleEventAlarmIfEarlier(context, SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + IN_FLIGHT_MAX_AGE_MS, undefined, null);
       } else await context.clearAlarm(SONG_REQUESTS_ALARM);
     } else if (await hasFreshChargingSongRequests(context.DB, event.channelId)) {
-      await context.scheduleAlarm(SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + IN_FLIGHT_MAX_AGE_MS, undefined, null);
+      await scheduleEventAlarmIfEarlier(context, SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + IN_FLIGHT_MAX_AGE_MS, undefined, null);
     } else await context.clearAlarm(SONG_REQUESTS_ALARM);
     if (streamId !== null) {
       const snapshot = await context.DB.prepare("SELECT revision FROM song_requests_now_playing WHERE channel_id = ?")

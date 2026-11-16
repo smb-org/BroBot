@@ -64,10 +64,8 @@ import type {
   ModuleExternalFetchBudget,
 } from "../../src/modules/contract";
 import type { ChannelPointsRewardInput } from "../../src/modules/channel_points/contracts";
-import {
-  CHANNEL_POINTS_LIFECYCLE_ALARM,
-  CHANNEL_POINTS_LIFECYCLE_HANDLER,
-} from "../../src/modules/channel_points/service";
+import { CHANNEL_POINTS_LIFECYCLE_ALARM } from "../../src/modules/channel_points/service";
+import { SONG_REQUESTS_LIFECYCLE_HANDLER } from "../../src/modules/song_requests/service";
 import { createChannelPointsRepository } from "../../src/modules/channel_points/repository";
 import {
   emptyDurableTimerState,
@@ -776,6 +774,9 @@ describe("ChannelObject realtime path", () => {
     });
 
     it("retries a failed Twitch PATCH through ChannelObject.alarm", async () => {
+      vi.useFakeTimers();
+      const startedAt = Date.parse(now);
+      vi.setSystemTime(startedAt);
       await database.prepare(
         `INSERT INTO channels (channel_id, login, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(channel_id) DO NOTHING`,
@@ -786,6 +787,11 @@ describe("ChannelObject realtime path", () => {
         `INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'channel_points', 1, '{}')
          ON CONFLICT(channel_id, module_id) DO UPDATE SET enabled = 1, settings = '{}'`,
       ).bind(channelId).run();
+      await database.prepare(
+        `INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')
+         ON CONFLICT(channel_id, module_id) DO UPDATE SET enabled = 1, settings = '{}'`,
+      ).bind(channelId).run();
+      await database.prepare("DELETE FROM song_requests WHERE channel_id = ?").bind(channelId).run();
       const repository = createChannelPointsRepository(database);
       const reward: ChannelPointsRewardInput = {
         title: "Scheduled reward",
@@ -820,6 +826,17 @@ describe("ChannelObject realtime path", () => {
         outcomeReason: null,
         claimedAt: "2000-01-01T00:00:00.000Z",
       }, ["received"], now);
+      await database.prepare(
+        `INSERT INTO song_requests (
+          id,channel_id,source,track_id,track_uri,title,artists_json,duration_ms,explicit,cover_url,spotify_url,
+          requester_user_id,requester_login,requester_display_name,state,operation_id,failure_reason,stream_id,
+          created_at,updated_at,request_type,channel_points_resolution_due
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ).bind(
+        `${redemptionId}_request`, channelId, "channel_points", "scheduled_track", "scheduled_track_uri",
+        "Scheduled song", "[]", 180_000, 0, null, "scheduled_track_link", "viewer_one", "viewer_demo",
+        null, "submitted", redemptionId, null, null, now, now, "channel_points", "FULFILLED",
+      ).run();
       mocks.channelPointManageable.mockResolvedValue({
         ok: true,
         data: [{
@@ -859,16 +876,50 @@ describe("ChannelObject realtime path", () => {
       const object = objectFor([], database, new Map(), channelId);
 
       await object.scheduleModuleAlarm(
-        "channel_points", CHANNEL_POINTS_LIFECYCLE_HANDLER, CHANNEL_POINTS_LIFECYCLE_ALARM, Date.now() - 1,
+        "song_requests", SONG_REQUESTS_LIFECYCLE_HANDLER, "channel-point-resolutions", startedAt,
       );
+      for (let retry = 0; retry < 8; retry += 1) {
+        vi.setSystemTime(startedAt + retry * 15_000);
+        await object.alarm();
+      }
+      const alarmTable = storageOf(object).values.get("channel:alarm_schedule") as Record<string, { deadline: number }>;
+      expect(alarmTable[`module:channel_points:${CHANNEL_POINTS_LIFECYCLE_ALARM}`]?.deadline).toBe(startedAt + 120_000);
+
+      vi.setSystemTime(startedAt + 120_000);
+      await object.alarm();
+      await expect(repository.getRedemption(channelId, redemptionId))
+        .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
+      expect(mocks.channelPointUpdate).toHaveBeenCalledOnce();
+
+      vi.setSystemTime(startedAt + 135_000);
       await object.alarm();
 
+      expect(mocks.channelPointUpdate).toHaveBeenCalledOnce();
       expect(mocks.channelPointUpdate).toHaveBeenCalledWith(
         expect.anything(), channelId, "scheduled_twitch_reward", [redemptionId], "FULFILLED", expect.any(Function),
       );
       await expect(repository.getRedemption(channelId, redemptionId))
         .resolves.toMatchObject({ status: "fulfilled", pendingTwitchStatus: null });
     });
+  });
+
+  it("reschedules an expected module retry without logging it as an error", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-11-16T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const registration = MODULES.find(({ id }) => id === "song_requests")?.alarms?.find(({ key }) => key === "submit");
+    if (registration === undefined) throw new Error("Song-request submit alarm is not registered.");
+    const handler = vi.spyOn(registration, "handle").mockResolvedValue("retry");
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const object = objectFor([]);
+
+    await object.scheduleModuleAlarm("song_requests", "submit", "submit:retry_wait", now);
+    await object.alarm();
+
+    const alarmTable = storageOf(object).values.get("channel:alarm_schedule") as Record<string, { nextAttemptAt?: number }>;
+    expect(alarmTable["module:song_requests:submit:retry_wait"]?.nextAttemptAt).toBe(now + 5_000);
+    expect(errorLog).not.toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledOnce();
   });
 
   const adSchedule = (nextAdAt: string | null): AdsSchedule => ({

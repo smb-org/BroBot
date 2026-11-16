@@ -806,6 +806,16 @@ export interface ModuleExecutionContext {
     identity?: ModuleAlarmIdentity,
     planSequence?: number,
   ) => Promise<void>;
+  /** Schedules a keyed alarm without postponing an earlier scheduled attempt. */
+  scheduleAlarmIfEarlier?: (
+    handlerKey: string,
+    alarmKey: string,
+    deadline: number,
+    ownerRevision?: number,
+    streamGeneration?: number | null,
+    identity?: ModuleAlarmIdentity,
+    planSequence?: number,
+  ) => Promise<void>;
   clearAlarm: (
     alarmKey: string,
     ownerRevision?: number,
@@ -954,6 +964,16 @@ export interface ModuleAlarmContext {
     /** Serialized lifecycle modules can omit this; the ChannelObject allocates it with the alarm write. */
     planSequence?: number,
     /** Schedules a keyed alarm through a sibling handler registered by this module. */
+    handlerKey?: string,
+  ) => Promise<void>;
+  /** Schedules a keyed alarm without postponing an earlier scheduled attempt. */
+  scheduleIfEarlier?: (
+    key: string,
+    deadline: number,
+    ownerRevision?: number,
+    streamGeneration?: number | null,
+    identity?: ModuleAlarmIdentity,
+    planSequence?: number,
     handlerKey?: string,
   ) => Promise<void>;
   clear: (
@@ -2520,6 +2540,15 @@ export interface ModuleRouteVariables {
   ) => Promise<unknown>;
   /** Schedules a module-owned keyed alarm for a route that transitions work into an alarm-driven phase. */
   scheduleModuleAlarm: (
+    channelId: string,
+    moduleId: string,
+    handlerKey: string,
+    alarmKey: string,
+    deadline: number,
+    streamGeneration?: number | null,
+  ) => Promise<void>;
+  /** Schedules a module alarm without postponing an earlier attempt. */
+  scheduleModuleAlarmIfEarlier?: (
     channelId: string,
     moduleId: string,
     handlerKey: string,

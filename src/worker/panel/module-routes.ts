@@ -81,7 +81,7 @@ interface ModuleRouteEnvironment {
     | "tempVips"
     | "botCredentials" | "getUserEmotes" | "getGlobalEmotes"
     | "readChannelBlockedTerms"
-    | "runModuleAlarm" | "scheduleModuleAlarm" | "startChatVote" | "beginSpotifyOAuth"
+    | "runModuleAlarm" | "scheduleModuleAlarm" | "scheduleModuleAlarmIfEarlier" | "startChatVote" | "beginSpotifyOAuth"
     | "listTextBlockConditions"
     | "listEventTimeSources" | "resolveEventTimes"
     | "notifyScheduleInputsChanged" | "reconcileTimerSchedules" | "validateTemplateContentMutation"
@@ -383,6 +383,15 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     if (routedModuleId !== moduleId) throw new Error("Module alarm access must use the mounted module route.");
     const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
     return object.scheduleModuleAlarm(moduleId, handlerKey, alarmKey, deadline, undefined, streamGeneration);
+  });
+  context.set("scheduleModuleAlarmIfEarlier", (channelId, moduleId, handlerKey, alarmKey, deadline, streamGeneration) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Module alarm access must use the authorized route channel.");
+    const marker = "/modules/";
+    const suffix = new URL(context.req.url).pathname.split(marker, 2)[1];
+    const routedModuleId = suffix === undefined ? "" : decodeURIComponent(suffix.split("/", 1)[0] ?? "");
+    if (routedModuleId !== moduleId) throw new Error("Module alarm access must use the mounted module route.");
+    const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+    return object.scheduleModuleAlarmIfEarlier(moduleId, handlerKey, alarmKey, deadline, undefined, streamGeneration);
   });
   context.set("beginSpotifyOAuth", async (channelId, memberUserId) => {
     if (channelId !== context.req.param("channelId")) throw new Error("Spotify OAuth must use the authorized route channel.");

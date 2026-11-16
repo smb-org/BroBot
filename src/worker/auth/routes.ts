@@ -793,7 +793,7 @@ authRouter.get("/auth/spotify/callback", async (context) => {
       if (module !== undefined && alarm !== undefined) {
         try {
           const channelObject = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(transaction.channelId));
-          await channelObject.scheduleModuleAlarm(module.id, alarm.key, SONG_REQUESTS_ALARM, Date.now() + 12_000);
+          await channelObject.scheduleModuleAlarmIfEarlier(module.id, alarm.key, SONG_REQUESTS_ALARM, Date.now() + 12_000);
         } catch { /* The next stream transition can repair a missed polling alarm. */ }
       }
     }
