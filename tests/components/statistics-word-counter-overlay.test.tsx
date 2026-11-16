@@ -38,7 +38,9 @@ describe("statistics word counter overlay", () => {
   });
 
   it("provides a bilingual editor preview and stores the folded word", () => {
-    expect(parseStatisticsWordCounterConfig({ word: "FAAAK" })).toEqual({ word: "fak", label: "FAAAK", show: "both" });
+    expect(parseStatisticsWordCounterConfig({ word: "FAAAK" })).toEqual({
+      word: "fak", label: "FAAAK", show: "both",
+    });
     expect(parseStatisticsWordCounterConfig({ word: "fak and bak" })).toBeNull();
     expect(statisticsWordCounterOverlayElement.previewState?.({ word: "fak", label: "Fak", show: "both" }, "de", 0))
       .toMatchObject({ words: { fak: { streamCount: 128, totalCount: 1_248 } } });

@@ -115,7 +115,10 @@ describe("Votekick module", () => {
     expect(votekickModule.eventSubTypes).toEqual(["channel.chat.message"]);
     expect(votekickModule.overlayElements?.[0]).toMatchObject({
       kind: "votekick.tally",
-      defaultConfig: { showCountdown: true, hideAfterCloseSeconds: 15 },
+      defaultConfig: {
+        showCountdown: true,
+        hideAfterCloseSeconds: 15,
+      },
     });
   });
 

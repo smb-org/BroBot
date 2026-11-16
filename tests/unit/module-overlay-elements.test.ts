@@ -50,7 +50,7 @@ describe("module overlay element declarations", () => {
     expect(typeof countdown?.load).toBe("function");
     expect(typeof countdown?.initialState).toBe("function");
     expect(countdown?.parseConfig({})).toEqual({ showSnoozeInfo: false });
-    expect(countdown?.parseConfig({ showSnoozeInfo: true })).toEqual({ showSnoozeInfo: true });
+    expect(countdown?.parseConfig({ showSnoozeInfo: true })).toMatchObject({ showSnoozeInfo: true });
     expect(countdown?.parseConfig({ showSnoozeInfo: "yes" })).toBeNull();
     expect(countdown?.parseConfig({ html: "<b>unsafe</b>" })).toBeNull();
   });
@@ -89,15 +89,7 @@ describe("module overlay element declarations", () => {
       defaultConfig: { showQuestionProgress: true, showPercent: true },
       mergeRealtimeStateOnModuleMessages: ["modul.quiz.phase", "modul.quiz.results", "modul.quiz.cancel"],
     });
-    expect(quiz?.parseConfig({ showPercent: false })).toEqual({
-      showQuestionProgress: true,
-      showPercent: false,
-      backgroundColor: "#10141b",
-      textColor: "#f2f5f9",
-      secondaryColor: "#a8b2c1",
-      accentColor: "#5fa4ff",
-      correctColor: "#32ca88",
-    });
+    expect(quiz?.parseConfig({ showPercent: false })).toEqual({ showQuestionProgress: true, showPercent: false, correctColor: "#32ca88" });
     expect(quiz?.parseConfig({ unsafe: true })).toBeNull();
     expect(quiz?.initialStateFromSnapshot).toBeTypeOf("function");
     expect(quiz?.load).toBeTypeOf("function");

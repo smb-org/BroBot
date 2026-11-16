@@ -791,6 +791,31 @@ und über `overlay.changed` an verbundene Quellen gemeldet. Der Editor und die
 Browserausgabe verwenden dieselbe React-Renderstrecke, damit Vorschau und
 Stream denselben Inhalt zeigen.
 
+Die Elementkonfiguration liegt als JSON am gespeicherten Element und wird über
+den `parseConfig`-Parser der jeweiligen Moduldeklaration eingelesen. Gemeinsame
+Darstellungseinstellungen liegen ausschließlich im Style-Tab des
+Overlay-Editors. Dieser schreibt den verwalteten CSS-Block zwischen
+`OVERLAY_STYLE_BEGIN_MARKER` und `OVERLAY_STYLE_END_MARKER`. Regeln auf
+`[data-element="<id>"]` setzen CSS-Variablen für Text-, Sekundärtext- und
+Akzentfarbe, Hintergrund, Schrift, Abstände, Rahmen und Schatten. Die
+Modulansichten lesen die Variablen dort, wo das Element den jeweiligen Teil
+darstellt; ihre bisherigen Literale bleiben die Fallbacks. Für Text-Elemente
+greift derselbe Block zusätzlich auf `.brobot-module-text` und
+`.brobot-variable`.
+
+Ältere Elementkonfigurationen bleiben zur Laufzeit kompatibel: Quiz übernimmt
+`backgroundColor`, `textColor`, `secondaryColor` und `accentColor`, Slots
+übernehmen dieselben Hintergrund- und Textfarben sowie `highlightColor`, und
+Alerts übernehmen `textColor`. Diese Werte liegen im CSS unter den Style-Werten
+als Fallback. Öffnet der Editor ein Overlay, verschiebt er diese Farben in das
+Style-Dokument des Elements. Beim nächsten expliziten Speichern schreibt er sie
+in den verwalteten CSS-Block und entfernt die migrierten Schlüssel aus der
+Elementkonfiguration; `null` bedeutet weiterhin den bisherigen Standard.
+Elementoptionen wie `correctColor`, `borderColor`, Alert-`fontSize` oder
+`showCover` bleiben erhalten. Es gibt keine parallelen elementeigenen Felder
+für gemeinsame Farben. Spezielle Farben für einzelne Bestandteile bleiben im
+Element-Editor und verwenden `ColorField`.
+
 Für jedes gespeicherte Overlay können Broadcaster und Verwalter benannte
 Zugänge ausstellen. Ein Zugang ist an Kanal und Overlay gebunden. D1 speichert
 den Pepper-Hash zur Prüfung sowie den

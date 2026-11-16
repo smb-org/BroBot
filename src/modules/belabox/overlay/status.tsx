@@ -52,8 +52,8 @@ const Status = ({ config, state, now, language = "en" }: ModuleOverlayElementPro
       overflow: "hidden",
       alignContent: "center",
       gap: "2px",
-      fontSize: "16px",
-      lineHeight: 1.1,
+      fontSize: "var(--brobot-overlay-font-size, 16px)",
+      lineHeight: "var(--brobot-overlay-line-height, 1.1)",
       whiteSpace: "nowrap",
     }}
   >

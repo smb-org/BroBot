@@ -10,6 +10,6 @@ export const overlayAlertElementTexts = {
 } as const;
 
 export const overlayAlertElementEditorTexts = {
-  de: { textColor: "Textfarbe", fontSize: "Schriftgröße", fontSizeUnit: "px", unset: "Standardfarbe verwenden", clear: "Farbe zurücksetzen" },
-  en: { textColor: "Text color", fontSize: "Font size", fontSizeUnit: "px", unset: "Use default color", clear: "Reset color" },
+  de: { fontSize: "Schriftgröße", fontSizeUnit: "px" },
+  en: { fontSize: "Font size", fontSizeUnit: "px" },
 } as const;

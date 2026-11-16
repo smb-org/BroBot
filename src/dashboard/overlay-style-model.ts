@@ -1,3 +1,5 @@
+import { OVERLAY_CSS_MAXIMUM_LENGTH } from "../contracts/overlay-css";
+
 export const OVERLAY_STYLE_BEGIN_MARKER = "/* brobot:style:begin - managed by the style editor, changes here are overwritten */";
 export const OVERLAY_STYLE_END_MARKER = "/* brobot:style:end */";
 
@@ -25,6 +27,8 @@ export interface OverlayStyle {
   fontSize?: number;
   fontWeight?: 400 | 500 | 600 | 700;
   color?: string;
+  secondaryTextColor?: string;
+  accentColor?: string;
   textAlign?: OverlayStyleAlignment;
   lineHeight?: number;
   letterSpacing?: number;
@@ -62,6 +66,16 @@ const propertyOrder = [
 
 const markerPrefixStartPattern = /\/\*\s*brobot:style:(?:begin|end)\b/gu;
 const elementIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
+
+const ownRecordValue = <Value>(record: Readonly<Record<string, Value>>, key: string): Value | undefined =>
+  Object.hasOwn(record, key) ? record[key] : undefined;
+
+const setOwnRecordValue = <Value>(record: Record<string, Value>, key: string, value: Value): void => {
+  Object.defineProperty(record, key, { configurable: true, enumerable: true, value, writable: true });
+};
+
+export const getOverlayElementStyle = (styles: OverlayStyleDocument, elementId: string): OverlayStyle | undefined =>
+  ownRecordValue(styles.elements, elementId);
 
 // Code-point order keeps the generated block identical across browser locales.
 const compareCodePoints = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
@@ -162,7 +176,62 @@ const styleDeclarations = (style: OverlayStyle): readonly string[] => {
   });
 };
 
-const hasStyle = (style: OverlayStyle): boolean => styleDeclarations(style).length > 0;
+const styleRootDeclarations = (style: OverlayStyle): readonly string[] => {
+  const declarations: string[] = [];
+  const addColor = (property: string, value: string | undefined): void => {
+    const color = value === undefined ? null : normalizedColor(value);
+    if (color !== null) declarations.push(`  ${property}: ${color};`);
+  };
+  addColor("--brobot-overlay-text-color", style.color);
+  addColor("--brobot-overlay-secondary-text-color", style.secondaryTextColor);
+  addColor("--brobot-overlay-accent-color", style.accentColor);
+  if (style.fontFamily !== undefined && isSafeFontFamily(style.fontFamily)) {
+    declarations.push(`  --brobot-overlay-font-family: "${escapeFontFamily(style.fontFamily)}", system-ui, sans-serif;`);
+  }
+  if (style.fontSize !== undefined && Number.isFinite(style.fontSize) && style.fontSize >= 1 && style.fontSize <= 500) {
+    declarations.push(`  --brobot-overlay-font-size: ${formatNumber(style.fontSize)}px;`);
+  }
+  if (style.fontWeight !== undefined && [400, 500, 600, 700].includes(style.fontWeight)) {
+    declarations.push(`  --brobot-overlay-font-weight: ${String(style.fontWeight)};`);
+  }
+  if (style.textAlign !== undefined && ["left", "center", "right"].includes(style.textAlign)) {
+    declarations.push(`  --brobot-overlay-text-align: ${style.textAlign};`);
+    declarations.push(`  --brobot-overlay-anchor-x: ${anchorTranslation(style.textAlign)};`);
+  }
+  if (style.lineHeight !== undefined && Number.isFinite(style.lineHeight) && style.lineHeight >= 0.5 && style.lineHeight <= 3) {
+    declarations.push(`  --brobot-overlay-line-height: ${formatNumber(style.lineHeight)};`);
+  }
+  if (style.letterSpacing !== undefined && Number.isFinite(style.letterSpacing) && style.letterSpacing >= -100 && style.letterSpacing <= 100) {
+    declarations.push(`  --brobot-overlay-letter-spacing: ${formatNumber(style.letterSpacing)}px;`);
+  }
+  if (style.stroke !== undefined && Number.isFinite(style.stroke.width) && style.stroke.width > 0 && style.stroke.width <= 20) {
+    const color = normalizedColor(style.stroke.color);
+    if (color !== null) declarations.push(`  --brobot-overlay-text-stroke: ${formatNumber(style.stroke.width)}px ${color};`);
+  }
+  if (style.shadow !== undefined
+    && Number.isFinite(style.shadow.x) && style.shadow.x >= -100 && style.shadow.x <= 100
+    && Number.isFinite(style.shadow.y) && style.shadow.y >= -100 && style.shadow.y <= 100
+    && Number.isFinite(style.shadow.blur) && style.shadow.blur >= 0 && style.shadow.blur <= 100) {
+    const color = normalizedColor(style.shadow.color);
+    if (color !== null) declarations.push(`  --brobot-overlay-text-shadow: ${formatNumber(style.shadow.x)}px ${formatNumber(style.shadow.y)}px ${formatNumber(style.shadow.blur)}px ${color};`);
+  }
+  if (style.background !== undefined && Number.isInteger(style.background.opacityPercent) && style.background.opacityPercent >= 0 && style.background.opacityPercent <= 100) {
+    const color = normalizedColor(style.background.color);
+    if (color !== null) {
+      const red = Number.parseInt(color.slice(1, 3), 16);
+      const green = Number.parseInt(color.slice(3, 5), 16);
+      const blue = Number.parseInt(color.slice(5, 7), 16);
+      declarations.push(`  --brobot-overlay-background: rgba(${String(red)}, ${String(green)}, ${String(blue)}, ${formatNumber(style.background.opacityPercent / 100)});`);
+    }
+  }
+  if (style.padding !== undefined && Number.isFinite(style.padding) && style.padding >= 0 && style.padding <= 100) {
+    declarations.push(`  --brobot-overlay-padding: ${formatNumber(style.padding)}px;`);
+  }
+  if (style.borderRadius !== undefined && Number.isFinite(style.borderRadius) && style.borderRadius >= 0 && style.borderRadius <= 100) {
+    declarations.push(`  --brobot-overlay-border-radius: ${formatNumber(style.borderRadius)}px;`);
+  }
+  return declarations;
+};
 
 const anchorTranslation = (alignment: OverlayStyleAlignment): string =>
   alignment === "center" ? "-50%" : alignment === "right" ? "-100%" : "0%";
@@ -172,19 +241,26 @@ const anchorRule = (selector: string, alignment: OverlayStyleAlignment): string 
 
 const styleRules = (styles: OverlayStyleDocument): readonly string[] => {
   const rules: string[] = [];
-  if (hasStyle(styles.overlay)) {
-    rules.push(`.brobot-overlay :where(.brobot-variable, .brobot-module-text) {\n${styleDeclarations(styles.overlay).join("\n")}\n}`);
-    if (styles.overlay.textAlign !== undefined) {
-      rules.push(anchorRule(".brobot-overlay .brobot-overlay-composition-element", styles.overlay.textAlign));
-    }
+  const overlayRootDeclarations = styleRootDeclarations(styles.overlay);
+  if (overlayRootDeclarations.length > 0) rules.push(`.brobot-overlay {\n${overlayRootDeclarations.join("\n")}\n}`);
+  const overlayDeclarations = styleDeclarations(styles.overlay);
+  if (overlayDeclarations.length > 0) {
+    rules.push(`.brobot-overlay :where(.brobot-variable, .brobot-module-text) {\n${overlayDeclarations.join("\n")}\n}`);
+  }
+  if (styles.overlay.textAlign !== undefined) {
+    rules.push(anchorRule(".brobot-overlay .brobot-overlay-composition-element", styles.overlay.textAlign));
   }
   for (const elementId of Object.keys(styles.elements).filter((id) => elementIdPattern.test(id)).sort(compareCodePoints)) {
-    const style = styles.elements[elementId];
-    if (style !== undefined && hasStyle(style)) {
-      rules.push(`[data-element="${elementId}"] :where(.brobot-variable, .brobot-module-text) {\n${styleDeclarations(style).join("\n")}\n}`);
-      if (style.textAlign !== undefined) {
-        rules.push(anchorRule(`.brobot-overlay .brobot-overlay-composition-element[data-element="${elementId}"]`, style.textAlign));
-      }
+    const style = ownRecordValue(styles.elements, elementId);
+    if (style === undefined) continue;
+    const rootDeclarations = styleRootDeclarations(style);
+    if (rootDeclarations.length > 0) rules.push(`[data-element="${elementId}"] {\n${rootDeclarations.join("\n")}\n}`);
+    const declarations = styleDeclarations(style);
+    if (declarations.length > 0) {
+      rules.push(`[data-element="${elementId}"] :where(.brobot-variable, .brobot-module-text) {\n${declarations.join("\n")}\n}`);
+    }
+    if (style.textAlign !== undefined) {
+      rules.push(anchorRule(`.brobot-overlay .brobot-overlay-composition-element[data-element="${elementId}"]`, style.textAlign));
     }
   }
   return rules;
@@ -331,22 +407,107 @@ const parseDeclarations = (lines: readonly string[]): OverlayStyle | null => {
   return lines.length === 0 ? null : style;
 };
 
+const rootStylePropertyNames: Readonly<Record<string, string>> = {
+  "--brobot-overlay-text-color": "color",
+  "--brobot-overlay-font-family": "font-family",
+  "--brobot-overlay-font-size": "font-size",
+  "--brobot-overlay-font-weight": "font-weight",
+  "--brobot-overlay-text-align": "text-align",
+  "--brobot-overlay-line-height": "line-height",
+  "--brobot-overlay-letter-spacing": "letter-spacing",
+  "--brobot-overlay-text-stroke": "-webkit-text-stroke",
+  "--brobot-overlay-text-shadow": "text-shadow",
+  "--brobot-overlay-background": "background-color",
+  "--brobot-overlay-padding": "padding",
+  "--brobot-overlay-border-radius": "border-radius",
+};
+
+const parseRootDeclarations = (lines: readonly string[]): OverlayStyle | null => {
+  const mapped: { property: string; line: string }[] = [];
+  const additional: Pick<OverlayStyle, "secondaryTextColor" | "accentColor"> = {};
+  const seen = new Set<string>();
+  let directTextAlign: string | undefined;
+  let anchorAlignment: OverlayStyleAlignment | undefined;
+  for (const line of lines) {
+    const declaration = /^ {2}([a-z-]+): (.+);$/u.exec(line);
+    if (declaration?.[1] === undefined || declaration[2] === undefined) return null;
+    const [, property, value] = declaration;
+    if (seen.has(property)) return null;
+    seen.add(property);
+    if (property === "--brobot-overlay-secondary-text-color" || property === "--brobot-overlay-accent-color") {
+      const parsed = parseColor(value);
+      if (parsed === null) return null;
+      if (property === "--brobot-overlay-secondary-text-color") additional.secondaryTextColor = parsed;
+      else additional.accentColor = parsed;
+      continue;
+    }
+    if (property === "text-align") {
+      if (directTextAlign !== undefined) return null;
+      directTextAlign = value;
+      continue;
+    }
+    if (property === "--brobot-overlay-anchor-x") {
+      if (anchorAlignment !== undefined) return null;
+      anchorAlignment = value === "0%" ? "left" : value === "-50%" ? "center" : value === "-100%" ? "right" : undefined;
+      if (anchorAlignment === undefined) return null;
+      continue;
+    }
+    const mappedProperty = rootStylePropertyNames[property];
+    if (mappedProperty === undefined) return null;
+    mapped.push({ property: mappedProperty, line: `  ${mappedProperty}: ${value};` });
+  }
+  mapped.sort((left, right) => propertyOrder.indexOf(left.property as (typeof propertyOrder)[number]) -
+    propertyOrder.indexOf(right.property as (typeof propertyOrder)[number]));
+  const parsedStyle = mapped.length === 0 ? {} : parseDeclarations(mapped.map(({ line }) => line));
+  if (parsedStyle === null) return null;
+  const style: OverlayStyle = { ...parsedStyle, ...additional };
+  if (Object.keys(style).length === 0) return null;
+  if (directTextAlign !== undefined && directTextAlign !== style.textAlign) return null;
+  if (anchorAlignment !== undefined && anchorAlignment !== style.textAlign) return null;
+  return style;
+};
+
 const parseContent = (content: string): OverlayStyleDocument | null => {
   if (!content.startsWith("\n") || !content.endsWith("\n")) return null;
   const body = content.slice(1, -1);
   if (body.length === 0) return { overlay: {}, elements: {} };
   const styles: { overlay: OverlayStyle; elements: Record<string, OverlayStyle> } = { overlay: {}, elements: {} };
   const rules = body.split("\n\n");
-  let previousSelectorOrder = "";
   let overlayStyleSeen = false;
+  let overlayStyleRuleSeen = false;
+  let overlayRootRuleSeen = false;
+  const elementStyleRulesSeen = new Set<string>();
+  const elementRootRulesSeen = new Set<string>();
+  const mergeStyles = (left: OverlayStyle, right: OverlayStyle): OverlayStyle | null => {
+    for (const key of Object.keys(left) as (keyof OverlayStyle)[]) {
+      if (Object.hasOwn(right, key) && JSON.stringify(left[key]) !== JSON.stringify(right[key])) return null;
+    }
+    return { ...left, ...right };
+  };
+  const setOverlayStyle = (style: OverlayStyle): boolean => {
+    const merged = overlayStyleSeen ? mergeStyles(styles.overlay, style) : style;
+    if (merged === null) return false;
+    styles.overlay = merged;
+    overlayStyleSeen = true;
+    return true;
+  };
+  const setElementStyle = (elementId: string, style: OverlayStyle): boolean => {
+    const previous = ownRecordValue(styles.elements, elementId);
+    const merged = previous === undefined ? style : mergeStyles(previous, style);
+    if (merged === null) return false;
+    setOwnRecordValue(styles.elements, elementId, merged);
+    return true;
+  };
   for (const rule of rules) {
     const lines = rule.split("\n");
     const selectorLine = lines.shift();
     const overlayStyleSelector = selectorLine === ".brobot-overlay :where(.brobot-variable, .brobot-module-text) {";
+    const overlayRootSelector = selectorLine === ".brobot-overlay {";
     const overlayAnchorSelector = selectorLine === ".brobot-overlay .brobot-overlay-composition-element {";
     const elementStyleMatch = selectorLine === undefined ? null : /^\[data-element="([A-Za-z0-9_-]{1,64})"\] :where\(\.brobot-variable, \.brobot-module-text\) \{$/u.exec(selectorLine);
+    const elementRootMatch = selectorLine === undefined ? null : /^\[data-element="([A-Za-z0-9_-]{1,64})"\] \{$/u.exec(selectorLine);
     const elementAnchorMatch = selectorLine === undefined ? null : /^\.brobot-overlay \.brobot-overlay-composition-element\[data-element="([A-Za-z0-9_-]{1,64})"\] \{$/u.exec(selectorLine);
-    if (!overlayStyleSelector && !overlayAnchorSelector && elementStyleMatch === null && elementAnchorMatch === null) return null;
+    if (!overlayStyleSelector && !overlayRootSelector && !overlayAnchorSelector && elementStyleMatch === null && elementRootMatch === null && elementAnchorMatch === null) return null;
     const closing = lines.pop();
     if (closing !== "}") return null;
     if (overlayAnchorSelector || elementAnchorMatch !== null) {
@@ -356,25 +517,38 @@ const parseContent = (content: string): OverlayStyleDocument | null => {
       const alignment = anchorMatch[1] === "-50%" ? "center" : anchorMatch[1] === "-100%" ? "right" : "left";
       const currentAlignment = overlayAnchorSelector
         ? styles.overlay.textAlign
-        : elementAnchorMatch?.[1] === undefined ? undefined : styles.elements[elementAnchorMatch[1]]?.textAlign;
+        : elementAnchorMatch?.[1] === undefined ? undefined : ownRecordValue(styles.elements, elementAnchorMatch[1])?.textAlign;
       if (currentAlignment !== alignment) return null;
+      continue;
+    }
+    if (overlayRootSelector) {
+      if (overlayRootRuleSeen) return null;
+      overlayRootRuleSeen = true;
+      const parsedRoot = parseRootDeclarations(lines);
+      if (parsedRoot === null || !setOverlayStyle(parsedRoot)) return null;
+      continue;
+    }
+    if (elementRootMatch !== null && elementRootMatch[1] !== undefined) {
+      const elementId = elementRootMatch[1];
+      if (elementRootRulesSeen.has(elementId)) return null;
+      const parsedRoot = parseRootDeclarations(lines);
+      if (parsedRoot === null) return null;
+      elementRootRulesSeen.add(elementId);
+      if (!setElementStyle(elementId, parsedRoot)) return null;
       continue;
     }
     const parsed = parseDeclarations(lines);
     if (parsed === null) return null;
     if (overlayStyleSelector) {
-      if (overlayStyleSeen) return null;
-      styles.overlay = parsed;
-      overlayStyleSeen = true;
+      if (overlayStyleRuleSeen || !setOverlayStyle(parsed)) return null;
+      overlayStyleRuleSeen = true;
     } else {
       const elementId = elementStyleMatch?.[1];
-      if (elementId === undefined || Object.hasOwn(styles.elements, elementId)) return null;
-      styles.elements[elementId] = parsed;
-      if (previousSelectorOrder !== "" && elementId <= previousSelectorOrder) return null;
-      previousSelectorOrder = elementId;
+      if (elementId === undefined || elementStyleRulesSeen.has(elementId) || !setElementStyle(elementId, parsed)) return null;
+      elementStyleRulesSeen.add(elementId);
     }
   }
-  return generateOverlayStyleContent(styles) === body ? styles : null;
+  return styles;
 };
 
 export const parseOverlayStyleBlock = (css: string): ParsedOverlayStyleBlock => {
@@ -417,7 +591,10 @@ export const replaceOverlayStyleBlock = (
     elements: Object.fromEntries(elementIds
       .filter((elementId) => elementIdPattern.test(elementId))
       .sort(compareCodePoints)
-      .flatMap((elementId) => styles.elements[elementId] === undefined ? [] : [[elementId, styles.elements[elementId]]])),
+      .flatMap((elementId) => {
+        const style = ownRecordValue(styles.elements, elementId);
+        return style === undefined ? [] : [[elementId, style]];
+      })),
   };
   const content = generateOverlayStyleContent(managedStyles);
   const parsed = parseOverlayStyleBlock(css);
@@ -429,4 +606,195 @@ export const replaceOverlayStyleBlock = (
   }
   if (parsed.kind === "invalid") return css;
   return `${generateOverlayStyleBlock(managedStyles)}\n${css}`;
+};
+
+interface LegacyOverlayElementConfig {
+  id: string;
+  kind: string;
+  config: Readonly<Record<string, unknown>>;
+}
+
+const legacyColorFields: Readonly<Record<string, readonly (readonly [string, keyof OverlayStyle])[]>> = {
+  "quiz.session": [
+    ["backgroundColor", "background"],
+    ["textColor", "color"],
+    ["secondaryColor", "secondaryTextColor"],
+    ["accentColor", "accentColor"],
+  ],
+  "emote_slots.slot": [
+    ["backgroundColor", "background"],
+    ["textColor", "color"],
+    ["secondaryColor", "secondaryTextColor"],
+    ["highlightColor", "accentColor"],
+  ],
+  "overlay_alerts.alert": [["textColor", "color"]],
+};
+
+const defaultElementColors: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "ads.countdown": { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
+  "belabox.status": { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
+  "chat_voting.tally": { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
+  "song_requests.now_playing": { background: "#0d1015", text: "#f2f5f9", secondaryText: "#c3cbd7", tertiaryText: "#a8b2c1", accent: "#1ed760" },
+  "song_requests.queue": { background: "#0d1015", text: "#f2f5f9", secondaryText: "#c3cbd7", accent: "#8ab4ff" },
+  "statistics.word_counter": { background: "#0d1015", text: "#f2f5f9", secondaryText: "#a8b2c1" },
+  "statistics.word_ranking": { background: "#0d1015", text: "#f2f5f9", secondaryText: "#a8b2c1", accent: "#35557f" },
+  "text_library.block": { background: "transparent", text: "rgba(255, 255, 255, 0.96)", secondaryText: "rgba(255, 255, 255, 0.78)" },
+  "votekick.tally": { background: "transparent", text: "rgba(255, 255, 255, 0.96)" },
+  "quiz.session": { background: "#10141b", text: "#f2f5f9", secondaryText: "#a8b2c1", accent: "#5fa4ff", correctText: "#32ca88" },
+  "emote_slots.slot": { background: "#090C10", text: "#F2F5F9", secondaryText: "#C9D1DB", accent: "#2ED3A3" },
+  "overlay_alerts.alert": { background: "rgb(16 20 27 / 84%)", text: "#ffffff" },
+};
+
+const contrastTextParts: Readonly<Record<string, readonly ("text" | "secondaryText" | "accent")[]>> = {
+  "song_requests.now_playing": ["text", "secondaryText", "accent"],
+  "song_requests.queue": ["text", "secondaryText"],
+  "statistics.word_counter": ["text", "secondaryText"],
+  "statistics.word_ranking": ["text", "secondaryText"],
+  "text_library.block": ["text", "secondaryText"],
+  "quiz.session": ["text", "secondaryText", "accent"],
+  "emote_slots.slot": ["text", "secondaryText", "accent"],
+};
+
+const legacyFieldForStyle = (kind: string, styleKey: keyof OverlayStyle): string | undefined =>
+  legacyColorFields[kind]?.find(([, key]) => key === styleKey)?.[0];
+
+const legacyStyleColor = (kind: string, config: Readonly<Record<string, unknown>>, styleKey: keyof OverlayStyle): string | undefined => {
+  const field = legacyFieldForStyle(kind, styleKey);
+  const value = field === undefined ? undefined : config[field];
+  if (typeof value === "string") return value;
+  if (value !== null || field === undefined) return undefined;
+  const defaultPart = styleKey === "color" ? "text" : styleKey === "secondaryTextColor" ? "secondaryText" : styleKey === "accentColor" ? "accent" : "background";
+  return defaultElementColors[kind]?.[defaultPart]?.toLowerCase();
+};
+
+const styleBackgroundColor = (style: OverlayStyle | undefined): string | undefined => {
+  const background = style?.background;
+  if (background === undefined) return undefined;
+  if (background.opacityPercent === 0) return "transparent";
+  if (background.opacityPercent === 100) return background.color;
+  const opacity = String(background.opacityPercent / 100);
+  const red = Number.parseInt(background.color.slice(1, 3), 16);
+  const green = Number.parseInt(background.color.slice(3, 5), 16);
+  const blue = Number.parseInt(background.color.slice(5, 7), 16);
+  return `rgba(${String(red)}, ${String(green)}, ${String(blue)}, ${opacity})`;
+};
+
+export interface EffectiveOverlayElementColors {
+  background: string;
+  text: string;
+  secondaryText?: string;
+  accent?: string;
+}
+
+export const resolveOverlayElementColors = (
+  kind: string,
+  config: Readonly<Record<string, unknown>>,
+  elementStyle: OverlayStyle,
+  overlayStyle: OverlayStyle,
+): EffectiveOverlayElementColors => {
+  const defaults = defaultElementColors[kind] ?? {};
+  const background = styleBackgroundColor(elementStyle) ?? legacyStyleColor(kind, config, "background") ??
+    styleBackgroundColor(overlayStyle) ?? defaults.background ?? "transparent";
+  const colorFrom = (style: OverlayStyle, key: "color" | "secondaryTextColor" | "accentColor"): string | undefined => {
+    if (key === "color") return style.color;
+    if (key === "secondaryTextColor") return style.secondaryTextColor;
+    return style.accentColor;
+  };
+  const resolve = (part: "text" | "secondaryText" | "accent"): string | undefined => {
+    const key: "color" | "secondaryTextColor" | "accentColor" = part === "text" ? "color" : part === "secondaryText" ? "secondaryTextColor" : "accentColor";
+    return colorFrom(elementStyle, key) ?? legacyStyleColor(kind, config, key) ??
+      colorFrom(overlayStyle, key) ?? defaults[part];
+  };
+  const text = resolve("text") ?? "#ffffff";
+  const secondaryText = resolve("secondaryText");
+  const accent = resolve("accent");
+  return { background, text, ...(secondaryText === undefined ? {} : { secondaryText }), ...(accent === undefined ? {} : { accent }) };
+};
+
+/** Returns the foreground colors used for text, including accent-colored slot jackpot text. */
+export const overlayElementTextColors = (
+  kind: string,
+  config: Readonly<Record<string, unknown>>,
+  elementStyle: OverlayStyle,
+  overlayStyle: OverlayStyle,
+): readonly string[] => {
+  const colors = resolveOverlayElementColors(kind, config, elementStyle, overlayStyle);
+  const textColors = (contrastTextParts[kind] ?? ["text"]).flatMap((part) => {
+    const foreground = part === "text" ? colors.text : part === "secondaryText" ? colors.secondaryText : colors.accent;
+    if (foreground === undefined) return [];
+    return [foreground];
+  });
+  if (kind === "quiz.session") {
+    const correctColor = config.correctColor;
+    const fallbackCorrectColor = defaultElementColors[kind]?.correctText;
+    const validCorrectColor = typeof correctColor === "string" && hexColorPattern.test(correctColor.toLowerCase())
+      ? correctColor.toLowerCase()
+      : fallbackCorrectColor;
+    return validCorrectColor === undefined ? textColors : [...textColors, validCorrectColor];
+  }
+  if (kind !== "song_requests.now_playing") return textColors;
+  const secondaryStyleColor = elementStyle.secondaryTextColor ?? legacyStyleColor(kind, config, "secondaryTextColor") ??
+    overlayStyle.secondaryTextColor;
+  const tertiaryText = defaultElementColors[kind]?.tertiaryText;
+  return secondaryStyleColor === undefined && tertiaryText !== undefined ? [...textColors, tertiaryText] : textColors;
+};
+
+/** Moves saved module colors into the shared style document while preserving unrelated config. */
+export const migrateLegacyOverlayStyles = <Element extends LegacyOverlayElementConfig>(
+  elements: readonly Element[],
+  styles: OverlayStyleDocument,
+): { elements: (Omit<Element, "config"> & { config: Record<string, unknown> })[]; styles: OverlayStyleDocument } => {
+  const migratedStyles: Record<string, OverlayStyle> = { ...styles.elements };
+  const migratedElements = elements.map((element) => {
+    const fields = legacyColorFields[element.kind] ?? [];
+    if (fields.length === 0) return { ...element, config: { ...element.config } };
+    const config: Record<string, unknown> = { ...element.config };
+    const style: OverlayStyle = { ...(ownRecordValue(migratedStyles, element.id) ?? {}) };
+    let changed = false;
+    for (const [legacyKey, styleKey] of fields) {
+      if (!Object.hasOwn(config, legacyKey)) continue;
+      const value = config[legacyKey];
+      if (value !== null && (typeof value !== "string" || !hexColorPattern.test(value.toLowerCase()))) continue;
+      changed = true;
+      Reflect.deleteProperty(config, legacyKey);
+      if (style[styleKey] !== undefined) continue;
+      const defaultPart = styleKey === "color" ? "text" : styleKey === "secondaryTextColor" ? "secondaryText" : styleKey === "accentColor" ? "accent" : "background";
+      const color = value === null ? defaultElementColors[element.kind]?.[defaultPart] : value.toLowerCase();
+      if (color === undefined || !hexColorPattern.test(color.toLowerCase())) continue;
+      if (styleKey === "background") style.background = { color: color.toLowerCase(), opacityPercent: 100 };
+      else if (styleKey === "color") style.color = color.toLowerCase();
+      else if (styleKey === "secondaryTextColor") style.secondaryTextColor = color.toLowerCase();
+      else if (styleKey === "accentColor") style.accentColor = color.toLowerCase();
+    }
+    if (!changed) return { ...element, config };
+    if (Object.keys(style).length > 0) setOwnRecordValue(migratedStyles, element.id, style);
+    return { ...element, config };
+  });
+  return { elements: migratedElements, styles: { overlay: styles.overlay, elements: migratedStyles } };
+};
+
+/** Returns a migrated draft only when its full CSS block is valid and within the runtime size limit. */
+export const migrateLegacyOverlayStylesToCss = <Element extends LegacyOverlayElementConfig>(
+  css: string,
+  elements: readonly Element[],
+  styles: OverlayStyleDocument,
+): { css: string; elements: (Omit<Element, "config"> & { config: Record<string, unknown> })[]; styles: OverlayStyleDocument } | null => {
+  const migration = migrateLegacyOverlayStyles(elements, styles);
+  const nextCss = replaceOverlayStyleBlock(css, migration.styles, migration.elements.map(({ id }) => id));
+  if (nextCss.length > OVERLAY_CSS_MAXIMUM_LENGTH) return null;
+  const parsed = parseOverlayStyleBlock(nextCss);
+  if (parsed.kind !== "valid") return null;
+  const expectedStyles: OverlayStyleDocument = {
+    overlay: migration.styles.overlay,
+    elements: Object.fromEntries(migration.elements
+      .map(({ id }) => id)
+      .filter((id) => elementIdPattern.test(id))
+      .sort(compareCodePoints)
+      .flatMap((id) => {
+        const style = ownRecordValue(migration.styles.elements, id);
+        return style === undefined ? [] : [[id, style]];
+      })),
+  };
+  if (generateOverlayStyleContent(parsed.styles) !== generateOverlayStyleContent(expectedStyles)) return null;
+  return { css: nextCss, elements: migration.elements, styles: parsed.styles };
 };

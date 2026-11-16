@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { ModuleOverlayRealtimeEnvelope, ModuleOverlayRealtimeMessageType, RealtimeEnvelope } from "../realtime-contract";
-import { sanitizeOverlayCss } from "../contracts/overlay-css";
+import { OVERLAY_CSS_MAXIMUM_LENGTH, sanitizeOverlayCss } from "../contracts/overlay-css";
 import { channelVariableTemplateNames } from "../contracts/channel-variable-template";
 import { connectOverlayRealtime } from "./realtime";
 import { OverlayCanvas } from "./canvas";
@@ -95,7 +95,7 @@ const parseBootstrap = (value: unknown): OverlayBootstrapData | null => {
       !isInteger(value.overlay.revision) || value.overlay.revision < 1 ||
       !isInteger(value.overlay.width) || value.overlay.width < 1 ||
       !isInteger(value.overlay.height) || value.overlay.height < 1 ||
-      typeof value.overlay.css !== "string" || value.overlay.css.length > 16_000 ||
+      typeof value.overlay.css !== "string" || value.overlay.css.length > OVERLAY_CSS_MAXIMUM_LENGTH ||
       !Array.isArray(value.overlay.elements)) return null;
   return {
     language: value.language,

@@ -1,9 +1,5 @@
 @layer components.overlay {
   .statistics-word-ranking {
-    --word-counter-background: #0d1015;
-    --word-counter-text: #f2f5f9;
-    --word-counter-secondary: #a8b2c1;
-    --word-ranking-bar-color: #35557f;
     box-sizing: border-box;
     display: grid;
     width: 100%;
@@ -13,12 +9,19 @@
     grid-template-rows: auto minmax(0, 1fr);
     align-content: start;
     gap: 8px;
-    padding: 12px 16px;
+    padding: var(--brobot-overlay-padding, 12px 16px);
     overflow: hidden;
-    border-radius: 12px;
-    background: var(--word-counter-background);
-    color: var(--word-counter-text);
-    font-family: Archivo, system-ui, sans-serif;
+    border-radius: var(--brobot-overlay-border-radius, 12px);
+    background: var(--brobot-overlay-background, var(--word-counter-background, var(--brobot-overlay-legacy-background, #0d1015)));
+    color: var(--brobot-overlay-text-color, var(--word-counter-text, var(--brobot-overlay-legacy-text-color, #f2f5f9)));
+    font-family: var(--brobot-overlay-font-family, Archivo, system-ui, sans-serif);
+    font-size: var(--brobot-overlay-font-size, 16px);
+    font-weight: var(--brobot-overlay-font-weight, 400);
+    line-height: var(--brobot-overlay-line-height, normal);
+    letter-spacing: var(--brobot-overlay-letter-spacing, normal);
+    text-align: var(--brobot-overlay-text-align, start);
+    -webkit-text-stroke: var(--brobot-overlay-text-stroke, 0 transparent);
+    text-shadow: var(--brobot-overlay-text-shadow, none);
   }
 
   .statistics-word-ranking--no-title {
@@ -30,9 +33,9 @@
     min-width: 0;
     margin: 0;
     overflow: hidden;
-    font-size: 20px;
-    font-weight: 600;
-    line-height: 24px;
+    font-size: var(--brobot-overlay-font-size, 20px);
+    font-weight: var(--brobot-overlay-font-weight, 600);
+    line-height: var(--brobot-overlay-line-height, 24px);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -61,8 +64,8 @@
     box-sizing: border-box;
     overflow: hidden;
     border-radius: 4px;
-    font-size: 15px;
-    line-height: 20px;
+    font-size: var(--brobot-overlay-font-size, 15px);
+    line-height: var(--brobot-overlay-line-height, 20px);
   }
 
   .statistics-word-ranking__row--empty { background: transparent; }
@@ -73,7 +76,7 @@
     inset: 2px auto 2px 0;
     width: var(--word-ranking-bar-width);
     border-radius: 3px;
-    background: var(--word-ranking-bar-color);
+    background: var(--brobot-overlay-accent-color, var(--word-ranking-bar-color, var(--brobot-overlay-legacy-accent-color, #35557f)));
     opacity: 0.55;
   }
 
@@ -86,30 +89,30 @@
   }
 
   .statistics-word-ranking__rank {
-    color: var(--word-counter-secondary);
-    font-family: "IBM Plex Mono", ui-monospace, monospace;
-    font-size: 12px;
+    color: var(--brobot-overlay-secondary-text-color, var(--word-counter-secondary, var(--brobot-overlay-legacy-secondary-text-color, #a8b2c1)));
+    font-family: var(--brobot-overlay-font-family, "IBM Plex Mono", ui-monospace, monospace);
+    font-size: var(--brobot-overlay-font-size, 12px);
     font-variant-numeric: tabular-nums;
-    text-align: right;
+    text-align: var(--brobot-overlay-text-align, right);
   }
 
   .statistics-word-ranking__word {
     overflow: hidden;
-    font-weight: 500;
+    font-weight: var(--brobot-overlay-font-weight, 500);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .statistics-word-ranking__count {
-    color: var(--word-counter-text);
-    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    color: var(--brobot-overlay-text-color, var(--word-counter-text, var(--brobot-overlay-legacy-text-color, #f2f5f9)));
+    font-family: var(--brobot-overlay-font-family, "IBM Plex Mono", ui-monospace, monospace);
     font-variant-numeric: tabular-nums;
-    text-align: right;
+    text-align: var(--brobot-overlay-text-align, right);
     white-space: nowrap;
   }
 
   .statistics-word-ranking__row--without-bars .statistics-word-ranking__word,
   .statistics-word-ranking__row--without-bars .statistics-word-ranking__count {
-    color: var(--word-counter-text);
+    color: var(--brobot-overlay-text-color, var(--word-counter-text, var(--brobot-overlay-legacy-text-color, #f2f5f9)));
   }
 }

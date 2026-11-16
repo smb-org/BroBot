@@ -1,18 +1,21 @@
 import type { JsonObject } from "../../contract";
+import { parseModuleOverlayConfig } from "../../contract";
 
 export interface NowPlayingConfig { showCover: boolean; showRequester: boolean }
 interface NowPlayingTrack { id: string; title: string; artist: string; coverUrl: string | null; spotifyUrl: string; requester: string | null; source: string }
 export interface NowPlayingState { revision: number; track: NowPlayingTrack | null; serverNow: string; emptyText?: string }
-export const DEFAULT_NOW_PLAYING_CONFIG: NowPlayingConfig = { showCover: true, showRequester: true };
+export const DEFAULT_NOW_PLAYING_CONFIG: NowPlayingConfig = {
+  showCover: true,
+  showRequester: true,
+};
 
 const record = (value: unknown): Record<string, unknown> | null => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
-export const parseNowPlayingConfig = (raw: unknown): NowPlayingConfig | null => {
-  const input = record(raw);
-  if (input === null || Object.keys(input).some((key) => !["showCover", "showRequester"].includes(key))) return null;
-  const showCover = input.showCover ?? true;
-  const showRequester = input.showRequester ?? true;
-  return typeof showCover === "boolean" && typeof showRequester === "boolean" ? { showCover, showRequester } : null;
-};
+export const parseNowPlayingConfig = (raw: unknown): NowPlayingConfig | null => parseModuleOverlayConfig(raw, (input) => {
+    if (Object.keys(input).some((key) => !["showCover", "showRequester"].includes(key))) return null;
+    const showCover = input.showCover ?? true;
+    const showRequester = input.showRequester ?? true;
+    return typeof showCover === "boolean" && typeof showRequester === "boolean" ? { showCover, showRequester } : null;
+});
 export const parseNowPlayingState = (raw: unknown): NowPlayingState | null => {
   const input = record(raw);
   if (input === null || !Number.isSafeInteger(input.revision) || typeof input.serverNow !== "string" || !Number.isFinite(Date.parse(input.serverNow))) return null;

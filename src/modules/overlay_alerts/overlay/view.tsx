@@ -82,7 +82,7 @@ const OverlayAlert = ({ config: rawConfig, state: rawState, now, mediaAccessToke
 
   if (current === null || !isActive) return null;
   const style = {
-    "--overlay-alert-text-color": config.textColor,
+    ...(config.textColor === null || config.textColor === undefined ? {} : { "--brobot-overlay-legacy-text-color": config.textColor }),
     "--overlay-alert-font-size": `${String(config.fontSize)}px`,
   } as CSSProperties;
 

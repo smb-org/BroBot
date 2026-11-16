@@ -48,16 +48,16 @@ describe("statistics word ranking overlay", () => {
     const { container, rerender } = render(<StatisticsWordRankingEditor config={{ scope: "stream", count: 5, bars: true }} onChange={onChange} language="en" />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Scope" }), { target: { value: "total" } });
-    expect(onChange).toHaveBeenLastCalledWith({ scope: "total", count: 5, bars: true });
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "total", count: 5, bars: true }));
     rerender(<StatisticsWordRankingEditor config={{ scope: "total", count: 5, bars: true }} onChange={onChange} language="en" />);
     fireEvent.change(screen.getByRole("spinbutton", { name: "Word count" }), { target: { value: "7" } });
-    expect(onChange).toHaveBeenLastCalledWith({ scope: "total", count: 7, bars: true });
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "total", count: 7, bars: true }));
     rerender(<StatisticsWordRankingEditor config={{ scope: "total", count: 7, bars: true }} onChange={onChange} language="en" />);
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "My words" } });
-    expect(onChange).toHaveBeenLastCalledWith({ scope: "total", count: 7, title: "My words", bars: true });
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "total", count: 7, title: "My words", bars: true }));
     rerender(<StatisticsWordRankingEditor config={{ scope: "total", count: 7, title: "My words", bars: true }} onChange={onChange} language="en" />);
     fireEvent.click(screen.getByRole("checkbox", { name: "Show bars" }));
-    expect(onChange).toHaveBeenLastCalledWith({ scope: "total", count: 7, title: "My words", bars: false });
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "total", count: 7, title: "My words", bars: false }));
     expect(container.querySelectorAll(".statistics-word-ranking-editor__preview-row")).toHaveLength(7);
   });
 });

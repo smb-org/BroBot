@@ -1,17 +1,17 @@
 import type { ReactElement } from "react";
 
 import type { OverlayElementEditorProps } from "../../contract";
-import { SwitchRow } from "../../../dashboard/ui";
+import { ColorField, SwitchRow } from "../../../dashboard/ui";
+import { isOverlayHexColor } from "../../contract";
 import { quizOverlayTexts } from "./locale";
 import { DEFAULT_QUIZ_OVERLAY_CONFIG, parseQuizOverlayConfig } from "./state";
 
-const QuizOverlayEditor = ({ config, onChange, language = "en", readOnly = false, readOnlyReason }: OverlayElementEditorProps): ReactElement => {
+const QuizOverlayEditor = ({ config, onChange, language = "en", readOnly = false }: OverlayElementEditorProps): ReactElement => {
   const labels = quizOverlayTexts(language);
   const values = parseQuizOverlayConfig(config) ?? DEFAULT_QUIZ_OVERLAY_CONFIG;
-  const disabledProps = readOnly ? { title: readOnlyReason, "aria-describedby": readOnlyReason === undefined ? undefined : "overlay-editor-readonly-reason" } : {};
-  const changeColor = (key: "backgroundColor" | "textColor" | "secondaryColor" | "accentColor" | "correctColor", value: string): void => {
-    if (readOnly || !/^#[0-9a-f]{6}$/iu.test(value)) return;
-    onChange({ ...values, [key]: value });
+  const changeCorrectColor = (value: string): void => {
+    if (readOnly || !isOverlayHexColor(value)) return;
+    onChange({ ...values, correctColor: value });
   };
 
   return <div className="config-section quiz-overlay-editor">
@@ -27,23 +27,12 @@ const QuizOverlayEditor = ({ config, onChange, language = "en", readOnly = false
       disabled={readOnly}
       onChange={(checked) => { if (!readOnly) onChange({ ...values, showPercent: checked }); }}
     />
-    {([
-      ["backgroundColor", labels.backgroundColor],
-      ["textColor", labels.textColor],
-      ["secondaryColor", labels.secondaryColor],
-      ["accentColor", labels.accentColor],
-      ["correctColor", labels.correctColor],
-    ] as const).map(([key, label]) => <label className="config-field config-field--narrow" key={key}>
-      <span>{label}</span>
-      <input
-        type="color"
-        aria-label={label}
-        value={values[key]}
-        disabled={readOnly}
-        {...disabledProps}
-        onChange={(event) => changeColor(key, event.currentTarget.value)}
-      />
-    </label>)}
+    <ColorField id="quiz-correct-color" label={labels.correctColor} value={values.correctColor}
+      unsetLabel={labels.colorUnset} clearLabel={labels.colorClear} disabled={readOnly}
+      onChange={(value) => {
+        if (value !== undefined) changeCorrectColor(value);
+        else if (!readOnly) onChange({ ...values, correctColor: DEFAULT_QUIZ_OVERLAY_CONFIG.correctColor });
+      }} />
   </div>;
 };
 

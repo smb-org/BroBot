@@ -8,12 +8,19 @@
     align-items: center;
     justify-content: center;
     gap: 10px;
-    padding: 12px 18px;
+    padding: var(--brobot-overlay-padding, 12px 18px);
     overflow: hidden;
-    border-radius: 12px;
-    background: rgb(16 20 27 / 84%);
-    color: var(--overlay-alert-text-color);
-    font-family: Archivo, system-ui, sans-serif;
+    border-radius: var(--brobot-overlay-border-radius, 12px);
+    background: var(--brobot-overlay-background, var(--brobot-overlay-legacy-background, rgb(16 20 27 / 84%)));
+    color: var(--brobot-overlay-text-color, var(--overlay-alert-text-color, var(--brobot-overlay-legacy-text-color, #ffffff)));
+    font-family: var(--brobot-overlay-font-family, Archivo, system-ui, sans-serif);
+    font-size: var(--brobot-overlay-font-size, 16px);
+    font-weight: var(--brobot-overlay-font-weight, 400);
+    line-height: var(--brobot-overlay-line-height, normal);
+    letter-spacing: var(--brobot-overlay-letter-spacing, normal);
+    text-align: var(--brobot-overlay-text-align, start);
+    -webkit-text-stroke: var(--brobot-overlay-text-stroke, 0 transparent);
+    text-shadow: var(--brobot-overlay-text-shadow, none);
   }
 
   .overlay-alert__image {
@@ -26,15 +33,15 @@
   .overlay-alert__text {
     display: -webkit-box;
     width: 100%;
-    max-height: calc(var(--overlay-alert-font-size) * 2.5);
+    max-height: calc(var(--brobot-overlay-font-size, var(--overlay-alert-font-size)) * 2.5);
     margin: 0;
     overflow: hidden;
     color: inherit;
-    font-size: var(--overlay-alert-font-size);
-    font-weight: 700;
-    line-height: 1.2;
+    font-size: var(--brobot-overlay-font-size, var(--overlay-alert-font-size));
+    font-weight: var(--brobot-overlay-font-weight, 700);
+    line-height: var(--brobot-overlay-line-height, 1.2);
     overflow-wrap: anywhere;
-    text-align: center;
+    text-align: var(--brobot-overlay-text-align, center);
     white-space: pre-wrap;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;

@@ -820,13 +820,35 @@ Palette-Zeile erhalten.
 ```ts
 overlayElements: [{
   kind: "chat_voting.tally", configVersion: 1, defaultSize: { width: 480, height: 240 },
-  defaultConfig: {}, parseConfig, load: () => import("./overlay/tally"),
+  defaultConfig: {
+    layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true,
+    hideAfterCloseSeconds: 15, width: 480,
+  },
+  parseConfig, load: () => import("./overlay/tally"),
   editorLabel: { de: "Abstimmungsergebnis", en: "Voting tally" },
   editorDescription: { de: "Live-Balken der Abstimmung.", en: "Live bars for the current vote." },
   initialState: (db, channelId) => readOpenTally(db, channelId),
   mergeRealtimeState: (current, incoming) => ({ ...current, ...incoming }),
 }],
 ```
+
+Der Style-Tab des Overlay-Editors ist der einzige Ort für gemeinsame
+Darstellungseinstellungen eines Elements. Er schreibt Styles in den
+verwalteten CSS-Block des Overlays und setzt am jeweiligen `[data-element]`-Root
+CSS-Variablen wie `--brobot-overlay-text-color`,
+`--brobot-overlay-secondary-text-color`, `--brobot-overlay-accent-color` und
+`--brobot-overlay-background`. Ansichten verwenden diese Variablen und behalten
+ihre bisherigen CSS-Farbwerte als Fallback. Elemente ohne sekundären oder
+Akzenttext ignorieren die entsprechende Variable. Overlay-Ansichten führen
+keine eigenen Felder für gemeinsame Farben ein.
+
+Bestehende Elementkonfigurationen mit Farben bleiben zur Laufzeit als Fallback
+gültig. Beim Öffnen übernimmt der Editor bekannte Legacy-Farben in das
+Style-Dokument des Elements; beim nächsten expliziten Speichern stehen sie im
+verwalteten CSS-Block und werden aus der Elementkonfiguration entfernt. Andere
+Elementoptionen bleiben erhalten. Farben für spezielle Teile wie die Quizfarbe
+der richtigen Antwort oder den Rahmen der Slot-Reels bleiben im
+Element-Editor und verwenden `ColorField`.
 
 **Grenzen:**
 
