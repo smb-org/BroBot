@@ -18,6 +18,7 @@ interface Readiness {
   enabled: boolean;
   state: string;
   streamId: string | null;
+  alsoOffline: boolean;
 }
 
 type ActionText = (typeof songRequestsActionTexts)[keyof typeof songRequestsActionTexts];
@@ -35,7 +36,7 @@ export default function SongRequestsCockpitAction({ channelId, language, onDraft
   useEffect(() => {
     const controller = new AbortController();
     void request<Readiness>(channelId, "connection", "GET", undefined, controller.signal)
-      .then((state) => { if (!controller.signal.aborted) setReady(state.enabled && (state.state === "connected" || state.state === "no_active_device") && state.streamId !== null); })
+      .then((state) => { if (!controller.signal.aborted) setReady(state.enabled && (state.state === "connected" || state.state === "no_active_device") && (state.streamId !== null || state.alsoOffline)); })
       .catch(() => { if (!controller.signal.aborted) notify({ tone: "error", message: text.unavailable }); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => { controller.abort(); };

@@ -10,6 +10,7 @@ import { overlayAlertElement } from "./overlay_alerts/overlay/element";
 import { statisticsWordCounterOverlayElement } from "./statistics/overlay/element";
 import { statisticsWordRankingOverlayElement } from "./statistics/overlay/ranking-element";
 import { songRequestsNowPlayingElement } from "./song_requests/overlay/element";
+import { songRequestsQueueElement } from "./song_requests/overlay/queue-element";
 
 export interface RegisteredOverlayElement {
   moduleId: string;
@@ -28,6 +29,7 @@ export const MODULE_OVERLAY_ELEMENTS: readonly RegisteredOverlayElement[] = [
   ...quizOverlayElements.map((definition) => ({ moduleId: "quiz", definition })),
   { moduleId: "overlay_alerts", definition: overlayAlertElement },
   { moduleId: "song_requests", definition: songRequestsNowPlayingElement },
+  { moduleId: "song_requests", definition: songRequestsQueueElement },
 ];
 
 export const moduleOverlayElementKindForMessage = (messageType: string): string => {

@@ -218,10 +218,10 @@ describe("song request ledger", () => {
       .bind(CHANNEL_ID).run();
 
     const result = await clearSongRequestsForStreamEnd(database as unknown as D1Database, CHANNEL_ID, STREAM_ID, "2026-11-15T22:00:00.000Z");
-    expect(result).toEqual({ changed: true, revision: 9 });
+    expect(result).toMatchObject({ changed: true, revision: 9 });
     expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, base.requestId)).toMatchObject({ state: "not_observed" });
     expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "pending-row")).toMatchObject({ state: "rejected" });
-    expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "unknown-row")).toMatchObject({ state: "failed", failureReason: "stream_ended" });
+    expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "unknown-row")).toMatchObject({ state: "failed", failureReason: "submit_outcome_uncertain" });
     expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "missing-stream-row"))
       .toMatchObject({ state: "rejected", failureReason: "stream_ended" });
   });

@@ -153,6 +153,31 @@ Refresh-Tokens liegen je Kanal im verschlüsselten Modul-Secret `song_requests`;
 sie gehören nicht in die Wrangler-Konfiguration. Die Erneuerung erfolgt nur im
 ChannelObject; Worker-Routen lesen den Access-Token über dessen RPC.
 
+Das Song-Request-Modul bietet die Zahlungsarten „Bot-Punkte“ und „Kostenlos“.
+Bot-Punkte setzen ein aktives `points`-Modul voraus. Wird es deaktiviert,
+bleiben die gespeicherten Song-Request-Einstellungen unverändert; die Seite
+zeigt den Grund an und `!sr` kann in diesem Modus nicht abbuchen. Kostenlose
+Anfragen bleiben unabhängig vom Punkte-Modul nutzbar und lassen sich auf
+Abonnenten, VIPs oder Moderatoren beschränken.
+
+„Auch offline“ ist standardmäßig ausgeschaltet. Im eingeschalteten Zustand
+arbeitet das Modul in einer eigenen Offline-Runde: `!sr`, Song-Abstimmung,
+Now-Playing-Abfrage und Overlay sind verfügbar. Die Poll-Abfrage läuft dann
+langsamer und verwendet dieselbe Fehler-Backoff-Logik. Beim nächsten
+`stream.online`, beim Ausschalten der Einstellung oder durch „Liste leeren“
+endet die Runde. Noch nicht gesendete Song-Wünsche werden abgelehnt und
+erstattet. Wünsche während einer laufenden Spotify-Übermittlung oder mit
+unklarem Ergebnis werden als fehlgeschlagen abgeschlossen und erstattet.
+Spotify-Einträge, die bereits gesendet wurden, werden durch die Bereinigung
+nicht aus Spotify entfernt.
+
+Automatische Annahme reiht nach erfolgreicher Prüfung über den keyed Alarm
+`submit:<requestId>` ein. Im moderierten Modus bleiben alle Anfragen bis zur
+Freigabe oder Ablehnung in der Cockpit-Warteschlange. Jeder Punkte-Abzug und
+jede Erstattung verwendet eine stabile Operations-ID im Punkte-Ledger; die
+Erstattung ist damit bei wiederholter Bereinigung idempotent. Kostenlose
+Anfragen erzeugen keine Punkteoperationen.
+
 Die vier Schlüsselwerte (`TWITCH_EVENTSUB_SECRET`, `SESSION_COOKIE_KEYS`,
 `TOKEN_ENCRYPTION_KEYS` und `OVERLAY_TOKEN_PEPPER`) werden mit dem im
 Erstaufsetzen dokumentierten `openssl`-Befehl erzeugt und sind je Umgebung und

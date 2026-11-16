@@ -33,6 +33,8 @@ describe("song request routes", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
     await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
       .bind(CHANNEL_ID, "moderator-fictional", "2026-11-15T19:00:00.000Z").run();
 
@@ -79,6 +81,8 @@ describe("song request routes", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
     await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
       .bind(CHANNEL_ID, "moderator-fictional", "2026-11-15T19:00:00.000Z").run();
     await database.prepare("INSERT INTO song_requests_connections (channel_id, state, updated_at) VALUES (?, 'connected', ?)")
@@ -168,12 +172,12 @@ describe("song request routes", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
     await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
       .bind(CHANNEL_ID, "moderator-fictional", "2026-11-15T19:00:00.000Z").run();
     await database.prepare("INSERT INTO song_requests_connections (channel_id, state, updated_at) VALUES (?, 'connected', ?)")
       .bind(CHANNEL_ID, "2026-11-15T19:00:00.000Z").run();
-    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
-      .bind(CHANNEL_ID).run();
     await database.prepare(
       `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, stream_id, started_at)
        VALUES (?, 'online', ?, 'eventsub', ?, ?)`,
@@ -245,6 +249,8 @@ describe("song request routes", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
     await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
       .bind(CHANNEL_ID, "moderator-fictional", "2026-11-15T19:00:00.000Z").run();
     await database.prepare("INSERT INTO song_requests_connections (channel_id, state, updated_at) VALUES (?, 'no_active_device', ?)")
@@ -292,6 +298,8 @@ describe("song request routes", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
     await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
       .bind(CHANNEL_ID, "moderator-fictional", "2026-11-15T19:00:00.000Z").run();
     await database.prepare("INSERT INTO song_requests_connections (channel_id, state, updated_at) VALUES (?, 'no_active_device', ?)")
@@ -327,6 +335,8 @@ describe("song request routes", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
     await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
       .bind(CHANNEL_ID, "moderator-fictional", "2026-11-15T19:00:00.000Z").run();
     await database.prepare("INSERT INTO song_requests_connections (channel_id, state, updated_at) VALUES (?, 'connected', ?)")
@@ -365,6 +375,8 @@ describe("song request routes", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
     await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
       .bind(CHANNEL_ID, "moderator-fictional", "2026-11-15T19:00:00.000Z").run();
     await database.prepare(
@@ -396,6 +408,8 @@ describe("song request routes", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
     await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
       .bind(CHANNEL_ID, "moderator-fictional", "2026-11-15T19:00:00.000Z").run();
     const getSpotifyAccessToken = vi.fn(() => Promise.resolve("spotify-access-fictional"));
@@ -425,6 +439,8 @@ describe("song request routes", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
     await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
       .bind(CHANNEL_ID, "moderator-fictional", "2026-11-15T19:00:00.000Z").run();
     await database.prepare("INSERT INTO song_requests_connections (channel_id, state, error_message, updated_at) VALUES (?, 'not_connected', NULL, ?)")

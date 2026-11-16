@@ -171,6 +171,90 @@ dem Spotify-POST wird `outcome_unknown` und niemals automatisch erneut gesendet.
 Manager können diesen Zustand im Cockpit auf „gesendet“ oder „fehlgeschlagen“
 auflösen.
 
+`!sr` löst Spotify-URI und -Links direkt und Freitext über den ersten Treffer
+auf. Das D1-Wunschbuch wird mit genau einem bedingten `INSERT … SELECT`
+geschrieben: Aktivierung, Spotify-Slot, Zahlungsmodul, Stream beziehungsweise
+Offline-Runde und alle eingeschalteten Anti-Spam-Regeln sind Teil derselben
+Einfügebedingung. Damit kann paralleler EventSub-Dispatch keine konfigurierte
+Kanal-, Künstler- oder Personenobergrenze überschreiten. Ein Bot-Punkte-Wunsch
+wird als `charging` eingefügt. Dieser Zustand zählt für alle Limits, bleibt
+aber aus Moderatorwarteschlange, Overlay und Submit-Alarm ausgeschlossen. Nur
+der `!sr`-Handler wendet vor der Sichtbarkeit die stabile Ledger-Operation
+`sr:<requestId>:charge` an. Erst danach setzt er den Wunsch über
+`transitionRequest` auf `pending_review` oder `approved` und plant im
+Automatikmodus den Submit-Alarm. Moderation und Submit-Alarm belasten niemals
+Punkte. Schlägt die Belastung fehl, wird `charging` zu `failed`; kostenlose
+Anfragen überspringen `charging` und verwenden das Ledger nie. Nach bestätigter
+Belastung speichert die Zeile `charged_at`; dadurch zählt die persönliche
+Abklingzeit auch nach Wiedergabestart weiter.
+
+Die Spalte `charging_since` wird beim D1-Insert mit der D1-Uhr gesetzt; der
+60-Sekunden-Abgleich verwendet weder `event.receivedAt` noch `updated_at` als
+Einfügezeit. Bevor ein Abgleich einen `charging`-Eintrag beendet, beansprucht er
+`sr:<requestId>:charge` im Punkte-DO mit einer bewegungslosen
+`refund`-Operation und der Identität `{ requestId, purpose: "cancel_charge" }`.
+Das Punkte-DO serialisiert Operationen unter derselben ID. Ein späterer
+`stake`-Versuch hat eine andere Payload-Identität und endet mit
+`operation_conflict`, bevor Ledger-Bewegungen ausgeführt werden. Gewinnt der
+Anspruch, ist die Belastung dauerhaft gesperrt und `refund_due` kann auf `0`
+gesetzt werden. Existiert bereits ein `stake`, wird stattdessen dessen Betrag
+erstattet; `refund_due` bleibt gesetzt, bis `sr:<requestId>:refund` im Ledger
+vorhanden ist. Auch andere Pfade, die `charging` abschließen, führen zuerst
+diesen Ledger-Anspruch aus.
+
+Die Migration `0094_song_request_admission.sql` ergänzt `request_type`, den
+gespeicherten Abbuchungsbetrag, `charged_at`, `refund_due`, `round_id` und
+`charging_since` und erweitert die Zustandsbedingung der Tabelle um `charging`.
+`round_id` ist im Live-Betrieb
+die Twitch-Stream-ID. Mit „Auch offline“ erzeugt die Tabelle
+`song_requests_offline_rounds` eine persistierte Offline-Runde, ohne eine
+fiktive Stream-ID vorzutäuschen. `stream.online`, das Ausschalten dieser
+Einstellung und „Liste leeren“ beenden die Offline-Runde. Die Bereinigung lehnt
+noch nicht gesendete Einträge ab und erstattet sie. Einträge in `submitting`
+oder `outcome_unknown` werden als fehlgeschlagen abgeschlossen und ebenfalls
+erstattet; bereits gesendete Titel bleiben in Spotify. Wird während eines
+laufenden Spotify-POSTs bereinigt oder das Modul deaktiviert, bleibt der Wunsch
+terminal und wird erstattet; die Ansage sagt, dass der Titel möglicherweise
+eingereiht wurde und Spotify vor einem erneuten Versuch geprüft werden soll.
+„Liste leeren“ markiert
+gesendete Einträge als `removed` und erhält `submitted_at`, damit sie bis zum
+Rundenende weiter Duplikat- und Künstlerregeln belegen. Alle Übergänge laufen
+durch `transitionRequest`; auch der Abschluss eines Spotify-POSTs akzeptiert
+nur noch einen aktuellen `submitting`-Eintrag. Ein später POST-Erfolg kann
+einen bereits terminalen Zustand nicht mehr überschreiben. Eine Erstattung
+verwendet den im Punkte-Ledger gespeicherten Betrag, nicht `charged_amount`.
+Sie bucht nur, wenn eine erfolgreiche Belastung existiert und
+`sr:<requestId>:refund` noch fehlt. `refund_due` wird nach vorhandener
+Erstattung oder nach dem erfolgreichen `charge`-Anspruch gelöscht, der weitere
+Belastungen verhindert. Alte
+`charging`-Einträge werden nach 60 Sekunden auf Poll- und Bereinigungspfaden
+abgeglichen; bei vorhandener Belastung folgt die Erstattung. Poll, Bereinigungen
+und Moderator-Routen versuchen offene Erstattungen bei ihren bestehenden
+Auslösern erneut. Ein deaktiviertes Modul plant dafür keine Endlosschleife.
+
+Die Einfügebedingung hält „einmal pro Stream/Runde“ an `round_id` gebunden.
+Eine Minuten-Abklingzeit durchsucht dagegen die Kanalhistorie und überlebt
+Rundenwechsel. Die persönliche Abklingzeit zählt offene Wünsche sowie bereits
+belastete, später wiedergegebene oder entfernte Wünsche. Abgelehnte Wünsche
+ohne bestätigte Belastung und fehlgeschlagene Wünsche zählen nicht. Die
+Einzel-Submit- und Now-Playing-Schreibvorgänge prüfen eine Live-Stream-ID oder
+die aktive Offline-Runde in derselben D1-Änderung.
+
+Anfragen können automatisch oder moderiert angenommen werden. Kostenlose
+Anfragen speichern `request_type = 'free'`; sie rufen weder Abbuchung noch
+Erstattung auf und wenden dieselben Rollen- und Anti-Spam-Regeln an. Für
+Bot-Punkte verwenden Belastung und Erstattung stabile, an die Request-ID
+gebundene Operations-IDs. Das Ausschalten des Punkte-Moduls blockiert die
+Punkte-Zahlungsart, schaltet sie aber nicht still auf kostenlos um.
+
+Das Queue-Overlay rendert die offenen Einträge aus dem BroBot-Ledger, nicht
+Spotify-Queue-Daten. Seine 2 bis 20 Zeilen-Slots bleiben reserviert, auch wenn
+weniger Einträge vorhanden sind. Der Realtime-Zustand wird auf 20 Zeilen,
+gekürzte Namen und weniger als 4 KB begrenzt. „Entfernen“ nach erfolgreicher
+Spotify-Übermittlung ändert den BroBot-Status und optional die Erstattung; der
+Track bleibt in Spotify und zählt bis zum Rundenende weiter für Duplikat- und
+Künstlerregeln.
+
 Das Wunschbuch ist BroBots Zustandsliste, kein Spiegel der Spotify-Warteschlange:
 Spotify bietet für einzelne Einträge weder Idempotenz-Schlüssel noch Entfernen
 oder Umsortieren. Einreihen und Wiedergabesteuerung brauchen beim Streamer ein

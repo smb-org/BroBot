@@ -2479,6 +2479,15 @@ export interface ModuleRouteVariables {
     alarmKey: string,
     invocation?: unknown,
   ) => Promise<unknown>;
+  /** Schedules a module-owned keyed alarm for a route that transitions work into an alarm-driven phase. */
+  scheduleModuleAlarm: (
+    channelId: string,
+    moduleId: string,
+    handlerKey: string,
+    alarmKey: string,
+    deadline: number,
+    streamGeneration?: number | null,
+  ) => Promise<void>;
   /** Starts a persisted options ballot owned by chat_voting; callers supply only validated labels and timing. */
   startChatVote?: (channelId: string, request: ModuleChatVoteStartRequest) => Promise<ModuleChatVoteStartResult>;
   /** Opens a signed Spotify OAuth transaction for the authorized channel; the host owns the signing keys. */

@@ -1,7 +1,7 @@
 import {
   AlertTriangle, ArrowDown, ArrowDownRight, ArrowUp, ArrowUpDown, ArrowUpRight, BellRing, Bookmark, Braces, Check, ChevronLeft, ChevronRight, Clock, Cloud, CloudFog, CloudLightning, CloudMoon, CloudRain, CloudSnow, CloudSun, Copy, Crown, Diamond, ExternalLink, Eye, EyeOff, Film, GripVertical, Image, Info, KeyRound, Layers,
   ListChecks, ListOrdered, Lock, MapPin, Megaphone, MessageSquareText, Minus, MoreVertical, Pause, Pencil, Play, Plus, Radio, RadioTower, RefreshCw, Search, Settings, SkipForward,
-  SlidersHorizontal, Square, Star, Sun, Moon, Timer, Wind, Sword, Trash2, Type, User, UserMinus, UserPlus, Users, Video, Volume2, VolumeX, Vote, X, Zap,
+  Coins, Gift, Music2, SlidersHorizontal, Square, Star, Sun, Moon, Timer, Wind, Sword, Trash2, Type, User, UserMinus, UserPlus, Users, Video, Volume2, VolumeX, Vote, X, Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactElement } from "react";
@@ -37,6 +37,7 @@ const glyphs = {
   more: MoreVertical,
   drag: GripVertical,
   token: KeyRound, variable: Braces,
+  coins: Coins, gift: Gift, music: Music2,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof glyphs;
