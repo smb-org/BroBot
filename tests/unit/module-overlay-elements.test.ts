@@ -71,10 +71,14 @@ describe("module overlay element declarations", () => {
       kind: "chat_voting.tally",
       configVersion: 1,
       defaultSize: { width: 480, height: 240 },
-      defaultConfig: { layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 15, width: 480 },
+      defaultConfig: { layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 15 },
     });
     expect(tally?.parseConfig({ layout: "strip", showPercent: false, hideAfterCloseSeconds: 0 }))
-      .toEqual({ layout: "strip", showPercent: false, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 0, width: 480 });
+      .toEqual({ layout: "strip", showPercent: false, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 0 });
+    expect(tally?.parseConfig({ width: 320 })).toEqual({
+      layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 15, width: 320,
+    });
+    expect(tally?.parseConfig({})).not.toHaveProperty("width");
     expect(tally?.parseConfig({ showCountdown: false })).toMatchObject({ showCountdown: false });
     expect(tally?.parseConfig({ width: 199 })).toBeNull();
     expect(tally?.parseConfig({ width: 1921 })).toBeNull();
