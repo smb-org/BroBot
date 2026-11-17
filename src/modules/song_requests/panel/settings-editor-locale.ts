@@ -26,31 +26,6 @@ const templateMessages: Readonly<Record<DashboardLanguage, TemplateTextFieldMess
   },
 };
 
-const ruleControls = {
-  de: {
-    duplicate: "Keine doppelten offenen Song-Wünsche", songCooldown: "Song-Abklingzeit", oncePerRound: "Einmal pro Stream oder Offline-Runde",
-    oncePerRoundHint: "Ersetzt die Minuten: ein Song nur einmal pro Stream.", personCooldown: "Persönliche Abklingzeit",
-    personOpen: "Maximal offene Wünsche pro Person", personRound: "Wünsche pro Stream oder Offline-Runde",
-    channelOpen: "Maximal offene Wünsche im Kanal", artistOpen: "Maximal offene Wünsche je Künstler",
-    maxLength: "Maximale Songlänge", explicitAllowed: "Explizite Songs erlauben", blockTracks: "Gesperrte Tracks",
-    blockedTrackIds: "Spotify-Track-IDs", blockArtists: "Gesperrte Künstler", blockedArtists: "Künstlernamen",
-    listPlaceholder: "Eintrag hinzufügen", removeItem: (item: string) => `${item} entfernen`,
-    chipCount: (count: number, max: number) => `${String(count)} / ${String(max)}`, chipLimit: "Die maximale Anzahl wurde erreicht.",
-    duplicateChip: (value: string) => `${value} ist bereits in der Liste.`,
-  },
-  en: {
-    duplicate: "No duplicate open song requests", songCooldown: "Track cooldown", oncePerRound: "Once per stream or offline round",
-    oncePerRoundHint: "Replaces the minutes: a song plays once per stream.", personCooldown: "Per-person cooldown",
-    personOpen: "Maximum open requests per person", personRound: "Requests per stream or offline round",
-    channelOpen: "Maximum open requests in the channel", artistOpen: "Maximum open requests per artist",
-    maxLength: "Maximum track length", explicitAllowed: "Allow explicit tracks", blockTracks: "Blocked tracks",
-    blockedTrackIds: "Spotify track IDs", blockArtists: "Blocked artists", blockedArtists: "Artist names",
-    listPlaceholder: "Add an entry", removeItem: (item: string) => `Remove ${item}`,
-    chipCount: (count: number, max: number) => `${String(count)} / ${String(max)}`, chipLimit: "The maximum number of entries has been reached.",
-    duplicateChip: (value: string) => `${value} is already on the list.`,
-  },
-} as const;
-
 const catalog = (language: DashboardLanguage): SettingsEditorCatalog => {
   const de = language === "de";
   const text = songRequestsSettingsTexts[language];
@@ -120,5 +95,4 @@ const catalog = (language: DashboardLanguage): SettingsEditorCatalog => {
 
 export const songRequestSettingsEditorCatalog = {
   locales: { de: catalog("de"), en: catalog("en") },
-  ruleControls,
 } as const;

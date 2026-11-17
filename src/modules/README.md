@@ -1012,6 +1012,11 @@ Schema (etwa Kanalereignisse) bleibt ohne Editor. `panel` bleibt daneben für
 Module mit eigenem Zustand oder Sofortaktionen (Werbung); wo beide stehen,
 erscheint `panel` oben und der `settingsEditor` darunter.
 
+Mit `settingsEditorPlacement: "page"` kann ein Modul den Editor auf eine eigene
+Navigationseite legen. `settingsEditorPageId` bindet ihn an den passenden Eintrag
+aus `navigationEntries`; andere Einträge zeigen weiter das Modul-Panel. Ohne diese
+Angabe bleibt die bisherige Bedeutung erhalten: Der Editor belegt die Modulroute.
+
 Jede Validierung, die das Speichern blockiert, muss einen sichtbaren Feldfehler
 liefern. `EditorShell.invalidFields` verwendet `{ id, label, message, sectionId }`
 für die Feldliste in der Speicherleiste, die Tab-Fehlerpunkte und den Fokus auf

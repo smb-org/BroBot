@@ -14,6 +14,41 @@ test.use({ locale: "en-US", timezoneId: "Europe/Berlin" });
 
 const localWorkerHost = new URL(e2eWorkerOrigin).hostname;
 
+test("keeps live requests and settings on separate module pages", async ({ page }) => {
+  const channelId = `channel-song-pages-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  seedE2ESongRequests(channelId);
+  const credentials = createE2ESessionCredentials();
+  await page.context().addCookies([
+    { name: "__Host-brobot_session", value: credentials.cookie, domain: localWorkerHost, path: "/", secure: true, httpOnly: true, sameSite: "Lax" },
+    { name: "__Host-brobot_csrf", value: credentials.csrfToken, domain: localWorkerHost, path: "/", secure: true, httpOnly: true, sameSite: "Lax" },
+  ]);
+
+  await page.goto(`${e2eWorkerOrigin}/channels/${channelId}/modules/song_requests`);
+  await expect(page.getByRole("heading", { name: "Song requests", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Spotify connection" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Admission" })).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "Payment" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
+
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: /Settings.*Running/u }).click();
+  await expect(page).toHaveURL(/\/modules\/song_requests\?page=settings$/u);
+  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Admission", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Spotify connection" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Connect Spotify" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Bot points/u })).toBeDisabled();
+  await expect(page.getByText("The points module is disabled. Bot points cannot be used right now; the saved payment mode stays unchanged.")).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const columns = page.locator(".settings-page__column");
+  await expect.poll(async () => {
+    const first = await columns.nth(0).boundingBox();
+    const second = await columns.nth(1).boundingBox();
+    return first !== null && second !== null && second.y >= first.y + first.height - 1;
+  }).toBe(true);
+});
+
 test("connects mocked Spotify, votes on three tracks, and shows the winner as now playing", async ({ page }) => {
   test.setTimeout(90_000);
   const channelId = `channel-song-${randomUUID().replaceAll("-", "").slice(0, 12)}`;

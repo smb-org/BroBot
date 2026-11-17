@@ -2915,6 +2915,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   settingsEditorRelatedParts?: readonly string[];
   /** Places the settings editor before a potentially long module panel. */
   settingsEditorPlacement?: "before-panel" | "after-panel" | "page";
+  /** Navigation entry that owns a page-level settings editor; other entries keep the module panel. */
+  settingsEditorPageId?: string;
   /** Server-side semantic validation after the shared settings schema parses. */
   validateSettings?: (settings: z.output<SettingsSchema>) => string | null;
   /** Reconciles one module-owned alarm immediately after settings are saved. */

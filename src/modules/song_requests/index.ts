@@ -18,6 +18,7 @@ import { songRequestsRoutes } from "./routes";
 import { songRequestsNowPlayingElement } from "./overlay/element";
 import { songRequestsQueueElement } from "./overlay/queue-element";
 import { songRequestsActionTexts } from "./panel/action-locale";
+import { songRequestsPanelTexts } from "./panel/locale";
 import { songRequestQueueSubtitle } from "./panel/queue-action-locale";
 import { requestSongChannelPointsAction } from "./channel-points-action";
 
@@ -49,12 +50,29 @@ export const songRequestsModule: BotModule<typeof songRequestsSettingsSchema> = 
   id: "song_requests",
   requiresModules: ["chat_voting"],
   navigationCategory: "stream",
+  navigationEntries: [
+    {
+      id: "requests",
+      label: { de: songRequestsPanelTexts.de.navigation.requests.label, en: songRequestsPanelTexts.en.navigation.requests.label },
+      description: { de: songRequestsPanelTexts.de.navigation.requests.description, en: songRequestsPanelTexts.en.navigation.requests.description },
+      iconKind: "music",
+      keywords: ["songs", "song requests", "spotify", "queue"],
+    },
+    {
+      id: "settings",
+      label: { de: songRequestsPanelTexts.de.navigation.settings.label, en: songRequestsPanelTexts.en.navigation.settings.label },
+      description: { de: songRequestsPanelTexts.de.navigation.settings.description, en: songRequestsPanelTexts.en.navigation.settings.description },
+      iconKind: "system",
+      keywords: ["settings", "payment", "rules"],
+    },
+  ],
   settingsSchema: songRequestsSettingsSchema,
   defaultSettings: songRequestsSettingsForLanguage("de"),
   defaultSettingsForLanguage: songRequestsSettingsForLanguage,
   defaultEnabled: false,
   settingsEditor: () => import("./panel/settings-editor"),
   settingsEditorPlacement: "page",
+  settingsEditorPageId: "settings",
   templateFields: SONG_REQUEST_TEMPLATE_FIELDS,
   templateContext: "event",
   templateVariableCatalog: SONG_REQUEST_TEMPLATE_VARIABLES,

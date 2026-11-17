@@ -248,6 +248,7 @@ interface ModuleSettingsPageOptions {
   reserveLockHint?: boolean;
   onNavigate: (route: DashboardRoute) => void;
   pageActions?: ReactNode;
+  enabledModuleIds?: readonly string[];
 }
 
 const ModuleSettingsEditor = ({ module, channelId, canManageContent, language, viewerIsBot = false, settingsSaveTarget, page }: {
@@ -359,7 +360,6 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       title={page.title}
       subtitle={page.subtitle}
       {...(page.badges === undefined ? {} : { badges: page.badges })}
-      {...(module.id === "song_requests" ? { topContent: <LoadStateLines rows={5} height={34} /> } : {})}
       icon={page.icon}
       {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
       active={page.active}
@@ -428,30 +428,6 @@ const AdsSettingsPanelMount = ({ module, channelId, language, canManageContent, 
     instanceKey="ads:settings-panel"
     load={loadPanel}
     properties={{ channelId, language, canManage: canManageContent, canOperate: true, moduleActive }}
-    loadingFallback={<LoadStateLines rows={5} height={34} />}
-    renderError={(retry) => <LoadState
-      variant="panel-320"
-      status="error"
-      loading={null}
-      empty={null}
-      error={null}
-      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: dashboardTexts().module.componentLoadError, onRetry: retry }}
-    >{null}</LoadState>}
-    onRetry={retryModuleChunkLoad}
-  />;
-};
-
-const SongRequestsSettingsPanelMount = ({ module, channelId, language, canManageContent }: {
-  module: (typeof MODULES)[number];
-  channelId: string;
-  language: DashboardLanguage;
-  canManageContent: boolean;
-}): ReactElement => {
-  const loadPanel = useCallback(() => loadModulePanel(module) as Promise<{ default: ComponentType<ModulePanelProperties> }>, [module]);
-  return <RetryableLazy
-    instanceKey="song-requests:settings-panel"
-    load={loadPanel}
-    properties={{ channelId, language, canManage: canManageContent, canOperate: true }}
     loadingFallback={<LoadStateLines rows={5} height={34} />}
     renderError={(retry) => <LoadState
       variant="panel-320"
@@ -639,7 +615,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
         ? { ...fieldErrors, [[...touchedFields].at(-1) ?? ""]: emoteSlotsCatalog[language].panel.quoteFieldError }
         : fieldErrors}
       clampNumberOnBlur={module.id !== "emote_slots"}
-      customContext={{ channelId, language, viewerIsBot, rateLocked: slotRate?.status === "locked",
+      customContext={{ channelId, language, viewerIsBot, enabledModuleIds: page?.enabledModuleIds ?? [], rateLocked: slotRate?.status === "locked",
         rateLockReason: module.id === "emote_slots" ? emoteSlotsCatalog[language].panel.quoteFieldError : undefined,
         lastTouchedField: [...touchedFields].at(-1) }}
       disabled={pending}
@@ -965,8 +941,6 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       onSettingsRevisionChange={setLatestSettingsRevision}
       onRemovePendingChange={setUrlRemovalPending}
       savingSettings={pending || urlRemovalPending} /> } : {})}
-    {...(module.id === "song_requests" ? { topContent: <SongRequestsSettingsPanelMount key="song-requests-panel" module={module}
-      channelId={channelId} language={language} canManageContent={canManageContent} /> } : {})}
     icon={page.icon}
     {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
     active={page.active}
@@ -1190,7 +1164,7 @@ const MountedModuleView = ({ module, channelId, pageId, streamSessionIdentity, c
         queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: dashboardTexts().module.componentLoadError, onRetry: retry }}
       >{null}</LoadState>}
     />}
-    {!chatVotingView && module.settingsEditorPlacement !== "before-panel" ? settingsEditor : null}
+    {!chatVotingView && module.settingsEditorPlacement !== "before-panel" && module.settingsEditorPlacement !== "page" ? settingsEditor : null}
   </div>;
 };
 
@@ -1419,6 +1393,8 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
   const statisticsEntry = registered?.navigationEntries?.find((entry) => entry.id === (pageId ?? "streams"))
     ?? registered?.navigationEntries?.find((entry) => entry.id === "streams");
   const statisticsPageLabel = statisticsEntry?.label[dashboardLanguage()] ?? texts.events.info;
+  const selectedNavigationEntry = registered?.navigationEntries?.find((entry) => entry.id === pageId)
+    ?? registered?.navigationEntries?.[0];
   const navigationPage = registered?.navigationEntries?.find((entry) => entry.showMainSwitch === false);
   const moduleState = modules.find((candidate) => candidate.id === moduleId);
   const activeModule = activeModules.find((candidate) => candidate.moduleId === moduleId);
@@ -1445,6 +1421,8 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
   const [headerActionsTarget, setHeaderActionsTarget] = useState<HTMLElement | null>(null);
   const viewLoading = loading || moduleState === undefined || ((registered?.panel !== undefined || registered?.settingsEditor !== undefined) && enabled && activeModule === undefined);
   const showActiveView = activeModule !== undefined && (enabled || moduleState === undefined);
+  const selectedSettingsPage = registered?.settingsEditorPlacement === "page" &&
+    (registered.settingsEditorPageId === undefined || pageId === registered.settingsEditorPageId);
 
   const stateMessage = registered === undefined
     ? labels.unknown(details.name)
@@ -1459,7 +1437,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
     if (error !== null) notify({ tone: "error", message: error });
   }, [error]);
 
-  if ((moduleId === "ads" || moduleId === "raid" || moduleId === "belabox" || registered?.settingsEditorPlacement === "page") && registered?.settingsEditor !== undefined && !permissionsMissing) {
+  if ((moduleId === "ads" || moduleId === "raid" || moduleId === "belabox" || selectedSettingsPage) && registered?.settingsEditor !== undefined && !permissionsMissing) {
     return <section className="module-detail module-detail--settings-page" aria-label={details.name}>
       <ModuleSettingsEditor
         module={registered}
@@ -1468,10 +1446,12 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
         language={dashboardLanguage()}
         viewerIsBot={viewerIsBot}
         page={{
-          title: details.name,
-          subtitle: details.description,
+          title: pageId === undefined ? details.name : selectedNavigationEntry?.label[dashboardLanguage()] ?? details.name,
+          subtitle: pageId === undefined ? details.description : selectedNavigationEntry?.description?.[dashboardLanguage()] ?? details.description,
           ...(moduleId === "emote_slots" ? { badges: <SlotJackpotMeta channelId={channelId} language={dashboardLanguage()} /> } : {}),
-          icon: iconFor(moduleId, "module-heading-glyph"),
+          icon: pageId === undefined || selectedNavigationEntry === undefined
+            ? iconFor(moduleId, "module-heading-glyph")
+            : <NavigationIcon kind={selectedNavigationEntry.iconKind} className="module-heading-glyph module-glyph" />,
           active: enabled,
           onToggle: (nextEnabled) => { if (nextEnabled !== enabled) onToggle(); },
           switchDisabled: !manageable || switchDisabled || busy,
@@ -1479,6 +1459,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
           ...(disabledReason === null ? {} : { lockHint: disabledReason }),
           ...(reserveDependencyHint ? { reserveLockHint: true } : {}),
           onNavigate,
+          enabledModuleIds: modules.filter(({ enabled, mandatory: moduleMandatory }) => enabled || moduleMandatory).map(({ id }) => id),
           pageActions: <ChatCommandsHelp commands={chatCommands} howToPlayRows={howToPlayRows} loading={loading || moduleState === undefined} language={dashboardLanguage()} />,
         }}
       />

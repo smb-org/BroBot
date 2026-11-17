@@ -1,11 +1,12 @@
 import type { ReactElement } from "react";
 
-import { ChipsInput, FieldPair, SwitchRow, UnitInput, type SettingsCustomFieldProps, type SettingsEditorDefinition, type SettingsEditorSpec } from "../../../dashboard/ui";
+import { ChipsInput, FieldPair, SegmentChoice, SwitchRow, UnitInput, type SettingsCustomFieldProps, type SettingsEditorDefinition, type SettingsEditorSpec } from "../../../dashboard/ui";
 import type { SongRequestsSettings } from "../contracts";
 import { renderTemplate } from "../../contract";
 import { SONG_REQUEST_TEMPLATE_VARIABLES } from "../contracts/template-variables";
 import { songRequestSettingsEditorCatalog } from "./settings-editor-locale";
 import { songRequestsSettingsTexts } from "./settings-locale";
+import "./settings-editor.css";
 
 const songRequestTemplatePreview = (template: string, values: Readonly<Record<string, string>>): string => {
   const samples = Object.fromEntries(SONG_REQUEST_TEMPLATE_VARIABLES.map(({ name, sample }) => [name, sample]));
@@ -39,6 +40,31 @@ const skipVoteField = {
   },
 };
 
+const paymentModeField = {
+  kind: "custom" as const,
+  key: "paymentMode" as const,
+  render: (props: SettingsCustomFieldProps<SongRequestsSettings>): ReactElement => {
+    const copy = songRequestsSettingsTexts[languageFrom(props.context)];
+    const enabledModuleIds = typeof props.context === "object" && props.context !== null &&
+      "enabledModuleIds" in props.context && Array.isArray(props.context.enabledModuleIds)
+      ? props.context.enabledModuleIds
+      : [];
+    const pointsEnabled = enabledModuleIds.includes("points");
+    return <SegmentChoice
+      label={props.label}
+      hint={props.hint}
+      value={props.settings.paymentMode}
+      disabled={props.disabled || props.readOnly}
+      onChange={(value) => { props.onChange(value); }}
+      {...(pointsEnabled ? {} : { warning: copy.pointsUnavailable })}
+      options={[
+        { value: "bot_points", label: copy.botPoints, ...(pointsEnabled ? {} : { disabled: true }) },
+        { value: "free", label: copy.free },
+      ]}
+    />;
+  },
+};
+
 const requestAlertField = {
   kind: "custom" as const,
   key: "requestAlert" as const,
@@ -54,7 +80,7 @@ const rulesField = {
   kind: "custom" as const,
   key: "rules" as const,
   render: (props: SettingsCustomFieldProps<SongRequestsSettings>): ReactElement => {
-    const labels = songRequestSettingsEditorCatalog.ruleControls[languageFrom(props.context)];
+    const labels = songRequestsSettingsTexts[languageFrom(props.context)];
     const rules = props.settings.rules;
     const disabled = props.disabled || props.readOnly;
     const update = <Key extends keyof SongRequestsSettings["rules"]>(key: Key, value: SongRequestsSettings["rules"][Key]): void => {
@@ -69,15 +95,15 @@ const rulesField = {
       unit?: string,
     ): ReactElement => <SwitchRow label={label} checked={rules[enabledKey]} disabled={disabled}
       onChange={(enabled) => { update(enabledKey, enabled); }}
-      control={<UnitInput label={label} {...(unit === undefined ? {} : { unit })} min={minimum} max={maximum} value={rules[valueKey]}
+      control={<UnitInput label={label} ariaLabel={label} hideLabel {...(unit === undefined ? {} : { unit })} min={minimum} max={maximum} value={rules[valueKey]}
         disabled={disabled || !rules[enabledKey]}
         onChange={(next) => { updateNumber(next, (value) => { update(valueKey, value); }); }} />} />;
-    return <>
+    return <div className="song-request-rules">
       <SwitchRow label={labels.duplicate} checked={rules.duplicateEnabled} disabled={disabled}
         onChange={(enabled) => { update("duplicateEnabled", enabled); }} />
       <SwitchRow label={labels.songCooldown} checked={rules.songCooldownEnabled} disabled={disabled}
         onChange={(enabled) => { update("songCooldownEnabled", enabled); }}
-        control={<UnitInput label={labels.songCooldown} unit="min" min={1} max={10_080} value={rules.songCooldownMinutes}
+        control={<UnitInput label={labels.songCooldown} ariaLabel={labels.songCooldown} hideLabel unit="min" min={1} max={10_080} value={rules.songCooldownMinutes}
           disabled={disabled || !rules.songCooldownEnabled || rules.songCooldownOncePerRound}
           onChange={(next) => { updateNumber(next, (minutes) => { update("songCooldownMinutes", minutes); }); }} />} />
       <SwitchRow label={labels.oncePerRound} description={labels.oncePerRoundHint} checked={rules.songCooldownOncePerRound}
@@ -100,7 +126,7 @@ const rulesField = {
       <ChipsInput label={labels.blockedArtists} values={rules.blockedArtists} onChange={(values) => { update("blockedArtists", values); }}
         max={100} disabled={disabled || !rules.blockArtistsEnabled} placeholder={labels.listPlaceholder} removeLabel={labels.removeItem} listLabel={labels.blockedArtists}
         messages={{ countLabel: labels.chipCount, atLimitHint: labels.chipLimit, duplicateWarning: labels.duplicateChip }} />
-    </>;
+    </div>;
   },
 };
 
@@ -108,7 +134,7 @@ const spec: SettingsEditorSpec<SongRequestsSettings> = {
   sections: [
     { id: "admission", icon: "tabSettings", fields: [
       { kind: "segment", key: "mode", options: [{ value: "automatic" }, { value: "moderated" }] },
-      { kind: "segment", key: "paymentMode", options: [{ value: "bot_points" }, { value: "free" }] },
+      paymentModeField,
       { kind: "number", key: "botPointsCost", min: 1, max: 1_000_000, step: 1 },
       { kind: "roleThreshold", key: "freeRoleThreshold", options: [{ value: "everyone" }, { value: "subscriber" }, { value: "vip" }, { value: "moderator" }] },
       { kind: "switchCard", key: "alsoOffline" },

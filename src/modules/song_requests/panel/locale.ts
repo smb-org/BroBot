@@ -1,5 +1,15 @@
 export const songRequestsPanelTexts = {
   de: {
+    navigation: {
+      requests: {
+        label: "Song-Wünsche",
+        description: "Verbindet Spotify und zeigt Song-Wünsche sowie Abstimmungsergebnisse.",
+      },
+      settings: {
+        label: "Einstellungen",
+        description: "Lege Zahlung, Annahmeregeln und Song-Wunsch-Alarm fest.",
+      },
+    },
     connection: "Spotify-Verbindung",
     connecting: "Spotify-Verbindung wird geladen …",
     connectionLoadError: "Der Spotify-Verbindungsstatus konnte nicht geladen werden.",
@@ -83,6 +93,16 @@ export const songRequestsPanelTexts = {
     },
   },
   en: {
+    navigation: {
+      requests: {
+        label: "Song requests",
+        description: "Connects Spotify and shows song requests and vote outcomes.",
+      },
+      settings: {
+        label: "Settings",
+        description: "Configure payment, admission rules, and song request alerts.",
+      },
+    },
     connection: "Spotify connection",
     connecting: "Loading Spotify connection …",
     connectionLoadError: "Spotify connection status could not be loaded.",
