@@ -732,13 +732,13 @@ const EventsPageFilterState = ({
             closeLabel={dashboardCommonTexts().close}
             onClose={closeGroup}
           >
-            <InspectorSection title={texts.events.operation}><dl className="properties">
+            <dl className="properties">
               <div><dt>{texts.events.timestamp}</dt><dd className="mono" title={selectedHistory[0]?.createdAt}>{selectedHistory[0] === undefined ? "" : formatTimestamp(selectedHistory[0].createdAt)}</dd></div>
               <div><dt>{texts.events.module}</dt><dd>{Array.from(new Set(selectedHistory.map(moduleLabel))).join(", ")}</dd></div>
               <div><dt>{texts.events.trigger}</dt><dd>{triggerNames.join(", ")}</dd></div>
               {moderatorNames.length === 0 ? null : <div><dt>{texts.events.moderator}</dt><dd>{moderatorNames.join(", ")}</dd></div>}
               {affectedNames.length === 0 ? null : <div><dt>{texts.events.affectedPerson}</dt><dd>{affectedNames.join(", ")}</dd></div>}
-            </dl></InspectorSection>
+            </dl>
             <InspectorSection title={texts.events.history}>
             <ol className="event-history">{selectedHistory.map((entry) => {
               return <li key={entry.eventId}>
