@@ -1,18 +1,25 @@
-import type { ModuleAlarmContext, ModuleChannelPointsAccess, ModuleChannelPointsStatus, ModuleDurableAction, ModuleEvent, ModuleExecutionContext, ModuleResult, ModulePointsAccess } from "../contract";
+import type { ModuleAlarmContext, ModuleOverlayAlertQueueAccess, ModuleChannelPointsAccess, ModuleChannelPointsStatus, ModuleDurableAction, ModuleEvent, ModuleExecutionContext, ModuleResult, ModulePointsAccess } from "../contract";
+import { renderTemplate } from "../contract";
 import { voteWinner } from "./domain/vote-result";
+import { decideSkipVote } from "./domain/skip-result";
 import { isSpotifyTrack, spotifyTrackIdFromInput, type SpotifyTrack } from "./domain/track";
 import { canUseFreeSongRequest, isOpenSongRequestState } from "./domain/rules";
-import { songRequestsSettingsSchema, type SongRequestsSettings } from "./contracts";
+import { songRequestsSettingsForLanguage, songRequestsSettingsSchema, type SongRequestsSettings } from "./contracts";
 import { songRequestChatTexts } from "./chat-locale";
+import { formatSongRequestTrack, songRequestArtistDisplay } from "./domain/track-display";
+import { SONG_REQUEST_TEMPLATE_VARIABLES } from "./contracts/template-variables";
 import {
   admitSongRequest,
   closeOfflineSongRequestRound,
   createNowPlayingSnapshot,
   createVoteRequestClaim,
+  createSkipVoteMapping,
   cleanupSongRequestRound,
   clearSongRequestsForStreamEnd,
   ensureOfflineSongRequestRound,
   finishVoteWithoutRequest,
+  claimSkipVoteResult,
+  finishSkipVoteResult,
   readOfflineSongRequestRound,
   readSongRequest,
   clearSongRequestChannelPointResolution,
@@ -26,9 +33,11 @@ import {
   songRequestTrackFromSpotify,
   transitionRequest,
   voteRecord,
+  openSkipVoteMapping,
+  removeUnstartedSkipVoteMapping,
 } from "./adapters/d1";
 import type { SongRequestRow, SongRequestState } from "./adapters/d1";
-import { SpotifyRequestError, refreshSpotifyToken, spotifyApiRequest, spotifySearchTracks, spotifyTrackById } from "./adapters/spotify";
+import { SpotifyRequestError, refreshSpotifyToken, spotifyApiRequest, spotifySearchTracks, spotifySkipCurrentTrack, spotifyTrackById } from "./adapters/spotify";
 import { readSongRequestQueueState } from "./overlay/queue-state";
 
 export const songRequestQueueOverlayPayload = readSongRequestQueueState;
@@ -38,6 +47,8 @@ export const SONG_REQUESTS_HANDLER = "poll";
 export const SONG_REQUESTS_SUBMIT_HANDLER = "submit";
 export const SONG_REQUESTS_LIFECYCLE_HANDLER = "lifecycle";
 export const SONG_REQUESTS_ACCESS_TOKEN_HANDLER = "access_token";
+export const SONG_REQUESTS_SKIP_HANDLER = "skip";
+export const SONG_REQUESTS_SKIP_ALARM = "execute";
 export const SONG_REQUESTS_CREDENTIAL_SECRET = "spotify_credentials";
 export const SONG_REQUESTS_SUBMIT_ALARM_PREFIX = "submit:";
 const POLL_INTERVAL_MS = 12_000;
@@ -242,6 +253,254 @@ const updateConnectionForError = async (
     const message = state === "spotify_error" ? error.message.slice(0, 200) : null;
     await setConnectionState(context, state, new Date().toISOString(), message);
   }
+};
+
+export type SongSkipOutcome = "skipped" | "nothing_playing" | "track_changed" | "not_connected" |
+  "no_active_device" | "spotify_unavailable";
+
+const nowPlayingTrackId = async (db: D1Database, channelId: string): Promise<string | null> => {
+  const row = await db.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
+    .bind(channelId).first<{ track_json: string | null }>();
+  if (row?.track_json === null || row?.track_json === undefined) return null;
+  try {
+    const track: unknown = JSON.parse(row.track_json);
+    return typeof track === "object" && track !== null && typeof (track as Record<string, unknown>).id === "string"
+      ? (track as Record<string, unknown>).id as string
+      : null;
+  } catch { return null; }
+};
+
+const recordSkipBackoff = async (db: D1Database, channelId: string, error: SpotifyRequestError, now: number): Promise<void> => {
+  const retryAfter = error.status === 429 ? error.retryAfterMs ?? 0 : 0;
+  const deadline = now + Math.max(BASE_BACKOFF_MS, retryAfter);
+  await db.prepare(
+    `INSERT INTO song_requests_connections
+       (channel_id, state, error_message, updated_at, poll_failures, poll_backoff_until)
+     VALUES (?, 'connected', NULL, ?, 1, ?)
+     ON CONFLICT(channel_id) DO UPDATE SET
+       updated_at = excluded.updated_at,
+       poll_failures = MIN(song_requests_connections.poll_failures + 1, 8),
+       poll_backoff_until = MAX(COALESCE(song_requests_connections.poll_backoff_until, 0), excluded.poll_backoff_until)
+     RETURNING channel_id`,
+  ).bind(channelId, new Date(now).toISOString(), deadline).first<{ channel_id: string }>();
+};
+
+/** Makes exactly one Spotify next-track request after all local guards pass. */
+export const skipSongTrack = async (
+  context: { DB: D1Database; channelId: string; environment?: Env | undefined },
+  readAccessToken: () => Promise<string | null>,
+  expectedTrackId?: string,
+): Promise<SongSkipOutcome> => {
+  const [slotHeld, connection] = await Promise.all([
+    spotifySlotHeld(context.DB, context.channelId),
+    context.DB.prepare("SELECT state, poll_backoff_until FROM song_requests_connections WHERE channel_id = ?")
+      .bind(context.channelId).first<{ state: string; poll_backoff_until: number | null }>(),
+  ]);
+  if (!slotHeld || connection?.state === undefined || connection.state === "not_connected" || connection.state === "reconnect_required") {
+    return "not_connected";
+  }
+  if (connection.state === "no_active_device") return "no_active_device";
+  if (connection.state !== "connected") return "not_connected";
+  const now = Date.now();
+  if (connection.poll_backoff_until !== null && connection.poll_backoff_until > now) return "spotify_unavailable";
+  const trackId = await nowPlayingTrackId(context.DB, context.channelId);
+  if (trackId === null) return expectedTrackId === undefined ? "nothing_playing" : "track_changed";
+  if (expectedTrackId !== undefined && trackId !== expectedTrackId) return "track_changed";
+  if (context.environment === undefined) return "not_connected";
+  let accessToken: string | null;
+  try { accessToken = await readAccessToken(); } catch { return "not_connected"; }
+  if (accessToken === null) return "not_connected";
+  if (expectedTrackId !== undefined) {
+    try {
+      const response = await spotifyApiRequest(context.environment, accessToken, "me/player/currently-playing");
+      if (response.status === 204) return "track_changed";
+      const payload: unknown = await response.json();
+      const row = typeof payload === "object" && payload !== null && !Array.isArray(payload)
+        ? payload as Record<string, unknown>
+        : null;
+      const liveItem = row?.item;
+      if (!isSpotifyTrack(liveItem) || liveItem.id !== expectedTrackId) return "track_changed";
+    } catch (error) {
+      if (error instanceof SpotifyRequestError && (error.status === 429 || error.status >= 500)) {
+        await recordSkipBackoff(context.DB, context.channelId, error, now);
+      } else if (error instanceof SpotifyRequestError) {
+        await updateConnectionForError({ DB: context.DB, channelId: context.channelId }, error);
+      }
+      return "spotify_unavailable";
+    }
+  }
+  try {
+    await spotifySkipCurrentTrack(context.environment, accessToken);
+    return "skipped";
+  } catch (error) {
+    if (!(error instanceof SpotifyRequestError)) return "spotify_unavailable";
+    if (error.status === 404) {
+      await setConnectionState({ DB: context.DB, channelId: context.channelId }, "no_active_device", new Date().toISOString());
+      return "no_active_device";
+    }
+    if (error.status === 429 || error.status >= 500) {
+      await recordSkipBackoff(context.DB, context.channelId, error, now);
+      return "spotify_unavailable";
+    }
+    await updateConnectionForError({ DB: context.DB, channelId: context.channelId }, error);
+    return "spotify_unavailable";
+  }
+};
+
+const isSongSkipOutcome = (value: unknown): value is SongSkipOutcome =>
+  value === "skipped" || value === "nothing_playing" || value === "track_changed" || value === "not_connected" ||
+  value === "no_active_device" || value === "spotify_unavailable";
+
+export const skipSongTrackThroughChannelObject = async (
+  runModuleAlarm: ((handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>) | undefined,
+  expectedTrackId?: string,
+): Promise<SongSkipOutcome> => {
+  if (runModuleAlarm === undefined) return "spotify_unavailable";
+  try {
+    const result = await runModuleAlarm(
+      SONG_REQUESTS_SKIP_HANDLER,
+      SONG_REQUESTS_SKIP_ALARM,
+      expectedTrackId === undefined ? {} : { expectedTrackId },
+    );
+    return isSongSkipOutcome(result) ? result : "spotify_unavailable";
+  } catch {
+    return "spotify_unavailable";
+  }
+};
+
+export const handleSongRequestSkipAlarm = async (
+  context: ModuleAlarmContext,
+  _alarmKey: string,
+  _deadline: number,
+  _ownerRevision?: number,
+  invocation?: unknown,
+): Promise<SongSkipOutcome> => {
+  const request = typeof invocation === "object" && invocation !== null && !Array.isArray(invocation)
+    ? invocation as Record<string, unknown>
+    : {};
+  const expectedTrackId = typeof request.expectedTrackId === "string" ? request.expectedTrackId : undefined;
+  return await skipSongTrack(
+    { DB: context.DB, channelId: context.channelId, environment: context.environment },
+    async () => await spotifyAccessToken(context),
+    expectedTrackId,
+  );
+};
+
+const skipOutcomeChatReply = (language: "de" | "en", result: SongSkipOutcome): string => {
+  const text = songRequestChatTexts[language].skipVote;
+  if (result === "skipped") return text.skipped;
+  if (result === "nothing_playing") return text.nothingPlaying;
+  if (result === "track_changed") return text.changed;
+  if (result === "no_active_device") return text.device;
+  if (result === "not_connected") return text.notConnected;
+  return text.unavailable;
+};
+
+/** chat_voting ballots count choices from 1: "Yes" is the first of the two skip vote options. */
+const SKIP_VOTE_YES_CHOICE = 1;
+
+const safeTwitchAvatarUrl =(value: string | null | undefined): string | undefined => {
+  if (typeof value !== "string" || value.length > 256) return undefined;
+  try {
+    const url = new URL(value);
+    return value.startsWith("https://static-cdn.jtvnw.net/") && url.protocol === "https:" && url.origin === "https://static-cdn.jtvnw.net" &&
+      url.username.length === 0 && url.password.length === 0 ? value : undefined;
+  } catch { return undefined; }
+};
+
+const renderSongRequestTemplate = (template: string, values: Readonly<Record<string, string | number>>): string =>
+  renderTemplate(template, values, {}, SONG_REQUEST_TEMPLATE_VARIABLES);
+
+export const enqueueSongRequestAlert = async (
+  context: {
+    DB: D1Database;
+    channelId: string;
+    overlayAlertQueue?: Pick<ModuleOverlayAlertQueueAccess, "enqueue"> | undefined;
+    resolveTwitchUserById?: ModuleExecutionContext["resolveTwitchUserById"];
+  },
+  requestId: string,
+): Promise<void> => {
+  const queue = context.overlayAlertQueue;
+  if (queue === undefined) return;
+  try {
+    const [module, request, channel] = await Promise.all([
+      context.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+        .bind(context.channelId).first<{ settings: string }>(),
+      context.DB.prepare(
+        `SELECT request_type, track_id, title, artists_json, album_name, requester_user_id, requester_login, requester_display_name,
+                round_id, created_at, state
+           FROM song_requests WHERE channel_id = ? AND id = ?`,
+      ).bind(context.channelId, requestId).first<{
+        request_type: "vote" | "bot_points" | "free" | "channel_points";
+        track_id: string;
+        title: string;
+        artists_json: string;
+        album_name: string | null;
+        requester_user_id: string | null;
+        requester_login: string | null;
+        requester_display_name: string | null;
+        round_id: string | null;
+        created_at: string;
+        state: string;
+      }>(),
+      context.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
+        .bind(context.channelId).first<{ language: string }>(),
+    ]);
+    if (request?.state !== "approved") return;
+    const language = channel?.language === "en" ? "en" : "de";
+    let settings = songRequestsSettingsForLanguage(language);
+    try {
+      const rawSettings: unknown = JSON.parse(module?.settings ?? "{}");
+      settings = songRequestsSettingsSchema.parse({
+        ...songRequestsSettingsForLanguage(language),
+        ...(typeof rawSettings === "object" && rawSettings !== null && !Array.isArray(rawSettings) ? rawSettings : {}),
+      });
+    }
+    catch { /* Invalid settings fall back to the module defaults. */ }
+    if (!settings.requestAlert.enabled || !settings.requestAlertTextEnabled) return;
+    let artists: unknown = [];
+    try { artists = JSON.parse(request.artists_json) as unknown; } catch { /* Use the empty artist label. */ }
+    const artistNames = Array.isArray(artists) ? artists.filter((item): item is string => typeof item === "string") : [];
+    const artist = songRequestArtistDisplay(artistNames);
+    const labels = language === "en"
+      ? { vote: "Song vote", botPoints: "Bot points", free: "Free request", channelPoints: "Channel points", viewer: "Viewer" }
+      : { vote: "Song-Abstimmung", botPoints: "Bot-Punkte", free: "Kostenloser Wunsch", channelPoints: "Kanalpunkte", viewer: "Zuschauer" };
+    const requestType = request.request_type === "bot_points" ? labels.botPoints
+      : request.request_type === "free" ? labels.free
+        : request.request_type === "channel_points" ? labels.channelPoints : labels.vote;
+    const requester = request.requester_display_name ?? request.requester_login ?? labels.viewer;
+    const formattedTrack = formatSongRequestTrack({ title: request.title, artists: artistNames, albumName: request.album_name });
+    const position = await context.DB.prepare(
+      `SELECT COUNT(*) AS position FROM song_requests
+        WHERE channel_id = ? AND round_id IS ? AND state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')
+          AND (created_at < ? OR (created_at = ? AND id <= ?))`,
+    ).bind(context.channelId, request.round_id, request.created_at, request.created_at, requestId)
+      .first<{ position: number }>();
+    const defaultAlertText = songRequestsSettingsForLanguage(language).requestAlertText;
+    const alertTemplate = request.request_type === "vote" && settings.requestAlertText === defaultAlertText
+      ? "{song.type}: {song.track}"
+      : settings.requestAlertText;
+    const rendered = renderSongRequestTemplate(alertTemplate, {
+      user: requester,
+      "song.track": formattedTrack,
+      "song.artist": artist,
+      "song.title": request.title,
+      "song.album": request.album_name?.trim() ?? "",
+      "song.position": position?.position ?? 1,
+      "song.type": request.request_type === "vote" ? labels.vote : requestType,
+    });
+    let avatarUrl: string | undefined;
+    if (request.requester_user_id !== null && request.request_type !== "vote" && context.resolveTwitchUserById !== undefined) {
+      try { avatarUrl = safeTwitchAvatarUrl((await context.resolveTwitchUserById(request.requester_user_id))?.profileImageUrl); }
+      catch { avatarUrl = undefined; }
+    }
+    await queue.enqueue(`song-request-alert:${requestId}`, {
+      ...(avatarUrl === undefined ? {} : { avatarUrl }),
+      text: rendered.slice(0, 200),
+      durationSeconds: 5,
+      volumePercent: 0,
+    });
+  } catch { /* Alerts are cosmetic and never block an approved request. */ }
 };
 
 const requestRoundIsCurrent = async (
@@ -465,6 +724,10 @@ const transitionAfterSpotifyPost = async (
   }
 };
 
+const spotifySubmissionFailureReason = (error: SpotifyRequestError): string =>
+  error.status === 403 && error.reason !== "PREMIUM_REQUIRED" ? error.message.slice(0, 200)
+    : error.reason ?? `spotify_${String(error.status)}`;
+
 const submitRequest = async (context: ModuleAlarmContext, requestId: string): Promise<void> => {
   const row = await readSongRequest(context.DB, context.channelId, requestId);
   if (row === null || row.state !== "approved") return;
@@ -540,9 +803,17 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
           await transitionAfterSpotifyPost(context, requestId, "submitted", null, row.roundId);
           return;
         } catch (retryError) {
-          if (retryError instanceof SpotifyRequestError) await updateConnectionForError(context, retryError);
-          if (!(retryError instanceof SpotifyRequestError) || retryError.status >= 500) {
+          if (!(retryError instanceof SpotifyRequestError)) {
             await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "retry_response_uncertain", row.roundId);
+            return;
+          }
+          await updateConnectionForError(context, retryError);
+          if (retryError.status >= 500) {
+            await transitionAfterSpotifyPost(context, requestId, "outcome_unknown", "retry_response_uncertain", row.roundId);
+            return;
+          }
+          if (retryError.status !== 429) {
+            await transitionAfterSpotifyPost(context, requestId, "failed", spotifySubmissionFailureReason(retryError), row.roundId);
             return;
           }
         }
@@ -551,8 +822,7 @@ const submitRequest = async (context: ModuleAlarmContext, requestId: string): Pr
       return;
     }
     await transitionAfterSpotifyPost(context, requestId, "failed",
-      error.status === 403 && error.reason !== "PREMIUM_REQUIRED" ? error.message.slice(0, 200)
-        : error.reason ?? `spotify_${String(error.status)}`, row.roundId);
+      spotifySubmissionFailureReason(error), row.roundId);
   }
 };
 
@@ -719,41 +989,93 @@ export const retrySongRequestRefunds = async (
 };
 
 const failureMessage = (reason: string | null): { de: string; en: string } => {
+  if (reason === "NO_ACTIVE_DEVICE" || reason === "no_active_device") return {
+    de: songRequestChatTexts.de.spotifyDevice,
+    en: songRequestChatTexts.en.spotifyDevice,
+  };
+  if (reason === "PREMIUM_REQUIRED" || reason === "premium_required") return {
+    de: "Spotify Premium ist erforderlich, um Songs in die Warteschlange einzureihen.",
+    en: "Spotify Premium is required to queue songs.",
+  };
+  if (reason === "rate_limited") return {
+    de: "Spotify verarbeitet gerade zu viele Anfragen. Bitte versuche es später erneut.",
+    en: "Spotify is receiving too many requests. Please try again later.",
+  };
   if (reason === "stream_offline") return {
-    de: "Der Stream ist offline; der Song wurde nicht in Spotify eingereiht.",
-    en: "The stream is offline; the song was not queued in Spotify.",
+    de: "Der Stream ist inzwischen offline. Der Song wurde nicht eingereiht.",
+    en: "The stream is now offline. The song was not queued.",
   };
   if (reason === "submit_outcome_uncertain") return {
-    de: "Der Song könnte in Spotify eingereiht worden sein; bitte prüfe Spotify vor einem erneuten Versuch.",
-    en: "The song may have been queued in Spotify; check Spotify before retrying.",
+    de: "Spotify hat den Ausgang nicht bestätigt. Bitte prüfe die Warteschlange vor einem erneuten Versuch.",
+    en: "Spotify did not confirm the result. Check the queue before trying again.",
   };
   if (reason === "outcome_unknown" || reason === "network_or_timeout" || reason === "spotify_server_error" || reason === "retry_response_uncertain" || reason === "submit_interrupted" || reason === "submit_state_conflict") return {
-    de: `Das Spotify-Ergebnis ist unklar (${reason}); bitte die Warteschlange prüfen.`,
-    en: `The Spotify result is unclear (${reason}); check the queue before retrying.`,
+    de: "Spotify hat den Ausgang nicht bestätigt. Bitte prüfe die Warteschlange vor einem erneuten Versuch.",
+    en: "Spotify did not confirm the result. Check the queue before trying again.",
   };
-  const detail = reason ?? "unknown";
   return {
-    de: `Der Song wurde nicht in Spotify eingereiht: ${detail}.`,
-    en: `The song was not queued in Spotify: ${detail}.`,
+    de: "Spotify konnte den Song nicht einreihen. Bitte versuche es später erneut.",
+    en: "Spotify could not queue the song. Please try again later.",
   };
+};
+
+const requestTypeLabel = (type: SongRequestRow["requestType"], language: "de" | "en"): string => {
+  const labels = language === "en"
+    ? { vote: "Song vote", bot_points: "Bot points", free: "Free request", channel_points: "Channel Points" }
+    : { vote: "Song-Abstimmung", bot_points: "Bot-Punkte", free: "Kostenloser Wunsch", channel_points: "Kanalpunkte" };
+  return labels[type];
 };
 
 const announceSubmitResult = async (context: ModuleAlarmContext, requestId: string): Promise<boolean> => {
   const row = await readSongRequest(context.DB, context.channelId, requestId);
   if (row === null || row.state === "charging" || row.state === "approved" || row.state === "submitting") return false;
   const language = await context.channelLanguage();
-  const message = row.state === "submitted"
-    ? language === "de"
-      ? `„${row.title}“ wurde in Spotify eingereiht.`
-      : `“${row.title}” was queued in Spotify.`
-    : failureMessage(row.state === "outcome_unknown" ? "outcome_unknown" : row.failureReason)[language];
+  const locale = language === "en" ? "en" : "de";
+  const moduleRow = await context.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+    .bind(context.channelId).first<{ settings: string }>();
+  let rawSettings: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(moduleRow?.settings ?? "{}");
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) rawSettings = parsed as Record<string, unknown>;
+  } catch { /* Invalid legacy settings use localized defaults. */ }
+  const settings = songRequestsSettingsSchema.parse({ ...songRequestsSettingsForLanguage(locale), ...rawSettings });
+  if (row.state === "submitted" && !settings.queuedTextEnabled) return false;
+  const position = await context.DB.prepare(
+    `SELECT COUNT(*) AS position FROM song_requests
+      WHERE channel_id = ? AND round_id IS ?
+        AND state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')
+        AND (created_at < ? OR (created_at = ? AND id <= ?))`,
+  ).bind(context.channelId, row.roundId, row.createdAt, row.createdAt, row.requestId).first<{ position: number }>();
+  const artist = songRequestArtistDisplay(row.artists);
+  const track = formatSongRequestTrack(row);
+  let message: string;
+  if (row.state === "submitted") {
+    const rendered = renderSongRequestTemplate(settings.queuedText, {
+      user: row.requesterDisplayName ?? row.requesterLogin ?? "",
+      "song.track": track,
+      "song.artist": artist,
+      "song.title": row.title,
+      "song.album": row.albumName?.trim() ?? "",
+      "song.position": position?.position ?? 1,
+      "song.type": requestTypeLabel(row.requestType, locale),
+    });
+    message = rendered;
+  } else {
+    message = failureMessage(row.state === "outcome_unknown" ? "outcome_unknown" : row.failureReason)[locale];
+    if ((row.state === "failed" || row.state === "rejected") && row.requestType === "bot_points" && row.chargedAmount > 0 && !row.refundDue) {
+      message += locale === "de" ? " Bot-Punkte wurden erstattet." : " Bot points were refunded.";
+    }
+    if ((row.state === "failed" || row.state === "rejected") && row.requestType === "channel_points" && row.channelPointsRewardId !== null && row.channelPointsResolutionCompleted === "CANCELED") {
+      message += locale === "de" ? " Die Kanalpunkte-Einlösung wurde storniert." : " The Channel Points redemption was canceled.";
+    }
+  }
   const delivery = await context.sendChat(
     message,
-    `song-vote-queue:${row.operationId}`,
+    `song-request-result:${row.operationId}`,
     undefined,
     undefined,
     undefined,
-    { automated: true },
+    { automated: true, ...(row.chatMessageId === null ? {} : { replyToMessageId: row.chatMessageId }) },
   );
   return delivery.retryable;
 };
@@ -787,42 +1109,113 @@ const scheduleSubmitAlarm = async (context: ModuleAlarmContext, requestId: strin
   );
 };
 
+const skipVoteResultText = (
+  language: "de" | "en",
+  result: "skipped" | "threshold_not_met" | "no_majority" | SongSkipOutcome,
+): string => {
+  const text = songRequestChatTexts[language].skipVote;
+  if (result === "skipped") return text.skipped;
+  if (result === "threshold_not_met") return text.threshold;
+  if (result === "no_majority") return text.majority;
+  if (result === "nothing_playing") return text.resultNothingPlaying;
+  if (result === "not_connected") return text.resultNotConnected;
+  if (result === "spotify_unavailable") return text.resultUnavailable;
+  if (result === "no_active_device") return text.resultDevice;
+  return skipOutcomeChatReply(language, result);
+};
+
+const handleSkipVoteResult = async (
+  context: ModuleAlarmContext,
+  action: Extract<ModuleDurableAction, { kind: "chat_vote.result" }>,
+  vote: NonNullable<Awaited<ReturnType<typeof voteRecord>>>,
+): Promise<void> => {
+  if (!await claimSkipVoteResult(context.DB, context.channelId, action.ballotId, action.closedAt)) return;
+  const yesVotes = action.counts[0] ?? 0;
+  const noVotes = action.counts[1] ?? 0;
+  const decision = decideSkipVote(yesVotes, noVotes, vote.skipThreshold ?? 5);
+  let result: "skipped" | "threshold_not_met" | "no_majority" | SongSkipOutcome;
+  let state: "queued" | "tie" | "no_votes" | "failed";
+  if (decision === "threshold_not_met") {
+    result = "threshold_not_met";
+    state = yesVotes === 0 && noVotes === 0 ? "no_votes" : "tie";
+  } else if (decision === "no_majority") {
+    result = "no_majority";
+    state = "tie";
+  } else {
+    result = vote.startTrackId === null ? "track_changed" : await skipSongTrackThroughChannelObject(
+      context.runModuleAlarm === undefined ? undefined : (handlerKey, alarmKey, invocation) =>
+        context.runModuleAlarm?.(handlerKey, alarmKey, invocation) ?? Promise.resolve(undefined),
+      vote.startTrackId,
+    );
+    state = result === "skipped" ? "queued" : "failed";
+    if (result === "skipped") await scheduleAlarmIfEarlier(context, SONG_REQUESTS_ALARM, Date.now() + 1_000, undefined, null);
+  }
+  await finishSkipVoteResult(context.DB, context.channelId, action.ballotId, state, result);
+  const language = await context.channelLanguage();
+  try { await context.sendChat(skipVoteResultText(language === "en" ? "en" : "de", result), `skip-vote-result:${action.ballotId}`); }
+  catch { /* The Spotify operation and cooldown are already committed. */ }
+};
+
 export const handleSongRequestDurableAction = async (context: ModuleAlarmContext, action: ModuleDurableAction): Promise<void> => {
   let vote = await voteRecord(context.DB, context.channelId, action.ballotId);
   if (vote === null) return;
+  if (vote.voteKind === "skip") {
+    await handleSkipVoteResult(context, action, vote);
+    return;
+  }
   if (vote.state === "open") {
-    const winner = voteWinner(action.counts);
+    const winner = await voteWinner(action.counts, action.ballotId);
     if (winner === null) {
       const zero = action.counts.every((count) => count === 0);
       await finishVoteWithoutRequest(context.DB, context.channelId, action.ballotId, zero ? "no_votes" : "tie", action.closedAt);
-      return;
-    }
-    const track = vote.candidates[winner];
-    if (track === undefined) return;
-    const roundId = vote.roundId ?? vote.streamId;
-    const streamId = vote.streamId;
-    const active = roundId !== null && await roundIsCurrentForSubmit(context, { streamId, roundId });
-    const requestId = crypto.randomUUID();
-    const claimed = await createVoteRequestClaim(context.DB, {
-      channelId: context.channelId,
-      ballotId: action.ballotId,
-      moderatorUserId: "system",
-      track,
-      streamId,
-      roundId,
-      requestId,
-      now: action.closedAt,
-      ...(active ? { activeRoundId: roundId } : {}),
-      initialState: active ? "approved" : "rejected",
-      failureReason: active ? null : "stream_offline",
-    });
-    if (!claimed) {
-      const current = await voteRecord(context.DB, context.channelId, action.ballotId);
-      if (current?.state === "open") await finishVoteWithoutRequest(context.DB, context.channelId, action.ballotId, "failed", action.closedAt);
+    } else {
+      const track = vote.candidates[winner.index];
+      if (track === undefined) return;
+      const roundId = vote.roundId ?? vote.streamId;
+      const streamId = vote.streamId;
+      const active = roundId !== null && await roundIsCurrentForSubmit(context, { streamId, roundId });
+      const requestId = crypto.randomUUID();
+      const claimed = await createVoteRequestClaim(context.DB, {
+        channelId: context.channelId,
+        ballotId: action.ballotId,
+        moderatorUserId: "system",
+        track,
+        streamId,
+        roundId,
+        requestId,
+        now: action.closedAt,
+        drawnByLot: winner.drawnByLot,
+        ...(active ? { activeRoundId: roundId } : {}),
+        initialState: active ? "approved" : "rejected",
+        failureReason: active ? null : "stream_offline",
+      });
+      if (!claimed) {
+        const current = await voteRecord(context.DB, context.channelId, action.ballotId);
+        if (current?.state === "open") await finishVoteWithoutRequest(context.DB, context.channelId, action.ballotId, "failed", action.closedAt);
+      }
     }
     vote = await voteRecord(context.DB, context.channelId, action.ballotId);
   }
+  if (vote?.state === "no_votes" && action.counts.every((count) => count === 0)) {
+    const language = await context.channelLanguage();
+    const delivery = await context.sendChat(language === "en" ? "Nobody voted – no song queued." : "Niemand hat abgestimmt – kein Song eingereiht.",
+      `song-vote-no-votes:${action.ballotId}`, undefined, undefined, undefined, { automated: true });
+    if (delivery.retryable) throw new Error("The song vote no-votes announcement is waiting for the automated output limit.");
+  }
+  if (vote?.state === "queued" && vote.drawnByLot && vote.requestId !== null) {
+    const request = await readSongRequest(context.DB, context.channelId, vote.requestId);
+    if (request !== null) {
+      const language = await context.channelLanguage();
+      const title = formatSongRequestTrack(request);
+      const delivery = await context.sendChat(language === "en" ? `Tie – drawn by lot: ${title}` : `Gleichstand – das Los entscheidet: ${title}`,
+        `song-vote-drawn:${action.ballotId}`, undefined, undefined, undefined, { automated: true });
+      if (delivery.retryable) throw new Error("The song vote draw announcement is waiting for the automated output limit.");
+    } else return;
+  }
   if (vote?.state === "queued" && vote.requestId !== null) await scheduleSubmitAlarm(context, vote.requestId);
+  if (vote?.state === "queued" && vote.requestId !== null) {
+    await enqueueSongRequestAlert(context, vote.requestId);
+  }
 };
 
 const notifyNowPlaying = async (context: Pick<ModuleAlarmContext, "publishModuleOverlayMessage">, revision: number): Promise<void> => {
@@ -1042,16 +1435,19 @@ export const pollSongRequestsPlayback = async (
     const response = await spotifyApiRequest(context.environment, token, "me/player/currently-playing");
     let track: SpotifyTrack | null = null;
     let progressMs: number | null | undefined;
+    let isPlaying = true;
     if (response.status !== 204) {
       const payload: unknown = await response.json();
       if (typeof payload === "object" && payload !== null && !Array.isArray(payload)) {
         const row = payload as Record<string, unknown>;
         const item = row.item;
+        isPlaying = row.is_playing !== false;
         if (isSpotifyTrack(item)) track = item;
         progressMs = Number.isSafeInteger(row.progress_ms) && (row.progress_ms as number) >= 0 ? row.progress_ms as number : undefined;
       }
     } else {
       progressMs = null;
+      isPlaying = false;
     }
     if (!await playbackCycleIsCurrent(context, roundId)) return;
     const snapshot = await createNowPlayingSnapshot(
@@ -1062,6 +1458,7 @@ export const pollSongRequestsPlayback = async (
       new Date(now).toISOString(),
       progressMs,
       streamRow.state === "online" ? { activeStreamId: roundId } : { offlineRoundId: roundId },
+      isPlaying,
     );
     if (!snapshot.committed || !await playbackCycleIsCurrent(context, roundId)) return;
     await setConnectionState(context, "connected", new Date(now).toISOString());
@@ -1222,11 +1619,20 @@ const readCurrentSongRequestScope = async (
   channelId: string,
   now: string,
 ): Promise<{ streamId: string | null; roundId: string; settingsJson: string; settings: SongRequestsSettings } | { error: "module_disabled" | "stream_offline" | "settings_invalid" }> => {
-  const module = await db.prepare("SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
-    .bind(channelId).first<{ enabled: number; settings: string }>();
+  const [module, channel] = await Promise.all([
+    db.prepare("SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(channelId).first<{ enabled: number; settings: string }>(),
+    db.prepare("SELECT language FROM channels WHERE channel_id = ?").bind(channelId).first<{ language: string }>(),
+  ]);
   if (module?.enabled !== 1) return { error: "module_disabled" };
   let settings: SongRequestsSettings;
-  try { settings = songRequestsSettingsSchema.parse(JSON.parse(module.settings) as unknown); }
+  try {
+    const rawSettings: unknown = JSON.parse(module.settings);
+    settings = songRequestsSettingsSchema.parse({
+      ...songRequestsSettingsForLanguage(channel?.language === "en" ? "en" : "de"),
+      ...(typeof rawSettings === "object" && rawSettings !== null && !Array.isArray(rawSettings) ? rawSettings : {}),
+    });
+  }
   catch { return { error: "settings_invalid" }; }
   const stream = await db.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
     .bind(channelId).first<{ state: string; stream_id: string | null }>();
@@ -1255,6 +1661,106 @@ const chatReply = (event: ModuleEvent, message: string): ModuleResult["actions"]
   automated: false,
   ...(typeof event.payload.message_id === "string" ? { replyToMessageId: event.payload.message_id } : {}),
 });
+
+const skipCommand = async (
+  event: ModuleEvent<SongRequestsSettings>,
+  context: ModuleExecutionContext,
+): Promise<ModuleResult | null> => {
+  const message = typeof event.payload.message === "object" && event.payload.message !== null
+    ? event.payload.message as Record<string, unknown> : null;
+  if (typeof message?.text !== "string" || !/^!skip$/iu.test(message.text.trim())) return null;
+  const language = await context.channelLanguage();
+  const text = songRequestChatTexts[language === "en" ? "en" : "de"].skipVote;
+  const userId = event.payload.chatter_user_id;
+  const login = event.payload.chatter_user_login;
+  if (typeof userId !== "string" || userId.length === 0 || typeof login !== "string" || login.length === 0 ||
+      await context.botUserId?.() === userId ||
+      typeof event.payload.source_broadcaster_user_id === "string" && event.payload.source_broadcaster_user_id !== event.channelId) return { actions: [], diagnostics: [] };
+
+  const reply = (value: string): ModuleResult => ({ actions: [chatReply(event, value)], diagnostics: [] });
+  const isModerator = event.chatStatus?.some((status) => status === "moderator" || status === "broadcaster") === true;
+  if (isModerator) {
+    const result = await skipSongTrackThroughChannelObject(context.runModuleAlarm === undefined
+      ? undefined
+      : (handlerKey, alarmKey, invocation) => context.runModuleAlarm?.(handlerKey, alarmKey, invocation) ?? Promise.resolve(undefined));
+    if (result === "skipped") {
+      await scheduleEventAlarmIfEarlier(context, SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + 1_000, undefined, null);
+    }
+    return reply(skipOutcomeChatReply(language, result));
+  }
+
+  const openBallotId = await openSkipVoteMapping(context.DB, event.channelId);
+  if (openBallotId !== null) {
+    const cast = context.castChatVote === undefined
+      ? null
+      : await context.castChatVote(openBallotId, userId, SKIP_VOTE_YES_CHOICE);
+    return cast === null || cast.status === "not_open"
+      ? reply(text.busy)
+      : reply(text.cast);
+  }
+
+  const settings = songRequestsSettingsSchema.parse(event.settings);
+  if (!settings.skipVote.enabled) return reply(text.disabled);
+  const trackId = await nowPlayingTrackId(context.DB, event.channelId);
+  if (trackId === null) return reply(text.nothingPlaying);
+  const [connection, slotHeld] = await Promise.all([
+    context.DB.prepare("SELECT state FROM song_requests_connections WHERE channel_id = ?")
+      .bind(event.channelId).first<{ state: string }>(),
+    spotifySlotHeld(context.DB, event.channelId),
+  ]);
+  if (!slotHeld || connection?.state === undefined || connection.state === "not_connected" || connection.state === "reconnect_required") {
+    return reply(text.notConnected);
+  }
+  if (connection.state === "no_active_device") return reply(text.device);
+  if (connection.state !== "connected") return reply(text.notConnected);
+
+  const lastVote = await context.DB.prepare(
+    `SELECT completed_at, skip_cooldown_seconds FROM song_requests_votes
+      WHERE channel_id = ? AND vote_kind = 'skip' AND completed_at IS NOT NULL
+      ORDER BY completed_at DESC, ballot_id DESC LIMIT 1`,
+  ).bind(event.channelId).first<{ completed_at: string; skip_cooldown_seconds: number | null }>();
+  if (lastVote !== null) {
+    const cooldownSeconds = lastVote.skip_cooldown_seconds ?? settings.skipVote.cooldownSeconds;
+    const remaining = Math.ceil((Date.parse(lastVote.completed_at) + cooldownSeconds * 1_000 - Date.now()) / 1_000);
+    if (remaining > 0) return reply(text.cooldown(remaining));
+  }
+  if (await context.ballots.hasOpenBallot?.()) return reply(text.busy);
+  if (context.startChatVote === undefined || context.castChatVote === undefined) return reply(text.busy);
+
+  const stream = await context.DB.prepare("SELECT stream_id FROM channel_stream_state WHERE channel_id = ? AND state = 'online'")
+    .bind(event.channelId).first<{ stream_id: string | null }>();
+  const ballotId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const inserted = await createSkipVoteMapping(context.DB, {
+    ballotId,
+    channelId: event.channelId,
+    streamId: stream?.stream_id ?? null,
+    userId,
+    startTrackId: trackId,
+    threshold: settings.skipVote.threshold,
+    cooldownSeconds: settings.skipVote.cooldownSeconds,
+    now,
+  });
+  if (!inserted) return reply(text.busy);
+  try {
+    const started = await context.startChatVote({
+      ballotId,
+      kind: "yes_no",
+      title: text.title,
+      labels: [text.yesLabel, text.noLabel],
+      durationSeconds: 30,
+    });
+    if (started.status !== "started" || started.ballotId !== ballotId) {
+      await removeUnstartedSkipVoteMapping(context.DB, event.channelId, ballotId);
+      return reply(text.busy);
+    }
+    const cast = await context.castChatVote(ballotId, userId, SKIP_VOTE_YES_CHOICE);
+    return cast.status === "not_open" ? reply(text.busy) : reply(text.started);
+  } catch {
+    await removeUnstartedSkipVoteMapping(context.DB, event.channelId, ballotId);
+    return reply(text.busy);
+  }
+};
 
 const processSongRequestCommand = async (
   event: ModuleEvent<SongRequestsSettings>,
@@ -1337,6 +1843,7 @@ const processSongRequestCommand = async (
     requesterUserId: userId,
     requesterLogin: login,
     requesterDisplayName: typeof payload.chatter_user_name === "string" && payload.chatter_user_name.length > 0 ? payload.chatter_user_name : login,
+    chatMessageId: typeof payload.message_id === "string" ? payload.message_id : null,
     initialState: scope.settings.mode === "moderated" ? "pending_review" as const : "approved" as const,
     now: parsedTime,
   };
@@ -1439,16 +1946,31 @@ const processSongRequestCommand = async (
       diagnostics: [],
     };
   }
+  if (current.state === "approved") await enqueueSongRequestAlert({ ...context, channelId: event.channelId }, requestId);
   if (scope.settings.mode === "automatic") {
     await context.scheduleAlarm(SONG_REQUESTS_SUBMIT_HANDLER, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`, Date.now(), undefined, null);
+    return { actions: [await queueOverlayChange({ DB: context.DB, channelId: event.channelId })], diagnostics: [] };
   }
   const position = admission.position ?? 1;
-  const reply = scope.settings.mode === "moderated" ? text.waitingReview(position) : text.accepted(position);
-  return { actions: [chatReply(event, reply), await queueOverlayChange({ DB: context.DB, channelId: event.channelId })], diagnostics: [] };
+  const rendered = renderSongRequestTemplate(scope.settings.waitingText, {
+    user: current.requesterDisplayName ?? current.requesterLogin ?? login,
+    "song.track": formatSongRequestTrack(current),
+    "song.artist": songRequestArtistDisplay(current.artists),
+    "song.title": current.title,
+    "song.album": current.albumName?.trim() ?? "",
+    "song.position": position,
+    "song.type": requestTypeLabel(current.requestType, language === "en" ? "en" : "de"),
+  });
+  const actions = scope.settings.waitingTextEnabled ? [chatReply(event, rendered)] : [];
+  actions.push(await queueOverlayChange({ DB: context.DB, channelId: event.channelId }));
+  return { actions, diagnostics: [] };
 };
 
 export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSettings>, context: ModuleExecutionContext): Promise<ModuleResult> => {
-  if (event.subscriptionType === "channel.chat.message") return await processSongRequestCommand(event, context);
+  if (event.subscriptionType === "channel.chat.message") {
+    const skipResult = await skipCommand(event, context);
+    return skipResult ?? await processSongRequestCommand(event, context);
+  }
   if (context.streamStateTransitionAccepted !== true) return { actions: [], diagnostics: [] };
   await scheduleEventAlarmIfEarlier(context,
     SONG_REQUESTS_LIFECYCLE_HANDLER,

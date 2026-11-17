@@ -917,6 +917,7 @@ export class ChannelObject extends DurableObject<Env> {
   private belaboxPollQueue: Promise<void> = Promise.resolve();
   private tempVipPanelRefresh: Promise<void> = Promise.resolve();
   private moduleLifecycleMutationQueue: Promise<void> = Promise.resolve();
+  private songRequestSkipQueue: Promise<void> = Promise.resolve();
   private statisticsWindowAlarmQueue: Promise<void> = Promise.resolve();
   private statisticsWordCounts = new Map<string, BufferedStatisticsWordCount>();
   private statisticsWordWordsByStream = new Map<string, Set<string>>();
@@ -1432,11 +1433,24 @@ export class ChannelObject extends DurableObject<Env> {
     operation: () => Promise<Result>,
   ): Promise<Result> {
     if (moduleId === "belabox" && handlerKey === "poll") return await this.serializeBelaboxPoll(operation);
+    if (moduleId === "song_requests" && handlerKey === "skip") return await this.serializeSongRequestSkip(operation);
     if (moduleId === "statistics") return await this.serializeStatisticsWindowAlarm(operation);
     if (MODULES.find((module) => module.id === moduleId)?.serializeLifecycleMutations === true) {
       return await this.serializeModuleLifecycleMutation(operation);
     }
     return await operation();
+  }
+
+  private async serializeSongRequestSkip<Result>(operation: () => Promise<Result>): Promise<Result> {
+    const previous = this.songRequestSkipQueue;
+    let release!: () => void;
+    this.songRequestSkipQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   private async serializeStatisticsWindowAlarm<Result>(operation: () => Promise<Result>): Promise<Result> {
@@ -4144,6 +4158,11 @@ export class ChannelObject extends DurableObject<Env> {
       } : {}),
       channelId,
       ...(moduleId === "song_requests" ? {
+        runModuleAlarm: (handlerKey: string, alarmKey: string, invocation?: unknown) => this.runModuleAlarm(
+          moduleId, handlerKey, alarmKey, invocation,
+        ),
+      } : {}),
+      ...(moduleId === "song_requests" ? {
         channelPoints: {
           resolveRedemption: async (operationId, status) => await this.runModuleAlarm(
             "channel_points", "serialized-lifecycle", "channel-points",
@@ -4243,9 +4262,10 @@ export class ChannelObject extends DurableObject<Env> {
         },
         deliverPending: () => this.deliverPendingQuizOverlaySnapshot(),
       },
-      ...(moduleId === "overlay_alerts" ? {
-        overlayAlertQueue: { advance: () => this.advanceOverlayAlertQueue() },
-      } : {}),
+      overlayAlertQueue: {
+        enqueue: (operationId, alert) => this.enqueueOverlayAlert(operationId, alert),
+        advance: () => this.advanceOverlayAlertQueue(),
+      },
       decoratePointWelcome: (action, accountId, claimId, attributions) => this.appendPointRoundWelcome(
         action,
         MODULES.find((candidate) => candidate.id === moduleId),

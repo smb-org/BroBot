@@ -138,6 +138,7 @@ describe("song request routes", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, CHANNEL_ID);
+    await database.prepare("UPDATE channels SET language = 'de' WHERE channel_id = ?").bind(CHANNEL_ID).run();
     await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
       .bind(CHANNEL_ID).run();
     await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
@@ -204,8 +205,10 @@ describe("song request routes", () => {
     const labels = startChatVote.mock.calls[0]?.[1]?.labels ?? [];
     expect(labels).toHaveLength(2);
     expect(labels.every((label) => Array.from(label).length <= 32)).toBe(true);
+    expect(startChatVote.mock.calls[0]?.[1]?.title).toBe("Song-Abstimmung");
     expect(await database.prepare("SELECT ballot_id FROM song_requests_votes").all()).toMatchObject({ results: [] });
 
+    await database.prepare("UPDATE channels SET language = 'en' WHERE channel_id = ?").bind(CHANNEL_ID).run();
     startChatVote.mockRejectedValueOnce(new RangeError("The candidate labels are invalid."));
     const invalidResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/vote`, {
       method: "POST",
@@ -223,6 +226,7 @@ describe("song request routes", () => {
 
     expect(invalidResponse.status).toBe(400);
     expect(await invalidResponse.json()).toEqual({ error: "song_vote_candidates_invalid" });
+    expect(startChatVote.mock.calls[1]?.[1]?.title).toBe("Song vote");
   });
 
   it("stores the song vote mapping before a fast ballot result can be delivered", async () => {
@@ -300,6 +304,12 @@ describe("song request routes", () => {
       .toEqual({ state: "queued" });
     expect(await database.prepare("SELECT state FROM song_requests WHERE operation_id = ?")
       .bind(`mod_vote:${ballotId}`).first()).toEqual({ state: "approved" });
+    const voteRow = await database.prepare("SELECT candidate_tracks_json FROM song_requests_votes WHERE ballot_id = ?")
+      .bind(ballotId).first<{ candidate_tracks_json: string }>();
+    expect(JSON.parse(voteRow?.candidate_tracks_json ?? "[]")).toMatchObject([
+      { albumName: "North Window" },
+      { albumName: "North Window" },
+    ]);
   });
 
   it("allows Spotify track lookup and ballot setup while no active device is reported", async () => {

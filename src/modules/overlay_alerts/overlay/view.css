@@ -30,6 +30,23 @@
     object-fit: contain;
   }
 
+  .overlay-alert--avatar {
+    flex-direction: row;
+    justify-content: center;
+    text-align: start;
+  }
+
+  .overlay-alert__avatar {
+    display: block;
+    width: 88px;
+    height: 88px;
+    flex: none;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  .overlay-alert--avatar .overlay-alert__text { width: auto; min-width: 0; flex: 1; text-align: start; }
+
   .overlay-alert__text {
     display: -webkit-box;
     width: 100%;

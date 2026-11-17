@@ -37,27 +37,11 @@
   .song-requests-panel__outcomes { display: grid; min-width: 0; }
   .song-requests-panel__outcome { display: flex; min-width: 0; min-height: var(--s8); align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s2); border-bottom: 1px solid var(--line); }
   .song-requests-panel__outcome time { flex: none; color: var(--text-3); }
-  .song-requests-panel__settings .ui-section__content { gap: var(--s3); }
   .song-requests-cockpit-action { min-width: 0; }
   .song-requests-cockpit-action { display: grid; gap: var(--s3); }
   .song-requests-cockpit-action__candidates { display: grid; gap: var(--s2); min-width: 0; }
   .song-requests-cockpit-action__candidates > strong { color: var(--text-2); font-size: var(--text-section); font-weight: 600; }
 
-  .song-requests-settings-editor { display: grid; align-content: start; gap: var(--s4); min-width: 0; }
-  .song-requests-settings-editor .ui-section__content { gap: var(--s3); }
-  .song-requests-settings-editor__disabled-note { display: grid; gap: var(--s2); justify-items: start; color: var(--text-2); font-size: 13px; }
-  .song-requests-settings-editor__disabled-note p { margin: 0; }
-  .song-requests-settings-editor .ui-switch-row { min-height: 36px; padding-inline-end: 0; }
-  .song-requests-settings-editor .ui-switch-row:has(.ui-switch-row__control) { grid-template-columns: minmax(0, 1fr) auto auto; }
-  .song-requests-settings-editor .ui-switch-row__control { grid-column: 2; grid-row: 1; }
-  .song-requests-settings-editor .ui-switch-row:has(.ui-switch-row__control) [data-slot="switch"] { grid-column: 3; }
-  .song-requests-settings-editor .ui-switch-row__control .unit-input { width: 8.5rem; }
-  .song-requests-settings-editor .ui-switch-row__control .ui-field__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  /* The editor has no field hints or errors, so the reserved empty slots would only add vertical gaps. */
-  .song-requests-settings-editor .unit-input__description,
-  .song-requests-settings-editor .unit-input__error,
-  .song-requests-settings-editor .segment-choice-field__hint,
-  .song-requests-settings-editor .segment-choice-field__warning { display: none; }
 
   .song-request-moderator-queue { display: grid; gap: var(--s2); min-width: 0; }
   .song-request-moderator-queue__toolbar { display: flex; min-height: var(--s8); align-items: center; justify-content: space-between; gap: var(--s2); }
@@ -76,9 +60,6 @@
   @media (max-width: 600px) {
     .song-request-moderator-queue .list-row { flex-wrap: wrap; }
     .song-request-moderator-queue .list-row__action { flex: 1 0 100%; justify-content: flex-end; }
-    .song-requests-settings-editor .ui-switch-row:has(.ui-switch-row__control) { grid-template-columns: minmax(0, 1fr) auto; }
-    .song-requests-settings-editor .ui-switch-row:has(.ui-switch-row__control) [data-slot="switch"] { grid-column: 2; }
-    .song-requests-settings-editor .ui-switch-row__control { grid-column: 1 / -1; grid-row: 2; }
     .song-requests-panel__connection-copy { align-items: flex-start; flex-direction: column; }
     .song-requests-panel__actions { justify-content: flex-start; }
     .song-requests-panel__list .list-row:has(.song-requests-panel__resolution) { flex-wrap: wrap; }
@@ -91,4 +72,76 @@
     .song-requests-panel__search-button { width: var(--control-height); min-width: var(--control-height); padding-inline: 0; }
     .song-requests-panel__search-button-label { display: none; }
   }
+}
+
+@layer components.modules {
+  .song-request-statistics__status {
+    min-height: 3em;
+    color: var(--color-text-3);
+    font-size: 0.875rem;
+  }
+
+  .song-request-statistics__reserved {
+    display: grid;
+    min-height: 21rem;
+    place-items: center;
+  }
+
+.song-request-statistics__columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+}
+
+.song-request-statistics__list {
+  min-width: 0;
+  min-height: 21rem;
+}
+
+.song-request-statistics__list h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.song-request-statistics__list ol {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.song-request-statistics__list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  padding: 0.375rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.song-request-statistics__name {
+  display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.song-request-statistics__name > span,
+.song-request-statistics__empty {
+  color: var(--color-text-3);
+  font-size: 0.875rem;
+}
+
+.song-request-statistics__count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+@media (max-width: 640px) {
+  .song-request-statistics__columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+}
 }

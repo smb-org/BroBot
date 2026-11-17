@@ -65,6 +65,7 @@ const seedRequest = async (
         uri: spotifyTrack.uri,
         title: spotifyTrack.name,
         artists: ["Mira Vale"],
+        albumName: "Quiet Atlas",
         durationMs: spotifyTrack.duration_ms,
         explicit: false,
         coverUrl: null,
@@ -231,6 +232,7 @@ describe("song request ledger", () => {
         uri: spotifyTrack.uri,
         title: spotifyTrack.name,
         artists: ["Mira Vale"],
+        albumName: "Quiet Atlas",
         durationMs: spotifyTrack.duration_ms,
         explicit: false,
         coverUrl: "https://i.scdn.co/image/fictional-cover",
@@ -254,7 +256,7 @@ describe("song request ledger", () => {
     const first = await createNowPlayingSnapshot(database as unknown as D1Database, CHANNEL_ID, STREAM_ID, spotifyTrack, NOW);
     expect(first.changed).toBe(true);
     expect(first.state).toMatchObject({ title: "Glass Harbor", artist: "Mira Vale", requester: null, source: "mod_vote" });
-    expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "request-first")).toMatchObject({ state: "observed_playing" });
+    expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "request-first")).toMatchObject({ state: "observed_playing", albumName: "Quiet Atlas" });
     expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "request-second")).toMatchObject({ state: "submitted" });
 
     const unchanged = await createNowPlayingSnapshot(database as unknown as D1Database, CHANNEL_ID, STREAM_ID, spotifyTrack, "2026-11-15T19:00:12.000Z");
@@ -267,6 +269,22 @@ describe("song request ledger", () => {
     expect(duplicateAgain.state).toMatchObject({ title: "Glass Harbor", requester: null });
     expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "request-second")).toMatchObject({ state: "observed_playing" });
     expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "request-old-stream")).toMatchObject({ state: "submitted" });
+  });
+
+  it("keeps the published progress anchor until a seek drifts past three seconds", async () => {
+    const database = await createDatabase();
+    const db = database as unknown as D1Database;
+    const first = await createNowPlayingSnapshot(db, CHANNEL_ID, STREAM_ID, spotifyTrack, NOW, 10_000);
+    const steadyPoll = await createNowPlayingSnapshot(
+      db, CHANNEL_ID, STREAM_ID, spotifyTrack, "2026-11-15T19:00:12.000Z", 22_000,
+    );
+
+    expect(steadyPoll).toMatchObject({ changed: false, revision: first.revision });
+    expect(await database.prepare("SELECT progress_ms, observed_at FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ progress_ms: 10_000, observed_at: NOW });
+
+    const seek = await createNowPlayingSnapshot(db, CHANNEL_ID, STREAM_ID, spotifyTrack, "2026-11-15T19:00:24.000Z", 23_000);
+    expect(seek).toMatchObject({ changed: true, revision: first.revision + 1 });
   });
 
   it("settles stream-scoped rows and advances the empty overlay revision on offline", async () => {
@@ -324,9 +342,14 @@ describe("song request ledger", () => {
     await database.prepare("UPDATE song_requests_votes SET state = 'no_votes' WHERE ballot_id = ?").bind("ballot-old-outcome").run();
     await addVote(database, "ballot-current-outcome", NOW, STREAM_ID);
     await database.prepare("UPDATE song_requests_votes SET state = 'tie' WHERE ballot_id = ?").bind("ballot-current-outcome").run();
+    await addVote(database, "ballot-drawn-outcome", "2026-11-15T18:59:00.000Z", STREAM_ID);
+    await database.prepare("UPDATE song_requests_votes SET state = 'queued', drawn_by_lot = 1 WHERE ballot_id = ?").bind("ballot-drawn-outcome").run();
 
     expect(await recentSongVoteOutcomes(database as unknown as D1Database, CHANNEL_ID, STREAM_ID))
-      .toEqual([{ ballotId: "ballot-current-outcome", state: "tie", createdAt: NOW }]);
+      .toEqual([
+        { ballotId: "ballot-current-outcome", state: "tie", drawnByLot: false, createdAt: NOW },
+        { ballotId: "ballot-drawn-outcome", state: "drawn", drawnByLot: true, createdAt: "2026-11-15T18:59:00.000Z" },
+      ]);
     expect(await latestSongRequestStreamId(database as unknown as D1Database, CHANNEL_ID, null)).toBe(STREAM_ID);
   });
 });

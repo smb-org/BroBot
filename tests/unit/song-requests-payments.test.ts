@@ -201,7 +201,7 @@ describe("song request payments", () => {
   it("charges a paid admission after insert and applies a refund operation at most once", async () => {
     const harness = await createHarness({ paymentMode: "bot_points", botPointsCost: 13, mode: "automatic" });
     const result = await processSongRequestsEvent(harness.createEvent("cedar_viewer"), harness.context);
-    expect(result.actions[0]).toMatchObject({ kind: "chat", automated: false });
+    expect(result.actions.filter((action) => action.kind === "chat")).toEqual([]);
     expect(harness.apply).toHaveBeenCalledTimes(1);
     expect(harness.apply.mock.calls[0]?.[0]).toContain(":charge");
     expect(harness.apply.mock.calls[0]?.[1]).toBe("stake");
@@ -231,10 +231,81 @@ describe("song request payments", () => {
     expect(harness.balanceOf("__house")).toBe(0);
   });
 
+  it.each([
+    {
+      language: "en" as const,
+      login: "no_device_viewer_en",
+      device: "Spotify has no active playback device. Start Spotify on a device.",
+      refund: "Bot points were refunded.",
+    },
+    {
+      language: "de" as const,
+      login: "no_device_viewer_de",
+      device: "Spotify hat kein aktives Wiedergabegerät. Starte Spotify auf einem Gerät.",
+      refund: "Bot-Punkte wurden erstattet.",
+    },
+  ])("waits for Spotify before replying to !sr and reports a safe NO_ACTIVE_DEVICE result in $language", async ({ language, login, device, refund }) => {
+    const harness = await createHarness({ paymentMode: "bot_points", botPointsCost: 13, mode: "automatic" }, { language });
+    harness.fetcher.mockImplementation((input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("me/player/queue")) return Promise.resolve(new Response(JSON.stringify({
+        error: { status: 404, message: "No active device found", reason: "NO_ACTIVE_DEVICE" },
+      }), { status: 404 }));
+      return Promise.resolve(new Response(JSON.stringify({ tracks: { items: [{ ...track }] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+
+    const result = await processSongRequestsEvent(harness.createEvent(login), harness.context);
+    expect(result.actions.filter((action) => action.kind === "chat")).toEqual([]);
+    const request = await harness.database.prepare("SELECT id, chat_message_id FROM song_requests WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ id: string; chat_message_id: string | null }>();
+    expect(request?.chat_message_id).toBe("message-" + login);
+    if (request === null) throw new Error("The request was not admitted.");
+
+    await handleSubmitAlarm(harness.alarmContext, `submit:${request.id}`);
+
+    expect(harness.sendChat).toHaveBeenCalledOnce();
+    expect(harness.sendChat.mock.calls[0]?.[0]).toContain(device);
+    expect(harness.sendChat.mock.calls[0]?.[0]).toContain(refund);
+    expect(harness.sendChat.mock.calls[0]?.[0]).not.toMatch(/NO_ACTIVE_DEVICE|Spotify request failed|404/u);
+    expect(harness.sendChat.mock.calls[0]?.[5]).toMatchObject({
+      automated: true,
+      replyToMessageId: "message-" + login,
+    });
+    expect(await harness.database.prepare("SELECT state, refund_due FROM song_requests WHERE id = ?")
+      .bind(request.id).first()).toEqual({ state: "failed", refund_due: 0 });
+  });
+
+  it("sends one formatted success reply after Spotify confirms the queue request", async () => {
+    const harness = await createHarness({ paymentMode: "free", mode: "automatic" });
+    harness.fetcher.mockImplementation((input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("me/player/queue")) return Promise.resolve(new Response(null, { status: 204 }));
+      return Promise.resolve(new Response(JSON.stringify({ tracks: { items: [{ ...track }] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+
+    const result = await processSongRequestsEvent(harness.createEvent("success_viewer"), harness.context);
+    expect(result.actions.filter((action) => action.kind === "chat")).toEqual([]);
+    const request = await harness.database.prepare("SELECT id, chat_message_id FROM song_requests WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ id: string; chat_message_id: string | null }>();
+    if (request === null) throw new Error("The request was not admitted.");
+
+    await handleSubmitAlarm(harness.alarmContext, `submit:${request.id}`);
+
+    expect(harness.sendChat).toHaveBeenCalledOnce();
+    expect(harness.sendChat.mock.calls[0]?.[0]).toBe("“Mira Vale – Glass Harbor (Quiet Atlas)” was queued in Spotify. Position 1.");
+    expect(harness.sendChat.mock.calls[0]?.[5]).toEqual({ automated: true, replyToMessageId: request.chat_message_id });
+  });
+
   it("keeps a late Spotify POST completion terminal after cleanup and refunds the ledger charge once", async () => {
     const harness = await createHarness({ paymentMode: "bot_points", mode: "automatic" });
     const result = await processSongRequestsEvent(harness.createEvent("late_post_viewer"), harness.context);
-    expect(result.actions[0]).toMatchObject({ kind: "chat", automated: false });
+    expect(result.actions.filter((action) => action.kind === "chat")).toEqual([]);
     const row = await harness.database.prepare("SELECT id FROM song_requests WHERE channel_id = ?")
       .bind(CHANNEL_ID).first<{ id: string }>();
     if (row === null) throw new Error("The paid request was not recorded.");
@@ -276,8 +347,8 @@ describe("song request payments", () => {
   });
 
   it.each([
-    ["de", "Der Song könnte in Spotify eingereiht worden sein; bitte prüfe Spotify vor einem erneuten Versuch."],
-    ["en", "The song may have been queued in Spotify; check Spotify before retrying."],
+    ["de", "Spotify hat den Ausgang nicht bestätigt. Bitte prüfe die Warteschlange vor einem erneuten Versuch. Bot-Punkte wurden erstattet."],
+    ["en", "Spotify did not confirm the result. Check the queue before trying again. Bot points were refunded."],
   ] as const)("keeps a disabled pending submission uncertain in %s", async (language, expectedMessage) => {
     const harness = await createHarness({ paymentMode: "bot_points", mode: "automatic" }, { language });
     await processSongRequestsEvent(harness.createEvent(`disable_pending_${language}`), harness.context);
@@ -318,9 +389,9 @@ describe("song request payments", () => {
       undefined,
       undefined,
       undefined,
-      { automated: true },
+      { automated: true, replyToMessageId: `message-disable_pending_${language}` },
     );
-    expect(harness.sendChat.mock.calls[0]?.[0]).not.toContain("not queued in Spotify");
+    expect(harness.sendChat.mock.calls[0]?.[0]).not.toMatch(/NO_ACTIVE_DEVICE|PREMIUM_REQUIRED|spotify_\d{3}/u);
     expect(await harness.database.prepare("SELECT state, failure_reason, refund_due FROM song_requests WHERE id = ?")
       .bind(row.id).first()).toEqual({ state: "failed", failure_reason: "submit_outcome_uncertain", refund_due: 0 });
     expect(harness.balanceOf(`user-disable_pending_${language}`)).toBe(1_000);
@@ -358,12 +429,12 @@ describe("song request payments", () => {
 
     await handleSubmitAlarm(harness.alarmContext, `submit:${row.id}`);
     expect(harness.sendChat).toHaveBeenLastCalledWith(
-      "The song may have been queued in Spotify; check Spotify before retrying.",
+      "Spotify did not confirm the result. Check the queue before trying again.",
       expect.any(String),
       undefined,
       undefined,
       undefined,
-      { automated: true },
+      { automated: true, replyToMessageId: `message-unclear_removal_${String(refund)}` },
     );
   });
 
