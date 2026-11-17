@@ -1536,6 +1536,20 @@ nicht die Spotify-Warteschlange. Modul- und Regel-Einstellungen verwenden
 serverseitige Zod-Validierung sowie `useDraft`, `useDraftGuard` und explizites
 Speichern.
 
+### Statistikabschnitte
+
+Ein Modul kann `statisticsSections` registrieren. Jeder Abschnitt besitzt eine
+stabile `id`, einen deutschen und englischen Titel und lädt seine
+Dashboard-Komponente über `load` erst bei Bedarf. Der gemeinsame Renderer zeigt
+Abschnitte aktivierter Module in der Stream-Detailansicht mit dem Scope
+`{ kind: "stream", streamId }` sowie in der Gesamtansicht mit
+`{ kind: "total" }`. Die geladene Komponente fragt ausschließlich die eigene
+Modulroute ab; der Host reicht `channelId`, Sprache und Scope weiter und blendet
+Abschnitte deaktivierter Module aus. Datenzugriff und Darstellung bleiben im
+Modul, während die Statistikseite Vertrag und Reihenfolge bereitstellt. Das
+Statistikpanel selbst importiert den Renderer nicht (Modulgrenze), sondern
+ruft die vom Host übergebene Funktion `renderStatisticsSections(scope)` auf.
+
 ## Checkliste für ein neues Modul
 
 - [ ] **Contract:** `id`, `navigationCategory`, `settingsSchema`, `defaultSettings`; nur benötigte optionale Felder (`eventSubTypes`, `routes`, `panel` oder `settingsEditor` lazy, `defaultEnabled` bewusst gewählt). Bei Secrets, Ballots oder aktiven Chattern die jeweilige Deklaration und den Zugriff nur über den Kontext nutzen.

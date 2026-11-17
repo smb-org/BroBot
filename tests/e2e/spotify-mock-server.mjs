@@ -25,6 +25,7 @@ const tracks = [
 ];
 let queue = [];
 let current = null;
+let nextRequests = 0;
 const redemptions = new Map();
 
 const json = (response, status, value) => {
@@ -52,6 +53,7 @@ const server = createServer((request, response) => {
   if (url.pathname === "/__test/reset" && request.method === "POST") {
     queue = [];
     current = null;
+    nextRequests = 0;
     redemptions.clear();
     response.writeHead(204);
     response.end();
@@ -67,6 +69,10 @@ const server = createServer((request, response) => {
       redemptions.set(value.id, value);
       json(response, 201, { accepted: true });
     }).catch(() => json(response, 400, { error: "redemption_invalid" }));
+    return;
+  }
+  if (url.pathname === "/__test/state" && request.method === "GET") {
+    json(response, 200, { currentTrackId: current?.id ?? null, nextRequests });
     return;
   }
   if (url.pathname === "/__test/redemptions" && request.method === "GET") {
@@ -150,6 +156,18 @@ const server = createServer((request, response) => {
     }
     queue.push(track);
     current ??= track;
+    response.writeHead(204);
+    response.end();
+    return;
+  }
+  if (url.pathname === "/v1/me/player/next" && request.method === "POST") {
+    nextRequests += 1;
+    if (current === null) {
+      json(response, 404, { error: { status: 404, message: "No active device", reason: "NO_ACTIVE_DEVICE" } });
+      return;
+    }
+    if (queue[0]?.id === current.id) queue.shift();
+    current = queue[0] ?? null;
     response.writeHead(204);
     response.end();
     return;

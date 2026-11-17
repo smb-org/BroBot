@@ -41,4 +41,13 @@ describe("song request settings", () => {
     expect(songRequestsSettingsSchema.safeParse({ queueOverlayRows: 21 }).success).toBe(false);
     expect(songRequestsSettingsSchema.safeParse({ botPointsCost: 0 }).success).toBe(false);
   });
+
+  it("defaults skip voting and request alerts with bounded skip settings", () => {
+    const settings = songRequestsSettingsSchema.parse({});
+    expect(settings.skipVote).toEqual({ enabled: false, threshold: 5, cooldownSeconds: 120 });
+    expect(settings.requestAlert).toEqual({ enabled: true });
+    expect(songRequestsSettingsSchema.safeParse({ skipVote: { enabled: true, threshold: 100, cooldownSeconds: 3600 } }).success).toBe(true);
+    expect(songRequestsSettingsSchema.safeParse({ skipVote: { enabled: true, threshold: 0, cooldownSeconds: 120 } }).success).toBe(false);
+    expect(songRequestsSettingsSchema.safeParse({ skipVote: { enabled: true, threshold: 5, cooldownSeconds: 3601 } }).success).toBe(false);
+  });
 });

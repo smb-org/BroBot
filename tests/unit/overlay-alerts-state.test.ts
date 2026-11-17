@@ -90,6 +90,17 @@ describe("overlay alerts state", () => {
     expect(parseOverlayAlertPayload({ ...payload, volumePercent: 101 })).toBeNull();
   });
 
+  it("accepts only short Twitch CDN avatar URLs and preserves alerts without an avatar", () => {
+    const payload = { operationId: "song-request-alert:request-1", text: "Song request", durationSeconds: 5, volumePercent: 80 };
+    expect(parseOverlayAlertPayload({ ...payload, avatarUrl: "https://static-cdn.jtvnw.net/avatar.png" }))
+      .toMatchObject({ avatarUrl: "https://static-cdn.jtvnw.net/avatar.png" });
+    expect(parseOverlayAlertPayload({ ...payload, avatarUrl: "https://example.invalid/avatar.png" })).toBeNull();
+    expect(parseOverlayAlertPayload({ ...payload, avatarUrl: "https://static-cdn.jtvnw.net" })).toBeNull();
+    expect(parseOverlayAlertPayload({ ...payload, avatarUrl: "https://static-cdn.jtvnw.net:444/avatar.png" })).toBeNull();
+    expect(parseOverlayAlertPayload({ ...payload, avatarUrl: `https://static-cdn.jtvnw.net/${"a".repeat(240)}` })).toBeNull();
+    expect(parseOverlayAlertPayload(payload)).toEqual(payload);
+  });
+
   it("renders viewer placeholders as plain text and caps the rendered result", () => {
     const rendered = renderOverlayAlertText("{user}: {input} · {reward}", {
       userName: "Viewer",

@@ -33,9 +33,10 @@ export const songRequestsPanelTexts = {
     emptyRequestsDescription: "Neue Song-Wünsche erscheinen hier.",
     requestLoadError: "Song-Wünsche konnten nicht geladen werden.",
     recentVotes: "Abstimmungsergebnisse in diesem Stream",
-    emptyVoteOutcomes: "Noch keine unentschiedenen oder leeren Abstimmungen.",
+    emptyVoteOutcomes: "Noch keine ausgelosten oder leeren Abstimmungen.",
     voteOutcomes: {
       tie: "Gleichstand · nichts eingereiht",
+      drawn: "Gleichstand · Los hat entschieden",
       no_votes: "Keine Stimmen · nichts eingereiht",
       failed: "Stream offline · nichts eingereiht",
     },
@@ -115,9 +116,10 @@ export const songRequestsPanelTexts = {
     emptyRequestsDescription: "New song requests will appear here.",
     requestLoadError: "Song requests could not be loaded.",
     recentVotes: "Vote outcomes in this stream",
-    emptyVoteOutcomes: "No tied or empty votes in this stream yet.",
+    emptyVoteOutcomes: "No drawn or empty votes in this stream yet.",
     voteOutcomes: {
       tie: "Tie · nothing queued",
+      drawn: "Tie · drawn by lot",
       no_votes: "No votes · nothing queued",
       failed: "Stream offline · nothing queued",
     },

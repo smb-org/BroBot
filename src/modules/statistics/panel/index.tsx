@@ -1,13 +1,13 @@
 import "./panel.css";
 
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
 
 import { EmptyState, Icon, ListDetail, LoadState, SubInspector } from "../../../dashboard/ui";
 import { dashboardCommonTexts, dashboardTexts } from "../../../dashboard/locale";
 import { useModulePagesQuery, useModuleQuery } from "../../../dashboard/data/module-query";
 import { useChannelSettings } from "../../../dashboard/data/channel-settings";
 import { browserTimeZone } from "../../../dashboard/ui/format-relative-time";
-import type { ModulePanelProperties } from "../../contract";
+import type { ModulePanelProperties, ModuleStatisticsSectionScope } from "../../contract";
 import type { StatisticsStreamDetailResponse, StatisticsStreamEvent, StatisticsStreamListResponse, StatisticsStreamSummary } from "../contracts";
 import { loadStatisticsStream, loadStatisticsStreams } from "./service";
 import { statisticsPanelTexts } from "./locale";
@@ -117,7 +117,7 @@ const StreamRow = ({ summary, active, language, timeZone, timeZoneFallbackLabel,
   </li>;
 };
 
-const StreamInspector = ({ detail, language, timeZone, timeZoneFallbackLabel, labels, highlightedEventId, onHighlightEvent, onClose, refreshError, onRetry }: {
+const StreamInspector = ({ detail, language, timeZone, timeZoneFallbackLabel, labels, highlightedEventId, onHighlightEvent, onClose, refreshError, onRetry, renderStatisticsSections }: {
   detail: StatisticsStreamDetailResponse;
   language: "de" | "en";
   timeZone: string | null;
@@ -128,6 +128,7 @@ const StreamInspector = ({ detail, language, timeZone, timeZoneFallbackLabel, la
   onClose: () => void;
   refreshError: boolean;
   onRetry: () => void;
+  renderStatisticsSections: (scope: ModuleStatisticsSectionScope) => ReactNode;
 }): ReactElement => {
   const { summary } = detail;
   const peakTime = summary.peakAt === null
@@ -219,10 +220,11 @@ const StreamInspector = ({ detail, language, timeZone, timeZoneFallbackLabel, la
         </li>)}
       </ul>}
     </section>
+    {renderStatisticsSections({ kind: "stream", streamId: summary.streamId })}
   </SubInspector>;
 };
 
-export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePanelProperties): ReactElement {
+export function StatisticsStreamsPanel({ channelId, language = "de", renderStatisticsSections = () => null }: ModulePanelProperties): ReactElement {
   const labels = statisticsPanelTexts(language);
   const settingsQuery = useChannelSettings(channelId);
   const timeZone = settingsQuery.isError ? browserTimeZone() : settingsQuery.data?.timeZone ?? null;
@@ -361,6 +363,7 @@ export function StatisticsStreamsPanel({ channelId, language = "de" }: ModulePan
     onClose={closeInspector}
     refreshError={detailQuery.isError}
     onRetry={() => { void detailQuery.refetch(); }}
+    renderStatisticsSections={renderStatisticsSections}
   />;
 
   return <ListDetail list={list} inspector={inspector} onCloseInspector={closeInspector} />;
@@ -372,5 +375,10 @@ const STATISTICS_PAGES: Readonly<Record<string, (properties: ModulePanelProperti
 };
 
 export function StatisticsPanel(properties: ModulePanelProperties): ReactElement {
-  return (STATISTICS_PAGES[properties.pageId ?? ""] ?? ((streams) => <StatisticsStreamsPanel {...streams} />))(properties);
+  const page = (STATISTICS_PAGES[properties.pageId ?? ""] ?? ((streams) => <StatisticsStreamsPanel {...streams} />))(properties);
+  if (properties.pageId !== "trends") return page;
+  return <>
+    {page}
+    {properties.renderStatisticsSections?.({ kind: "total" })}
+  </>;
 }

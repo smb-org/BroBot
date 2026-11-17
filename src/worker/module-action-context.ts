@@ -7,6 +7,7 @@ import { readChannelStreamState } from "./db/stream-state";
 import { prepareChannelVariableChange, readChannelVariables } from "./db/channel-variables";
 import { secureRandomInteger } from "./template-resolver";
 import { createModuleSecretAccess } from "./module-secrets";
+import { fetchTwitchUsersById } from "./twitch/user-resolution";
 
 /** Builds the worker-owned, channel-scoped context used by action retries outside EventSub dispatch. */
 export const createModuleActionExecutionContext = (
@@ -41,6 +42,8 @@ export const createModuleActionExecutionContext = (
       enqueue: (operationId, alert) => object.enqueueOverlayAlert(operationId, alert),
       advance: () => object.advanceOverlayAlertQueue(),
     },
+    resolveTwitchUserById: async (userId) =>
+      (await fetchTwitchUsersById(fetch, environment, [userId])).get(userId) ?? null,
     sendChat: (text, operationId) => object.sendModuleChatMessage(moduleId, operationId, text),
     streamState: async (): Promise<ModuleStreamState> => {
       const state = await readChannelStreamState(environment.DB, channelId);

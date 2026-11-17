@@ -5,6 +5,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import { blitzQuestionColumns } from "../../src/modules/blitz_round/adapters/d1";
+import { ACCEPTED_REQUEST_STATES_SQL, SONG_REQUEST_STATISTICS_STREAM_SCOPE_SQL } from "../../src/modules/song_requests/adapters/d1";
 import { moduleCommandCollisionWriteGuard } from "../../src/modules/contracts/module-command-collision";
 import { MODULES } from "../../src/modules/registry";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
@@ -131,6 +132,8 @@ const sqlGetFixtures = new Map<string, string>([
   ["initialAuthorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
   ["auditAuthorization.sql", authorizeModuleMutation("channel-id", actor, now).sql],
   ["referenceQuery.sql", apiSourceReferenceQuery("channel-id", "sunset").sql],
+  ["scopeSql", SONG_REQUEST_STATISTICS_STREAM_SCOPE_SQL],
+  ["ACCEPTED_REQUEST_STATES_SQL", ACCEPTED_REQUEST_STATES_SQL],
   ["CHAT_VOTE_RESULT_TEXT_REFERENCE_EXISTS_SQL", CHAT_VOTE_RESULT_TEXT_REFERENCE_EXISTS_SQL],
   ["CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL", CHAT_VOTE_RESULT_TEXT_REFERENCE_SOURCE_SQL],
   ["CHAT_VOTE_RESULT_TEXT_REFERENCE_CURRENT_VOTE_WHERE_SQL", CHAT_VOTE_RESULT_TEXT_REFERENCE_CURRENT_VOTE_WHERE_SQL],
@@ -400,9 +403,9 @@ describe("SQL contract", () => {
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
       expect(objects.filter((object) => object.type === "table")).toHaveLength(88);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(83);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(84);
       expect(objects.filter((object) => object.type === "trigger")).toHaveLength(180);
-      expect(objects).toHaveLength(351);
+      expect(objects).toHaveLength(352);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),
@@ -416,6 +419,13 @@ describe("SQL contract", () => {
       const songRequestConnectionColumns = [...tableColumns("song_requests_connections")];
       expect(songRequestConnectionColumns).toHaveLength(6);
       expect(songRequestConnectionColumns).toContain("poll_backoff_until");
+      expect([...tableColumns("song_requests")]).toEqual(expect.arrayContaining([
+        "album_name", "chat_message_id", "channel_points_resolution_completed",
+      ]));
+      expect([...tableColumns("song_requests_votes")]).toContain("drawn_by_lot");
+      expect(database.prepare("PRAGMA index_list(song_requests)").all()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "song_requests_statistics_idx" }),
+      ]));
       expect([...tableColumns("blitz_questions")]).toContain("search_text");
       expect([...tableColumns("twitch_login_identity")]).toEqual(expect.arrayContaining([
         "refresh_lease_owner", "refresh_lease_until",

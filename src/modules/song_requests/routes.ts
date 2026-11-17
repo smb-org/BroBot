@@ -5,6 +5,7 @@ import type { ModuleChatVoteStartResult, ModuleRouteEnvironment } from "../contr
 import { spotifySearchTracks, spotifyTrackById, SpotifyRequestError, type SpotifyEnvironment } from "./adapters/spotify";
 import { spotifyTrackIdFromInput } from "./domain/track";
 import { songVoteLabels } from "./domain/vote-labels";
+import { formatSongRequestTrack } from "./domain/track-display";
 import {
   closeOfflineSongRequestRound,
   cleanupSongRequestRound,
@@ -14,6 +15,7 @@ import {
   readSongRequest,
   recentSongRequests,
   recentSongVoteOutcomes,
+  readSongRequestStatistics,
   resolveUnknownRequest,
   songRequestTrackFromSpotify,
   spotifySlotHeld,
@@ -30,6 +32,8 @@ import {
   SONG_REQUESTS_SUBMIT_HANDLER,
   SONG_REQUESTS_SUBMIT_ALARM_PREFIX,
   SONG_REQUESTS_LIFECYCLE_HANDLER,
+  enqueueSongRequestAlert,
+  skipSongTrack,
 } from "./service";
 import { songRequestsSettingsSchema } from "./contracts";
 
@@ -247,6 +251,8 @@ songRequestsRoutes.post("/vote", async (context) => {
   if (labels.length !== tracks.length) return context.json({ error: "song_vote_candidates_invalid" }, 400);
   const startChatVote = context.get("startChatVote");
   if (startChatVote === undefined) return context.json({ error: "chat_vote_unavailable" }, 503);
+  const channelLanguage = await context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
+    .bind(channel(context)).first<{ language: string }>();
   const ballotId = crypto.randomUUID();
   const now = new Date().toISOString();
   const mapping = await context.env.DB.prepare(
@@ -277,7 +283,12 @@ songRequestsRoutes.post("/vote", async (context) => {
       .bind(channel(context), ballotId).run();
   };
   let started: ModuleChatVoteStartResult;
-  try { started = await startChatVote(channel(context), { ballotId, title: "Song vote", labels, durationSeconds: 90 }); }
+  try { started = await startChatVote(channel(context), {
+    ballotId,
+    title: channelLanguage?.language === "en" ? "Song vote" : "Song-Abstimmung",
+    labels,
+    durationSeconds: 90,
+  }); }
   catch (error) {
     await removeUnstartedMapping();
     if (error instanceof RangeError) return context.json({ error: "song_vote_candidates_invalid" }, 400);
@@ -294,6 +305,18 @@ songRequestsRoutes.post("/vote", async (context) => {
   return context.json({ ballotId: started.ballotId, tracks: tracks.map(songRequestTrackFromSpotify) }, 201);
 });
 
+songRequestsRoutes.post("/skip", async (context) => {
+  if (!isModerator(context)) return moderatorDenied(context);
+  const outcome = await skipSongTrack(
+    { DB: context.env.DB, channelId: channel(context), environment: context.env },
+    async () => await token(context),
+  );
+  if (outcome === "skipped") {
+    await scheduleAlarmIfEarlier(context, "song_requests", SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + 1_000, null);
+  }
+  return context.json({ outcome });
+});
+
 songRequestsRoutes.get("/requests", async (context) => {
   if (!isModerator(context)) return moderatorDenied(context);
   const current = await currentRequestRound(context);
@@ -304,6 +327,23 @@ songRequestsRoutes.get("/requests", async (context) => {
   });
 });
 
+songRequestsRoutes.get("/statistics", async (context) => {
+  const query = context.req.query();
+  const scope = query.scope;
+  if (scope === "total") {
+    return context.json(await readSongRequestStatistics(context.env.DB, channel(context), null));
+  }
+  const requestedStreamId = query.streamId;
+  if (scope !== "stream" || requestedStreamId === undefined || !/^[A-Za-z0-9_-]{1,128}$/u.test(requestedStreamId)) {
+    return context.json({ error: "song_request_statistics_scope_invalid" }, 400);
+  }
+  const stream = await context.env.DB.prepare(
+    "SELECT 1 AS present FROM channel_statistics WHERE channel_id = ? AND stream_id = ? LIMIT 1",
+  ).bind(channel(context), requestedStreamId).first<{ present: number }>();
+  if (stream === null) return context.json({ error: "song_request_statistics_stream_not_found" }, 404);
+  return context.json(await readSongRequestStatistics(context.env.DB, channel(context), requestedStreamId));
+});
+
 songRequestsRoutes.get("/queue", async (context) => {
   if (!isModerator(context)) return moderatorDenied(context);
   const current = await currentRequestRound(context);
@@ -311,7 +351,7 @@ songRequestsRoutes.get("/queue", async (context) => {
   const queue = await pendingSongRequestQueue(context.env.DB, channel(context), current.roundId);
   return context.json({ count: queue.count, items: queue.requests.map((row) => ({
     requestId: row.requestId,
-    title: row.title,
+    title: formatSongRequestTrack(row),
     spotifyUrl: row.spotifyUrl,
     artists: row.artists,
     requester: row.requesterDisplayName ?? row.requesterLogin ?? "",
@@ -331,6 +371,16 @@ songRequestsRoutes.post("/requests/:requestId/approve", async (context) => {
     activeRoundId: current.roundId, now: new Date().toISOString(),
   });
   if (!changed) return context.json({ error: "song_request_not_pending_review" }, 409);
+  const alertQueue = context.get("overlayAlertQueue")?.(channel(context));
+  const resolveTwitchUserById = context.get("resolveTwitchUserById");
+  await enqueueSongRequestAlert({
+    DB: context.env.DB,
+    channelId: channel(context),
+    ...(alertQueue === undefined ? {} : { overlayAlertQueue: alertQueue }),
+    ...(resolveTwitchUserById === undefined ? {} : {
+      resolveTwitchUserById: async (userId) => await resolveTwitchUserById(channel(context), userId),
+    }),
+  }, requestId);
   await context.get("scheduleModuleAlarm")(
     channel(context), "song_requests", SONG_REQUESTS_SUBMIT_HANDLER,
     `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`, Date.now(), current.streamId === null ? null : undefined,

@@ -7,6 +7,28 @@ import OverlayAlertView from "../../src/modules/overlay_alerts/overlay/view";
 afterEach(cleanup);
 
 describe("overlay alert element", () => {
+  it("keeps channel-point alert markup unchanged when there is no avatar", () => {
+    const now = Date.parse("2030-01-01T00:00:00.000Z");
+    const markup = renderToStaticMarkup(<OverlayAlertView config={{}} state={{
+      revision: 1,
+      serverNow: new Date(now).toISOString(),
+      current: {
+        operationId: "redemption-alert",
+        text: "Viewer redeemed Welcome",
+        durationSeconds: 5,
+        volumePercent: 80,
+        startedAt: new Date(now).toISOString(),
+        endsAt: new Date(now + 5_000).toISOString(),
+      },
+      queue: [],
+      operationIds: ["redemption-alert"],
+    }} now={now} />);
+
+    expect(markup).toContain('<section class="overlay-alert"');
+    expect(markup).toContain("Viewer redeemed Welcome");
+    expect(markup).not.toContain("overlay-alert__avatar");
+  });
+
   it("renders viewer supplied placeholder output as text, never markup", () => {
     const now = Date.parse("2030-01-01T00:00:00.000Z");
     const markup = renderToStaticMarkup(<OverlayAlertView config={{}} state={{

@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { MODULES } from "../modules/registry";
 import { VotekickThresholdExample } from "../modules/votekick/panel/threshold-example";
 import { MODULE_NAVIGATION_CATEGORIES } from "../modules/contract";
-import type { ModulePanelProperties, ModuleRegisteredTemplateVariable, ModuleTempVipMode } from "../modules/contract";
+import type { ModulePanelProperties, ModuleRegisteredStatisticsSection, ModuleRegisteredTemplateVariable, ModuleStatisticsSectionScope, ModuleTempVipMode } from "../modules/contract";
+import { StatisticsSections } from "./StatisticsSections";
 import type { BelaboxSettings } from "../modules/belabox/contracts";
 import type { BelaboxStatusResponse } from "../modules/belabox/contracts";
 import { calculateSlotPayoutRateForDraft } from "../modules/emote_slots/domain/payout-rate";
@@ -231,6 +232,7 @@ interface ModulePanelMountProperties {
   onInitialCommandConsumed?: () => void;
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
   chatVotingTab?: "votes" | "settings";
+  renderStatisticsSections?: (scope: ModuleStatisticsSectionScope) => ReactNode;
 }
 
 interface ModuleSettingsPageOptions {
@@ -357,6 +359,7 @@ const ModuleSettingsEditorQuery = ({ module, channelId, canManageContent, langua
       title={page.title}
       subtitle={page.subtitle}
       {...(page.badges === undefined ? {} : { badges: page.badges })}
+      {...(module.id === "song_requests" ? { topContent: <LoadStateLines rows={5} height={34} /> } : {})}
       icon={page.icon}
       {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
       active={page.active}
@@ -425,6 +428,30 @@ const AdsSettingsPanelMount = ({ module, channelId, language, canManageContent, 
     instanceKey="ads:settings-panel"
     load={loadPanel}
     properties={{ channelId, language, canManage: canManageContent, canOperate: true, moduleActive }}
+    loadingFallback={<LoadStateLines rows={5} height={34} />}
+    renderError={(retry) => <LoadState
+      variant="panel-320"
+      status="error"
+      loading={null}
+      empty={null}
+      error={null}
+      queryError={{ title: dashboardTexts().errors.dataLoadFailed, message: dashboardTexts().module.componentLoadError, onRetry: retry }}
+    >{null}</LoadState>}
+    onRetry={retryModuleChunkLoad}
+  />;
+};
+
+const SongRequestsSettingsPanelMount = ({ module, channelId, language, canManageContent }: {
+  module: (typeof MODULES)[number];
+  channelId: string;
+  language: DashboardLanguage;
+  canManageContent: boolean;
+}): ReactElement => {
+  const loadPanel = useCallback(() => loadModulePanel(module) as Promise<{ default: ComponentType<ModulePanelProperties> }>, [module]);
+  return <RetryableLazy
+    instanceKey="song-requests:settings-panel"
+    load={loadPanel}
+    properties={{ channelId, language, canManage: canManageContent, canOperate: true }}
     loadingFallback={<LoadStateLines rows={5} height={34} />}
     renderError={(retry) => <LoadState
       variant="panel-320"
@@ -938,6 +965,8 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
       onSettingsRevisionChange={setLatestSettingsRevision}
       onRemovePendingChange={setUrlRemovalPending}
       savingSettings={pending || urlRemovalPending} /> } : {})}
+    {...(module.id === "song_requests" ? { topContent: <SongRequestsSettingsPanelMount key="song-requests-panel" module={module}
+      channelId={channelId} language={language} canManageContent={canManageContent} /> } : {})}
     icon={page.icon}
     {...(module.id === "belabox" ? { className: "settings-page--belabox" } : module.id === "emote_slots" ? { className: "settings-page--slot" } : module.id === "duel" ? { className: "settings-page--duel" } : {})}
     active={page.active}
@@ -1038,7 +1067,7 @@ const LoadedModuleSettingsEditor = ({ module, channelId, canManageContent, langu
   </>;
 };
 
-export const ModulePanelMount = ({ channelId, activeModules, pageId, settingsSaveTarget = null, headerActionsTarget, streamSessionIdentity, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, viewerIsBot = false, initialSelection, initialCommand, onInitialCommandConsumed, onOpenTestArea, chatVotingTab = "votes" }: ModulePanelMountProperties): ReactElement => {
+export const ModulePanelMount = ({ channelId, activeModules, pageId, settingsSaveTarget = null, headerActionsTarget, streamSessionIdentity, suspendModuleId, canManage = true, canOperate = true, botIsModerator = null, viewerIsBot = false, initialSelection, initialCommand, onInitialCommandConsumed, onOpenTestArea, chatVotingTab = "votes", renderStatisticsSections }: ModulePanelMountProperties): ReactElement => {
   const registeredViews = activeModules.flatMap((activeModule) => {
     const module = MODULES.find((candidate) => candidate.id === activeModule.moduleId);
     if (module === undefined) return [];
@@ -1072,12 +1101,13 @@ export const ModulePanelMount = ({ channelId, activeModules, pageId, settingsSav
           {...(onInitialCommandConsumed === undefined ? {} : { onInitialCommandConsumed })}
           {...(onOpenTestArea === undefined ? {} : { onOpenTestArea })}
           {...(id === "chat_voting" ? { chatVotingTab } : {})}
+          {...(renderStatisticsSections === undefined ? {} : { renderStatisticsSections })}
         />)}
     </section>
   );
 };
 
-const MountedModuleView = ({ module, channelId, pageId, streamSessionIdentity, canManage, canOperate, botIsModerator, viewerIsBot, suspendToParent, settingsSaveTarget, headerActionsTarget, initialSelection, initialCommand, onInitialCommandConsumed, onOpenTestArea, chatVotingTab }: {
+const MountedModuleView = ({ module, channelId, pageId, streamSessionIdentity, canManage, canOperate, botIsModerator, viewerIsBot, suspendToParent, settingsSaveTarget, headerActionsTarget, initialSelection, initialCommand, onInitialCommandConsumed, onOpenTestArea, chatVotingTab, renderStatisticsSections }: {
   module: (typeof MODULES)[number];
   channelId: string;
   streamSessionIdentity?: string;
@@ -1094,6 +1124,7 @@ const MountedModuleView = ({ module, channelId, pageId, streamSessionIdentity, c
   onOpenTestArea?: (moduleId: "text_commands" | "faq", entryId: string) => void;
   chatVotingTab?: "votes" | "settings";
   pageId?: string;
+  renderStatisticsSections?: (scope: ModuleStatisticsSectionScope) => ReactNode;
 }): ReactElement => {
   const language = dashboardLanguage();
   const description = moduleDescription(module.id, language);
@@ -1131,6 +1162,7 @@ const MountedModuleView = ({ module, channelId, pageId, streamSessionIdentity, c
           }))),
         } : {}),
         ...(pageId === undefined ? {} : { pageId }),
+        ...(renderStatisticsSections === undefined ? {} : { renderStatisticsSections }),
         ...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity }),
         ...(headerActionsTarget === undefined ? {} : { headerActionsTarget }),
         language: dashboardLanguage(),
@@ -1370,6 +1402,20 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
   const labels = workspaceTexts();
   const details = moduleDetails(moduleId);
   const registered = MODULES.find((candidate) => candidate.id === moduleId);
+  const statisticsSections: ModuleRegisteredStatisticsSection[] = MODULES.flatMap((candidate) =>
+    (candidate.statisticsSections ?? []).map((section) => ({ ...section, moduleId: candidate.id })),
+  );
+  const enabledStatisticsModuleIds = MODULES.filter((candidate) => {
+    const state = modules.find((item) => item.id === candidate.id);
+    return state?.mandatory === true || candidate.mandatory === true || state?.enabled === true;
+  }).map(({ id }) => id);
+  const renderStatisticsSections = (scope: ModuleStatisticsSectionScope): ReactNode => <StatisticsSections
+    sections={statisticsSections}
+    enabledModuleIds={enabledStatisticsModuleIds}
+    channelId={channelId}
+    language={dashboardLanguage()}
+    scope={scope}
+  />;
   const statisticsEntry = registered?.navigationEntries?.find((entry) => entry.id === (pageId ?? "streams"))
     ?? registered?.navigationEntries?.find((entry) => entry.id === "streams");
   const statisticsPageLabel = statisticsEntry?.label[dashboardLanguage()] ?? texts.events.info;
@@ -1533,7 +1579,7 @@ export const ModulePage = ({ channelId, moduleId, pageId, ownRole, modules, acti
             />
           </section> : null) : !showActiveView ? null : (
             <section className={`module-detail__content${viewLoading ? " stale" : ""}`} aria-label={labels.content}>
-              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} {...(pageId === undefined ? {} : { pageId })} settingsSaveTarget={settingsSaveTarget} headerActionsTarget={headerActionsTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} viewerIsBot={viewerIsBot} {...(initialSelection === undefined ? {} : { initialSelection })} {...(initialCommand === undefined ? {} : { initialCommand })} {...(onInitialCommandConsumed === undefined ? {} : { onInitialCommandConsumed })} onOpenTestArea={(targetModuleId, entryId) => onNavigate({ kind: "channel", channelId, section: "test-area", only: { moduleId: targetModuleId, entryId } })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} />
+              <ModulePanelMount key={`${channelId}:${moduleId}`} channelId={channelId} activeModules={[activeModule]} {...(pageId === undefined ? {} : { pageId })} settingsSaveTarget={settingsSaveTarget} headerActionsTarget={headerActionsTarget} {...(streamSessionIdentity === undefined ? {} : { streamSessionIdentity })} {...(suspendPanelUntilReady ? { suspendModuleId: moduleId } : {})} canManage={ownRole !== "operator"} canOperate={true} botIsModerator={botIsModerator} viewerIsBot={viewerIsBot} {...(initialSelection === undefined ? {} : { initialSelection })} {...(initialCommand === undefined ? {} : { initialCommand })} {...(onInitialCommandConsumed === undefined ? {} : { onInitialCommandConsumed })} onOpenTestArea={(targetModuleId, entryId) => onNavigate({ kind: "channel", channelId, section: "test-area", only: { moduleId: targetModuleId, entryId } })} {...(moduleId === "chat_voting" ? { chatVotingTab } : {})} renderStatisticsSections={renderStatisticsSections} />
             </section>
           )
         ) : (

@@ -1,4 +1,5 @@
 import type { SongRequestsSettings } from "../contracts";
+import type { SongRequestStatistics } from "../contracts";
 
 const route = (channelId: string, part: string): string => `/api/channels/${encodeURIComponent(channelId)}/modules/song_requests/${part}`;
 
@@ -34,3 +35,19 @@ export const readSettings = (channelId: string, signal?: AbortSignal): Promise<S
 
 export const saveSettings = (channelId: string, revision: number, settings: SongRequestsSettings): Promise<SongRequestsSettingsRead> =>
   request<SongRequestsSettingsRead>(channelId, "settings", "PATCH", { revision, settings });
+
+export const skipSong = async (channelId: string): Promise<"skipped" | "nothing_playing" | "track_changed" | "not_connected" | "no_active_device" | "spotify_unavailable"> =>
+  (await request<{ outcome: "skipped" | "nothing_playing" | "track_changed" | "not_connected" | "no_active_device" | "spotify_unavailable" }>(
+    channelId, "skip", "POST",
+  )).outcome;
+
+export const readSongRequestStatistics = (
+  channelId: string,
+  scope: { kind: "stream"; streamId: string } | { kind: "total" },
+  signal?: AbortSignal,
+): Promise<SongRequestStatistics> => {
+  const query = scope.kind === "stream"
+    ? `statistics?scope=stream&streamId=${encodeURIComponent(scope.streamId)}`
+    : "statistics?scope=total";
+  return request<SongRequestStatistics>(channelId, query, "GET", undefined, signal);
+};

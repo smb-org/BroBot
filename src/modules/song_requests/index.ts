@@ -1,6 +1,7 @@
 import { PanelApiError } from "../../contracts/panel-error";
 import type { BotModule, ModuleImmediateActionCondition } from "../contract";
-import { songRequestsSettingsSchema } from "./contracts";
+import { songRequestsSettingsForLanguage, songRequestsSettingsSchema } from "./contracts";
+import { SONG_REQUEST_TEMPLATE_FIELDS, SONG_REQUEST_TEMPLATE_VARIABLES, songRequestTemplateVariableGroup } from "./contracts/template-variables";
 import {
   processSongRequestsEvent,
   pollSongRequestsPlayback,
@@ -49,9 +50,15 @@ export const songRequestsModule: BotModule<typeof songRequestsSettingsSchema> = 
   requiresModules: ["chat_voting"],
   navigationCategory: "stream",
   settingsSchema: songRequestsSettingsSchema,
-  defaultSettings: songRequestsSettingsSchema.parse({}),
+  defaultSettings: songRequestsSettingsForLanguage("de"),
+  defaultSettingsForLanguage: songRequestsSettingsForLanguage,
   defaultEnabled: false,
-  panelManagesSettings: true,
+  settingsEditor: () => import("./panel/settings-editor"),
+  settingsEditorPlacement: "page",
+  templateFields: SONG_REQUEST_TEMPLATE_FIELDS,
+  templateContext: "event",
+  templateVariableCatalog: SONG_REQUEST_TEMPLATE_VARIABLES,
+  templateVariableGroup: songRequestTemplateVariableGroup,
   channelPointsActions: [requestSongChannelPointsAction],
   settingsChangedAlarm: { handlerKey: SONG_REQUESTS_LIFECYCLE_HANDLER, alarmKey: "settings" },
   chatCommands: [{
@@ -66,6 +73,11 @@ export const songRequestsModule: BotModule<typeof songRequestsSettingsSchema> = 
     }],
     minimumChatStatus: "configurable",
     minimumChatStatusSetting: "freeRoleThreshold",
+  }, {
+    name: "!skip",
+    syntax: "!skip",
+    description: { de: songRequestsActionTexts.de.skipCommandDescription, en: songRequestsActionTexts.en.skipCommandDescription },
+    minimumChatStatus: "everyone",
   }],
   panelIcon: { paths: ["M9 18V5l12-2v13", "M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0", "M21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0"] },
   eventSubTypes: ["channel.chat.message", "stream.online", "stream.offline"],
@@ -74,6 +86,11 @@ export const songRequestsModule: BotModule<typeof songRequestsSettingsSchema> = 
   // `!sr` charges points and queues in Spotify, so a single message cannot be simulated read-only.
   dryRunSilentReason: "instant_settlement",
   routes: songRequestsRoutes,
+  statisticsSections: [{
+    id: "song-request-statistics",
+    title: { de: songRequestsActionTexts.de.statisticsTitle, en: songRequestsActionTexts.en.statisticsTitle },
+    load: () => import("./panel/statistics-section"),
+  }],
   overlayElements: [songRequestsNowPlayingElement, songRequestsQueueElement],
   panel: () => import("./panel"),
   actions: [{
@@ -94,6 +111,27 @@ export const songRequestsModule: BotModule<typeof songRequestsSettingsSchema> = 
           return { tone: "error", message: { de: songRequestsActionTexts.de.busy, en: songRequestsActionTexts.en.busy } };
         }
         return { tone: "error", message: { de: songRequestsActionTexts.de.error, en: songRequestsActionTexts.en.error } };
+      }
+    },
+  }, {
+    id: "skip-song",
+    name: { de: songRequestsActionTexts.de.skipName, en: songRequestsActionTexts.en.skipName },
+    icon: "skip-forward",
+    conditions: ["moduleEnabled"],
+    requiredRole: "operator",
+    errorMessage: { de: songRequestsActionTexts.de.skipUnavailable, en: songRequestsActionTexts.en.skipUnavailable },
+    execute: async ({ channelId }) => {
+      try {
+        const outcome = await (await import("./panel/service")).skipSong(channelId);
+        if (outcome === "skipped") {
+          return { tone: "success", message: { de: songRequestsActionTexts.de.skipSucceeded, en: songRequestsActionTexts.en.skipSucceeded } };
+        }
+        if (outcome === "no_active_device") {
+          return { tone: "error", message: { de: songRequestsActionTexts.de.skipDevice, en: songRequestsActionTexts.en.skipDevice } };
+        }
+        return { tone: "error", message: { de: songRequestsActionTexts.de.skipUnavailable, en: songRequestsActionTexts.en.skipUnavailable } };
+      } catch {
+        return { tone: "error", message: { de: songRequestsActionTexts.de.skipUnavailable, en: songRequestsActionTexts.en.skipUnavailable } };
       }
     },
   }, {

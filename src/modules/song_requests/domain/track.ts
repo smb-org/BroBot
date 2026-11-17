@@ -9,6 +9,12 @@ export interface SpotifyTrack {
   external_urls: { spotify: string };
 }
 
+export interface SongRequestTrackDisplay {
+  title: string;
+  artists: readonly string[];
+  albumName?: string | null;
+}
+
 const TRACK_ID = /^[A-Za-z0-9]{1,64}$/u;
 
 export const spotifyTrackIdFromInput = (input: string): string | null => {
@@ -41,6 +47,7 @@ export const compactSpotifyTrack = (track: SpotifyTrack) => ({
   uri: track.uri,
   title: track.name.slice(0, 200),
   artists: track.artists.map(({ name }) => name.slice(0, 100)).slice(0, 8),
+  albumName: track.album.name.slice(0, 200),
   durationMs: track.duration_ms,
   explicit: track.explicit,
   coverUrl: track.album.images[0]?.url ?? null,

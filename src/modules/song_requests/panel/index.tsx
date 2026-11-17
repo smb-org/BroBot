@@ -19,15 +19,15 @@ import {
 } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
 import { songRequestsPanelTexts } from "./locale";
-import { readSettings, request } from "./service";
-import type { SongRequestsSettingsRead } from "./service";
-import SongRequestsSettingsEditor from "./settings-editor";
+import { formatSongRequestTrack } from "../domain/track-display";
+import { request } from "./service";
 import "./panel.css";
 
 interface Track {
   id: string;
   title: string;
   artists: readonly string[];
+  albumName?: string | null;
   coverUrl: string | null;
   spotifyUrl: string;
 }
@@ -49,7 +49,8 @@ interface RequestRow extends Track {
 
 interface VoteOutcome {
   ballotId: string;
-  state: "tie" | "no_votes" | "failed";
+  state: "tie" | "no_votes" | "failed" | "drawn";
+  drawnByLot: boolean;
   createdAt: string;
 }
 
@@ -61,7 +62,6 @@ interface Connection {
   errorMessage: string | null;
   streamId: string | null;
   emptyText: string;
-  pointsEnabled: boolean;
 }
 
 interface RequestsRead {
@@ -102,12 +102,6 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
     "requests",
     (signal) => request<RequestsRead>(channelId, "requests", "GET", undefined, signal),
     { enabled: canViewRequests },
-  );
-  const settingsQuery = useModuleQuery<SongRequestsSettingsRead>(
-    channelId,
-    "song_requests",
-    "settings",
-    (signal) => readSettings(channelId, signal),
   );
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
@@ -240,9 +234,6 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
   const requestQueryStatus = requestsQuery.data === undefined
     ? requestsQuery.isError ? "error" : "loading"
     : requests.length === 0 ? "empty" : "success";
-  const settingsQueryStatus = settingsQuery.data === undefined
-    ? settingsQuery.isError ? "error" : "loading"
-    : "success";
   const canConnect = canManage && connection?.enabled === true && !connection.hasCredentials;
   const canReconnect = canManage && connection?.enabled === true && connection.hasCredentials;
   const canDisconnect = canManage && connection?.enabled === true && connection.hasCredentials;
@@ -304,7 +295,7 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
             <ListRow
               href={track.spotifyUrl}
               onNavigate={() => { window.open(track.spotifyUrl, "_blank", "noopener,noreferrer"); }}
-              title={track.title}
+              title={formatSongRequestTrack(track)}
               description={track.artists.join(", ")}
               status={null}
               action={alreadySelected
@@ -336,7 +327,7 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
             <ListRow
               href={track.spotifyUrl}
               onNavigate={() => { window.open(track.spotifyUrl, "_blank", "noopener,noreferrer"); }}
-              title={track.title}
+              title={formatSongRequestTrack(track)}
               description={track.artists.join(", ")}
               status={<Badge tone="brand">{text.candidate}</Badge>}
               action={<Button
@@ -368,8 +359,8 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
               <ListRow
                 href={requestRow.spotifyUrl}
                 onNavigate={() => { window.open(requestRow.spotifyUrl, "_blank", "noopener,noreferrer"); }}
-                title={requestRow.title}
-                description={[requestRow.artists.join(", "), requestRow.requesterDisplayName ?? requestRow.requesterLogin].filter(Boolean).join(" · ")}
+                title={formatSongRequestTrack(requestRow)}
+                description={requestRow.requesterDisplayName ?? requestRow.requesterLogin ?? ""}
                 status={<Badge tone={stateTone(requestRow.state)}>{text.states[requestRow.state]}</Badge>}
                 action={!canOperate ? null : (() => {
                   const beforeSubmit = requestRow.state === "pending_review" || requestRow.state === "approved";
@@ -402,26 +393,6 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
       </div>}
     </Section> : null}
 
-    <Section title={text.settings} className="song-requests-panel__settings">
-      <LoadState
-        variant="panel-0"
-        status={settingsQueryStatus}
-        loading={<LoadStateLines rows={1} height={44} />}
-        empty={null}
-        error={<p role="alert">{text.settingsLoadError}</p>}
-        queryError={{ message: text.settingsLoadError, onRetry: () => { void settingsQuery.refetch(); } }}
-        refreshError={settingsQuery.isRefetchError}
-      >
-        {settingsQuery.data === undefined ? null : <SongRequestsSettingsEditor
-          key={channelId}
-          channelId={channelId}
-          language={activeLanguage}
-          settings={settingsQuery.data}
-          pointsEnabled={connection?.pointsEnabled === true}
-          canManage={canManage}
-        />}
-      </LoadState>
-    </Section>
     <ConfirmDialog opened={removal !== null} title={text.removeConfirmTitle} description={removal?.description ?? ""}
       confirmLabel={removal?.label ?? text.remove} cancelLabel={text.cancel} danger pending={pending}
       onConfirm={() => { if (removal !== null) removeRequest(removal.requestId, removal.refund); setRemoval(null); }}

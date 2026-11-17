@@ -4243,9 +4243,10 @@ export class ChannelObject extends DurableObject<Env> {
         },
         deliverPending: () => this.deliverPendingQuizOverlaySnapshot(),
       },
-      ...(moduleId === "overlay_alerts" ? {
-        overlayAlertQueue: { advance: () => this.advanceOverlayAlertQueue() },
-      } : {}),
+      overlayAlertQueue: {
+        enqueue: (operationId, alert) => this.enqueueOverlayAlert(operationId, alert),
+        advance: () => this.advanceOverlayAlertQueue(),
+      },
       decoratePointWelcome: (action, accountId, claimId, attributions) => this.appendPointRoundWelcome(
         action,
         MODULES.find((candidate) => candidate.id === moduleId),

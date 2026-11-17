@@ -161,22 +161,106 @@ describe("durable song vote results", () => {
     expect(textOf(fetcher.mock.calls[0]?.[0])).toContain("/me/player/queue?uri=spotify%3Atrack%3Aquietatlas02");
     expect(await database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(requestId).first()).toEqual({ state: "submitted" });
     expect(sendChat).toHaveBeenCalledTimes(1);
-    expect(sendChat.mock.calls[0]?.[0]).toContain("queued in Spotify");
+    expect(sendChat.mock.calls[0]?.[0]).toBe("“Mira Vale – Quiet Atlas” was queued in Spotify. Position 1.");
     expect(sendChat.mock.calls[0]?.[5]).toEqual({ automated: true });
   });
 
-  it.each([
-    { name: "a tie", ballotId: "ballot-tie", counts: [4, 4, 1], expected: "tie" },
-    { name: "zero votes", ballotId: "ballot-zero", counts: [0, 0, 0], expected: "no_votes" },
-  ])("does not enqueue when the result is $name", async ({ ballotId, counts, expected }) => {
-    const { database, context, schedule } = await createContext(ballotId);
+  it("draws a tied winner deterministically, announces the draw, and queues it", async () => {
+    const ballotId = "ballot-tie";
+    const { database, context, schedule, sendChat } = await createContext(ballotId);
     const fetcher = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetcher);
-    await handleSongRequestDurableAction(context, voteResult(ballotId, counts));
+    const action = voteResult(ballotId, [4, 4, 1]);
+    await handleSongRequestDurableAction(context, action);
+    const firstRequestId = await requestIdFor(database);
+    const first = await database.prepare("SELECT title FROM song_requests WHERE id = ?").bind(firstRequestId).first<{ title: string }>();
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await database.prepare("SELECT state, request_id, drawn_by_lot FROM song_requests_votes WHERE ballot_id = ?")
+      .bind(ballotId).first()).toEqual({ state: "queued", request_id: firstRequestId, drawn_by_lot: 1 });
+    expect(await database.prepare("SELECT COUNT(*) AS count FROM song_requests WHERE operation_id = ?")
+      .bind("mod_vote:" + ballotId).first()).toEqual({ count: 1 });
+    expect(["Glass Harbor", "Quiet Atlas"]).toContain(first?.title);
+    expect(schedule.mock.calls.filter(([key]) => key === SONG_REQUESTS_SUBMIT_ALARM_PREFIX + firstRequestId)).toHaveLength(1);
+    expect(sendChat.mock.calls.map(([message, operationId]) => [message, operationId])).toEqual([
+      ["Tie – drawn by lot: Mira Vale – " + (first?.title ?? ""), "song-vote-drawn:" + ballotId],
+    ]);
+
+    fetcher.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await handleSubmitAlarm(context, SONG_REQUESTS_SUBMIT_ALARM_PREFIX + firstRequestId);
+
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(firstRequestId).first())
+      .toEqual({ state: "submitted" });
+    expect(sendChat.mock.calls.map(([message]) => message)).toEqual([
+      "Tie – drawn by lot: Mira Vale – " + (first?.title ?? ""),
+      "“Mira Vale – " + (first?.title ?? "") + "” was queued in Spotify. Position 1.",
+    ]);
+  });
+
+  it("retries a tie result before scheduling the drawn request when chat delivery is retryable", async () => {
+    const ballotId = "ballot-tie-chat-retry";
+    const { database, context, schedule, sendChat } = await createContext(ballotId);
+    sendChat.mockResolvedValueOnce({ sent: false, reason: "automated_output_limit", retryable: true, delivery: "not_attempted" });
+    const action = voteResult(ballotId, [4, 4, 1]);
+
+    await expect(handleSongRequestDurableAction(context, action)).rejects.toThrow("draw announcement is waiting");
+    const requestId = await requestIdFor(database);
+    expect(schedule.mock.calls.filter(([key]) => key === SONG_REQUESTS_SUBMIT_ALARM_PREFIX + requestId)).toHaveLength(0);
+
+    await handleSongRequestDurableAction(context, action);
+
+    expect(schedule.mock.calls.filter(([key]) => key === SONG_REQUESTS_SUBMIT_ALARM_PREFIX + requestId)).toHaveLength(1);
+    expect(sendChat.mock.calls.map(([, operationId]) => operationId)).toEqual([
+      `song-vote-drawn:${ballotId}`,
+      `song-vote-drawn:${ballotId}`,
+    ]);
+  });
+
+  it("reports a definitive no-device error after a short Spotify rate-limit retry", async () => {
+    const ballotId = "ballot-throttle-then-no-device";
+    const { database, context, sendChat } = await createContext(ballotId);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { status: 429, message: "Too many requests", reason: "RATE_LIMITED" } }), {
+        status: 429,
+        headers: { "Retry-After": "0" },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { status: 404, message: "No active device found", reason: "NO_ACTIVE_DEVICE" } }), {
+        status: 404,
+      }));
+    vi.stubGlobal("fetch", fetcher);
+    await handleSongRequestDurableAction(context, voteResult(ballotId, [9, 1, 0]));
+    const requestId = await requestIdFor(database);
+
+    await handleSubmitAlarm(context, `${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${requestId}`);
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
+      .toEqual({ state: "failed", failure_reason: "NO_ACTIVE_DEVICE" });
+    expect(sendChat.mock.calls[0]?.[0]).toContain("Spotify has no active playback device.");
+    expect(sendChat.mock.calls[0]?.[0]).not.toMatch(/NO_ACTIVE_DEVICE|429|404/u);
+  });
+
+  it("announces zero votes without choosing or scheduling a song", async () => {
+    const ballotId = "ballot-zero";
+    const { database, context, schedule, sendChat } = await createContext(ballotId);
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+    await handleSongRequestDurableAction(context, voteResult(ballotId, [0, 0, 0]));
+
     expect(fetcher).not.toHaveBeenCalled();
     expect(schedule).not.toHaveBeenCalled();
     expect(await database.prepare("SELECT state FROM song_requests_votes WHERE ballot_id = ?").bind(ballotId).first())
-      .toEqual({ state: expected });
+      .toEqual({ state: "no_votes" });
+    expect(await database.prepare("SELECT COUNT(*) AS count FROM song_requests WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ count: 0 });
+    expect(sendChat.mock.calls).toEqual([[
+      "Nobody voted – no song queued.",
+      "song-vote-no-votes:" + ballotId,
+      undefined,
+      undefined,
+      undefined,
+      { automated: true },
+    ]]);
   });
 
   it("rejects a winning request with stream_offline instead of treating the ballot as empty", async () => {
@@ -196,7 +280,7 @@ describe("durable song vote results", () => {
     expect(fetcher).not.toHaveBeenCalled();
     // One call schedules the vote retry, one persists the channel-point resolution retry.
     expect(schedule).toHaveBeenCalledTimes(2);
-    expect(sendChat.mock.calls[0]?.[0]).toContain("stream is offline");
+    expect(sendChat.mock.calls[0]?.[0]).toContain("stream is now offline");
     expect(sendChat.mock.calls[0]?.[5]).toEqual({ automated: true });
   });
 
@@ -223,6 +307,7 @@ describe("durable song vote results", () => {
       .bind(CHANNEL_ID).first()).toEqual({ state, error_message: message });
     expect(await database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(requestId).first()).toEqual({ state: "failed" });
     expect(sendChat).toHaveBeenCalledOnce();
+    expect(sendChat.mock.calls[0]?.[0]).not.toMatch(/NO_ACTIVE_DEVICE|PREMIUM_REQUIRED|spotify_\d{3}|\b404\b|\b403\b|\b429\b/u);
   });
 
   it("marks a timeout after Spotify accepted as outcome_unknown and never retries it", async () => {
@@ -383,7 +468,7 @@ describe("durable song vote results", () => {
     // Deactivation already settled the row as failed; the late Spotify completion must not overwrite that decision.
     expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
       .toEqual({ state: "failed", failure_reason: "submit_outcome_uncertain" });
-    expect(sendChat.mock.calls[0]?.[0]).toContain("may have been queued in Spotify");
+    expect(sendChat.mock.calls[0]?.[0]).toBe("Spotify did not confirm the result. Check the queue before trying again.");
   });
 
   it("reports an uncertain outcome when the Spotify slot is revoked after Spotify received the POST", async () => {
@@ -409,8 +494,8 @@ describe("durable song vote results", () => {
 
     expect(await database.prepare("SELECT state, failure_reason FROM song_requests WHERE id = ?").bind(requestId).first())
       .toEqual({ state: "outcome_unknown", failure_reason: "submit_state_conflict" });
-    expect(sendChat.mock.calls[0]?.[0]).toContain("result is unclear");
-    expect(sendChat.mock.calls[0]?.[0]).not.toContain("was not queued");
+    expect(sendChat.mock.calls[0]?.[0]).toBe("Spotify did not confirm the result. Check the queue before trying again.");
+    expect(sendChat.mock.calls[0]?.[0]).not.toMatch(/NO_ACTIVE_DEVICE|PREMIUM_REQUIRED|spotify_\d{3}|\b404\b|\b403\b|\b429\b/u);
   });
 
   it("backs off a live poll while disconnected and keeps its schedule", async () => {
@@ -521,6 +606,68 @@ describe("durable song vote results", () => {
     expect(await database.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
       .bind(CHANNEL_ID).first()).toEqual({ track_json: null });
     expect(schedule.mock.calls.filter(([key]) => key === SONG_REQUESTS_ALARM)).toHaveLength(0);
+  });
+
+  it("hides a paused track without observing its request, then shows and observes it after playback resumes", async () => {
+    const { database, context } = await createContext("ballot-poll-paused-track");
+    const playing = { is_playing: true, progress_ms: 18_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const paused = { is_playing: false, progress_ms: 42_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(playing), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(paused), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(paused), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(playing), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    await pollSongRequestsPlayback(context);
+    expect((await database.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ track_json: string | null }>())?.track_json).toContain("Glass Harbor");
+    await pollSongRequestsPlayback(context);
+    expect(await database.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ track_json: null });
+
+    const requestId = "request-submitted-while-paused";
+    await transitionRequest(database as unknown as D1Database, {
+      channelId: CHANNEL_ID,
+      requestId,
+      fromState: null,
+      toState: "approved",
+      now: new Date(NOW).toISOString(),
+      newRequest: {
+        source: "mod_vote",
+        track: {
+          id: spotifyTrackFixture.id,
+          uri: spotifyTrackFixture.uri,
+          title: spotifyTrackFixture.name,
+          artists: ["Mira Vale"],
+          albumName: "Quiet Atlas",
+          durationMs: spotifyTrackFixture.duration_ms,
+          explicit: false,
+          coverUrl: null,
+          spotifyUrl: spotifyTrackFixture.external_urls.spotify,
+        },
+        operationId: "paused-track-request",
+        streamId: STREAM_ID,
+      },
+    });
+    await transitionRequest(database as unknown as D1Database, {
+      channelId: CHANNEL_ID, requestId, fromState: "approved", toState: "submitting", now: new Date(NOW).toISOString(),
+    });
+    await transitionRequest(database as unknown as D1Database, {
+      channelId: CHANNEL_ID, requestId, fromState: "submitting", toState: "submitted", now: new Date(NOW).toISOString(),
+    });
+
+    await pollSongRequestsPlayback(context);
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(requestId).first())
+      .toEqual({ state: "submitted" });
+    expect(await database.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ track_json: null });
+
+    await pollSongRequestsPlayback(context);
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(requestId).first())
+      .toEqual({ state: "observed_playing" });
+    expect((await database.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ track_json: string | null }>())?.track_json).toContain("Glass Harbor");
   });
 
   it("reconciles an approved winner when its submit alarm could not be scheduled", async () => {
@@ -791,5 +938,32 @@ describe("durable song vote results", () => {
     expect(restarted.changed).toBe(true);
     expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-run-one'").first()).toEqual({ state: "observed_playing" });
     expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-run-two'").first()).toEqual({ state: "observed_playing" });
+  });
+
+  it("does not match another submitted request when the same track is only seeked", async () => {
+    const { database } = await createContext("ballot-repeat-seek");
+    const db = database as unknown as D1Database;
+    for (const [requestId, operationId] of [["request-seek-one", "seek-one"], ["request-seek-two", "seek-two"]] as const) {
+      await transitionRequest(db, {
+        channelId: CHANNEL_ID, requestId, fromState: null, toState: "approved", now: new Date(NOW).toISOString(),
+        newRequest: { source: "mod_vote", track: trackAt(0), operationId, streamId: STREAM_ID },
+      });
+      await transitionRequest(db, { channelId: CHANNEL_ID, requestId, fromState: "approved", toState: "submitting", now: new Date(NOW).toISOString() });
+      await transitionRequest(db, { channelId: CHANNEL_ID, requestId, fromState: "submitting", toState: "submitted", now: new Date(NOW).toISOString() });
+    }
+    const track = {
+      id: "glassharbor01", uri: "spotify:track:glassharbor01", name: "Glass Harbor", duration_ms: 201_000,
+      explicit: false, artists: [{ id: "miravale01", name: "Mira Vale" }],
+      album: { name: "Quiet Atlas", images: [] },
+      external_urls: { spotify: "" },
+    };
+
+    await createNowPlayingSnapshot(db, CHANNEL_ID, STREAM_ID, track, new Date(NOW).toISOString(), 90_000);
+    await createNowPlayingSnapshot(db, CHANNEL_ID, STREAM_ID, track, new Date(NOW + 12_000).toISOString(), 102_000);
+    const seek = await createNowPlayingSnapshot(db, CHANNEL_ID, STREAM_ID, track, new Date(NOW + 24_000).toISOString(), 20_000);
+
+    expect(seek.changed).toBe(true);
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-seek-one'").first()).toEqual({ state: "observed_playing" });
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-seek-two'").first()).toEqual({ state: "submitted" });
   });
 });

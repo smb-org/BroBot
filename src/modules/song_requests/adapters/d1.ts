@@ -1,12 +1,14 @@
 import type { SpotifyTrack } from "../domain/track";
 import { compactSpotifyTrack } from "../domain/track";
-import type { SongRequestsSettings } from "../contracts";
+import { interpolatePlaybackProgress } from "../domain/playback";
+import type { SongRequestStatistics, SongRequestsSettings } from "../contracts";
 
 export interface SongRequestTrack {
   id: string;
   uri: string;
   title: string;
   artists: readonly string[];
+  albumName?: string | null;
   durationMs: number;
   explicit: boolean;
   coverUrl: string | null;
@@ -31,6 +33,10 @@ export interface SongRequestRow extends SongRequestTrack {
   roundId: string | null;
   chargedAmount: number;
   channelPointsRewardId: string | null;
+  chatMessageId: string | null;
+  channelPointsResolutionDue: "FULFILLED" | "CANCELED" | null;
+  channelPointsResolutionCompleted: "FULFILLED" | "CANCELED" | null;
+  refundDue: boolean;
   submittedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -44,6 +50,7 @@ interface SongRequestSqlRow {
   track_uri: string;
   title: string;
   artists_json: string;
+  album_name?: string | null;
   duration_ms: number;
   explicit: number;
   cover_url: string | null;
@@ -58,6 +65,10 @@ interface SongRequestSqlRow {
   round_id: string | null;
   charged_amount: number;
   channel_points_reward_id: string | null;
+  chat_message_id?: string | null;
+  channel_points_resolution_due?: "FULFILLED" | "CANCELED" | null;
+  channel_points_resolution_completed?: "FULFILLED" | "CANCELED" | null;
+  refund_due?: number;
   submitted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -77,6 +88,7 @@ const rowToRequest = (row: SongRequestSqlRow): SongRequestRow => {
     uri: row.track_uri,
     title: row.title,
     artists,
+    albumName: row.album_name ?? null,
     durationMs: row.duration_ms,
     explicit: row.explicit === 1,
     coverUrl: row.cover_url,
@@ -91,9 +103,65 @@ const rowToRequest = (row: SongRequestSqlRow): SongRequestRow => {
     roundId: row.round_id,
     chargedAmount: row.charged_amount,
     channelPointsRewardId: row.channel_points_reward_id,
+    chatMessageId: row.chat_message_id ?? null,
+    channelPointsResolutionDue: row.channel_points_resolution_due ?? null,
+    channelPointsResolutionCompleted: row.channel_points_resolution_completed ?? null,
+    refundDue: row.refund_due === 1,
     submittedAt: row.submitted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+};
+
+export const ACCEPTED_REQUEST_STATES_SQL = "'approved', 'submitting', 'submitted', 'observed_playing', 'not_observed', 'outcome_unknown'";
+export const SONG_REQUEST_STATISTICS_STREAM_SCOPE_SQL = " AND stream_id = ?";
+
+/** Reads the top queue requesters and tracks for one stream or the whole channel. */
+export const readSongRequestStatistics = async (
+  database: D1Database,
+  channelId: string,
+  streamId: string | null,
+): Promise<SongRequestStatistics> => {
+  const scopeSql = streamId === null ? "" : SONG_REQUEST_STATISTICS_STREAM_SCOPE_SQL;
+  const bindings = streamId === null ? [channelId] : [channelId, streamId];
+  const [requesters, tracks] = await Promise.all([
+    database.prepare(
+      `SELECT requester_user_id AS user_id,
+              COALESCE(MAX(NULLIF(requester_display_name, '')), MAX(NULLIF(requester_login, '')), requester_user_id) AS display_name,
+              COUNT(*) AS count
+         FROM song_requests
+        WHERE channel_id = ?${scopeSql}
+          AND state IN (${ACCEPTED_REQUEST_STATES_SQL})
+          AND request_type != 'vote'
+          AND requester_user_id IS NOT NULL
+        GROUP BY requester_user_id
+        ORDER BY count DESC, requester_user_id ASC
+        LIMIT 10`,
+    ).bind(...bindings).all<{ user_id: string; display_name: string; count: number }>(),
+    database.prepare(
+      `SELECT track_id, MIN(title) AS title, MIN(artists_json) AS artists_json, MIN(album_name) AS album_name, COUNT(*) AS count
+         FROM song_requests
+        WHERE channel_id = ?${scopeSql}
+          AND state IN (${ACCEPTED_REQUEST_STATES_SQL})
+        GROUP BY track_id
+        ORDER BY count DESC, track_id ASC
+        LIMIT 10`,
+    ).bind(...bindings).all<{ track_id: string; title: string; artists_json: string; album_name: string | null; count: number }>(),
+  ]);
+  return {
+    requesters: requesters.results.map(({ user_id, display_name, count }) => ({
+      userId: user_id,
+      displayName: display_name,
+      count,
+    })),
+    tracks: tracks.results.map(({ track_id, title, artists_json, album_name, count }) => {
+      let artists: string[] = [];
+      try {
+        const value: unknown = JSON.parse(artists_json);
+        if (Array.isArray(value)) artists = value.filter((artist): artist is string => typeof artist === "string");
+      } catch { /* Invalid legacy artist JSON stays empty. */ }
+      return { trackId: track_id, title, artists, albumName: album_name, count };
+    }),
   };
 };
 
@@ -173,7 +241,7 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
        )))`;
     const bindings: (string | number | null)[] = [
       input.requestId, input.channelId, request.source, request.track.id, request.track.uri,
-      request.track.title, JSON.stringify(request.track.artists), request.track.durationMs,
+      request.track.title, JSON.stringify(request.track.artists), request.track.albumName ?? null, request.track.durationMs,
       Number(request.track.explicit), request.track.coverUrl, request.track.spotifyUrl,
       request.requesterUserId ?? null, request.requesterLogin ?? null, request.requesterDisplayName ?? null,
       input.toState, request.operationId, reason, request.streamId, request.roundId ?? request.streamId,
@@ -189,10 +257,10 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
     );
     transition = db.prepare(
       `INSERT INTO song_requests
-        (id, channel_id, source, track_id, track_uri, title, artists_json, duration_ms, explicit, cover_url, spotify_url,
+        (id, channel_id, source, track_id, track_uri, title, artists_json, album_name, duration_ms, explicit, cover_url, spotify_url,
          requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason, stream_id, round_id,
          request_type, charged_amount, channel_points_reward_id, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         WHERE 1 = 1${ballotGuard}${activeRoundGuard}
        ON CONFLICT (operation_id) DO NOTHING
        RETURNING id`,
@@ -267,12 +335,15 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
            WHEN ? = 'submitted' THEN 'FULFILLED'
            WHEN ? IN ('rejected', 'failed') THEN 'CANCELED'
            WHEN ? = 'removed' AND ? = 'outcome_unknown' THEN 'CANCELED'
-           ELSE channel_points_resolution_due END
+           ELSE channel_points_resolution_due END,
+         channel_points_resolution_completed = CASE WHEN ? = 1 OR ? IN ('submitted', 'rejected', 'failed', 'removed')
+           THEN NULL ELSE channel_points_resolution_completed END
         WHERE ${conditions.join(" AND ")}
        RETURNING id`,
     ).bind(...bindings.slice(0, 9), input.refundDue === true ? 1 : input.refundDue === false ? 0 : null,
       input.refundDue === true ? 1 : input.refundDue === false ? 0 : null,
       Number(input.suppressChannelPointsResolution === true), input.toState, input.toState, input.toState, from,
+      Number(input.suppressChannelPointsResolution === true), input.toState,
       ...bindings.slice(9));
   }
   const results = await db.batch([transition, ...(input.companionStatements ?? [])]);
@@ -296,6 +367,7 @@ export interface SongRequestAdmissionInput {
   requesterUserId: string;
   requesterLogin: string;
   requesterDisplayName: string;
+  chatMessageId?: string | null;
   initialState: "pending_review" | "approved";
   now: string;
 }
@@ -319,8 +391,9 @@ export const admitSongRequest = async (
   const artistsJson = JSON.stringify(input.track.artists);
   const blockedTrackIdsJson = JSON.stringify(rules.blockedTrackIds);
   const blockedArtistsJson = JSON.stringify(rules.blockedArtists);
-  const admitted = await db.prepare(
-    `WITH request_time(at) AS (SELECT ?)
+  const admissionResults = await db.batch([
+    db.prepare(
+      `WITH request_time(at) AS (SELECT ?)
      INSERT INTO song_requests
       (id, channel_id, source, track_id, track_uri, title, artists_json, duration_ms, explicit, cover_url, spotify_url,
        requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason, stream_id,
@@ -453,8 +526,14 @@ export const admitSongRequest = async (
     Number(rules.personRoundLimitEnabled), input.channelId, input.roundId, input.requesterUserId, rules.personRoundLimit,
     Number(rules.channelOpenLimitEnabled), input.channelId, input.roundId, rules.channelOpenLimit,
     Number(rules.artistOpenLimitEnabled), artistsJson, input.channelId, input.roundId, rules.artistOpenLimit,
-  ).first<{ id: string }>();
-  if (admitted === null) return { accepted: false, position: null };
+    ),
+    db.prepare(
+      `UPDATE song_requests SET album_name = ?, chat_message_id = ?
+      WHERE channel_id = ? AND id = ? AND operation_id = ?
+     RETURNING id`,
+    ).bind(input.track.albumName ?? null, input.chatMessageId ?? null, input.channelId, input.requestId, input.operationId),
+  ]);
+  if ((admissionResults[0]?.results.length ?? 0) === 0) return { accepted: false, position: null };
   const row = await db.prepare(
     `SELECT COUNT(*) AS position FROM song_requests
       WHERE channel_id = ? AND round_id = ? AND ${OPEN_REQUEST_SQL}
@@ -590,6 +669,7 @@ export const songRequestTrackFromSpotify = (track: SpotifyTrack): SongRequestTra
     uri: compact.uri,
     title: compact.title,
     artists: compact.artists,
+    albumName: compact.albumName,
     durationMs: compact.durationMs,
     explicit: compact.explicit,
     coverUrl: compact.coverUrl,
@@ -603,9 +683,10 @@ export const spotifySlotHeld = async (db: D1Database, channelId: string): Promis
 
 export const readSongRequest = async (db: D1Database, channelId: string, requestId: string): Promise<SongRequestRow | null> => {
   const row = await db.prepare(
-    `SELECT id, source, track_id, track_uri, title, artists_json, duration_ms, explicit, cover_url, spotify_url,
+    `SELECT id, source, track_id, track_uri, title, artists_json, album_name, duration_ms, explicit, cover_url, spotify_url,
             requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason,
-            stream_id, round_id, request_type, charged_amount, channel_points_reward_id, submitted_at, created_at, updated_at
+            stream_id, round_id, request_type, charged_amount, channel_points_reward_id, chat_message_id,
+            channel_points_resolution_due, channel_points_resolution_completed, refund_due, submitted_at, created_at, updated_at
        FROM song_requests WHERE channel_id = ? AND id = ? LIMIT 1`,
   ).bind(channelId, requestId).first<SongRequestSqlRow>();
   return row === null ? null : rowToRequest(row);
@@ -645,21 +726,24 @@ export const clearSongRequestChannelPointResolution = async (
   status: "FULFILLED" | "CANCELED",
 ): Promise<boolean> => {
   const result = await db.prepare(
-    `UPDATE song_requests SET channel_points_resolution_due = NULL
-      WHERE channel_id = ? AND id = ? AND channel_points_resolution_due = ?`,
-  ).bind(channelId, requestId, status).run();
-  return result.meta.changes > 0;
+    `UPDATE song_requests SET channel_points_resolution_due = NULL, channel_points_resolution_completed = ?
+      WHERE channel_id = ? AND id = ? AND channel_points_resolution_due = ?
+     RETURNING id`,
+  ).bind(status, channelId, requestId, status).first<{ id: string }>();
+  return result !== null;
 };
 
 export const clearSongRequestChannelPointResolutionByOperation = async (
   db: D1Database,
   channelId: string,
   operationId: string,
+  status: "FULFILLED" | "CANCELED",
 ): Promise<void> => {
   await db.prepare(
-    `UPDATE song_requests SET channel_points_resolution_due = NULL
-      WHERE channel_id = ? AND operation_id = ? AND channel_points_resolution_due IS NOT NULL`,
-  ).bind(channelId, operationId).run();
+    `UPDATE song_requests SET channel_points_resolution_due = NULL, channel_points_resolution_completed = ?
+      WHERE channel_id = ? AND operation_id = ? AND request_type = 'channel_points'
+     RETURNING id`,
+  ).bind(status, channelId, operationId).first<{ id: string }>();
 };
 
 export const songRequestRefundIsDue = async (db: D1Database, channelId: string, requestId: string): Promise<boolean> =>
@@ -697,9 +781,10 @@ export const songRequestRefundDueIds = async (
 
 export const recentSongRequests = async (db: D1Database, channelId: string, roundId: string | null): Promise<SongRequestRow[]> => {
   const rows = await db.prepare(
-    `SELECT id, source, track_id, track_uri, title, artists_json, duration_ms, explicit, cover_url, spotify_url,
+    `SELECT id, source, track_id, track_uri, title, artists_json, album_name, duration_ms, explicit, cover_url, spotify_url,
             requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason,
-            stream_id, round_id, request_type, charged_amount, channel_points_reward_id, submitted_at, created_at, updated_at
+            stream_id, round_id, request_type, charged_amount, channel_points_reward_id, chat_message_id,
+            channel_points_resolution_due, channel_points_resolution_completed, refund_due, submitted_at, created_at, updated_at
        FROM song_requests
       WHERE channel_id = ? AND round_id IS ? AND state != 'charging'
       ORDER BY created_at DESC, id DESC LIMIT 50`,
@@ -709,7 +794,8 @@ export const recentSongRequests = async (db: D1Database, channelId: string, roun
 
 export interface SongVoteOutcome {
   ballotId: string;
-  state: "tie" | "no_votes" | "failed";
+  state: "tie" | "no_votes" | "failed" | "drawn";
+  drawnByLot: boolean;
   createdAt: string;
 }
 
@@ -727,12 +813,18 @@ export const latestSongRequestStreamId = async (db: D1Database, channelId: strin
 
 export const recentSongVoteOutcomes = async (db: D1Database, channelId: string, roundId: string | null): Promise<SongVoteOutcome[]> => {
   const rows = await db.prepare(
-    `SELECT ballot_id, state, created_at
+    `SELECT ballot_id, state, drawn_by_lot, created_at
        FROM song_requests_votes
-      WHERE channel_id = ? AND COALESCE(round_id, stream_id) IS ? AND state IN ('tie', 'no_votes', 'failed')
+      WHERE channel_id = ? AND vote_kind = 'song' AND COALESCE(round_id, stream_id) IS ?
+        AND (state IN ('tie', 'no_votes', 'failed') OR (state = 'queued' AND drawn_by_lot = 1))
       ORDER BY created_at DESC, ballot_id DESC LIMIT 10`,
-  ).bind(channelId, roundId).all<{ ballot_id: string; state: SongVoteOutcome["state"]; created_at: string }>();
-  return rows.results.map((row) => ({ ballotId: row.ballot_id, state: row.state, createdAt: row.created_at }));
+  ).bind(channelId, roundId).all<{ ballot_id: string; state: "tie" | "no_votes" | "failed" | "queued"; drawn_by_lot: number; created_at: string }>();
+  return rows.results.map((row) => ({
+    ballotId: row.ballot_id,
+    state: row.state === "queued" ? "drawn" : row.state,
+    drawnByLot: row.drawn_by_lot === 1,
+    createdAt: row.created_at,
+  }));
 };
 
 export const createVoteRequestClaim = async (
@@ -749,15 +841,16 @@ export const createVoteRequestClaim = async (
     activeRoundId?: string;
     initialState?: "approved" | "rejected";
     failureReason?: string | null;
+    drawnByLot?: boolean;
   },
 ): Promise<boolean> => {
   const operationId = `mod_vote:${input.ballotId}`;
   const claim = db.prepare(
     `UPDATE song_requests_votes
-        SET state = 'queued', request_id = ?, completed_at = ?
+        SET state = 'queued', request_id = ?, completed_at = ?, drawn_by_lot = ?
       WHERE channel_id = ? AND ballot_id = ? AND state = 'open'
         AND EXISTS (SELECT 1 FROM song_requests WHERE operation_id = ? AND channel_id = ?)`,
-  ).bind(input.requestId, input.now, input.channelId, input.ballotId, operationId, input.channelId);
+  ).bind(input.requestId, input.now, Number(input.drawnByLot === true), input.channelId, input.ballotId, operationId, input.channelId);
   return await transitionRequest(db, {
     channelId: input.channelId,
     requestId: input.requestId,
@@ -778,18 +871,87 @@ export const voteRecord = async (db: D1Database, channelId: string, ballotId: st
   requestId: string | null;
   streamId: string | null;
   roundId: string | null;
+  voteKind: "song" | "skip";
+  drawnByLot: boolean;
+  startTrackId: string | null;
+  skipThreshold: number | null;
+  skipCooldownSeconds: number | null;
 } | null> => {
   const row = await db.prepare(
-    "SELECT candidate_tracks_json, state, request_id, stream_id, round_id FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ?",
-  ).bind(channelId, ballotId).first<{ candidate_tracks_json: string; state: string; request_id: string | null; stream_id: string | null; round_id: string | null }>();
+    "SELECT candidate_tracks_json, state, request_id, stream_id, round_id, vote_kind, drawn_by_lot, start_track_id, skip_threshold, skip_cooldown_seconds FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ?",
+  ).bind(channelId, ballotId).first<{ candidate_tracks_json: string; state: string; request_id: string | null; stream_id: string | null; round_id: string | null; vote_kind: "song" | "skip"; drawn_by_lot: number; start_track_id: string | null; skip_threshold: number | null; skip_cooldown_seconds: number | null }>();
   if (row === null) return null;
   try {
     const value: unknown = JSON.parse(row.candidate_tracks_json);
     if (!Array.isArray(value)) return null;
-    return { candidates: value as SongRequestTrack[], state: row.state, requestId: row.request_id, streamId: row.stream_id, roundId: row.round_id };
+    return {
+      candidates: value as SongRequestTrack[], state: row.state, requestId: row.request_id, streamId: row.stream_id,
+      roundId: row.round_id, voteKind: row.vote_kind, drawnByLot: row.drawn_by_lot === 1, startTrackId: row.start_track_id,
+      skipThreshold: row.skip_threshold, skipCooldownSeconds: row.skip_cooldown_seconds,
+    };
   } catch {
     return null;
   }
+};
+
+export const createSkipVoteMapping = async (db: D1Database, input: {
+  ballotId: string;
+  channelId: string;
+  streamId: string | null;
+  userId: string;
+  startTrackId: string;
+  threshold: number;
+  cooldownSeconds: number;
+  now: string;
+}): Promise<boolean> => {
+  const row = await db.prepare(
+    `INSERT INTO song_requests_votes
+       (ballot_id, channel_id, stream_id, round_id, candidate_tracks_json, moderator_user_id, state, created_at,
+        vote_kind, start_track_id, skip_threshold, skip_cooldown_seconds)
+     SELECT ?, ?, ?, ?, '[]', ?, 'open', ?, 'skip', ?, ?, ?
+      WHERE EXISTS (SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1)
+        AND EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)
+     RETURNING ballot_id`,
+  ).bind(input.ballotId, input.channelId, input.streamId, input.streamId, input.userId, input.now,
+    input.startTrackId, input.threshold, input.cooldownSeconds, input.channelId, input.channelId)
+    .first<{ ballot_id: string }>();
+  return row !== null;
+};
+
+export const openSkipVoteMapping = async (db: D1Database, channelId: string): Promise<string | null> => {
+  const row = await db.prepare(
+    "SELECT ballot_id FROM song_requests_votes WHERE channel_id = ? AND vote_kind = 'skip' AND state = 'open' ORDER BY created_at DESC, ballot_id DESC LIMIT 1",
+  ).bind(channelId).first<{ ballot_id: string }>();
+  return row?.ballot_id ?? null;
+};
+
+export const removeUnstartedSkipVoteMapping = async (db: D1Database, channelId: string, ballotId: string): Promise<void> => {
+  await db.prepare(
+    "DELETE FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ? AND vote_kind = 'skip' AND state = 'open' RETURNING ballot_id",
+  ).bind(channelId, ballotId).first<{ ballot_id: string }>();
+};
+
+export const claimSkipVoteResult = async (db: D1Database, channelId: string, ballotId: string, closedAt: string): Promise<boolean> => {
+  const row = await db.prepare(
+    `UPDATE song_requests_votes SET state = 'queued', completed_at = ?, skip_result = 'pending'
+      WHERE channel_id = ? AND ballot_id = ? AND vote_kind = 'skip' AND state = 'open'
+     RETURNING ballot_id`,
+  ).bind(closedAt, channelId, ballotId).first<{ ballot_id: string }>();
+  return row !== null;
+};
+
+export const finishSkipVoteResult = async (
+  db: D1Database,
+  channelId: string,
+  ballotId: string,
+  state: "queued" | "tie" | "no_votes" | "failed",
+  result: "skipped" | "threshold_not_met" | "no_majority" | "track_changed" | "not_connected" | "nothing_playing" | "no_active_device" | "spotify_unavailable",
+): Promise<void> => {
+  await db.prepare(
+    `UPDATE song_requests_votes SET state = ?, skip_result = ?
+      WHERE channel_id = ? AND ballot_id = ? AND vote_kind = 'skip' AND state = 'queued' AND skip_result = 'pending'
+     RETURNING ballot_id`,
+  ).bind(state, result, channelId, ballotId).first<{ ballot_id: string }>();
 };
 
 export const finishVoteWithoutRequest = async (
@@ -814,10 +976,11 @@ export const createNowPlayingSnapshot = async (
   now: string,
   progressMs?: number | null,
   fence?: { activeStreamId: string } | { offlineRoundId: string },
+  playing = true,
 ): Promise<{ changed: boolean; revision: number; state: Record<string, unknown> | null; committed: boolean }> => {
   const current = await db.prepare(
-    "SELECT revision, track_json, request_id, progress_ms FROM song_requests_now_playing WHERE channel_id = ?",
-  ).bind(channelId).first<{ revision: number; track_json: string | null; request_id: string | null; progress_ms: number | null }>();
+    "SELECT revision, track_json, request_id, progress_ms, observed_at FROM song_requests_now_playing WHERE channel_id = ?",
+  ).bind(channelId).first<{ revision: number; track_json: string | null; request_id: string | null; progress_ms: number | null; observed_at: string | null }>();
   let previousTrackId: string | null = null;
   if (current?.track_json !== null && current?.track_json !== undefined) {
     try {
@@ -829,11 +992,26 @@ export const createNowPlayingSnapshot = async (
   }
   const nextTrackId = track?.id ?? null;
   const sameTrack = current !== null && previousTrackId === nextTrackId && nextTrackId !== null;
-  const progressDropped = current !== null && sameTrack && progressMs !== undefined && progressMs !== null &&
-    current.progress_ms !== null && progressMs < current.progress_ms;
+  let priorState: Record<string, unknown> | null = null;
+  if (current?.track_json !== null && current?.track_json !== undefined) {
+    try {
+      const parsed: unknown = JSON.parse(current.track_json);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) priorState = parsed as Record<string, unknown>;
+    } catch { /* A damaged snapshot is replaced from the live Spotify response. */ }
+  }
+  const observedAt = current?.observed_at === null || current?.observed_at === undefined ? null : Date.parse(current.observed_at);
+  const durationMs = typeof priorState?.durationMs === "number" ? priorState.durationMs : 0;
+  const expectedProgress = current?.progress_ms === null || current?.progress_ms === undefined || observedAt === null || !Number.isFinite(observedAt)
+    ? current?.progress_ms ?? null
+    : interpolatePlaybackProgress(current.progress_ms, durationMs, observedAt, Date.parse(now));
+  const progressDrifted = current !== null && sameTrack && progressMs !== undefined && progressMs !== null &&
+    expectedProgress !== null && Math.abs(progressMs - expectedProgress) > 3_000;
   const trackChanged = current === null ? track !== null : previousTrackId !== nextTrackId;
-  const changed = trackChanged || progressDropped;
-  const nextProgress = track === null ? null : progressMs ?? current?.progress_ms ?? null;
+  const trackRestarted = sameTrack && progressMs !== undefined && progressMs !== null &&
+    expectedProgress !== null && expectedProgress >= 30_000 && progressMs <= 5_000;
+  const playingChanged = sameTrack && priorState !== null && (priorState.playing !== false) !== playing;
+  const changed = trackChanged || trackRestarted || progressDrifted || playingChanged;
+  const nextProgress = track === null ? null : progressMs ?? (sameTrack ? current.progress_ms : null) ?? null;
   const roundFenceSql = fence === undefined ? "" : " AND " + ("activeStreamId" in fence
     ? `EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?)`
     : `EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'offline')
@@ -844,26 +1022,26 @@ export const createNowPlayingSnapshot = async (
     ? [channelId, fence.activeStreamId]
     : [channelId, channelId, fence.offlineRoundId, channelId];
   if (!changed && current !== null) {
-    const progressUpdate = fence === undefined
-      ? db.prepare("UPDATE song_requests_now_playing SET progress_ms = ? WHERE channel_id = ?")
-        .bind(nextProgress, channelId)
-      : db.prepare(
-        `UPDATE song_requests_now_playing SET progress_ms = ? WHERE channel_id = ?
+    if (fence === undefined) return { changed: false, revision: current.revision, state: null, committed: true };
+    const stillCurrent = await db.prepare(
+      `SELECT 1 AS valid FROM song_requests_now_playing
+        WHERE channel_id = ? AND revision = ? AND track_json IS ?
           ${roundFenceSql}
           AND EXISTS (SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1)
           AND EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)`,
-      ).bind(nextProgress, channelId, ...roundFenceBindings, channelId, channelId);
-    const result = await progressUpdate.run();
-    return { changed: false, revision: current.revision, state: null, committed: fence === undefined || result.meta.changes > 0 };
+    ).bind(channelId, current.revision, current.track_json, ...roundFenceBindings, channelId, channelId)
+      .first<{ valid: number }>();
+    return { changed: false, revision: current.revision, state: null, committed: stillCurrent !== null };
   }
   if (!changed && current === null && track === null) return { changed: false, revision: 0, state: null, committed: true };
 
   let matched: SongRequestSqlRow | null = null;
-  if (track !== null && changed) {
+  if (track !== null && (trackChanged || trackRestarted)) {
     matched = await db.prepare(
-      `SELECT id, source, track_id, track_uri, title, artists_json, duration_ms, explicit, cover_url, spotify_url,
+      `SELECT id, source, track_id, track_uri, title, artists_json, album_name, duration_ms, explicit, cover_url, spotify_url,
               requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason,
-              stream_id, round_id, request_type, charged_amount, created_at, updated_at
+              stream_id, round_id, request_type, charged_amount, channel_points_reward_id, chat_message_id,
+              channel_points_resolution_due, channel_points_resolution_completed, refund_due, submitted_at, created_at, updated_at
          FROM song_requests
         WHERE channel_id = ? AND round_id = ? AND track_id = ? AND state = 'submitted'
         ORDER BY created_at ASC, id ASC LIMIT 1`,
@@ -871,22 +1049,27 @@ export const createNowPlayingSnapshot = async (
   }
   const request = matched === null ? null : rowToRequest(matched);
   const compact = track === null ? null : compactSpotifyTrack(track);
-  let priorState: Record<string, unknown> | null = null;
-  if (current?.track_json !== null && current?.track_json !== undefined) {
-    try {
-      const parsed: unknown = JSON.parse(current.track_json);
-      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) priorState = parsed as Record<string, unknown>;
-    } catch { /* A damaged snapshot is replaced from the live Spotify response. */ }
-  }
   const state: Record<string, unknown> | null = compact === null ? null : sameTrack && request === null && priorState !== null ? priorState : {
     id: compact.id,
     title: compact.title,
     artist: compact.artists.join(", "),
+    albumName: compact.albumName,
+    durationMs: compact.durationMs,
+    progressMs: nextProgress,
+    serverNow: now,
     coverUrl: compact.coverUrl,
     spotifyUrl: compact.spotifyUrl,
     requester: request?.source === "mod_vote" ? null : request?.requesterDisplayName ?? null,
     source: request?.source ?? "manual",
+    playing,
   };
+  if (state !== null) {
+    state.durationMs = compact?.durationMs ?? state.durationMs;
+    state.progressMs = nextProgress;
+    state.serverNow = now;
+    if (compact !== null) state.albumName = compact.albumName;
+    state.playing = playing;
+  }
   const serialized = state === null ? null : JSON.stringify(state);
   const revision = (current?.revision ?? 0) + Number(changed);
   const snapshotWrite = fence === undefined
@@ -1020,9 +1203,10 @@ export const pendingSongRequestQueue = async (
   roundId?: string | null,
 ): Promise<{ count: number; requests: SongRequestRow[] }> => {
   const rows = await db.prepare(
-    `SELECT id, source, track_id, track_uri, title, artists_json, duration_ms, explicit, cover_url, spotify_url,
+    `SELECT id, source, track_id, track_uri, title, artists_json, album_name, duration_ms, explicit, cover_url, spotify_url,
             requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason,
-            stream_id, round_id, request_type, charged_amount, channel_points_reward_id, submitted_at, created_at, updated_at
+            stream_id, round_id, request_type, charged_amount, channel_points_reward_id, chat_message_id,
+            channel_points_resolution_due, channel_points_resolution_completed, refund_due, submitted_at, created_at, updated_at
        FROM song_requests WHERE channel_id = ? AND state = 'pending_review' AND (? IS NULL OR round_id = ?)
       ORDER BY created_at, id LIMIT 100`,
   ).bind(channelId, roundId ?? null, roundId ?? null).all<SongRequestSqlRow>();

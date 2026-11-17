@@ -1,0 +1,27 @@
+@layer components.dashboard {
+  .statistics-sections {
+    display: grid;
+    gap: var(--s4);
+    min-width: 0;
+  }
+
+  .statistics-section-loading {
+    display: grid;
+    align-content: start;
+    gap: 12px;
+    min-height: 24rem;
+    padding-top: 8px;
+  }
+
+  .statistics-section-loading span {
+    display: block;
+    width: min(100%, 520px);
+    height: 14px;
+    border-radius: var(--r-control);
+    background: var(--surface-well);
+  }
+
+  .statistics-section-loading span:last-child {
+    width: min(70%, 360px);
+  }
+}
