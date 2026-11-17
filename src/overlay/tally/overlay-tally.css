@@ -10,6 +10,8 @@
   grid-template-columns: minmax(0, 1fr) 6ch;
   align-items: start;
   min-width: 0;
+  /* Title and timer share one size: 0.85em of the element base font. */
+  font-size: 0.85em;
   height: 2.4em;
   min-height: 2.4em;
 }
@@ -68,14 +70,14 @@
 }
 
 .overlay-tally__options--strip .overlay-tally__option--colored {
-  min-height: 1.5em;
+  min-height: 1.1em;
   min-width: 0;
 }
 
 .overlay-tally__options--strip .overlay-tally__option--colored .overlay-tally__caption {
   align-items: center;
   flex-wrap: nowrap;
-  height: 1.5em;
+  height: 1.1em;
   min-width: 0;
 }
 

@@ -183,7 +183,8 @@ test("standard vote options keep the original narrow bars and strip sizing", asy
 
     expect(measurements.tally.width).toBe(200);
     expect(measurements.optionsClass).toContain("overlay-tally__options--standard");
-    expect(measurements.row).toMatchObject({ minWidth: "auto", boxSizing: "content-box" });
+    // Strip rows must be able to shrink below their nowrap label; bar rows are stretched by the column.
+    expect(measurements.row).toMatchObject({ minWidth: layout === "strip" ? "0px" : "auto", boxSizing: "content-box" });
     // Labels truncate; counters keep their content width on one line instead of wrapping.
     expect(measurements.label).toMatchObject({ minWidth: "0px", whiteSpace: "nowrap" });
     expect(measurements.count).toMatchObject({ minWidth: "auto", whiteSpace: "nowrap" });
@@ -268,6 +269,9 @@ test("colored strip rows keep counters on one line and labels readable at a 360p
   // Computed styles instead of scroll measurements, so wider fonts cannot change the outcome.
   expect(plain?.labelTextOverflows).toEqual(["ellipsis", "ellipsis"]);
   expect(plain?.countWhiteSpaces).toEqual(["nowrap", "nowrap"]);
+  // Long uncoloured labels must shrink inside their row instead of widening it past the overlay box.
+  expect(plain?.rowsOverflowTally).toBe(false);
+  expect(plain?.countsOverflowTally).toBe(false);
   // Coloured rows use compact markers, truncate labels and keep counters on one line at equal heights.
   expect(colored?.rowsOverflowTally).toBe(false);
   expect(colored?.countsOverflowTally).toBe(false);

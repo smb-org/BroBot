@@ -1,0 +1,35 @@
+.overlay-marquee {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Fits or reduced motion: the text truncates with an ellipsis inside the box. */
+.overlay-marquee__text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Overflowing: the text takes its full width and moves; the keyframes come with the component. */
+.overlay-marquee__text[data-scrolling="true"] {
+  display: inline-block;
+  overflow: visible;
+  text-overflow: clip;
+  animation-duration: var(--overlay-marquee-duration, 0s);
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay-marquee__text[data-scrolling="true"] {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    animation: none;
+  }
+}
