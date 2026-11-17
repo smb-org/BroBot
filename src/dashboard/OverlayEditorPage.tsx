@@ -339,14 +339,27 @@ const moduleElementOption = (kind: string): ModuleElementOption | undefined =>
 
 interface PreviewHandlePosition { left: number; top: number }
 
+type PreviewHandleIdentity = `scale:${OverlayEditorScaleCorner}` | `width:${OverlayEditorWidthEdge}`;
+
 const PREVIEW_HANDLE_SIZE = 18;
 const PREVIEW_SCALE_CORNER_PRIORITY: readonly OverlayEditorScaleCorner[] = [
   "bottom-right", "top-left", "top-right", "bottom-left",
 ];
 const PREVIEW_WIDTH_EDGE_PRIORITY: readonly OverlayEditorWidthEdge[] = ["right", "left"];
+const PREVIEW_HANDLE_IDENTITY_PRIORITY: readonly PreviewHandleIdentity[] = [
+  "scale:bottom-right", "scale:top-left", "scale:top-right", "scale:bottom-left", "width:right", "width:left",
+];
 
 const previewHandlePositionsOverlap = (first: PreviewHandlePosition, second: PreviewHandlePosition): boolean =>
   Math.abs(first.left - second.left) < PREVIEW_HANDLE_SIZE && Math.abs(first.top - second.top) < PREVIEW_HANDLE_SIZE;
+
+const previewHandleCoversBounds = (position: PreviewHandlePosition, bounds: OverlayEditorElementBounds): boolean => {
+  const left = position.left - PREVIEW_HANDLE_SIZE / 2;
+  const top = position.top - PREVIEW_HANDLE_SIZE / 2;
+  return left <= bounds.left && top <= bounds.top &&
+    left + PREVIEW_HANDLE_SIZE >= bounds.left + bounds.width &&
+    top + PREVIEW_HANDLE_SIZE >= bounds.top + bounds.height;
+};
 
 const overlayEditorElementCanvasBounds = (
   element: PanelOverlayElement,
@@ -374,6 +387,33 @@ const overlayEditorElementCanvasBounds = (
     top: element.y,
     width,
     height,
+  };
+};
+
+const overlayEditorElementClickableBounds = (
+  element: PanelOverlayElement,
+  root: HTMLElement | null,
+  anchor: OverlayStyleAlignment,
+): OverlayEditorElementBounds | null => {
+  if (root === null) return null;
+  const rendered = findRenderedElement(root, element.id);
+  if (rendered === undefined) return null;
+  const bounds = rendered.getBoundingClientRect();
+  const rootBounds = root.getBoundingClientRect();
+  if (bounds.width === 0 && bounds.height === 0) {
+    const base = moduleElementOption(element.kind)?.defaultSize ?? UNMEASURED_ELEMENT_FALLBACK_SIZE;
+    return {
+      left: element.x - (anchor === "right" ? base.width : anchor === "center" ? base.width / 2 : 0),
+      top: element.y,
+      width: base.width,
+      height: base.height,
+    };
+  }
+  return {
+    left: bounds.left - rootBounds.left,
+    top: bounds.top - rootBounds.top,
+    width: bounds.width,
+    height: bounds.height,
   };
 };
 
@@ -629,11 +669,13 @@ function OverlayEditorWorkspace({
   const [activeScalePercent, setActiveScalePercent] = useState<number | null>(null);
   const [activeWidthHandle, setActiveWidthHandle] = useState<OverlayEditorWidthEdge | null>(null);
   const [activeWidthPx, setActiveWidthPx] = useState<number | null>(null);
+  const [focusedPreviewHandle, setFocusedPreviewHandle] = useState<PreviewHandleIdentity | null>(null);
   const previewFrameRootRef = useRef<HTMLDivElement | null>(null);
   const previewViewportRef = useRef<HTMLDivElement>(null);
   const canvasFrameRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const drag = useRef<PointerDrag | null>(null);
+  const blurredPreviewHandle = useRef<PreviewHandleIdentity | null>(null);
   const pendingWidthPositionClamp = useRef<string | null>(null);
   const previewEventHandlers = useRef<PreviewEventHandlers>({
     pointerDown: () => undefined,
@@ -1427,33 +1469,15 @@ function OverlayEditorWorkspace({
   const elementAtPoint = (point: { x: number; y: number }): PanelOverlayElement | undefined => {
     const root = previewFrameRootRef.current;
     if (root === null) return undefined;
-    const rootBounds = root.getBoundingClientRect();
     const topmostFirst = draft.elements
       .map((element, index) => ({ element, index }))
       .sort((left, right) => right.element.z - left.element.z || right.index - left.index);
     for (const { element } of topmostFirst) {
       if (!element.inComposition) continue;
-      const rendered = findRenderedElement(root, element.id);
-      if (rendered === undefined) continue;
-      const bounds = rendered.getBoundingClientRect();
-      let left: number;
-      let top: number;
-      let width: number;
-      let height: number;
-      if (bounds.width === 0 && bounds.height === 0) {
-        const size = moduleElementOption(element.kind)?.defaultSize ?? UNMEASURED_ELEMENT_FALLBACK_SIZE;
-        const anchor = elementHorizontalAnchor(element);
-        left = element.x - (anchor === "right" ? size.width : anchor === "center" ? size.width / 2 : 0);
-        top = element.y;
-        width = size.width;
-        height = size.height;
-      } else {
-        left = bounds.left - rootBounds.left;
-        top = bounds.top - rootBounds.top;
-        width = bounds.width;
-        height = bounds.height;
-      }
-      if (point.x >= left && point.x <= left + width && point.y >= top && point.y <= top + height) return element;
+      const bounds = overlayEditorElementClickableBounds(element, root, elementHorizontalAnchor(element));
+      if (bounds === null) continue;
+      if (point.x >= bounds.left && point.x <= bounds.left + bounds.width &&
+        point.y >= bounds.top && point.y <= bounds.top + bounds.height) return element;
     }
     return undefined;
   };
@@ -1616,6 +1640,25 @@ function OverlayEditorWorkspace({
     };
   }, [previewFrameRoot]);
 
+  useLayoutEffect(() => {
+    const blurredHandle = blurredPreviewHandle.current;
+    if (blurredHandle === null) return;
+    blurredPreviewHandle.current = null;
+    const canvasFrame = canvasFrameRef.current;
+    if (canvasFrame === null) return;
+    const hasVisibleHandle = (identity: PreviewHandleIdentity): boolean =>
+      canvasFrame.querySelector(`[data-preview-handle-key="${identity}"]`) !== null;
+    if (hasVisibleHandle(blurredHandle)) return;
+    if (document.activeElement !== document.body && document.activeElement !== document.documentElement) return;
+    const blurredIndex = PREVIEW_HANDLE_IDENTITY_PRIORITY.indexOf(blurredHandle);
+    const nextHandle = [
+      ...PREVIEW_HANDLE_IDENTITY_PRIORITY.slice(blurredIndex + 1),
+      ...PREVIEW_HANDLE_IDENTITY_PRIORITY.slice(0, blurredIndex + 1),
+    ].find(hasVisibleHandle);
+    if (nextHandle === undefined) return;
+    canvasFrame.querySelector<HTMLButtonElement>(`[data-preview-handle-key="${nextHandle}"]`)?.focus();
+  }, [activeScaleHandle, activeWidthHandle, canvasScale, draft, focusedPreviewHandle, selectedElementBounds]);
+
   const rendererMarkup = <OverlayCanvas overlay={rendererOverlay} language={language} variables={liveVariables} elementId={null} />;
 
   return <ToolPage kind="overlays"
@@ -1728,24 +1771,68 @@ function OverlayEditorWorkspace({
             "bottom-left": { left: leftCornerX, top: bottomCornerY },
             "bottom-right": { left: rightCornerX, top: bottomCornerY },
           };
-          const acceptedHandlePositions: PreviewHandlePosition[] = [];
-          const visibleCornerPositions: Partial<Record<OverlayEditorScaleCorner, PreviewHandlePosition>> = {};
-          for (const corner of PREVIEW_SCALE_CORNER_PRIORITY) {
-            const position = cornerPositions[corner];
-            if (acceptedHandlePositions.some((target) => previewHandlePositionsOverlap(position, target))) continue;
-            visibleCornerPositions[corner] = position;
-            acceptedHandlePositions.push(position);
-          }
-          const widthHandlePositions: Partial<Record<OverlayEditorWidthEdge, PreviewHandlePosition>> = {};
+          const handleCandidates: Array<{ identity: PreviewHandleIdentity; position: PreviewHandlePosition }> =
+            PREVIEW_SCALE_CORNER_PRIORITY.map((corner) => ({
+              identity: `scale:${corner}` as PreviewHandleIdentity,
+              position: cornerPositions[corner],
+            }));
           if (selectedElement !== null && overlayElementSupportsWidth(selectedElement.kind) && selectedElementBounds !== null) {
             for (const edge of PREVIEW_WIDTH_EDGE_PRIORITY) {
-              const position = {
-                left: handleLeft(edge === "left" ? selectedElementBounds.left : selectedElementBounds.left + selectedElementBounds.width),
-                top: handleTop(selectedElementBounds.top + selectedElementBounds.height / 2),
-              };
-              if (acceptedHandlePositions.some((target) => previewHandlePositionsOverlap(position, target))) continue;
-              widthHandlePositions[edge] = position;
-              acceptedHandlePositions.push(position);
+              handleCandidates.push({
+                identity: `width:${edge}` as PreviewHandleIdentity,
+                position: {
+                  left: handleLeft(edge === "left" ? selectedElementBounds.left : selectedElementBounds.left + selectedElementBounds.width),
+                  top: handleTop(selectedElementBounds.top + selectedElementBounds.height / 2),
+                },
+              });
+            }
+          }
+          const previewRoot = previewFrameRootRef.current;
+          const selectedId = selectedElement?.id;
+          const otherClickableBounds = selectedId === undefined || previewRoot === null ? [] : draft.elements
+            .filter((element) => element.id !== selectedId && element.inComposition)
+            .flatMap((element) => {
+              const bounds = overlayEditorElementClickableBounds(
+                element,
+                previewRoot,
+                elementHorizontalAnchor(element),
+              );
+              if (bounds === null) return [];
+              const left = Math.max(0, bounds.left * canvasScale - frameBorderLeft);
+              const top = Math.max(0, bounds.top * canvasScale - frameBorderTop);
+              const right = Math.min(frameWidth, (bounds.left + bounds.width) * canvasScale - frameBorderLeft);
+              const bottom = Math.min(frameHeight, (bounds.top + bounds.height) * canvasScale - frameBorderTop);
+              if (right <= left || bottom <= top) return [];
+              return [{ left, top, width: right - left, height: bottom - top }];
+            });
+          const activePreviewHandle: PreviewHandleIdentity | null = activeScaleHandle !== null
+            ? `scale:${activeScaleHandle}`
+            : activeWidthHandle !== null ? `width:${activeWidthHandle}` : null;
+          const forcedPreviewHandle = activePreviewHandle ?? focusedPreviewHandle;
+          const visibleHandleCandidates: typeof handleCandidates = [];
+          const acceptCandidate = (
+            candidate: (typeof handleCandidates)[number],
+            force: boolean,
+          ): void => {
+            if (!force && visibleHandleCandidates.some(({ position }) => previewHandlePositionsOverlap(candidate.position, position))) return;
+            if (!force && otherClickableBounds.some((bounds) => previewHandleCoversBounds(candidate.position, bounds))) return;
+            visibleHandleCandidates.push(candidate);
+          };
+          const forcedCandidate = handleCandidates.find(({ identity }) => identity === forcedPreviewHandle);
+          if (forcedCandidate !== undefined) acceptCandidate(forcedCandidate, true);
+          for (const candidate of handleCandidates) {
+            if (candidate.identity !== forcedPreviewHandle) acceptCandidate(candidate, false);
+          }
+          if (visibleHandleCandidates.length === 0) {
+            const bottomRight = handleCandidates.find(({ identity }) => identity === "scale:bottom-right");
+            if (bottomRight !== undefined) acceptCandidate(bottomRight, true);
+          }
+          const visibleHandleIdentities = new Set(visibleHandleCandidates.map(({ identity }) => identity));
+          const widthHandlePositions: Partial<Record<OverlayEditorWidthEdge, PreviewHandlePosition>> = {};
+          for (const candidate of visibleHandleCandidates) {
+            if (candidate.identity.startsWith("width:")) {
+              const edge = candidate.identity.slice("width:".length) as OverlayEditorWidthEdge;
+              widthHandlePositions[edge] = candidate.position;
             }
           }
           return <div className="overlay-editor__preview-viewport" ref={previewViewportRef}
@@ -1771,15 +1858,23 @@ function OverlayEditorWorkspace({
                   const cornerLabel = corner === "top-left" ? "top left"
                     : corner === "top-right" ? "top right"
                       : corner === "bottom-left" ? "bottom left" : "bottom right";
-                  const position = visibleCornerPositions[corner];
-                  if (position === undefined) return null;
+                  const identity: PreviewHandleIdentity = `scale:${corner}`;
+                  const position = cornerPositions[corner];
+                  if (!visibleHandleIdentities.has(identity)) return null;
                   return <button
                     key={corner}
                     type="button"
                     className={`overlay-editor__scale-handle overlay-editor__scale-handle--${corner}`}
                     data-testid={`overlay-editor-scale-handle-${corner}`}
+                    data-preview-handle-key={identity}
                     style={position}
                     aria-label={labels.editorScaleHandle(cornerLabel)}
+                    onFocus={() => { setFocusedPreviewHandle(identity); }}
+                    onBlur={() => {
+                      if (focusedPreviewHandle !== identity) return;
+                      blurredPreviewHandle.current = identity;
+                      setFocusedPreviewHandle(null);
+                    }}
                     onPointerDown={(event) => { startScaleDrag(event, corner); }}
                   >
                     {activeScaleHandle === corner && activeScalePercent !== null
@@ -1790,13 +1885,21 @@ function OverlayEditorWorkspace({
                 {overlayElementSupportsWidth(selectedElement.kind) ? PREVIEW_WIDTH_EDGE_PRIORITY.map((edge) => {
                   const position = widthHandlePositions[edge];
                   if (position === undefined) return null;
+                  const identity: PreviewHandleIdentity = `width:${edge}`;
                   return <button
                     key={edge}
                     type="button"
                     className={`overlay-editor__scale-handle overlay-editor__scale-handle--width-${edge}`}
                     data-testid={`overlay-editor-width-handle-${edge}`}
+                    data-preview-handle-key={identity}
                     style={position}
                     aria-label={labels.editorWidthHandle(edge)}
+                    onFocus={() => { setFocusedPreviewHandle(identity); }}
+                    onBlur={() => {
+                      if (focusedPreviewHandle !== identity) return;
+                      blurredPreviewHandle.current = identity;
+                      setFocusedPreviewHandle(null);
+                    }}
                     onPointerDown={(event) => { startWidthDrag(event, edge); }}
                   >
                     {activeWidthHandle === edge && activeWidthPx !== null

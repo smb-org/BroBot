@@ -63,6 +63,50 @@ const stubMeasuredElementSize = (frameWindow: WindowWithElementConstructor, elem
   });
 };
 
+interface MeasuredOverlayElement {
+  id: string;
+  x: number;
+  y: number;
+  widthPx: number;
+  heightPx: number;
+}
+
+const stubMeasuredOverlayElementBounds = (frameWindow: WindowWithElementConstructor, elements: readonly MeasuredOverlayElement[]): void => {
+  const elementsById = new Map(elements.map((element) => [element.id, element]));
+  vi.spyOn(frameWindow.Element.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const element = this.dataset.element === undefined ? undefined : elementsById.get(this.dataset.element);
+    if (element === undefined) {
+      return { x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) };
+    }
+    const scale = Number(/scale\(([^)]+)\)/u.exec(this.style.transform)?.[1] ?? 1);
+    const width = element.widthPx * scale;
+    const height = element.heightPx * scale;
+    return {
+      x: element.x, y: element.y, left: element.x, top: element.y,
+      right: element.x + width, bottom: element.y + height, width, height,
+      toJSON: () => ({}),
+    };
+  });
+};
+
+const stubPreviewViewportSize = (clientWidth: number, clientHeight: number): void => {
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(private readonly callback: ResizeObserverCallback) {}
+
+    observe(target: Element): void {
+      if (!target.classList.contains("overlay-editor__preview-viewport")) return;
+      Object.defineProperties(target, {
+        clientWidth: { configurable: true, value: clientWidth },
+        clientHeight: { configurable: true, value: clientHeight },
+      });
+      this.callback([], this);
+    }
+
+    disconnect(): void {}
+    unobserve(): void {}
+  });
+};
+
 const expectPreviewHandleHitBoxesToBeDisjoint = (): void => {
   const handles = [...document.querySelectorAll<HTMLButtonElement>(".overlay-editor__scale-handle")];
   const hitBoxes = handles.map((handle) => {
@@ -1260,6 +1304,141 @@ describe("Overlay composition editor", () => {
       clientY: elementB.y * canvasScale,
     });
     expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(570);
+  });
+
+  it("keeps a neighbouring variable selectable when a scale handle would cover its whole box", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const baseElement = initialOverlay.elements[0];
+    if (baseElement === undefined) throw new Error("Overlay test element is missing.");
+    const elementA = { ...baseElement, id: "element-a", label: "Variable A", x: 500, y: 500, widthPx: 80, scalePercent: 25, z: 0 };
+    const elementB = { ...elementA, id: "element-b", label: "Variable B", x: 520, z: 1 };
+    const overlay = { ...initialOverlay, width: 1920, height: 1080, elements: [elementA, elementB] };
+    stubPreviewViewportSize(576, 324);
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const frameWindow = previewFrameWindow();
+    stubMeasuredOverlayElementBounds(frameWindow, [
+      { id: elementA.id, x: elementA.x, y: elementA.y, widthPx: 80, heightPx: 52.8 },
+      { id: elementB.id, x: elementB.x, y: elementB.y, widthPx: 80, heightPx: 52.8 },
+    ]);
+    fireEvent.click(document.querySelector('[data-element-row="element-b"] .overlay-editor__element-select') as HTMLElement);
+    fireEvent.click(document.querySelector('[data-element-row="element-a"] .overlay-editor__element-select') as HTMLElement);
+    const bElement = await waitFor(() => {
+      const found = frameWindow.document.querySelector<HTMLElement>('[data-element="element-b"]');
+      if (found === null) throw new Error("Neighbouring variable preview is missing.");
+      return found;
+    });
+    const bBox = { left: 520 * 0.3, top: 500 * 0.3, right: 540 * 0.3, bottom: 513.2 * 0.3 };
+    const clickPoint = { x: 539 * 0.3, y: 512 * 0.3 };
+    for (const handle of document.querySelectorAll<HTMLButtonElement>(".overlay-editor__scale-handle")) {
+      const left = Number.parseFloat(handle.style.left) - 9;
+      const top = Number.parseFloat(handle.style.top) - 9;
+      expect(left <= bBox.left && top <= bBox.top && left + 18 >= bBox.right && top + 18 >= bBox.bottom).toBe(false);
+      expect(clickPoint.x >= left && clickPoint.x <= left + 18 && clickPoint.y >= top && clickPoint.y <= top + 18).toBe(false);
+    }
+
+    fireEvent.pointerDown(bElement, {
+      pointerId: 1,
+      button: 0,
+      clientX: clickPoint.x,
+      clientY: clickPoint.y,
+    });
+
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(520);
+  });
+
+  it("keeps an actively dragged scale handle mounted with pointer capture through omission", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const baseElement = initialOverlay.elements[0];
+    if (baseElement === undefined) throw new Error("Overlay test element is missing.");
+    const element = { ...baseElement, id: "element-active-pointer", x: 100, y: 100, widthPx: 80, scalePercent: 100 };
+    const overlay = { ...initialOverlay, width: 1920, height: 1080, elements: [element] };
+    stubPreviewViewportSize(960, 540);
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    stubMeasuredOverlayElementBounds(previewFrameWindow(), [{ id: element.id, x: element.x, y: element.y, widthPx: 80, heightPx: 52.8 }]);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Scale (%)" }), { target: { value: "101" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Scale (%)" }), { target: { value: "100" } });
+    const topLeftHandle = screen.getByTestId("overlay-editor-scale-handle-top-left");
+    let capturedPointer = false;
+    Object.defineProperty(topLeftHandle, "setPointerCapture", { configurable: true, value: vi.fn(() => { capturedPointer = true; }) });
+    Object.defineProperty(topLeftHandle, "hasPointerCapture", {
+      configurable: true,
+      value: vi.fn((pointerId: number) => capturedPointer && pointerId === 7 && topLeftHandle.isConnected),
+    });
+    const canvasFrame = document.querySelector<HTMLElement>(".overlay-editor__canvas-frame");
+    if (canvasFrame === null) throw new Error("Overlay editor canvas frame is missing.");
+
+    fireEvent.pointerDown(topLeftHandle, { pointerId: 7, button: 0, clientX: 50, clientY: 50 });
+    fireEvent.pointerMove(canvasFrame, { pointerId: 7, clientX: 74, clientY: 50 });
+
+    expect(screen.getByRole("spinbutton", { name: "Scale (%)" })).toHaveValue(40);
+    expect(screen.getByTestId("overlay-editor-scale-handle-top-left")).toBe(topLeftHandle);
+    expect(topLeftHandle.hasPointerCapture(7)).toBe(true);
+    fireEvent.pointerMove(canvasFrame, { pointerId: 7, clientX: 79, clientY: 50 });
+    expect(screen.getByRole("spinbutton", { name: "Scale (%)" })).not.toHaveValue(40);
+    expect(screen.getByTestId("overlay-editor-scale-handle-top-left")).toBe(topLeftHandle);
+
+    fireEvent.pointerUp(canvasFrame, { pointerId: 7 });
+    expect(screen.queryByTestId("overlay-editor-scale-handle-top-left")).not.toBeInTheDocument();
+  });
+
+  it("keeps a keyboard-focused scale handle focused through omission and moves focus after blur", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const baseElement = initialOverlay.elements[0];
+    if (baseElement === undefined) throw new Error("Overlay test element is missing.");
+    const element = { ...baseElement, id: "element-active-keyboard", x: 100, y: 100, widthPx: 80, scalePercent: 100 };
+    const overlay = { ...initialOverlay, width: 1920, height: 1080, elements: [element] };
+    stubPreviewViewportSize(960, 540);
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    stubMeasuredOverlayElementBounds(previewFrameWindow(), [{ id: element.id, x: element.x, y: element.y, widthPx: 80, heightPx: 52.8 }]);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Scale (%)" }), { target: { value: "101" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Scale (%)" }), { target: { value: "100" } });
+    const topLeftHandle = screen.getByTestId("overlay-editor-scale-handle-top-left");
+    topLeftHandle.focus();
+
+    for (let step = 0; step < 12; step += 1) fireEvent.keyDown(topLeftHandle, { key: "-" });
+
+    expect(screen.getByRole("spinbutton", { name: "Scale (%)" })).toHaveValue(40);
+    expect(screen.getByTestId("overlay-editor-scale-handle-top-left")).toBe(topLeftHandle);
+    expect(topLeftHandle).toHaveFocus();
+    topLeftHandle.blur();
+
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("overlay-editor-scale-handle-bottom-right")));
   });
 
   it("omits overlapping width handles on a short scaled element while a corner drag changes scale", async () => {
