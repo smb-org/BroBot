@@ -249,8 +249,8 @@ const ChannelInspector = ({
             pending={consentInProgress}
             onChange={() => { void toggleConsent(); }}
           />
-          <InvitationLink channel={channel} />
         </InspectorSection>
+        <div className="platform-inspector-grid__invitation"><InvitationLink channel={channel} /></div>
         <InspectorSection title={texts.spotifyAccess}>
           <p className="muted platform-spotify-channel-state">
             {spotifyChannel === undefined
