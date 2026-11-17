@@ -266,6 +266,48 @@ describe("Overlay composition editor", () => {
     view.unmount();
   });
 
+  it("keeps a scaled hidden text block inside the canvas when resetting its width", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const textBlock = {
+      ...initialOverlay.elements[0],
+      id: "element-hidden-text-reset",
+      kind: "text_library.block",
+      label: "Hidden text block",
+      variableName: null,
+      text: "",
+      config: { blockName: "" },
+      x: 1800,
+      y: 1040,
+      scalePercent: 25,
+      widthPx: 80,
+    };
+    const overlay = { ...initialOverlay, width: 1920, height: 1080, elements: [textBlock] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [
+        { id: "text_library", enabled: true, mandatory: false, settings: "{}" },
+      ] }));
+      if (url.pathname === "/api/channels/kanal-a/modules/text_library/blocks") return Promise.resolve(jsonResponse({ blocks: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reset width" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(1800);
+      expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(1040);
+    });
+    expect(screen.getByRole("spinbutton", { name: "Width (px)" })).toHaveValue(null);
+  });
+
   it("clamps Y after a width edit changes the measured wrapped height", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     const element = { ...initialOverlay.elements[0], id: "element-wrapping", widthPx: 300, x: 100, y: 680 };
@@ -1095,6 +1137,89 @@ describe("Overlay composition editor", () => {
     // 360 x 96 at 50% is 180 x 48 (not 720 x 192 from scaling the 100% size by 50/25).
     expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(1740);
     expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(1032);
+  });
+
+  it("keeps scale handle targets separate from width handles on a short scaled element", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const textBlock = {
+      ...initialOverlay.elements[0],
+      id: "element-short-text",
+      kind: "text_library.block",
+      label: "Short text block",
+      variableName: null,
+      text: "",
+      config: { blockName: "" },
+      x: 1800,
+      y: 0,
+      scalePercent: 50,
+    };
+    const overlay = { ...initialOverlay, width: 1920, height: 1080, elements: [textBlock] };
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+
+      observe(target: Element): void {
+        if (!target.classList.contains("overlay-editor__preview-viewport")) return;
+        Object.defineProperties(target, {
+          clientWidth: { configurable: true, value: 1600 },
+          clientHeight: { configurable: true, value: 900 },
+        });
+        this.callback([], this);
+      }
+
+      disconnect(): void {}
+      unobserve(): void {}
+    });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [
+        { id: "text_library", enabled: true, mandatory: false, settings: "{}" },
+      ] }));
+      if (url.pathname === "/api/channels/kanal-a/modules/text_library/blocks") return Promise.resolve(jsonResponse({ blocks: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Preview zoom" }), { target: { value: "60" } });
+    const canvasFrame = document.querySelector<HTMLElement>(".overlay-editor__canvas-frame");
+    if (canvasFrame === null) throw new Error("Overlay editor canvas frame is missing.");
+    expect(canvasFrame.style.width).toBe("960px");
+
+    expect(screen.getByTestId("overlay-editor-width-handle-left")).toBeInTheDocument();
+    expect(screen.queryByTestId("overlay-editor-width-handle-right")).not.toBeInTheDocument();
+    const handles = [...document.querySelectorAll<HTMLButtonElement>(".overlay-editor__scale-handle")];
+    expect(handles.length).toBeGreaterThan(4);
+    const hitSize = 18;
+    const hitBoxes = handles.map((handle) => {
+      const left = Number.parseFloat(handle.style.left);
+      const top = Number.parseFloat(handle.style.top);
+      return { left: left - hitSize / 2, top: top - hitSize / 2, right: left + hitSize / 2, bottom: top + hitSize / 2 };
+    });
+    for (let first = 0; first < hitBoxes.length; first += 1) {
+      for (let second = first + 1; second < hitBoxes.length; second += 1) {
+        const a = hitBoxes[first];
+        const b = hitBoxes[second];
+        if (a === undefined || b === undefined) throw new Error("Handle hit box is missing.");
+        expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(true);
+      }
+    }
+
+    const topLeftHandle = screen.getByTestId("overlay-editor-scale-handle-top-left");
+    const startX = Number.parseFloat(topLeftHandle.style.left);
+    const startY = Number.parseFloat(topLeftHandle.style.top);
+    Object.defineProperty(topLeftHandle, "setPointerCapture", { configurable: true, value: vi.fn() });
+    fireEvent.pointerDown(topLeftHandle, { pointerId: 1, button: 0, clientX: startX, clientY: startY });
+    // The element touches the top canvas edge, so only shrinking is possible; moving inward shrinks it.
+    fireEvent.pointerMove(canvasFrame, { pointerId: 1, clientX: startX + 20, clientY: startY });
+    fireEvent.pointerUp(canvasFrame, { pointerId: 1 });
+
+    expect(screen.getByRole("spinbutton", { name: "Scale (%)" })).not.toHaveValue(50);
   });
 
   it("keeps saved X when long temporary text is replaced by short loaded content", async () => {
