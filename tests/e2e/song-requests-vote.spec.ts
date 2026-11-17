@@ -30,9 +30,9 @@ test("keeps live requests and settings on separate module pages", async ({ page 
   await expect(page.getByRole("group", { name: "Payment" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
 
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: /Settings.*Running/u }).click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: /Song request settings.*Running/u }).click();
   await expect(page).toHaveURL(/\/modules\/song_requests\?page=settings$/u);
-  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Song request settings", level: 1 })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Admission", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Spotify connection" })).toHaveCount(0);

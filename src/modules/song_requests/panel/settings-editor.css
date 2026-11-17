@@ -1,4 +1,33 @@
 @layer components.modules {
+  /* Single fields put their label above the control, like every other module settings page. */
+  .settings-page:has(.song-request-rules) .ui-settings-editor .inspector-field-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s1);
+  }
+
+  .settings-page:has(.song-request-rules) .ui-settings-editor .inspector-field-row__label {
+    color: var(--text-2);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .settings-page:has(.song-request-rules) .ui-settings-editor .inspector-field-row__info {
+    width: var(--s5);
+    height: var(--s5);
+    min-height: var(--s5);
+  }
+
+  /* Reserved lines that stay empty here (lock reason, switch error, hint-less segment and number fields) only widen the gaps. */
+  .settings-page:has(.song-request-rules) .ui-settings-editor :is(
+    .ui-locked-reason--reserved,
+    .ui-switch-row + .ui-field__error,
+    .unit-input__description:empty,
+    .inspector-field-row .segment-choice-field__hint[aria-hidden="true"],
+    .inspector-field-row .segment-choice-field__warning[aria-hidden="true"]
+  ) {
+    display: none;
+  }
+
   .song-request-rules {
     display: grid;
     gap: var(--s2);

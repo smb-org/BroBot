@@ -58,7 +58,8 @@ describe("song request shared settings editor", () => {
     const entries = songRequestsModule.navigationEntries ?? [];
 
     expect(entries.map(({ id }) => id)).toEqual(["requests", "settings"]);
-    expect(entries.map(({ label }) => label.en)).toEqual(["Song requests", "Settings"]);
+    expect(entries.map(({ label }) => label.en)).toEqual(["Song requests", "Song request settings"]);
+    expect(entries.map(({ label }) => label.de)).toEqual(["Song-Wünsche", "Song-Wunsch-Einstellungen"]);
     expect(entries.every(({ label }) => label.de !== label.en)).toBe(true);
     expect(entries.map(({ description }) => description?.en)).toEqual([
       "Connects Spotify and shows song requests and vote outcomes.",

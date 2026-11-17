@@ -6,7 +6,7 @@ export const songRequestsPanelTexts = {
         description: "Verbindet Spotify und zeigt Song-Wünsche sowie Abstimmungsergebnisse.",
       },
       settings: {
-        label: "Einstellungen",
+        label: "Song-Wunsch-Einstellungen",
         description: "Lege Zahlung, Annahmeregeln und Song-Wunsch-Alarm fest.",
       },
     },
@@ -99,7 +99,7 @@ export const songRequestsPanelTexts = {
         description: "Connects Spotify and shows song requests and vote outcomes.",
       },
       settings: {
-        label: "Settings",
+        label: "Song request settings",
         description: "Configure payment, admission rules, and song request alerts.",
       },
     },
