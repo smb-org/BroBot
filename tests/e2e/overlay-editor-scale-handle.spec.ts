@@ -125,7 +125,7 @@ test("resizes width from a canvas edge, saves, reloads, and syncs the width fiel
     name: "Width test",
     width: 1920,
     height: 1080,
-    css: "",
+    css: ".brobot-variable { font-size: 120px; line-height: 1; }",
     revision: 1,
     createdAt: "2026-11-01T20:15:00.000Z",
     updatedAt: "2026-11-01T20:15:00.000Z",

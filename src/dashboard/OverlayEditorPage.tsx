@@ -340,22 +340,10 @@ const moduleElementOption = (kind: string): ModuleElementOption | undefined =>
 interface PreviewHandlePosition { left: number; top: number }
 
 const PREVIEW_HANDLE_SIZE = 18;
-const PREVIEW_HANDLE_GAP = 2;
-
-// Spread opposing corner targets when canvas-edge insets leave too little room between them.
-const separatePreviewHandleCenters = (first: number, second: number, extent: number, inset: number): [number, number] => {
-  const separation = PREVIEW_HANDLE_SIZE + PREVIEW_HANDLE_GAP;
-  if (second - first >= separation || extent - inset * 2 < separation) return [first, second];
-  // The leading target keeps its place; only the trailing one moves away, so neighbouring elements stay reachable.
-  let adjustedFirst = first;
-  let adjustedSecond = first + separation;
-  const maximum = extent - inset;
-  if (adjustedSecond > maximum) {
-    adjustedFirst -= adjustedSecond - maximum;
-    adjustedSecond = maximum;
-  }
-  return [adjustedFirst, adjustedSecond];
-};
+const PREVIEW_SCALE_CORNER_PRIORITY: readonly OverlayEditorScaleCorner[] = [
+  "bottom-right", "top-left", "top-right", "bottom-left",
+];
+const PREVIEW_WIDTH_EDGE_PRIORITY: readonly OverlayEditorWidthEdge[] = ["right", "left"];
 
 const previewHandlePositionsOverlap = (first: PreviewHandlePosition, second: PreviewHandlePosition): boolean =>
   Math.abs(first.left - second.left) < PREVIEW_HANDLE_SIZE && Math.abs(first.top - second.top) < PREVIEW_HANDLE_SIZE;
@@ -1730,49 +1718,34 @@ function OverlayEditorWorkspace({
             Math.max(handleInset, Math.min(frameWidth - handleInset, canvasX * canvasScale - frameBorderLeft));
           const handleTop = (canvasY: number): number =>
             Math.max(handleInset, Math.min(frameHeight - handleInset, canvasY * canvasScale - frameBorderTop));
-          const [leftCornerX, rightCornerX] = separatePreviewHandleCenters(
-            handleLeft(selectedElementBounds?.left ?? 0),
-            handleLeft((selectedElementBounds?.left ?? 0) + (selectedElementBounds?.width ?? 0)),
-            frameWidth,
-            handleInset,
-          );
-          const [topCornerY, bottomCornerY] = separatePreviewHandleCenters(
-            handleTop(selectedElementBounds?.top ?? 0),
-            handleTop((selectedElementBounds?.top ?? 0) + (selectedElementBounds?.height ?? 0)),
-            frameHeight,
-            handleInset,
-          );
+          const leftCornerX = handleLeft(selectedElementBounds?.left ?? 0);
+          const rightCornerX = handleLeft((selectedElementBounds?.left ?? 0) + (selectedElementBounds?.width ?? 0));
+          const topCornerY = handleTop(selectedElementBounds?.top ?? 0);
+          const bottomCornerY = handleTop((selectedElementBounds?.top ?? 0) + (selectedElementBounds?.height ?? 0));
           const cornerPositions: Record<OverlayEditorScaleCorner, PreviewHandlePosition> = {
             "top-left": { left: leftCornerX, top: topCornerY },
             "top-right": { left: rightCornerX, top: topCornerY },
             "bottom-left": { left: leftCornerX, top: bottomCornerY },
             "bottom-right": { left: rightCornerX, top: bottomCornerY },
           };
+          const acceptedHandlePositions: PreviewHandlePosition[] = [];
+          const visibleCornerPositions: Partial<Record<OverlayEditorScaleCorner, PreviewHandlePosition>> = {};
+          for (const corner of PREVIEW_SCALE_CORNER_PRIORITY) {
+            const position = cornerPositions[corner];
+            if (acceptedHandlePositions.some((target) => previewHandlePositionsOverlap(position, target))) continue;
+            visibleCornerPositions[corner] = position;
+            acceptedHandlePositions.push(position);
+          }
           const widthHandlePositions: Partial<Record<OverlayEditorWidthEdge, PreviewHandlePosition>> = {};
           if (selectedElement !== null && overlayElementSupportsWidth(selectedElement.kind) && selectedElementBounds !== null) {
-            for (const edge of ["left", "right"] as const) {
-              const cornerX = edge === "left" ? leftCornerX : rightCornerX;
-              const middle = {
+            for (const edge of PREVIEW_WIDTH_EDGE_PRIORITY) {
+              const position = {
                 left: handleLeft(edge === "left" ? selectedElementBounds.left : selectedElementBounds.left + selectedElementBounds.width),
                 top: handleTop(selectedElementBounds.top + selectedElementBounds.height / 2),
               };
-              const occupied = [
-                ...Object.values(cornerPositions),
-                ...Object.values(widthHandlePositions),
-              ];
-              // Keep corner targets clear by moving a colliding middle target beyond its corner.
-              let position: PreviewHandlePosition | undefined = occupied.some((target) => previewHandlePositionsOverlap(middle, target))
-                ? undefined
-                : middle;
-              if (position === undefined) {
-                const outside = {
-                  left: cornerX + (edge === "left" ? -1 : 1) * (PREVIEW_HANDLE_SIZE + PREVIEW_HANDLE_GAP),
-                  top: middle.top,
-                };
-                const fitsInsideFrame = outside.left >= handleInset && outside.left <= frameWidth - handleInset;
-                if (fitsInsideFrame && occupied.every((target) => !previewHandlePositionsOverlap(outside, target))) position = outside;
-              }
-              if (position !== undefined) widthHandlePositions[edge] = position;
+              if (acceptedHandlePositions.some((target) => previewHandlePositionsOverlap(position, target))) continue;
+              widthHandlePositions[edge] = position;
+              acceptedHandlePositions.push(position);
             }
           }
           return <div className="overlay-editor__preview-viewport" ref={previewViewportRef}
@@ -1794,16 +1767,18 @@ function OverlayEditorWorkspace({
                 ref={loadPreviewFrame} />
               {previewFrameRoot === null ? null : createPortal(rendererMarkup, previewFrameRoot)}
               {selectedElement === null || !canEdit || selectedElementBounds === null ? null : <div className="overlay-editor__scale-handles" role="group" aria-label={overlayElementSupportsWidth(selectedElement.kind) ? labels.editorWidth : labels.editorScale}>
-                {(["top-left", "top-right", "bottom-left", "bottom-right"] as const).map((corner) => {
+                {PREVIEW_SCALE_CORNER_PRIORITY.map((corner) => {
                   const cornerLabel = corner === "top-left" ? "top left"
                     : corner === "top-right" ? "top right"
                       : corner === "bottom-left" ? "bottom left" : "bottom right";
+                  const position = visibleCornerPositions[corner];
+                  if (position === undefined) return null;
                   return <button
                     key={corner}
                     type="button"
                     className={`overlay-editor__scale-handle overlay-editor__scale-handle--${corner}`}
                     data-testid={`overlay-editor-scale-handle-${corner}`}
-                    style={cornerPositions[corner]}
+                    style={position}
                     aria-label={labels.editorScaleHandle(cornerLabel)}
                     onPointerDown={(event) => { startScaleDrag(event, corner); }}
                   >
@@ -1812,7 +1787,7 @@ function OverlayEditorWorkspace({
                       : null}
                   </button>;
                 })}
-                {overlayElementSupportsWidth(selectedElement.kind) ? (["left", "right"] as const).map((edge) => {
+                {overlayElementSupportsWidth(selectedElement.kind) ? PREVIEW_WIDTH_EDGE_PRIORITY.map((edge) => {
                   const position = widthHandlePositions[edge];
                   if (position === undefined) return null;
                   return <button

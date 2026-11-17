@@ -63,6 +63,23 @@ const stubMeasuredElementSize = (frameWindow: WindowWithElementConstructor, elem
   });
 };
 
+const expectPreviewHandleHitBoxesToBeDisjoint = (): void => {
+  const handles = [...document.querySelectorAll<HTMLButtonElement>(".overlay-editor__scale-handle")];
+  const hitBoxes = handles.map((handle) => {
+    const left = Number.parseFloat(handle.style.left);
+    const top = Number.parseFloat(handle.style.top);
+    return { left: left - 9, top: top - 9, right: left + 9, bottom: top + 9 };
+  });
+  for (let first = 0; first < hitBoxes.length; first += 1) {
+    for (let second = first + 1; second < hitBoxes.length; second += 1) {
+      const a = hitBoxes[first];
+      const b = hitBoxes[second];
+      if (a === undefined || b === undefined) throw new Error("Handle hit box is missing.");
+      expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(true);
+    }
+  }
+};
+
 describe("Overlay composition editor", () => {
   afterEach(() => {
     cleanup();
@@ -1139,7 +1156,113 @@ describe("Overlay composition editor", () => {
     expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(1032);
   });
 
-  it("keeps scale handle targets separate from width handles on a short scaled element", async () => {
+  it("omits overlapping handles on a very short canvas while keeping the bottom-right corner", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const baseElement = initialOverlay.elements[0];
+    if (baseElement === undefined) throw new Error("Overlay test element is missing.");
+    const overlay = {
+      ...initialOverlay,
+      width: 1920,
+      height: 100,
+      elements: [{ ...baseElement, x: 120, y: 0, scalePercent: 25 }],
+    };
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+
+      observe(target: Element): void {
+        if (!target.classList.contains("overlay-editor__preview-viewport")) return;
+        Object.defineProperties(target, {
+          clientWidth: { configurable: true, value: 192 },
+          clientHeight: { configurable: true, value: 10 },
+        });
+        this.callback([], this);
+      }
+
+      disconnect(): void {}
+      unobserve(): void {}
+    });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    expect(screen.getByTestId("overlay-editor-scale-handle-bottom-right")).toBeInTheDocument();
+    expectPreviewHandleHitBoxesToBeDisjoint();
+  });
+
+  it("keeps a neighbouring short element reachable when width handles would overlap it", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const baseElement = initialOverlay.elements[0];
+    if (baseElement === undefined) throw new Error("Overlay test element is missing.");
+    const elementA = { ...baseElement, id: "element-a", label: "A", x: 500, y: 500, widthPx: 80, scalePercent: 25, z: 0 };
+    const elementB = { ...elementA, id: "element-b", label: "B", x: 570, z: 1 };
+    const overlay = { ...initialOverlay, width: 1920, height: 1080, elements: [elementA, elementB] };
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+
+      observe(target: Element): void {
+        if (!target.classList.contains("overlay-editor__preview-viewport")) return;
+        Object.defineProperties(target, {
+          clientWidth: { configurable: true, value: 960 },
+          clientHeight: { configurable: true, value: 540 },
+        });
+        this.callback([], this);
+      }
+
+      disconnect(): void {}
+      unobserve(): void {}
+    });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels") return Promise.resolve(jsonResponse({ channels: [channel], bot: channel.bot }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/channels/kanal-a/overlay-tokens") return Promise.resolve(jsonResponse({ tokens: [], nextOffset: null }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    window.history.replaceState({}, "", "/channels/kanal-a/overlays/overlay-a");
+    render(<DashboardApp />);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const frameWindow = previewFrameWindow();
+    const bElement = frameWindow.document.querySelector<HTMLElement>('[data-element="element-b"]');
+    if (bElement === null) throw new Error("Neighbouring preview element is missing.");
+    const canvasScale = 0.5;
+    const bBox = {
+      left: elementB.x * canvasScale,
+      top: elementB.y * canvasScale,
+      right: (elementB.x + (elementB.widthPx * elementB.scalePercent / 100)) * canvasScale,
+      bottom: (elementB.y + (40 * elementB.scalePercent / 100)) * canvasScale,
+    };
+    const handles = [...document.querySelectorAll<HTMLButtonElement>(".overlay-editor__scale-handle")];
+    for (const handle of handles) {
+      const left = Number.parseFloat(handle.style.left) - 9;
+      const top = Number.parseFloat(handle.style.top) - 9;
+      const right = left + 18;
+      const bottom = top + 18;
+      expect(right <= bBox.left || bBox.right <= left || bottom <= bBox.top || bBox.bottom <= top).toBe(true);
+    }
+
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(500);
+    fireEvent.pointerDown(bElement, {
+      pointerId: 1,
+      button: 0,
+      clientX: elementB.x * canvasScale,
+      clientY: elementB.y * canvasScale,
+    });
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(570);
+  });
+
+  it("omits overlapping width handles on a short scaled element while a corner drag changes scale", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     const textBlock = {
       ...initialOverlay.elements[0],
@@ -1191,24 +1314,9 @@ describe("Overlay composition editor", () => {
     if (canvasFrame === null) throw new Error("Overlay editor canvas frame is missing.");
     expect(canvasFrame.style.width).toBe("960px");
 
-    expect(screen.getByTestId("overlay-editor-width-handle-left")).toBeInTheDocument();
+    expect(screen.queryByTestId("overlay-editor-width-handle-left")).not.toBeInTheDocument();
     expect(screen.queryByTestId("overlay-editor-width-handle-right")).not.toBeInTheDocument();
-    const handles = [...document.querySelectorAll<HTMLButtonElement>(".overlay-editor__scale-handle")];
-    expect(handles.length).toBeGreaterThan(4);
-    const hitSize = 18;
-    const hitBoxes = handles.map((handle) => {
-      const left = Number.parseFloat(handle.style.left);
-      const top = Number.parseFloat(handle.style.top);
-      return { left: left - hitSize / 2, top: top - hitSize / 2, right: left + hitSize / 2, bottom: top + hitSize / 2 };
-    });
-    for (let first = 0; first < hitBoxes.length; first += 1) {
-      for (let second = first + 1; second < hitBoxes.length; second += 1) {
-        const a = hitBoxes[first];
-        const b = hitBoxes[second];
-        if (a === undefined || b === undefined) throw new Error("Handle hit box is missing.");
-        expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(true);
-      }
-    }
+    expectPreviewHandleHitBoxesToBeDisjoint();
 
     const topLeftHandle = screen.getByTestId("overlay-editor-scale-handle-top-left");
     const startX = Number.parseFloat(topLeftHandle.style.left);
