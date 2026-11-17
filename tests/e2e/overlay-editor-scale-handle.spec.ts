@@ -32,7 +32,7 @@ test("scales from a canvas handle, saves, reloads, and syncs the scale field", a
     createdAt: "2026-11-01T20:15:00.000Z",
     updatedAt: "2026-11-01T20:15:00.000Z",
     elements: [
-      { id: "element-score", kind: "variable", label: "Score", variableName: "score", text: "Score: {value}", config: {}, x: 80, y: 80, scalePercent: 100, z: 0, inComposition: true },
+      { id: "element-score", kind: "variable", label: "Score", variableName: "score", text: "Score: {value}", config: {}, x: 0, y: 400, scalePercent: 100, z: 0, inComposition: true },
     ],
   };
 
@@ -64,6 +64,24 @@ test("scales from a canvas handle, saves, reloads, and syncs the scale field", a
   await page.goto(`/channels/${channelId}/overlays/${overlayId}`);
   await expect(page.getByRole("heading", { name: "Scale test" })).toBeVisible();
   await expect(page.frameLocator('[data-testid="overlay-editor-renderer"]').locator('[data-element="element-score"]')).toBeVisible();
+  const topLeftHandle = page.getByTestId("overlay-editor-scale-handle-top-left");
+  await expect(topLeftHandle).toBeVisible();
+  const topLeftBounds = await topLeftHandle.boundingBox();
+  const canvasScale = await page.locator(".overlay-editor__canvas-frame")
+    .evaluate((frame) => Number.parseFloat(getComputedStyle(frame).width) / 1920);
+  const elementWidth = await page.frameLocator('[data-testid="overlay-editor-renderer"]')
+    .locator('[data-element="element-score"]')
+    .evaluate((element) => element.getBoundingClientRect().width);
+  expect(topLeftBounds).not.toBeNull();
+  if (topLeftBounds === null) return;
+  const smallDragPx = 2;
+  const expectedScale = Math.round(100 * (1 - smallDragPx / canvasScale / elementWidth));
+  await page.mouse.move(topLeftBounds.x + topLeftBounds.width / 2, topLeftBounds.y + topLeftBounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(topLeftBounds.x + topLeftBounds.width / 2 + smallDragPx, topLeftBounds.y + topLeftBounds.height / 2);
+  await page.mouse.up();
+  await expect(page.locator("#overlay-editor-scale")).toHaveValue(String(expectedScale));
+
   const handle = page.getByTestId("overlay-editor-scale-handle-bottom-right");
   await expect(handle).toBeVisible();
   const bounds = await handle.boundingBox();

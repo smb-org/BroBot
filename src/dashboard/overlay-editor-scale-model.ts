@@ -17,6 +17,7 @@ interface ScaleHandleDragInput {
   bounds: OverlayEditorElementBounds;
   corner: OverlayEditorScaleCorner;
   pointer: OverlayEditorPosition;
+  startPointer: OverlayEditorPosition;
   canvas: OverlayEditorSize;
   anchor: OverlayStyleAlignment;
   shiftKey: boolean;
@@ -35,6 +36,7 @@ interface WidthHandleDragInput {
   bounds: OverlayEditorElementBounds;
   edge: OverlayEditorWidthEdge;
   pointer: OverlayEditorPosition;
+  startPointer: OverlayEditorPosition;
   canvas: OverlayEditorSize;
   anchor: OverlayStyleAlignment;
 }
@@ -42,6 +44,7 @@ interface WidthHandleDragInput {
 interface WidthFieldInput {
   widthPx: number | null;
   bounds: OverlayEditorElementBounds;
+  automaticSize?: OverlayEditorSize;
   scalePercent: number;
   canvas: OverlayEditorSize;
   anchor: OverlayStyleAlignment;
@@ -58,21 +61,36 @@ const anchorXForBounds = (bounds: OverlayEditorElementBounds, anchor: OverlaySty
 const elementXForLeftAndWidth = (left: number, width: number, anchor: OverlayStyleAlignment): number =>
   anchor === "right" ? left + width : anchor === "center" ? left + width / 2 : left;
 
+const pointerAfterMovementFrom = (
+  pointer: OverlayEditorPosition,
+  startPointer: OverlayEditorPosition,
+  startingHandle: OverlayEditorPosition,
+): OverlayEditorPosition => ({
+  x: startingHandle.x + pointer.x - startPointer.x,
+  y: startingHandle.y + pointer.y - startPointer.y,
+});
+
 /** Resizes a side handle in canvas pixels while holding the opposite edge in place. */
 export const resizeOverlayElementWidthFromHandleDrag = ({
   scalePercent,
   bounds,
   edge,
   pointer,
+  startPointer,
   canvas,
   anchor,
 }: WidthHandleDragInput): OverlayEditorWidthPosition => {
   const scale = clampScalePercent(scalePercent) / 100;
+  const movingX = edge === "left" ? bounds.left : bounds.left + bounds.width;
+  const adjustedPointer = pointerAfterMovementFrom(pointer, startPointer, {
+    x: movingX,
+    y: bounds.top + bounds.height / 2,
+  });
   const movingDirection = edge === "left" ? -1 : 1;
   const fixedX = edge === "left" ? bounds.left + bounds.width : bounds.left;
   const availableVisibleWidth = edge === "left" ? fixedX : canvas.width - fixedX;
   const maximumWidthPx = Math.max(OVERLAY_ELEMENT_MINIMUM_WIDTH_PX, Math.floor(Math.max(0, availableVisibleWidth) / scale));
-  const requestedWidthPx = (pointer.x - fixedX) * movingDirection / scale;
+  const requestedWidthPx = (adjustedPointer.x - fixedX) * movingDirection / scale;
   const nextWidthPx = clampWidthPx(requestedWidthPx, maximumWidthPx);
   const renderedWidth = nextWidthPx * scale;
   const left = edge === "left" ? fixedX - renderedWidth : fixedX;
@@ -90,11 +108,13 @@ export const resizeOverlayElementWidthFromHandleDrag = ({
 export const setOverlayElementWidthFromField = ({
   widthPx,
   bounds,
+  automaticSize,
   scalePercent,
   canvas,
   anchor,
 }: WidthFieldInput): OverlayEditorWidthPosition => {
   const scale = clampScalePercent(scalePercent) / 100;
+  const naturalSize = automaticSize ?? { width: bounds.width / scale, height: bounds.height / scale };
   const anchorX = anchorXForBounds(bounds, anchor);
   const maximumVisibleWidth = anchor === "right"
     ? anchorX
@@ -103,12 +123,13 @@ export const setOverlayElementWidthFromField = ({
       : canvas.width - anchorX;
   const maximumWidthPx = Math.max(OVERLAY_ELEMENT_MINIMUM_WIDTH_PX, Math.floor(maximumVisibleWidth / scale));
   const nextWidthPx = widthPx === null ? null : clampWidthPx(widthPx, maximumWidthPx);
-  const renderedWidth = nextWidthPx === null ? bounds.width : nextWidthPx * scale;
+  const renderedWidth = nextWidthPx === null ? naturalSize.width * scale : nextWidthPx * scale;
+  const renderedHeight = nextWidthPx === null ? naturalSize.height * scale : bounds.height;
   const left = anchor === "right" ? anchorX - renderedWidth : anchor === "center" ? anchorX - renderedWidth / 2 : anchorX;
   const position = clampOverlayEditorPosition(
     { x: elementXForLeftAndWidth(left, renderedWidth, anchor), y: bounds.top },
     canvas,
-    { width: renderedWidth, height: bounds.height },
+    { width: renderedWidth, height: renderedHeight },
     anchor,
   );
   return { widthPx: nextWidthPx, ...position };
@@ -119,6 +140,7 @@ export const scaleOverlayElementFromHandleDrag = ({
   bounds,
   corner,
   pointer,
+  startPointer,
   canvas,
   anchor,
   shiftKey,
@@ -126,10 +148,15 @@ export const scaleOverlayElementFromHandleDrag = ({
   const currentScale = clampScalePercent(scalePercent);
   const handleX = corner.endsWith("left") ? -1 : 1;
   const handleY = corner.startsWith("top") ? -1 : 1;
+  const startingHandle = {
+    x: handleX < 0 ? bounds.left : bounds.left + bounds.width,
+    y: handleY < 0 ? bounds.top : bounds.top + bounds.height,
+  };
+  const adjustedPointer = pointerAfterMovementFrom(pointer, startPointer, startingHandle);
   const fixedX = handleX < 0 ? bounds.left + bounds.width : bounds.left;
   const fixedY = handleY < 0 ? bounds.top + bounds.height : bounds.top;
-  const horizontalFactor = bounds.width <= 0 ? 1 : (pointer.x - fixedX) * handleX / bounds.width;
-  const verticalFactor = bounds.height <= 0 ? 1 : (pointer.y - fixedY) * handleY / bounds.height;
+  const horizontalFactor = bounds.width <= 0 ? 1 : (adjustedPointer.x - fixedX) * handleX / bounds.width;
+  const verticalFactor = bounds.height <= 0 ? 1 : (adjustedPointer.y - fixedY) * handleY / bounds.height;
   const factor = Math.abs(horizontalFactor - 1) >= Math.abs(verticalFactor - 1) ? horizontalFactor : verticalFactor;
   const step = shiftKey ? 5 : 1;
   const requestedScale = currentScale * factor;

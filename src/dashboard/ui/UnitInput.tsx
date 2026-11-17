@@ -1,4 +1,4 @@
-import { useId, type KeyboardEvent } from "react";
+import { useId, useState, type KeyboardEvent } from "react";
 
 import { useDisabledFieldReason } from "./DisabledFieldReason";
 import { Input } from "./primitives/input";
@@ -20,6 +20,7 @@ export interface UnitInputProps {
   error?: string;
   disabled?: boolean;
   clampOnBlur?: boolean;
+  commitOnBlurOrEnter?: boolean;
   required?: boolean;
   name?: string;
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
@@ -27,14 +28,44 @@ export interface UnitInputProps {
 
 const clampValue = (value: number, min: number | undefined, max: number | undefined): number => Math.max(min ?? Number.NEGATIVE_INFINITY, Math.min(max ?? Number.POSITIVE_INFINITY, value));
 
-export function UnitInput({ id: suppliedId, label, ariaLabel, unit, value, onChange, min, max, step = 1, suggestions = [], hint, placeholder, error, disabled = false, clampOnBlur = true, required = false, name, onKeyDown }: UnitInputProps) {
+export function UnitInput({ id: suppliedId, label, ariaLabel, unit, value, onChange, min, max, step = 1, suggestions = [], hint, placeholder, error, disabled = false, clampOnBlur = true, commitOnBlurOrEnter = false, required = false, name, onKeyDown }: UnitInputProps) {
   const generatedId = useId();
   const id = suppliedId ?? generatedId;
   const disabledReason = useDisabledFieldReason();
+  const [draftValue, setDraftValue] = useState<string | null>(null);
   const descriptionId = `${id}-description`;
   const errorId = `${id}-error`;
   const describedBy = [descriptionId, error === undefined ? null : errorId, disabledReason?.id].filter((part): part is string => part !== null && part !== undefined).join(" ");
+  const updateInputValue = (next: number | ""): void => {
+    if (commitOnBlurOrEnter) {
+      setDraftValue(next === "" ? "" : String(next));
+      return;
+    }
+    onChange(next);
+  };
+
+  const commitDraft = (): void => {
+    if (draftValue === null) return;
+    if (draftValue.length === 0) {
+      setDraftValue(null);
+      onChange("");
+      return;
+    }
+    const parsed = Number(draftValue);
+    if (!Number.isFinite(parsed)) {
+      setDraftValue(null);
+      return;
+    }
+    const committed = clampOnBlur ? clampValue(parsed, min, max) : parsed;
+    setDraftValue(null);
+    onChange(committed);
+  };
+
   const onBlur = (): void => {
+    if (commitOnBlurOrEnter) {
+      commitDraft();
+      return;
+    }
     if (!clampOnBlur || typeof value !== "number") return;
     const clamped = clampValue(value, min, max);
     if (clamped !== value) onChange(clamped);
@@ -44,18 +75,25 @@ export function UnitInput({ id: suppliedId, label, ariaLabel, unit, value, onCha
   // uses step="any" and the intended increment is applied to the arrow keys here.
   const onKeyDownWithStep = (event: KeyboardEvent<HTMLInputElement>): void => {
     onKeyDown?.(event);
-    if (event.defaultPrevented || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+    if (event.defaultPrevented) return;
+    if (commitOnBlurOrEnter && event.key === "Enter") {
+      event.preventDefault();
+      commitDraft();
+      return;
+    }
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     event.preventDefault();
-    const base = typeof value === "number" ? value : 0;
-    onChange(clampValue(base + (event.key === "ArrowUp" ? step : -step), min, max));
+    const displayedValue = draftValue === null ? value : draftValue === "" ? "" : Number(draftValue);
+    const base = typeof displayedValue === "number" ? displayedValue : 0;
+    updateInputValue(clampValue(base + (event.key === "ArrowUp" ? step : -step), min, max));
   };
 
   return <div data-ui="" className="unit-input">
     <label className="ui-field__label" htmlFor={id}>{label}</label>
     <div className="unit-input__control">
-      <Input id={id} type="number" inputMode="decimal" aria-label={ariaLabel} aria-describedby={describedBy} aria-invalid={error === undefined ? undefined : true} value={value} min={min} max={max} step="any" placeholder={placeholder} disabled={disabled} required={required} name={name} onBlur={onBlur} onKeyDown={onKeyDownWithStep} onChange={(event) => {
+      <Input id={id} type="number" inputMode="decimal" aria-label={ariaLabel} aria-describedby={describedBy} aria-invalid={error === undefined ? undefined : true} value={commitOnBlurOrEnter ? draftValue ?? value : value} min={min} max={max} step="any" placeholder={placeholder} disabled={disabled} required={required} name={name} onBlur={onBlur} onKeyDown={onKeyDownWithStep} onChange={(event) => {
         const next = event.currentTarget.value;
-        onChange(next.length === 0 ? "" : Number(next));
+        updateInputValue(next.length === 0 ? "" : Number(next));
       }} className="unit-input__input" />
       {unit === undefined || unit.length === 0 ? null : <span className="unit-input__unit" aria-hidden="true">{unit}</span>}
     </div>

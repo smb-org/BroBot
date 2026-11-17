@@ -140,6 +140,7 @@ interface ScalePointerDrag {
   corner: OverlayEditorScaleCorner;
   startScalePercent: number;
   startBounds: OverlayEditorElementBounds;
+  startPointer: { x: number; y: number };
   anchor: OverlayStyleAlignment;
 }
 
@@ -149,6 +150,7 @@ interface WidthPointerDrag {
   pointerId: number;
   edge: OverlayEditorWidthEdge;
   startBounds: OverlayEditorElementBounds;
+  startPointer: { x: number; y: number };
   scalePercent: number;
   anchor: OverlayStyleAlignment;
 }
@@ -621,6 +623,7 @@ function OverlayEditorWorkspace({
   const canvasFrameRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const drag = useRef<PointerDrag | null>(null);
+  const pendingWidthPositionClamp = useRef<string | null>(null);
   const previewEventHandlers = useRef<PreviewEventHandlers>({
     pointerDown: () => undefined,
     pointerMove: () => undefined,
@@ -987,12 +990,29 @@ function OverlayEditorWorkspace({
     const resized = setOverlayElementWidthFromField({
       widthPx,
       bounds,
+      automaticSize: moduleElementOption(element.kind)?.defaultSize ?? UNMEASURED_ELEMENT_FALLBACK_SIZE,
       scalePercent: element.scalePercent,
       canvas: canvasSize,
       anchor: elementHorizontalAnchor(element),
     });
+    pendingWidthPositionClamp.current = element.id;
     updateElement(element.id, resized);
   };
+
+  useLayoutEffect(() => {
+    const elementId = pendingWidthPositionClamp.current;
+    if (elementId === null) return;
+    pendingWidthPositionClamp.current = null;
+    const element = draft.elements.find(({ id }) => id === elementId);
+    if (element === undefined) return;
+    const position = clampOverlayEditorPosition(
+      { x: element.x, y: element.y },
+      canvasSize,
+      renderedElementSize(element.id),
+      elementHorizontalAnchor(element),
+    );
+    if (position.x !== element.x || position.y !== element.y) updateElement(element.id, position);
+  }, [canvasSize, draft.elements, previewFrameRoot, updateElement]);
   const writeStyleDocument = (next: OverlayStyleDocument, nextElements = draft.elements): void => {
     const migrated = migrateLegacyOverlayStylesToCss(draft.css, nextElements, next);
     if (migrated === null) {
@@ -1446,6 +1466,7 @@ function OverlayEditorWorkspace({
         bounds: active.startBounds,
         corner: active.corner,
         pointer: point,
+        startPointer: active.startPointer,
         canvas: canvasSize,
         anchor: active.anchor,
         shiftKey: event.shiftKey,
@@ -1461,10 +1482,12 @@ function OverlayEditorWorkspace({
         bounds: active.startBounds,
         edge: active.edge,
         pointer: point,
+        startPointer: active.startPointer,
         canvas: canvasSize,
         anchor: active.anchor,
       });
       setActiveWidthPx(resized.widthPx);
+      pendingWidthPositionClamp.current = active.elementId;
       updateElement(active.elementId, resized);
       return;
     }
@@ -1498,6 +1521,7 @@ function OverlayEditorWorkspace({
       corner,
       startScalePercent: element.scalePercent,
       startBounds: bounds,
+      startPointer: pointInCanvasFromOuterClient(event.clientX, event.clientY),
       anchor: elementHorizontalAnchor(element),
     };
     setActiveScaleHandle(corner);
@@ -1520,6 +1544,7 @@ function OverlayEditorWorkspace({
       pointerId: event.pointerId,
       edge,
       startBounds: bounds,
+      startPointer: pointInCanvasFromOuterClient(event.clientX, event.clientY),
       scalePercent: element.scalePercent,
       anchor: elementHorizontalAnchor(element),
     };
@@ -1802,6 +1827,7 @@ function OverlayEditorWorkspace({
             {overlayElementSupportsWidth(selectedElement.kind) ? <div className="overlay-editor__width-control">
               <UnitInput id="overlay-editor-width" label={labels.editorWidth} min={OVERLAY_ELEMENT_MINIMUM_WIDTH_PX} max={OVERLAY_ELEMENT_MAXIMUM_WIDTH_PX}
                 value={selectedElement.widthPx ?? ""} placeholder={labels.editorWidthAutomatic} disabled={!canEdit}
+                commitOnBlurOrEnter
                 onChange={(widthPx) => {
                   if (widthPx === "") setElementWidth(selectedElement, null);
                   else if (Number.isFinite(widthPx)) setElementWidth(selectedElement, Math.round(widthPx));

@@ -14,6 +14,7 @@ describe("overlay editor scale handles", () => {
       bounds: { left: 100, top: 100, width: 200, height: 100 },
       corner: "bottom-right",
       pointer: { x: 360, y: 230 },
+      startPointer: { x: 300, y: 200 },
       canvas: { width: 1920, height: 1080 },
       anchor: "left",
       shiftKey: false,
@@ -26,6 +27,7 @@ describe("overlay editor scale handles", () => {
       bounds: { left: 100, top: 300, width: 200, height: 100 },
       corner: "top-right",
       pointer: { x: 360, y: 270 },
+      startPointer: { x: 300, y: 300 },
       canvas: { width: 1920, height: 1080 },
       anchor: "left",
       shiftKey: false,
@@ -38,10 +40,28 @@ describe("overlay editor scale handles", () => {
       bounds: { left: 1400, top: 100, width: 200, height: 100 },
       corner: "bottom-left",
       pointer: { x: 1340, y: 230 },
+      startPointer: { x: 1400, y: 200 },
       canvas: { width: 1920, height: 1080 },
       anchor: "right",
       shiftKey: false,
     })).toEqual({ scalePercent: 130, x: 1600, y: 100 });
+  });
+
+  it("measures scale movement from an inset handle's pointer-down position", () => {
+    const input = {
+      scalePercent: 100,
+      bounds: { left: 100, top: 100, width: 100, height: 100 },
+      corner: "top-left" as const,
+      startPointer: { x: 125, y: 125 },
+      canvas: { width: 1920, height: 1080 },
+      anchor: "left" as const,
+      shiftKey: false,
+    };
+
+    expect(scaleOverlayElementFromHandleDrag({ ...input, pointer: input.startPointer }))
+      .toEqual({ scalePercent: 100, x: 100, y: 100 });
+    expect(scaleOverlayElementFromHandleDrag({ ...input, pointer: { x: 135, y: 135 } }))
+      .toEqual({ scalePercent: 90, x: 110, y: 110 });
   });
 
   it("keeps the fixed corner in place when the canvas edge limits a drag", () => {
@@ -50,6 +70,7 @@ describe("overlay editor scale handles", () => {
       bounds: { left: 1700, top: 100, width: 200, height: 100 },
       corner: "bottom-right",
       pointer: { x: 2500, y: 500 },
+      startPointer: { x: 1900, y: 200 },
       canvas: { width: 1920, height: 1080 },
       anchor: "left",
       shiftKey: false,
@@ -65,6 +86,7 @@ describe("overlay editor scale handles", () => {
       bounds: { left: 100, top: 100, width: 200, height: 100 },
       corner: "bottom-right" as const,
       pointer: { x: 371, y: 235 },
+      startPointer: { x: 300, y: 200 },
       canvas: { width: 1920, height: 1080 },
       anchor: "left" as const,
     };
@@ -78,6 +100,7 @@ describe("overlay editor scale handles", () => {
       scalePercent: 100,
       bounds: { left: 100, top: 100, width: 200, height: 100 },
       corner: "bottom-right" as const,
+      startPointer: { x: 300, y: 200 },
       canvas: { width: 1920, height: 1080 },
       anchor: "left" as const,
       shiftKey: false,
@@ -103,9 +126,26 @@ describe("overlay editor width handles", () => {
       bounds: { left: 100, top: 40, width: 200, height: 60 },
       edge: "right",
       pointer: { x: 351, y: 70 },
+      startPointer: { x: 300, y: 70 },
       canvas: { width: 1920, height: 1080 },
       anchor: "left",
     })).toEqual({ widthPx: 251, x: 100, y: 40 });
+  });
+
+  it("measures width movement from an inset handle's pointer-down position", () => {
+    const input = {
+      scalePercent: 100,
+      bounds: { left: 100, top: 40, width: 200, height: 60 },
+      edge: "right" as const,
+      startPointer: { x: 325, y: 70 },
+      canvas: { width: 1920, height: 1080 },
+      anchor: "left" as const,
+    };
+
+    expect(resizeOverlayElementWidthFromHandleDrag({ ...input, pointer: input.startPointer }))
+      .toEqual({ widthPx: 200, x: 100, y: 40 });
+    expect(resizeOverlayElementWidthFromHandleDrag({ ...input, pointer: { x: 333, y: 70 } }))
+      .toEqual({ widthPx: 208, x: 100, y: 40 });
   });
 
   it("changes width from the left edge while keeping the right anchor fixed", () => {
@@ -114,6 +154,7 @@ describe("overlay editor width handles", () => {
       bounds: { left: 300, top: 40, width: 200, height: 60 },
       edge: "left",
       pointer: { x: 400, y: 70 },
+      startPointer: { x: 300, y: 70 },
       canvas: { width: 1920, height: 1080 },
       anchor: "right",
     })).toEqual({ widthPx: 100, x: 500, y: 40 });
@@ -126,6 +167,7 @@ describe("overlay editor width handles", () => {
       bounds: { left: 1700, top: 0, width: 200, height: 50 },
       edge: "right",
       pointer: { x: 2500, y: 25 },
+      startPointer: { x: 1900, y: 25 },
       canvas,
       anchor: "left",
     });
@@ -136,6 +178,7 @@ describe("overlay editor width handles", () => {
       bounds: { left: 0, top: 0, width: 200, height: 50 },
       edge: "left",
       pointer: { x: 199, y: 25 },
+      startPointer: { x: 0, y: 25 },
       canvas,
       anchor: "left",
     });
@@ -154,5 +197,16 @@ describe("overlay editor width handles", () => {
       .toEqual({ widthPx: 400, x: 100, y: 30 });
     expect(setOverlayElementWidthFromField({ ...base, widthPx: null, anchor: "center" }))
       .toEqual({ widthPx: null, x: 200, y: 30 });
+  });
+
+  it("clamps an automatic reset using the kind's default size", () => {
+    expect(setOverlayElementWidthFromField({
+      widthPx: null,
+      bounds: { left: 1800, top: 700, width: 80, height: 40 },
+      automaticSize: { width: 480, height: 240 },
+      scalePercent: 100,
+      canvas: { width: 1920, height: 1080 },
+      anchor: "left",
+    })).toEqual({ widthPx: null, x: 1440, y: 700 });
   });
 });

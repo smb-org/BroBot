@@ -126,6 +126,8 @@ export const loadOverlayEditorPreviewBackground = async (): Promise<StoredOverla
   return image === null ? { mode: "transparent", image: null } : { mode, image };
 };
 
+export const loadStoredOverlayEditorPreviewImage = (): Promise<Blob | null> => readStoredImage();
+
 export const storeOverlayEditorPreviewImage = (image: Blob): Promise<void> => writeStoredImage(image);
 
 export const removeStoredOverlayEditorPreviewImage = (): Promise<void> => writeStoredImage(null);

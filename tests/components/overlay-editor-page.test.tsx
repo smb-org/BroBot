@@ -169,13 +169,135 @@ describe("Overlay composition editor", () => {
     expect(width).toHaveAttribute("placeholder", "Automatic");
     fireEvent.change(width, { target: { value: "420" } });
     expect(width).toHaveValue(420);
+    fireEvent.blur(width);
     fireEvent.click(screen.getByRole("button", { name: "Reset width" }));
     expect(width).toHaveValue(null);
     fireEvent.change(width, { target: { value: "360" } });
     expect(width).toHaveValue(360);
+    fireEvent.blur(width);
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(savedBody?.elements[0]?.widthPx).toBe(360));
+    view.unmount();
+  });
+
+  it("keeps width input drafts until blur and clamps them when committed", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const overlay = { ...initialOverlay, elements: [{ ...initialOverlay.elements[0], widthPx: null }] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const width = screen.getByRole("spinbutton", { name: "Width (px)" });
+    // The reset button is enabled exactly when a width is stored, so it shows what has been committed.
+    const reset = screen.getByRole("button", { name: "Reset width" });
+    expect(reset).toBeDisabled();
+    fireEvent.change(width, { target: { value: "3" } });
+    expect(width).toHaveValue(3);
+    fireEvent.change(width, { target: { value: "36" } });
+    expect(width).toHaveValue(36);
+    fireEvent.change(width, { target: { value: "360" } });
+    expect(width).toHaveValue(360);
+    expect(reset).toBeDisabled();
+    fireEvent.blur(width);
+    expect(width).toHaveValue(360);
+    expect(reset).toBeEnabled();
+
+    fireEvent.change(width, { target: { value: "3" } });
+    fireEvent.change(width, { target: { value: "30" } });
+    expect(width).toHaveValue(30);
+    fireEvent.blur(width);
+    expect(width).toHaveValue(80);
+    fireEvent.change(width, { target: { value: "210" } });
+    fireEvent.keyDown(width, { key: "Enter" });
+    expect(width).toHaveValue(210);
+    fireEvent.change(width, { target: { value: "" } });
+    fireEvent.blur(width);
+    expect(width).toHaveValue(null);
+    expect(reset).toBeDisabled();
+    view.unmount();
+  });
+
+  it("clamps X to the automatic module width when resetting a narrow element", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const tally = {
+      ...initialOverlay.elements[0],
+      id: "element-tally",
+      kind: "chat_voting.tally",
+      variableName: null,
+      text: "",
+      config: {},
+      x: 1800,
+      y: 100,
+      widthPx: 80,
+    };
+    const overlay = { ...initialOverlay, width: 1920, height: 1080, elements: [tally] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(1800);
+    fireEvent.click(screen.getByRole("button", { name: "Reset width" }));
+
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "X (px)" })).toHaveValue(1440));
+    expect(screen.getByRole("spinbutton", { name: "Width (px)" })).toHaveValue(null);
+    view.unmount();
+  });
+
+  it("clamps Y after a width edit changes the measured wrapped height", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    const element = { ...initialOverlay.elements[0], id: "element-wrapping", widthPx: 300, x: 100, y: 680 };
+    const overlay = { ...initialOverlay, elements: [element] };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a") return Promise.resolve(jsonResponse({ overlay }));
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [variable], count: 1, maximum: 25 }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      return Promise.reject(new Error(`Unexpected request ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    // jsdom has no layout, so this stub also reports the element's top edge (the shared stub reports 0).
+    vi.spyOn(previewFrameWindow().Element.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const isElement = this.dataset.element === element.id;
+      const width = isElement ? Number.parseFloat(this.style.width) : 0;
+      const height = isElement ? (width <= 100 ? 120 : 40) : 0;
+      const top = isElement ? element.y : 0;
+      return { x: 0, y: top, left: 0, top, right: width, bottom: top + height, width, height, toJSON: () => ({}) };
+    });
+    const width = screen.getByRole("spinbutton", { name: "Width (px)" });
+    fireEvent.change(width, { target: { value: "80" } });
+    fireEvent.blur(width);
+
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Y (px)" })).toHaveValue(600));
     view.unmount();
   });
 

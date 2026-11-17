@@ -4,6 +4,7 @@ import { overlaysTexts, type DashboardLanguage } from "./locale";
 import { Button, FilePicker, Select } from "./ui";
 import {
   loadOverlayEditorPreviewBackground,
+  loadStoredOverlayEditorPreviewImage,
   removeStoredOverlayEditorPreviewImage,
   storeOverlayEditorPreviewBackgroundMode,
   storeOverlayEditorPreviewImage,
@@ -29,6 +30,7 @@ export function OverlayEditorPreviewBackground({ language, children }: OverlayEd
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userChangedBackground = useRef(false);
+  const imageLoadGeneration = useRef(0);
   const currentUrl = useRef<string | null>(null);
 
   // Every image change goes through here so the previous object URL is always revoked.
@@ -62,6 +64,7 @@ export function OverlayEditorPreviewBackground({ language, children }: OverlayEd
     });
     return () => {
       mounted = false;
+      imageLoadGeneration.current += 1;
       setImage(null);
     };
   }, [setImage]);
@@ -72,6 +75,12 @@ export function OverlayEditorPreviewBackground({ language, children }: OverlayEd
     setMode(value);
     setError("");
     storeOverlayEditorPreviewBackgroundMode(value);
+    if (value === "image" && image === null) {
+      const generation = ++imageLoadGeneration.current;
+      void loadStoredOverlayEditorPreviewImage().then((storedImage) => {
+        if (storedImage !== null && generation === imageLoadGeneration.current) setImage(storedImage);
+      });
+    }
   };
 
   const chooseImage = (file: File | undefined): void => {
@@ -82,6 +91,7 @@ export function OverlayEditorPreviewBackground({ language, children }: OverlayEd
       setError(labels.editorPreviewImageSizeError);
     } else {
       userChangedBackground.current = true;
+      imageLoadGeneration.current += 1;
       setError("");
       setImage(file);
       setMode("image");
@@ -93,6 +103,7 @@ export function OverlayEditorPreviewBackground({ language, children }: OverlayEd
 
   const removeImage = (): void => {
     userChangedBackground.current = true;
+    imageLoadGeneration.current += 1;
     setImage(null);
     setMode("transparent");
     setError("");
