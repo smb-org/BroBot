@@ -227,6 +227,9 @@ export interface PanelPlatformAuditEntry {
   action: string;
   before: string;
   after: string;
+  subjectUserId?: string | null;
+  subjectLogin?: string | null;
+  subjectDisplayName?: string | null;
 }
 
 export interface PanelPlatformAuditResponse {

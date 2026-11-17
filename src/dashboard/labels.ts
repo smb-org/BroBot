@@ -100,6 +100,7 @@ export interface PlatformTexts {
   editChannel: (name: string) => string;
   toggleConsent: string;
   members: string;
+  memberCounts: (broadcaster: string, manager: string, operator: string) => string;
   loadMembers: string;
   noMembers: string;
   addMember: string;
@@ -126,7 +127,12 @@ export interface PlatformTexts {
   platformAdmin: string;
   member: string;
   spotifyAccess: string;
+  spotifyOverview: string;
   spotifyUsedSlots: (used: string, limit: string) => string;
+  spotifySlotEnabled: (slot: string) => string;
+  spotifyNotEnabled: string;
+  spotifyNoSlots: string;
+  identityAndConsent: string;
   spotifyEnabled: string;
   spotifyDisabled: string;
   spotifyLimit: string;
@@ -176,6 +182,7 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     editChannel: (name) => `Kanal bearbeiten: ${name}`,
     toggleConsent: "Vollzustimmung",
     members: "Mitglieder",
+    memberCounts: (broadcaster, manager, operator) => `Broadcaster: ${broadcaster}, Verwalter: ${manager}, Bediener: ${operator}`,
     loadMembers: "Mitglieder werden geladen …",
     noMembers: "Keine zusätzlichen Mitglieder freigegeben.",
     addMember: "Mitglied hinzufügen",
@@ -201,7 +208,12 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     platformAdmin: "Betreiber",
     member: "Mitglied",
     spotifyAccess: "Spotify-Freigabe",
+    spotifyOverview: "Spotify-Platzübersicht",
     spotifyUsedSlots: (used, limit) => `${used} von ${limit} Spotify-Plätzen belegt`,
+    spotifySlotEnabled: (slot) => `Spotify freigeschaltet · Platz ${slot}`,
+    spotifyNotEnabled: "Spotify nicht freigeschaltet",
+    spotifyNoSlots: "Keine Spotify-Plätze belegt.",
+    identityAndConsent: "Identität und Zustimmung",
     spotifyEnabled: "Spotify freischalten",
     spotifyDisabled: "Spotify-Freigabe entfernen",
     spotifyLimit: "Alle fünf Spotify-Plätze sind belegt.",
@@ -256,6 +268,7 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     editChannel: (name) => `Edit channel: ${name}`,
     toggleConsent: "Full consent",
     members: "Members",
+    memberCounts: (broadcaster, manager, operator) => `Broadcaster: ${broadcaster}, Manager: ${manager}, Operator: ${operator}`,
     loadMembers: "Loading members …",
     noMembers: "No additional members have access.",
     addMember: "Add member",
@@ -281,7 +294,12 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     platformAdmin: "Operator",
     member: "Member",
     spotifyAccess: "Spotify access",
+    spotifyOverview: "Spotify slot overview",
     spotifyUsedSlots: (used, limit) => `${used} of ${limit} Spotify slots used`,
+    spotifySlotEnabled: (slot) => `Spotify enabled · slot ${slot}`,
+    spotifyNotEnabled: "Spotify not enabled",
+    spotifyNoSlots: "No Spotify slots are in use.",
+    identityAndConsent: "Identity and consent",
     spotifyEnabled: "Enable Spotify",
     spotifyDisabled: "Remove Spotify access",
     spotifyLimit: "All five Spotify slots are in use.",

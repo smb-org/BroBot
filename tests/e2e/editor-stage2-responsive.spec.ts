@@ -144,6 +144,14 @@ const installMocks = async (page: Page, events: readonly unknown[] = []): Promis
       });
       return;
     }
+    if (pathname === "/api/platform/spotify-channels") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ usedSlots: 1, limit: 5, channels: [{ slot: 1, channelId: channel.channelId, login: channel.login, displayName: channel.displayName, enabledAt: "2026-09-19T12:00:00.000Z" }] }),
+      });
+      return;
+    }
     if (pathname === "/api/platform/audit") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [], nextCursor: null }) });
       return;
@@ -216,7 +224,14 @@ test("editor stage 2 pages fit at 1280px and 390px and produce review screenshot
   }
   await page.setViewportSize({ width: 1280, height: 900 });
   await platformRow.click();
-  await expect(page.getByRole("region", { name: "Kanal bearbeiten: Brotkrumen-Kanal" })).toBeVisible();
+  const platformInspector = page.getByRole("region", { name: "Kanal bearbeiten: Brotkrumen-Kanal" });
+  await expect(platformInspector).toBeVisible();
+  const invitation = platformInspector.getByRole("region", { name: "Einladungslink" });
+  await expect(invitation.getByRole("button", { name: "Link kopieren" })).toBeVisible();
+  await expect(invitation.getByRole("textbox", { name: "Einladungslink" })).toHaveCount(0);
+  await expect(platformInspector.getByRole("heading", { name: "Identität und Zustimmung" })).toBeVisible();
+  await expect(platformInspector.getByRole("heading", { name: "Spotify-Freigabe" })).toBeVisible();
+  await expect(platformInspector.getByRole("heading", { name: "Mitglieder" })).toBeVisible();
   await capture(page, testInfo, "13-platform-inspector");
 
   await page.goto(`/channels/${channel.channelId}`);
