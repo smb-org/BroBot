@@ -111,6 +111,14 @@ export const spotifySearchTracks = async (
     typeof (item as Record<string, unknown>).uri === "string") : [];
 };
 
+export const spotifySkipCurrentTrack = async (
+  environment: SpotifyEnvironment,
+  accessToken: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> => {
+  await spotifyApiRequest(environment, accessToken, "me/player/next", { method: "POST" }, fetcher);
+};
+
 const formRequest = async (
   environment: SpotifyEnvironment,
   form: URLSearchParams,

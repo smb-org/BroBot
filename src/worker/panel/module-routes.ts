@@ -64,6 +64,7 @@ import { createModuleSecretAccess } from "../module-secrets";
 import { createModuleActionExecutionContext } from "../module-action-context";
 import { beginSpotifyOAuth, spotifyOAuthStateCookie } from "../auth/spotify-oauth";
 import { liftModerationBan } from "../moderation";
+import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../../modules/contracts/text-block-write-guard";
 import { effectiveEventTemplateDeclarations } from "../../modules/contracts/text-block-validation";
 
@@ -74,6 +75,7 @@ interface ModuleRouteEnvironment {
     "writeModuleDiagnostics" | "broadcasterHasScope" | "broadcasterScopesForChannel"
     | "measureServerTiming" | "recordServerTiming" | "scheduleBackgroundWork" | "getAppAccessToken" | "helixRequest"
     | "listChannelVariables" | "findChannelVariable" | "secrets"
+    | "overlayAlertQueue" | "resolveTwitchUserById"
     | "channelLocation"
     | "externalFetchBudget"
     | "ballots"
@@ -363,6 +365,15 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
       throw new Error("Module secret access requires a registered module route.");
     }
     return createModuleSecretAccess(context.env, channelId, moduleId);
+  });
+  context.set("resolveTwitchUserById", async (channelId, userId) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Twitch user resolution must use the authorized route channel.");
+    return (await fetchTwitchUsersById(fetch, context.env, [userId])).get(userId) ?? null;
+  });
+  context.set("overlayAlertQueue", (channelId) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Overlay alerts must use the authorized route channel.");
+    const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+    return { enqueue: (operationId, alert) => object.enqueueOverlayAlert(operationId, alert) };
   });
   context.set("runModuleAlarm", (channelId, moduleId, handlerKey, alarmKey, invocation) => {
     if (channelId !== context.req.param("channelId")) throw new Error("Module alarm access must use the authorized route channel.");
@@ -875,7 +886,26 @@ moduleRouter.get("/api/channels/:channelId/modules/:moduleId/settings", async (c
   } catch {
     return context.json({ error: "module_settings_invalid" }, 500);
   }
-  const settings = (module.settingsReadSchema ?? module.settingsSchema).safeParse(rawSettings);
+  let defaults = module.defaultSettings;
+  if (module.defaultSettingsForLanguage !== undefined) {
+    const language = (await context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
+      .bind(context.req.param("channelId")).first<{ language: ModuleLanguage }>())?.language ?? "de";
+    defaults = module.defaultSettingsForLanguage(language);
+  }
+  let settingsInput = rawSettings;
+  if (module.id === "song_requests" && typeof rawSettings === "object" && rawSettings !== null && !Array.isArray(rawSettings)) {
+    const storedSettings = rawSettings as Record<string, unknown>;
+    const localizedDefaults = typeof defaults === "object" && defaults !== null
+      ? defaults as Record<string, unknown>
+      : {};
+    settingsInput = {
+      ...storedSettings,
+      ...(storedSettings.queuedText === undefined ? { queuedText: localizedDefaults.queuedText } : {}),
+      ...(storedSettings.waitingText === undefined ? { waitingText: localizedDefaults.waitingText } : {}),
+      ...(storedSettings.requestAlertText === undefined ? { requestAlertText: localizedDefaults.requestAlertText } : {}),
+    };
+  }
+  const settings = (module.settingsReadSchema ?? module.settingsSchema).safeParse(settingsInput);
   if (!settings.success) return context.json({ error: "module_settings_invalid" }, 500);
   const channelId = context.req.param("channelId");
   const variables = (await listChannelVariables(context.env.DB, channelId)).map(({ name, value, description }) => ({ name, value, description }));

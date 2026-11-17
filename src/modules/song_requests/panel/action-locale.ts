@@ -1,6 +1,7 @@
 export const songRequestsActionTexts = {
   de: {
     name: "Song-Abstimmung starten", queueName: "Song-Warteschlange", search: "Spotify-Suche", query: "Song, Spotify-Link oder URI", searchButton: "Suchen",
+    skipName: "Song überspringen", skipCommandDescription: "Überspringe den laufenden Song direkt oder starte eine Skip-Abstimmung.", statisticsTitle: "Song-Wünsche", skipSucceeded: "Song wurde übersprungen.", skipUnavailable: "Spotify antwortet gerade nicht. Bitte versuche es später erneut.", skipDevice: "Spotify hat kein aktives Wiedergabegerät.",
     add: "Hinzufügen", addTrack: (title: string) => `${title} hinzufügen`, added: "Hinzugefügt",
     candidate: "Kandidat", removeTrack: (title: string) => `${title} aus den Kandidaten entfernen`,
     selected: "Kandidaten", emptyCandidates: "Noch keine Kandidaten", emptyResults: "Keine Songs gefunden.",
@@ -10,6 +11,7 @@ export const songRequestsActionTexts = {
   },
   en: {
     name: "Start song vote", queueName: "Song request queue", search: "Spotify search", query: "Track, Spotify link, or URI", searchButton: "Search",
+    skipName: "Skip song", skipCommandDescription: "Skip the current song directly or start a skip vote.", statisticsTitle: "Song requests", skipSucceeded: "Song skipped.", skipUnavailable: "Spotify is not responding. Please try again later.", skipDevice: "Spotify has no active playback device.",
     add: "Add", addTrack: (title: string) => `Add ${title}`, added: "Added",
     candidate: "Candidate", removeTrack: (title: string) => `Remove ${title} from candidates`,
     selected: "Candidates", emptyCandidates: "No candidates yet", emptyResults: "No tracks found.",

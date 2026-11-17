@@ -47,6 +47,8 @@ import { notifyModuleScheduleInputsChanged } from "./module-schedules";
 import { pointsCatalog } from "../modules/points/locale";
 import { pointsSettingsReadSchema } from "../modules/points/contracts";
 import { appendPointWelcome, type PendingPointWelcome } from "./point-welcome";
+import { fetchTwitchUsersById } from "./twitch/user-resolution";
+import { createModuleActionExecutionContext } from "./module-action-context";
 
 export interface DispatchEnvironment {
   DB: D1Database;
@@ -1460,6 +1462,19 @@ export const dispatchEventSubNotification = async (
             secrets: createModuleSecretAccess(environment, event.channelId, module.id),
             authorizeMutation: authorizeModuleMutation,
             ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),
+            startChatVote: async (request, voteActor) => {
+              const chatVoting = MODULES.find((candidate) => candidate.id === "chat_voting");
+              if (chatVoting?.startChatVote === undefined) return { status: "busy" };
+              return await chatVoting.startChatVote(
+                createModuleActionExecutionContext(environment as unknown as Env, event.channelId, "chat_voting"),
+                request,
+                voteActor,
+              );
+            },
+            castChatVote: (ballotId, userId, choice) =>
+              moduleBallots(environment.CHANNEL, event.channelId, "chat_voting").cast(ballotId, userId, choice),
+            resolveTwitchUserById: async (userId) =>
+              (await fetchTwitchUsersById(fetcher, environment as unknown as Env, [userId])).get(userId) ?? null,
             points,
             tempVips: moduleTempVips(environment.CHANNEL, event.channelId),
             ...(moduleChannelNamespace === undefined ? {} : {

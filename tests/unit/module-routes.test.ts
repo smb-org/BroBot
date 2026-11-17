@@ -6,6 +6,10 @@ import type { BotModule, ModuleRouteEnvironment } from "../../src/modules/contra
 import type * as ModuleRegistry from "../../src/modules/registry";
 import { belaboxModule } from "../../src/modules/belabox";
 import { belaboxDefaultAlertTexts } from "../../src/modules/belabox/contracts/alert-texts";
+import { emoteSlotsModule } from "../../src/modules/emote_slots";
+import { DEFAULT_EMOTE_SLOT_SETTINGS } from "../../src/modules/emote_slots/contracts";
+import { songRequestsModule } from "../../src/modules/song_requests";
+import { songRequestsSettingsForLanguage } from "../../src/modules/song_requests/contracts";
 import { textCommandModule } from "../../src/modules/text_commands";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey as key } from "./fixtures";
@@ -109,7 +113,8 @@ const quizOverlayTestModule: BotModule<typeof clipsTestSchema> = {
   }],
 };
 
-const registeredModules = [testModule, mandatoryTestModule, defaultEnabledTestModule] as BotModule[];
+const baseModules = [testModule, mandatoryTestModule, defaultEnabledTestModule, emoteSlotsModule, songRequestsModule] as BotModule[];
+const registeredModules = [...baseModules];
 const dependencyTestSchema = z.object({});
 const dependencyPointsModule: BotModule<typeof dependencyTestSchema> = {
   id: "points",
@@ -272,7 +277,7 @@ describe("Module management in the panel", () => {
     prepareEnableCommand = false;
     enableHookCallCount = 0;
     activationResultForTest = undefined;
-    registeredModules.splice(3);
+    registeredModules.splice(baseModules.length);
   });
 
   afterEach(() => {
@@ -299,6 +304,8 @@ describe("Module management in the panel", () => {
       // No fallback: a default-enabled module with no row reports disabled,
       // exactly like any other module. Only a real row makes it enabled.
       { id: "clips", enabled: false, settings: "{}", mandatory: false },
+      { id: "emote_slots", enabled: false, settings: JSON.stringify(emoteSlotsModule.defaultSettings), mandatory: false },
+      { id: "song_requests", enabled: false, settings: JSON.stringify(songRequestsModule.defaultSettings), mandatory: false },
     ]);
   });
 
@@ -326,6 +333,55 @@ describe("Module management in the panel", () => {
     expect(read.status).toBe(200);
     expect(denied.status).toBe(403);
     expect(saved.status).toBe(200);
+  });
+
+  it("keeps the legacy slot pair payout when reading and saving another setting", async () => {
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "user-manager");
+    await insertMember(database, "kanal-a", "user-manager", "manager");
+    const legacySettings: Record<string, unknown> = { ...DEFAULT_EMOTE_SLOT_SETTINGS };
+    delete legacySettings.pairPayoutBp;
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES ('kanal-a', 'emote_slots', 1, ?, 1)",
+    ).bind(JSON.stringify(legacySettings)).run();
+
+    const settingsPath = "/api/channels/kanal-a/modules/emote_slots/settings";
+    const loadedResponse = await panelRouter.fetch(await requestFor("user-manager", settingsPath), environment);
+    const loaded = await loadedResponse.json<{ settings: Record<string, unknown>; revision: number }>();
+    expect(loadedResponse.status).toBe(200);
+    expect(loaded.settings.pairPayoutBp).toBe(10_000);
+
+    const savedResponse = await panelRouter.fetch(await requestFor("user-manager", settingsPath, "PATCH", {
+      revision: loaded.revision,
+      settings: { ...loaded.settings, cooldownSeconds: 91 },
+    }), environment);
+    expect(savedResponse.status).toBe(200);
+    const reread = await panelRouter.fetch(await requestFor("user-manager", settingsPath), environment);
+    await expect(reread.json()).resolves.toMatchObject({ settings: { pairPayoutBp: 10_000, cooldownSeconds: 91 } });
+  });
+
+  it("uses the channel language for missing song request message templates", async () => {
+    await insertChannel(database, "kanal-a");
+    await database.prepare("UPDATE channels SET language = 'en' WHERE channel_id = 'kanal-a'").run();
+    await insertLoginIdentityAndSession(database, "user-operator");
+    await insertMember(database, "kanal-a", "user-operator", "operator");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision) VALUES ('kanal-a', 'song_requests', 1, '{\"queuedTextEnabled\":true}', 1)",
+    ).run();
+
+    const response = await panelRouter.fetch(
+      await requestFor("user-operator", "/api/channels/kanal-a/modules/song_requests/settings"),
+      environment,
+    );
+    const body = await response.json<{ settings: Record<string, unknown> }>();
+    const defaults = songRequestsSettingsForLanguage("en");
+
+    expect(response.status).toBe(200);
+    expect(body.settings).toMatchObject({
+      queuedText: defaults.queuedText,
+      waitingText: defaults.waitingText,
+      requestAlertText: defaults.requestAlertText,
+    });
   });
 
   it("updates only the authorized broadcaster channel title and category with its channel token", async () => {
@@ -1192,6 +1248,8 @@ describe("Module management in the panel", () => {
       { id: "test-modul", enabled: true, settings: '{"betrag":42}', mandatory: false },
       { id: "channel_events", enabled: true, settings: '{"betrag":42}', mandatory: true },
       { id: "clips", enabled: false, settings: "{}", mandatory: false },
+      { id: "emote_slots", enabled: false, settings: JSON.stringify(emoteSlotsModule.defaultSettings), mandatory: false },
+      { id: "song_requests", enabled: false, settings: JSON.stringify(songRequestsModule.defaultSettings), mandatory: false },
     ]);
   });
 

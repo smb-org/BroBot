@@ -1,5 +1,15 @@
 export const songRequestsPanelTexts = {
   de: {
+    navigation: {
+      requests: {
+        label: "Song-Wünsche",
+        description: "Verbindet Spotify und zeigt Song-Wünsche sowie Abstimmungsergebnisse.",
+      },
+      settings: {
+        label: "Song-Wunsch-Einstellungen",
+        description: "Lege Zahlung, Annahmeregeln und Song-Wunsch-Alarm fest.",
+      },
+    },
     connection: "Spotify-Verbindung",
     connecting: "Spotify-Verbindung wird geladen …",
     connectionLoadError: "Der Spotify-Verbindungsstatus konnte nicht geladen werden.",
@@ -33,9 +43,10 @@ export const songRequestsPanelTexts = {
     emptyRequestsDescription: "Neue Song-Wünsche erscheinen hier.",
     requestLoadError: "Song-Wünsche konnten nicht geladen werden.",
     recentVotes: "Abstimmungsergebnisse in diesem Stream",
-    emptyVoteOutcomes: "Noch keine unentschiedenen oder leeren Abstimmungen.",
+    emptyVoteOutcomes: "Noch keine ausgelosten oder leeren Abstimmungen.",
     voteOutcomes: {
       tie: "Gleichstand · nichts eingereiht",
+      drawn: "Gleichstand · Los hat entschieden",
       no_votes: "Keine Stimmen · nichts eingereiht",
       failed: "Stream offline · nichts eingereiht",
     },
@@ -82,6 +93,16 @@ export const songRequestsPanelTexts = {
     },
   },
   en: {
+    navigation: {
+      requests: {
+        label: "Song requests",
+        description: "Connects Spotify and shows song requests and vote outcomes.",
+      },
+      settings: {
+        label: "Song request settings",
+        description: "Configure payment, admission rules, and song request alerts.",
+      },
+    },
     connection: "Spotify connection",
     connecting: "Loading Spotify connection …",
     connectionLoadError: "Spotify connection status could not be loaded.",
@@ -115,9 +136,10 @@ export const songRequestsPanelTexts = {
     emptyRequestsDescription: "New song requests will appear here.",
     requestLoadError: "Song requests could not be loaded.",
     recentVotes: "Vote outcomes in this stream",
-    emptyVoteOutcomes: "No tied or empty votes in this stream yet.",
+    emptyVoteOutcomes: "No drawn or empty votes in this stream yet.",
     voteOutcomes: {
       tie: "Tie · nothing queued",
+      drawn: "Tie · drawn by lot",
       no_votes: "No votes · nothing queued",
       failed: "Stream offline · nothing queued",
     },

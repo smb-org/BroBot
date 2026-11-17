@@ -1,5 +1,6 @@
 import type { JsonObject } from "../../contract";
 import { buildSongRequestQueueState, type SongRequestQueueEntry, type SongRequestQueueState } from "../domain/queue-state";
+import { formatSongRequestTrack } from "../domain/track-display";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -61,12 +62,14 @@ export const readSongRequestQueueState = async (db: D1Database, channelId: strin
     }
   }
   const rows = roundId === null ? [] : (await db.prepare(
-    `SELECT title, requester_login, requester_display_name, request_type FROM song_requests
+    `SELECT title, artists_json, album_name, requester_login, requester_display_name, request_type FROM song_requests
       WHERE channel_id = ? AND round_id = ?
         AND state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')
       ORDER BY created_at, id LIMIT 20`,
   ).bind(channelId, roundId).all<{
     title: string;
+    artists_json: string;
+    album_name: string | null;
     requester_login: string | null;
     requester_display_name: string | null;
     request_type: SongRequestQueueEntry["requestType"];
@@ -74,10 +77,17 @@ export const readSongRequestQueueState = async (db: D1Database, channelId: strin
   return songRequestQueueStateJson(buildSongRequestQueueState({
     revision: revision?.revision ?? 0,
     rowCount,
-    rows: rows.map((row) => ({
-      title: row.title,
-      requester: row.requester_display_name ?? row.requester_login ?? "",
-      requestType: row.request_type,
-    })),
+    rows: rows.map((row) => {
+      let artists: string[] = [];
+      try {
+        const parsed: unknown = JSON.parse(row.artists_json);
+        if (Array.isArray(parsed)) artists = parsed.filter((artist): artist is string => typeof artist === "string");
+      } catch { /* Empty legacy artist lists stay readable. */ }
+      return {
+        title: formatSongRequestTrack({ title: row.title, artists, albumName: row.album_name }),
+        requester: row.requester_display_name ?? row.requester_login ?? "",
+        requestType: row.request_type,
+      };
+    }),
   }));
 };

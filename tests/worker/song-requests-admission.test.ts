@@ -151,6 +151,42 @@ describe("song request admission on D1", () => {
     expect((await admitSongRequest(database, { ...requestInput(91), track: first.track })).accepted).toBe(false);
   });
 
+  it("formats the album in the queue overlay from the stored request track", async () => {
+    await configure(settings);
+    const input = {
+      ...requestInput(92),
+      requestType: "free" as const,
+      track: { ...requestInput(92).track, albumName: "Fictional Album" },
+    };
+    expect((await admitSongRequest(database, input)).accepted).toBe(true);
+
+    expect(await readSongRequestQueueState(database, CHANNEL_ID)).toMatchObject({
+      rows: [{ title: "Mira Vale – Fictional Track 92 (Fictional Album)" }],
+    });
+  });
+
+  it("stores album and reply metadata in the same D1 batch as admission", async () => {
+    await configure(settings);
+    const batch = vi.fn(database.batch.bind(database));
+    const admissionDatabase = {
+      prepare: database.prepare.bind(database),
+      batch,
+    } as unknown as D1Database;
+    const input = {
+      ...requestInput(93),
+      requestType: "free" as const,
+      chatMessageId: "message-request-93",
+      track: { ...requestInput(93).track, albumName: "Fictional Album" },
+    };
+
+    expect((await admitSongRequest(admissionDatabase, input)).accepted).toBe(true);
+
+    expect(batch).toHaveBeenCalledOnce();
+    expect(batch.mock.calls[0]?.[0]).toHaveLength(2);
+    expect(await database.prepare("SELECT album_name, chat_message_id FROM song_requests WHERE id = ?")
+      .bind(input.requestId).first()).toEqual({ album_name: "Fictional Album", chat_message_id: "message-request-93" });
+  });
+
   it("admits an older channel-points request after a newer request has already passed admission", async () => {
     const customSettings = songRequestsSettingsSchema.parse({ rules: {
       duplicateEnabled: false,
@@ -539,8 +575,8 @@ describe("song request points ledger on a real ChannelObject", () => {
     const accepted = await processSongRequestsEvent(event, context);
     const request = await database.prepare("SELECT id FROM song_requests WHERE channel_id = ?")
       .bind(channelId).first<{ id: string }>();
-    expect(accepted.actions[0]).toMatchObject({ kind: "chat", automated: false });
-    expect(JSON.stringify(accepted.actions[0])).toContain("accepted");
+    expect(accepted.actions[0]).toMatchObject({ kind: "chat", automated: false, replyToMessageId: "real-ledger-message" });
+    expect(JSON.stringify(accepted.actions[0])).toContain("waiting for moderator approval");
     expect(await points.balance("viewer-real-ledger")).toBe(87);
     if (request === null) throw new Error("The paid song request was not recorded.");
     expect(await points.getOperation(songRequestChargeOperationId(request.id))).toMatchObject({ kind: "stake" });

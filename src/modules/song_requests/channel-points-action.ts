@@ -15,7 +15,7 @@ import { spotifyTrackIdFromInput, type SpotifyTrack } from "./domain/track";
 import { songRequestChannelPointsTexts } from "./channel-points-locale";
 import { songRequestsSettingsSchema } from "./contracts";
 import { SpotifyRequestError, spotifySearchTracks, spotifyTrackById } from "./adapters/spotify";
-import { SONG_REQUESTS_LIFECYCLE_HANDLER } from "./service";
+import { enqueueSongRequestAlert, SONG_REQUESTS_LIFECYCLE_HANDLER } from "./service";
 
 const requestSongConfigSchema = z.object({});
 const refund = () => ({
@@ -86,7 +86,7 @@ const terminalCallback = async (
     if (request === null) return;
     if (status === "FULFILLED" &&
         (request.state === "submitted" || request.state === "observed_playing" || request.state === "not_observed")) {
-      await clearSongRequestChannelPointResolutionByOperation(context.DB, context.channelId, operationId);
+      await clearSongRequestChannelPointResolutionByOperation(context.DB, context.channelId, operationId, status);
       return;
     }
     const target = status === "CANCELED"
@@ -94,7 +94,7 @@ const terminalCallback = async (
         : isOpenSongRequestState(request.state) ? "rejected" : null
       : isOpenSongRequestState(request.state) ? "removed" : null;
     if (target === null) {
-      await clearSongRequestChannelPointResolutionByOperation(context.DB, context.channelId, operationId);
+      await clearSongRequestChannelPointResolutionByOperation(context.DB, context.channelId, operationId, status);
       return;
     }
     const changed = await transitionRequest(context.DB, {
@@ -108,6 +108,7 @@ const terminalCallback = async (
       now: new Date().toISOString(),
     });
     if (changed) {
+      await clearSongRequestChannelPointResolutionByOperation(context.DB, context.channelId, operationId, status);
       await notifyQueueOverlay(context);
       return;
     }
@@ -206,6 +207,7 @@ export const requestSongChannelPointsAction: ChannelPointsActionDefinition<typeo
       }
       return refund();
     }
+    if (admissionInput.initialState === "approved") await enqueueSongRequestAlert({ ...context, channelId }, requestId);
     await notifyQueueOverlay(context);
     return "pending";
   },

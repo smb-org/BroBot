@@ -86,7 +86,8 @@ const OverlayAlert = ({ config: rawConfig, state: rawState, now, mediaAccessToke
     "--overlay-alert-font-size": `${String(config.fontSize)}px`,
   } as CSSProperties;
 
-  return <section className="overlay-alert" data-alert-id={current.operationId} style={style} role="status" aria-live="polite">
+  return <section className={`overlay-alert${current.avatarUrl === undefined ? "" : " overlay-alert--avatar"}`} data-alert-id={current.operationId} style={style} role="status" aria-live="polite">
+    {current.avatarUrl === undefined ? null : <img className="overlay-alert__avatar" src={current.avatarUrl} alt="" />}
     {imageUrl === null ? null : <img className="overlay-alert__image" src={imageUrl} alt="" />}
     {current.text.length === 0 ? null : <p className="overlay-alert__text">{current.text}</p>}
     {soundUrl === null ? null : <audio ref={audioRef} src={soundUrl} preload="auto" />}

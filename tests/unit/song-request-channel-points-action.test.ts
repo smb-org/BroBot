@@ -317,8 +317,8 @@ describe("song request channel-points action", () => {
     await expect(readSongRequest(database as unknown as D1Database, CHANNEL_ID, redemption.id))
       .resolves.toMatchObject({ state: "rejected", failureReason: "twitch_canceled" });
     await expect(database.prepare(
-      "SELECT channel_points_resolution_due FROM song_requests WHERE id = ?",
-    ).bind(redemption.id).first()).resolves.toEqual({ channel_points_resolution_due: null });
+      "SELECT channel_points_resolution_due, channel_points_resolution_completed FROM song_requests WHERE id = ?",
+    ).bind(redemption.id).first()).resolves.toEqual({ channel_points_resolution_due: null, channel_points_resolution_completed: "CANCELED" });
     expect(publishModuleOverlayMessage).toHaveBeenCalledTimes(2);
     expect(publishModuleOverlayMessage).toHaveBeenLastCalledWith(
       "queue_changed", "song_requests.queue", expect.any(Object),
@@ -336,8 +336,8 @@ describe("song request channel-points action", () => {
     await expect(readSongRequest(database as unknown as D1Database, CHANNEL_ID, redemption.id))
       .resolves.toMatchObject({ state: "removed", failureReason: "twitch_fulfilled_externally" });
     await expect(database.prepare(
-      "SELECT channel_points_resolution_due FROM song_requests WHERE id = ?",
-    ).bind(redemption.id).first()).resolves.toEqual({ channel_points_resolution_due: null });
+      "SELECT channel_points_resolution_due, channel_points_resolution_completed FROM song_requests WHERE id = ?",
+    ).bind(redemption.id).first()).resolves.toEqual({ channel_points_resolution_due: null, channel_points_resolution_completed: "FULFILLED" });
     expect(publishModuleOverlayMessage).toHaveBeenCalledTimes(2);
     expect(publishModuleOverlayMessage).toHaveBeenLastCalledWith(
       "queue_changed", "song_requests.queue", expect.any(Object),
@@ -375,6 +375,55 @@ describe("song request channel-points action", () => {
     expect(fetcher).not.toHaveBeenCalled();
     await expect(readSongRequest(database as unknown as D1Database, CHANNEL_ID, redemption.id))
       .resolves.toMatchObject({ state: "rejected", failureReason: "twitch_canceled" });
+  });
+
+  it("keeps the Twitch cancellation status when its callback clears the obligation before delivery returns", async () => {
+    const { database, context, fetcher } = await createFixture();
+    await requestSongChannelPointsAction.execute(context, {
+      redemption, operationId: redemption.id, config: {},
+    });
+    await transitionRequest(database as unknown as D1Database, {
+      channelId: CHANNEL_ID, requestId: redemption.id, fromState: "pending_review", toState: "approved", now: NOW,
+    });
+    fetcher.mockReset().mockResolvedValueOnce(new Response(JSON.stringify({
+      error: { status: 404, message: "No active device found", reason: "NO_ACTIVE_DEVICE" },
+    }), { status: 404 }));
+    const sendChat = vi.fn<ModuleAlarmContext["sendChat"]>(() => Promise.resolve({
+      sent: true, reason: null, retryable: false, delivery: "delivered",
+    }));
+    const alarmContext = {
+      DB: database,
+      channelId: CHANNEL_ID,
+      environment: { APP_ENV: "production" },
+      secrets: { readWithVersion: () => Promise.resolve({
+        value: JSON.stringify({ accessToken: "spotify-access-fixture", refreshToken: "spotify-refresh-fixture", expiresAt: Date.parse("2099-01-01T00:00:00.000Z") }),
+        version: "fixture-version",
+      }) },
+      points: { getOperation: () => Promise.resolve(null) },
+      channelPoints: {
+        readRedemptionStatus: () => Promise.resolve("UNFULFILLED" as const),
+        resolveRedemption: async (operationId: string, status: "FULFILLED" | "CANCELED") => {
+          await requestSongChannelPointsAction.onRedemptionResolved?.(context, operationId, status);
+          return true;
+        },
+      },
+      streamState: () => Promise.resolve("online" as const),
+      streamStartedAt: () => Promise.resolve({ streamId: "stream-channel-points-action", startedAt: NOW }),
+      channelLanguage: () => Promise.resolve("en" as const),
+      sendChat,
+      schedule: vi.fn(() => Promise.resolve()),
+      clear: vi.fn(() => Promise.resolve()),
+      publishModuleOverlayMessage: vi.fn(() => Promise.resolve()),
+    } as unknown as ModuleAlarmContext;
+
+    await handleSubmitAlarm(alarmContext, `submit:${redemption.id}`);
+
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(sendChat.mock.calls[0]?.[0]).toContain("Spotify has no active playback device.");
+    expect(sendChat.mock.calls[0]?.[0]).toContain("The Channel Points redemption was canceled.");
+    await expect(database.prepare(
+      "SELECT channel_points_resolution_due, channel_points_resolution_completed FROM song_requests WHERE id = ?",
+    ).bind(redemption.id).first()).resolves.toEqual({ channel_points_resolution_due: null, channel_points_resolution_completed: "CANCELED" });
   });
 
   it("pushes a durable Twitch cancellation when song requests are disabled", async () => {
