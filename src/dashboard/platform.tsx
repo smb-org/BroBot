@@ -470,9 +470,10 @@ const InvitationLink = ({ channel: channel }: { channel: PanelPlatformChannelOve
     }
   };
 
+  const compact = channel.broadcasterConnected && channel.fullConsent;
   return (
-    <div className={`platform-invitation-link${channel.broadcasterConnected ? " platform-invitation-link--compact" : ""}`} role="region" aria-label={texts.invitationLink}>
-      {channel.broadcasterConnected ? <>
+    <div className={`platform-invitation-link${compact ? " platform-invitation-link--compact" : ""}`} role="region" aria-label={texts.invitationLink}>
+      {compact ? <>
         <span>{texts.invitationLink}</span>
         <Button type="button" variant="neutral" icon={copied ? "copied" : "copy"} onClick={() => { void copyLinkToClipboard(); }}>{copied ? texts.linkCopied : texts.copyLink}</Button>
       </> : <div className="form-row">

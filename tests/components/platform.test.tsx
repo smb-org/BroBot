@@ -236,6 +236,19 @@ describe("Platform level", () => {
     expect(within(invitation).getByRole("button", { name: "Link kopieren" })).toBeInTheDocument();
   });
 
+  it("keeps the full invitation link while a connected channel has no consent", async () => {
+    setUpPlatform(true, undefined, [{ ...channel, broadcasterConnected: true, fullConsent: false }]);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
+    const inspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    const invitation = within(inspector).getByRole("region", { name: "Einladungslink" });
+    expect(within(invitation).getByRole("textbox", { name: "Einladungslink" })).toBeInTheDocument();
+    expect(within(invitation).getByText("Diesen Link bekommt der Streamer. Er startet die Twitch-Zustimmung für den gewählten Kanal.")).toBeInTheDocument();
+  });
+
   it("shows the Add member title only once in the channel inspector", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");

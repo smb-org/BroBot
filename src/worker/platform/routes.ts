@@ -433,7 +433,9 @@ platformRouter.get("/api/platform/audit", async (context) => {
     const subjectId = auditSubjectUserId(entry.action, entry.before, entry.after);
     return subjectId === null ? [] : [subjectId];
   });
-  const userIds = [...new Set([...audit.entries.map((entry) => entry.actorUserId), ...subjectIds])];
+  // Helix rejects the whole batch on a non-numeric id, so only numeric ids are looked up.
+  const userIds = [...new Set([...audit.entries.map((entry) => entry.actorUserId), ...subjectIds])]
+    .filter((userId) => /^\d+$/.test(userId));
   const users = await fetchTwitchUsersById(fetch, context.env, userIds);
   return context.json({
     ...audit,
