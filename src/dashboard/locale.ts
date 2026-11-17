@@ -707,6 +707,8 @@ export interface OverlaysTexts {
   editorCreateStepCount: (current: number, total: number) => string; editorCreateNext: string; editorCreateBack: string;
   editorCreateBuildLink: string; editorCreateRetryAccess: string; editorCreateLinkLabel: string; editorCreateCopied: string; editorCreateFinish: string; editorCreateError: string; editorCreateAccessError: string; editorCreateAccessInvalidated: string;
   editorElements: string; editorPreview: string; editorPreviewCanvas: string; editorProperties: string;
+  editorPreviewBackground: string; editorPreviewBackgroundTransparent: string; editorPreviewBackgroundLight: string; editorPreviewBackgroundDark: string; editorPreviewBackgroundImage: string;
+  editorPreviewChooseImage: string; editorPreviewRemoveImage: string; editorPreviewImageTypeError: string; editorPreviewImageSizeError: string;
   editorPropertiesTab: string; editorStyleTab: string; editorCssTab: string;
   editorPropertiesTabShort: string; editorStyleTabShort: string; editorCssTabShort: string;
   editorStyleTarget: string; editorStyleOverlayTarget: string; editorStyleElementTarget: (name: string) => string;
@@ -731,9 +733,12 @@ export interface OverlaysTexts {
   editorPaletteNavigate: string; editorPaletteChoose: string; editorPaletteClose: string;
   editorModuleElement: string; editorModuleDisabled: (moduleName: string) => string;
   editorLabel: string; editorDisplayText: string;
-  editorVariable: string; editorX: string; editorY: string; editorScale: string; editorZ: string;
+  editorVariable: string; editorX: string; editorY: string; editorWidth: string; editorWidthReset: string; editorWidthAutomatic: string;
+  editorScale: string; editorZ: string;
   editorMoveForward: string; editorMoveBackward: string; editorInComposition: string;
   editorZoom: string; editorReference: (width: number, height: number) => string; editorTextHint: (name: string) => string;
+  editorScaleHandle: (corner: "top left" | "top right" | "bottom left" | "bottom right") => string;
+  editorWidthHandle: (edge: "left" | "right") => string;
   editorElementLimit: string; editorElementUsage: string; editorMissingPrefill: (name: string) => string; editorSave: string;
   editorDiscard: string; editorSaved: string; editorClean: string; editorUnsaved: string; editorSaving: string;
   editorSaveError: string; editorConflictTitle: string; editorConflictDescription: string;
@@ -788,6 +793,8 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorCreateBuildLink: "Overlay anlegen und OBS-Link erstellen", editorCreateRetryAccess: "OBS-Link erneut erstellen", editorCreateLinkLabel: "Browserquellen-Link", editorCreateCopied: "Link kopiert", editorCreateFinish: "Zum Editor",
     editorCreateError: "Overlay oder OBS-Link konnten nicht erstellt werden. Versuche es erneut.", editorCreateAccessError: "Das Overlay wurde erstellt, aber der OBS-Link fehlt. Erstelle einen neuen Link.", editorCreateAccessInvalidated: "Der OBS-Zugang ist nicht mehr aktiv. Erstelle einen neuen Link.",
     editorElements: "Elemente", editorPreview: "Live-Vorschau", editorPreviewCanvas: "Overlay-Vorschau", editorProperties: "Eigenschaften",
+    editorPreviewBackground: "Vorschau-Hintergrund", editorPreviewBackgroundTransparent: "Transparent", editorPreviewBackgroundLight: "Hell", editorPreviewBackgroundDark: "Dunkel", editorPreviewBackgroundImage: "Eigenes Bild",
+    editorPreviewChooseImage: "Hintergrundbild wählen", editorPreviewRemoveImage: "Hintergrundbild entfernen", editorPreviewImageTypeError: "Wähle eine Bilddatei aus.", editorPreviewImageSizeError: "Das Bild darf höchstens 10 MB groß sein.",
     editorPropertiesTab: "Position", editorStyleTab: "Stil-Editor", editorCssTab: "CSS-Code",
     editorPropertiesTabShort: "Position", editorStyleTabShort: "Stil", editorCssTabShort: "CSS",
     editorStyleTarget: "Stil anwenden auf", editorStyleOverlayTarget: "Overlay-Vorgabe",
@@ -817,9 +824,11 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorPaletteNavigate: "Navigieren", editorPaletteChoose: "Hinzufügen", editorPaletteClose: "Schließen",
     editorModuleElement: "Modul-Element", editorModuleDisabled: (moduleName) => `Modul ${moduleName} ist deaktiviert.`,
     editorLabel: "Elementname", editorDisplayText: "Anzeigetext",
-    editorVariable: "Kanalvariable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Skalierung (%)", editorZ: "Ebene (z)",
+    editorVariable: "Kanalvariable", editorX: "X (px)", editorY: "Y (px)", editorWidth: "Breite (px)", editorWidthReset: "Breite zurücksetzen", editorWidthAutomatic: "Automatisch", editorScale: "Skalierung (%)", editorZ: "Ebene (z)",
     editorMoveForward: "Eine Ebene nach vorn", editorMoveBackward: "Eine Ebene nach hinten", editorInComposition: "In der Komposition anzeigen",
     editorZoom: "Vorschau-Zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} Referenz`, editorTextHint: (name) => `Verwende {var.${name}} für die Kanalvariable. {value} bleibt als Alias verfügbar.`,
+    editorScaleHandle: (corner) => `Element am Griff ${corner === "top left" ? "oben links" : corner === "top right" ? "oben rechts" : corner === "bottom left" ? "unten links" : "unten rechts"} skalieren`,
+    editorWidthHandle: (edge) => `Elementbreite am Griff ${edge === "left" ? "links" : "rechts"} ändern`,
     editorElementLimit: "Pro Overlay sind höchstens 20 Elemente möglich.", editorElementUsage: "Elemente belegt", editorMissingPrefill: (name) => `Die Variable ${name} ist nicht mehr verfügbar.`, editorSave: "Speichern",
     editorDiscard: "Verwerfen", editorSaved: "Gespeichert", editorClean: "Gespeicherte Komposition. Änderungen werden erst nach dem Speichern live.",
     editorUnsaved: "Ungespeicherte Änderungen", editorSaving: "Wird gespeichert …", editorSaveError: "Die Komposition konnte nicht gespeichert werden.",
@@ -899,6 +908,8 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorCreateBuildLink: "Create overlay and OBS link", editorCreateRetryAccess: "Retry OBS link", editorCreateLinkLabel: "Browser source link", editorCreateCopied: "Link copied", editorCreateFinish: "Open editor",
     editorCreateError: "The overlay or OBS link could not be created. Try again.", editorCreateAccessError: "The overlay was created, but its OBS link is missing. Create a new link.", editorCreateAccessInvalidated: "The OBS access is no longer active. Create a new link.",
     editorElements: "Elements", editorPreview: "Live preview", editorPreviewCanvas: "Overlay preview", editorProperties: "Properties",
+    editorPreviewBackground: "Preview background", editorPreviewBackgroundTransparent: "Transparent", editorPreviewBackgroundLight: "Light", editorPreviewBackgroundDark: "Dark", editorPreviewBackgroundImage: "Own image",
+    editorPreviewChooseImage: "Choose preview image", editorPreviewRemoveImage: "Remove preview image", editorPreviewImageTypeError: "Choose an image file.", editorPreviewImageSizeError: "The image must be 10 MB or smaller.",
     editorPropertiesTab: "Layout", editorStyleTab: "Style editor", editorCssTab: "CSS code",
     editorPropertiesTabShort: "Layout", editorStyleTabShort: "Style", editorCssTabShort: "CSS",
     editorStyleTarget: "Apply style to", editorStyleOverlayTarget: "Overlay default",
@@ -928,9 +939,11 @@ const overlaysCatalog: LocaleCatalog<OverlaysTexts> = {
     editorPaletteNavigate: "Navigate", editorPaletteChoose: "Add", editorPaletteClose: "Close",
     editorModuleElement: "Module element", editorModuleDisabled: (moduleName) => `${moduleName} module is disabled.`,
     editorLabel: "Element label", editorDisplayText: "Display text",
-    editorVariable: "Channel variable", editorX: "X (px)", editorY: "Y (px)", editorScale: "Scale (%)", editorZ: "Layer (z)",
+    editorVariable: "Channel variable", editorX: "X (px)", editorY: "Y (px)", editorWidth: "Width (px)", editorWidthReset: "Reset width", editorWidthAutomatic: "Automatic", editorScale: "Scale (%)", editorZ: "Layer (z)",
     editorMoveForward: "Move one layer forward", editorMoveBackward: "Move one layer backward", editorInComposition: "Show in composition",
     editorZoom: "Preview zoom", editorReference: (width, height) => `${String(width)} × ${String(height)} reference`, editorTextHint: (name) => `Use {var.${name}} for the channel variable. {value} remains available as an alias.`,
+    editorScaleHandle: (corner) => `Scale element from ${corner} handle`,
+    editorWidthHandle: (edge) => `Change element width from the ${edge} handle`,
     editorElementLimit: "An overlay can contain at most 20 elements.", editorElementUsage: "elements used", editorMissingPrefill: (name) => `Variable ${name} is no longer available.`, editorSave: "Save",
     editorDiscard: "Discard", editorSaved: "Saved", editorClean: "Saved composition. Changes go live after you save.",
     editorUnsaved: "Unsaved changes", editorSaving: "Saving …", editorSaveError: "The composition could not be saved.",

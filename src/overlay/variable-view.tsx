@@ -11,10 +11,11 @@ interface VariableValueViewProperties {
   value: number;
   language: OverlayLanguage;
   variables?: Readonly<Record<string, number>>;
+  wrap?: boolean;
 }
 
 /** Renders a variable as text while keeping the public overlay classes stable. */
-export const VariableValueView = ({ name, text, value, language, variables = {} }: VariableValueViewProperties): ReactElement => {
+export const VariableValueView = ({ name, text, value, language, variables = {}, wrap = false }: VariableValueViewProperties): ReactElement => {
   const ownValue = formatCount(value, language);
   const ownToken = channelVariableTemplateToken(name);
   const expression = /\{var\.([a-z][a-z0-9_]{0,31})\}|\{value\}/gu;
@@ -44,7 +45,7 @@ export const VariableValueView = ({ name, text, value, language, variables = {} 
     segments.push({ kind: "value", text: ownValue });
   }
 
-  return <div className="brobot-variable" data-variable={name}>
+  return <div className="brobot-variable" data-variable={name} style={wrap ? { whiteSpace: "normal", overflowWrap: "anywhere" } : undefined}>
     {segments.map((segment, index) => <span className={segment.kind === "value" ? "brobot-variable__value" : "brobot-variable__text"} key={`${String(index)}:${segment.kind}`}>{segment.text}</span>)}
   </div>;
 };

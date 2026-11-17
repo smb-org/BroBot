@@ -26,6 +26,7 @@ const sameElement = (left: OverlayDraftElement, right: OverlayDraftElement): boo
   left.variableName === right.variableName && left.text === right.text &&
   JSON.stringify(stableValue(left.config)) === JSON.stringify(stableValue(right.config)) &&
   left.x === right.x && left.y === right.y && left.scalePercent === right.scalePercent &&
+  (left.widthPx ?? null) === (right.widthPx ?? null) &&
   left.z === right.z && left.inComposition === right.inComposition;
 
 const sameOverlay = (before: OverlayRecord, draft: OverlayDraft): boolean =>

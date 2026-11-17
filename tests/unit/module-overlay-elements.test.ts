@@ -5,7 +5,7 @@ import { adsModule } from "../../src/modules/ads";
 import { chatVotingModule } from "../../src/modules/chat_voting";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { MODULES, validateModuleOverlayElements } from "../../src/modules/registry";
-import { MODULE_OVERLAY_ELEMENTS, moduleOverlayElementKindForMessage, moduleOverlayMessageRequiresStateReload } from "../../src/modules/overlay-element-registry";
+import { MODULE_OVERLAY_ELEMENTS, moduleOverlayElementKindForMessage, moduleOverlayMessageRequiresStateReload, overlayElementSupportsWidth } from "../../src/modules/overlay-element-registry";
 
 const moduleWithElements = (id: string, kinds: readonly string[]): BotModule => ({
   id,
@@ -25,6 +25,15 @@ const moduleWithElements = (id: string, kinds: readonly string[]): BotModule => 
 });
 
 describe("module overlay element declarations", () => {
+  it("enables width for text and tally elements while fixed layouts stay intrinsic", () => {
+    expect(MODULE_OVERLAY_ELEMENTS.filter(({ definition }) => definition.resizableWidth === true)
+      .map(({ definition }) => definition.kind).sort((a, b) => a.localeCompare(b)))
+      .toEqual(["chat_voting.tally", "text_library.block", "votekick.tally"]);
+    expect(overlayElementSupportsWidth("variable")).toBe(true);
+    expect(overlayElementSupportsWidth("song_requests.now_playing")).toBe(false);
+    expect(overlayElementSupportsWidth("emote_slots.slot")).toBe(false);
+  });
+
   it("rejects kinds that are not prefixed with their module id", () => {
     expect(() => { validateModuleOverlayElements([moduleWithElements("ads", ["clips.countdown"])]); })
       .toThrow(/prefixed/u);

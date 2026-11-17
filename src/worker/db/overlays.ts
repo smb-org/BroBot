@@ -19,6 +19,7 @@ export interface OverlayDraftElement {
   x: number;
   y: number;
   scalePercent: number;
+  widthPx?: number | null;
   z: number;
   inComposition: boolean;
   /** Read-only reconnect hint; omitted from save requests. */
@@ -78,6 +79,7 @@ interface OverlayElementRow {
   x: number;
   y: number;
   scale_percent: number;
+  width_px: number | null;
   z: number;
   in_composition: number;
   missing_variable_name: string | null;
@@ -99,6 +101,7 @@ const mapElement = (row: OverlayElementRow): OverlayDraftElement => ({
   x: row.x,
   y: row.y,
   scalePercent: row.scale_percent,
+  widthPx: row.width_px,
   z: row.z,
   inComposition: row.in_composition === 1,
   missingVariableName: row.missing_variable_name,
@@ -154,14 +157,14 @@ export const getOverlayForChannel = async (
   const elementsQuery = elementId === undefined
     ? db.prepare(
       `SELECT element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json,
-              x, y, scale_percent, z, in_composition, missing_variable_name
+              x, y, scale_percent, width_px, z, in_composition, missing_variable_name
          FROM overlay_elements
         WHERE channel_id = ? AND overlay_id = ?
         ORDER BY z, element_id`,
     ).bind(channelId, overlayId)
     : db.prepare(
       `SELECT element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json,
-              x, y, scale_percent, z, in_composition, missing_variable_name
+              x, y, scale_percent, width_px, z, in_composition, missing_variable_name
          FROM overlay_elements
         WHERE channel_id = ? AND overlay_id = ? AND element_id = ?
         ORDER BY z, element_id`,
@@ -294,11 +297,11 @@ export const createOverlayWithAudit = async (
   const elementWrites = elements.map((element) => db.prepare(
     `INSERT INTO overlay_elements
       (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json, x, y,
-       scale_percent, z, in_composition, missing_variable_name)
-     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL WHERE changes() > 0`,
+       scale_percent, width_px, z, in_composition, missing_variable_name)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL WHERE changes() > 0`,
   ).bind(element.id, input.channelId, input.id, element.kind, element.label,
     element.variableName, element.text, JSON.stringify(element.config), element.x, element.y,
-    element.scalePercent, element.z, element.inComposition ? 1 : 0));
+    element.scalePercent, element.widthPx ?? null, element.z, element.inComposition ? 1 : 0));
   const audit = prepareAudit(db, actor.userId, changedAt, input.channelId, null, "overlay.created", null, {
     overlayId: input.id,
     name: input.name,
@@ -474,18 +477,19 @@ export const updateOverlayDraftWithAudit = async (
           SET kind = ?, label = ?, variable_name = ?,
               missing_variable_name = CASE WHEN ? IS NULL THEN missing_variable_name ELSE NULL END,
               text = ?, config_json = ?, x = ?, y = ?,
-              scale_percent = ?, z = ?, in_composition = ?
+              scale_percent = ?, width_px = ?, z = ?, in_composition = ?
         WHERE channel_id = ? AND overlay_id = ? AND element_id = ? AND changes() > 0`,
     ).bind(element.kind, element.label, element.variableName, element.variableName, element.text, JSON.stringify(element.config), element.x,
-      element.y, element.scalePercent, element.z, element.inComposition ? 1 : 0,
+      element.y, element.scalePercent, element.widthPx ?? null, element.z, element.inComposition ? 1 : 0,
       before.channelId, before.id, element.id)),
     ...diff.added.map((element) => db.prepare(
       `INSERT INTO overlay_elements
         (element_id, channel_id, overlay_id, kind, label, variable_name, text, config_json, x, y,
-         scale_percent, z, in_composition, missing_variable_name)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL WHERE changes() > 0`,
+         scale_percent, width_px, z, in_composition, missing_variable_name)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL WHERE changes() > 0`,
     ).bind(element.id, before.channelId, before.id, element.kind, element.label, element.variableName, element.text,
-      JSON.stringify(element.config), element.x, element.y, element.scalePercent, element.z, element.inComposition ? 1 : 0)),
+      JSON.stringify(element.config), element.x, element.y, element.scalePercent, element.widthPx ?? null,
+      element.z, element.inComposition ? 1 : 0)),
   ];
 
   const after: OverlayRecord = {

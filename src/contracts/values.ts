@@ -115,6 +115,8 @@ export const nextVariableValue = (
 /** Limits for the first stored-overlay editor iteration. */
 export const OVERLAY_MAXIMUM_COUNT = 20;
 export const OVERLAY_ELEMENT_MAXIMUM_COUNT = 20;
+export const OVERLAY_ELEMENT_MINIMUM_WIDTH_PX = 80;
+export const OVERLAY_ELEMENT_MAXIMUM_WIDTH_PX = 1920;
 export type OverlayElementKind = "variable" | `${string}.${string}`;
 
 /** Closed reasons persisted when an overlay access is revoked. */

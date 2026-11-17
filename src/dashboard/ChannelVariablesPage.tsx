@@ -27,6 +27,7 @@ import { registerDashboardNavigationGuard } from "./ui/navigation-guard";
 import { formatTemplateVariableToken, templateVariableParameter } from "./ui/template-text-field-model";
 import { moduleName } from "./module-labels";
 import type { ModuleRegisteredTemplateVariable } from "../modules/contract";
+import { overlayElementSupportsWidth } from "../modules/overlay-element-registry";
 
 type VariableCatalogFilter = "all" | "own" | "module";
 
@@ -74,6 +75,7 @@ const saveableOverlayElement = (element: PanelOverlayElement): Omit<PanelOverlay
   x: element.x,
   y: element.y,
   scalePercent: element.scalePercent,
+  ...(overlayElementSupportsWidth(element.kind) ? { widthPx: element.widthPx ?? null } : {}),
   z: element.z,
   inComposition: element.inComposition,
 });

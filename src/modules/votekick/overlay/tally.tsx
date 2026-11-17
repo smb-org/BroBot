@@ -5,7 +5,7 @@ import { OverlayTally, OverlayTallyOptions } from "../../../overlay/tally/Overla
 import { votekickOverlayLabels } from "./locale";
 import { isVotekickOverlayState } from "./state";
 
-const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
+const Tally = ({ config, state, widthPx, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
   const current = useMemo(() => isVotekickOverlayState(state) ? state : null, [state]);
   const labels = votekickOverlayLabels(language);
   if (current === null) return null;
@@ -24,6 +24,7 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
     showCountdown={config.showCountdown !== false && open}
     hideAfterCloseSeconds={hideAfterCloseSeconds}
     countdownRemainingLabel={labels.countdownRemaining}
+    {...(widthPx === undefined ? {} : { width: widthPx })}
     summary={summary}
     className="votekick-tally"
   >

@@ -202,6 +202,31 @@ describe("stored overlay routes", () => {
       .resolves.toEqual({ count: 2 });
   });
 
+  it("persists variable widths and rejects width on fixed layout elements", async () => {
+    await insertChannel(database, "channel-a");
+    await insertLoginIdentityAndSession(database, "manager-a");
+    await insertMember(database, "channel-a", "manager-a", "manager");
+    const overlayId = await createOverlay("manager-a", "channel-a", "Gameplay");
+    const widthElement = { ...element("width-element", 100), widthPx: 360 };
+
+    const saved = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
+      baseRevision: 1, name: "Gameplay", width: 1920, height: 1080, css: "", elements: [widthElement],
+    });
+    expect(saved.status).toBe(200);
+    await expect(saved.json()).resolves.toMatchObject({
+      overlay: { revision: 2, elements: [{ id: "width-element", widthPx: 360 }] },
+    });
+    await expect(database.prepare("SELECT width_px FROM overlay_elements WHERE element_id = 'width-element'").first())
+      .resolves.toEqual({ width_px: 360 });
+
+    const fixedWidth = await fetchPanel("manager-a", `/api/channels/channel-a/overlays/${overlayId}`, "PUT", {
+      baseRevision: 2, name: "Gameplay", width: 1920, height: 1080, css: "",
+      elements: [{ ...element("fixed-element"), kind: "ads.countdown", config: {}, widthPx: null }],
+    });
+    expect(fixedWidth.status).toBe(400);
+    await expect(fixedWidth.json()).resolves.toEqual({ error: "overlay_data_invalid" });
+  });
+
   it("returns a variable field error when the variable is deleted between create validation and the atomic insert", async () => {
     await insertChannel(database, "channel-a");
     await insertLoginIdentityAndSession(database, "manager-a");

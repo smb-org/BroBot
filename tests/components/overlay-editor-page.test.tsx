@@ -135,6 +135,50 @@ describe("Overlay composition editor", () => {
     view.unmount();
   });
 
+  it("syncs the width field, resets it to automatic, and includes the selected width on explicit save", async () => {
+    Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
+    let savedBody: { elements: Array<{ widthPx?: number | null }> } | undefined;
+    const overlay = {
+      ...initialOverlay,
+      elements: [{ ...initialOverlay.elements[0], widthPx: null }],
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && (init?.method ?? "GET") === "GET") {
+        return Promise.resolve(jsonResponse({ overlay }));
+      }
+      if (url.pathname === "/api/channels/kanal-a/modules") return Promise.resolve(jsonResponse({ modules: [] }));
+      if (url.pathname === "/api/channels/kanal-a/variables") return Promise.resolve(jsonResponse({ variables: [], count: 0, maximum: 25 }));
+      if (url.pathname === "/api/csrf") return Promise.resolve(jsonResponse({ token: "csrf-test" }));
+      if (url.pathname === "/api/channels/kanal-a/overlays/overlay-a" && init?.method === "PUT") {
+        if (typeof init.body !== "string") throw new Error("Overlay save body must be JSON text.");
+        savedBody = JSON.parse(init.body) as typeof savedBody;
+        return Promise.resolve(jsonResponse({ overlay: { ...overlay, revision: 5, elements: savedBody?.elements ?? overlay.elements } }));
+      }
+      return Promise.reject(new Error(`Unexpected request ${init?.method ?? "GET"} ${url.pathname}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const view = render(<UiProvider><OverlayEditorPage
+      channelId="kanal-a" overlayId="overlay-a" canManage language="en"
+      onBack={vi.fn()} onOverlayCreated={vi.fn()}
+    /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Gameplay", level: 1 })).toBeInTheDocument();
+    const width = screen.getByRole("spinbutton", { name: "Width (px)" });
+    expect(width).toHaveValue(null);
+    expect(width).toHaveAttribute("placeholder", "Automatic");
+    fireEvent.change(width, { target: { value: "420" } });
+    expect(width).toHaveValue(420);
+    fireEvent.click(screen.getByRole("button", { name: "Reset width" }));
+    expect(width).toHaveValue(null);
+    fireEvent.change(width, { target: { value: "360" } });
+    expect(width).toHaveValue(360);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(savedBody?.elements[0]?.widthPx).toBe(360));
+    view.unmount();
+  });
+
   it("shows legacy module colors in Style and removes their config keys on explicit save", async () => {
     Object.defineProperty(window.navigator, "language", { value: "en-US", configurable: true });
     const legacyElement = {

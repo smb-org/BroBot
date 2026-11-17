@@ -10,6 +10,7 @@ export const votekickOverlayElement = {
   kind: VOTEKICK_ELEMENT_KIND,
   configVersion: 1,
   defaultSize: { width: 480, height: 160 },
+  resizableWidth: true as const,
   defaultConfig: { showCountdown: true, hideAfterCloseSeconds: 15 },
   previewState: (_config: JsonObject, _language: ModuleLanguage, now: number): JsonObject => ({
     votekickId: "overlay-editor-preview",

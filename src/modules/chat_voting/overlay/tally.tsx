@@ -7,7 +7,7 @@ import { chatVotingOverlayLabels } from "./locale";
 import { parseTallyState } from "./tally-state";
 import { OverlayTally, OverlayTallyOptions, type OverlayTallyRow } from "../../../overlay/tally/OverlayTally";
 
-const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
+const Tally = ({ config, state, widthPx, language = "en" }: ModuleOverlayElementProps): ReactElement | null => {
   const current = useMemo(() => parseTallyState(state), [state]);
   const labels = chatVotingOverlayLabels(language);
   if (current === null || current.counts.length === 0 && current.kind !== "free_text") return null;
@@ -19,8 +19,8 @@ const Tally = ({ config, state, language = "en" }: ModuleOverlayElementProps): R
     typeof current.requestedDurationSeconds === "number" && current.requestedDurationSeconds > 0 &&
     Number.isFinite(closesAt);
   const hideAfterCloseSeconds = typeof config.hideAfterCloseSeconds === "number" ? config.hideAfterCloseSeconds : 15;
-  const width = typeof config.width === "number" && Number.isFinite(config.width)
-    ? Math.max(200, Math.min(1920, config.width)) : 480;
+  const width = widthPx ?? (typeof config.width === "number" && Number.isFinite(config.width)
+    ? Math.max(200, Math.min(1920, config.width)) : 480);
   const layout = config.layout === "strip" ? "strip" : "bars";
   const useVoteColors = config.useVoteColors !== false;
   const headerText = current.title?.trim() || (closed ? labels.closed : labels.title);

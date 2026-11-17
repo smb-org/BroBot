@@ -10,6 +10,7 @@ export const chatVotingOverlayElement = {
   kind: CHAT_VOTING_TALLY_ELEMENT_KIND,
   configVersion: 1,
   defaultSize: { width: 480, height: 240 },
+  resizableWidth: true as const,
   defaultConfig: { layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 15, width: 480 },
   previewState: (_config: JsonObject, language: ModuleLanguage, now: number): JsonObject => ({
     pollId: "overlay-editor-preview",

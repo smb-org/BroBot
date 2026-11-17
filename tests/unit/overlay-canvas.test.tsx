@@ -61,6 +61,29 @@ describe("OverlayCanvas anchors", () => {
     expect(element?.className).toBe("brobot-overlay-composition-element");
     expect(element?.style.transform).toBe("scale(1.5) translateX(var(--brobot-overlay-anchor-x, 0%))");
     expect(overlay.css).toContain("--brobot-overlay-anchor-x: -100%;");
+    expect(element?.style.width).toBe("max-content");
+  });
+
+  it("applies fixed width and wrapping only when a width is stored", () => {
+    const sourceElement = overlay.elements[0];
+    if (sourceElement === undefined) throw new Error("Overlay test element is missing.");
+    const { container, rerender } = render(<OverlayCanvas
+      overlay={{ ...overlay, elements: [{ ...sourceElement, widthPx: 240 }] }}
+      language="en"
+      variables={{ score: 1234 }}
+      elementId={null}
+    />);
+    const element = container.querySelector<HTMLElement>("[data-element]");
+    const variable = container.querySelector<HTMLElement>(".brobot-variable");
+    expect(element?.style.width).toBe("240px");
+    expect(element?.style.transform).toBe("scale(1.5) translateX(var(--brobot-overlay-anchor-x, 0%))");
+    expect(variable?.style.whiteSpace).toBe("normal");
+    expect(variable?.style.overflowWrap).toBe("anywhere");
+
+    rerender(<OverlayCanvas overlay={overlay} language="en" variables={{ score: 1234 }} elementId={null} />);
+    expect(container.querySelector<HTMLElement>("[data-element]")?.style.width).toBe("max-content");
+    expect(container.querySelector<HTMLElement>(".brobot-variable")?.style.whiteSpace).toBe("");
+    expect(container.querySelector<HTMLElement>(".brobot-variable")?.style.overflowWrap).toBe("");
   });
 
   it("keeps the standalone element transform unchanged", () => {

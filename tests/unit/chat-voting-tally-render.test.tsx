@@ -28,6 +28,35 @@ describe("chat voting overlay tally", () => {
     expect((container.querySelector(".overlay-tally__fill") as HTMLElement).style.backgroundColor).toBe("");
   });
 
+  it("uses the element width override in the shared overlay canvas", async () => {
+    render(<OverlayCanvas
+      overlay={{
+        id: "overlay-width",
+        revision: 1,
+        width: 1280,
+        height: 720,
+        css: "",
+        elements: [{
+          id: "tally-width", kind: "chat_voting.tally", label: "Voting", variableName: null, text: "", config: { width: 480 },
+          state: {
+            pollId: "width-poll", status: "open", preset: "yes_no", optionCount: 2,
+            labels: ["Yes", "No"], counts: [2, 1], revision: 1,
+          },
+          moduleEnabled: true, x: 0, y: 0, scalePercent: 150, widthPx: 320, z: 0, inComposition: true,
+        }],
+      }}
+      language="en"
+      variables={{}}
+      elementId={null}
+    />);
+
+    const tally = await screen.findByRole("region", { name: "Voting" });
+    expect(tally.style.width).toBe("320px");
+    expect(document.querySelector<HTMLElement>("[data-element='tally-width']")?.style.width).toBe("320px");
+    expect(document.querySelector<HTMLElement>("[data-element='tally-width']")?.style.transform)
+      .toBe("scale(1.5) translateX(var(--brobot-overlay-anchor-x, 0%))");
+  });
+
   it("shows answer colors in strip layout while the overlay color switch is enabled", () => {
     const state = {
       pollId: "strip-colored-poll",
