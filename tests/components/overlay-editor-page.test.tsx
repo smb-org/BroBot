@@ -801,6 +801,7 @@ describe("Overlay composition editor", () => {
     fireEvent.change(fontSize, { target: { value: "" } });
 
     expect(fontSize).toHaveValue(null);
+    expect(fontSize).toHaveAttribute("placeholder", "32");
     fireEvent.click(screen.getByRole("tab", { name: "CSS code" }));
     const cssField = document.querySelector<HTMLTextAreaElement>("#overlay-editor-css-code");
     if (cssField === null) throw new Error("CSS editor field is missing.");

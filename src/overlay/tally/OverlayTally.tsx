@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 
+import { OverlayMarquee } from "../OverlayMarquee";
 import "./overlay-tally.css";
 
 export interface OverlayTallyRow {
@@ -101,7 +102,7 @@ export const OverlayTally = ({
       aria-level={2}
       aria-label={title}
       title={title}
-      style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 6ch", alignItems: "start", minWidth: 0, height: "2.4em", minHeight: "2.4em" }}
+      style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 6ch", alignItems: "start", minWidth: 0, fontSize: "0.85em", height: "2.4em", minHeight: "2.4em" }}
     >
       <span
         className={classNames("overlay-tally__title", classPrefix === undefined ? undefined : `${classPrefix}__header-title`)}
@@ -112,7 +113,7 @@ export const OverlayTally = ({
         role="timer"
         aria-hidden={countdownText.length === 0}
         aria-label={countdownText.length === 0 ? undefined : countdownRemainingLabel(countdownText)}
-        style={{ display: "flex", width: "6ch", minWidth: "6ch", height: "2.4em", minHeight: "2.4em", alignItems: "center", justifyContent: "flex-end", textAlign: "right", whiteSpace: "nowrap", fontFamily: "\"IBM Plex Mono\", ui-monospace, monospace", fontVariantNumeric: "tabular-nums" }}
+        style={{ display: "flex", width: "6ch", minWidth: "6ch", height: "2.4em", minHeight: "2.4em", alignItems: "flex-start", justifyContent: "flex-end", textAlign: "right", whiteSpace: "nowrap", lineHeight: 1.2, fontVariantNumeric: "tabular-nums" }}
       >{countdownText}</span>
     </div>
     {summary === undefined ? null : <div className={classNames("overlay-tally__summary", classPrefix === undefined ? undefined : `${classPrefix}__summary`)} title={summary} style={{ height: "1.5em", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</div>}
@@ -135,7 +136,7 @@ export const OverlayTallyOptions = ({
     display: "flex",
     flexDirection: layout === "strip" ? "row" as const : "column" as const,
     flexWrap: "wrap" as const,
-    gap: "0.65em",
+    gap: variant === "terms" ? "0.65em" : "0.5em",
     width: "100%",
     minWidth: 0,
     boxSizing: "border-box" as const,
@@ -147,27 +148,37 @@ export const OverlayTallyOptions = ({
     minWidth: 0,
     width: layout === "bars" ? "100%" : undefined,
     boxSizing: "border-box" as const,
-  } : layout === "strip" ? { flex: "1 1 8em" } : undefined;
+  } : layout === "strip" ? { flex: "1 1 8em", minWidth: 0 } : undefined;
   const trackStyle = {
-    height: "0.45em",
+    height: variant === "terms" ? "0.45em" : "0.35em",
     ...(variant === "terms" ? { width: "100%", minWidth: 0, boxSizing: "border-box" as const } : {}),
     borderRadius: "999px",
-    background: "rgba(127, 127, 127, 0.25)",
+    background: "color-mix(in srgb, var(--brobot-overlay-text-color, currentColor) 24%, transparent)",
     overflow: "hidden",
   };
+  const captionStyle = variant === "terms"
+    ? { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 10rem", alignItems: "center", gap: "0 0.5em", minWidth: 0, width: "100%", boxSizing: "border-box" as const }
+    : layout === "bars"
+      ? { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: "0 0.5em", minWidth: 0 }
+      : { display: "flex", justifyContent: "space-between", gap: "0.5em", minWidth: 0 };
+  // Option text is sized relative to the element base font: label 0.7em, count 0.55em (free-text terms keep their own scale).
+  const labelStyle = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, ...(variant === "terms" ? {} : { fontSize: "0.7em" }) };
+  const countStyle = variant === "terms"
+    ? { minWidth: 0, overflow: "hidden", textOverflow: "clip", textAlign: "right" as const, whiteSpace: "nowrap" as const, fontSize: "0.5em", fontVariantNumeric: "tabular-nums" }
+    : { flexShrink: 0, textAlign: "right" as const, whiteSpace: "nowrap" as const, fontSize: "0.55em", fontVariantNumeric: "tabular-nums" };
 
   return <>
     <div className={classNames("overlay-tally__options", `overlay-tally__options--${layout}`, `overlay-tally__options--${variant}`, classPrefix === undefined ? undefined : `${classPrefix}__options`)} style={optionsStyle}>
       {rows.map((row) => {
         const percent = total === 0 ? 0 : Math.round(row.count * 100 / total);
         return <div className={classNames("overlay-tally__option", layout === "strip" && row.color !== undefined ? "overlay-tally__option--colored" : undefined, classPrefix === undefined ? undefined : `${classPrefix}__option`)} key={row.id} style={optionStyle}>
-          <div className={classNames("overlay-tally__caption", classPrefix === undefined ? undefined : `${classPrefix}__caption`)} style={variant === "terms" ? { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 10rem", alignItems: "center", gap: "0 0.5em", minWidth: 0, width: "100%", boxSizing: "border-box" } : { display: "flex", justifyContent: "space-between", gap: "0.5em" }}>
-            <span className={classNames("overlay-tally__label", layout === "strip" && row.color !== undefined ? "overlay-tally__label--strip-colored" : undefined)} title={row.title} style={variant === "terms" ? { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : undefined}>
+          <div className={classNames("overlay-tally__caption", classPrefix === undefined ? undefined : `${classPrefix}__caption`)} style={captionStyle}>
+            <span className={classNames("overlay-tally__label", layout === "strip" && row.color !== undefined ? "overlay-tally__label--strip-colored" : undefined)} title={row.title ?? row.label} style={labelStyle}>
               {layout === "strip" && row.color !== undefined
-                ? <><span className="overlay-tally__color-marker" aria-hidden="true" style={{ backgroundColor: row.color }} /><span className="overlay-tally__label-copy">{row.label}</span></>
-                : row.label}
+                ? <><span className="overlay-tally__color-marker" aria-hidden="true" style={{ backgroundColor: row.color }} /><OverlayMarquee className="overlay-tally__label-copy" text={row.label} title={row.title ?? row.label} /></>
+                : <OverlayMarquee text={row.label} title={row.title ?? row.label} />}
             </span>
-            <span className="overlay-tally__count" style={variant === "terms" ? { minWidth: 0, overflow: "hidden", textOverflow: "clip", textAlign: "right", whiteSpace: "nowrap", fontSize: "0.5em", fontVariantNumeric: "tabular-nums" } : undefined}>
+            <span className="overlay-tally__count" style={countStyle}>
               {String(row.count)}{showPercent ? ` · ${String(percent)}%` : ""}
             </span>
           </div>

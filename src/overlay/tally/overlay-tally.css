@@ -10,6 +10,8 @@
   grid-template-columns: minmax(0, 1fr) 6ch;
   align-items: start;
   min-width: 0;
+  /* Title and timer share one size: 0.85em of the element base font. */
+  font-size: 0.85em;
   height: 2.4em;
   min-height: 2.4em;
 }
@@ -34,11 +36,11 @@
   min-width: 6ch;
   height: 2.4em;
   min-height: 2.4em;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
-  text-align: var(--brobot-overlay-text-align, right);
+  text-align: right;
   white-space: nowrap;
-  font-family: var(--brobot-overlay-font-family, "IBM Plex Mono", ui-monospace, monospace);
+  line-height: var(--brobot-overlay-line-height, 1.2);
   font-variant-numeric: tabular-nums;
 }
 
@@ -68,14 +70,14 @@
 }
 
 .overlay-tally__options--strip .overlay-tally__option--colored {
-  min-height: 1.5em;
+  min-height: 1.1em;
   min-width: 0;
 }
 
 .overlay-tally__options--strip .overlay-tally__option--colored .overlay-tally__caption {
   align-items: center;
   flex-wrap: nowrap;
-  height: 1.5em;
+  height: 1.1em;
   min-width: 0;
 }
 
@@ -155,7 +157,7 @@
 .overlay-tally__track {
   height: 0.45em;
   border-radius: 999px;
-  background: rgba(127, 127, 127, 0.25);
+  background: color-mix(in srgb, var(--brobot-overlay-text-color, currentColor) 24%, transparent);
   overflow: hidden;
 }
 
@@ -169,8 +171,8 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: currentColor;
-  opacity: 0.8;
+  background: var(--brobot-overlay-accent-color, currentColor);
+  opacity: 1;
 }
 
 .overlay-tally__more {

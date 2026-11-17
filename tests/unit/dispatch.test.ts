@@ -757,6 +757,48 @@ describe("chat message text normalization", () => {
   });
 });
 
+describe("unknown text command hint", () => {
+  const srModule: BotModule = {
+    ...silentModule("song_requests"),
+    chatCommands: [{
+      name: "!sr",
+      syntax: "!sr <song>",
+      description: { en: "Request a song", de: "Song wünschen" },
+      minimumChatStatus: "everyone",
+    }],
+  };
+  const unknownCodes = async (text: string, enableSr: boolean): Promise<string[]> => {
+    const database = new TestD1Database();
+    try {
+      await withBot(database);
+      await activate(database, "kanal-a", textCommandModule.id);
+      if (enableSr) await activate(database, "kanal-a", srModule.id);
+      await dispatchEventSubNotification(environment(database), {
+        channelId: "kanal-a",
+        subscriptionType: CHAT_TYPE,
+        triggerId: "unknown-hint",
+        payload: { message: { text }, chatter_user_id: "viewer-1", chatter_user_login: "viewer", message_id: "m-1" },
+        receivedAt: NOW,
+      }, sent(), [textCommandModule, srModule]);
+      return (await eventLog(database)).map((row) => row.code).filter((code) => code === "text_commands.unknown");
+    } finally {
+      database.close();
+    }
+  };
+
+  it("stays silent for a command an enabled module claims", async () => {
+    expect(await unknownCodes("!sr some song", true)).toEqual([]);
+  });
+
+  it("still logs a command nobody claims", async () => {
+    expect(await unknownCodes("!doesnotexist", true)).toEqual(["text_commands.unknown"]);
+  });
+
+  it("still logs a command whose owning module is disabled", async () => {
+    expect(await unknownCodes("!sr some song", false)).toEqual(["text_commands.unknown"]);
+  });
+});
+
 describe("module selection", () => {
   it("skips disabled modules", () => {
     const { matches } = selectModulesForEvent(

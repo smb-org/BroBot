@@ -91,7 +91,7 @@ describe("ads countdown overlay element", () => {
     expect(variableCss).toContain(".brobot-variable,\n.brobot-module-text {");
     expect(variableCss).toContain("color: var(--brobot-overlay-text-color, var(--brobot-overlay-legacy-text-color, rgba(255, 255, 255, 0.96)));");
     expect(variableCss).toContain("font-family: var(--brobot-overlay-font-family, system-ui, sans-serif);");
-    expect(variableCss).toContain("font-size: var(--brobot-overlay-font-size, 48px);");
+    expect(variableCss).toContain("font-size: var(--brobot-overlay-font-size, 32px);");
     expect(variableCss).toContain("font-weight: var(--brobot-overlay-font-weight, 700);");
     expect(variableCss).toContain("line-height: var(--brobot-overlay-line-height, 1.1);");
     expect(variableCss).toContain("text-shadow: var(--brobot-overlay-text-shadow, 0 1px 3px rgba(0, 0, 0, 0.9));");

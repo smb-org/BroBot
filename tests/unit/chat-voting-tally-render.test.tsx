@@ -22,7 +22,19 @@ describe("chat voting overlay tally", () => {
     const firstFill = container.querySelector(".overlay-tally__fill") as HTMLElement;
     expect(firstFill.style.backgroundColor).toBe("rgb(91, 140, 255)");
     expect(firstFill.style.opacity).toBe("1");
-    expect((container.querySelector(".overlay-tally__track") as HTMLElement).style.background).toBe("rgba(127, 127, 127, 0.25)");
+    expect((container.querySelector(".overlay-tally__track") as HTMLElement).style.background).toContain("color-mix(");
+    const caption = container.querySelector(".overlay-tally__caption") as HTMLElement;
+    expect(caption.style.gridTemplateColumns).toBe("minmax(0, 1fr) auto");
+    expect((container.querySelector(".overlay-tally__label") as HTMLElement).style.whiteSpace).toBe("nowrap");
+    const count = container.querySelector(".overlay-tally__count") as HTMLElement;
+    expect([count.style.whiteSpace, count.style.fontVariantNumeric]).toEqual(["nowrap", "tabular-nums"]);
+    expect((container.querySelector(".overlay-tally__countdown") as HTMLElement).style.fontFamily).toBe("");
+    // Size hierarchy relative to the element base font: title and timer 0.85em, label 0.7em, count 0.55em.
+    expect((container.querySelector(".overlay-tally__header") as HTMLElement).style.fontSize).toBe("0.85em");
+    expect((container.querySelector(".overlay-tally__label") as HTMLElement).style.fontSize).toBe("0.7em");
+    expect(count.style.fontSize).toBe("0.55em");
+    // Option labels render through the shared marquee.
+    expect(container.querySelector(".overlay-tally__label .overlay-marquee")).not.toBeNull();
 
     rerender(<Tally config={{ layout: "bars", showPercent: true, useVoteColors: false }} state={state} now={Date.now()} language="en" />);
     expect((container.querySelector(".overlay-tally__fill") as HTMLElement).style.backgroundColor).toBe("");

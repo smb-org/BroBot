@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RenderOptions } from "@testing-library/react";
@@ -345,7 +345,10 @@ describe("EventsPage failure cause icon", () => {
     const firstRow = view.container.querySelector(".event-table tbody tr:not(.data-table__day-row)");
     if (!(firstRow instanceof HTMLTableRowElement)) throw new Error("Initial event row is missing.");
     fireEvent.click(firstRow);
-    expect(screen.getByRole("region", { name: "Detail" })).toBeVisible();
+    const detail = screen.getByRole("region", { name: "Detail" });
+    expect(detail).toBeVisible();
+    // The panel title already says "Vorgang"; no section repeats it.
+    expect(within(detail).getAllByText("Vorgang")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Change filter" }));
     expect(screen.queryByRole("region", { name: "Detail" })).not.toBeInTheDocument();
 
