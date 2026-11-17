@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 import { PlatformPage } from "../../src/dashboard/platform";
+import type { PanelPlatformChannelOverview, PanelSpotifyAccessResponse } from "../../src/panel-contract";
 import { UiProvider } from "../../src/dashboard/ui";
 import { renderWithQuery as render } from "../query-test-utils";
 
@@ -17,7 +18,7 @@ const requestUrl = (input: RequestInfo | URL): URL => {
   return new URL(input, window.location.origin);
 };
 
-const channel = {
+const channel: PanelPlatformChannelOverview = {
   channelId: "123",
   login: "alpha_login",
   displayName: "Alpha",
@@ -39,12 +40,15 @@ const members = {
 const setUpPlatform = (
   platform: boolean,
   audit: { entries: unknown[]; nextCursor: string | null } = { entries: [], nextCursor: null },
+  channels: PanelPlatformChannelOverview[] = [channel],
+  spotifyAccess: PanelSpotifyAccessResponse = { usedSlots: 0, limit: 5, channels: [] },
 ): ReturnType<typeof vi.fn<typeof fetch>> => {
   const fetcher = vi.fn<typeof fetch>((input) => {
     const url = requestUrl(input);
     if (url.pathname === "/api/channels") return Promise.resolve(response({ channels: [], bot: { status: "connected", reason: null, updatedAt: "2026-09-18T00:00:00.000Z" }, platformAdmin: platform }));
-    if (url.pathname === "/api/platform") return Promise.resolve(response({ channels: [channel] }));
+    if (url.pathname === "/api/platform") return Promise.resolve(response({ channels }));
     if (url.pathname === "/api/platform/audit") return Promise.resolve(response(audit));
+    if (url.pathname === "/api/platform/spotify-channels") return Promise.resolve(response(spotifyAccess));
     if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(response(members));
     return Promise.resolve(response({}, 404));
   });
@@ -90,7 +94,7 @@ describe("Platform level", () => {
     expect(screen.queryAllByRole("option", { name: "Broadcaster" })).toHaveLength(0);
   });
 
-  it("keeps the channel table compact with role counts combined and explained", async () => {
+  it("labels each role count in the channel table and its accessible name", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -107,12 +111,43 @@ describe("Platform level", () => {
     const identityCell = channelRow.querySelector('[data-field="identity"]');
     expect(identityCell).not.toBeNull();
     expect(identityCell).toHaveAttribute("data-label", "Broadcaster-Identität");
-    const membersHeader = within(table).getByRole("columnheader", { name: "Mitglieder" });
     const consentHeader = within(table).getByRole("columnheader", { name: "Zustimmung" });
-    const counts = within(channelRow).getByText("1 · 1 · 0");
+    const counts = within(channelRow).getByRole("cell", { name: "Broadcaster: 1, Verwalter: 1, Bediener: 0" });
+    expect(within(counts).getByText("Broadcaster: 1")).toBeInTheDocument();
+    expect(within(counts).getByText("Verwalter: 1")).toBeInTheDocument();
+    expect(within(counts).getByText("Bediener: 0")).toBeInTheDocument();
     expect(consentHeader).toHaveAttribute("title", "Vollzustimmung");
-    expect(membersHeader).toHaveAttribute("title", expect.stringContaining("·"));
-    expect(counts).toHaveAttribute("title", membersHeader.getAttribute("title"));
+  });
+
+  it("keeps Spotify slots in the page overview and scopes inspector status to the selected channel", async () => {
+    const otherChannel: PanelPlatformChannelOverview = {
+      ...channel,
+      channelId: "456",
+      login: "viewer_one",
+      displayName: "Viewer One",
+    };
+    setUpPlatform(true, undefined, [channel, otherChannel], {
+      usedSlots: 1,
+      limit: 5,
+      channels: [{ slot: 2, channelId: otherChannel.channelId, login: otherChannel.login, displayName: otherChannel.displayName, enabledAt: "2026-09-19T12:00:00.000Z" }],
+    });
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    const slotOverview = await screen.findByRole("region", { name: "Spotify-Platzübersicht" });
+    expect(within(slotOverview).getByText("1 von 5 Spotify-Plätzen belegt")).toBeInTheDocument();
+    expect(within(slotOverview).getByText("2. @viewer_one")).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
+    const alphaInspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    const alphaSpotify = within(alphaInspector).getByRole("region", { name: "Spotify-Freigabe" });
+    expect(within(alphaSpotify).getByText("Spotify nicht freigeschaltet")).toBeInTheDocument();
+    expect(within(alphaSpotify).queryByText("@viewer_one")).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("row", { name: /viewer_one/ }));
+    const viewerInspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Viewer One" });
+    expect(within(viewerInspector).getByText("Spotify freigeschaltet · Platz 2")).toBeInTheDocument();
   });
 
   it("hides the channel id and edits a selected member role in the inspector", async () => {
@@ -127,7 +162,8 @@ describe("Platform level", () => {
     if (table === null) throw new Error("Kanalübersicht-Tabelle fehlt");
     expect(table).toHaveClass("platform-channel-table--inspector-open");
     expect(within(table).queryByRole("columnheader", { name: "Kennung" })).not.toBeInTheDocument();
-    expect(within(table).getAllByRole("columnheader")).toHaveLength(4);
+    expect(within(table).queryByRole("columnheader", { name: "Mitglieder" })).not.toBeInTheDocument();
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(3);
     expect(within(table).getByRole("columnheader", { name: "Identität" })).toBeInTheDocument();
     expect(within(channelRow).getByRole("rowheader")).toHaveAttribute("title", "123");
 
@@ -175,8 +211,8 @@ describe("Platform level", () => {
     expect(remove).toHaveAccessibleDescription("Die Broadcaster-Rolle kann der Betreiber nicht entfernen.");
   });
 
-  it("builds the invite link from the selected channel's login", async () => {
-    setUpPlatform(true);
+  it("keeps the invitation link prominent while the channel has not connected", async () => {
+    setUpPlatform(true, undefined, [{ ...channel, fullConsent: false }]);
     window.history.replaceState({}, "", "/betreiber");
 
     render(<DashboardApp />);
@@ -185,6 +221,43 @@ describe("Platform level", () => {
     const link = await screen.findByRole("textbox", { name: "Einladungslink" });
 
     expect(link).toHaveValue("http://localhost:3000/auth/login?channel=alpha_login");
+  });
+
+  it("shows only the compact copy action after the channel connects", async () => {
+    setUpPlatform(true, undefined, [{ ...channel, broadcasterConnected: true }]);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
+    const inspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    const invitation = within(inspector).getByRole("region", { name: "Einladungslink" });
+    expect(within(invitation).queryByRole("textbox", { name: "Einladungslink" })).not.toBeInTheDocument();
+    expect(within(invitation).getByRole("button", { name: "Link kopieren" })).toBeInTheDocument();
+  });
+
+  it("keeps the full invitation link while a connected channel has no consent", async () => {
+    setUpPlatform(true, undefined, [{ ...channel, broadcasterConnected: true, fullConsent: false }]);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
+    const inspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    const invitation = within(inspector).getByRole("region", { name: "Einladungslink" });
+    expect(within(invitation).getByRole("textbox", { name: "Einladungslink" })).toBeInTheDocument();
+    expect(within(invitation).getByText("Diesen Link bekommt der Streamer. Er startet die Twitch-Zustimmung für den gewählten Kanal.")).toBeInTheDocument();
+  });
+
+  it("shows the Add member title only once in the channel inspector", async () => {
+    setUpPlatform(true);
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    fireEvent.click(await screen.findByRole("row", { name: /alpha_login/ }));
+    const inspector = await screen.findByRole("region", { name: "Kanal bearbeiten: Alpha" });
+    expect(within(inspector).getAllByRole("heading", { name: "Mitglied hinzufügen" })).toHaveLength(1);
   });
 
   it("shows the shared Twitch user field and puts a hidden lucide icon on the copy action", async () => {
@@ -207,9 +280,9 @@ describe("Platform level", () => {
     setUpPlatform(true, {
       entries: [{
         auditId: "audit-1",
-        actorUserId: "26876135",
-        actorLogin: "esembe",
-        actorDisplayName: "Esembe",
+        actorUserId: "test-operator",
+        actorLogin: "operator_test",
+        actorDisplayName: "Operator Test",
         actorKind: "platform_admin",
         createdAt: "2026-09-18T00:00:00.000Z",
         channelId: "123",
@@ -217,6 +290,21 @@ describe("Platform level", () => {
         action: "channel.released",
         before: "{}",
         after: "{}",
+      }, {
+        auditId: "audit-member-role",
+        actorUserId: "test-operator",
+        actorLogin: "operator_test",
+        actorDisplayName: "Operator Test",
+        actorKind: "platform_admin",
+        createdAt: "2026-09-18T00:00:00.500Z",
+        channelId: "123",
+        moduleId: null,
+        action: "member.role_changed",
+        before: JSON.stringify({ userId: "viewer_one_id", role: "manager" }),
+        after: JSON.stringify({ userId: "viewer_one_id", role: "operator" }),
+        subjectUserId: "viewer_one_id",
+        subjectLogin: "viewer_one",
+        subjectDisplayName: "Viewer One",
       }, {
         auditId: "audit-2",
         actorUserId: "gelöscht",
@@ -238,12 +326,14 @@ describe("Platform level", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: "Audit" }));
     const audit = await screen.findByRole("region", { name: "Betreiber-Audit" });
-    expect(await within(audit).findByText("Betreiber · Esembe")).toBeInTheDocument();
-    expect(await within(audit).findByText("Betreiber · gelöscht")).toBeInTheDocument();
-    expect(within(audit).queryByText("Betreiber · 26876135")).not.toBeInTheDocument();
+    expect(within(audit).queryByText("Betreiber · test-operator")).not.toBeInTheDocument();
+    expect(within(audit).getByText("Betreiber · Operator Test gab den Kanal alpha_login frei")).toHaveClass("audit-sentence");
+    expect(within(audit).getByText("Betreiber · Operator Test änderte die Rolle von Viewer One von Verwalter zu Bediener")).toHaveClass("audit-sentence");
+    expect(within(audit).getByText("Betreiber · gelöscht änderte die Vollzustimmung für alpha_login von — zu —")).toBeInTheDocument();
+    expect(within(audit).queryByRole("columnheader", { name: "Akteur" })).not.toBeInTheDocument();
   });
 
-  it("shows the invite link only in the selected channel's editor", async () => {
+  it("shows the prominent invitation link only in the selected channel's editor", async () => {
     setUpPlatform(true);
     window.history.replaceState({}, "", "/betreiber");
 
@@ -352,6 +442,7 @@ describe("Platform level", () => {
       const url = requestUrl(input);
       if (url.pathname === "/api/channels") return Promise.resolve(response({ channels: [], platformAdmin: true }));
       if (url.pathname === "/api/platform") return Promise.resolve(response({ channels: [freigegeben] }));
+      if (url.pathname === "/api/platform/spotify-channels") return Promise.resolve(response({ usedSlots: 0, limit: 5, channels: [] }));
       if (url.pathname === "/api/platform/audit") return Promise.resolve(response({ entries: [], nextCursor: null }));
       if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(response(members));
       if (url.pathname === "/api/platform/twitch/user-suggestions") return Promise.resolve(response({ users: [{ userId: "789", login: "beta_login", displayName: "Beta", profileImageUrl: null }], partial: false }));

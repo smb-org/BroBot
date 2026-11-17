@@ -31,6 +31,7 @@ import {
 } from "./repository";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { CHANNEL_ROLES, PLATFORM_ASSIGNABLE_ROLES, type ChannelRole } from "../../contracts/values";
+import { auditSubjectUserId } from "../../dashboard/audit/areas";
 import { revokeRealtimeUser } from "../realtime";
 
 interface PlatformEnvironment {
@@ -428,16 +429,29 @@ platformRouter.get("/api/platform/audit", async (context) => {
     return context.json({ error: "pagination_cursor_invalid" }, 400);
   }
   const audit = await listPlatformAudit(context.env.DB, limit, cursor);
-  const actorIds = audit.entries.map((entry) => entry.actorUserId);
-  const actors = await fetchTwitchUsersById(fetch, context.env, actorIds);
+  const subjectIds = audit.entries.flatMap((entry) => {
+    const subjectId = auditSubjectUserId(entry.action, entry.before, entry.after);
+    return subjectId === null ? [] : [subjectId];
+  });
+  // Helix rejects the whole batch on a non-numeric id, so only numeric ids are looked up.
+  const userIds = [...new Set([...audit.entries.map((entry) => entry.actorUserId), ...subjectIds])]
+    .filter((userId) => /^\d+$/.test(userId));
+  const users = await fetchTwitchUsersById(fetch, context.env, userIds);
   return context.json({
     ...audit,
     entries: audit.entries.map((entry) => {
-      const actor = actors.get(entry.actorUserId);
+      const actor = users.get(entry.actorUserId);
+      const subjectId = auditSubjectUserId(entry.action, entry.before, entry.after);
+      const subject = subjectId === null ? undefined : users.get(subjectId);
       return {
         ...entry,
         actorLogin: actor?.login ?? null,
         actorDisplayName: actor?.displayName ?? null,
+        ...(subjectId === null ? {} : {
+          subjectUserId: subjectId,
+          subjectLogin: subject?.login ?? null,
+          subjectDisplayName: subject?.displayName ?? null,
+        }),
       };
     }),
   });

@@ -315,6 +315,14 @@ const installPlatformMocks = async (page: Page, gates: Partial<Record<"audit" | 
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ channels }) });
       return;
     }
+    if (pathname === "/api/platform/spotify-channels") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ usedSlots: 1, limit: 5, channels: [{ slot: 1, channelId: platformChannelId, login: platformChannel.login, displayName: platformChannel.displayName, enabledAt: "2026-09-20T08:00:00.000Z" }] }),
+      });
+      return;
+    }
     if (pathname === "/api/platform/audit") {
       const gate = gates.audit;
       gate?.started();
@@ -389,7 +397,7 @@ test("channel audit pagination stays above the growing list and the list top fix
   }
 });
 
-test("platform audit keeps its footer in place as rows arrive", async ({ page }) => {
+test("platform audit keeps pagination above its list as rows arrive", async ({ page }) => {
   let releaseAudit!: () => void;
   let markAuditStarted!: () => void;
   let releaseMembers!: () => void;
@@ -412,37 +420,54 @@ test("platform audit keeps its footer in place as rows arrive", async ({ page })
   await expect(page.locator(".platform-tabs__panel .list-pagination-footer button")).toBeVisible();
   await expect(platformAuditList).toHaveAttribute("data-status", "success");
   expect((await measureBox(page, ".platform-tabs__panel .ui-load-state")).slice(0, 2)).toEqual(auditListBefore.slice(0, 2));
-  expect((await measureBox(page, ".platform-tabs__panel .list-pagination-footer"))[3]).toBe(44);
+  const auditPagination = await measureBox(page, ".platform-tabs__panel .list-pagination-footer");
+  const loadedAuditList = await measureBox(page, ".platform-tabs__panel .ui-load-state");
+  expect(auditPagination[3]).toBe(44);
+  expect(auditPagination[1] + auditPagination[3]).toBeLessThanOrEqual(loadedAuditList[1]);
 
   await page.getByRole("tab", { name: "Channels" }).click();
   await page.locator(".platform-channel-table tbody tr").click();
   await membersStarted;
-  const grantEditor = page.locator('.platform-inspector-section[aria-label="Add member"]');
+  const grantEditor = page.getByRole("region", { name: "Add member" });
   await expect(grantEditor).toBeVisible();
-  const grantBefore = await measureBox(page, '.platform-inspector-section[aria-label="Add member"]');
   const membersSection = page.locator(".ui-section--inspector").filter({ has: page.getByRole("heading", { name: "Members" }) });
+  const membersList = membersSection.locator(".platform-members-list .ui-load-state");
   const membersBefore = await membersSection.boundingBox();
   if (membersBefore === null) throw new Error("The members list section should have a layout box while loading.");
-  expect(grantBefore[1] + grantBefore[3]).toBeLessThanOrEqual(membersBefore.y + 0.5);
+  const grantBox = await grantEditor.boundingBox();
+  const listBefore = await membersList.boundingBox();
+  if (grantBox === null || listBefore === null) throw new Error("The member grant form and list should have layout boxes while loading.");
+  expect(grantBox.y + grantBox.height).toBeLessThanOrEqual(listBefore.y + 0.5);
   releaseMembers();
   await expect(page.locator(".platform-members-table tbody tr")).toHaveCount(100);
-  expect(await measureBox(page, '.platform-inspector-section[aria-label="Add member"]')).toEqual(grantBefore);
+  expect((await grantEditor.boundingBox())?.y).toBe(grantBox.y);
   expect((await membersSection.boundingBox())?.y).toBe(membersBefore.y);
-  expect(grantBefore[1] + grantBefore[3]).toBeLessThanOrEqual(((await membersSection.boundingBox())?.y ?? Number.POSITIVE_INFINITY) + 0.5);
+  expect(await membersList.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
 });
 
 test("platform tabs isolate populated channel and audit lists at desktop and mobile widths", async ({ page }) => {
-  for (const width of [1280, 390]) {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+  for (const width of [1280, 1920, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : width === 1920 ? 1080 : 900 });
     await installPlatformMocks(page, {}, fullPlatformChannels);
 
     await page.goto("/platform");
+    const spotifyOverview = page.getByRole("region", { name: "Spotify slot overview" });
+    await expect(spotifyOverview).toContainText("1 of 5 Spotify slots used");
+    await expect(spotifyOverview).toContainText("1. @stable-platform-channel");
     const channelTab = page.getByRole("tab", { name: "Channels" });
     const auditTab = page.getByRole("tab", { name: "Audit" });
     await expect(channelTab).toHaveAttribute("aria-selected", "true");
     await expect(page.locator(".platform-channel-table tbody tr")).toHaveCount(30);
     await expect(page.getByRole("button", { name: "Release channel" })).toBeVisible();
     await expect(page.locator(".platform-tabs [role='tabpanel']:visible")).toHaveCount(1);
+    if (width === 1920) {
+      await page.locator(".platform-channel-table tbody tr").first().click();
+      const inspector = page.getByRole("region", { name: "Edit channel: Stable Platform Channel" });
+      await expect(inspector.getByRole("heading", { name: "Identity and consent" })).toBeInViewport();
+      await expect(inspector.getByRole("heading", { name: "Spotify access" })).toBeInViewport();
+      await expect(inspector.getByRole("heading", { name: "Members" })).toBeInViewport();
+      await inspector.getByRole("button", { name: "Close" }).click();
+    }
     const channelControls = await measureDocumentBox(page, ".platform-tabs__list");
     const channelList = await measureDocumentBox(page, ".platform-channel-table");
     expect(channelControls[1] + channelControls[3]).toBeLessThanOrEqual(channelList[1]);
@@ -457,11 +482,10 @@ test("platform tabs isolate populated channel and audit lists at desktop and mob
     await expect(auditList.locator(".table tbody tr")).toHaveCount(50);
     await expect(page.locator(".platform-tabs [role='tabpanel']:visible")).toHaveCount(1);
     await expect(page.locator(".platform-channel-table")).toHaveCount(0);
-    await auditControl.scrollIntoViewIfNeeded();
     const auditControls = await measureBox(page, ".platform-tabs__panel .list-pagination-footer");
-    const mainBottom = await page.locator(".dashboard-shell__main").evaluate((main) => main.getBoundingClientRect().bottom);
+    const auditListBox = await measureBox(page, ".platform-tabs__panel .ui-load-state");
     expect(auditControls[3]).toBe(44);
-    expect(Math.abs(auditControls[1] + auditControls[3] - mainBottom)).toBeLessThanOrEqual(20);
+    expect(auditControls[1] + auditControls[3]).toBeLessThanOrEqual(auditListBox[1]);
     await page.unrouteAll();
   }
 });

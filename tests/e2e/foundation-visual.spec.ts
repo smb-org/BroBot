@@ -54,6 +54,8 @@ const installApiMocks = async (page: Page): Promise<void> => {
       body = { channels: [channel], bot: channel.bot, platformAdmin: true, viewerIsBot: false };
     } else if (pathname === "/api/platform") {
       body = { channels: [] };
+    } else if (pathname === "/api/platform/spotify-channels") {
+      body = { usedSlots: 0, limit: 5, channels: [] };
     } else if (pathname === "/api/platform/audit") {
       body = { entries: [], nextCursor: null };
     } else if (pathname === `/api/channels/${channelId}/revisions`) {

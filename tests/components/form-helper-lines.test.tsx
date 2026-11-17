@@ -100,6 +100,7 @@ describe("helper text on every field (editor-konzept 3.0/15d)", () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const path = requestUrl(input).pathname;
       if (path === "/api/platform") return Promise.resolve(jsonResponse({ channels: [channel] }));
+      if (path === "/api/platform/spotify-channels") return Promise.resolve(jsonResponse({ usedSlots: 0, limit: 5, channels: [] }));
       if (path === "/api/platform/audit") return Promise.resolve(jsonResponse({ entries: [], nextCursor: null }));
       if (path === "/api/platform/channels/123/members") return Promise.resolve(jsonResponse({ members: [], nextCursor: null, broadcasterCount: 1, viewerUserId: "999" }));
       return Promise.resolve(jsonResponse({}, 404));
