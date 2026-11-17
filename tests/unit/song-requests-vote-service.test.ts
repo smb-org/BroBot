@@ -673,6 +673,69 @@ describe("durable song vote results", () => {
     expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-b'").first()).toEqual({ state: "submitted" });
   });
 
+  it("matches the next same-track request after a restart from a paused position", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const { database, context } = await createContext("ballot-poll-paused-restart");
+    const playing = { is_playing: true, progress_ms: 18_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const paused = { is_playing: false, progress_ms: 199_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const restarted = { is_playing: true, progress_ms: 5_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(playing), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(paused), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(restarted), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    for (const [requestId, operationId] of [["request-a", "paused-restart-a"], ["request-b", "paused-restart-b"]] as const) {
+      await transitionRequest(database as unknown as D1Database, {
+        channelId: CHANNEL_ID,
+        requestId,
+        fromState: null,
+        toState: "approved",
+        now: new Date(NOW).toISOString(),
+        newRequest: {
+          source: "mod_vote",
+          track: {
+            id: spotifyTrackFixture.id,
+            uri: spotifyTrackFixture.uri,
+            title: spotifyTrackFixture.name,
+            artists: ["Mira Vale"],
+            albumName: "Quiet Atlas",
+            durationMs: spotifyTrackFixture.duration_ms,
+            explicit: false,
+            coverUrl: null,
+            spotifyUrl: spotifyTrackFixture.external_urls.spotify,
+          },
+          operationId,
+          streamId: STREAM_ID,
+        },
+      });
+      await transitionRequest(database as unknown as D1Database, {
+        channelId: CHANNEL_ID, requestId, fromState: "approved", toState: "submitting", now: new Date(NOW).toISOString(),
+      });
+      await transitionRequest(database as unknown as D1Database, {
+        channelId: CHANNEL_ID, requestId, fromState: "submitting", toState: "submitted", now: new Date(NOW).toISOString(),
+      });
+    }
+
+    await pollSongRequestsPlayback(context);
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-a'").first()).toEqual({ state: "observed_playing" });
+    expect(await database.prepare("SELECT request_id FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ request_id: "request-a" });
+
+    vi.setSystemTime(NOW + 10_000);
+    await pollSongRequestsPlayback(context);
+    expect(await database.prepare("SELECT progress_ms FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ progress_ms: 199_000 });
+
+    vi.setSystemTime(NOW + 15_000);
+    await pollSongRequestsPlayback(context);
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-a'").first()).toEqual({ state: "observed_playing" });
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-b'").first()).toEqual({ state: "observed_playing" });
+    expect(await database.prepare("SELECT request_id FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ request_id: "request-b" });
+  });
+
   it("reconciles an approved winner when its submit alarm could not be scheduled", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);

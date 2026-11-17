@@ -1001,17 +1001,20 @@ export const createNowPlayingSnapshot = async (
   }
   const observedAt = current?.observed_at === null || current?.observed_at === undefined ? null : Date.parse(current.observed_at);
   const durationMs = typeof priorState?.durationMs === "number" ? priorState.durationMs : 0;
-  const expectedProgress = current?.progress_ms === null || current?.progress_ms === undefined || observedAt === null || !Number.isFinite(observedAt)
+  const pausedSameTrack = sameTrack && priorState?.playing === false;
+  const expectedProgress = pausedSameTrack || current?.progress_ms === null || current?.progress_ms === undefined || observedAt === null || !Number.isFinite(observedAt)
     ? current?.progress_ms ?? null
     : interpolatePlaybackProgress(current.progress_ms, durationMs, observedAt, Date.parse(now));
   const progressDrifted = current !== null && sameTrack && progressMs !== undefined && progressMs !== null &&
     expectedProgress !== null && Math.abs(progressMs - expectedProgress) > 3_000;
   const trackChanged = current === null ? track !== null : previousTrackId !== nextTrackId;
-  const trackRestarted = sameTrack && priorState?.playing !== false && progressMs !== undefined && progressMs !== null &&
+  const trackRestarted = sameTrack && (priorState?.playing !== false || playing) && progressMs !== undefined && progressMs !== null &&
     expectedProgress !== null && expectedProgress >= 30_000 && progressMs <= 5_000;
   const playingChanged = sameTrack && priorState !== null && (priorState.playing !== false) !== playing;
   const changed = trackChanged || trackRestarted || progressDrifted || playingChanged;
-  const nextProgress = track === null ? null : progressMs ?? (sameTrack ? current.progress_ms : null) ?? null;
+  const nextProgress = track === null ? null : pausedSameTrack && !playing
+    ? current.progress_ms ?? null
+    : progressMs ?? (sameTrack ? current.progress_ms : null) ?? null;
   const roundFenceSql = fence === undefined ? "" : " AND " + ("activeStreamId" in fence
     ? `EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?)`
     : `EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'offline')
