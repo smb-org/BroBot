@@ -22,7 +22,13 @@ describe("chat voting overlay tally", () => {
     const firstFill = container.querySelector(".overlay-tally__fill") as HTMLElement;
     expect(firstFill.style.backgroundColor).toBe("rgb(91, 140, 255)");
     expect(firstFill.style.opacity).toBe("1");
-    expect((container.querySelector(".overlay-tally__track") as HTMLElement).style.background).toBe("rgba(127, 127, 127, 0.25)");
+    expect((container.querySelector(".overlay-tally__track") as HTMLElement).style.background).toContain("color-mix(");
+    const caption = container.querySelector(".overlay-tally__caption") as HTMLElement;
+    expect(caption.style.gridTemplateColumns).toBe("minmax(0, 1fr) minmax(0, min(4.5em, 45%))");
+    expect((container.querySelector(".overlay-tally__label") as HTMLElement).style.whiteSpace).toBe("nowrap");
+    const count = container.querySelector(".overlay-tally__count") as HTMLElement;
+    expect([count.style.whiteSpace, count.style.fontVariantNumeric]).toEqual(["nowrap", "tabular-nums"]);
+    expect((container.querySelector(".overlay-tally__countdown") as HTMLElement).style.fontFamily).toBe("");
 
     rerender(<Tally config={{ layout: "bars", showPercent: true, useVoteColors: false }} state={state} now={Date.now()} language="en" />);
     expect((container.querySelector(".overlay-tally__fill") as HTMLElement).style.backgroundColor).toBe("");

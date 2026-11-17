@@ -1335,6 +1335,17 @@ export const dispatchEventSubNotification = async (
     }
   }
 
+  // `matches` holds only enabled (or mandatory) modules, so a claim here means
+  // the command belongs to a live module and text_commands must not call it unknown.
+  const commandClaimedByOtherModule = matches.some(({ module, settings }) => {
+    if (module.id === "text_commands") return false;
+    try {
+      return commandRouteMatchesModule(module, event, (module.settingsReadSchema ?? module.settingsSchema).parse(JSON.parse(settings)));
+    } catch {
+      return false;
+    }
+  });
+
   for (const { module, settings } of matches) {
     const diagnostics: ModuleDiagnostic[] = [];
     let result: ModuleResult | null = null;
@@ -1637,7 +1648,8 @@ export const dispatchEventSubNotification = async (
     }
 
     if (result !== null) {
-      diagnostics.push(...result.diagnostics);
+      diagnostics.push(...result.diagnostics.filter((diagnostic) =>
+        !(commandClaimedByOtherModule && module.id === "text_commands" && diagnostic.code === "text_commands.unknown")));
       for (const change of result.variableChanges ?? []) {
         changedVariables.set(change.name, change.value);
         overlayIdsByVariable.set(change.name, change.overlayIds);

@@ -184,9 +184,10 @@ test("standard vote options keep the original narrow bars and strip sizing", asy
     expect(measurements.tally.width).toBe(200);
     expect(measurements.optionsClass).toContain("overlay-tally__options--standard");
     expect(measurements.row).toMatchObject({ minWidth: "auto", boxSizing: "content-box" });
-    expect(measurements.label).toMatchObject({ minWidth: "auto", whiteSpace: "normal" });
-    expect(measurements.count).toMatchObject({ minWidth: "auto", whiteSpace: "normal" });
-    expect(measurements.count.fontSize).toBe(measurements.tally.fontSize);
+    // Labels truncate and counters stay on one line instead of wrapping to many rows.
+    expect(measurements.label).toMatchObject({ minWidth: "0px", whiteSpace: "nowrap" });
+    expect(measurements.count).toMatchObject({ minWidth: "0px", whiteSpace: "nowrap" });
+    expect(Number.parseFloat(String(measurements.count.fontSize))).toBeLessThan(Number.parseFloat(String(measurements.tally.fontSize)));
     if (layout === "bars") {
       expect(measurements.track).not.toBeNull();
       expect(measurements.trackStyle).not.toMatch(/(?:width|min-width|box-sizing):/u);
@@ -194,8 +195,8 @@ test("standard vote options keep the original narrow bars and strip sizing", asy
       expect(measurements.track).toBeNull();
     }
     expect(measurements.rows).toHaveLength(2);
-    expect(measurements.rows[0]).toBeGreaterThan(400);
-    expect(measurements.rows[1]).toBeGreaterThan(400);
+    expect(measurements.rows[0]).toBeLessThan(150);
+    expect(measurements.rows[1]).toBeLessThan(150);
   }
 });
 
@@ -262,11 +263,11 @@ test("colored strip rows keep counters on one line and labels readable at a 360p
   const colored = measurements[1];
   expect(plain).toBeDefined();
   expect(colored).toBeDefined();
-  // Uncoloured rows keep the original behaviour: no marker, no truncation, text may wrap.
+  // Uncoloured rows have no marker but truncate their labels and keep counters on one line too.
   expect(plain?.markerFontSizeRatios).toEqual([]);
   // Computed styles instead of scroll measurements, so wider fonts cannot change the outcome.
-  expect(plain?.labelTextOverflows).toEqual(["clip", "clip"]);
-  expect(plain?.countWhiteSpaces).toEqual(["normal", "normal"]);
+  expect(plain?.labelTextOverflows).toEqual(["ellipsis", "ellipsis"]);
+  expect(plain?.countWhiteSpaces).toEqual(["nowrap", "nowrap"]);
   // Coloured rows use compact markers, truncate labels and keep counters on one line at equal heights.
   expect(colored?.rowsOverflowTally).toBe(false);
   expect(colored?.countsOverflowTally).toBe(false);
