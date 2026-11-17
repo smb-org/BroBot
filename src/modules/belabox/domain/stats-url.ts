@@ -1,6 +1,7 @@
 import type { BelaboxStatsUrlError } from "../contracts";
 
-const BELABOX_STATS_HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.belabox\.net$/u;
+const BELABOX_STATS_HOST_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+belabox\.net$/u;
+const MAX_HOSTNAME_LENGTH = 253;
 const BELABOX_STATS_PATH_PATTERN = /^\/[A-Za-z0-9._~-]{8,256}$/u;
 const RAW_URL_PATTERN = /^[A-Za-z][A-Za-z\d+.-]*:\/\/([^/?#\\]*)(\/[^?#\\]*)?$/u;
 
@@ -36,7 +37,7 @@ export const validateBelaboxStatsUrl = (input: string): BelaboxStatsUrlValidatio
   if (url.protocol === "http:" ? url.port !== "8080" : url.port !== "") {
     return { ok: false, reason: "invalid_port" };
   }
-  if (!BELABOX_STATS_HOST_PATTERN.test(url.hostname)) return { ok: false, reason: "invalid_host" };
+  if (url.hostname.length > MAX_HOSTNAME_LENGTH || !BELABOX_STATS_HOST_PATTERN.test(url.hostname)) return { ok: false, reason: "invalid_host" };
   if (url.username.length > 0 || url.password.length > 0) return { ok: false, reason: "credentials_not_allowed" };
   if (url.search.length > 0) return { ok: false, reason: "query_not_allowed" };
   if (url.hash.length > 0) return { ok: false, reason: "fragment_not_allowed" };
