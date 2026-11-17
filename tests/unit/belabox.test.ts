@@ -209,13 +209,24 @@ describe("BELABOX stats URL", () => {
   });
 
   it.each([
+    "http://eu.srt.belabox.net:8080/abcdefgh",
+    "https://a.b.c.belabox.net/abcdefgh",
+  ])("accepts nested relay host %s", (value) => {
+    expect(validateBelaboxStatsUrl(value).ok).toBe(true);
+  });
+
+  it.each([
     "http://relay.belabox.net/abcdefgh",
     "http://relay.belabox.net:80/abcdefgh",
     "http://relay.belabox.net:443/abcdefgh",
     "http://relay.belabox.net:8443/abcdefgh",
     "https://relay.belabox.net:8080/abcdefgh",
     "https://belabox.net/abcdefgh",
-    "https://nested.relay.belabox.net/abcdefgh",
+    "http://belabox.net:8080/abcdefgh",
+    "http://eu.srt.belabox.net.example.com:8080/abcdefgh",
+    "http://evilbelabox.net:8080/abcdefgh",
+    "http://eu..belabox.net:8080/abcdefgh",
+    "http://-eu.belabox.net:8080/abcdefgh",
     "https://relay.belabox.net.evil.example/abcdefgh",
     "https://relay-bbelabox.net/abcdefgh",
     "https://relay.belabox.net./abcdefgh",
