@@ -673,6 +673,107 @@ describe("durable song vote results", () => {
     expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-b'").first()).toEqual({ state: "submitted" });
   });
 
+  it("keeps request attribution when resuming after a paused seek", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const { database, context } = await createContext("ballot-poll-paused-seek");
+    const playing = { is_playing: true, progress_ms: 18_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const paused = { is_playing: false, progress_ms: 42_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const seeked = { is_playing: false, progress_ms: 2_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const resumed = { is_playing: true, progress_ms: 3_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(playing), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(paused), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(seeked), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(resumed), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    for (const [requestId, operationId] of [["request-a", "paused-seek-a"], ["request-b", "paused-seek-b"]] as const) {
+      await transitionRequest(database as unknown as D1Database, {
+        channelId: CHANNEL_ID,
+        requestId,
+        fromState: null,
+        toState: "approved",
+        now: new Date(NOW).toISOString(),
+        newRequest: {
+          source: "mod_vote",
+          track: {
+            id: spotifyTrackFixture.id,
+            uri: spotifyTrackFixture.uri,
+            title: spotifyTrackFixture.name,
+            artists: ["Mira Vale"],
+            albumName: "Quiet Atlas",
+            durationMs: spotifyTrackFixture.duration_ms,
+            explicit: false,
+            coverUrl: null,
+            spotifyUrl: spotifyTrackFixture.external_urls.spotify,
+          },
+          operationId,
+          streamId: STREAM_ID,
+        },
+      });
+      await transitionRequest(database as unknown as D1Database, {
+        channelId: CHANNEL_ID, requestId, fromState: "approved", toState: "submitting", now: new Date(NOW).toISOString(),
+      });
+      await transitionRequest(database as unknown as D1Database, {
+        channelId: CHANNEL_ID, requestId, fromState: "submitting", toState: "submitted", now: new Date(NOW).toISOString(),
+      });
+    }
+
+    await pollSongRequestsPlayback(context);
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-a'").first()).toEqual({ state: "observed_playing" });
+
+    vi.setSystemTime(NOW + 10_000);
+    await pollSongRequestsPlayback(context);
+    vi.setSystemTime(NOW + 20_000);
+    await pollSongRequestsPlayback(context);
+    expect(await database.prepare("SELECT progress_ms FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ progress_ms: 2_000 });
+
+    vi.setSystemTime(NOW + 30_000);
+    await pollSongRequestsPlayback(context);
+    expect(await database.prepare("SELECT request_id FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ request_id: "request-a" });
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-a'").first()).toEqual({ state: "observed_playing" });
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-b'").first()).toEqual({ state: "submitted" });
+  });
+
+  it("does not advance paused progress by wall-clock time across repeated polls", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const { database, context } = await createContext("ballot-poll-paused-progress-freeze");
+    const playing = { is_playing: true, progress_ms: 42_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const paused = { is_playing: false, progress_ms: 42_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const resumed = { is_playing: true, progress_ms: 43_000, currently_playing_type: "track", item: spotifyTrackFixture };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(playing), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(paused), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(paused), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(paused), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(paused), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(resumed), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    await pollSongRequestsPlayback(context);
+    vi.setSystemTime(NOW + 10_000);
+    await pollSongRequestsPlayback(context);
+    const pausedSnapshot = await database.prepare("SELECT revision FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ revision: number }>();
+    expect(pausedSnapshot).not.toBeNull();
+
+    for (const offset of [40_000, 70_000, 100_000]) {
+      vi.setSystemTime(NOW + offset);
+      await pollSongRequestsPlayback(context);
+      expect(await database.prepare("SELECT progress_ms, revision FROM song_requests_now_playing WHERE channel_id = ?")
+        .bind(CHANNEL_ID).first()).toEqual({ progress_ms: 42_000, revision: pausedSnapshot?.revision });
+    }
+
+    vi.setSystemTime(NOW + 130_000);
+    await pollSongRequestsPlayback(context);
+    expect(await database.prepare("SELECT progress_ms FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first()).toEqual({ progress_ms: 43_000 });
+  });
+
   it("matches the next same-track request after a restart from a paused position", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
