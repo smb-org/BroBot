@@ -65,20 +65,26 @@ export const OverlayMarquee = ({ text, className, title, holdSeconds = 2, speed 
   const travelSeconds = distance / speed;
   const cycleSeconds = 2 * (holdSeconds + travelSeconds);
   const holdPercent = (holdSeconds / cycleSeconds) * 100;
-  const style = scrolling
+  // The box carries the shared variables and the edge-fade animation; the text carries the movement.
+  const boxStyle = scrolling
     ? {
       "--overlay-marquee-distance": `${String(distance)}px`,
       "--overlay-marquee-duration": `${cycleSeconds.toFixed(2)}s`,
-      animationName,
+      animationName: `${animationName}-fade`,
     } as CSSProperties
     : undefined;
+  const textStyle = scrolling ? { animationName } : undefined;
+  const hold = holdPercent.toFixed(3);
+  const holdEnd = (50 + holdPercent).toFixed(3);
+  // Fade widths follow the position: right edge soft at rest, left edge soft once the text has moved,
+  // only the left edge soft at the end position.
+  const keyframes = `@keyframes ${animationName}{0%,${hold}%{transform:translateX(0)}50%,${holdEnd}%{transform:translateX(calc(-1 * var(--overlay-marquee-distance)))}100%{transform:translateX(0)}}`
+    + `@keyframes ${animationName}-fade{0%,${hold}%{--overlay-marquee-fade-left:0px;--overlay-marquee-fade-right:1em}50%,${holdEnd}%{--overlay-marquee-fade-left:1em;--overlay-marquee-fade-right:0px}100%{--overlay-marquee-fade-left:0px;--overlay-marquee-fade-right:1em}}`;
 
   return <>
-    {scrolling
-      ? <style>{`@keyframes ${animationName}{0%,${holdPercent.toFixed(3)}%{transform:translateX(0)}50%,${(50 + holdPercent).toFixed(3)}%{transform:translateX(calc(-1 * var(--overlay-marquee-distance)))}100%{transform:translateX(0)}}`}</style>
-      : null}
-    <span ref={boxRef} className={["overlay-marquee", className].filter(Boolean).join(" ")} title={title ?? text}>
-      <span ref={textRef} className="overlay-marquee__text" data-scrolling={scrolling ? "true" : "false"} style={style}>{text}</span>
+    {scrolling ? <style>{keyframes}</style> : null}
+    <span ref={boxRef} className={["overlay-marquee", scrolling ? "overlay-marquee--fading" : undefined, className].filter(Boolean).join(" ")} title={title ?? text} style={boxStyle}>
+      <span ref={textRef} className="overlay-marquee__text" data-scrolling={scrolling ? "true" : "false"} style={textStyle}>{text}</span>
     </span>
   </>;
 };

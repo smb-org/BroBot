@@ -56,12 +56,29 @@ describe("OverlayMarquee", () => {
     const { container } = render(<OverlayMarquee text="A very long label that does not fit" />);
     const text = container.querySelector<HTMLElement>(".overlay-marquee__text");
     expect(text?.dataset.scrolling).toBe("true");
-    expect(text?.style.getPropertyValue("--overlay-marquee-distance")).toBe("240px");
+    const box = container.querySelector<HTMLElement>(".overlay-marquee");
+    expect(box?.style.getPropertyValue("--overlay-marquee-distance")).toBe("240px");
     // 240 px at 40 px/s is 6 s each way, plus 2 s of rest at both ends: 16 s per cycle.
-    expect(text?.style.getPropertyValue("--overlay-marquee-duration")).toBe("16.00s");
+    expect(box?.style.getPropertyValue("--overlay-marquee-duration")).toBe("16.00s");
     const keyframes = container.querySelector("style")?.textContent ?? "";
     expect(keyframes).toContain("12.500%");
     expect(keyframes).toContain("62.500%");
+  });
+
+  it("fades the edges only while the text overflows and moves", () => {
+    widths.text = 440;
+    const { container, rerender } = render(<OverlayMarquee text="A very long label that does not fit" />);
+    const box = container.querySelector<HTMLElement>(".overlay-marquee");
+    expect(box).toHaveClass("overlay-marquee--fading");
+    // Right edge soft at rest, left edge soft at the end position, both while it moves.
+    const keyframes = container.querySelector("style")?.textContent ?? "";
+    expect(keyframes).toMatch(/0%,12\.500%\{--overlay-marquee-fade-left:0px;--overlay-marquee-fade-right:1em\}/u);
+    expect(keyframes).toMatch(/50%,62\.500%\{--overlay-marquee-fade-left:1em;--overlay-marquee-fade-right:0px\}/u);
+    expect(box?.style.animationName).toMatch(/-fade$/u);
+
+    widths.text = 100;
+    rerender(<OverlayMarquee text="Short" />);
+    expect(container.querySelector(".overlay-marquee")).not.toHaveClass("overlay-marquee--fading");
   });
 
   it("re-measures when the box size changes", () => {
@@ -80,5 +97,6 @@ describe("OverlayMarquee", () => {
     const text = container.querySelector<HTMLElement>(".overlay-marquee__text");
     expect(text?.dataset.scrolling).toBe("false");
     expect(container.querySelector("style")).toBeNull();
+    expect(container.querySelector(".overlay-marquee")).not.toHaveClass("overlay-marquee--fading");
   });
 });
