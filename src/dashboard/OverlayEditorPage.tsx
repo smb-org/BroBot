@@ -665,6 +665,7 @@ function OverlayEditorWorkspace({
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [previewFrameRoot, setPreviewFrameRoot] = useState<HTMLDivElement | null>(null);
   const [selectedElementBounds, setSelectedElementBounds] = useState<OverlayEditorElementBounds | null>(null);
+  const [renderedClickableBounds, setRenderedClickableBounds] = useState<Readonly<Record<string, OverlayEditorElementBounds>>>({});
   const [activeScaleHandle, setActiveScaleHandle] = useState<OverlayEditorScaleCorner | null>(null);
   const [activeScalePercent, setActiveScalePercent] = useState<number | null>(null);
   const [activeWidthHandle, setActiveWidthHandle] = useState<OverlayEditorWidthEdge | null>(null);
@@ -995,27 +996,56 @@ function OverlayEditorWorkspace({
   };
 
   useLayoutEffect(() => {
-    // Stale bounds are never read without a selection (the handles render only for a selected element).
-    if (selectedElement === null) return;
     const styleBlock = parseOverlayStyleBlock(draft.css);
     const boundsStyle = styleBlock.kind === "valid" ? styleBlock.styles : styleDocument;
-    const anchor = getOverlayElementStyle(boundsStyle, selectedElement.id)?.textAlign ?? boundsStyle.overlay.textAlign ?? "left";
     const updateBounds = (): void => {
-      setSelectedElementBounds(overlayEditorElementCanvasBounds(selectedElement, previewFrameRootRef.current, anchor));
+      const nextSelectedBounds = selectedElement === null
+        ? null
+        : overlayEditorElementCanvasBounds(
+          selectedElement,
+          previewFrameRootRef.current,
+          getOverlayElementStyle(boundsStyle, selectedElement.id)?.textAlign ?? boundsStyle.overlay.textAlign ?? "left",
+        );
+      setSelectedElementBounds((current) => {
+        if (current === null || nextSelectedBounds === null) return current === nextSelectedBounds ? current : nextSelectedBounds;
+        return current.left === nextSelectedBounds.left && current.top === nextSelectedBounds.top &&
+          current.width === nextSelectedBounds.width && current.height === nextSelectedBounds.height
+          ? current
+          : nextSelectedBounds;
+      });
+      const nextClickableBounds: Record<string, OverlayEditorElementBounds> = {};
+      for (const element of draft.elements) {
+        if (!element.inComposition) continue;
+        const anchor = getOverlayElementStyle(boundsStyle, element.id)?.textAlign ?? boundsStyle.overlay.textAlign ?? "left";
+        const bounds = overlayEditorElementClickableBounds(element, previewFrameRootRef.current, anchor);
+        if (bounds !== null) nextClickableBounds[element.id] = bounds;
+      }
+      setRenderedClickableBounds((current) => {
+        const currentIds = Object.keys(current);
+        const nextIds = Object.keys(nextClickableBounds);
+        const unchanged = currentIds.length === nextIds.length && nextIds.every((id) => {
+          const previous = current[id];
+          const next = nextClickableBounds[id];
+          return previous !== undefined && next !== undefined &&
+            previous.left === next.left && previous.top === next.top &&
+            previous.width === next.width && previous.height === next.height;
+        });
+        return unchanged ? current : nextClickableBounds;
+      });
     };
     updateBounds();
     const root = previewFrameRootRef.current;
-    const rendered = root === null ? undefined : findRenderedElement(root, selectedElement.id);
     const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateBounds);
-    if (resizeObserver !== null && rendered !== undefined) resizeObserver.observe(rendered);
+    if (resizeObserver !== null && root !== null) {
+      for (const rendered of root.querySelectorAll<HTMLElement>("[data-element]")) resizeObserver.observe(rendered);
+    }
     const mutationObserver = typeof MutationObserver === "undefined" ? null : new MutationObserver(updateBounds);
-    const observedElement = rendered ?? root;
-    if (mutationObserver !== null && observedElement !== null) mutationObserver.observe(observedElement, { childList: true, subtree: true });
+    if (mutationObserver !== null && root !== null) mutationObserver.observe(root, { childList: true, subtree: true, characterData: true });
     return () => {
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
     };
-  }, [draft, previewFrameRoot, selectedElement, selectedElementId, styleDocument]);
+  }, [draft, liveVariables, previewFrameRoot, selectedElement, selectedElementId, styleDocument]);
 
   const clampDraggedPosition = (element: PanelOverlayElement, x: number, y: number): { x: number; y: number } =>
     clampOverlayEditorPosition({ x, y }, canvasSize, renderedElementSize(element.id), elementHorizontalAnchor(element));
@@ -1787,17 +1817,12 @@ function OverlayEditorWorkspace({
               });
             }
           }
-          const previewRoot = previewFrameRootRef.current;
           const selectedId = selectedElement?.id;
-          const otherClickableBounds = selectedId === undefined || previewRoot === null ? [] : draft.elements
+          const otherClickableBounds = selectedId === undefined ? [] : draft.elements
             .filter((element) => element.id !== selectedId && element.inComposition)
             .flatMap((element) => {
-              const bounds = overlayEditorElementClickableBounds(
-                element,
-                previewRoot,
-                elementHorizontalAnchor(element),
-              );
-              if (bounds === null) return [];
+              const bounds = renderedClickableBounds[element.id];
+              if (bounds === undefined) return [];
               const left = Math.max(0, bounds.left * canvasScale - frameBorderLeft);
               const top = Math.max(0, bounds.top * canvasScale - frameBorderTop);
               const right = Math.min(frameWidth, (bounds.left + bounds.width) * canvasScale - frameBorderLeft);
