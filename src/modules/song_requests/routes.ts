@@ -33,7 +33,7 @@ import {
   SONG_REQUESTS_SUBMIT_ALARM_PREFIX,
   SONG_REQUESTS_LIFECYCLE_HANDLER,
   enqueueSongRequestAlert,
-  skipSongTrack,
+  skipSongTrackThroughChannelObject,
 } from "./service";
 import { songRequestsSettingsSchema } from "./contracts";
 
@@ -307,10 +307,8 @@ songRequestsRoutes.post("/vote", async (context) => {
 
 songRequestsRoutes.post("/skip", async (context) => {
   if (!isModerator(context)) return moderatorDenied(context);
-  const outcome = await skipSongTrack(
-    { DB: context.env.DB, channelId: channel(context), environment: context.env },
-    async () => await token(context),
-  );
+  const outcome = await skipSongTrackThroughChannelObject((handlerKey, alarmKey, invocation) =>
+    context.get("runModuleAlarm")(channel(context), "song_requests", handlerKey, alarmKey, invocation));
   if (outcome === "skipped") {
     await scheduleAlarmIfEarlier(context, "song_requests", SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + 1_000, null);
   }

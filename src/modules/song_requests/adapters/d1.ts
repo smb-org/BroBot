@@ -1007,7 +1007,7 @@ export const createNowPlayingSnapshot = async (
   const progressDrifted = current !== null && sameTrack && progressMs !== undefined && progressMs !== null &&
     expectedProgress !== null && Math.abs(progressMs - expectedProgress) > 3_000;
   const trackChanged = current === null ? track !== null : previousTrackId !== nextTrackId;
-  const trackRestarted = sameTrack && progressMs !== undefined && progressMs !== null &&
+  const trackRestarted = sameTrack && priorState?.playing !== false && progressMs !== undefined && progressMs !== null &&
     expectedProgress !== null && expectedProgress >= 30_000 && progressMs <= 5_000;
   const playingChanged = sameTrack && priorState !== null && (priorState.playing !== false) !== playing;
   const changed = trackChanged || trackRestarted || progressDrifted || playingChanged;

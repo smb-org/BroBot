@@ -892,10 +892,20 @@ moduleRouter.get("/api/channels/:channelId/modules/:moduleId/settings", async (c
       .bind(context.req.param("channelId")).first<{ language: ModuleLanguage }>())?.language ?? "de";
     defaults = module.defaultSettingsForLanguage(language);
   }
-  const mergedSettings = typeof rawSettings === "object" && rawSettings !== null && !Array.isArray(rawSettings)
-    ? { ...(typeof defaults === "object" && defaults !== null ? defaults : {}), ...rawSettings }
-    : rawSettings;
-  const settings = (module.settingsReadSchema ?? module.settingsSchema).safeParse(mergedSettings);
+  let settingsInput = rawSettings;
+  if (module.id === "song_requests" && typeof rawSettings === "object" && rawSettings !== null && !Array.isArray(rawSettings)) {
+    const storedSettings = rawSettings as Record<string, unknown>;
+    const localizedDefaults = typeof defaults === "object" && defaults !== null
+      ? defaults as Record<string, unknown>
+      : {};
+    settingsInput = {
+      ...storedSettings,
+      ...(storedSettings.queuedText === undefined ? { queuedText: localizedDefaults.queuedText } : {}),
+      ...(storedSettings.waitingText === undefined ? { waitingText: localizedDefaults.waitingText } : {}),
+      ...(storedSettings.requestAlertText === undefined ? { requestAlertText: localizedDefaults.requestAlertText } : {}),
+    };
+  }
+  const settings = (module.settingsReadSchema ?? module.settingsSchema).safeParse(settingsInput);
   if (!settings.success) return context.json({ error: "module_settings_invalid" }, 500);
   const channelId = context.req.param("channelId");
   const variables = (await listChannelVariables(context.env.DB, channelId)).map(({ name, value, description }) => ({ name, value, description }));

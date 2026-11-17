@@ -947,6 +947,8 @@ export interface ModuleAlarmContext {
   points: ModulePointsAccess;
   /** Durable, revisioned quiz overlay state used by reconnect bootstrap and broadcast retries. */
   quizOverlaySnapshot: ModuleQuizOverlaySnapshotAccess;
+  /** Runs one registered module alarm synchronously through the channel Durable Object. */
+  runModuleAlarm?: (handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>;
   /** Adds the currently pending account welcome to a threaded game reply. */
   decoratePointWelcome?: (
     action: Extract<ModuleAction, { kind: "chat" }>,

@@ -11,6 +11,8 @@ import {
   handleSongRequestDurableAction,
   processSongRequestsEvent,
   skipSongTrack,
+  SONG_REQUESTS_SKIP_ALARM,
+  SONG_REQUESTS_SKIP_HANDLER,
 } from "../../src/modules/song_requests/service";
 import { songRequestsModule } from "../../src/modules/song_requests/index";
 import { songRequestsRoutes } from "../../src/modules/song_requests/routes";
@@ -85,6 +87,7 @@ const eventContext = (
     startChatVote?: ModuleExecutionContext["startChatVote"];
     castChatVote?: ModuleExecutionContext["castChatVote"];
     scheduleAlarm?: ModuleExecutionContext["scheduleAlarm"];
+    runModuleAlarm?: ModuleExecutionContext["runModuleAlarm"];
   } = {},
 ): ModuleExecutionContext => ({
   DB: database as unknown as D1Database,
@@ -95,6 +98,7 @@ const eventContext = (
   ballots: { hasOpenBallot: () => Promise.resolve(options.openBallot ?? false) },
   startChatVote: options.startChatVote,
   castChatVote: options.castChatVote,
+  runModuleAlarm: options.runModuleAlarm,
   scheduleAlarm: options.scheduleAlarm ?? (() => Promise.resolve(undefined)),
 } as unknown as ModuleExecutionContext);
 
@@ -117,21 +121,33 @@ const addSkipMapping = async (database: TestD1Database, ballotId: string, startT
   expect(inserted).toBe(true);
 };
 
-const alarmContext = (database: TestD1Database): ModuleAlarmContext => ({
-  DB: database as unknown as D1Database,
-  channelId: CHANNEL_ID,
-  environment,
-  secrets: {
-    readWithVersion: () => Promise.resolve({
-      value: JSON.stringify({ accessToken: "spotify-access-fictional", refreshToken: "spotify-refresh-fictional", expiresAt: NOW + 3_600_000 }),
-      version: "credential-version",
-    }),
-  },
-  channelLanguage: () => Promise.resolve("en"),
-  sendChat: vi.fn(() => Promise.resolve({ sent: true, reason: null, retryable: false, delivery: "delivered" as const })),
-  schedule: vi.fn(() => Promise.resolve(undefined)),
-  scheduleIfEarlier: vi.fn(() => Promise.resolve(undefined)),
-} as unknown as ModuleAlarmContext);
+const alarmContext = (database: TestD1Database): ModuleAlarmContext => {
+  const runModuleAlarm = vi.fn(async (handlerKey: string, alarmKey: string, invocation?: unknown) => {
+    if (handlerKey !== SONG_REQUESTS_SKIP_HANDLER || alarmKey !== SONG_REQUESTS_SKIP_ALARM) return undefined;
+    const request = typeof invocation === "object" && invocation !== null ? invocation as Record<string, unknown> : {};
+    return await skipSongTrack(
+      { DB: database as unknown as D1Database, channelId: CHANNEL_ID, environment },
+      () => Promise.resolve("spotify-access-fictional"),
+      typeof request.expectedTrackId === "string" ? request.expectedTrackId : undefined,
+    );
+  });
+  return {
+    DB: database as unknown as D1Database,
+    channelId: CHANNEL_ID,
+    environment,
+    secrets: {
+      readWithVersion: () => Promise.resolve({
+        value: JSON.stringify({ accessToken: "spotify-access-fictional", refreshToken: "spotify-refresh-fictional", expiresAt: NOW + 3_600_000 }),
+        version: "credential-version",
+      }),
+    },
+    channelLanguage: () => Promise.resolve("en"),
+    sendChat: vi.fn(() => Promise.resolve({ sent: true, reason: null, retryable: false, delivery: "delivered" as const })),
+    schedule: vi.fn(() => Promise.resolve(undefined)),
+    scheduleIfEarlier: vi.fn(() => Promise.resolve(undefined)),
+    runModuleAlarm,
+  } as unknown as ModuleAlarmContext;
+};
 
 const skipResult = (ballotId: string, counts: number[]) => ({
   kind: "chat_vote.result" as const,
@@ -226,13 +242,20 @@ describe("skip vote chat command", () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetcher);
     const scheduleAlarm = vi.fn(() => Promise.resolve(undefined));
-    const result = await processSongRequestsEvent(chatEvent("!skip", { chatStatus: ["moderator"] }), eventContext(database, { scheduleAlarm }));
+    const runModuleAlarm = vi.fn(async (handlerKey: string, alarmKey: string, invocation?: unknown) => {
+      expect(handlerKey).toBe(SONG_REQUESTS_SKIP_HANDLER);
+      expect(alarmKey).toBe(SONG_REQUESTS_SKIP_ALARM);
+      expect(invocation).toEqual({});
+      return await skipSongTrack({ DB: database as unknown as D1Database, channelId: CHANNEL_ID, environment }, () => Promise.resolve("token"));
+    });
+    const result = await processSongRequestsEvent(chatEvent("!skip", { chatStatus: ["moderator"] }), eventContext(database, { scheduleAlarm, runModuleAlarm }));
 
     expect(replyText(result)).toBe("The song was skipped.");
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(new URL(fetcher.mock.calls[0]?.[0] as string).pathname).toBe("/v1/me/player/next");
     expect((fetcher.mock.calls[0]?.[1] as RequestInit).method).toBe("POST");
     expect(scheduleAlarm).toHaveBeenCalledWith("poll", "poll", NOW + 1_000, undefined, null);
+    expect(runModuleAlarm).toHaveBeenCalledOnce();
   });
 });
 
@@ -287,16 +310,62 @@ describe("skip vote close result", () => {
     await addNowPlaying(database);
     await addSkipMapping(database, "skip-winner");
     vi.setSystemTime(NOW);
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ is_playing: true, item: TRACK }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetcher);
     const context = alarmContext(database);
 
     await handleSongRequestDurableAction(context, skipResult("skip-winner", [3, 1]));
 
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(new URL(fetcher.mock.calls[0]?.[0] as string).pathname).toBe("/v1/me/player/currently-playing");
+    expect(new URL(fetcher.mock.calls[1]?.[0] as string).pathname).toBe("/v1/me/player/next");
+    expect((fetcher.mock.calls[1]?.[1] as RequestInit).method).toBe("POST");
     expect(await database.prepare("SELECT state, skip_result FROM song_requests_votes WHERE ballot_id = 'skip-winner'").first())
       .toEqual({ state: "queued", skip_result: "skipped" });
     expect(context.scheduleIfEarlier).toHaveBeenCalledWith("poll", NOW + 1_000, undefined, null);
+  });
+
+  it("does not skip after a direct skip has advanced the live track from A to B", async () => {
+    const database = await createDatabase();
+    await addNowPlaying(database);
+    await addSkipMapping(database, "skip-after-direct-advance");
+    vi.setSystemTime(NOW);
+    let liveTrack: typeof TRACK | typeof changedTrack = TRACK;
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const path = new URL(input as string).pathname;
+      if (path.endsWith("/me/player/next")) {
+        liveTrack = changedTrack;
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (path.endsWith("/me/player/currently-playing")) {
+        return Promise.resolve(new Response(JSON.stringify({ is_playing: true, item: liveTrack }), { status: 200 }));
+      }
+      return Promise.reject(new Error(`Unexpected Spotify request: ${path}`));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const directRunModuleAlarm = vi.fn(async (handlerKey: string, alarmKey: string, invocation?: unknown) => {
+      expect(handlerKey).toBe(SONG_REQUESTS_SKIP_HANDLER);
+      expect(alarmKey).toBe(SONG_REQUESTS_SKIP_ALARM);
+      expect(invocation).toEqual({});
+      return await skipSongTrack({ DB: database as unknown as D1Database, channelId: CHANNEL_ID, environment }, () => Promise.resolve("token"));
+    });
+    await processSongRequestsEvent(
+      chatEvent("!skip", { chatStatus: ["moderator"] }),
+      eventContext(database, { runModuleAlarm: directRunModuleAlarm }),
+    );
+
+    const context = alarmContext(database);
+    await handleSongRequestDurableAction(context, skipResult("skip-after-direct-advance", [3, 1]));
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(new URL(fetcher.mock.calls[0]?.[0] as string).pathname).toBe("/v1/me/player/next");
+    expect(new URL(fetcher.mock.calls[1]?.[0] as string).pathname).toBe("/v1/me/player/currently-playing");
+    expect(fetcher.mock.calls.filter(([, init]) => (init as RequestInit).method === "POST")).toHaveLength(1);
+    expect(await database.prepare("SELECT skip_result FROM song_requests_votes WHERE ballot_id = 'skip-after-direct-advance'").first())
+      .toEqual({ skip_result: "track_changed" });
+    expect(context.runModuleAlarm).toHaveBeenCalledWith(SONG_REQUESTS_SKIP_HANDLER, SONG_REQUESTS_SKIP_ALARM, { expectedTrackId: TRACK.id });
   });
 
   it("does not retry Spotify 429 responses and persists backoff", async () => {
@@ -335,7 +404,7 @@ describe("skip vote close result", () => {
     await database.prepare("UPDATE song_requests_connections SET state = 'connected', poll_backoff_until = ? WHERE channel_id = ?")
       .bind(NOW + 5_000, CHANNEL_ID).run();
     fetcher.mockClear();
-    await expect(skipSongTrack({ DB: database as unknown as D1Database, channelId: CHANNEL_ID, environment }, () => Promise.resolve("token")))
+    await expect(skipSongTrack({ DB: database as unknown as D1Database, channelId: CHANNEL_ID, environment }, () => Promise.resolve("token"), TRACK.id))
       .resolves.toBe("spotify_unavailable");
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -355,6 +424,12 @@ describe("moderator skip route and cockpit action", () => {
     app.use("*", async (context, next) => {
       context.set("channelRole", "operator");
       context.set("scheduleModuleAlarmIfEarlier", () => Promise.resolve(undefined));
+      context.set("runModuleAlarm", async (_channelId, _moduleId, handlerKey, alarmKey, invocation) => {
+        expect(handlerKey).toBe(SONG_REQUESTS_SKIP_HANDLER);
+        expect(alarmKey).toBe(SONG_REQUESTS_SKIP_ALARM);
+        expect(invocation).toEqual({});
+        return await skipSongTrack({ DB: database as unknown as D1Database, channelId: CHANNEL_ID, environment }, () => Promise.resolve("token"));
+      });
       await next();
     });
     app.route("/channels/:channelId", songRequestsRoutes);

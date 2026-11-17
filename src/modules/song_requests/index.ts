@@ -9,7 +9,9 @@ import {
   handleSongRequestsLifecycleAlarm,
   handleSubmitAlarm,
   readSpotifyAccessTokenAlarm,
+  handleSongRequestSkipAlarm,
   SONG_REQUESTS_ACCESS_TOKEN_HANDLER,
+  SONG_REQUESTS_SKIP_HANDLER,
   SONG_REQUESTS_ALARM,
   SONG_REQUESTS_LIFECYCLE_HANDLER,
   SONG_REQUESTS_SUBMIT_HANDLER,
@@ -167,6 +169,7 @@ export const songRequestsModule: BotModule<typeof songRequestsSettingsSchema> = 
     { key: SONG_REQUESTS_SUBMIT_HANDLER, retryDelaysMs: [5_000, 15_000, 60_000], handle: handleSubmitAlarm },
     { key: SONG_REQUESTS_LIFECYCLE_HANDLER, handle: handleSongRequestsLifecycleAlarm },
     { key: SONG_REQUESTS_ACCESS_TOKEN_HANDLER, handle: async (context) => await readSpotifyAccessTokenAlarm(context) },
+    { key: SONG_REQUESTS_SKIP_HANDLER, handle: handleSongRequestSkipAlarm },
   ],
   handleDurableAction: handleSongRequestDurableAction,
   onActivationChange: async (activation, _channelId, enabled) => {

@@ -47,6 +47,8 @@ export const SONG_REQUESTS_HANDLER = "poll";
 export const SONG_REQUESTS_SUBMIT_HANDLER = "submit";
 export const SONG_REQUESTS_LIFECYCLE_HANDLER = "lifecycle";
 export const SONG_REQUESTS_ACCESS_TOKEN_HANDLER = "access_token";
+export const SONG_REQUESTS_SKIP_HANDLER = "skip";
+export const SONG_REQUESTS_SKIP_ALARM = "execute";
 export const SONG_REQUESTS_CREDENTIAL_SECRET = "spotify_credentials";
 export const SONG_REQUESTS_SUBMIT_ALARM_PREFIX = "submit:";
 const POLL_INTERVAL_MS = 12_000;
@@ -308,6 +310,25 @@ export const skipSongTrack = async (
   let accessToken: string | null;
   try { accessToken = await readAccessToken(); } catch { return "not_connected"; }
   if (accessToken === null) return "not_connected";
+  if (expectedTrackId !== undefined) {
+    try {
+      const response = await spotifyApiRequest(context.environment, accessToken, "me/player/currently-playing");
+      if (response.status === 204) return "track_changed";
+      const payload: unknown = await response.json();
+      const row = typeof payload === "object" && payload !== null && !Array.isArray(payload)
+        ? payload as Record<string, unknown>
+        : null;
+      const liveItem = row?.item;
+      if (!isSpotifyTrack(liveItem) || liveItem.id !== expectedTrackId) return "track_changed";
+    } catch (error) {
+      if (error instanceof SpotifyRequestError && (error.status === 429 || error.status >= 500)) {
+        await recordSkipBackoff(context.DB, context.channelId, error, now);
+      } else if (error instanceof SpotifyRequestError) {
+        await updateConnectionForError({ DB: context.DB, channelId: context.channelId }, error);
+      }
+      return "spotify_unavailable";
+    }
+  }
   try {
     await spotifySkipCurrentTrack(context.environment, accessToken);
     return "skipped";
@@ -324,6 +345,45 @@ export const skipSongTrack = async (
     await updateConnectionForError({ DB: context.DB, channelId: context.channelId }, error);
     return "spotify_unavailable";
   }
+};
+
+const isSongSkipOutcome = (value: unknown): value is SongSkipOutcome =>
+  value === "skipped" || value === "nothing_playing" || value === "track_changed" || value === "not_connected" ||
+  value === "no_active_device" || value === "spotify_unavailable";
+
+export const skipSongTrackThroughChannelObject = async (
+  runModuleAlarm: ((handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>) | undefined,
+  expectedTrackId?: string,
+): Promise<SongSkipOutcome> => {
+  if (runModuleAlarm === undefined) return "spotify_unavailable";
+  try {
+    const result = await runModuleAlarm(
+      SONG_REQUESTS_SKIP_HANDLER,
+      SONG_REQUESTS_SKIP_ALARM,
+      expectedTrackId === undefined ? {} : { expectedTrackId },
+    );
+    return isSongSkipOutcome(result) ? result : "spotify_unavailable";
+  } catch {
+    return "spotify_unavailable";
+  }
+};
+
+export const handleSongRequestSkipAlarm = async (
+  context: ModuleAlarmContext,
+  _alarmKey: string,
+  _deadline: number,
+  _ownerRevision?: number,
+  invocation?: unknown,
+): Promise<SongSkipOutcome> => {
+  const request = typeof invocation === "object" && invocation !== null && !Array.isArray(invocation)
+    ? invocation as Record<string, unknown>
+    : {};
+  const expectedTrackId = typeof request.expectedTrackId === "string" ? request.expectedTrackId : undefined;
+  return await skipSongTrack(
+    { DB: context.DB, channelId: context.channelId, environment: context.environment },
+    async () => await spotifyAccessToken(context),
+    expectedTrackId,
+  );
 };
 
 const skipOutcomeChatReply = (language: "de" | "en", result: SongSkipOutcome): string => {
@@ -1082,9 +1142,9 @@ const handleSkipVoteResult = async (
     result = "no_majority";
     state = "tie";
   } else {
-    result = vote.startTrackId === null ? "track_changed" : await skipSongTrack(
-      { DB: context.DB, channelId: context.channelId, environment: context.environment },
-      async () => await spotifyAccessToken(context),
+    result = vote.startTrackId === null ? "track_changed" : await skipSongTrackThroughChannelObject(
+      context.runModuleAlarm === undefined ? undefined : (handlerKey, alarmKey, invocation) =>
+        context.runModuleAlarm?.(handlerKey, alarmKey, invocation) ?? Promise.resolve(undefined),
       vote.startTrackId,
     );
     state = result === "skipped" ? "queued" : "failed";
@@ -1382,7 +1442,7 @@ export const pollSongRequestsPlayback = async (
         const row = payload as Record<string, unknown>;
         const item = row.item;
         isPlaying = row.is_playing !== false;
-        if (isPlaying && isSpotifyTrack(item)) track = item;
+        if (isSpotifyTrack(item)) track = item;
         progressMs = Number.isSafeInteger(row.progress_ms) && (row.progress_ms as number) >= 0 ? row.progress_ms as number : undefined;
       }
     } else {
@@ -1620,12 +1680,9 @@ const skipCommand = async (
   const reply = (value: string): ModuleResult => ({ actions: [chatReply(event, value)], diagnostics: [] });
   const isModerator = event.chatStatus?.some((status) => status === "moderator" || status === "broadcaster") === true;
   if (isModerator) {
-    const environment = context.environment;
-    const result = await skipSongTrack(
-      { DB: context.DB, channelId: event.channelId, environment },
-      async () => environment?.CHANNEL === undefined ? null : await environment.CHANNEL
-        .get(environment.CHANNEL.idFromName(event.channelId)).getSpotifyAccessToken(),
-    );
+    const result = await skipSongTrackThroughChannelObject(context.runModuleAlarm === undefined
+      ? undefined
+      : (handlerKey, alarmKey, invocation) => context.runModuleAlarm?.(handlerKey, alarmKey, invocation) ?? Promise.resolve(undefined));
     if (result === "skipped") {
       await scheduleEventAlarmIfEarlier(context, SONG_REQUESTS_HANDLER, SONG_REQUESTS_ALARM, Date.now() + 1_000, undefined, null);
     }

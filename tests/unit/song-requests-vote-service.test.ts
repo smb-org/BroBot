@@ -608,66 +608,69 @@ describe("durable song vote results", () => {
     expect(schedule.mock.calls.filter(([key]) => key === SONG_REQUESTS_ALARM)).toHaveLength(0);
   });
 
-  it("hides a paused track without observing its request, then shows and observes it after playback resumes", async () => {
+  it("keeps request attribution across pause and resume without observing a duplicate same-track request", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
     const { database, context } = await createContext("ballot-poll-paused-track");
     const playing = { is_playing: true, progress_ms: 18_000, currently_playing_type: "track", item: spotifyTrackFixture };
     const paused = { is_playing: false, progress_ms: 42_000, currently_playing_type: "track", item: spotifyTrackFixture };
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify(playing), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(paused), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(paused), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(playing), { status: 200 }));
     vi.stubGlobal("fetch", fetcher);
 
-    await pollSongRequestsPlayback(context);
-    expect((await database.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
-      .bind(CHANNEL_ID).first<{ track_json: string | null }>())?.track_json).toContain("Glass Harbor");
-    await pollSongRequestsPlayback(context);
-    expect(await database.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
-      .bind(CHANNEL_ID).first()).toEqual({ track_json: null });
-
-    const requestId = "request-submitted-while-paused";
-    await transitionRequest(database as unknown as D1Database, {
-      channelId: CHANNEL_ID,
-      requestId,
-      fromState: null,
-      toState: "approved",
-      now: new Date(NOW).toISOString(),
-      newRequest: {
-        source: "mod_vote",
-        track: {
-          id: spotifyTrackFixture.id,
-          uri: spotifyTrackFixture.uri,
-          title: spotifyTrackFixture.name,
-          artists: ["Mira Vale"],
-          albumName: "Quiet Atlas",
-          durationMs: spotifyTrackFixture.duration_ms,
-          explicit: false,
-          coverUrl: null,
-          spotifyUrl: spotifyTrackFixture.external_urls.spotify,
+    const submit = async (requestId: string, operationId: string): Promise<void> => {
+      await transitionRequest(database as unknown as D1Database, {
+        channelId: CHANNEL_ID,
+        requestId,
+        fromState: null,
+        toState: "approved",
+        now: new Date(NOW).toISOString(),
+        newRequest: {
+          source: "mod_vote",
+          track: {
+            id: spotifyTrackFixture.id,
+            uri: spotifyTrackFixture.uri,
+            title: spotifyTrackFixture.name,
+            artists: ["Mira Vale"],
+            albumName: "Quiet Atlas",
+            durationMs: spotifyTrackFixture.duration_ms,
+            explicit: false,
+            coverUrl: null,
+            spotifyUrl: spotifyTrackFixture.external_urls.spotify,
+          },
+          operationId,
+          streamId: STREAM_ID,
         },
-        operationId: "paused-track-request",
-        streamId: STREAM_ID,
-      },
-    });
-    await transitionRequest(database as unknown as D1Database, {
-      channelId: CHANNEL_ID, requestId, fromState: "approved", toState: "submitting", now: new Date(NOW).toISOString(),
-    });
-    await transitionRequest(database as unknown as D1Database, {
-      channelId: CHANNEL_ID, requestId, fromState: "submitting", toState: "submitted", now: new Date(NOW).toISOString(),
-    });
+      });
+      await transitionRequest(database as unknown as D1Database, {
+        channelId: CHANNEL_ID, requestId, fromState: "approved", toState: "submitting", now: new Date(NOW).toISOString(),
+      });
+      await transitionRequest(database as unknown as D1Database, {
+        channelId: CHANNEL_ID, requestId, fromState: "submitting", toState: "submitted", now: new Date(NOW).toISOString(),
+      });
+    };
+    await submit("request-a", "paused-track-request-a");
+    await submit("request-b", "paused-track-request-b");
 
     await pollSongRequestsPlayback(context);
-    expect(await database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(requestId).first())
-      .toEqual({ state: "submitted" });
-    expect(await database.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
-      .bind(CHANNEL_ID).first()).toEqual({ track_json: null });
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-a'").first()).toEqual({ state: "observed_playing" });
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-b'").first()).toEqual({ state: "submitted" });
+    await pollSongRequestsPlayback(context);
+    const pausedSnapshot = await database.prepare("SELECT track_json, request_id FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ track_json: string | null; request_id: string | null }>();
+    expect(pausedSnapshot?.request_id).toBe("request-a");
+    expect(pausedSnapshot?.track_json).not.toBeNull();
+    expect(JSON.parse(pausedSnapshot?.track_json ?? "null")).toMatchObject({ id: spotifyTrackFixture.id, playing: false });
 
     await pollSongRequestsPlayback(context);
-    expect(await database.prepare("SELECT state FROM song_requests WHERE id = ?").bind(requestId).first())
-      .toEqual({ state: "observed_playing" });
-    expect((await database.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
-      .bind(CHANNEL_ID).first<{ track_json: string | null }>())?.track_json).toContain("Glass Harbor");
+    const resumedSnapshot = await database.prepare("SELECT track_json, request_id FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(CHANNEL_ID).first<{ track_json: string | null; request_id: string | null }>();
+    expect(resumedSnapshot?.request_id).toBe("request-a");
+    expect(JSON.parse(resumedSnapshot?.track_json ?? "null")).toMatchObject({ id: spotifyTrackFixture.id, playing: true });
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-a'").first()).toEqual({ state: "observed_playing" });
+    expect(await database.prepare("SELECT state FROM song_requests WHERE id = 'request-b'").first()).toEqual({ state: "submitted" });
   });
 
   it("reconciles an approved winner when its submit alarm could not be scheduled", async () => {
