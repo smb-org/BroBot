@@ -24,7 +24,7 @@ describe("chat voting overlay tally", () => {
     expect(firstFill.style.opacity).toBe("1");
     expect((container.querySelector(".overlay-tally__track") as HTMLElement).style.background).toContain("color-mix(");
     const caption = container.querySelector(".overlay-tally__caption") as HTMLElement;
-    expect(caption.style.gridTemplateColumns).toBe("minmax(0, 1fr) minmax(0, min(4.5em, 45%))");
+    expect(caption.style.gridTemplateColumns).toBe("minmax(0, 1fr) auto");
     expect((container.querySelector(".overlay-tally__label") as HTMLElement).style.whiteSpace).toBe("nowrap");
     const count = container.querySelector(".overlay-tally__count") as HTMLElement;
     expect([count.style.whiteSpace, count.style.fontVariantNumeric]).toEqual(["nowrap", "tabular-nums"]);

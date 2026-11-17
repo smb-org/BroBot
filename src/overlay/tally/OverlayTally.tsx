@@ -158,12 +158,12 @@ export const OverlayTallyOptions = ({
   const captionStyle = variant === "terms"
     ? { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 10rem", alignItems: "center", gap: "0 0.5em", minWidth: 0, width: "100%", boxSizing: "border-box" as const }
     : layout === "bars"
-      ? { display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, min(4.5em, 45%))", alignItems: "center", gap: "0 0.5em", minWidth: 0 }
+      ? { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: "0 0.5em", minWidth: 0 }
       : { display: "flex", justifyContent: "space-between", gap: "0.5em", minWidth: 0 };
   const labelStyle = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const };
   const countStyle = variant === "terms"
     ? { minWidth: 0, overflow: "hidden", textOverflow: "clip", textAlign: "right" as const, whiteSpace: "nowrap" as const, fontSize: "0.5em", fontVariantNumeric: "tabular-nums" }
-    : { minWidth: 0, overflow: "hidden", textAlign: "right" as const, whiteSpace: "nowrap" as const, fontSize: "0.6em", fontVariantNumeric: "tabular-nums" };
+    : { flexShrink: 0, textAlign: "right" as const, whiteSpace: "nowrap" as const, fontSize: "0.6em", fontVariantNumeric: "tabular-nums" };
 
   return <>
     <div className={classNames("overlay-tally__options", `overlay-tally__options--${layout}`, `overlay-tally__options--${variant}`, classPrefix === undefined ? undefined : `${classPrefix}__options`)} style={optionsStyle}>

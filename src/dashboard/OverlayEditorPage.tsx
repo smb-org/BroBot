@@ -24,6 +24,7 @@ import {
   migrateLegacyOverlayStylesToCss,
   replaceOverlayStyleBlock,
   overlayElementTextColors,
+  DEFAULT_OVERLAY_FONT_SIZE,
   resolveOverlayElementColors,
   type OverlayStyleAlignment,
   type OverlayStyle,
@@ -974,8 +975,9 @@ function OverlayEditorWorkspace({
     label: string,
     value: number | undefined,
     onChange: (next: number | undefined) => void,
-    options: { min?: number; max?: number; unit?: string; ariaLabel?: string } = {},
+    options: { min?: number; max?: number; unit?: string; ariaLabel?: string; placeholder?: string } = {},
   ): ReactElement => <UnitInput id={id} label={label} value={value ?? ""}
+    {...(options.placeholder === undefined ? {} : { placeholder: options.placeholder })}
     {...(options.min === undefined ? {} : { min: options.min })}
     {...(options.max === undefined ? {} : { max: options.max })}
     {...(options.unit === undefined ? {} : { unit: options.unit })}
@@ -1582,7 +1584,7 @@ function OverlayEditorWorkspace({
                     disabled={!canEdit || styleLocked} onChange={(value) => { updateStyleProperty("fontFamily", value.length === 0 ? undefined : value); }} />
                   <div className="overlay-editor__style-pair">
                     {renderStyleNumber("overlay-editor-style-font-size", labels.editorStyleFontSize, targetStyle.fontSize,
-                      (value) => { updateStyleProperty("fontSize", value); }, { min: 1, max: 500, unit: "px" })}
+                      (value) => { updateStyleProperty("fontSize", value); }, { min: 1, max: 500, unit: "px", placeholder: String(DEFAULT_OVERLAY_FONT_SIZE) })}
                     <Select id="overlay-editor-style-font-weight" label={labels.editorStyleFontWeight}
                       value={targetStyle.fontWeight === undefined ? null : String(targetStyle.fontWeight)} disabled={!canEdit || styleLocked}
                       {...(styleLockedReason.length === 0 ? {} : { describedBy: "overlay-style-disabled-reason" })}

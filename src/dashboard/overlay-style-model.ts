@@ -22,6 +22,9 @@ interface OverlayStyleBackground {
 
 export type OverlayStyleAlignment = "left" | "center" | "right";
 
+/** Font size in px that overlay text uses without an own size; mirrors the fallback in src/overlay/variable.css. */
+export const DEFAULT_OVERLAY_FONT_SIZE = 32;
+
 export interface OverlayStyle {
   fontFamily?: string;
   fontSize?: number;

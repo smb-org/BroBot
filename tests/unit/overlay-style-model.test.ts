@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+
+import { DEFAULT_OVERLAY_FONT_SIZE } from "../../src/dashboard/overlay-style-model";
 
 import {
   OVERLAY_STYLE_BEGIN_MARKER,
@@ -514,5 +517,13 @@ describe("overlay style block model", () => {
     expect(rewritten.slice(rewritten.indexOf(OVERLAY_STYLE_END_MARKER))).toBe(edited.slice(edited.indexOf(OVERLAY_STYLE_END_MARKER)));
     expect(parseOverlayStyleBlock(rewritten).kind).toBe("valid");
     expect(generateOverlayStyleContent({ overlay: {}, elements: {} })).toBe("");
+  });
+});
+
+describe("default overlay font size", () => {
+  it("keeps the shared CSS fallback and the editor placeholder in step", () => {
+    const css = readFileSync("src/overlay/variable.css", "utf8");
+    expect(DEFAULT_OVERLAY_FONT_SIZE).toBe(32);
+    expect(css).toContain(`font-size: var(--brobot-overlay-font-size, ${String(DEFAULT_OVERLAY_FONT_SIZE)}px);`);
   });
 });

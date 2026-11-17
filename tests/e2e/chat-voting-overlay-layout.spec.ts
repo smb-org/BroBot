@@ -184,9 +184,9 @@ test("standard vote options keep the original narrow bars and strip sizing", asy
     expect(measurements.tally.width).toBe(200);
     expect(measurements.optionsClass).toContain("overlay-tally__options--standard");
     expect(measurements.row).toMatchObject({ minWidth: "auto", boxSizing: "content-box" });
-    // Labels truncate and counters stay on one line instead of wrapping to many rows.
+    // Labels truncate; counters keep their content width on one line instead of wrapping.
     expect(measurements.label).toMatchObject({ minWidth: "0px", whiteSpace: "nowrap" });
-    expect(measurements.count).toMatchObject({ minWidth: "0px", whiteSpace: "nowrap" });
+    expect(measurements.count).toMatchObject({ minWidth: "auto", whiteSpace: "nowrap" });
     expect(Number.parseFloat(String(measurements.count.fontSize))).toBeLessThan(Number.parseFloat(String(measurements.tally.fontSize)));
     if (layout === "bars") {
       expect(measurements.track).not.toBeNull();
