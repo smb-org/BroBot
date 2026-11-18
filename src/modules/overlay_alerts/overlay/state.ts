@@ -3,6 +3,7 @@ import { isOverlayHexColor, parseModuleOverlayConfig } from "../../contract";
 export interface OverlayAlertPayload {
   operationId: string;
   imageUrl?: string;
+  avatarUrl?: string;
   soundUrl?: string;
   text: string;
   durationSeconds: number;
@@ -42,6 +43,15 @@ const isIntegerBetween = (value: unknown, min: number, max: number): value is nu
 const isMediaUrl = (value: unknown): value is string =>
   typeof value === "string" && value.startsWith("/api/overlay/media/") && value.length <= 256;
 
+const isTwitchAvatarUrl = (value: unknown): value is string => {
+  if (typeof value !== "string" || value.length > 256) return false;
+  try {
+    const url = new URL(value);
+    return value.startsWith("https://static-cdn.jtvnw.net/") && url.protocol === "https:" && url.origin === "https://static-cdn.jtvnw.net" &&
+      url.username.length === 0 && url.password.length === 0;
+  } catch { return false; }
+};
+
 export const parseOverlayAlertConfig = (value: unknown): OverlayAlertConfig | null => {
   return parseModuleOverlayConfig(value, (input) => {
     if (Object.keys(input).some((key) => key !== "fontSize" && key !== "textColor")) return null;
@@ -58,11 +68,13 @@ export const parseOverlayAlertPayload = (value: unknown): QueuedOverlayAlert | n
       typeof input.text !== "string" || input.text.length > 200 ||
       !isIntegerBetween(input.durationSeconds, 2, 15) || !isIntegerBetween(input.volumePercent, 0, 100) ||
       input.imageUrl !== undefined && !isMediaUrl(input.imageUrl) ||
+      input.avatarUrl !== undefined && !isTwitchAvatarUrl(input.avatarUrl) ||
       input.soundUrl !== undefined && !isMediaUrl(input.soundUrl) ||
       input.imageUrl === undefined && input.soundUrl === undefined && input.text.trim().length === 0) return null;
   return {
     operationId: input.operationId,
     ...(input.imageUrl === undefined ? {} : { imageUrl: input.imageUrl }),
+    ...(input.avatarUrl === undefined ? {} : { avatarUrl: input.avatarUrl }),
     ...(input.soundUrl === undefined ? {} : { soundUrl: input.soundUrl }),
     text: input.text,
     durationSeconds: input.durationSeconds,

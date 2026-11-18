@@ -1,220 +1,171 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import type { ReactElement } from "react";
 
-import { runModuleQueryWrite, useDashboardQueryClient } from "../../../dashboard/data";
-import { dashboardTexts } from "../../../dashboard/locale";
-import {
-  Button,
-  ChipsInput,
-  ConfirmDialog,
-  Field,
-  FieldPair,
-  RoleThreshold,
-  SaveStatus,
-  Section,
-  SegmentChoice,
-  SwitchRow,
-  UnitInput,
-  registerDashboardNavigationGuard,
-  useDraft,
-  useDraftGuard,
-} from "../../../dashboard/ui";
+import { ChipsInput, FieldPair, SegmentChoice, SwitchRow, UnitInput, type SettingsCustomFieldProps, type SettingsEditorDefinition, type SettingsEditorSpec } from "../../../dashboard/ui";
 import type { SongRequestsSettings } from "../contracts";
-import { saveSettings } from "./service";
-import type { SongRequestsSettingsRead } from "./service";
+import { renderTemplate } from "../../contract";
+import { SONG_REQUEST_TEMPLATE_VARIABLES } from "../contracts/template-variables";
+import { songRequestSettingsEditorCatalog } from "./settings-editor-locale";
 import { songRequestsSettingsTexts } from "./settings-locale";
+import "./settings-editor.css";
 
-export default function SongRequestsSettingsEditor({
-  channelId,
-  language,
-  settings,
-  pointsEnabled,
-  canManage,
-}: {
-  channelId: string;
-  language: "de" | "en";
-  settings: SongRequestsSettingsRead;
-  pointsEnabled: boolean;
-  canManage: boolean;
-}): ReactElement {
-  const labels = songRequestsSettingsTexts[language];
-  const queryClient = useDashboardQueryClient();
-  const draft = useDraft(settings.settings);
-  const baselineRevision = useRef(settings.revision);
-  const [pending, setPending] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState<string | undefined>();
-  const saveInFlight = useRef<Promise<string | null> | null>(null);
-  const disabled = !canManage || pending;
+const songRequestTemplatePreview = (template: string, values: Readonly<Record<string, string>>): string => {
+  const samples = Object.fromEntries(SONG_REQUEST_TEMPLATE_VARIABLES.map(({ name, sample }) => [name, sample]));
+  return renderTemplate(template, { user: "Maple Viewer", ...samples, ...values }, {}, SONG_REQUEST_TEMPLATE_VARIABLES);
+};
 
-  useEffect(() => {
-    if (draft.dirty || baselineRevision.current === settings.revision) return;
-    baselineRevision.current = settings.revision;
-    draft.accept(settings.settings);
-    setSaved(false);
-  }, [draft.accept, draft.dirty, settings.revision, settings.settings]);
+const languageFrom = (context: unknown): "de" | "en" => typeof context === "object" && context !== null &&
+  "language" in context && context.language === "en" ? "en" : "de";
 
-  const update = useCallback((patch: Partial<SongRequestsSettings>): void => {
-    draft.setValue((current) => ({ ...current, ...patch }));
-    setSaved(false);
-    setSaveError(undefined);
-  }, [draft.setValue]);
-  const updateRule = useCallback(<K extends keyof SongRequestsSettings["rules"],>(key: K, value: SongRequestsSettings["rules"][K]): void => {
-    draft.setValue((current) => ({ ...current, rules: { ...current.rules, [key]: value } }));
-    setSaved(false);
-    setSaveError(undefined);
-  }, [draft.setValue]);
-  const updateNumber = (value: number | "", updateValue: (value: number) => void, fallback: number): void => {
-    updateValue(typeof value === "number" && Number.isFinite(value) ? value : fallback);
-  };
+const updateNumber = (value: number | "", update: (next: number) => void): void => {
+  if (typeof value === "number" && Number.isFinite(value)) update(value);
+};
 
-  const saveDraft = useCallback((): Promise<string | null> => {
-    if (!canManage || !draft.dirty) return Promise.resolve(null);
-    if (saveInFlight.current !== null) return saveInFlight.current;
-    setPending(true);
-    setSaved(false);
-    setSaveError(undefined);
-    const operation = (async (): Promise<string | null> => {
-      try {
-        const result = await runModuleQueryWrite(
-          queryClient,
-          channelId,
-          "song_requests",
-          "settings",
-          (revision) => saveSettings(channelId, revision ?? baselineRevision.current, draft.value),
-          { baselineRevision: baselineRevision.current, updateCache: (_current, savedSettings) => savedSettings },
-        );
-        baselineRevision.current = result.revision;
-        draft.accept(result.settings);
-        setSaved(true);
-        return null;
-      } catch (error: unknown) {
-        const message = error instanceof Error && error.message.includes("conflict") ? labels.conflict : labels.saveError;
-        setSaveError(message);
-        return message;
-      } finally {
-        saveInFlight.current = null;
-        setPending(false);
-      }
-    })();
-    saveInFlight.current = operation;
-    return operation;
-  }, [canManage, channelId, draft.accept, draft.dirty, draft.value, labels.conflict, labels.saveError, queryClient]);
+const skipVoteField = {
+  kind: "custom" as const,
+  key: "skipVote" as const,
+  render: (props: SettingsCustomFieldProps<SongRequestsSettings>): ReactElement => {
+    const copy = songRequestsSettingsTexts[languageFrom(props.context)];
+    const value = props.settings.skipVote;
+    const disabled = props.disabled || props.readOnly;
+    return <>
+      <SwitchRow label={copy.skipVoteEnabled} checked={value.enabled} disabled={disabled}
+        onChange={(enabled) => { props.onChange({ ...value, enabled }); }} />
+      <FieldPair>
+        <UnitInput label={copy.skipThreshold} min={1} max={100} value={value.threshold} disabled={disabled || !value.enabled}
+          onChange={(next) => { updateNumber(next, (threshold) => { props.onChange({ ...value, threshold }); }); }} />
+        <UnitInput label={copy.skipCooldown} unit="s" min={0} max={3600} value={value.cooldownSeconds} disabled={disabled || !value.enabled}
+          onChange={(next) => { updateNumber(next, (cooldownSeconds) => { props.onChange({ ...value, cooldownSeconds }); }); }} />
+      </FieldPair>
+    </>;
+  },
+};
 
-  const guard = useDraftGuard(draft.dirty, saveDraft, draft.reset);
-  useEffect(() => registerDashboardNavigationGuard(guard.guardSwitch), [guard.guardSwitch]);
-  const navigation = dashboardTexts(language).module;
-  const rule = draft.value.rules;
-
-  type EnabledKey = "personCooldownEnabled" | "personOpenLimitEnabled" | "personRoundLimitEnabled" | "channelOpenLimitEnabled" | "artistOpenLimitEnabled" | "maxTrackLengthEnabled";
-  type ValueKey = "personCooldownMinutes" | "personOpenLimit" | "personRoundLimit" | "channelOpenLimit" | "artistOpenLimit" | "maxTrackLengthMinutes";
-  const limitRule = (label: string, enabledKey: EnabledKey, valueKey: ValueKey, min: number, max: number, unit?: string): ReactElement => {
-    const enabled = rule[enabledKey];
-    return <SwitchRow
-      label={label}
-      checked={enabled}
-      disabled={disabled}
-      onChange={(value) => { updateRule(enabledKey, value); }}
-      control={<UnitInput label={label} {...(unit === undefined ? {} : { unit })} min={min} max={max} value={rule[valueKey]}
-        disabled={disabled || !enabled}
-        onChange={(value) => { updateNumber(value, (next) => { updateRule(valueKey, next); }, rule[valueKey]); }} />}
+const paymentModeField = {
+  kind: "custom" as const,
+  key: "paymentMode" as const,
+  render: (props: SettingsCustomFieldProps<SongRequestsSettings>): ReactElement => {
+    const copy = songRequestsSettingsTexts[languageFrom(props.context)];
+    const enabledModuleIds = typeof props.context === "object" && props.context !== null &&
+      "enabledModuleIds" in props.context && Array.isArray(props.context.enabledModuleIds)
+      ? props.context.enabledModuleIds
+      : [];
+    const pointsEnabled = enabledModuleIds.includes("points");
+    return <SegmentChoice
+      label={props.label}
+      hint={props.hint}
+      value={props.settings.paymentMode}
+      disabled={props.disabled || props.readOnly}
+      onChange={(value) => { props.onChange(value); }}
+      {...(pointsEnabled ? {} : { warning: copy.pointsUnavailable })}
+      options={[
+        { value: "bot_points", label: copy.botPoints, ...(pointsEnabled ? {} : { disabled: true }) },
+        { value: "free", label: copy.free },
+      ]}
     />;
-  };
+  },
+};
 
-  return <div className="song-requests-settings-editor">
-    <Section title={labels.admission}>
-      <SegmentChoice
-        label={labels.mode}
-        value={draft.value.mode}
-        disabled={disabled}
-        onChange={(mode) => { update({ mode }); }}
-        options={[
-          { value: "automatic", label: labels.automatic },
-          { value: "moderated", label: labels.moderated },
-        ]}
-        wrap
-      />
-      {pointsEnabled || draft.value.paymentMode === "free" ? <SegmentChoice
-        label={labels.payment}
-        value={draft.value.paymentMode}
-        disabled={disabled}
-        onChange={(paymentMode) => { update({ paymentMode }); }}
-        options={pointsEnabled ? [
-          { value: "bot_points", label: labels.botPoints },
-          { value: "free", label: labels.free },
-        ] : [{ value: "free", label: labels.free }]}
-        wrap
-      /> : <div className="song-requests-settings-editor__disabled-note" role="status">
-        <p>{labels.pointsUnavailable}</p>
-        <Button variant="secondary" disabled={disabled} onClick={() => { update({ paymentMode: "free" }); }}>{labels.switchToFree}</Button>
-      </div>}
-      {draft.value.paymentMode === "bot_points" && pointsEnabled ? <UnitInput
-        label={labels.cost}
-        min={1}
-        max={1_000_000}
-        value={draft.value.botPointsCost}
-        disabled={disabled}
-        onChange={(value) => { updateNumber(value, (botPointsCost) => { update({ botPointsCost }); }, draft.value.botPointsCost); }}
-      /> : null}
-      {draft.value.paymentMode === "free" ? <RoleThreshold
-        label={labels.freeRole}
-        value={draft.value.freeRoleThreshold}
-        options={labels.roles.map((role) => ({ ...role }))}
-        disabled={disabled}
-        onChange={(freeRoleThreshold) => { update({ freeRoleThreshold: freeRoleThreshold as SongRequestsSettings["freeRoleThreshold"] }); }}
-      /> : null}
-      <SwitchRow
-        label={labels.alsoOffline}
-        description={labels.alsoOfflineDescription}
-        checked={draft.value.alsoOffline}
-        disabled={disabled}
-        onChange={(alsoOffline) => { update({ alsoOffline }); }}
-      />
-    </Section>
+const requestAlertField = {
+  kind: "custom" as const,
+  key: "requestAlert" as const,
+  render: (props: SettingsCustomFieldProps<SongRequestsSettings>): ReactElement => {
+    const copy = songRequestsSettingsTexts[languageFrom(props.context)];
+    return <SwitchRow label={copy.requestAlertEnabled} checked={props.settings.requestAlert.enabled}
+      disabled={props.disabled || props.readOnly}
+      onChange={(enabled) => { props.onChange({ enabled }); }} />;
+  },
+};
 
-    <Section title={labels.rules}>
-      <SwitchRow label={labels.duplicate} checked={rule.duplicateEnabled} disabled={disabled} onChange={(value) => { updateRule("duplicateEnabled", value); }} />
-      <SwitchRow
-        label={labels.songCooldown}
-        checked={rule.songCooldownEnabled}
-        disabled={disabled}
-        onChange={(value) => { updateRule("songCooldownEnabled", value); }}
-        control={<UnitInput label={labels.songCooldown} unit="min" min={1} max={10_080} value={rule.songCooldownMinutes}
-          disabled={disabled || !rule.songCooldownEnabled || rule.songCooldownOncePerRound}
-          onChange={(value) => { updateNumber(value, (next) => { updateRule("songCooldownMinutes", next); }, rule.songCooldownMinutes); }} />}
-      />
-      <SwitchRow label={labels.oncePerRound} description={labels.oncePerRoundHint} checked={rule.songCooldownOncePerRound}
-        disabled={disabled || !rule.songCooldownEnabled} onChange={(value) => { updateRule("songCooldownOncePerRound", value); }} />
+const rulesField = {
+  kind: "custom" as const,
+  key: "rules" as const,
+  render: (props: SettingsCustomFieldProps<SongRequestsSettings>): ReactElement => {
+    const labels = songRequestsSettingsTexts[languageFrom(props.context)];
+    const rules = props.settings.rules;
+    const disabled = props.disabled || props.readOnly;
+    const update = <Key extends keyof SongRequestsSettings["rules"]>(key: Key, value: SongRequestsSettings["rules"][Key]): void => {
+      props.onChange({ ...rules, [key]: value });
+    };
+    const limitRule = (
+      label: string,
+      enabledKey: "personCooldownEnabled" | "personOpenLimitEnabled" | "personRoundLimitEnabled" | "channelOpenLimitEnabled" | "artistOpenLimitEnabled" | "maxTrackLengthEnabled",
+      valueKey: "personCooldownMinutes" | "personOpenLimit" | "personRoundLimit" | "channelOpenLimit" | "artistOpenLimit" | "maxTrackLengthMinutes",
+      minimum: number,
+      maximum: number,
+      unit?: string,
+    ): ReactElement => <SwitchRow label={label} checked={rules[enabledKey]} disabled={disabled}
+      onChange={(enabled) => { update(enabledKey, enabled); }}
+      control={<UnitInput label={label} ariaLabel={label} hideLabel {...(unit === undefined ? {} : { unit })} min={minimum} max={maximum} value={rules[valueKey]}
+        disabled={disabled || !rules[enabledKey]}
+        onChange={(next) => { updateNumber(next, (value) => { update(valueKey, value); }); }} />} />;
+    return <div className="song-request-rules">
+      <SwitchRow label={labels.duplicate} checked={rules.duplicateEnabled} disabled={disabled}
+        onChange={(enabled) => { update("duplicateEnabled", enabled); }} />
+      <SwitchRow label={labels.songCooldown} checked={rules.songCooldownEnabled} disabled={disabled}
+        onChange={(enabled) => { update("songCooldownEnabled", enabled); }}
+        control={<UnitInput label={labels.songCooldown} ariaLabel={labels.songCooldown} hideLabel unit="min" min={1} max={10_080} value={rules.songCooldownMinutes}
+          disabled={disabled || !rules.songCooldownEnabled || rules.songCooldownOncePerRound}
+          onChange={(next) => { updateNumber(next, (minutes) => { update("songCooldownMinutes", minutes); }); }} />} />
+      <SwitchRow label={labels.oncePerRound} description={labels.oncePerRoundHint} checked={rules.songCooldownOncePerRound}
+        disabled={disabled || !rules.songCooldownEnabled} onChange={(enabled) => { update("songCooldownOncePerRound", enabled); }} />
       {limitRule(labels.personCooldown, "personCooldownEnabled", "personCooldownMinutes", 0, 10_080, "min")}
       {limitRule(labels.personOpen, "personOpenLimitEnabled", "personOpenLimit", 1, 50)}
       {limitRule(labels.personRound, "personRoundLimitEnabled", "personRoundLimit", 1, 100)}
       {limitRule(labels.channelOpen, "channelOpenLimitEnabled", "channelOpenLimit", 1, 200)}
       {limitRule(labels.artistOpen, "artistOpenLimitEnabled", "artistOpenLimit", 1, 50)}
       {limitRule(labels.maxLength, "maxTrackLengthEnabled", "maxTrackLengthMinutes", 1, 1_000, "min")}
-      <SwitchRow label={labels.explicitAllowed} checked={rule.explicitAllowed} disabled={disabled} onChange={(value) => { updateRule("explicitAllowed", value); }} />
-      <SwitchRow label={labels.blockTracks} checked={rule.blockTracksEnabled} disabled={disabled} onChange={(value) => { updateRule("blockTracksEnabled", value); }} />
-      <ChipsInput label={labels.blockedTrackIds} values={rule.blockedTrackIds} onChange={(values) => { updateRule("blockedTrackIds", values); }}
-        max={200} disabled={disabled || !rule.blockTracksEnabled} placeholder={labels.listPlaceholder} removeLabel={labels.removeItem} listLabel={labels.blockedTrackIds}
+      <SwitchRow label={labels.explicitAllowed} checked={rules.explicitAllowed} disabled={disabled}
+        onChange={(enabled) => { update("explicitAllowed", enabled); }} />
+      <SwitchRow label={labels.blockTracks} checked={rules.blockTracksEnabled} disabled={disabled}
+        onChange={(enabled) => { update("blockTracksEnabled", enabled); }} />
+      <ChipsInput label={labels.blockedTrackIds} values={rules.blockedTrackIds} onChange={(values) => { update("blockedTrackIds", values); }}
+        max={200} disabled={disabled || !rules.blockTracksEnabled} placeholder={labels.listPlaceholder} removeLabel={labels.removeItem} listLabel={labels.blockedTrackIds}
         messages={{ countLabel: labels.chipCount, atLimitHint: labels.chipLimit, duplicateWarning: labels.duplicateChip }} />
-      <SwitchRow label={labels.blockArtists} checked={rule.blockArtistsEnabled} disabled={disabled} onChange={(value) => { updateRule("blockArtistsEnabled", value); }} />
-      <ChipsInput label={labels.blockedArtists} values={rule.blockedArtists} onChange={(values) => { updateRule("blockedArtists", values); }}
-        max={100} disabled={disabled || !rule.blockArtistsEnabled} placeholder={labels.listPlaceholder} removeLabel={labels.removeItem} listLabel={labels.blockedArtists}
+      <SwitchRow label={labels.blockArtists} checked={rules.blockArtistsEnabled} disabled={disabled}
+        onChange={(enabled) => { update("blockArtistsEnabled", enabled); }} />
+      <ChipsInput label={labels.blockedArtists} values={rules.blockedArtists} onChange={(values) => { update("blockedArtists", values); }}
+        max={100} disabled={disabled || !rules.blockArtistsEnabled} placeholder={labels.listPlaceholder} removeLabel={labels.removeItem} listLabel={labels.blockedArtists}
         messages={{ countLabel: labels.chipCount, atLimitHint: labels.chipLimit, duplicateWarning: labels.duplicateChip }} />
-    </Section>
+    </div>;
+  },
+};
 
-    <Section title={labels.overlay}>
-      <FieldPair>
-        <UnitInput label={labels.overlayRows} min={2} max={20} value={draft.value.queueOverlayRows} disabled={disabled}
-          onChange={(value) => { updateNumber(value, (queueOverlayRows) => { update({ queueOverlayRows }); }, draft.value.queueOverlayRows); }} />
-        <Field label={labels.emptyText} value={draft.value.emptyText} onChange={(emptyText) => { update({ emptyText: emptyText.slice(0, 80) }); }} disabled={disabled} />
-      </FieldPair>
-    </Section>
+const spec: SettingsEditorSpec<SongRequestsSettings> = {
+  sections: [
+    { id: "admission", icon: "tabSettings", fields: [
+      { kind: "segment", key: "mode", options: [{ value: "automatic" }, { value: "moderated" }] },
+      paymentModeField,
+      { kind: "number", key: "botPointsCost", min: 1, max: 1_000_000, step: 1 },
+      { kind: "roleThreshold", key: "freeRoleThreshold", options: [{ value: "everyone" }, { value: "subscriber" }, { value: "vip" }, { value: "moderator" }] },
+      { kind: "switchCard", key: "alsoOffline" },
+    ] },
+    { id: "rules", icon: "clock-hour-4", fields: [rulesField] },
+    { id: "skipVote", icon: "vote", fields: [skipVoteField] },
+    { id: "alert", icon: "music", fields: [requestAlertField] },
+    { id: "overlay", icon: "tabSettings", fields: [
+      { kind: "number", key: "queueOverlayRows", min: 2, max: 20, step: 1 },
+      { kind: "text", key: "emptyText", maxLength: 80, optional: true },
+    ] },
+    { id: "messages", icon: "tabMessages", fields: [
+      { kind: "message", key: "queuedText", enabledKey: "queuedTextEnabled", preview: songRequestTemplatePreview },
+      { kind: "message", key: "waitingText", enabledKey: "waitingTextEnabled", preview: songRequestTemplatePreview },
+      { kind: "message", key: "requestAlertText", enabledKey: "requestAlertTextEnabled", preview: songRequestTemplatePreview },
+    ] },
+  ],
+};
 
-    {canManage ? <SaveStatus dirty={draft.dirty} persistent pending={pending} saved={saved} {...(saveError === undefined ? {} : { error: saveError })}
-      onSave={() => { void saveDraft(); }} onDiscard={() => { draft.reset(); setSaved(false); setSaveError(undefined); }}
-      saveLabel={labels.save} discardLabel={labels.discard} savedLabel={labels.saved} pendingLabel={labels.saving} /> : null}
-    <ConfirmDialog opened={guard.confirmOpen} title={navigation.unsavedChangesTitle} description={navigation.unsavedChangesDescription}
-      confirmLabel={navigation.discardAndSwitch} cancelLabel={navigation.continueEditing} onConfirm={guard.discardAndSwitch} onCancel={guard.continueEditing}
-      {...(canManage ? { alternative: { label: navigation.saveAndSwitch, onClick: () => { void guard.saveAndSwitch(); } } } : {})}
-      pending={guard.saving || pending} {...(guard.saveError === undefined ? {} : { error: guard.saveError })} />
-  </div>;
-}
+const definition: SettingsEditorDefinition<SongRequestsSettings> = {
+  spec,
+  locales: songRequestSettingsEditorCatalog.locales,
+  layout: "columns",
+  pageColumns: [["admission", "rules"], ["skipVote", "alert", "overlay", "messages"]],
+  savePosition: "page-header",
+  showTitle: false,
+  messageFields: [
+    { messagePath: "queuedText", enabledPath: "queuedTextEnabled" },
+    { messagePath: "waitingText", enabledPath: "waitingTextEnabled" },
+    { messagePath: "requestAlertText", enabledPath: "requestAlertTextEnabled" },
+  ],
+};
+
+export default definition;

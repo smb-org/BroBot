@@ -17,6 +17,7 @@ export interface UnitInputProps {
   suggestions?: number[];
   hint?: string;
   placeholder?: string;
+  hideLabel?: boolean;
   error?: string;
   disabled?: boolean;
   clampOnBlur?: boolean;
@@ -28,7 +29,7 @@ export interface UnitInputProps {
 
 const clampValue = (value: number, min: number | undefined, max: number | undefined): number => Math.max(min ?? Number.NEGATIVE_INFINITY, Math.min(max ?? Number.POSITIVE_INFINITY, value));
 
-export function UnitInput({ id: suppliedId, label, ariaLabel, unit, value, onChange, min, max, step = 1, suggestions = [], hint, placeholder, error, disabled = false, clampOnBlur = true, commitOnBlurOrEnter = false, required = false, name, onKeyDown }: UnitInputProps) {
+export function UnitInput({ id: suppliedId, label, ariaLabel, unit, value, onChange, min, max, step = 1, suggestions = [], hint, placeholder, hideLabel = false, error, disabled = false, clampOnBlur = true, commitOnBlurOrEnter = false, required = false, name, onKeyDown }: UnitInputProps) {
   const generatedId = useId();
   const id = suppliedId ?? generatedId;
   const disabledReason = useDisabledFieldReason();
@@ -89,9 +90,9 @@ export function UnitInput({ id: suppliedId, label, ariaLabel, unit, value, onCha
   };
 
   return <div data-ui="" className="unit-input">
-    <label className="ui-field__label" htmlFor={id}>{label}</label>
+    {hideLabel ? null : <label className="ui-field__label" htmlFor={id}>{label}</label>}
     <div className="unit-input__control">
-      <Input id={id} type="number" inputMode="decimal" aria-label={ariaLabel} aria-describedby={describedBy} aria-invalid={error === undefined ? undefined : true} value={commitOnBlurOrEnter ? draftValue ?? value : value} min={min} max={max} step="any" placeholder={placeholder} disabled={disabled} required={required} name={name} onBlur={onBlur} onKeyDown={onKeyDownWithStep} onChange={(event) => {
+      <Input id={id} type="number" inputMode="decimal" aria-label={ariaLabel ?? (hideLabel ? label : undefined)} aria-describedby={describedBy} aria-invalid={error === undefined ? undefined : true} value={commitOnBlurOrEnter ? draftValue ?? value : value} min={min} max={max} step="any" placeholder={placeholder} disabled={disabled} required={required} name={name} onBlur={onBlur} onKeyDown={onKeyDownWithStep} onChange={(event) => {
         const next = event.currentTarget.value;
         updateInputValue(next.length === 0 ? "" : Number(next));
       }} className="unit-input__input" />

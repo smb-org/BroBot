@@ -380,14 +380,14 @@ export const chatVotingModule: BotModule<typeof settingsSchema> = {
       {
         channelId,
         ...(request.ballotId === undefined ? {} : { ballotId: request.ballotId }),
-        kind: "options",
+        kind: request.kind ?? "options",
         optionCount: request.labels.length,
         durationSeconds: request.durationSeconds,
         labels: request.labels,
         title: request.title,
         settings,
         language: await context.channelLanguage(),
-        authorization: context.authorizeMutation(channelId, actor, new Date(startedAt).toISOString()),
+        ...(actor === undefined ? {} : { authorization: context.authorizeMutation(channelId, actor, new Date(startedAt).toISOString()) }),
       },
       context.ballots,
       (ballotId, deadline, revision) => context.scheduleAlarm(

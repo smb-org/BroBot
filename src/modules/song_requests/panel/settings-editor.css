@@ -1,0 +1,105 @@
+@layer components.modules {
+  /* Single fields put their label above the control, like every other module settings page. */
+  .settings-page:has(.song-request-rules) .ui-settings-editor .inspector-field-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s1);
+  }
+
+  .settings-page:has(.song-request-rules) .ui-settings-editor .inspector-field-row__label {
+    color: var(--text-2);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .settings-page:has(.song-request-rules) .ui-settings-editor .inspector-field-row__info {
+    width: var(--s5);
+    height: var(--s5);
+    min-height: var(--s5);
+  }
+
+  /* Reserved lines that stay empty here (lock reason, switch error, hint-less segment and number fields) only widen the gaps. */
+  .settings-page:has(.song-request-rules) .ui-settings-editor :is(
+    .ui-locked-reason--reserved,
+    .ui-switch-row + .ui-field__error,
+    .unit-input__description:empty,
+    .inspector-field-row .segment-choice-field__hint[aria-hidden="true"],
+    .inspector-field-row .segment-choice-field__warning[aria-hidden="true"]
+  ) {
+    display: none;
+  }
+
+  .song-request-rules {
+    display: grid;
+    gap: var(--s2);
+    min-width: 0;
+  }
+
+  .song-request-rules .ui-switch-row:has(.ui-switch-row__control) {
+    grid-template-columns: minmax(0, 1fr) minmax(7rem, 10rem) auto;
+    gap: var(--s2);
+  }
+
+  .song-request-rules .ui-switch-row__copy {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .song-request-rules .ui-switch-row__control {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .song-request-rules .ui-switch-row__control .unit-input {
+    width: 100%;
+    gap: 0;
+  }
+
+  .song-request-rules .ui-switch-row__control .unit-input__description {
+    display: none;
+  }
+
+  /* The error line is reserved by the shared input; inside a rule row it would only widen the gaps. */
+  .song-request-rules .ui-switch-row__control .unit-input__error {
+    min-height: 0;
+    height: 0;
+    overflow: visible;
+  }
+
+  .song-request-rules .ui-switch-row:has(.ui-switch-row__control) > [data-slot="switch"] {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .song-request-rules .ui-switch-row:not(:has(.ui-switch-row__control)) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--s2) var(--s3);
+  }
+
+  .song-request-rules .ui-switch-row:not(:has(.ui-switch-row__control)) > [data-slot="switch"] {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  @media (max-width: 600px) {
+    .song-request-rules .ui-switch-row:has(.ui-switch-row__control) {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .song-request-rules .ui-switch-row__copy {
+      grid-column: 1 / -1;
+      grid-row: 1;
+    }
+
+    .song-request-rules .ui-switch-row__control {
+      grid-column: 1;
+      grid-row: 2;
+      width: min(10rem, 100%);
+    }
+
+    .song-request-rules .ui-switch-row:has(.ui-switch-row__control) > [data-slot="switch"] {
+      grid-column: 2;
+      grid-row: 2;
+    }
+  }
+}

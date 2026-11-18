@@ -78,6 +78,8 @@ test("a platform admin can enter Setup and reach Platform with no released chann
       await fulfillJson(route, { channels: [], viewerUserId: "platform-admin", platformAdmin: true, viewerIsBot: false });
     } else if (pathname === "/api/platform") {
       await fulfillJson(route, { channels: [] });
+    } else if (pathname === "/api/platform/spotify-channels") {
+      await fulfillJson(route, { usedSlots: 0, limit: 5, channels: [] });
     } else if (pathname === "/api/platform/audit") {
       await fulfillJson(route, { entries: [], nextCursor: null });
     } else {

@@ -1012,6 +1012,11 @@ Schema (etwa Kanalereignisse) bleibt ohne Editor. `panel` bleibt daneben für
 Module mit eigenem Zustand oder Sofortaktionen (Werbung); wo beide stehen,
 erscheint `panel` oben und der `settingsEditor` darunter.
 
+Mit `settingsEditorPlacement: "page"` kann ein Modul den Editor auf eine eigene
+Navigationseite legen. `settingsEditorPageId` bindet ihn an den passenden Eintrag
+aus `navigationEntries`; andere Einträge zeigen weiter das Modul-Panel. Ohne diese
+Angabe bleibt die bisherige Bedeutung erhalten: Der Editor belegt die Modulroute.
+
 Jede Validierung, die das Speichern blockiert, muss einen sichtbaren Feldfehler
 liefern. `EditorShell.invalidFields` verwendet `{ id, label, message, sectionId }`
 für die Feldliste in der Speicherleiste, die Tab-Fehlerpunkte und den Fokus auf
@@ -1535,6 +1540,20 @@ Das separate Queue-Overlay zeigt den BroBot-Ledger mit festen Zeilen-Slots
 nicht die Spotify-Warteschlange. Modul- und Regel-Einstellungen verwenden
 serverseitige Zod-Validierung sowie `useDraft`, `useDraftGuard` und explizites
 Speichern.
+
+### Statistikabschnitte
+
+Ein Modul kann `statisticsSections` registrieren. Jeder Abschnitt besitzt eine
+stabile `id`, einen deutschen und englischen Titel und lädt seine
+Dashboard-Komponente über `load` erst bei Bedarf. Der gemeinsame Renderer zeigt
+Abschnitte aktivierter Module in der Stream-Detailansicht mit dem Scope
+`{ kind: "stream", streamId }` sowie in der Gesamtansicht mit
+`{ kind: "total" }`. Die geladene Komponente fragt ausschließlich die eigene
+Modulroute ab; der Host reicht `channelId`, Sprache und Scope weiter und blendet
+Abschnitte deaktivierter Module aus. Datenzugriff und Darstellung bleiben im
+Modul, während die Statistikseite Vertrag und Reihenfolge bereitstellt. Das
+Statistikpanel selbst importiert den Renderer nicht (Modulgrenze), sondern
+ruft die vom Host übergebene Funktion `renderStatisticsSections(scope)` auf.
 
 ## Checkliste für ein neues Modul
 

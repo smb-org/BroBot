@@ -1,0 +1,63 @@
+/* Registered so the edge fades interpolate smoothly while the text moves. */
+@property --overlay-marquee-fade-left {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --overlay-marquee-fade-right {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+/* Only an overflowing, moving line is masked: soft edges instead of a hard cut. */
+.overlay-marquee--fading {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--overlay-marquee-fade-left), #000 calc(100% - var(--overlay-marquee-fade-right)), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 var(--overlay-marquee-fade-left), #000 calc(100% - var(--overlay-marquee-fade-right)), transparent 100%);
+  animation-duration: var(--overlay-marquee-duration, 0s);
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.overlay-marquee {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Fits or reduced motion: the text truncates with an ellipsis inside the box. */
+.overlay-marquee__text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Overflowing: the text takes its full width and moves; the keyframes come with the component. */
+.overlay-marquee__text[data-scrolling="true"] {
+  display: inline-block;
+  overflow: visible;
+  text-overflow: clip;
+  animation-duration: var(--overlay-marquee-duration, 0s);
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay-marquee--fading {
+    -webkit-mask-image: none;
+    mask-image: none;
+    animation: none;
+  }
+
+  .overlay-marquee__text[data-scrolling="true"] {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    animation: none;
+  }
+}

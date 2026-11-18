@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import type { z } from "zod";
 import type { AuditWriteAction, ChannelRole, ChannelStreamState, ChannelVariableOperation, ChatOutputTarget } from "../contracts/values";
 import type { DryRunEntryReport } from "../contracts/dry-run";
@@ -250,13 +250,14 @@ export interface ModuleOverlayElementProps {
 
 export interface ModuleOverlayAlertQueueItem {
   imageUrl?: string;
+  avatarUrl?: string;
   soundUrl?: string;
   text: string;
   durationSeconds: number;
   volumePercent: number;
 }
 
-interface ModuleOverlayAlertQueueAccess {
+export interface ModuleOverlayAlertQueueAccess {
   enqueue: (
     operationId: string,
     alert: ModuleOverlayAlertQueueItem,
@@ -572,9 +573,12 @@ export type ModuleDurableAction = {
 export interface ModuleChatVoteStartRequest {
   /** A caller may persist its result mapping before the ballot is exposed. */
   ballotId?: string;
+  kind?: "options" | "yes_no";
   title: string;
   labels: readonly string[];
   durationSeconds: number;
+  /** Receives the closed ballot result through the named handler on the dependent module. */
+  resultHandlerKey?: string;
 }
 
 export type ModuleChatVoteStartResult =
@@ -696,6 +700,7 @@ interface ModuleTwitchUser {
   userId: string;
   login: string;
   displayName: string;
+  profileImageUrl?: string | null;
 }
 
 /** Stable identity for one scheduled timer occurrence. */
@@ -735,6 +740,10 @@ export interface ModuleExecutionContext {
   }>;
   /** Enqueues one durable, idempotent overlay alert and reports live element presence. */
   overlayAlertQueue?: ModuleOverlayAlertQueueAccess;
+  /** Starts a persisted chat_voting ballot through the shared vote owner. */
+  startChatVote?: (request: ModuleChatVoteStartRequest, actor?: ModuleMutationActor) => Promise<ModuleChatVoteStartResult>;
+  /** Casts into the shared chat_voting ballot with one voter identity per channel. */
+  castChatVote?: (ballotId: string, userId: string, choice: number) => Promise<BallotCastResult>;
   /** Returns the same host context with module-owned ledgers bound to another registered module. */
   forModule?: (moduleId: string) => ModuleExecutionContext;
   /** Narrow channel-points redemption operations used by reward action providers. */
@@ -754,6 +763,8 @@ export interface ModuleExecutionContext {
   lookupUserByLogin?: (login: string) => Promise<ModuleTwitchUser | null>;
   /** Looks up one public Twitch user using the connected bot's token. */
   lookupUserByLoginWithBotToken?: (login: string) => Promise<ModuleTwitchUser | null>;
+  /** Resolves public Twitch identity fields by user ID; missing avatar data is allowed. */
+  resolveTwitchUserById?: (userId: string) => Promise<ModuleTwitchUser | null>;
   /** Returns null when Twitch moderator lookup fails. */
   isChannelModerator?: (userId: string) => Promise<boolean | null>;
   /** Checks the channel's recent bot send history for an identity or exact text match. */
@@ -940,6 +951,8 @@ export interface ModuleAlarmContext {
   points: ModulePointsAccess;
   /** Durable, revisioned quiz overlay state used by reconnect bootstrap and broadcast retries. */
   quizOverlaySnapshot: ModuleQuizOverlaySnapshotAccess;
+  /** Runs one registered module alarm synchronously through the channel Durable Object. */
+  runModuleAlarm?: (handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>;
   /** Adds the currently pending account welcome to a threaded game reply. */
   decoratePointWelcome?: (
     action: Extract<ModuleAction, { kind: "chat" }>,
@@ -1006,7 +1019,7 @@ export interface ModuleAlarmContext {
     payload: Readonly<Record<string, unknown>>,
   ) => Promise<void>;
   /** Advances the durable overlay alert queue after the current display duration. */
-  overlayAlertQueue?: Pick<ModuleOverlayAlertQueueAccess, "advance">;
+  overlayAlertQueue?: Pick<ModuleOverlayAlertQueueAccess, "advance" | "enqueue">;
   /** Sends scheduled output with an occurrence claim; automated output uses the shared channel limit by default. */
   sendChat: (
     text: string,
@@ -2225,6 +2238,27 @@ export interface RegisteredChannelPointsAction {
   definition: ChannelPointsActionDefinition;
 }
 
+export type ModuleStatisticsSectionScope =
+  | { kind: "stream"; streamId: string }
+  | { kind: "total" };
+
+export interface ModuleStatisticsSectionProperties {
+  channelId: string;
+  language: ModuleLanguage;
+  scope: ModuleStatisticsSectionScope;
+}
+
+/** A module-owned block rendered by the statistics page in the requested scope. */
+interface ModuleStatisticsSectionDefinition {
+  id: string;
+  title: Readonly<Record<ModuleLanguage, string>>;
+  load: () => Promise<{ default: ComponentType<ModuleStatisticsSectionProperties> }>;
+}
+
+export interface ModuleRegisteredStatisticsSection extends ModuleStatisticsSectionDefinition {
+  moduleId: string;
+}
+
 /** Shared props for lazily loaded panel views. */
 export interface ModulePanelProperties {
   channelId: string;
@@ -2246,6 +2280,8 @@ export interface ModulePanelProperties {
   moduleActive?: boolean;
   /** Generic data-source conditions available to text-block editors. */
   textBlockConditions?: readonly ModuleTextBlockConditionDefinition[];
+  /** Renders the statistics sections of the modules enabled in this channel for one scope. */
+  renderStatisticsSections?: (scope: ModuleStatisticsSectionScope) => ReactNode;
   /** Last known status of the bot's moderator role in this channel. */
   botIsModerator?: boolean | null;
   /** Slot in the page header's action row; a panel may portal page-level buttons into it. */
@@ -2523,6 +2559,10 @@ export interface ModuleRouteVariables {
   authorizeManagementMutation: AuthorizeModuleMutation;
   /** Returns secret access bound to the authorized route channel and mounted module. */
   secrets: (channelId: string) => ModuleSecretAccess;
+  /** Returns the authorized channel's durable overlay alert queue. */
+  overlayAlertQueue?: (channelId: string) => Pick<ModuleOverlayAlertQueueAccess, "enqueue">;
+  /** Resolves public Twitch identity fields by user ID; missing avatar data is allowed. */
+  resolveTwitchUserById?: (channelId: string, userId: string) => Promise<ModuleTwitchUser | null>;
   externalFetchBudget: ModuleExternalFetchBudget;
   /** Returns ballot access bound to the authorized route channel and mounted module. */
   ballots: (channelId: string) => ModuleBallotAccess;
@@ -2771,10 +2811,12 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   startChatVote?: (
     context: ModuleExecutionContext,
     request: ModuleChatVoteStartRequest,
-    actor: ModuleMutationActor,
+    actor?: ModuleMutationActor,
   ) => Promise<ModuleChatVoteStartResult>;
   /** Receives host-dispatched durable module actions such as a closed chat ballot. */
   handleDurableAction?: (context: ModuleAlarmContext, action: ModuleDurableAction) => Promise<void>;
+  /** Lazy dashboard statistics sections rendered in stream detail and total scopes. */
+  statisticsSections?: readonly ModuleStatisticsSectionDefinition[];
   /** Overlay presentation declarations, with view and editor chunks loaded on demand. */
   overlayElements?: readonly ModuleOverlayElementDefinition[];
   /** Realtime element kinds a later overlay slice will implement without registering an element UI yet. */
@@ -2879,6 +2921,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   settingsEditorRelatedParts?: readonly string[];
   /** Places the settings editor before a potentially long module panel. */
   settingsEditorPlacement?: "before-panel" | "after-panel" | "page";
+  /** Navigation entry that owns a page-level settings editor; other entries keep the module panel. */
+  settingsEditorPageId?: string;
   /** Server-side semantic validation after the shared settings schema parses. */
   validateSettings?: (settings: z.output<SettingsSchema>) => string | null;
   /** Reconciles one module-owned alarm immediately after settings are saved. */

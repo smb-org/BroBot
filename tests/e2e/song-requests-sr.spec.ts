@@ -98,7 +98,7 @@ test("!sr supports moderated approval and rejection, then automatic submission",
   await expect.poll(async () => {
     const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/queue`, { headers: apiHeaders });
     return response.ok() ? await response.json() as unknown : null;
-  }).toMatchObject({ count: 1, items: [{ title: "Glass Harbor", state: "pending_review" }] });
+  }).toMatchObject({ count: 1, items: [{ title: "Mira Vale – Glass Harbor (Quiet Atlas)", state: "pending_review" }] });
   const waiting = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/queue`, { headers: apiHeaders });
   const firstRequestId = ((await waiting.json()) as { items: Array<{ requestId: string }> }).items[0]?.requestId;
   if (firstRequestId === undefined) throw new Error("The moderated song request was not added to the queue.");
@@ -109,12 +109,14 @@ test("!sr supports moderated approval and rejection, then automatic submission",
     const body = await response.json() as { requests: Array<{ requestId: string; state: string }> };
     return body.requests.find((row) => row.requestId === firstRequestId)?.state;
   }, { timeout: 25_000 }).toBe("submitted");
+  await page.reload();
+  await expect(page.getByRole("link", { name: "Mira Vale – Glass Harbor (Quiet Atlas)" })).toBeVisible();
 
   await command("viewer-sr-reject", "quiet_viewer", "!sr spotify:track:quietatlas02");
   await expect.poll(async () => {
     const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/queue`, { headers: apiHeaders });
     return response.ok() ? await response.json() as unknown : null;
-  }).toMatchObject({ count: 1, items: [{ title: "Quiet Atlas", state: "pending_review" }] });
+  }).toMatchObject({ count: 1, items: [{ title: "Mira Vale – Quiet Atlas (Glass Harbor)", state: "pending_review" }] });
   const secondQueue = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/queue`, { headers: apiHeaders });
   const secondRequestId = ((await secondQueue.json()) as { items: Array<{ requestId: string }> }).items[0]?.requestId;
   if (secondRequestId === undefined) throw new Error("The second moderated request was not added to the queue.");
@@ -243,7 +245,7 @@ test("channel-point song redemptions stay in the moderated queue and resolve on 
   await expect.poll(async () => {
     const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/queue`, { headers: apiHeaders });
     return response.ok() ? await response.json() as unknown : null;
-  }).toMatchObject({ count: 1, items: [{ title: "Glass Harbor", state: "pending_review" }] });
+  }).toMatchObject({ count: 1, items: [{ title: "Mira Vale – Glass Harbor (Quiet Atlas)", state: "pending_review" }] });
   const channelPointsQueue = await page.request.get(
     `${e2eWorkerOrigin}/api/channels/${channelId}/modules/channel_points/queue`, { headers: apiHeaders },
   );
@@ -272,7 +274,7 @@ test("channel-point song redemptions stay in the moderated queue and resolve on 
   await expect.poll(async () => {
     const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/queue`, { headers: apiHeaders });
     return response.ok() ? await response.json() as unknown : null;
-  }).toMatchObject({ count: 1, items: [{ title: "Quiet Atlas", state: "pending_review" }] });
+  }).toMatchObject({ count: 1, items: [{ title: "Mira Vale – Quiet Atlas (Glass Harbor)", state: "pending_review" }] });
   const rejectedQueue = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/queue`, { headers: apiHeaders });
   const rejectedRequestId = ((await rejectedQueue.json()) as { items: Array<{ requestId: string }> }).items[0]?.requestId;
   if (rejectedRequestId === undefined) throw new Error("The second channel-points request was not added to moderation.");

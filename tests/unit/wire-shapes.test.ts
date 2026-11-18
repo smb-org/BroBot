@@ -246,6 +246,9 @@ const panelPlatformAuditEntry: PanelPlatformAuditEntry = {
   actorUserId: panelAuditEntry.actorUserId ?? "user-1",
   actorKind: "platform_admin",
   channelId: "kanal-a",
+  subjectUserId: "user-2",
+  subjectLogin: "viewer_one",
+  subjectDisplayName: "Viewer One",
 };
 
 const panelForms = {
@@ -411,6 +414,14 @@ const expectedModuleSettings = {
     alsoOffline: false,
     queueOverlayRows: 10,
     emptyText: "",
+    queuedText: "„{song.track}“ wurde in Spotify eingereiht. Position {song.position}.",
+    queuedTextEnabled: true,
+    waitingText: "„{song.track}“ wartet auf die Freigabe durch die Moderation.",
+    waitingTextEnabled: true,
+    requestAlertText: "{user} · {song.type}: {song.track}",
+    requestAlertTextEnabled: true,
+    skipVote: { enabled: false, threshold: 5, cooldownSeconds: 120 },
+    requestAlert: { enabled: true },
     rules: {
       duplicateEnabled: true,
       songCooldownEnabled: true,
@@ -900,9 +911,9 @@ describe("serialized contract shapes", () => {
         "$.panel.modulesResponse: modules",
         "$.panel.modulesResponse.modules[]: enabled,id,missingBroadcasterScopes,requiredBroadcasterScopes,settings",
         "$.panel.moduleState: enabled,id,missingBroadcasterScopes,requiredBroadcasterScopes,settings",
-        "$.panel.platformAuditEntry: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,channelId,createdAt,moduleId",
+        "$.panel.platformAuditEntry: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,channelId,createdAt,moduleId,subjectDisplayName,subjectLogin,subjectUserId",
         "$.panel.platformAuditResponse: entries,nextCursor",
-        "$.panel.platformAuditResponse.entries[]: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,channelId,createdAt,moduleId",
+        "$.panel.platformAuditResponse.entries[]: action,actorDisplayName,actorKind,actorLogin,actorUserId,after,auditId,before,channelId,createdAt,moduleId,subjectDisplayName,subjectLogin,subjectUserId",
         "$.panel.platformChannel: broadcasterConnected,channelId,displayName,fullConsent,login,memberCounts",
         "$.panel.platformChannel.memberCounts: broadcaster,manager,operator",
         "$.panel.platformMembers: broadcasterCount,members,nextCursor,viewerUserId",

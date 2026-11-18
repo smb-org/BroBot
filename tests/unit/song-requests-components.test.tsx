@@ -25,7 +25,7 @@ describe("song request components", () => {
   it("renders a fixed now-playing card with Spotify attribution and vote label", () => {
     const { container } = render(<SongRequestsNowPlaying
       config={{ showCover: true, showRequester: true }}
-      state={{ revision: 1, serverNow: "2026-11-15T12:00:00.000Z", track: { ...track, artist: "Mira Vale", requester: null, source: "mod_vote" } }}
+      state={{ revision: 1, serverNow: "2026-11-15T12:00:00.000Z", track: { ...track, artist: "Mira Vale", requester: null, source: "mod_vote", durationMs: 296_000, progressMs: 83_000 } }}
       now={Date.parse("2026-11-15T12:00:00.000Z")}
       language="en"
     />);
@@ -33,6 +33,18 @@ describe("song request components", () => {
     expect(container.querySelector(".song-requests-now-playing__spotify")).toHaveTextContent("Spotify");
     expect(container.querySelector(".song-requests-now-playing__requester")).toHaveTextContent("Song vote");
     expect(container.querySelector(".song-requests-now-playing")).toHaveStyle({ width: "640px", height: "112px" });
+    expect(container.querySelector(".song-requests-now-playing__progress")).toBeInTheDocument();
+    expect(container.querySelector(".song-requests-now-playing__progress")).toHaveTextContent("1:23 / 4:56");
+  });
+
+  it("omits the progress row when progress is disabled", () => {
+    const { container } = render(<SongRequestsNowPlaying
+      config={{ showCover: true, showRequester: true, showProgress: false }}
+      state={{ revision: 2, serverNow: "2026-11-15T12:00:00.000Z", track: { ...track, artist: "Mira Vale", requester: null, source: "mod_vote" } }}
+      now={Date.parse("2026-11-15T12:00:00.000Z")}
+      language="en"
+    />);
+    expect(container.querySelector(".song-requests-now-playing__progress")).not.toBeInTheDocument();
   });
 
   it("keeps the idle element reserved and renders its configured empty text", () => {
@@ -135,82 +147,19 @@ describe("song request components", () => {
     });
   });
 
-  it("saves player empty text only after the Save action", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
-      const url = urlOf(input);
-      if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-song-request" }));
-      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "Pick a song", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
-      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings("Pick a song"), revision: 3 }));
-      return Promise.resolve(json({ settings: settings("Up next"), revision: 4 }));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    renderPanel();
-    const field = await screen.findByRole("textbox", { name: "Player empty text" });
-    fireEvent.change(field, { target: { value: "Up next" } });
-
-    expect(fetcher.mock.calls.some(([input, init]) => urlOf(input).pathname.endsWith("/settings") && init?.method === "PATCH")).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() => {
-      expect(fetcher.mock.calls.some(([input, init]) => urlOf(input).pathname.endsWith("/settings") && init?.method === "PATCH")).toBe(true);
-    });
-    const saveCall = fetcher.mock.calls.find(([input, init]) => urlOf(input).pathname.endsWith("/settings") && init?.method === "PATCH");
-    expect(JSON.parse(typeof saveCall?.[1]?.body === "string" ? saveCall[1].body : "{}")).toMatchObject({
-      revision: 3,
-      settings: { emptyText: "Up next" },
-    });
-  });
-
-  it("explains that saved bot point mode is unavailable while points is disabled", async () => {
+  it("leaves all settings controls to the shared settings editor", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
-      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({
-        enabled: true, hasCredentials: true, slot: 2, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: false,
-      }));
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
       if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
-      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 3 }));
       return Promise.resolve(json({}));
     }));
     renderPanel();
+    await screen.findByText("Spotify is connected.");
 
-    expect(await screen.findByText(/The points module is disabled/u)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Switch to free" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Player empty text" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Bot points" })).not.toBeInTheDocument();
-  });
-
-  it("switches the saved payment mode between free and bot points explicitly", async () => {
-    let savedSettings = settings();
-    let revision = 3;
-    const respond = (input: Parameters<typeof fetch>[0], init?: RequestInit): Response => {
-      const url = urlOf(input);
-      if (url.pathname === "/api/csrf") return json({ token: "csrf-payment-mode" });
-      if (url.pathname.endsWith("/connection")) return json({
-        enabled: true, hasCredentials: true, slot: 2, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true,
-      });
-      if (url.pathname.endsWith("/requests")) return json({ requests: [], voteOutcomes: [] });
-      if (url.pathname.endsWith("/settings") && init?.method === "PATCH") {
-        const body = JSON.parse(typeof init.body === "string" ? init.body : "{}") as { settings?: unknown };
-        savedSettings = songRequestsSettingsSchema.parse(body.settings);
-        revision += 1;
-        return json({ settings: savedSettings, revision });
-      }
-      if (url.pathname.endsWith("/settings")) return json({ settings: savedSettings, revision });
-      return json({});
-    };
-    const fetcher = vi.fn<typeof fetch>().mockImplementation((input, init) => Promise.resolve(respond(input, init)));
-    vi.stubGlobal("fetch", fetcher);
-    renderPanel();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Free" }));
-    expect(await screen.findByLabelText("Free requests from role")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => { expect(savedSettings.paymentMode).toBe("free"); });
-
-    fireEvent.click(await screen.findByRole("button", { name: "Bot points" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => { expect(savedSettings.paymentMode).toBe("bot_points"); });
-    expect(fetcher.mock.calls.filter(([input, init]) => urlOf(input).pathname.endsWith("/settings") && init?.method === "PATCH")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 
   it("shows Spotify state and starts a vote from a deterministic three-track search", async () => {
@@ -223,7 +172,10 @@ describe("song request components", () => {
       const url = urlOf(input);
       if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-e2e" }));
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 3, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [{ ballotId: "ballot-tie", state: "tie", createdAt: "2026-11-15T19:00:00.000Z" }] }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [
+        { ballotId: "ballot-drawn", state: "drawn", drawnByLot: true, createdAt: "2026-11-15T19:00:00.000Z" },
+        { ballotId: "ballot-tie", state: "tie", drawnByLot: false, createdAt: "2026-11-15T18:00:00.000Z" },
+      ] }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings("Pick a song"), revision: 3 }));
       if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: searchTracks }));
       if (url.pathname.endsWith("/vote")) return Promise.resolve(json({ ballotId: "ballot-fictional" }, 201));
@@ -233,9 +185,10 @@ describe("song request components", () => {
     renderPanel();
     await screen.findByText("Spotify is connected.");
     await screen.findByText("Tie · nothing queued");
+    await screen.findByText("Tie · drawn by lot");
     fireEvent.change(screen.getByRole("textbox", { name: "Track, Spotify link, or URI" }), { target: { value: "Glass Harbor" } });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
-    await screen.findByText("Silver Current");
+    await screen.findByText("Mira Vale – Silver Current");
     for (const title of ["Glass Harbor", "Quiet Atlas", "Silver Current"]) {
       fireEvent.click(screen.getByRole("button", { name: `Add ${title} to vote` }));
     }
@@ -266,7 +219,7 @@ describe("song request components", () => {
     });
     vi.stubGlobal("fetch", fetcher);
     renderPanel();
-    await screen.findByText("Paid Track");
+    await screen.findByText("Mira Vale – Paid Track");
 
     fireEvent.click(screen.getByRole("button", { name: "Actions: Free Track" }));
     expect(await screen.findByRole("menuitem", { name: "Remove" })).toBeInTheDocument();

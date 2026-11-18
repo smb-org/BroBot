@@ -18,7 +18,7 @@ const environmentKey = {
   SESSION_ENCRYPTION_KEYS: JSON.stringify({ active: { id: "encryption-v1", key: key(2) }, retired: [] }),
 };
 
-const platformId = "26876135";
+const platformId = "90000001";
 
 const environmentFor = (database: TestD1Database, platform = [platformId]): Env => ({
   DB: database as unknown as D1Database,
@@ -512,7 +512,7 @@ describe("Platform admin level", () => {
     expect(secondPage.nextCursor).toBeNull();
   });
 
-  it("resolves platform-admin audit actors in bulk and keeps unresolved ids", async () => {
+  it("resolves platform audit actors and member targets in one bulk lookup", async () => {
     await setPlatform(database);
     await insertChannel(database, "kanal-a");
     await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
@@ -522,14 +522,25 @@ describe("Platform admin level", () => {
         (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
        VALUES (?, ?, ?, ?, NULL, ?, '{}', '{}', ?), (?, ?, ?, ?, NULL, ?, '{}', '{}', ?)`,
     ).bind(
-      "audit-aufgelöst", "betreiber", "2026-09-18T00:00:02.000Z", "kanal-a", "channel.released", "platform_admin",
-      "audit-ungelöst", "gelöscht", "2026-09-18T00:00:01.000Z", "kanal-a", "channel.full_consent_changed", "platform_admin",
+      "audit-aufgelöst", "300000001", "2026-09-18T00:00:02.000Z", "kanal-a", "channel.released", "platform_admin",
+      "audit-ungelöst", "300000002", "2026-09-18T00:00:01.000Z", "kanal-a", "channel.full_consent_changed", "platform_admin",
+    ).run();
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
+       VALUES (?, ?, ?, ?, NULL, ?, '{}', ?, ?)`,
+    ).bind(
+      "audit-member-added", "300000001", "2026-09-18T00:00:03.000Z", "kanal-a", "member.added",
+      JSON.stringify({ userId: "300000003", role: "operator" }), "platform_admin",
     ).run();
     const twitch = vi.fn((input: RequestInfo | URL) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
       expect(url.pathname).toBe("/helix/users");
-      expect(url.searchParams.getAll("id")).toEqual(["betreiber", "gelöscht"]);
-      return Promise.resolve(responseFromHelix([{ id: "betreiber", login: "esembe", display_name: "Esembe" }]));
+      expect(url.searchParams.getAll("id")).toEqual(["300000001", "300000002", "300000003"]);
+      return Promise.resolve(responseFromHelix([
+        { id: "300000001", login: "operator_test", display_name: "Operator Test" },
+        { id: "300000003", login: "viewer_one", display_name: "Viewer One" },
+      ]));
     });
     vi.stubGlobal("fetch", twitch);
 
@@ -542,8 +553,48 @@ describe("Platform admin level", () => {
     expect(response.status).toBe(200);
     expect(twitch).toHaveBeenCalledTimes(1);
     expect(body.entries).toEqual([
-      expect.objectContaining({ actorUserId: "betreiber", actorLogin: "esembe", actorDisplayName: "Esembe", actorKind: "platform_admin" }),
-      expect.objectContaining({ actorUserId: "gelöscht", actorLogin: null, actorDisplayName: null, actorKind: "platform_admin" }),
+      expect.objectContaining({ actorUserId: "300000001", actorLogin: "operator_test", actorDisplayName: "Operator Test", subjectUserId: "300000003", subjectLogin: "viewer_one", subjectDisplayName: "Viewer One", actorKind: "platform_admin" }),
+      expect.objectContaining({ actorUserId: "300000001", actorLogin: "operator_test", actorDisplayName: "Operator Test", actorKind: "platform_admin" }),
+      expect.objectContaining({ actorUserId: "300000002", actorLogin: null, actorDisplayName: null, actorKind: "platform_admin" }),
+    ]);
+  });
+
+  it("sends only numeric ids to Helix and keeps non-numeric ids for fallback display", async () => {
+    await setPlatform(database);
+    await insertChannel(database, "kanal-a");
+    await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
+    await setBotIdentity(database);
+    await database.prepare(
+      `INSERT INTO audit_log
+        (audit_id, actor_user_id, created_at, channel_id, module_id, action, before_json, after_json, actor_kind)
+       VALUES (?, ?, ?, ?, NULL, ?, '{}', ?, ?), (?, ?, ?, ?, NULL, ?, '{}', ?, ?)`,
+    ).bind(
+      "audit-numeric", "300000001", "2026-09-18T00:00:02.000Z", "kanal-a", "member.added",
+      JSON.stringify({ userId: "300000003", role: "operator" }), "platform_admin",
+      "audit-text-subject", "operator_text_id", "2026-09-18T00:00:01.000Z", "kanal-a", "member.added",
+      JSON.stringify({ userId: "viewer_one_id", role: "operator" }), "platform_admin",
+    ).run();
+    const twitch = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      expect(url.searchParams.getAll("id")).toEqual(["300000001", "300000003"]);
+      return Promise.resolve(responseFromHelix([
+        { id: "300000001", login: "operator_test", display_name: "Operator Test" },
+        { id: "300000003", login: "viewer_one", display_name: "Viewer One" },
+      ]));
+    });
+    vi.stubGlobal("fetch", twitch);
+
+    const response = await platformRouter.fetch(
+      await requestFor(platformId, "/api/platform/audit"),
+      environment,
+    );
+    const body = await response.json<{ entries: Array<Record<string, unknown>> }>();
+
+    expect(response.status).toBe(200);
+    expect(twitch).toHaveBeenCalledTimes(1);
+    expect(body.entries).toEqual([
+      expect.objectContaining({ actorUserId: "300000001", actorLogin: "operator_test", subjectUserId: "300000003", subjectLogin: "viewer_one" }),
+      expect.objectContaining({ actorUserId: "operator_text_id", actorLogin: null, subjectUserId: "viewer_one_id", subjectLogin: null }),
     ]);
   });
 });

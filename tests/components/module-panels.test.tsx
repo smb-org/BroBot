@@ -96,6 +96,7 @@ const editorFixture = vi.hoisted(() => {
 });
 
 const activeLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: () => <p>Panel geladen</p> })));
+const entryPanelLoader = vi.hoisted(() => vi.fn(() => Promise.resolve({ default: ({ language }: { language?: string }) => <p>{language === "en" ? "Live requests" : "Live song requests"}</p> })));
 const relatedPanelLoader = vi.hoisted(() => vi.fn());
 const belaboxPanelLoader = vi.hoisted(() => vi.fn());
 
@@ -191,6 +192,20 @@ vi.mock("../../src/modules/registry", () => ({
       settingsEditorPlacement: "page",
     },
     {
+      id: "editor-entry-fixture",
+      navigationCategory: "stream",
+      settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {}, extraMessage: {} } },
+      defaultSettings: { amount: 2, handle: "", labels: "", message: "Hello {viewer}", mode: "automatic", enabled: true, threshold: 4, extraMessage: "Extra value" },
+      navigationEntries: [
+        { id: "requests", label: { de: "Localized requests", en: "Song requests" }, iconKind: "music" },
+        { id: "settings", label: { de: "Localized settings", en: "Settings" }, iconKind: "system" },
+      ],
+      panel: entryPanelLoader,
+      settingsEditor: editorFixture.loader,
+      settingsEditorPlacement: "page",
+      settingsEditorPageId: "settings",
+    },
+    {
       id: "editor-before-fixture",
       navigationCategory: "chat",
       settingsSchema: { shape: { amount: {}, handle: {}, labels: {}, message: {}, mode: {}, enabled: {}, threshold: {}, extraMessage: {} } },
@@ -277,13 +292,19 @@ const renderSettingsFixture = (
   />, queryOptions);
 };
 
+const setBrowserLanguage = (language: string): void => {
+  Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
+};
+
 describe("Module panel loader", () => {
   afterEach(() => {
     cleanup();
     for (const toast of toastsSnapshot()) dismissToast(toast.id);
     vi.unstubAllGlobals();
+    setBrowserLanguage("de-DE");
     editorFixture.loader.mockClear();
     editorFixture.belaboxLoader.mockClear();
+    entryPanelLoader.mockClear();
     belaboxPanelLoader.mockClear();
     completeBelaboxRemoval = undefined;
   });
@@ -319,6 +340,44 @@ describe("Module panel loader", () => {
 
     expect(await screen.findByText("Panel geladen")).toBeInTheDocument();
     expect(activeLoader).toHaveBeenCalledTimes(1);
+  });
+
+  it("binds a page-level settings editor to its declared navigation entry", async () => {
+    setBrowserLanguage("en-US");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({
+      settings: editorFixtureSettings,
+      revision: 1,
+      variables: [],
+    }))));
+    const common = {
+      channelId: "kanal-a",
+      moduleId: "editor-entry-fixture",
+      ownRole: "manager" as const,
+      modules: [{ id: "editor-entry-fixture", enabled: true, settings: "{}" }],
+      activeModules: [{ moduleId: "editor-entry-fixture", settings: "{}" }],
+      onNavigate: vi.fn(),
+      onToggle: vi.fn(),
+    };
+    const view = renderWithUiProvider(<ModulePage {...common} />);
+
+    expect(await screen.findByText("Live requests")).toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton", { name: "Amount" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Song requests", level: 1 })).toBeInTheDocument();
+
+    view.rerender(<UiProvider><ModulePage {...common} pageId="settings" /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Settings", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("spinbutton", { name: "Amount" })).toBeInTheDocument();
+    expect(screen.queryByText("Live requests")).not.toBeInTheDocument();
+    expect(entryPanelLoader).toHaveBeenCalledTimes(1);
+
+    setBrowserLanguage("de-DE");
+    view.rerender(<UiProvider><ModulePage {...common} pageId="settings" /></UiProvider>);
+
+    expect(await screen.findByRole("heading", { name: "Localized settings", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("spinbutton", {
+      name: editorFixture.definition.locales.de.fields.amount.label,
+    })).toBeInTheDocument();
   });
 
   it("keeps declared chat command help in the module header while module data loads", async () => {

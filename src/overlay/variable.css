@@ -4,7 +4,7 @@
   background-color: var(--brobot-overlay-background, var(--brobot-overlay-legacy-background, transparent));
   color: var(--brobot-overlay-text-color, var(--brobot-overlay-legacy-text-color, rgba(255, 255, 255, 0.96)));
   font-family: var(--brobot-overlay-font-family, system-ui, sans-serif);
-  font-size: var(--brobot-overlay-font-size, 48px);
+  font-size: var(--brobot-overlay-font-size, 32px);
   font-weight: var(--brobot-overlay-font-weight, 700);
   line-height: var(--brobot-overlay-line-height, 1.1);
   letter-spacing: var(--brobot-overlay-letter-spacing, normal);

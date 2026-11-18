@@ -1,5 +1,5 @@
 import {
-  Banknote, BookOpenText, Braces, Clapperboard, Coins, CloudSun, Crown, Database, FlaskConical, Megaphone, MessageCircleQuestion,
+  Banknote, BookOpenText, Braces, Clapperboard, Coins, CloudSun, Crown, Database, FlaskConical, Megaphone, MessageCircleQuestion, Music2,
   MessageSquareText, Radio, RadioTower, ScrollText, Settings, Settings2, ShieldAlert, Signal, Sword, Timer, Zap,
   ToggleRight, UsersRound, Vote,
 } from "lucide-react";
@@ -27,6 +27,7 @@ const iconByKind: Readonly<Record<string, LucideIcon>> = {
   raid: RadioTower,
   belabox: Signal,
   coins: Coins,
+  music: Music2,
   data: Database,
   commands: MessageSquareText,
   blitz: Zap,
