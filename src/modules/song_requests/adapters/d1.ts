@@ -779,17 +779,58 @@ export const songRequestRefundDueIds = async (
   return rows.results.map((row) => row.id);
 };
 
+export interface SongRequestNowPlaying {
+  requestId: string;
+  playing: boolean;
+}
+
+interface SongRequestNowPlayingSqlRow {
+  request_id: string | null;
+  track_json: string | null;
+}
+
+const prepareRecentSongRequests = (db: D1Database, channelId: string, roundId: string | null): D1PreparedStatement => db.prepare(
+  `SELECT id, source, track_id, track_uri, title, artists_json, album_name, duration_ms, explicit, cover_url, spotify_url,
+          requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason,
+          stream_id, round_id, request_type, charged_amount, channel_points_reward_id, chat_message_id,
+          channel_points_resolution_due, channel_points_resolution_completed, refund_due, submitted_at, created_at, updated_at
+     FROM song_requests
+    WHERE channel_id = ? AND round_id IS ? AND state != 'charging'
+    ORDER BY created_at DESC, id DESC LIMIT 50`,
+).bind(channelId, roundId);
+
+const nowPlayingFromRow = (row: SongRequestNowPlayingSqlRow | undefined): SongRequestNowPlaying | null => {
+  if (row?.request_id == null) return null;
+  let playing = true;
+  if (row.track_json !== null) {
+    try {
+      const track: unknown = JSON.parse(row.track_json);
+      if (typeof track === "object" && track !== null && !Array.isArray(track) && (track as Record<string, unknown>).playing === false) {
+        playing = false;
+      }
+    } catch { /* Preserve pointer behavior for older or damaged snapshots. */ }
+  }
+  return { requestId: row.request_id, playing };
+};
+
 export const recentSongRequests = async (db: D1Database, channelId: string, roundId: string | null): Promise<SongRequestRow[]> => {
-  const rows = await db.prepare(
-    `SELECT id, source, track_id, track_uri, title, artists_json, album_name, duration_ms, explicit, cover_url, spotify_url,
-            requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason,
-            stream_id, round_id, request_type, charged_amount, channel_points_reward_id, chat_message_id,
-            channel_points_resolution_due, channel_points_resolution_completed, refund_due, submitted_at, created_at, updated_at
-       FROM song_requests
-      WHERE channel_id = ? AND round_id IS ? AND state != 'charging'
-      ORDER BY created_at DESC, id DESC LIMIT 50`,
-  ).bind(channelId, roundId).all<SongRequestSqlRow>();
+  const rows = await prepareRecentSongRequests(db, channelId, roundId).all<SongRequestSqlRow>();
   return rows.results.map(rowToRequest);
+};
+
+export const recentSongRequestsAndNowPlaying = async (
+  db: D1Database,
+  channelId: string,
+  roundId: string | null,
+): Promise<{ requests: SongRequestRow[]; nowPlaying: SongRequestNowPlaying | null }> => {
+  const [requestRows, nowPlayingRows] = await db.batch([
+    prepareRecentSongRequests(db, channelId, roundId),
+    db.prepare("SELECT request_id, track_json FROM song_requests_now_playing WHERE channel_id = ?").bind(channelId),
+  ]) as [D1Result<SongRequestSqlRow>, D1Result<SongRequestNowPlayingSqlRow>];
+  return {
+    requests: requestRows.results.map(rowToRequest),
+    nowPlaying: nowPlayingFromRow(nowPlayingRows.results[0]),
+  };
 };
 
 export interface SongVoteOutcome {

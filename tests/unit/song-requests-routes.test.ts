@@ -2,12 +2,12 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModuleAlarmContext, ModuleChatVoteStartRequest, ModuleRouteEnvironment } from "../../src/modules/contract";
-import { transitionRequest } from "../../src/modules/song_requests/adapters/d1";
+import { createNowPlayingSnapshot, transitionRequest } from "../../src/modules/song_requests/adapters/d1";
 import { songRequestsRoutes } from "../../src/modules/song_requests/routes";
 import { handleSongRequestDurableAction, spotifyAccessToken } from "../../src/modules/song_requests/service";
 import { beginSpotifyOAuth, spotifyOAuthStateCookie } from "../../src/worker/auth/spotify-oauth";
 import { insertChannel, testKey } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const CHANNEL_ID = "song-requests-open-vote";
 const TRACK_IDS = ["glassharbor01", "quietatlas02"];
@@ -30,6 +30,121 @@ afterEach(() => {
 });
 
 describe("song request routes", () => {
+  it("returns the channel's now-playing request id and null for a snapshot without a request", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    const otherChannelId = "song-requests-now-playing-other";
+    await insertChannel(database, CHANNEL_ID);
+    await insertChannel(database, otherChannelId);
+    await database.prepare(
+      "INSERT INTO song_requests_now_playing (channel_id, revision, track_json, request_id) VALUES (?, 1, ?, ?)",
+    ).bind(CHANNEL_ID, JSON.stringify({ playing: true }), "request-current-fictional").run();
+    await database.prepare(
+      "INSERT INTO song_requests_now_playing (channel_id, revision, track_json, request_id) VALUES (?, 1, ?, NULL)",
+    ).bind(otherChannelId, JSON.stringify({ playing: false })).run();
+
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "operator");
+      await next();
+    });
+    app.route("/channels/:channelId", songRequestsRoutes);
+    const batch = vi.fn((statements: TestPreparedStatement[]) => database.batch(statements));
+    const routeDatabase = {
+      prepare: database.prepare.bind(database),
+      batch,
+    } as unknown as D1Database;
+    const env = { DB: routeDatabase } as ModuleRouteEnvironment["Bindings"];
+
+    const currentResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests`), env);
+    expect(currentResponse.status).toBe(200);
+    await expect(currentResponse.json()).resolves.toEqual({
+      requests: [], voteOutcomes: [], nowPlaying: { requestId: "request-current-fictional", playing: true },
+    });
+
+    const otherResponse = await app.fetch(new Request(`https://brobot.example/channels/${otherChannelId}/requests`), env);
+    expect(otherResponse.status).toBe(200);
+    await expect(otherResponse.json()).resolves.toEqual({ requests: [], voteOutcomes: [], nowPlaying: null });
+    expect(batch).toHaveBeenCalledTimes(2);
+    for (const [statements] of batch.mock.calls) {
+      expect(statements.map(({ sql }) => sql)).toEqual([
+        expect.stringContaining("FROM song_requests"),
+        expect.stringContaining("FROM song_requests_now_playing WHERE channel_id = ?"),
+      ]);
+      expect(statements[0]?.sql).toContain("WHERE channel_id = ? AND round_id IS ?");
+    }
+  });
+
+  it("reports a request as paused and playing again from its now-playing snapshot", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
+    const streamId = "stream-fictional-current";
+    const now = "2026-11-17T19:00:00.000Z";
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, stream_id, started_at)
+       VALUES (?, 'online', ?, 'eventsub', ?, ?)`,
+    ).bind(CHANNEL_ID, now, streamId, now).run();
+    const db = database as unknown as D1Database;
+    const track = spotifyTrack(TRACK_IDS[0] ?? "glassharbor01");
+    const requestId = "request-paused-fictional";
+    await transitionRequest(db, {
+      channelId: CHANNEL_ID,
+      requestId,
+      fromState: null,
+      toState: "approved",
+      now,
+      newRequest: {
+        source: "mod_vote",
+        requestType: "vote",
+        track: {
+          id: track.id,
+          uri: track.uri,
+          title: track.name,
+          artists: track.artists.map(({ name }) => name),
+          albumName: track.album.name,
+          durationMs: track.duration_ms,
+          explicit: track.explicit,
+          coverUrl: null,
+          spotifyUrl: track.external_urls.spotify,
+        },
+        operationId: requestId,
+        streamId,
+      },
+    });
+    await transitionRequest(db, { channelId: CHANNEL_ID, requestId, fromState: "approved", toState: "submitting", now });
+    await transitionRequest(db, { channelId: CHANNEL_ID, requestId, fromState: "submitting", toState: "submitted", now });
+    await createNowPlayingSnapshot(db, CHANNEL_ID, streamId, track, now, 0);
+
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "operator");
+      await next();
+    });
+    app.route("/channels/:channelId", songRequestsRoutes);
+    const fetchRequests = async (): Promise<{
+      requests: Array<{ requestId: string; state: string }>;
+      nowPlaying: { requestId: string; playing: boolean } | null;
+    }> => {
+      const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests`), { DB: db });
+      expect(response.status).toBe(200);
+      return await response.json();
+    };
+
+    await createNowPlayingSnapshot(db, CHANNEL_ID, streamId, track, now, 0, undefined, false);
+    await expect(fetchRequests()).resolves.toMatchObject({
+      requests: [expect.objectContaining({ requestId, state: "observed_playing" })],
+      nowPlaying: { requestId, playing: false },
+    });
+    await createNowPlayingSnapshot(db, CHANNEL_ID, streamId, track, now, 0, undefined, true);
+    await expect(fetchRequests()).resolves.toMatchObject({
+      requests: [expect.objectContaining({ requestId, state: "observed_playing" })],
+      nowPlaying: { requestId, playing: true },
+    });
+  });
+
   it("does not offer a Twitch refund for a fulfilled channel-point request", async () => {
     const database = new TestD1Database();
     databases.push(database);

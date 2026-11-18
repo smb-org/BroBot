@@ -242,7 +242,7 @@ function ChapterInspector({
               const added = draft.value.tracks.some(({ id }) => id === track.id);
               return <div role="listitem" key={track.id}>
                 <ListRow href={track.spotifyUrl} onNavigate={() => { window.open(track.spotifyUrl, "_blank", "noopener,noreferrer"); }}
-                  icon={track.coverUrl === null ? <Icon name="music" size={20} /> : <img className="song-requests-chapter-cover" src={track.coverUrl} alt="" />}
+                  icon={track.coverUrl === null ? <Icon name="music" size={20} /> : <img className="song-requests-cover" src={track.coverUrl} alt="" />}
                   title={track.title} description={track.artists.join(", ")} status={null}
                   action={<Button variant="secondary" size="compact" disabled={!canManage || added || draft.value.tracks.length >= 20}
                     onClick={() => { addTrack(track); }}>{added ? text.added : text.add}</Button>} />
@@ -253,7 +253,7 @@ function ChapterInspector({
         <div className="song-requests-panel__list" role="list" aria-label={text.trackPool}>
           {draft.value.tracks.map((track) => <div role="listitem" key={track.id}>
             <ListRow href={`https://open.spotify.com/track/${track.id}`} onNavigate={() => { window.open(`https://open.spotify.com/track/${track.id}`, "_blank", "noopener,noreferrer"); }}
-              icon={track.coverUrl === null ? <Icon name="music" size={20} /> : <img className="song-requests-chapter-cover" src={track.coverUrl} alt="" />}
+              icon={track.coverUrl === null ? <Icon name="music" size={20} /> : <img className="song-requests-cover" src={track.coverUrl} alt="" />}
               title={track.title} description={track.artists.join(", ")} status={null}
               action={<Button variant="subtle" danger="subtle" icon="remove" iconOnly size="compact" disabled={!canManage || saving}
                 ariaLabel={text.removeTrack(track.title)} onClick={() => { removeTrack(track.id); }} />} />

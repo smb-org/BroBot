@@ -1,8 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { QueryClient } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
+import { useDashboardQueryClient } from "../../src/dashboard/data";
+import { refetchModuleQueryData } from "../../src/dashboard/data/module-query";
 import SongRequestsPanel from "../../src/modules/song_requests/panel";
+import { songRequestsPanelTexts } from "../../src/modules/song_requests/panel/locale";
 import SongRequestsNowPlaying from "../../src/modules/song_requests/overlay/view";
 import SongRequestsNowPlayingEditor from "../../src/modules/song_requests/overlay/editor";
 import { songRequestsSettingsSchema } from "../../src/modules/song_requests/contracts";
@@ -11,6 +16,10 @@ const track = { id: "glassharbor01", title: "Glass Harbor", artists: ["Mira Vale
 const urlOf = (input: RequestInfo | URL): URL => new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.origin);
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status });
 const settings = (emptyText = "") => songRequestsSettingsSchema.parse({ emptyText });
+const QueryClientCapture = ({ onCapture, children }: { onCapture: (client: QueryClient) => void; children: ReactNode }) => {
+  onCapture(useDashboardQueryClient());
+  return <>{children}</>;
+};
 const renderPanel = (): void => {
   render(<DashboardDataProvider><SongRequestsPanel channelId="channel-fictional" language="en" canManage canOperate /></DashboardDataProvider>);
 };
@@ -95,7 +104,7 @@ describe("song request components", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled, hasCredentials, slot: enabled ? 2 : null, state, errorMessage: errorMessage ?? null, streamId: null, emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings("Pick a song"), revision: 3 }));
       return Promise.resolve(json({}));
     }));
@@ -113,7 +122,7 @@ describe("song request components", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 3 }));
       if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: [] }));
       return Promise.resolve(json({}));
@@ -131,7 +140,7 @@ describe("song request components", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 3 }));
       if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: [] }));
       return Promise.resolve(json({}));
@@ -151,7 +160,7 @@ describe("song request components", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [] }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
       return Promise.resolve(json({}));
     }));
     renderPanel();
@@ -160,6 +169,77 @@ describe("song request components", () => {
     expect(screen.queryByRole("textbox", { name: "Player empty text" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Bot points" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+  });
+
+  it("renders request covers, track titles and attribution, and switches played status after a refetch", async () => {
+    const requests = [
+      {
+        requestId: "current-song", ...track, state: "observed_playing", failureReason: null, source: "points", requestType: "free", chargedAmount: 0,
+        requesterDisplayName: "Fictional Viewer", requesterLogin: "fictional_viewer", createdAt: "2026-11-15T19:00:00.000Z",
+      },
+      {
+        requestId: "earlier-song", ...track, id: "quietatlas02", title: "Quiet Atlas", coverUrl: null, state: "observed_playing", failureReason: null,
+        source: "mod_vote", requestType: "vote", chargedAmount: 0, requesterDisplayName: null, requesterLogin: null,
+        createdAt: "2026-11-15T18:00:00.000Z",
+      },
+    ];
+    let nowPlaying: { requestId: string; playing: boolean } | null = { requestId: "current-song", playing: true };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 1, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests, voteOutcomes: [], nowPlaying }));
+      if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 1 }));
+      return Promise.resolve(json({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const captured: { client: QueryClient | null } = { client: null };
+    render(<DashboardDataProvider><QueryClientCapture onCapture={(client) => { captured.client = client; }}>
+      <SongRequestsPanel channelId="channel-fictional" language="en" canManage canOperate />
+    </QueryClientCapture></DashboardDataProvider>);
+
+    const currentLink = await screen.findByRole("link", { name: /Glass Harbor/u });
+    const currentRow = currentLink.closest('[role="listitem"]');
+    expect(currentRow?.querySelector(".list-row__title")).toHaveTextContent("Glass Harbor");
+    expect(currentRow?.querySelector(".list-row__description")).toHaveTextContent("Mira Vale · Fictional Viewer");
+    expect(currentRow?.querySelector(".song-requests-cover")).toHaveAttribute("src", track.coverUrl);
+    expect(currentRow?.querySelector(".list-row__status")).toHaveTextContent("Now playing");
+    expect(currentRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--green");
+
+    const earlierLink = screen.getByRole("link", { name: /Quiet Atlas/u });
+    const earlierRow = earlierLink.closest('[role="listitem"]');
+    expect(earlierRow?.querySelector(".list-row__title")).toHaveTextContent("Quiet Atlas");
+    expect(earlierRow?.querySelector(".list-row__description")).toHaveTextContent("Mira Vale · Song vote");
+    expect(earlierRow?.querySelector(".song-requests-cover")).toBeNull();
+    expect(earlierRow?.querySelector(".list-row__icon svg")).toBeInTheDocument();
+    expect(earlierRow?.querySelector(".list-row__status")).toHaveTextContent("Played");
+    expect(earlierRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--neutral");
+
+    if (captured.client === null) throw new Error("The dashboard query client was not captured.");
+    nowPlaying = { requestId: "current-song", playing: false };
+    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    await waitFor(() => {
+      expect(currentRow?.querySelector(".list-row__status")).toHaveTextContent("Paused");
+      expect(currentRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--neutral");
+      expect(earlierRow?.querySelector(".list-row__status")).toHaveTextContent("Played");
+    });
+    expect(songRequestsPanelTexts.de.states.paused).toBe("Pausiert");
+
+    nowPlaying = { requestId: "current-song", playing: true };
+    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    await waitFor(() => {
+      expect(currentRow?.querySelector(".list-row__status")).toHaveTextContent("Now playing");
+      expect(currentRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--green");
+    });
+
+    nowPlaying = { requestId: "earlier-song", playing: true };
+    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    await waitFor(() => {
+      expect(currentRow?.querySelector(".list-row__status")).toHaveTextContent("Played");
+      expect(currentRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--neutral");
+      expect(earlierRow?.querySelector(".list-row__status")).toHaveTextContent("Now playing");
+      expect(earlierRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--green");
+    });
   });
 
   it("shows Spotify state and starts a vote from a deterministic three-track search", async () => {
@@ -172,7 +252,7 @@ describe("song request components", () => {
       const url = urlOf(input);
       if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-e2e" }));
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 3, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], nowPlaying: null, voteOutcomes: [
         { ballotId: "ballot-drawn", state: "drawn", drawnByLot: true, createdAt: "2026-11-15T19:00:00.000Z" },
         { ballotId: "ballot-tie", state: "tie", drawnByLot: false, createdAt: "2026-11-15T18:00:00.000Z" },
       ] }));
@@ -219,7 +299,7 @@ describe("song request components", () => {
     });
     vi.stubGlobal("fetch", fetcher);
     renderPanel();
-    await screen.findByText("Mira Vale – Paid Track");
+    await screen.findByText("Paid Track", { selector: ".list-row__title" });
 
     fireEvent.click(screen.getByRole("button", { name: "Actions: Free Track" }));
     expect(await screen.findByRole("menuitem", { name: "Remove" })).toBeInTheDocument();

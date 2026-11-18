@@ -110,7 +110,7 @@ test("!sr supports moderated approval and rejection, then automatic submission",
     return body.requests.find((row) => row.requestId === firstRequestId)?.state;
   }, { timeout: 25_000 }).toBe("submitted");
   await page.reload();
-  await expect(page.getByRole("link", { name: "Mira Vale – Glass Harbor (Quiet Atlas)" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Glass Harbor" })).toBeVisible();
 
   await command("viewer-sr-reject", "quiet_viewer", "!sr spotify:track:quietatlas02");
   await expect.poll(async () => {

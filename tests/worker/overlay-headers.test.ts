@@ -35,7 +35,7 @@ describe("overlay document security headers", () => {
     const dashboard = await exports.default.fetch(new Request("http://localhost/"));
     const api = await exports.default.fetch(new Request("http://localhost/api/overlay/bootstrap"));
 
-    expect(dashboard.headers.get("content-security-policy")).toBe("img-src 'self' https://static-cdn.jtvnw.net https://cdn.7tv.app");
+    expect(dashboard.headers.get("content-security-policy")).toBe("img-src 'self' https://static-cdn.jtvnw.net https://cdn.7tv.app https://i.scdn.co");
     expect(dashboard.headers.get("x-frame-options")).toBeNull();
     expect(api.status).toBe(401);
     expect(api.headers.get("content-security-policy")).toBeNull();
