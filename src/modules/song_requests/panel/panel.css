@@ -27,6 +27,8 @@
   .song-requests-panel .ui-load-state__retry-slot:empty { display: none; }
   .song-requests-panel__list { display: grid; min-width: 0; }
   .song-requests-panel__list [role="listitem"] { min-width: 0; }
+  .song-requests-panel__list .list-row__link { grid-template-columns: 36px minmax(0, 1fr) auto; }
+  .song-requests-panel__list .list-row__icon { display: grid; width: 36px; height: 36px; place-items: center; }
   .song-requests-panel__list .list-row__link--no-icon { grid-template-columns: minmax(0, 1fr) auto; }
   .song-requests-panel__list .list-row__status, .song-requests-panel__list .list-row__action { flex: none; white-space: nowrap; }
   .song-requests-panel__list .list-row__action:empty { display: none; }
@@ -48,7 +50,7 @@
   .song-requests-chapter-inspector__body { display: grid; gap: var(--s4); min-width: 0; }
   .song-requests-chapter-inspector__search-results:empty { display: none; }
   .song-requests-chapter-inspector__track-count { min-height: var(--s5); margin: 0; color: var(--text-3); font-size: var(--text-small); }
-  .song-requests-chapter-cover { display: block; width: 36px; height: 36px; border-radius: var(--r-control); object-fit: cover; }
+  .song-requests-cover { display: block; width: 36px; height: 36px; border-radius: var(--r-control); object-fit: cover; }
   .song-requests-chapter-inspector__message, .song-requests-chapter-inspector__save-status { min-height: var(--s5); color: var(--text-3); font-size: var(--text-small); overflow-wrap: anywhere; }
   .song-requests-chapter-inspector__save-status { color: var(--brand-text); }
   .song-requests-chapter-inspector__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s2); }

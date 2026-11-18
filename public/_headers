@@ -1,14 +1,14 @@
 /
-  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net https://cdn.7tv.app
+  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net https://cdn.7tv.app https://i.scdn.co
 
 /channels/*
-  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net https://cdn.7tv.app
+  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net https://cdn.7tv.app https://i.scdn.co
 
 /platform
-  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net https://cdn.7tv.app
+  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net https://cdn.7tv.app https://i.scdn.co
 
 /platform/*
-  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net https://cdn.7tv.app
+  Content-Security-Policy: img-src 'self' https://static-cdn.jtvnw.net https://cdn.7tv.app https://i.scdn.co
 
 # Vite assets are static Cloudflare assets. CORS lets the sandboxed overlay
 # iframe load JS, CSS, and fonts from its opaque origin without invoking Worker.

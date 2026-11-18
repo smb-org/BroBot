@@ -13,6 +13,7 @@ import {
   cleanupSongRequestRound,
   ensureOfflineSongRequestRound,
   latestSongRequestStreamId,
+  readNowPlayingRequestId,
   pendingSongRequestQueue,
   readSongRequest,
   recentSongRequests,
@@ -563,6 +564,7 @@ songRequestsRoutes.get("/requests", async (context) => {
   return context.json({
     requests: await recentSongRequests(context.env.DB, channel(context), requestStreamId),
     voteOutcomes: await recentSongVoteOutcomes(context.env.DB, channel(context), requestStreamId),
+    nowPlayingRequestId: await readNowPlayingRequestId(context.env.DB, channel(context)),
   });
 });
 

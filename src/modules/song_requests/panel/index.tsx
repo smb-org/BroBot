@@ -69,10 +69,12 @@ interface Connection {
 interface RequestsRead {
   requests: RequestRow[];
   voteOutcomes: VoteOutcome[];
+  nowPlayingRequestId: string | null;
 }
 
-const stateTone = (state: SongRequestState): "neutral" | "green" | "amber" | "red" => {
-  if (state === "submitted" || state === "observed_playing") return "green";
+const stateTone = (state: SongRequestState, nowPlaying = false): "neutral" | "green" | "amber" | "red" => {
+  if (state === "submitted" || (state === "observed_playing" && nowPlaying)) return "green";
+  if (state === "observed_playing") return "neutral";
   if (state === "failed" || state === "rejected" || state === "removed") return "red";
   if (state === "pending_review" || state === "approved" || state === "submitting" || state === "outcome_unknown") return "amber";
   return "neutral";
@@ -357,31 +359,39 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
         refreshError={requestsQuery.isRefetchError}
       >
           <div className="song-requests-panel__list" role="list" aria-label={text.recent}>
-            {requests.map((requestRow) => <div role="listitem" key={requestRow.requestId}>
-              <ListRow
-                href={requestRow.spotifyUrl}
-                onNavigate={() => { window.open(requestRow.spotifyUrl, "_blank", "noopener,noreferrer"); }}
-                title={formatSongRequestTrack(requestRow)}
-                description={requestRow.requesterDisplayName ?? requestRow.requesterLogin ?? ""}
-                status={<Badge tone={stateTone(requestRow.state)}>{text.states[requestRow.state]}</Badge>}
-                action={!canOperate ? null : (() => {
-                  const beforeSubmit = requestRow.state === "pending_review" || requestRow.state === "approved";
-                  const afterSubmit = requestRow.state === "submitted" || requestRow.state === "outcome_unknown";
-                  const paid = requestRow.requestType === "bot_points" && requestRow.chargedAmount > 0;
-                  if (!beforeSubmit && !afterSubmit) return null;
-                  const items = [
-                    { label: text.remove, disabled: pending, onSelect: () => { setRemoval({ requestId: requestRow.requestId, refund: false, label: text.remove, description: beforeSubmit ? (paid ? text.removeConfirmBeforePaid : text.removeConfirmBefore) : text.removeConfirmAfter }); } },
-                    ...(afterSubmit && paid ? [{ label: text.removeRefund, disabled: pending, onSelect: () => { setRemoval({ requestId: requestRow.requestId, refund: true, label: text.removeRefund, description: text.removeConfirmRefund }); } }] : []),
-                    ...(requestRow.state === "outcome_unknown" ? [
-                      { divider: true as const },
-                      { label: text.resolveIn, disabled: pending, onSelect: () => { resolveRequest(requestRow.requestId, "submitted"); } },
-                      { label: text.resolveOut, disabled: pending, onSelect: () => { resolveRequest(requestRow.requestId, "failed"); } },
-                    ] : []),
-                  ];
-                  return <ActionMenu label={`${text.requestActions}: ${requestRow.title}`} items={items} />;
-                })()}
-              />
-            </div>)}
+            {requests.map((requestRow) => {
+              const nowPlaying = requestRow.state === "observed_playing" && requestRow.requestId === requestData?.nowPlayingRequestId;
+              const requester = requestRow.requesterDisplayName || requestRow.requesterLogin;
+              const attribution = requester || (requestRow.requestType === "vote" ? text.recap.songVote : null);
+              const description = [requestRow.artists.join(", "), attribution]
+                .filter((part): part is string => part !== null && part.length > 0).join(" · ");
+              const beforeSubmit = requestRow.state === "pending_review" || requestRow.state === "approved";
+              const afterSubmit = requestRow.state === "submitted" || requestRow.state === "outcome_unknown";
+              const paid = requestRow.requestType === "bot_points" && requestRow.chargedAmount > 0;
+              const action = !canOperate || (!beforeSubmit && !afterSubmit) ? null : (() => {
+                const items = [
+                  { label: text.remove, disabled: pending, onSelect: () => { setRemoval({ requestId: requestRow.requestId, refund: false, label: text.remove, description: beforeSubmit ? (paid ? text.removeConfirmBeforePaid : text.removeConfirmBefore) : text.removeConfirmAfter }); } },
+                  ...(afterSubmit && paid ? [{ label: text.removeRefund, disabled: pending, onSelect: () => { setRemoval({ requestId: requestRow.requestId, refund: true, label: text.removeRefund, description: text.removeConfirmRefund }); } }] : []),
+                  ...(requestRow.state === "outcome_unknown" ? [
+                    { divider: true as const },
+                    { label: text.resolveIn, disabled: pending, onSelect: () => { resolveRequest(requestRow.requestId, "submitted"); } },
+                    { label: text.resolveOut, disabled: pending, onSelect: () => { resolveRequest(requestRow.requestId, "failed"); } },
+                  ] : []),
+                ];
+                return <ActionMenu label={`${text.requestActions}: ${requestRow.title}`} items={items} />;
+              })();
+              return <div role="listitem" key={requestRow.requestId}>
+                <ListRow
+                  href={requestRow.spotifyUrl}
+                  onNavigate={() => { window.open(requestRow.spotifyUrl, "_blank", "noopener,noreferrer"); }}
+                  icon={requestRow.coverUrl === null ? <Icon name="music" size={20} /> : <img className="song-requests-cover" src={requestRow.coverUrl} alt="" />}
+                  title={requestRow.title}
+                  description={description}
+                  status={<Badge tone={stateTone(requestRow.state, nowPlaying)}>{requestRow.state === "observed_playing" ? (nowPlaying ? text.states.observed_playing : text.states.played) : text.states[requestRow.state]}</Badge>}
+                  action={action}
+                />
+              </div>;
+            })}
           </div>
       </LoadState>
     </Section> : null}

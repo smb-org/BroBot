@@ -792,6 +792,13 @@ export const recentSongRequests = async (db: D1Database, channelId: string, roun
   return rows.results.map(rowToRequest);
 };
 
+export const readNowPlayingRequestId = async (db: D1Database, channelId: string): Promise<string | null> => {
+  const row = await db.prepare(
+    "SELECT request_id FROM song_requests_now_playing WHERE channel_id = ?",
+  ).bind(channelId).first<{ request_id: string | null }>();
+  return row?.request_id ?? null;
+};
+
 export interface SongVoteOutcome {
   ballotId: string;
   state: "tie" | "no_votes" | "failed" | "drawn";

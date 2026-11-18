@@ -30,6 +30,38 @@ afterEach(() => {
 });
 
 describe("song request routes", () => {
+  it("returns the channel's now-playing request id and null for a snapshot without a request", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    const otherChannelId = "song-requests-now-playing-other";
+    await insertChannel(database, CHANNEL_ID);
+    await insertChannel(database, otherChannelId);
+    await database.prepare(
+      "INSERT INTO song_requests_now_playing (channel_id, revision, request_id) VALUES (?, 1, ?)",
+    ).bind(CHANNEL_ID, "request-current-fictional").run();
+    await database.prepare(
+      "INSERT INTO song_requests_now_playing (channel_id, revision, request_id) VALUES (?, 1, NULL)",
+    ).bind(otherChannelId).run();
+
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "operator");
+      await next();
+    });
+    app.route("/channels/:channelId", songRequestsRoutes);
+    const env = { DB: database as unknown as D1Database } as ModuleRouteEnvironment["Bindings"];
+
+    const currentResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests`), env);
+    expect(currentResponse.status).toBe(200);
+    await expect(currentResponse.json()).resolves.toEqual({
+      requests: [], voteOutcomes: [], nowPlayingRequestId: "request-current-fictional",
+    });
+
+    const otherResponse = await app.fetch(new Request(`https://brobot.example/channels/${otherChannelId}/requests`), env);
+    expect(otherResponse.status).toBe(200);
+    await expect(otherResponse.json()).resolves.toEqual({ requests: [], voteOutcomes: [], nowPlayingRequestId: null });
+  });
+
   it("does not offer a Twitch refund for a fulfilled channel-point request", async () => {
     const database = new TestD1Database();
     databases.push(database);
