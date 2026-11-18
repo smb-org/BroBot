@@ -509,7 +509,13 @@ songRequestsRoutes.post("/vote", async (context) => {
         en: songRequestChatTexts.en.chapterNotEnough,
       },
     }, 409);
-    if (chapterRedraws >= 1) return context.json({ error: "stream_offline" }, 409);
+    if (chapterRedraws >= 1) return context.json({
+      error: "song_vote_chapter_not_enough_tracks",
+      message: {
+        de: songRequestChatTexts.de.chapterNotEnough,
+        en: songRequestChatTexts.en.chapterNotEnough,
+      },
+    }, 409);
     tracks = candidates;
     chapterRedraws += 1;
   }

@@ -257,4 +257,91 @@ describe("song request chapter vote route", () => {
     ).bind(CHANNEL_ID, staleTrack.id).all<{ source: string; state: string }>();
     expect(requestsForStaleTrack.results).toEqual([{ source: "channel_points", state: "approved" }]);
   });
+
+  it("answers with the chapter error code, not stream_offline, when the insert guard fails twice", async () => {
+    const database = new TestD1Database();
+    databaseList.push(database);
+    await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
+    await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
+      .bind(CHANNEL_ID, "moderator-fictional", "2026-11-18T10:00:00.000Z").run();
+    await database.prepare("INSERT INTO song_requests_connections (channel_id, state, updated_at) VALUES (?, 'connected', ?)")
+      .bind(CHANNEL_ID, "2026-11-18T10:00:00.000Z").run();
+    await database.prepare(`INSERT INTO channel_stream_state
+      (channel_id, state, changed_at, source, stream_id, started_at)
+      VALUES (?, 'online', ?, 'eventsub', ?, ?)`)
+      .bind(CHANNEL_ID, "2026-11-18T10:00:00.000Z", "stream-chapter-fictional", "2026-11-18T10:00:00.000Z").run();
+    const poolTracks = ["glassharbor01", "quietatlas02", "silvercurrent03", "northwindow04", "lanternhill05", "paperocean06"]
+      .map((id) => ({ id, title: id, artists: ["Mira Vale"], coverUrl: null }));
+    const saved = await saveSongRequestChapter(database as unknown as D1Database, CHANNEL_ID, null, null, {
+      name: "Night Drive", offerInCockpit: true, tracks: poolTracks,
+    }, "2026-11-18T10:00:00.000Z");
+    if (saved.status !== "saved") throw new Error("Expected a saved chapter fixture.");
+
+    const db = database as unknown as D1Database;
+    let attempts = 0;
+    // Before each of the first two ballot inserts a request lands for a track of that very ballot.
+    const interleavedDatabase = {
+      prepare: (sql: string) => {
+        const statement = database.prepare(sql);
+        if (!/INSERT INTO song_requests_votes/iu.test(sql)) return statement;
+        let values: readonly unknown[] = [];
+        const wrapped = {
+          bind: (...bound: Parameters<typeof statement.bind>) => { values = bound; statement.bind(...bound); return wrapped; },
+          first: async <T>() => {
+            if (attempts < 2) {
+              attempts += 1;
+              const candidates = JSON.parse(values[4] as string) as { id: string }[];
+              const racedId = candidates[0]?.id ?? "";
+              await transitionRequest(db, {
+                channelId: CHANNEL_ID,
+                requestId: `request-guard-race-${String(attempts)}`,
+                fromState: null,
+                toState: "approved",
+                now: "2026-11-18T10:01:00.000Z",
+                newRequest: {
+                  source: "channel_points",
+                  track: {
+                    id: racedId, uri: `spotify:track:${racedId}`, title: racedId, artists: ["Mira Vale"], albumName: null,
+                    durationMs: 200_000, explicit: false, coverUrl: null, spotifyUrl: `https://open.spotify.com/track/${racedId}`,
+                  },
+                  operationId: `operation-guard-race-${String(attempts)}`,
+                  streamId: "stream-chapter-fictional",
+                },
+              });
+            }
+            return await statement.first<T>();
+          },
+        };
+        return wrapped;
+      },
+    } as unknown as D1Database;
+    const startChatVote = vi.fn(() => Promise.resolve({ status: "started" as const, ballotId: "ballot-unused-fictional" }));
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "operator");
+      context.set("session", { userId: "moderator-fictional", sessionId: "session-chapter-guard-twice" });
+      context.set("startChatVote", startChatVote);
+      await next();
+    });
+    app.route("/channels/:channelId", songRequestsRoutes);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/vote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chapterId: saved.chapter.id }),
+    }), {
+      DB: interleavedDatabase,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ getSpotifyAccessToken: () => Promise.resolve("spotify-access-fictional") }),
+      },
+    });
+
+    expect(attempts).toBe(2);
+    expect(response.status).toBe(409);
+    expect((await response.json<{ error: string }>()).error).toBe("song_vote_chapter_not_enough_tracks");
+    expect(startChatVote).not.toHaveBeenCalled();
+  });
 });
