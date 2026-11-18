@@ -298,8 +298,8 @@ export const getPlatformSpotifyAccess = async (): Promise<PanelSpotifyAccessResp
 export const setPlatformSpotifyChannel = (channelId: string, enabled: boolean): Promise<{ enabled: boolean }> =>
   requestMutation(`/api/platform/spotify-channels/${encodeURIComponent(channelId)}`, "PATCH", { enabled });
 
-export const startSongRequestVote = (channelId: string, trackIds: readonly string[]): Promise<{ ballotId: string }> =>
-  requestMutation(`${modulePath(channelId, "song_requests")}/vote`, "POST", { trackIds });
+export const startSongRequestVote = (channelId: string, trackIds: readonly string[], chapterId?: string): Promise<{ ballotId: string }> =>
+  requestMutation(`${modulePath(channelId, "song_requests")}/vote`, "POST", chapterId === undefined ? { trackIds } : { chapterId });
 
 export const fetchPlatformTwitchUserSuggestions = (
   query: string,

@@ -59,6 +59,8 @@ const catalog = (language: DashboardLanguage): SettingsEditorCatalog => {
       rules: text.rules,
       skipVote: text.skipVote,
       alert: text.requestAlert,
+      spotlight: text.spotlight,
+      recap: text.recap,
       overlay: text.overlay,
       messages: de ? "Nachrichten" : "Messages",
     },
@@ -84,6 +86,8 @@ const catalog = (language: DashboardLanguage): SettingsEditorCatalog => {
       skipThreshold: field(text.skipThreshold, de ? "Benötigte Ja-Stimmen." : "Required yes votes."),
       skipCooldown: field(text.skipCooldown, de ? "Pause nach Ende einer Abstimmung." : "Wait time after a vote closes."),
       requestAlertEnabled: field(text.requestAlertEnabled, de ? "Song-Wunsch-Alarm im Overlay anzeigen." : "Show song request alerts in the overlay."),
+      spotlight: field(text.spotlightEnabled, text.spotlightHint),
+      recap: field(text.recapChatEnabled, de ? "Sendet höchstens eine kurze Dankesnachricht pro Stream." : "Sends at most one short thank-you message per stream."),
     },
     warningLabel: (warning: PanelTemplateWarning) => warning.code === "unknown_template_variables"
       ? `${de ? "Unbekannte Variablen" : "Unknown variables"}: ${warning.unknownVariables.join(", ")}`

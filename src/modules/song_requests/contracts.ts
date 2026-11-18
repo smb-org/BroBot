@@ -49,6 +49,8 @@ export const songRequestsSettingsSchema = z.object({
     cooldownSeconds: z.number().int().min(0).max(3600).default(120),
   }).prefault({}),
   requestAlert: z.object({ enabled: z.boolean().default(true) }).prefault({}),
+  spotlight: z.object({ enabled: z.boolean().default(false) }).prefault({}),
+  recap: z.object({ chatEnabled: z.boolean().default(true) }).prefault({}),
   rules: songRequestRulesSchema,
 });
 
@@ -69,3 +71,22 @@ export interface SongRequestStatistics {
   requesters: readonly { userId: string; displayName: string; count: number }[];
   tracks: readonly { trackId: string; title: string; artists: readonly string[]; albumName?: string | null; count: number }[];
 }
+
+export interface SongRequestChapterTrack {
+  id: string;
+  title: string;
+  artists: readonly string[];
+  coverUrl: string | null;
+}
+
+export interface SongRequestChapter {
+  id: string;
+  channelId: string;
+  name: string;
+  tracks: readonly SongRequestChapterTrack[];
+  offerInCockpit: boolean;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+

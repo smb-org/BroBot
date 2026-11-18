@@ -14,6 +14,8 @@ describe("song request shared settings editor", () => {
   it("renders both configured columns with admission, rules, skip vote, alert, overlay, and messages", () => {
     const catalog = definition.locales.en;
     const settings = songRequestsSettingsSchema.parse({});
+    expect(settings.spotlight).toEqual({ enabled: false });
+    expect(settings.recap).toEqual({ chatEnabled: true });
     const templateVariables = Object.fromEntries(["queuedText", "waitingText", "requestAlertText"].map((key) => {
       const typeSample = catalog.fields[key]?.variables?.find(({ name }) => name === "song.type")?.sample;
       return [key, SONG_REQUEST_TEMPLATE_VARIABLES.map((variable) => ({
@@ -45,9 +47,10 @@ describe("song request shared settings editor", () => {
     expect(definition.savePosition).toBe("page-header");
     expect(definition.showTitle).toBe(false);
     expect(container.querySelectorAll(".settings-page__column")).toHaveLength(2);
-    for (const title of ["Admission", "Admission rules", "Skip vote", "Song request alert", "Overlay", "Messages"]) {
+    for (const title of ["Admission", "Admission rules", "Skip vote", "Song request alert", "Requester spotlight", "Stream recap", "Overlay", "Messages"]) {
       expect(screen.getByText(title, { selector: "h2, h3, h4, legend" })).toBeInTheDocument();
     }
+    expect(screen.getByText("Spotify forbids synchronising its content with video. The alert appears up to one poll interval after the track starts.")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Queued result" })).toHaveValue("“{song.track}” was queued in Spotify. Position {song.position}.");
     expect(screen.getByRole("textbox", { name: "Waiting for approval" })).toHaveValue("“{song.track}” is waiting for moderator approval.");
     expect(screen.getByText("“Nightwish – Sleeping Sun (Oceanborn)” was queued in Spotify. Position 1.")).toBeInTheDocument();
@@ -57,12 +60,14 @@ describe("song request shared settings editor", () => {
   it("declares the live panel first and binds settings to a second bilingual navigation entry", () => {
     const entries = songRequestsModule.navigationEntries ?? [];
 
-    expect(entries.map(({ id }) => id)).toEqual(["requests", "settings"]);
-    expect(entries.map(({ label }) => label.en)).toEqual(["Song requests", "Song request settings"]);
-    expect(entries.map(({ label }) => label.de)).toEqual(["Song-Wünsche", "Song-Wunsch-Einstellungen"]);
+    expect(entries.map(({ id }) => id)).toEqual(["requests", "chapters", "recap", "settings"]);
+    expect(entries.map(({ label }) => label.en)).toEqual(["Song requests", "Soundtrack chapters", "Song recap", "Song request settings"]);
+    expect(entries.map(({ label }) => label.de)).toEqual(["Song-Wünsche", "Soundtrack-Kapitel", "Song-Rückblick", "Song-Wunsch-Einstellungen"]);
     expect(entries.every(({ label }) => label.de !== label.en)).toBe(true);
     expect(entries.map(({ description }) => description?.en)).toEqual([
       "Connects Spotify and shows song requests and vote outcomes.",
+      "Manage track pools for chapter votes.",
+      "Played song requests from past streams.",
       "Configure payment, admission rules, and song request alerts.",
     ]);
     expect(entries.every(({ description }) => description?.de !== description?.en)).toBe(true);

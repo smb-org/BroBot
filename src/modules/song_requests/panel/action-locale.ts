@@ -8,6 +8,10 @@ export const songRequestsActionTexts = {
     loading: "Verbindung und Stream werden geprüft …", unavailable: "Spotify verbinden und den Stream starten, um eine Abstimmung zu öffnen.",
     failed: "Spotify-Suche fehlgeschlagen.", run: "Abstimmung starten", started: "Song-Abstimmung gestartet.",
     error: "Song-Abstimmung konnte nicht gestartet werden.", busy: "Es läuft bereits eine Abstimmung.",
+    chapterName: "Kapitel-Abstimmung starten", chapterStarted: "Kapitel-Abstimmung gestartet.",
+    chapterNotEnough: "Dieses Kapitel hat weniger als zwei verfügbare Songs. Ergänze Tracks oder prüfe die Abklingzeit.",
+    chaptersLoading: "Kapitel werden geladen …", chaptersEmpty: "Keine Kapitel für das Cockpit angeboten.",
+    startChapter: "Kapitel starten", chapterTracks: (count: number) => `${String(count)} Tracks`,
   },
   en: {
     name: "Start song vote", queueName: "Song request queue", search: "Spotify search", query: "Track, Spotify link, or URI", searchButton: "Search",
@@ -18,5 +22,9 @@ export const songRequestsActionTexts = {
     loading: "Checking Spotify and stream …", unavailable: "Connect Spotify and start the stream to open a vote.",
     failed: "Spotify search failed.", run: "Start vote", started: "Song vote started.",
     error: "Could not start the song vote.", busy: "Another vote is already open.",
+    chapterName: "Start chapter vote", chapterStarted: "Chapter vote started.",
+    chapterNotEnough: "This chapter has fewer than two eligible tracks. Add tracks or check the cooldown.",
+    chaptersLoading: "Loading chapters …", chaptersEmpty: "No chapters are offered in the cockpit.",
+    startChapter: "Start chapter", chapterTracks: (count: number) => `${String(count)} tracks`,
   },
 } as const;
