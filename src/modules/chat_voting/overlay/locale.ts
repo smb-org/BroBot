@@ -19,7 +19,6 @@ const catalog = {
     useVoteColors: "Farben aus der Abstimmung übernehmen",
     hideAfterCloseSeconds: "Ergebnis ausblenden nach",
     seconds: "Sekunden",
-    width: "Breite (px)",
   },
   en: {
     title: "Voting",
@@ -39,7 +38,6 @@ const catalog = {
     useVoteColors: "Take colours from the voting",
     hideAfterCloseSeconds: "Hide results after",
     seconds: "seconds",
-    width: "Width (px)",
   },
 } as const;
 

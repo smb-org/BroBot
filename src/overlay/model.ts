@@ -12,6 +12,7 @@ export interface OverlayElementData {
   x: number;
   y: number;
   scalePercent: number;
+  widthPx?: number | null;
   z: number;
   inComposition: boolean;
 }

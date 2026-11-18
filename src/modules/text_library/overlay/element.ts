@@ -11,6 +11,7 @@ export const textBlockOverlayElement = {
   kind: TEXT_BLOCK_OVERLAY_ELEMENT_KIND,
   configVersion: 1,
   defaultSize: { width: 360, height: 96 },
+  resizableWidth: true as const,
   defaultConfig: { blockName: "" },
   previewState: (config: JsonObject, language: ModuleLanguage, now: number): JsonObject => {
     const blockName = typeof config.blockName === "string" ? config.blockName : "";

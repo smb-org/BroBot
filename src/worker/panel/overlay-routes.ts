@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import {
   OVERLAY_ELEMENT_MAXIMUM_COUNT,
+  OVERLAY_ELEMENT_MAXIMUM_WIDTH_PX,
+  OVERLAY_ELEMENT_MINIMUM_WIDTH_PX,
   OVERLAY_MAXIMUM_COUNT,
   canManage,
   type ApiErrorCode,
@@ -28,6 +30,7 @@ import { saveOverlayDraft } from "../overlays/service";
 import { closeRealtimeTokenBeforeResponse, closeRealtimeUnboundOverlayTokenBeforeResponse } from "../realtime-revocation";
 import { publishOverlayChanged } from "../realtime";
 import { MODULES, moduleOverlayElementForKind } from "../../modules/registry";
+import { overlayElementSupportsWidth } from "../../modules/overlay-element-registry";
 import type { JsonObject } from "../../modules/contract";
 
 interface OverlayRouteEnvironment {
@@ -69,6 +72,7 @@ const elementSchema = z.object({
   x: z.number().int().default(0),
   y: z.number().int().default(0),
   scalePercent: z.number().int().min(25).max(400).default(100),
+  widthPx: z.number().int().min(OVERLAY_ELEMENT_MINIMUM_WIDTH_PX).max(OVERLAY_ELEMENT_MAXIMUM_WIDTH_PX).nullable().optional(),
   z: z.number().int().default(0),
   inComposition: z.boolean().default(true),
 }).strict();
@@ -88,6 +92,9 @@ const createOverlaySchema = z.object({
     }
     if (element.x < 0 || element.x > input.width) context.addIssue({ code: "custom", path: ["elements", index, "x"], message: "x is outside the overlay" });
     if (element.y < 0 || element.y > input.height) context.addIssue({ code: "custom", path: ["elements", index, "y"], message: "y is outside the overlay" });
+    if (element.widthPx !== undefined && !overlayElementSupportsWidth(element.kind)) {
+      context.addIssue({ code: "custom", path: ["elements", index, "widthPx"], message: "element kind does not support a width" });
+    }
     if (parseOverlayElementConfig(element.kind, element.config) === null ||
         new TextEncoder().encode(JSON.stringify(element.config)).byteLength > OVERLAY_ELEMENT_CONFIG_MAXIMUM_BYTES) {
       context.addIssue({ code: "custom", path: ["elements", index, "config"], message: "config is invalid" });
@@ -118,6 +125,9 @@ const updateOverlaySchema = z.object({
     }
     if (element.y < 0 || element.y > draft.height) {
       context.addIssue({ code: "custom", path: ["elements", index, "y"], message: "y is outside the overlay" });
+    }
+    if (element.widthPx !== undefined && !overlayElementSupportsWidth(element.kind)) {
+      context.addIssue({ code: "custom", path: ["elements", index, "widthPx"], message: "element kind does not support a width" });
     }
     if (element.kind !== "variable" && element.variableName !== null) {
       context.addIssue({ code: "custom", path: ["elements", index, "variableName"], message: "element variable reference does not match its kind" });
@@ -191,6 +201,7 @@ overlayRouter.post("/api/channels/:channelId/overlays", async (context) => {
   const channelId = context.req.param("channelId");
   const elements = parsed.data.elements.map((element) => ({
     ...element,
+    widthPx: element.widthPx ?? null,
     config: parseOverlayElementConfig(element.kind, element.config) ?? {},
   })) as OverlayDraftElement[];
   const requiredModuleIds = [...new Set(elements.flatMap((element) => {
@@ -314,6 +325,7 @@ overlayRouter.put("/api/channels/:channelId/overlays/:overlayId", async (context
     elements: parsedDraft.elements.map((element) => ({
       ...element,
       kind: element.kind as OverlayElementKind,
+      widthPx: element.widthPx ?? null,
       config: parseOverlayElementConfig(element.kind, element.config) ?? {},
     })),
   };

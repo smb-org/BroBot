@@ -127,6 +127,7 @@ export interface PanelOverlayElement {
   x: number;
   y: number;
   scalePercent: number;
+  widthPx?: number | null;
   z: number;
   inComposition: boolean;
 }

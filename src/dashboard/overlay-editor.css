@@ -83,14 +83,35 @@
 .overlay-editor__zoom { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 11px; }
 .overlay-editor__zoom .unit-input { width: 108px; }
 .overlay-editor__zoom .unit-input__input { padding-right: var(--s8); }
+.overlay-editor__preview-background-controls { display: grid; min-width: 0; grid-template-columns: minmax(110px, 260px) auto; align-items: end; gap: var(--s2); }
+.overlay-editor__preview-background-controls > .ui-select { min-width: 0; }
+.overlay-editor__preview-background-actions { display: flex; align-items: center; gap: var(--s2); }
+.overlay-editor__preview-background-error { min-height: 17px; grid-column: 1 / -1; margin: -4px 0 0; color: var(--error-text); font-size: 11px; line-height: 17px; }
 .overlay-editor__preview-viewport { position: relative; width: 100%; min-height: 0; flex: 1 1 auto; display: flex; align-items: center; justify-content: center; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface-well); }
 .overlay-editor__canvas-frame { position: relative; flex: none; margin: auto; overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--r-control); background-color: var(--surface-inspector); background-image: linear-gradient(45deg, var(--surface-raised) 25%, transparent 25%), linear-gradient(-45deg, var(--surface-raised) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--surface-raised) 75%), linear-gradient(-45deg, transparent 75%, var(--surface-raised) 75%); background-size: var(--s6) var(--s6); background-position: 0 0, 0 var(--s3), var(--s3) calc(0px - var(--s3)), calc(0px - var(--s3)) 0; }
+.overlay-editor__canvas-frame[data-preview-background="light"] { background-color: var(--content-default); background-image: none; }
+.overlay-editor__canvas-frame[data-preview-background="dark"] { background-color: var(--color-depth); background-image: none; }
+.overlay-editor__canvas-frame[data-preview-background="image"] { background-color: transparent; background-position: center; background-repeat: no-repeat; background-size: cover; }
+.overlay-editor__scale-handles { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
+.overlay-editor__scale-handle { position: absolute; display: grid; width: 18px; height: 18px; place-items: center; padding: 0; border: 2px solid var(--brand-text); border-radius: 50%; background: var(--surface); cursor: nwse-resize; pointer-events: auto; touch-action: none; transform: translate(-50%, -50%); }
+.overlay-editor__scale-handle--top-right,
+.overlay-editor__scale-handle--bottom-left { cursor: nesw-resize; }
+.overlay-editor__scale-handle--width-left,
+.overlay-editor__scale-handle--width-right { cursor: ew-resize; }
+.overlay-editor__scale-handle:focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
+.overlay-editor__scale-handle-value { position: absolute; left: calc(100% + var(--s2)); top: 50%; padding: 2px 6px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--surface); color: var(--text); font: 11px/1.4 "IBM Plex Mono", ui-monospace, monospace; white-space: nowrap; transform: translateY(-50%); }
+.overlay-editor__scale-handle--top-left .overlay-editor__scale-handle-value,
+.overlay-editor__scale-handle--bottom-left .overlay-editor__scale-handle-value,
+.overlay-editor__scale-handle--width-left .overlay-editor__scale-handle-value { right: calc(100% + var(--s2)); left: auto; }
 .overlay-editor__preview-frame { position: absolute; top: 50%; left: 50%; border: 0; background: transparent; transform-origin: center; }
 .overlay-editor__preview-foot { display: flex; justify-content: space-between; color: var(--text-3); font-size: 11px; }
 .overlay-editor__property-fields { display: grid; gap: 8px; }
 .overlay-editor__property-fields .ui-field__description:empty,
 .overlay-editor__property-fields .unit-input__description:empty { display: none; }
 .overlay-editor__numeric-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.overlay-editor__width-control { display: grid; grid-column: 1 / -1; min-width: 0; grid-template-columns: min(14rem, calc((100% - var(--s2)) / 2)) var(--control-height); justify-content: start; align-items: end; gap: var(--s2); }
+/* The field reserves an 18px error row plus a 4px gap below its input; keep the reset button level with the input. */
+.overlay-editor__width-control > .ui-button { width: var(--control-height); min-width: var(--control-height); margin-bottom: 22px; }
 .overlay-editor__layer-actions { display: flex; align-items: center; gap: 8px; }
 .overlay-editor__layer-action { width: 36px; min-width: 36px; }
 .overlay-editor__layer-action--backward svg { transform: rotate(180deg); }
@@ -200,6 +221,7 @@
   .overlay-editor__elements,
   .overlay-editor__preview-panel,
   .overlay-editor__properties { min-height: 0; overflow: visible; padding: 12px; }
+  .overlay-editor__scale-handles { display: none; }
   .overlay-editor__preview-viewport { min-height: 188px; max-height: 240px; flex: none; }
   .overlay-editor__properties :where(input, textarea, select, button, [tabindex]) { scroll-margin-bottom: 88px; }
   .overlay-editor__numeric-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -226,6 +248,8 @@
 @media (max-width: 480px) {
   .overlay-editor__zoom { flex-wrap: wrap; justify-content: flex-end; }
   .overlay-editor__zoom .unit-input { width: 92px; }
+  .overlay-editor__preview-background-controls { grid-template-columns: minmax(0, 1fr); }
+  .overlay-editor__preview-background-actions { justify-content: space-between; }
   .overlay-editor__create-size { grid-template-columns: minmax(0, 1fr); }
 }
 }

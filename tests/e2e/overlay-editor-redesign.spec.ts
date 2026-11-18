@@ -202,9 +202,11 @@ test("canvas and element list share selection with full-row highlighting at targ
     });
     expect(propertyLayout.fieldsGap).toBe("8px");
     expect(propertyLayout.numericGap).toBe("8px");
-    expect(propertyLayout.numericWidths).toHaveLength(4);
+    // X, Y, Width (variable elements support a width), Scale, Layer.
+    expect(propertyLayout.numericWidths).toHaveLength(5);
     expect(Math.abs((propertyLayout.numericWidths[0] ?? 0) - (propertyLayout.numericWidths[1] ?? 0))).toBeLessThanOrEqual(1);
     expect(Math.abs((propertyLayout.numericWidths[2] ?? 0) - (propertyLayout.numericWidths[3] ?? 0))).toBeLessThanOrEqual(1);
+    expect(Math.abs((propertyLayout.numericWidths[3] ?? 0) - (propertyLayout.numericWidths[4] ?? 0))).toBeLessThanOrEqual(1);
     expect(propertyLayout.layerGap).toBe("8px");
     expect(propertyLayout.layerWidths).toEqual([36, 36]);
     expect(propertyLayout.layerTitles).toEqual(["Eine Ebene nach vorn", "Eine Ebene nach hinten"]);

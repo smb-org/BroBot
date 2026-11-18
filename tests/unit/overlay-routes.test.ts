@@ -699,7 +699,7 @@ describe("Overlay routes", () => {
         css: ".score { color: gold; }",
         elements: [{
           id: "element-a", kind: "variable", label: "Lives", variableName: "lives", text: "{value}",
-          config: {}, x: 8, y: 9, scalePercent: 100, z: 0, inComposition: true,
+          config: {}, x: 8, y: 9, scalePercent: 100, widthPx: null, z: 0, inComposition: true,
         }],
       },
       variables: { lives: 7 },

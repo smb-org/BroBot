@@ -39,3 +39,13 @@
 .brobot-overlay-composition-element .brobot-variable {
   white-space: nowrap;
 }
+
+.brobot-overlay-fixed-width .brobot-module-text > :first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.brobot-overlay-fixed-width > .brobot-module-text {
+  width: 100%;
+  box-sizing: border-box;
+}

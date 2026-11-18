@@ -416,6 +416,7 @@ describe("SQL contract", () => {
       expect([...tableColumns("channel_stream_state")]).toEqual(expect.arrayContaining([
         "checked_at", "eventsub_changed_at",
       ]));
+      expect([...tableColumns("overlay_elements")]).toContain("width_px");
       const songRequestConnectionColumns = [...tableColumns("song_requests_connections")];
       expect(songRequestConnectionColumns).toHaveLength(6);
       expect(songRequestConnectionColumns).toContain("poll_backoff_until");

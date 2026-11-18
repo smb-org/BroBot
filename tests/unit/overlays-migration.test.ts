@@ -8,6 +8,31 @@ const migrationsDirectory = resolve(import.meta.dirname, "../../migrations");
 const readMigration = (name: string): string => readFileSync(resolve(migrationsDirectory, name), "utf8");
 
 describe("stored overlays migration", () => {
+  it("adds nullable overlay element widths with the supported pixel range", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec(`
+        CREATE TABLE overlay_elements (
+          element_id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL
+        );
+        INSERT INTO overlay_elements (element_id, kind) VALUES ('element-a', 'variable');
+      `);
+
+      database.exec(readMigration("0100_overlay_element_width.sql"));
+
+      expect(database.prepare("SELECT element_id, width_px FROM overlay_elements").get())
+        .toEqual({ element_id: "element-a", width_px: null });
+      database.prepare("UPDATE overlay_elements SET width_px = 240 WHERE element_id = 'element-a'").run();
+      expect(database.prepare("SELECT width_px FROM overlay_elements WHERE element_id = 'element-a'").get())
+        .toEqual({ width_px: 240 });
+      expect(() => database.prepare("UPDATE overlay_elements SET width_px = 79 WHERE element_id = 'element-a'").run()).toThrow();
+      expect(() => database.prepare("UPDATE overlay_elements SET width_px = 1921 WHERE element_id = 'element-a'").run()).toThrow();
+    } finally {
+      database.close();
+    }
+  });
+
   it("raises the overlay CSS limit while preserving overlays and their elements", () => {
     const database = new DatabaseSync(":memory:");
     try {

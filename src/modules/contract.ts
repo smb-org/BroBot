@@ -241,6 +241,8 @@ export interface ModuleOverlayElementProps {
   config: Readonly<Record<string, unknown>>;
   state: Readonly<Record<string, unknown>> | null;
   now: number;
+  /** Composition width override applied outside module configuration. */
+  widthPx?: number;
   /** Bearer credential used by overlay elements that fetch protected media. */
   mediaAccessToken?: string;
   language?: "de" | "en";
@@ -363,6 +365,8 @@ export interface ModuleOverlayElementDefinition {
   kind: `${string}.${string}`;
   configVersion: number;
   defaultSize: { width: number; height: number };
+  /** Allows the composition editor to set a fixed content width. */
+  resizableWidth?: true;
   defaultConfig: JsonObject;
   /** Editor-only sample state used when no live module state is available. */
   previewState?: (config: JsonObject, language: ModuleLanguage, now: number) => JsonObject;

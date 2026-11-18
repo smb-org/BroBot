@@ -32,6 +32,9 @@ export const MODULE_OVERLAY_ELEMENTS: readonly RegisteredOverlayElement[] = [
   { moduleId: "song_requests", definition: songRequestsQueueElement },
 ];
 
+export const overlayElementSupportsWidth = (kind: string): boolean => kind === "variable" ||
+  MODULE_OVERLAY_ELEMENTS.some(({ definition }) => definition.kind === kind && definition.resizableWidth === true);
+
 export const moduleOverlayElementKindForMessage = (messageType: string): string => {
   const declared = MODULE_OVERLAY_ELEMENTS.find(({ definition }) =>
     definition.mergeRealtimeStateOnModuleMessages?.includes(messageType) === true);

@@ -5,7 +5,7 @@ import { adsModule } from "../../src/modules/ads";
 import { chatVotingModule } from "../../src/modules/chat_voting";
 import { textLibraryModule } from "../../src/modules/text_library";
 import { MODULES, validateModuleOverlayElements } from "../../src/modules/registry";
-import { MODULE_OVERLAY_ELEMENTS, moduleOverlayElementKindForMessage, moduleOverlayMessageRequiresStateReload } from "../../src/modules/overlay-element-registry";
+import { MODULE_OVERLAY_ELEMENTS, moduleOverlayElementKindForMessage, moduleOverlayMessageRequiresStateReload, overlayElementSupportsWidth } from "../../src/modules/overlay-element-registry";
 
 const moduleWithElements = (id: string, kinds: readonly string[]): BotModule => ({
   id,
@@ -25,6 +25,15 @@ const moduleWithElements = (id: string, kinds: readonly string[]): BotModule => 
 });
 
 describe("module overlay element declarations", () => {
+  it("enables width for text and tally elements while fixed layouts stay intrinsic", () => {
+    expect(MODULE_OVERLAY_ELEMENTS.filter(({ definition }) => definition.resizableWidth === true)
+      .map(({ definition }) => definition.kind).sort((a, b) => a.localeCompare(b)))
+      .toEqual(["chat_voting.tally", "text_library.block", "votekick.tally"]);
+    expect(overlayElementSupportsWidth("variable")).toBe(true);
+    expect(overlayElementSupportsWidth("song_requests.now_playing")).toBe(false);
+    expect(overlayElementSupportsWidth("emote_slots.slot")).toBe(false);
+  });
+
   it("rejects kinds that are not prefixed with their module id", () => {
     expect(() => { validateModuleOverlayElements([moduleWithElements("ads", ["clips.countdown"])]); })
       .toThrow(/prefixed/u);
@@ -62,10 +71,14 @@ describe("module overlay element declarations", () => {
       kind: "chat_voting.tally",
       configVersion: 1,
       defaultSize: { width: 480, height: 240 },
-      defaultConfig: { layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 15, width: 480 },
+      defaultConfig: { layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 15 },
     });
     expect(tally?.parseConfig({ layout: "strip", showPercent: false, hideAfterCloseSeconds: 0 }))
-      .toEqual({ layout: "strip", showPercent: false, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 0, width: 480 });
+      .toEqual({ layout: "strip", showPercent: false, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 0 });
+    expect(tally?.parseConfig({ width: 320 })).toEqual({
+      layout: "bars", showPercent: true, showCountdown: true, useVoteColors: true, hideAfterCloseSeconds: 15, width: 320,
+    });
+    expect(tally?.parseConfig({})).not.toHaveProperty("width");
     expect(tally?.parseConfig({ showCountdown: false })).toMatchObject({ showCountdown: false });
     expect(tally?.parseConfig({ width: 199 })).toBeNull();
     expect(tally?.parseConfig({ width: 1921 })).toBeNull();

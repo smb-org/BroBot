@@ -358,6 +358,7 @@ authRouter.get("/api/overlay/bootstrap", async (context) => {
             x: element.x,
             y: element.y,
             scalePercent: element.scalePercent,
+            widthPx: element.widthPx,
             z: element.z,
             inComposition: element.inComposition,
           };

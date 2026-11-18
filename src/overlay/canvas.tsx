@@ -54,12 +54,15 @@ const renderElement = (
     position: isolated ? "relative" : "absolute",
     left: isolated ? 0 : element.x,
     top: isolated ? 0 : element.y,
-    ...(isolated ? {} : { width: "max-content" }),
+    ...(element.widthPx == null ? (isolated ? {} : { width: "max-content" }) : { width: element.widthPx }),
     transform: isolated ? `scale(${String(scale)})` : `scale(${String(scale)}) translateX(var(--brobot-overlay-anchor-x, 0%))`,
     transformOrigin: "top left",
     zIndex: element.z,
   };
-  const wrapperClass = isolated ? undefined : "brobot-overlay-composition-element";
+  const wrapperClass = [
+    isolated ? undefined : "brobot-overlay-composition-element",
+    element.widthPx == null ? undefined : "brobot-overlay-fixed-width",
+  ].filter((value): value is string => value !== undefined).join(" ") || undefined;
   if (element.kind !== "variable") {
     const ModuleElement = lazyModuleElements.get(element.kind);
     if (ModuleElement === undefined || element.moduleEnabled !== true) return null;
@@ -75,6 +78,7 @@ const renderElement = (
         state={element.state ?? null}
         now={Date.now()}
         language={language}
+        {...(element.widthPx == null ? {} : { widthPx: element.widthPx })}
         {...(mediaAccessToken === undefined ? {} : { mediaAccessToken })}
       /></Suspense>
     </div>;
@@ -94,6 +98,7 @@ const renderElement = (
       value={value}
       language={language}
       variables={variables}
+      wrap={element.widthPx != null}
     />
   </div>;
 };
