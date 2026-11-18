@@ -69,11 +69,11 @@ interface Connection {
 interface RequestsRead {
   requests: RequestRow[];
   voteOutcomes: VoteOutcome[];
-  nowPlayingRequestId: string | null;
+  nowPlaying: { requestId: string; playing: boolean } | null;
 }
 
-const stateTone = (state: SongRequestState, nowPlaying = false): "neutral" | "green" | "amber" | "red" => {
-  if (state === "submitted" || (state === "observed_playing" && nowPlaying)) return "green";
+const stateTone = (state: SongRequestState, playback: "playing" | "paused" | null = null): "neutral" | "green" | "amber" | "red" => {
+  if (state === "submitted" || (state === "observed_playing" && playback === "playing")) return "green";
   if (state === "observed_playing") return "neutral";
   if (state === "failed" || state === "rejected" || state === "removed") return "red";
   if (state === "pending_review" || state === "approved" || state === "submitting" || state === "outcome_unknown") return "amber";
@@ -360,7 +360,10 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
       >
           <div className="song-requests-panel__list" role="list" aria-label={text.recent}>
             {requests.map((requestRow) => {
-              const nowPlaying = requestRow.state === "observed_playing" && requestRow.requestId === requestData?.nowPlayingRequestId;
+              const nowPlaying = requestData?.nowPlaying ?? null;
+              const playback: "playing" | "paused" | null = requestRow.state !== "observed_playing" || nowPlaying === null || nowPlaying.requestId !== requestRow.requestId
+                ? null
+                : nowPlaying.playing ? "playing" : "paused";
               const requester = requestRow.requesterDisplayName || requestRow.requesterLogin;
               const attribution = requester || (requestRow.requestType === "vote" ? text.recap.songVote : null);
               const description = [requestRow.artists.join(", "), attribution]
@@ -387,7 +390,9 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
                   icon={requestRow.coverUrl === null ? <Icon name="music" size={20} /> : <img className="song-requests-cover" src={requestRow.coverUrl} alt="" />}
                   title={requestRow.title}
                   description={description}
-                  status={<Badge tone={stateTone(requestRow.state, nowPlaying)}>{requestRow.state === "observed_playing" ? (nowPlaying ? text.states.observed_playing : text.states.played) : text.states[requestRow.state]}</Badge>}
+                  status={<Badge tone={stateTone(requestRow.state, playback)}>{requestRow.state === "observed_playing"
+                    ? playback === "playing" ? text.states.observed_playing : playback === "paused" ? text.states.paused : text.states.played
+                    : text.states[requestRow.state]}</Badge>}
                   action={action}
                 />
               </div>;

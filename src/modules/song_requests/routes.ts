@@ -13,10 +13,9 @@ import {
   cleanupSongRequestRound,
   ensureOfflineSongRequestRound,
   latestSongRequestStreamId,
-  readNowPlayingRequestId,
   pendingSongRequestQueue,
   readSongRequest,
-  recentSongRequests,
+  recentSongRequestsAndNowPlaying,
   recentSongVoteOutcomes,
   readSongRequestStatistics,
   resolveUnknownRequest,
@@ -561,10 +560,12 @@ songRequestsRoutes.get("/requests", async (context) => {
   if (!isModerator(context)) return moderatorDenied(context);
   const current = await currentRequestRound(context);
   const requestStreamId = current?.roundId ?? await latestSongRequestStreamId(context.env.DB, channel(context), await streamId(context));
+  const { requests, nowPlaying } = await recentSongRequestsAndNowPlaying(context.env.DB, channel(context), requestStreamId);
   return context.json({
-    requests: await recentSongRequests(context.env.DB, channel(context), requestStreamId),
+    requests,
     voteOutcomes: await recentSongVoteOutcomes(context.env.DB, channel(context), requestStreamId),
-    nowPlayingRequestId: await readNowPlayingRequestId(context.env.DB, channel(context)),
+    nowPlaying,
+    nowPlayingRequestId: nowPlaying?.requestId ?? null,
   });
 });
 

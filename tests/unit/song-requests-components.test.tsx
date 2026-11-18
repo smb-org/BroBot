@@ -7,6 +7,7 @@ import { DashboardDataProvider } from "../../src/dashboard/data/provider";
 import { useDashboardQueryClient } from "../../src/dashboard/data";
 import { refetchModuleQueryData } from "../../src/dashboard/data/module-query";
 import SongRequestsPanel from "../../src/modules/song_requests/panel";
+import { songRequestsPanelTexts } from "../../src/modules/song_requests/panel/locale";
 import SongRequestsNowPlaying from "../../src/modules/song_requests/overlay/view";
 import SongRequestsNowPlayingEditor from "../../src/modules/song_requests/overlay/editor";
 import { songRequestsSettingsSchema } from "../../src/modules/song_requests/contracts";
@@ -182,11 +183,11 @@ describe("song request components", () => {
         createdAt: "2026-11-15T18:00:00.000Z",
       },
     ];
-    let nowPlayingRequestId = "current-song";
+    let nowPlaying: { requestId: string; playing: boolean } | null = { requestId: "current-song", playing: true };
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 1, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests, voteOutcomes: [], nowPlayingRequestId }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests, voteOutcomes: [], nowPlaying, nowPlayingRequestId: nowPlaying?.requestId ?? null }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 1 }));
       return Promise.resolve(json({}));
     });
@@ -214,8 +215,24 @@ describe("song request components", () => {
     expect(earlierRow?.querySelector(".list-row__status")).toHaveTextContent("Played");
     expect(earlierRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--neutral");
 
-    nowPlayingRequestId = "earlier-song";
     if (captured.client === null) throw new Error("The dashboard query client was not captured.");
+    nowPlaying = { requestId: "current-song", playing: false };
+    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    await waitFor(() => {
+      expect(currentRow?.querySelector(".list-row__status")).toHaveTextContent("Paused");
+      expect(currentRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--neutral");
+      expect(earlierRow?.querySelector(".list-row__status")).toHaveTextContent("Played");
+    });
+    expect(songRequestsPanelTexts.de.states.paused).toBe("Pausiert");
+
+    nowPlaying = { requestId: "current-song", playing: true };
+    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    await waitFor(() => {
+      expect(currentRow?.querySelector(".list-row__status")).toHaveTextContent("Now playing");
+      expect(currentRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--green");
+    });
+
+    nowPlaying = { requestId: "earlier-song", playing: true };
     await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
     await waitFor(() => {
       expect(currentRow?.querySelector(".list-row__status")).toHaveTextContent("Played");
