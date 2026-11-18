@@ -8,7 +8,7 @@ import { DEFAULT_SLOT_OVERLAY_CONFIG, parseSlotOverlayConfig } from "./state";
 const SlotOverlayEditor = ({ config, onChange, language = "en", readOnly = false }: OverlayElementEditorProps): ReactElement => {
   const labels = emoteSlotOverlayLabels(language);
   const values = parseSlotOverlayConfig(config) ?? DEFAULT_SLOT_OVERLAY_CONFIG;
-  return <div className="config-section emote-slot-overlay-editor">
+  return <div className="overlay-editor__module-fields emote-slot-overlay-editor">
     <ColorField id="emote-slot-border-color" label={labels.borderColor} value={values.borderColor}
       unsetLabel={labels.colorUnset} clearLabel={labels.colorClear} disabled={readOnly}
       onChange={(borderColor) => {

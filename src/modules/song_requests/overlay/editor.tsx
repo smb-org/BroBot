@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import type { OverlayElementEditorProps } from "../../contract";
+import { SwitchRow } from "../../../dashboard/ui";
 import { nowPlayingTexts } from "./locale";
 import { DEFAULT_NOW_PLAYING_CONFIG, parseNowPlayingConfig } from "./state";
 import "./editor.css";
@@ -7,10 +8,13 @@ import "./editor.css";
 export default function SongRequestsNowPlayingEditor({ config, onChange, onPreviewState, language = "de", readOnly = false }: OverlayElementEditorProps): ReactElement {
   const value = parseNowPlayingConfig(config) ?? DEFAULT_NOW_PLAYING_CONFIG;
   const copy = nowPlayingTexts[language];
-  return <div className="song-requests-now-playing-editor">
-    <label><span>{copy.showCover}</span><input type="checkbox" checked={value.showCover} disabled={readOnly} onChange={(event) => onChange({ ...value, showCover: event.currentTarget.checked })} /></label>
-    <label><span>{copy.showRequester}</span><input type="checkbox" checked={value.showRequester} disabled={readOnly} onChange={(event) => onChange({ ...value, showRequester: event.currentTarget.checked })} /></label>
-    <label><span>{copy.showProgress}</span><input type="checkbox" checked={value.showProgress} disabled={readOnly} onChange={(event) => onChange({ ...value, showProgress: event.currentTarget.checked })} /></label>
+  return <div className="song-requests-now-playing-editor overlay-editor__module-fields">
+    <SwitchRow label={copy.showCover} checked={value.showCover} disabled={readOnly}
+      onChange={(checked) => { if (!readOnly) onChange({ ...value, showCover: checked }); }} />
+    <SwitchRow label={copy.showRequester} checked={value.showRequester} disabled={readOnly}
+      onChange={(checked) => { if (!readOnly) onChange({ ...value, showRequester: checked }); }} />
+    <SwitchRow label={copy.showProgress} checked={value.showProgress} disabled={readOnly}
+      onChange={(checked) => { if (!readOnly) onChange({ ...value, showProgress: checked }); }} />
     <div className="song-requests-now-playing-editor__preview" aria-label={copy.preview}>
       <span>{copy.preview}</span><strong>Glass Harbor</strong><small>Mira Vale · Song vote · Spotify</small>
     </div>

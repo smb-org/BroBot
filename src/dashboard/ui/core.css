@@ -64,7 +64,6 @@
   --state-label-width: 240px;
   /* Field widths preserve narrow number inputs, wide response fields, and the medium derived size. */
   --config-field-narrow: 9rem;
-  --config-field-medium: 20rem;
   --config-field-wide: 40rem;
 
   color-scheme: dark;
@@ -211,8 +210,7 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 
 .inspector-form label .muted,
 .content-section label .muted,
-.module-stack label .muted,
-.config-field__hint { color: var(--text-3); font-size: 12px; font-weight: 400; line-height: 1.45; }
+.module-stack label .muted { color: var(--text-3); font-size: 12px; font-weight: 400; line-height: 1.45; }
 
 /* The host styles raw fields only; controls marked by the UI seam carry their own scoped styles. */
 :is(.inspector-form, .content-section, .module-stack) input:not([type="checkbox"]):not([type="radio"]):not([data-ui]),
@@ -232,13 +230,7 @@ h3 { margin-bottom: 0; font-size: 13px; font-weight: 600; }
 /* Number inputs do not need the width of response fields. */
 .inspector-form input[type="number"]:not([data-ui]),
 .content-section input[type="number"]:not([data-ui]),
-.module-stack input[type="number"]:not([data-ui]),
-.config-field--narrow { max-width: var(--config-field-narrow); }
-.config-field--medium { max-width: var(--config-field-medium); }
-.config-field--wide { max-width: var(--config-field-wide); }
-.config-field > input,
-.config-field > textarea,
-.config-field > select { width: 100%; }
+.module-stack input[type="number"]:not([data-ui]) { max-width: var(--config-field-narrow); }
 
 /* Forms stack their fields; side-by-side fields become hard to read in narrow windows, and their widths vary. */
 form.content-section { display: grid; gap: var(--s4); }

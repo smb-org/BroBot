@@ -66,7 +66,7 @@ describe("votekick overlay tally", () => {
     const onChange = vi.fn<(config: JsonObject) => void>();
     render(<VotekickOverlayEditor config={{ showCountdown: true, hideAfterCloseSeconds: 15 }} onChange={onChange} language="en" />);
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "Show countdown" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show countdown" }));
     expect(onChange).toHaveBeenLastCalledWith({ showCountdown: false, hideAfterCloseSeconds: 15 });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Hide results after (seconds)" }), { target: { value: "30" } });
     expect(onChange).toHaveBeenLastCalledWith({ showCountdown: true, hideAfterCloseSeconds: 30 });

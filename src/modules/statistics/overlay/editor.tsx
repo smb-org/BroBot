@@ -1,17 +1,14 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import type { OverlayElementEditorProps } from "../../contract";
+import { Field, Select } from "../../../dashboard/ui";
 import { foldStatisticsWord } from "../domain";
 import { statisticsWordCounterLabels } from "./locale";
-import {
-  DEFAULT_STATISTICS_WORD_COUNTER_CONFIG,
-  parseStatisticsWordCounterConfig,
-  type StatisticsWordCounterShow,
-} from "./state";
+import { DEFAULT_STATISTICS_WORD_COUNTER_CONFIG, parseStatisticsWordCounterConfig } from "./state";
 
 import "./editor.css";
 
-export default function StatisticsWordCounterEditor({ config, onChange, language = "de", readOnly = false, readOnlyReason }: OverlayElementEditorProps): ReactElement {
+export default function StatisticsWordCounterEditor({ config, onChange, language = "de", readOnly = false }: OverlayElementEditorProps): ReactElement {
   const values = parseStatisticsWordCounterConfig(config) ?? DEFAULT_STATISTICS_WORD_COUNTER_CONFIG;
   const labels = statisticsWordCounterLabels(language);
   const [wordInput, setWordInput] = useState(() => typeof config.word === "string" ? config.word : values.word);
@@ -55,10 +52,6 @@ export default function StatisticsWordCounterEditor({ config, onChange, language
     onChange({ ...values, label: nextLabel });
   };
 
-  const changeShow = (show: StatisticsWordCounterShow): void => {
-    if (!readOnly) onChange({ ...values, show });
-  };
-
   const wordIsValid = parseStatisticsWordCounterConfig({ word: wordInput }) !== null;
   const number = new Intl.NumberFormat(language === "de" ? "de-DE" : "en-US");
   const previewCounts = values.show === "both"
@@ -67,30 +60,20 @@ export default function StatisticsWordCounterEditor({ config, onChange, language
       ? `${labels.stream} ${number.format(128)}`
       : `${labels.total} ${number.format(1_248)}`;
 
-  return <div className="statistics-word-counter-editor">
-    <label className="statistics-word-counter-editor__field" htmlFor="statistics-word-counter-word">
-      <span>{labels.word}</span>
-      <input id="statistics-word-counter-word" type="text" value={wordInput} maxLength={80}
-        disabled={readOnly} title={readOnly ? readOnlyReason : undefined} aria-invalid={!wordIsValid}
-        onChange={(event) => changeWord(event.currentTarget.value)} />
-      <span className="statistics-word-counter-editor__hint" aria-live="polite">{wordIsValid ? "" : labels.invalidWord}</span>
-    </label>
-    <label className="statistics-word-counter-editor__field" htmlFor="statistics-word-counter-label">
-      <span>{labels.label}</span>
-      <input id="statistics-word-counter-label" type="text" value={labelInput} maxLength={80}
-        disabled={readOnly} title={readOnly ? readOnlyReason : undefined}
-        onChange={(event) => changeLabel(event.currentTarget.value)} />
-    </label>
-    <label className="statistics-word-counter-editor__field" htmlFor="statistics-word-counter-show">
-      <span>{labels.show}</span>
-      <select id="statistics-word-counter-show" value={values.show} disabled={readOnly}
-        title={readOnly ? readOnlyReason : undefined}
-        onChange={(event) => changeShow(event.currentTarget.value as StatisticsWordCounterShow)}>
-        <option value="stream">{labels.stream}</option>
-        <option value="total">{labels.total}</option>
-        <option value="both">{labels.both}</option>
-      </select>
-    </label>
+  return <div className="statistics-word-counter-editor overlay-editor__module-fields">
+    <Field label={labels.word} value={wordInput} disabled={readOnly}
+      {...(wordIsValid ? {} : { error: labels.invalidWord })} normalize={(word) => word.slice(0, 80)}
+      onChange={changeWord} />
+    <Field label={labels.label} value={labelInput} disabled={readOnly}
+      normalize={(label) => label.slice(0, 80)}
+      onChange={changeLabel} />
+    <Select label={labels.show} value={values.show} disabled={readOnly}
+      options={[
+        { value: "stream", label: labels.stream },
+        { value: "total", label: labels.total },
+        { value: "both", label: labels.both },
+      ]}
+      onChange={(show) => { if (!readOnly && show !== null) onChange({ ...values, show }); }} />
     <p className="statistics-word-counter-editor__preview" aria-label={labels.preview}>
       {labels.preview}: {labelInput || wordInput} · {previewCounts}
     </p>

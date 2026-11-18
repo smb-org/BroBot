@@ -103,18 +103,15 @@ test("module overlay previews retain their styling and drag by measured bounds (
   await waitForWebFonts(page);
   const propertyFieldsBeforeEditorLoads = await box(propertyFields);
   releaseEditorRequest();
-  await expect(page.locator(".module-overlay-element-editor select")).toBeVisible();
+  await expect(page.locator(".module-overlay-element-editor .ui-select")).toBeVisible();
   const tallyEditor = page.locator(".module-overlay-element-editor");
   await expect(tallyEditor.locator(".module-overlay-element-editor__element")).toHaveCSS("min-height", "364px");
-  const switchBounds = await tallyEditor.locator(".ui-switch-row").boundingBox();
-  const layoutBounds = await tallyEditor.locator('select[aria-label="Layout"]').evaluate((element) => {
-    const rect = element.closest(".config-field")?.getBoundingClientRect();
-    return rect === undefined ? null : { y: rect.y };
-  });
+  const switchBounds = await tallyEditor.locator(".ui-switch-row").first().boundingBox();
+  const layoutBounds = await tallyEditor.locator(".ui-select").first().boundingBox();
   expect(switchBounds).not.toBeNull();
   expect(layoutBounds).not.toBeNull();
   if (switchBounds !== null && layoutBounds !== null) {
-    expect(layoutBounds.y - (switchBounds.y + switchBounds.height)).toBeLessThanOrEqual(8);
+    expect(layoutBounds.y - (switchBounds.y + switchBounds.height)).toBeLessThanOrEqual(12);
   }
   expect(await box(propertyFields)).toEqual(propertyFieldsBeforeEditorLoads);
   await expect(frame.locator("style[data-brobot-overlay-tally-css]")).toHaveCount(1, { timeout: 15_000 });

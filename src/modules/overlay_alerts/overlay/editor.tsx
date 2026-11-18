@@ -8,7 +8,7 @@ import { DEFAULT_OVERLAY_ALERT_CONFIG, parseOverlayAlertConfig } from "./state";
 export default function OverlayAlertEditor({ config, onChange, language = "de", readOnly = false }: OverlayElementEditorProps): ReactElement {
   const labels = overlayAlertElementEditorTexts[language];
   const values = parseOverlayAlertConfig(config) ?? DEFAULT_OVERLAY_ALERT_CONFIG;
-  return <div className="config-section overlay-alert-element-editor">
+  return <div className="overlay-editor__module-fields overlay-alert-element-editor">
     <UnitInput
       label={labels.fontSize}
       unit={labels.fontSizeUnit}

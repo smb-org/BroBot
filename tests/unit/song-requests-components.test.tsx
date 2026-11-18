@@ -75,7 +75,7 @@ describe("song request components", () => {
     const onChange = vi.fn();
     const onPreviewState = vi.fn();
     render(<SongRequestsNowPlayingEditor config={{}} onChange={onChange} onPreviewState={onPreviewState} language="en" />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Show cover" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show cover" }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ showCover: false, showRequester: true }));
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     expect(onPreviewState).toHaveBeenCalledTimes(1);
