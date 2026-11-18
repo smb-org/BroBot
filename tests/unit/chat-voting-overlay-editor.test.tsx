@@ -75,6 +75,7 @@ describe("chat voting overlay editor", () => {
       ...screen.getAllByRole("switch"),
     ];
     for (const control of controls) expect(control).toBeDisabled();
+    for (const toggle of screen.getAllByRole("switch")) expect(toggle).toHaveAccessibleDescription(reason);
     expect(screen.getByRole("combobox", { name: "Layout" })).toHaveAttribute("aria-describedby", "overlay-editor-readonly-reason");
     expect(screen.getByRole("spinbutton", { name: "Hide results after (seconds)" }).getAttribute("aria-describedby")).toContain("overlay-editor-readonly-reason");
     expect(onChange).not.toHaveBeenCalled();

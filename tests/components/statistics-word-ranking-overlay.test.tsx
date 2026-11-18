@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { JsonObject } from "../../src/modules/contract";
+import { clickSelectOption } from "../query-test-utils";
 import StatisticsWordRankingEditor from "../../src/modules/statistics/overlay/ranking-editor";
 import StatisticsWordRanking from "../../src/modules/statistics/overlay/ranking-view";
 
@@ -43,11 +44,12 @@ describe("statistics word ranking overlay", () => {
     expect(rows[1]?.style.getPropertyValue("--word-ranking-bar-width")).toBe("50%");
   });
 
-  it("exposes labeled editor fields and commits validated values", () => {
+  it("exposes labeled editor fields and commits validated values", async () => {
     const onChange = vi.fn<(config: JsonObject) => void>();
     const { container, rerender } = render(<StatisticsWordRankingEditor config={{ scope: "stream", count: 5, bars: true }} onChange={onChange} language="en" />);
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Scope" }), { target: { value: "total" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Scope" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Total", hidden: true }));
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "total", count: 5, bars: true }));
     rerender(<StatisticsWordRankingEditor config={{ scope: "total", count: 5, bars: true }} onChange={onChange} language="en" />);
     fireEvent.change(screen.getByRole("spinbutton", { name: "Word count" }), { target: { value: "7" } });
@@ -56,7 +58,7 @@ describe("statistics word ranking overlay", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "My words" } });
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "total", count: 7, title: "My words", bars: true }));
     rerender(<StatisticsWordRankingEditor config={{ scope: "total", count: 7, title: "My words", bars: true }} onChange={onChange} language="en" />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Show bars" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Show bars" }));
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "total", count: 7, title: "My words", bars: false }));
     expect(container.querySelectorAll(".statistics-word-ranking-editor__preview-row")).toHaveLength(7);
   });

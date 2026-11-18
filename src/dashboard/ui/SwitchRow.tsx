@@ -2,6 +2,7 @@ import { useId, type ReactNode } from "react";
 
 import { Switch as SwitchPrimitive } from "./primitives/switch";
 import { LockedReason } from "./LockedReason";
+import { useDisabledFieldReason } from "./DisabledFieldReason";
 
 export interface SwitchRowProps {
   label: string;
@@ -25,7 +26,9 @@ export function SwitchRow({ control, label, ariaLabel, description, hint, checke
   const hintId = `${id}-hint`;
   const reasonId = `${id}-reason`;
   const blocked = disabled || pending || lockedReason !== undefined;
-  const describedBy = [description === undefined ? null : descriptionId, hint === undefined ? null : hintId, lockedReason === undefined ? null : reasonId].filter((part): part is string => part !== null).join(" ") || undefined;
+  // An explicit lockedReason wins; otherwise a disabled row points at the surrounding disabled-field reason.
+  const contextReasonId = useDisabledFieldReason()?.id;
+  const describedBy = [description === undefined ? null : descriptionId, hint === undefined ? null : hintId, lockedReason === undefined ? (disabled ? contextReasonId ?? null : null) : reasonId].filter((part): part is string => part !== null).join(" ") || undefined;
 
   return <div data-ui="" className="ui-switch-row" aria-busy={pending}>
     <span className="ui-switch-row__copy">

@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import AdsCountdown from "../../src/modules/ads/overlay/countdown";
+import { DisabledFieldReasonContext } from "../../src/dashboard/ui/DisabledFieldReason";
 import AdsCountdownEditor from "../../src/modules/ads/overlay/countdown-editor";
 
 const variableCss = readFileSync(resolve(process.cwd(), "src/overlay/variable.css"), "utf8");
@@ -100,12 +101,14 @@ describe("ads countdown overlay element", () => {
 
   it("disables the snooze option for read-only operators and explains why", () => {
     const onChange = vi.fn();
-    render(<AdsCountdownEditor config={{}} onChange={onChange} readOnly readOnlyReason="Operators cannot edit this overlay." />);
-    const checkbox = screen.getByRole("checkbox", { name: "Show snooze info" });
+    render(<DisabledFieldReasonContext.Provider value={{ id: "overlay-editor-readonly-reason", reason: "Operators cannot edit this overlay." }}>
+      <p id="overlay-editor-readonly-reason">Operators cannot edit this overlay.</p>
+      <AdsCountdownEditor config={{}} onChange={onChange} readOnly />
+    </DisabledFieldReasonContext.Provider>);
+    const checkbox = screen.getByRole("switch", { name: "Show snooze info" });
 
     expect(checkbox).toBeDisabled();
-    expect(checkbox).toHaveAttribute("title", "Operators cannot edit this overlay.");
-    expect(checkbox).toHaveAttribute("aria-describedby", "overlay-editor-readonly-reason");
+    expect(checkbox).toHaveAccessibleDescription("Operators cannot edit this overlay.");
     fireEvent.click(checkbox);
     expect(onChange).not.toHaveBeenCalled();
   });

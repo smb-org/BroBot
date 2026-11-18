@@ -423,7 +423,7 @@ for (const lazyCase of lazyLayoutCases) {
     if (lazyCase.type === "module") await expect(page.locator(".module-view-fallback")).toBeVisible();
     else await expect(page.locator("[data-module-editor-fallback]")).toBeVisible();
     if (lazyCase.type === "editor" && lazyCase.kind === "chat_voting.tally") {
-      await expect(page.locator(".module-overlay-element-editor__element")).toHaveCSS("min-height", "364px");
+      await expect(page.locator(".module-overlay-element-editor__element")).toHaveCSS("min-height", "320px");
     }
     const boxHeightBefore = await reservedBox.evaluate((element) => element.getBoundingClientRect().height);
     const minHeightBefore = await reservedBox.evaluate((element) => getComputedStyle(element).minHeight);
