@@ -409,6 +409,8 @@ export interface ModuleOverlayElementDefinition {
   ) => Promise<JsonObject | null>;
   load: () => Promise<{ default: ComponentType<ModuleOverlayElementProps> }>;
   editor?: () => Promise<{ default: ComponentType<OverlayElementEditorProps> }>;
+  /** CSS height reserved for the lazy editor when it depends on the saved config; otherwise the host uses a fixed value. */
+  editorReservedHeight?: (config: JsonObject) => string;
 }
 
 export type ModuleOverlayHostEvent = "channel.game.changed" | "stream.state.changed" | "template.data.changed";
