@@ -73,9 +73,8 @@ const TextBlockOverlayEditor = ({ config, onChange, channelId = "", language = "
     return () => controller.abort();
   }, [blockName, channelId, labels.sampleValues, onPreviewState]);
 
-  return <div className="text-block-overlay-editor">
+  return <div className="text-block-overlay-editor overlay-editor__module-fields">
     <Select
-      id="overlay-editor-text-block-name"
       label={labels.label}
       value={blockName.length === 0 ? null : blockName}
       disabled={readOnly || loadState !== "ready" || blocks.length === 0}

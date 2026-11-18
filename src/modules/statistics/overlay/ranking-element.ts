@@ -78,6 +78,9 @@ export const statisticsWordRankingOverlayElement: ModuleOverlayElementDefinition
     return parsed === null ? null : parsed as unknown as JsonObject;
   },
   initialState,
+  // The preview grows by one 24px row per word; the fields above it take 360px.
+  editorReservedHeight: (rawConfig) =>
+    `calc(var(--s10) * 9 + ${String((parseStatisticsWordRankingConfig(rawConfig) ?? DEFAULT_STATISTICS_WORD_RANKING_CONFIG).count)} * var(--s6))`,
   load: () => import("./ranking-view"),
   editor: () => import("./ranking-editor"),
 };

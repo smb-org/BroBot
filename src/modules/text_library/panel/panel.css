@@ -69,7 +69,7 @@
   .text-library__weekdays { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); margin: 0; padding: 0; border: 0; }
   .text-library__time-window { display: flex; flex-wrap: wrap; align-items: end; gap: var(--s2); color: var(--text-2); font-size: 12px; }
   .text-library__time-window > span { flex: 1 0 100%; }
-  .text-library__time-window > .config-field { flex: 1 1 128px; max-width: 160px; }
+  .text-library__time-window > .ui-field { flex: 1 1 128px; max-width: 160px; }
   .text-library__texts { display: grid; gap: var(--s3); }
   .text-library__text-field { display: grid; justify-items: start; gap: var(--s2); }
   .text-library__text-field > .ui-template-text-field { width: 100%; }
@@ -85,7 +85,7 @@
   .text-library__settings > summary { color: var(--text); font-size: 13px; font-weight: 600; }
   .text-library__settings-body { display: grid; gap: var(--s4); margin-top: var(--s4); }
   .text-library__category-row, .text-library__category-create, .text-library__timezone { display: grid; gap: var(--s2); align-items: end; padding-bottom: var(--s3); border-bottom: 1px solid var(--line); }
-  .text-library__category-row .config-field, .text-library__category-create .config-field, .text-library__timezone .config-field { min-width: 0; }
+  .text-library__category-row .ui-field, .text-library__category-create .ui-field, .text-library__timezone .ui-field { min-width: 0; }
   .text-library__list-toolbar .list-toolbar__status:has(.list-toolbar__reason) { height: auto; min-height: 40px; overflow: visible; }
   .text-library__list-toolbar .list-toolbar__status:has(.list-toolbar__reason) > .ui-load-state__content { grid-template-columns: minmax(0, 1fr); align-items: start; height: auto; min-height: 40px; }
   .text-library__list-toolbar .list-toolbar__status:has(.list-toolbar__reason) .list-toolbar__status-right { justify-content: flex-start; overflow: visible; white-space: normal; }

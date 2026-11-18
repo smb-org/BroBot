@@ -759,7 +759,7 @@ describe("Overlay composition editor", () => {
     expect(variableEntry).toHaveTextContent("No description");
     expect(variableEntry.querySelector(".overlay-element-palette__value")).toHaveTextContent("123,456,789");
     clickSelectOption(await screen.findByRole("option", { name: /Ad countdown/u, hidden: true }));
-    const snoozeInfo = await screen.findByRole("checkbox", { name: "Show snooze info" });
+    const snoozeInfo = await screen.findByRole("switch", { name: "Show snooze info" });
     expect(snoozeInfo).not.toBeChecked();
     const previewFrame = document.querySelector<HTMLIFrameElement>('[data-testid="overlay-editor-renderer"]');
     await waitFor(() => expect(previewFrame?.contentDocument?.body).toHaveTextContent("Ad in 2:30"));

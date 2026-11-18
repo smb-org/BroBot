@@ -9,6 +9,7 @@ import {
   mergeStatisticsWordCounterRealtimeState,
   parseStatisticsWordCounterConfig,
 } from "../../src/modules/statistics/overlay/state";
+import { clickSelectOption } from "../query-test-utils";
 
 afterEach(cleanup);
 
@@ -37,7 +38,7 @@ describe("statistics word counter overlay", () => {
     expect(screen.getByText("4")).toBeInTheDocument();
   });
 
-  it("provides a bilingual editor preview and stores the folded word", () => {
+  it("provides a bilingual editor preview and stores the folded word", async () => {
     expect(parseStatisticsWordCounterConfig({ word: "FAAAK" })).toEqual({
       word: "fak", label: "FAAAK", show: "both",
     });
@@ -52,7 +53,8 @@ describe("statistics word counter overlay", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Word" }), { target: { value: "FAAAK" } });
     expect(onChange).toHaveBeenLastCalledWith({ word: "fak", label: "FAAAK", show: "both" });
     rerender(<StatisticsWordCounterEditor config={{ word: "fak", label: "FAAAK", show: "both" }} onChange={onChange} language="en" />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Show" }), { target: { value: "total" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Show" }));
+    clickSelectOption(await screen.findByRole("option", { name: "Total", hidden: true }));
     expect(onChange).toHaveBeenLastCalledWith({ word: "fak", label: "FAAAK", show: "total" });
   });
 

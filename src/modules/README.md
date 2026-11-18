@@ -76,9 +76,8 @@ und Lade-, Leer- und Fehlerzustände behalten dieselbe Mindesthöhe.
 Eine Konfigurationsfläche teilt ihren Inhalt in `.config-section`-Abschnitte.
 Jeder Abschnitt beginnt mit einer Überschrift in `.section-heading`, die von
 einer Haarlinie getrennt wird; Container-Karten gehören nicht zu dieser Welt.
-Die Feldhülle trägt genau eine Inhaltsstufe: `config-field--narrow` für
-Zahlen und kurze Werte, `config-field--medium` für Namen und Bezeichner oder
-`config-field--wide` für Fließtext.
+Felder nutzen die gemeinsamen Komponenten aus `src/dashboard/ui` (`Field`,
+`Select`, `UnitInput`, `SwitchRow`).
 
 Für wiederkehrende Panel-Inhalte stellt `src/dashboard/ui` `InspectorSection`,
 `InspectorFieldRow`, `InspectorActions`, `ActionMenu`, `Badge` und `FilterBar`

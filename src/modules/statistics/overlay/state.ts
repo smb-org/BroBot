@@ -2,7 +2,7 @@ import type { JsonObject } from "../../contract";
 import { parseModuleOverlayConfig } from "../../contract";
 import { foldStatisticsWord, tokenizeStatisticsWordDetails } from "../domain";
 
-export type StatisticsWordCounterShow = "stream" | "total" | "both";
+type StatisticsWordCounterShow = "stream" | "total" | "both";
 
 export interface StatisticsWordCounterConfig {
   word: string;

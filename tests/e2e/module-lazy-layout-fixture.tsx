@@ -7,11 +7,14 @@ import { ModulePanelMount } from "../../src/dashboard/module-panels";
 import { UiProvider } from "../../src/dashboard/ui";
 import { MODULE_OVERLAY_ELEMENTS } from "../../src/modules/overlay-element-registry";
 import "../../src/dashboard/ui/core.css";
+import "../../src/dashboard/overlay-editor.css"; // the editor page supplies the module field stack
 
 const channelId = "channel-a";
 const query = new URLSearchParams(window.location.search);
 const moduleId = query.get("module");
 const elementKind = query.get("element");
+const configParameter = query.get("config");
+const elementConfig = configParameter === null ? null : JSON.parse(configParameter) as Record<string, never>;
 const module = MODULES.find((candidate) => candidate.id === moduleId);
 const element = MODULE_OVERLAY_ELEMENTS.find((candidate) => candidate.definition.kind === elementKind);
 
@@ -19,7 +22,7 @@ const content = element !== undefined
   ? <div className="module-route-layout" data-testid="module-route-layout">
     <ModuleOverlayElementEditor
       kind={element.definition.kind}
-      config={element.definition.defaultConfig}
+      config={elementConfig ?? element.definition.defaultConfig}
       channelId={channelId}
       language="en"
       onChange={() => undefined}

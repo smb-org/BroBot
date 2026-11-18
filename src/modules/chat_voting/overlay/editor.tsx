@@ -1,81 +1,35 @@
 import type { ReactElement } from "react";
 
 import type { OverlayElementEditorProps } from "../../contract";
-import { SwitchRow } from "../../../dashboard/ui";
+import { Select, SwitchRow, UnitInput } from "../../../dashboard/ui";
 import { chatVotingOverlayLabels } from "./locale";
 
-const ChatVotingOverlayEditor = ({ config, onChange, language = "en", readOnly = false, readOnlyReason }: OverlayElementEditorProps): ReactElement => {
+// The read-only reason reaches the shared fields through the disabled-field reason context.
+const ChatVotingOverlayEditor = ({ config, onChange, language = "en", readOnly = false }: OverlayElementEditorProps): ReactElement => {
   const labels = chatVotingOverlayLabels(language);
   const layout = config.layout === "strip" ? "strip" : "bars";
   const showPercent = config.showPercent !== false;
   const showCountdown = config.showCountdown !== false;
   const useVoteColors = config.useVoteColors !== false;
   const hideAfterCloseSeconds = typeof config.hideAfterCloseSeconds === "number" ? config.hideAfterCloseSeconds : 15;
-  const disabledProps = readOnly ? { title: readOnlyReason, "aria-describedby": readOnlyReason === undefined ? undefined : "overlay-editor-readonly-reason" } : {};
 
-  return <div className="config-section">
-    <div style={{ display: "grid", gap: "var(--s2)" }}>
-      <SwitchRow
-        label={labels.useVoteColors}
-        checked={useVoteColors}
-        disabled={readOnly}
-        onChange={(checked) => { if (!readOnly) onChange({ ...config, useVoteColors: checked }); }}
-      />
-      <label className="config-field">
-        <span>{labels.layout}</span>
-        <select
-          aria-label={labels.layout}
-          value={layout}
-          disabled={readOnly}
-          {...disabledProps}
-          onChange={(event) => { if (!readOnly) onChange({ ...config, layout: event.currentTarget.value }); }}
-        >
-          <option value="strip">{labels.strip}</option>
-          <option value="bars">{labels.bars}</option>
-        </select>
-      </label>
-    </div>
-    <label className="config-field">
-      <span>{labels.showCountdown}</span>
-      <input
-        type="checkbox"
-        aria-label={labels.showCountdown}
-        checked={showCountdown}
-        disabled={readOnly}
-        {...disabledProps}
-        onChange={(event) => { if (!readOnly) onChange({ ...config, showCountdown: event.currentTarget.checked }); }}
-      />
-    </label>
-    <label className="config-field">
-      <span>{labels.showPercent}</span>
-      <input
-        type="checkbox"
-        aria-label={labels.showPercent}
-        checked={showPercent}
-        disabled={readOnly}
-        {...disabledProps}
-        onChange={(event) => { if (!readOnly) onChange({ ...config, showPercent: event.currentTarget.checked }); }}
-      />
-    </label>
-    <label className="config-field">
-      <span>{labels.hideAfterCloseSeconds} ({labels.seconds})</span>
-      <input
-        type="number"
-        aria-label={`${labels.hideAfterCloseSeconds} (${labels.seconds})`}
-        min={0}
-        max={120}
-        step={1}
-        value={hideAfterCloseSeconds}
-        disabled={readOnly}
-        {...disabledProps}
-        onChange={(event) => {
-          if (!readOnly && event.currentTarget.value !== "") {
-            const value = Math.max(0, Math.min(120, Math.trunc(Number(event.currentTarget.value))));
-            onChange({ ...config, hideAfterCloseSeconds: value });
-          }
-        }}
-      />
-    </label>
+  return <div className="overlay-editor__module-fields">
+    <SwitchRow label={labels.useVoteColors} checked={useVoteColors} disabled={readOnly}
+      onChange={(checked) => { if (!readOnly) onChange({ ...config, useVoteColors: checked }); }} />
+    <Select label={labels.layout} value={layout} disabled={readOnly}
+      options={[{ value: "strip", label: labels.strip }, { value: "bars", label: labels.bars }]}
+      onChange={(value) => { if (!readOnly && value !== null) onChange({ ...config, layout: value }); }} />
+    <SwitchRow label={labels.showCountdown} checked={showCountdown} disabled={readOnly}
+      onChange={(checked) => { if (!readOnly) onChange({ ...config, showCountdown: checked }); }} />
+    <SwitchRow label={labels.showPercent} checked={showPercent} disabled={readOnly}
+      onChange={(checked) => { if (!readOnly) onChange({ ...config, showPercent: checked }); }} />
+    <UnitInput label={labels.hideAfterCloseSeconds} ariaLabel={`${labels.hideAfterCloseSeconds} (${labels.seconds})`} unit={labels.seconds}
+      value={hideAfterCloseSeconds} min={0} max={120} step={1} disabled={readOnly}
+      onChange={(next) => {
+        if (!readOnly && typeof next === "number") {
+          onChange({ ...config, hideAfterCloseSeconds: Math.max(0, Math.min(120, Math.trunc(next))) });
+        }
+      }} />
   </div>;
 };
 

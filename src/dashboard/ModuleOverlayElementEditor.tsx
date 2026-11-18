@@ -23,19 +23,26 @@ interface ModuleOverlayElementEditorProperties {
 
 const moduleElements = new Map(MODULE_OVERLAY_ELEMENTS.map((registered) => [registered.definition.kind, registered] as const));
 
+// Fallback reservations; an element definition may supply `editorReservedHeight` when its height depends on its config.
 const moduleEditorReservedHeights: Readonly<Record<string, string>> = {
-  "ads.countdown": "calc(var(--s10) * 8)",
-  "chat_voting.tally": "calc(var(--s10) * 9 + var(--s1))",
-  "text_library.block": "calc(var(--s10) * 8)",
-  "belabox.status": "calc(var(--s10) * 6)",
-  "votekick.tally": "calc(var(--s10) * 6)",
+  // Each value is the measured height of the loaded editor, rounded up to the token grid.
+  "ads.countdown": "calc(var(--s10) + var(--s1))",
+  "chat_voting.tally": "calc(var(--s10) * 8)",
+  "text_library.block": "calc(var(--s10) * 7)",
+  "belabox.status": "calc(var(--s10) * 6 + var(--s4))",
+  "votekick.tally": "calc(var(--s10) * 3 + var(--s3))",
+  "statistics.word_counter": "calc(var(--s10) * 6 + var(--s6) + var(--s3))",
+  "song_requests.now_playing": "calc(var(--s10) * 8)",
+  "quiz.session": "calc(var(--s10) * 4 + var(--s3))",
+  "overlay_alerts.alert": "calc(var(--s10) * 2)",
+  "emote_slots.slot": "calc(var(--s10) + var(--s6) + var(--s1))",
 };
 
 export const ModuleOverlayElementEditor = ({ kind, config, channelId, language, onChange, onPreviewState, readOnly = false, readOnlyReason }: ModuleOverlayElementEditorProperties): ReactElement | null => {
   const registered = moduleElements.get(kind);
   const loadEditor = useCallback(() => loadModuleOverlayElementEditor(kind) as Promise<{ default: ComponentType<OverlayElementEditorProps> }>, [kind]);
   if (registered === undefined) return null;
-  const reservedHeight = moduleEditorReservedHeights[kind] ?? "calc(var(--s10) * 8)";
+  const reservedHeight = registered.definition.editorReservedHeight?.(config) ?? moduleEditorReservedHeights[kind] ?? "calc(var(--s10) * 8)";
 
   return <div className="module-overlay-element-editor" data-kind={kind}>
     {registered.definition.editor === undefined ? null : <div className="module-overlay-element-editor__element" style={{ minHeight: reservedHeight }}><RetryableLazy

@@ -1,6 +1,4 @@
 @layer components.dashboard {
-  .song-requests-now-playing-editor { display: grid; gap: 12px; }
-  .song-requests-now-playing-editor label { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--color-text-2); }
   .song-requests-now-playing-editor__preview { display: grid; min-height: 80px; align-content: center; gap: 6px; padding: 12px; background: var(--color-inspector); color: var(--color-text); }
   .song-requests-now-playing-editor__preview span, .song-requests-now-playing-editor__preview small { color: var(--color-text-3); }
 }

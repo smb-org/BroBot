@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactElement } from "react";
 
+import { Field, Select, SwitchRow, UnitInput } from "../../../dashboard/ui";
 import type { OverlayElementEditorProps } from "../../contract";
 import { statisticsWordRankingLabels } from "./locale";
 import {
@@ -28,8 +29,7 @@ export default function StatisticsWordRankingEditor({
   onChange,
   language = "de",
   readOnly = false,
-  readOnlyReason,
-}: OverlayElementEditorProps): ReactElement {
+}:OverlayElementEditorProps): ReactElement {
   const values = parseStatisticsWordRankingConfig(config) ?? DEFAULT_STATISTICS_WORD_RANKING_CONFIG;
   const labels = statisticsWordRankingLabels(language);
   const titleValue = values.title ?? labels.defaultTitle;
@@ -56,34 +56,15 @@ export default function StatisticsWordRankingEditor({
     if (!readOnly) onChange({ ...values, bars });
   };
 
-  return <div className="statistics-word-ranking-editor">
-    <label className="statistics-word-ranking-editor__field" htmlFor="statistics-word-ranking-scope">
-      <span>{labels.scope}</span>
-      <select id="statistics-word-ranking-scope" value={values.scope} disabled={readOnly}
-        title={readOnly ? readOnlyReason : undefined}
-        onChange={(event) => changeScope(event.currentTarget.value as StatisticsWordRankingScope)}>
-        <option value="stream">{labels.stream}</option>
-        <option value="total">{labels.total}</option>
-      </select>
-    </label>
-    <label className="statistics-word-ranking-editor__field" htmlFor="statistics-word-ranking-count">
-      <span>{labels.count}</span>
-      <input id="statistics-word-ranking-count" type="number" min={3} max={10} step={1} value={values.count}
-        disabled={readOnly} title={readOnly ? readOnlyReason : undefined}
-        onChange={(event) => changeCount(event.currentTarget.value)} />
-    </label>
-    <label className="statistics-word-ranking-editor__field" htmlFor="statistics-word-ranking-title">
-      <span>{labels.title}</span>
-      <input id="statistics-word-ranking-title" type="text" maxLength={80} value={titleValue}
-        disabled={readOnly} title={readOnly ? readOnlyReason : undefined}
-        onChange={(event) => changeTitle(event.currentTarget.value)} />
-    </label>
-    <label className="statistics-word-ranking-editor__toggle" htmlFor="statistics-word-ranking-bars">
-      <input id="statistics-word-ranking-bars" type="checkbox" checked={values.bars} disabled={readOnly}
-        title={readOnly ? readOnlyReason : undefined}
-        onChange={(event) => changeBars(event.currentTarget.checked)} />
-      <span>{labels.bars}</span>
-    </label>
+  return <div className="statistics-word-ranking-editor overlay-editor__module-fields">
+    <Select label={labels.scope} value={values.scope} disabled={readOnly}
+      options={[{ value: "stream", label: labels.stream }, { value: "total", label: labels.total }]}
+      onChange={(scope) => { if (scope !== null) changeScope(scope as StatisticsWordRankingScope); }} />
+    <UnitInput label={labels.count} value={values.count} min={3} max={10} step={1} disabled={readOnly}
+      onChange={(next) => { if (next !== "") changeCount(String(next)); }} />
+    <Field label={labels.title} value={titleValue} disabled={readOnly} normalize={(title) => title.slice(0, 80)}
+      onChange={changeTitle} />
+    <SwitchRow label={labels.bars} checked={values.bars} disabled={readOnly} onChange={changeBars} />
     <section className="statistics-word-ranking-editor__preview" aria-label={labels.preview}>
       {titleValue.length > 0 ? <h3>{titleValue}</h3> : null}
       <ol style={{ "--preview-row-count": String(values.count) } as CSSProperties}>

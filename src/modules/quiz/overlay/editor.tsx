@@ -14,7 +14,7 @@ const QuizOverlayEditor = ({ config, onChange, language = "en", readOnly = false
     onChange({ ...values, correctColor: value });
   };
 
-  return <div className="config-section quiz-overlay-editor">
+  return <div className="overlay-editor__module-fields quiz-overlay-editor">
     <SwitchRow
       label={labels.showQuestionProgress}
       checked={values.showQuestionProgress}

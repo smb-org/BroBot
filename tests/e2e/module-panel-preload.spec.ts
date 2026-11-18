@@ -378,17 +378,25 @@ const lazyModuleViews = [
   "text_commands", "faq", "chat_voting", "text_library", "timers", "sun", "moon",
   "weather", "api_source", "belabox", "ads",
 ] as const;
-const lazyOverlayEditors = [
+interface LazyOverlayEditor { kind: string; moduleId: string; chunk: string; wordCount?: number }
+const lazyOverlayEditors: readonly LazyOverlayEditor[] = [
   { kind: "chat_voting.tally", moduleId: "chat_voting", chunk: "editor" },
   { kind: "text_library.block", moduleId: "text_library", chunk: "editor" },
   { kind: "belabox.status", moduleId: "belabox", chunk: "editor" },
   { kind: "ads.countdown", moduleId: "ads", chunk: "countdown-editor" },
   { kind: "votekick.tally", moduleId: "votekick", chunk: "editor" },
-] as const;
+  // The ranking reservation follows the configured word count, so the extremes are covered as well.
+  { kind: "statistics.word_ranking", moduleId: "statistics", chunk: "ranking-editor", wordCount: 3 },
+  { kind: "statistics.word_ranking", moduleId: "statistics", chunk: "ranking-editor", wordCount: 5 },
+  { kind: "statistics.word_ranking", moduleId: "statistics", chunk: "ranking-editor", wordCount: 10 },
+];
 
 const lazyLayoutCases = [
   ...lazyModuleViews.map((moduleId) => ({ type: "module" as const, moduleId, label: `${moduleId} panel` })),
-  ...lazyOverlayEditors.map((editor) => ({ type: "editor" as const, ...editor, label: `${editor.kind} editor` })),
+  ...lazyOverlayEditors.map((editor) => ({
+    type: "editor" as const, ...editor,
+    label: `${editor.kind} editor${editor.wordCount === undefined ? "" : ` with ${String(editor.wordCount)} words`}`,
+  })),
 ];
 
 for (const lazyCase of lazyLayoutCases) {
@@ -414,7 +422,7 @@ for (const lazyCase of lazyLayoutCases) {
     await page.route(pattern, intercept);
     const fixtureUrl = lazyCase.type === "module"
       ? `/tests/e2e/module-lazy-layout-fixture.html?module=${lazyCase.moduleId}`
-      : `/tests/e2e/module-lazy-layout-fixture.html?element=${encodeURIComponent(lazyCase.kind)}`;
+      : `/tests/e2e/module-lazy-layout-fixture.html?element=${encodeURIComponent(lazyCase.kind)}${lazyCase.wordCount === undefined ? "" : `&config=${encodeURIComponent(JSON.stringify({ scope: "stream", count: lazyCase.wordCount, bars: true }))}`}`;
     await page.goto(fixtureUrl, { waitUntil: "commit" });
     await requestStarted;
 
@@ -423,7 +431,7 @@ for (const lazyCase of lazyLayoutCases) {
     if (lazyCase.type === "module") await expect(page.locator(".module-view-fallback")).toBeVisible();
     else await expect(page.locator("[data-module-editor-fallback]")).toBeVisible();
     if (lazyCase.type === "editor" && lazyCase.kind === "chat_voting.tally") {
-      await expect(page.locator(".module-overlay-element-editor__element")).toHaveCSS("min-height", "364px");
+      await expect(page.locator(".module-overlay-element-editor__element")).toHaveCSS("min-height", "320px");
     }
     const boxHeightBefore = await reservedBox.evaluate((element) => element.getBoundingClientRect().height);
     const minHeightBefore = await reservedBox.evaluate((element) => getComputedStyle(element).minHeight);

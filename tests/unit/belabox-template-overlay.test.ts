@@ -7,6 +7,7 @@ import { belaboxModule } from "../../src/modules/belabox";
 import { mergeModuleOverlayElementState, moduleOverlayElementKindForMessage } from "../../src/modules/overlay-element-registry";
 import BelaboxStatus from "../../src/modules/belabox/overlay/status";
 import BelaboxEditor from "../../src/modules/belabox/overlay/editor";
+import { clickSelectOption } from "../query-test-utils";
 import { insertChannel } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -567,7 +568,8 @@ describe("BELABOX template variables and overlay metadata", () => {
     expect(screen.getByText("no data")).toBeInTheDocument();
   });
 
-  it("explains on-demand updates in the localized editor", () => {
+  it("explains on-demand updates in the localized editor", async () => {
+    vi.useRealTimers(); // the shared select opens through async queries, which fake timers would stall
     const onChange = vi.fn();
     render(createElement(BelaboxEditor, {
       config: { layout: "compact", unit: "kbps", hideWhenHealthy: false },
@@ -576,7 +578,8 @@ describe("BELABOX template variables and overlay metadata", () => {
     }));
 
     expect(screen.getByText("In on-demand mode, this element does not update live.")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Layout"), { target: { value: "detail" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Layout" }));
+    clickSelectOption(await screen.findByRole("option", { name: "With RTT", hidden: true }));
     expect(onChange).toHaveBeenCalledWith({ layout: "detail", unit: "kbps", hideWhenHealthy: false });
   });
 });
