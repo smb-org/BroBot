@@ -41,7 +41,7 @@ import {
 } from "../../src/modules/votekick/adapters/d1";
 import { entryColumns as pollsEntryColumns, rankSql, runColumns as pollsRunColumns } from "../../src/modules/polls/repository";
 import { blockUsageExistsSql, textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
-import { SONG_REQUEST_CHAPTER_COLUMNS } from "../../src/modules/song_requests/repository";
+import { SONG_REQUEST_CHAPTER_COLUMNS, songRequestChapterTrackExclusionPredicate } from "../../src/modules/song_requests/repository";
 import {
   chatVoteAlarmClosePredicate,
   chatVoteExtensionPredicate,
@@ -228,6 +228,9 @@ const sqlGetFixtures = new Map<string, string>([
   ["blockUsageExistsSql", blockUsageExistsSql],
   ["chatVoteSelectColumns", chatVoteSelectColumns],
   ["SONG_REQUEST_CHAPTER_COLUMNS", SONG_REQUEST_CHAPTER_COLUMNS],
+  ["exclusion.sql", songRequestChapterTrackExclusionPredicate({ songCooldownEnabled: true, songCooldownOncePerRound: false, songCooldownMinutes: 1 }).sql],
+  ["chapterExclusion.sql", songRequestChapterTrackExclusionPredicate({ songCooldownEnabled: true, songCooldownOncePerRound: false, songCooldownMinutes: 1 }).sql],
+  ["chapterInsertGuard", ` AND NOT EXISTS (SELECT 1 FROM json_each(?) AS candidate WHERE ${songRequestChapterTrackExclusionPredicate({ songCooldownEnabled: true, songCooldownOncePerRound: false, songCooldownMinutes: 1 }).sql})`],
   ["chatVoteTemplateSelectColumns", chatVoteTemplateSelectColumns],
   ["readOnlyPredicateSql", chatVoteFinishPredicate("channel-id", "poll-id").sql],
   ["alarmClosePredicate.sql", chatVoteAlarmClosePredicate("channel-id", "poll-id", now, now).sql],

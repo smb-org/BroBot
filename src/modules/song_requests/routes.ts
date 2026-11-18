@@ -38,7 +38,14 @@ import {
   skipSongTrackThroughChannelObject,
 } from "./service";
 import { songRequestsSettingsSchema, type SongRequestChapterTrack } from "./contracts";
-import { deleteSongRequestChapter, excludedSongRequestChapterTrackIds, listSongRequestChapters, readSongRequestChapter, saveSongRequestChapter } from "./repository";
+import {
+  deleteSongRequestChapter,
+  excludedSongRequestChapterTrackIds,
+  listSongRequestChapters,
+  readSongRequestChapter,
+  saveSongRequestChapter,
+  songRequestChapterTrackExclusionPredicate,
+} from "./repository";
 import type { SongRequestChapterDraft } from "./repository";
 import type { SongRequestTrack } from "./adapters/d1";
 
@@ -408,6 +415,9 @@ songRequestsRoutes.post("/vote", async (context) => {
   if (startChatVote === undefined) return context.json({ error: "chat_vote_unavailable" }, 503);
   const channelLanguage = await context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
     .bind(channel(context)).first<{ language: string }>();
+  let chapterExclusion: ReturnType<typeof songRequestChapterTrackExclusionPredicate> | null = null;
+  let chapterCooldownSettings: ReturnType<typeof songRequestsSettingsSchema.parse>["rules"] | null = null;
+  let chapterEligibilityNow = new Date().toISOString();
   if (chapter !== null) {
     const currentChapter = await readSongRequestChapter(context.env.DB, channel(context), chapter.id);
     if (currentChapter === null || !currentChapter.offerInCockpit) return context.json({ error: "song_vote_chapter_missing" }, 404);
@@ -416,6 +426,8 @@ songRequestsRoutes.post("/vote", async (context) => {
       .bind(channel(context)).first<{ settings: string }>();
     let settings = songRequestsSettingsSchema.parse({});
     try { settings = songRequestsSettingsSchema.parse(JSON.parse(settingsRow?.settings ?? "{}") as unknown); } catch { /* Use defaults for invalid legacy settings. */ }
+    chapterCooldownSettings = settings.rules;
+    chapterExclusion = songRequestChapterTrackExclusionPredicate(settings.rules);
     // Read eligibility after token and route I/O so the ballot uses the current request state.
     const excluded = await excludedSongRequestChapterTrackIds(
       context.env.DB,
@@ -423,7 +435,7 @@ songRequestsRoutes.post("/vote", async (context) => {
       requestRound.roundId,
       chapter.tracks,
       settings.rules,
-      new Date().toISOString(),
+      chapterEligibilityNow,
     );
     const candidates = drawChapterCandidates(chapter.tracks, excluded).map(requestTrackFromChapter);
     if (candidates.length < 2) return context.json({
@@ -435,12 +447,23 @@ songRequestsRoutes.post("/vote", async (context) => {
     }, 409);
     tracks = candidates;
   }
-  const labels = songVoteLabels(tracks.map((track) => ({ name: track.title, artists: track.artists.map((name) => ({ name })) })));
-  if (labels.length !== tracks.length) return context.json({ error: "song_vote_candidates_invalid" }, 400);
-  const ballotId = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const mapping = await context.env.DB.prepare(
-    `INSERT INTO song_requests_votes
+  const chapterInsertGuard = chapterExclusion === null ? "" : `
+        AND NOT EXISTS (
+          SELECT 1 FROM json_each(?) AS candidate
+           WHERE ${chapterExclusion.sql}
+        )`;
+  let labels: string[];
+  let ballotId: string;
+  let mapping: { ballot_id: string } | null;
+  let chapterRedraws = 0;
+  for (;;) {
+    labels = songVoteLabels(tracks.map((track) => ({ name: track.title, artists: track.artists.map((name) => ({ name })) })));
+    if (labels.length !== tracks.length) return context.json({ error: "song_vote_candidates_invalid" }, 400);
+    ballotId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    chapterEligibilityNow = now;
+    mapping = await context.env.DB.prepare(
+      `INSERT INTO song_requests_votes
        (ballot_id, channel_id, stream_id, round_id, candidate_tracks_json, moderator_user_id, state, created_at, chapter_id, chapter_name_snapshot)
      SELECT ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?
       WHERE EXISTS (SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1)
@@ -454,14 +477,42 @@ songRequestsRoutes.post("/vote", async (context) => {
         ) AND EXISTS (
           SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1
             AND json_extract(settings, '$.alsoOffline') = 1
-        )))
-     RETURNING ballot_id`,
-  ).bind(ballotId, channel(context), requestRound.streamId, requestRound.roundId,
-    JSON.stringify(tracks), context.get("session").userId, now, chapter?.id ?? null, chapter?.name ?? null,
-    channel(context), channel(context), requestRound.streamId, channel(context), requestRound.roundId,
-    requestRound.streamId, channel(context), channel(context), requestRound.roundId, channel(context))
-    .first<{ ballot_id: string }>();
-  if (mapping === null) return context.json({ error: "stream_offline" }, 409);
+        )))${chapterInsertGuard}
+       RETURNING ballot_id`,
+    ).bind(ballotId, channel(context), requestRound.streamId, requestRound.roundId,
+      JSON.stringify(tracks), context.get("session").userId, now, chapter?.id ?? null, chapter?.name ?? null,
+      channel(context), channel(context), requestRound.streamId, channel(context), requestRound.roundId,
+      requestRound.streamId, channel(context), channel(context), requestRound.roundId, channel(context),
+      ...(chapterExclusion === null || chapterCooldownSettings === null ? [] : [
+        JSON.stringify(tracks.map(({ id }) => id)),
+        ...chapterExclusion.bindings(channel(context), requestRound.roundId, chapterEligibilityNow),
+      ]))
+      .first<{ ballot_id: string }>();
+    if (mapping !== null) break;
+    if (chapter === null || chapterExclusion === null || chapterCooldownSettings === null) {
+      return context.json({ error: "stream_offline" }, 409);
+    }
+    chapterEligibilityNow = new Date().toISOString();
+    const excluded = await excludedSongRequestChapterTrackIds(
+      context.env.DB,
+      channel(context),
+      requestRound.roundId,
+      chapter.tracks,
+      chapterCooldownSettings,
+      chapterEligibilityNow,
+    );
+    const candidates = drawChapterCandidates(chapter.tracks, excluded).map(requestTrackFromChapter);
+    if (candidates.length < 2) return context.json({
+      error: "song_vote_chapter_not_enough_tracks",
+      message: {
+        de: songRequestChatTexts.de.chapterNotEnough,
+        en: songRequestChatTexts.en.chapterNotEnough,
+      },
+    }, 409);
+    if (chapterRedraws >= 1) return context.json({ error: "stream_offline" }, 409);
+    tracks = candidates;
+    chapterRedraws += 1;
+  }
   const removeUnstartedMapping = async (): Promise<void> => {
     await context.env.DB.prepare("DELETE FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ? AND state = 'open'")
       .bind(channel(context), ballotId).run();

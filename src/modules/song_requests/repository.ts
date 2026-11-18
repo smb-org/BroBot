@@ -113,6 +113,42 @@ export const deleteSongRequestChapter = async (
   return await readSongRequestChapter(db, channelId, chapterId) === null ? "missing" : "conflict";
 };
 
+export const songRequestChapterTrackExclusionPredicate = (settings: {
+  songCooldownEnabled: boolean;
+  songCooldownOncePerRound: boolean;
+  songCooldownMinutes: number;
+}): {
+  sql: string;
+  bindings: (channelId: string, roundId: string, now: string) => (string | number)[];
+} => {
+  const currentRound = `EXISTS (
+    SELECT 1 FROM song_requests
+     WHERE channel_id = ? AND round_id = ? AND track_id = CAST(candidate.value AS TEXT)
+       AND state NOT IN ('rejected', 'failed')
+  )`;
+  if (!settings.songCooldownEnabled) {
+    return { sql: currentRound, bindings: (channelId, roundId) => [channelId, roundId] };
+  }
+  const cooldown = settings.songCooldownOncePerRound
+    ? `EXISTS (
+        SELECT 1 FROM song_requests
+         WHERE channel_id = ? AND track_id = CAST(candidate.value AS TEXT) AND submitted_at IS NOT NULL
+           AND round_id = ? AND submitted_at <= ?
+      )`
+    : `EXISTS (
+        SELECT 1 FROM song_requests
+         WHERE channel_id = ? AND track_id = CAST(candidate.value AS TEXT) AND submitted_at IS NOT NULL
+           AND submitted_at >= ? AND submitted_at <= ?
+      )`;
+  return {
+    sql: `${currentRound} OR ${cooldown}`,
+    bindings: (channelId, roundId, now) => settings.songCooldownOncePerRound
+      ? [channelId, roundId, channelId, roundId, now]
+      : [channelId, roundId, channelId,
+        new Date(Date.parse(now) - settings.songCooldownMinutes * 60_000).toISOString(), now],
+  };
+};
+
 export const excludedSongRequestChapterTrackIds = async (
   db: D1Database,
   channelId: string,
@@ -123,25 +159,11 @@ export const excludedSongRequestChapterTrackIds = async (
 ): Promise<Set<string>> => {
   if (tracks.length === 0) return new Set();
   const ids = JSON.stringify(tracks.map(({ id }) => id));
-  const played = await db.prepare(
-    `SELECT DISTINCT track_id FROM song_requests
-      WHERE channel_id = ? AND round_id = ? AND track_id IN (SELECT value FROM json_each(?))
-        AND state NOT IN ('rejected', 'failed')`,
-  ).bind(channelId, roundId, ids).all<{ track_id: string }>();
-  const excluded = new Set(played.results.map(({ track_id }) => track_id));
-  if (!settings.songCooldownEnabled) return excluded;
-  const cooldown = settings.songCooldownOncePerRound
-    ? await db.prepare(
-      `SELECT DISTINCT track_id FROM song_requests
-        WHERE channel_id = ? AND track_id IN (SELECT value FROM json_each(?)) AND submitted_at IS NOT NULL
-          AND round_id = ? AND submitted_at <= ?`,
-    ).bind(channelId, ids, roundId, now).all<{ track_id: string }>()
-    : await db.prepare(
-      `SELECT DISTINCT track_id FROM song_requests
-        WHERE channel_id = ? AND track_id IN (SELECT value FROM json_each(?)) AND submitted_at IS NOT NULL
-          AND submitted_at >= ? AND submitted_at <= ?`,
-    ).bind(channelId, ids, new Date(Date.parse(now) - settings.songCooldownMinutes * 60_000).toISOString(), now)
-      .all<{ track_id: string }>();
-  for (const row of cooldown.results) excluded.add(row.track_id);
-  return excluded;
+  const exclusion = songRequestChapterTrackExclusionPredicate(settings);
+  const excluded = await db.prepare(
+    `SELECT DISTINCT CAST(candidate.value AS TEXT) AS track_id
+       FROM json_each(?) AS candidate
+      WHERE ${exclusion.sql}`,
+  ).bind(ids, ...exclusion.bindings(channelId, roundId, now)).all<{ track_id: string }>();
+  return new Set(excluded.results.map(({ track_id }) => track_id));
 };

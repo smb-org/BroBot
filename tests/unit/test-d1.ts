@@ -264,7 +264,13 @@ export const createWriteInterleavingDatabase = (
           statement.bind(...values);
           return wrapped;
         },
-        first: <T>() => statement.first<T>(),
+        first: async <T>() => {
+          if (!triggered) {
+            triggered = true;
+            await beforeWrite();
+          }
+          return await statement.first<T>();
+        },
         all: <T>(...typeHint: readonly T[]) => statement.all<T>(...typeHint),
         run: async () => {
           if (!triggered) {

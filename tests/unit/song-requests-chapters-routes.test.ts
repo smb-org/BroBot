@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleChatVoteStartRequest, ModuleRouteEnvironment } from "../../src/modules/contract";
+import type { ModuleAlarmContext, ModuleChatVoteStartRequest, ModuleRouteEnvironment } from "../../src/modules/contract";
 import { transitionRequest } from "../../src/modules/song_requests/adapters/d1";
 import { songRequestsRoutes } from "../../src/modules/song_requests/routes";
 import { saveSongRequestChapter } from "../../src/modules/song_requests/repository";
+import { handleSongRequestDurableAction } from "../../src/modules/song_requests/service";
 import { insertChannel } from "./fixtures";
-import { TestD1Database } from "./test-d1";
+import { createWriteInterleavingDatabase, TestD1Database } from "./test-d1";
 
 const CHANNEL_ID = "chapter-route-channel-fictional";
 const databaseList: TestD1Database[] = [];
@@ -146,5 +147,114 @@ describe("song request chapter vote route", () => {
     const storedTracks = JSON.parse(mapping?.candidate_tracks_json ?? "[]") as { id: string }[];
     expect(storedTracks.map(({ id }) => id)).not.toContain("glassharbor01");
     expect(startChatVote).toHaveBeenCalledOnce();
+  });
+
+  it("rechecks chapter eligibility in the insert and redraws before exposing a stale track", async () => {
+    const database = new TestD1Database();
+    databaseList.push(database);
+    await insertChannel(database, CHANNEL_ID);
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
+    await database.prepare("INSERT INTO spotify_channel_access (slot, channel_id, enabled_by, enabled_at) VALUES (1, ?, ?, ?)")
+      .bind(CHANNEL_ID, "moderator-fictional", "2026-11-18T10:00:00.000Z").run();
+    await database.prepare("INSERT INTO song_requests_connections (channel_id, state, updated_at) VALUES (?, 'connected', ?)")
+      .bind(CHANNEL_ID, "2026-11-18T10:00:00.000Z").run();
+    await database.prepare(`INSERT INTO channel_stream_state
+      (channel_id, state, changed_at, source, stream_id, started_at)
+      VALUES (?, 'online', ?, 'eventsub', ?, ?)`)
+      .bind(CHANNEL_ID, "2026-11-18T10:00:00.000Z", "stream-chapter-fictional", "2026-11-18T10:00:00.000Z").run();
+    const staleTrack = { id: "glassharbor01", title: "Glass Harbor", artists: ["Mira Vale"], coverUrl: null };
+    const saved = await saveSongRequestChapter(database as unknown as D1Database, CHANNEL_ID, null, null, {
+      name: "Night Drive",
+      offerInCockpit: true,
+      tracks: [
+        staleTrack,
+        { id: "quietatlas02", title: "Quiet Atlas", artists: ["Mira Vale"], coverUrl: null },
+        { id: "silvercurrent03", title: "Silver Current", artists: ["Rowan March"], coverUrl: null },
+      ],
+    }, "2026-11-18T10:00:00.000Z");
+    if (saved.status !== "saved") throw new Error("Expected a saved chapter fixture.");
+
+    const db = database as unknown as D1Database;
+    const interleavedDatabase = createWriteInterleavingDatabase(database,
+      (sql) => /INSERT INTO song_requests_votes/iu.test(sql),
+      async () => {
+        await transitionRequest(db, {
+          channelId: CHANNEL_ID,
+          requestId: "request-during-vote-insert-fictional",
+          fromState: null,
+          toState: "approved",
+          now: "2026-11-18T10:01:00.000Z",
+          newRequest: {
+            source: "channel_points",
+            track: {
+              id: staleTrack.id, uri: `spotify:track:${staleTrack.id}`, title: staleTrack.title,
+              artists: staleTrack.artists, albumName: null, durationMs: 200_000, explicit: false,
+              coverUrl: null, spotifyUrl: `https://open.spotify.com/track/${staleTrack.id}`,
+            },
+            operationId: "operation-during-vote-insert-fictional",
+            streamId: "stream-chapter-fictional",
+          },
+        });
+      });
+    const durableContext = {
+      DB: db,
+      channelId: CHANNEL_ID,
+      streamState: () => Promise.resolve("online"),
+      streamStartedAt: () => Promise.resolve({ streamId: "stream-chapter-fictional", startedAt: "2026-11-18T10:00:00.000Z" }),
+      schedule: vi.fn(() => Promise.resolve()),
+      getAlarmDeadline: () => Promise.resolve(null),
+    } as unknown as ModuleAlarmContext;
+    const startChatVote = vi.fn(async (_channelId: string, request: ModuleChatVoteStartRequest) => {
+      const ballotId = request.ballotId ?? "ballot-chapter-race-fictional";
+      const mapping = await database.prepare("SELECT candidate_tracks_json FROM song_requests_votes WHERE ballot_id = ?")
+        .bind(ballotId).first<{ candidate_tracks_json: string }>();
+      const candidates = JSON.parse(mapping?.candidate_tracks_json ?? "[]") as { id: string }[];
+      const staleTrackIndex = candidates.findIndex(({ id }) => id === staleTrack.id);
+      const winningIndex = staleTrackIndex >= 0 ? staleTrackIndex : 0;
+      await handleSongRequestDurableAction(durableContext, {
+        kind: "chat_vote.result",
+        targetModuleId: "song_requests",
+        targetHandlerKey: "submit",
+        ballotId,
+        labels: request.labels,
+        counts: candidates.map((_candidate, index) => index === winningIndex ? 6 : 0),
+        closedAt: "2026-11-18T10:02:00.000Z",
+      });
+      return { status: "started" as const, ballotId };
+    });
+    const app = new Hono<ModuleRouteEnvironment>();
+    app.use("*", async (context, next) => {
+      context.set("channelRole", "operator");
+      context.set("session", { userId: "moderator-fictional", sessionId: "session-chapter-vote-race" });
+      context.set("startChatVote", startChatVote);
+      await next();
+    });
+    app.route("/channels/:channelId", songRequestsRoutes);
+
+    const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/vote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chapterId: saved.chapter.id }),
+    }), {
+      DB: interleavedDatabase,
+      CHANNEL: {
+        idFromName: (channelId: string) => channelId,
+        get: () => ({ getSpotifyAccessToken: () => Promise.resolve("spotify-access-fictional") }),
+      },
+    });
+
+    expect(response.status).toBe(201);
+    const body = await response.json<{ ballotId: string; tracks: { id: string }[] }>();
+    expect(body.tracks.map(({ id }) => id)).not.toContain(staleTrack.id);
+    const ballot = await database.prepare("SELECT candidate_tracks_json FROM song_requests_votes WHERE ballot_id = ?")
+      .bind(body.ballotId).first<{ candidate_tracks_json: string }>();
+    const ballotTracks = JSON.parse(ballot?.candidate_tracks_json ?? "[]") as { id: string }[];
+    expect(ballotTracks.map(({ id }) => id)).not.toContain(staleTrack.id);
+    expect(startChatVote).toHaveBeenCalledOnce();
+    const requestsForStaleTrack = await database.prepare(
+      "SELECT source, state FROM song_requests WHERE channel_id = ? AND track_id = ?",
+    ).bind(CHANNEL_ID, staleTrack.id).all<{ source: string; state: string }>();
+    expect(requestsForStaleTrack.results).toEqual([{ source: "channel_points", state: "approved" }]);
   });
 });
