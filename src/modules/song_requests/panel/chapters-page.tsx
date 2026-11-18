@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
-import { Button, CollectionPage, ConfirmDialog, EmptyState, Field, Icon, InspectorSection, ListRow, LoadState, LoadStateLines, SubInspector, SwitchRow, useDraft, useDraftGuard } from "../../../dashboard/ui";
+import { Button, CollectionPage, ConfirmDialog, EmptyState, Field, Icon, InspectorSection, ListRow, LoadState, LoadStateLines, SubInspector, SwitchRow, registerDashboardNavigationGuard, useDraft, useDraftGuard } from "../../../dashboard/ui";
 import { useModuleQuery } from "../../../dashboard/data";
 import { dashboardCommonTexts } from "../../../dashboard/locale";
 import type { ModulePanelProperties } from "../../contract";
@@ -40,15 +40,24 @@ export default function SongRequestChaptersPage(properties: ModulePanelPropertie
     request<ChapterListResponse>(channelId, "chapters", "GET", undefined, signal), { enabled: canManage || canOperate });
   const chapters = query.data?.chapters ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [guardSwitch, setGuardSwitch] = useState<((proceed: () => void) => void) | null>(null);
+  const [guardSwitch, setGuardSwitch] = useState<((proceed: () => void, cancel?: () => void) => void) | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SongRequestChapter | null>(null);
+  const pendingSelection = useRef<{ id: string | null } | null>(null);
+  const selectionGeneration = useRef(0);
 
   // A selection that disappeared from the list resolves to null, which closes the inspector.
   const selected = selectedId === "new-chapter" ? blankChapter() : chapters.find(({ id }) => id === selectedId) ?? null;
   const changeSelection = (nextId: string | null): void => {
-    const proceed = (): void => { setSelectedId(nextId); };
+    selectionGeneration.current += 1;
+    const proceed = (): void => {
+      pendingSelection.current = null;
+      setSelectedId(nextId);
+    };
     if (guardSwitch === null) proceed();
-    else guardSwitch(proceed);
+    else {
+      pendingSelection.current = { id: nextId };
+      guardSwitch(proceed, () => { pendingSelection.current = null; });
+    }
   };
   const refresh = async (): Promise<void> => { await query.refetch(); };
 
@@ -100,7 +109,11 @@ export default function SongRequestChaptersPage(properties: ModulePanelPropertie
           onRegisterGuard={(guard) => { setGuardSwitch(() => guard); }}
           onClose={() => { changeSelection(null); }}
           onSaved={(chapter) => {
-            void refresh().then(() => { setSelectedId(chapter.id); });
+            const selectSavedChapter = pendingSelection.current === null;
+            const generationAtSave = selectionGeneration.current;
+            void refresh().then(() => {
+              if (selectSavedChapter && generationAtSave === selectionGeneration.current) setSelectedId(chapter.id);
+            });
           }}
           onDelete={() => { setDeleteTarget(selected); }}
         />}
@@ -140,7 +153,7 @@ function ChapterInspector({
   canManage: boolean;
   language: "de" | "en";
   labels: ChapterPageLabels;
-  onRegisterGuard: (guard: ((proceed: () => void) => void) | null) => void;
+  onRegisterGuard: (guard: ((proceed: () => void, cancel?: () => void) => void) | null) => void;
   onClose: () => void;
   onSaved: (chapter: SongRequestChapter) => void;
   onDelete: () => void;
@@ -149,6 +162,7 @@ function ChapterInspector({
   const text = labels;
   const initial = useMemo(() => draftFrom(chapter), [chapter]);
   const draft = useDraft(initial);
+  const baseRevision = useRef(chapter.revision);
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState<readonly SpotifyTrack[]>([]);
   const [searchState, setSearchState] = useState<"idle" | "loading" | "searched">("idle");
@@ -163,8 +177,9 @@ function ChapterInspector({
     try {
       const response = await request<{ chapter: SongRequestChapter }>(channelId, isNew ? "chapters" : `chapters/${encodeURIComponent(chapter.id)}`, isNew ? "POST" : "PATCH", {
         ...draft.value,
-        ...(isNew ? {} : { revision: chapter.revision }),
+        ...(isNew ? {} : { revision: baseRevision.current }),
       });
+      baseRevision.current = response.chapter.revision;
       draft.accept(draftFrom(response.chapter));
       onSaved(response.chapter);
       return null;
@@ -176,6 +191,7 @@ function ChapterInspector({
   };
   const guard = useDraftGuard(draft.dirty, save, draft.reset);
   useEffect(() => { onRegisterGuard(guard.guardSwitch); return () => { onRegisterGuard(null); }; }, [guard.guardSwitch, onRegisterGuard]);
+  useEffect(() => registerDashboardNavigationGuard(guard.guardSwitch), [guard.guardSwitch]);
 
   const search = async (): Promise<void> => {
     const query = searchText.trim();

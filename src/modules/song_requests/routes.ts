@@ -370,7 +370,7 @@ songRequestsRoutes.post("/vote", async (context) => {
   const body = await bodyFrom(context.req.raw);
   const chapterId = body?.chapterId;
   let chapter: Awaited<ReturnType<typeof readSongRequestChapter>> = null;
-  let tracks: SongRequestTrack[];
+  let tracks: SongRequestTrack[] = [];
   let manualTrackIds: string[] | null = null;
   if (chapterId !== undefined) {
     if (typeof chapterId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(chapterId)) {
@@ -378,34 +378,12 @@ songRequestsRoutes.post("/vote", async (context) => {
     }
     chapter = await readSongRequestChapter(context.env.DB, channel(context), chapterId);
     if (chapter === null || !chapter.offerInCockpit) return context.json({ error: "song_vote_chapter_missing" }, 404);
-    const settingsRow = await context.env.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
-      .bind(channel(context)).first<{ settings: string }>();
-    let settings = songRequestsSettingsSchema.parse({});
-    try { settings = songRequestsSettingsSchema.parse(JSON.parse(settingsRow?.settings ?? "{}") as unknown); } catch { /* Use defaults for invalid legacy settings. */ }
-    const excluded = await excludedSongRequestChapterTrackIds(
-      context.env.DB,
-      channel(context),
-      requestRound.roundId,
-      chapter.tracks,
-      settings.rules,
-      new Date().toISOString(),
-    );
-    const candidates = drawChapterCandidates(chapter.tracks, excluded).map(requestTrackFromChapter);
-    if (candidates.length < 2) return context.json({
-      error: "song_vote_chapter_not_enough_tracks",
-      message: {
-        de: songRequestChatTexts.de.chapterNotEnough,
-        en: songRequestChatTexts.en.chapterNotEnough,
-      },
-    }, 409);
-    tracks = candidates;
   } else {
     const ids = body?.trackIds;
     if (!Array.isArray(ids) || ids.length < 2 || ids.length > 5 || !ids.every((id) => typeof id === "string" && /^[A-Za-z0-9]{1,64}$/u.test(id)) || new Set(ids).size !== ids.length) {
       return context.json({ error: "song_vote_candidates_invalid" }, 400);
     }
     manualTrackIds = ids;
-    tracks = [];
   }
   let accessToken: string | null;
   try { accessToken = await token(context); } catch { return context.json({ error: "spotify_unavailable" }, 502); }
@@ -426,12 +404,39 @@ songRequestsRoutes.post("/vote", async (context) => {
     }
   }
   if (!await accessEnabled(context)) return context.json({ error: "spotify_not_enabled" }, 403);
-  const labels = songVoteLabels(tracks.map((track) => ({ name: track.title, artists: track.artists.map((name) => ({ name })) })));
-  if (labels.length !== tracks.length) return context.json({ error: "song_vote_candidates_invalid" }, 400);
   const startChatVote = context.get("startChatVote");
   if (startChatVote === undefined) return context.json({ error: "chat_vote_unavailable" }, 503);
   const channelLanguage = await context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
     .bind(channel(context)).first<{ language: string }>();
+  if (chapter !== null) {
+    const currentChapter = await readSongRequestChapter(context.env.DB, channel(context), chapter.id);
+    if (currentChapter === null || !currentChapter.offerInCockpit) return context.json({ error: "song_vote_chapter_missing" }, 404);
+    chapter = currentChapter;
+    const settingsRow = await context.env.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(channel(context)).first<{ settings: string }>();
+    let settings = songRequestsSettingsSchema.parse({});
+    try { settings = songRequestsSettingsSchema.parse(JSON.parse(settingsRow?.settings ?? "{}") as unknown); } catch { /* Use defaults for invalid legacy settings. */ }
+    // Read eligibility after token and route I/O so the ballot uses the current request state.
+    const excluded = await excludedSongRequestChapterTrackIds(
+      context.env.DB,
+      channel(context),
+      requestRound.roundId,
+      chapter.tracks,
+      settings.rules,
+      new Date().toISOString(),
+    );
+    const candidates = drawChapterCandidates(chapter.tracks, excluded).map(requestTrackFromChapter);
+    if (candidates.length < 2) return context.json({
+      error: "song_vote_chapter_not_enough_tracks",
+      message: {
+        de: songRequestChatTexts.de.chapterNotEnough,
+        en: songRequestChatTexts.en.chapterNotEnough,
+      },
+    }, 409);
+    tracks = candidates;
+  }
+  const labels = songVoteLabels(tracks.map((track) => ({ name: track.title, artists: track.artists.map((name) => ({ name })) })));
+  if (labels.length !== tracks.length) return context.json({ error: "song_vote_candidates_invalid" }, 400);
   const ballotId = crypto.randomUUID();
   const now = new Date().toISOString();
   const mapping = await context.env.DB.prepare(

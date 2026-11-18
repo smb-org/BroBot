@@ -36,7 +36,7 @@ export default function SongRequestRecapPage({ channelId, language = "de", canMa
   const activeLanguage: "de" | "en" = language === "en" ? "en" : "de";
   const text = songRequestsPanelTexts[activeLanguage].recap;
   const allowed = canManage || canOperate;
-  const streamsQuery = useModuleQuery<RecapStreamsResponse>(channelId, "song_requests", "recap/streams", (signal) =>
+  const streamsQuery = useModuleQuery<RecapStreamsResponse>(channelId, "song_requests", "recap", (signal) =>
     request<RecapStreamsResponse>(channelId, "recap/streams", "GET", undefined, signal), { enabled: allowed });
   const streams = streamsQuery.data?.streams ?? [];
   const [pickedStreamId, setSelectedStreamId] = useState<string | null>(null);
@@ -45,12 +45,13 @@ export default function SongRequestRecapPage({ channelId, language = "de", canMa
     ? pickedStreamId
     : streamsQuery.data?.selectedStreamId ?? null;
 
-  const recapPart = `recap?streamId=${encodeURIComponent(selectedStreamId ?? "")}`;
+  const recapQueryPart = `recap:${selectedStreamId ?? "pending"}`;
+  const recapRoutePart = `recap?streamId=${encodeURIComponent(selectedStreamId ?? "")}`;
   const recapQuery = useModuleQuery<RecapResponse>(
     channelId,
     "song_requests",
-    recapPart,
-    (signal) => request<RecapResponse>(channelId, recapPart, "GET", undefined, signal),
+    recapQueryPart,
+    (signal) => request<RecapResponse>(channelId, recapRoutePart, "GET", undefined, signal),
     { enabled: allowed && selectedStreamId !== null },
   );
   const channelSettings = useChannelSettings(channelId);
