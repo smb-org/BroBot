@@ -104,7 +104,7 @@ describe("song request components", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled, hasCredentials, slot: enabled ? 2 : null, state, errorMessage: errorMessage ?? null, streamId: null, emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlayingRequestId: null }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings("Pick a song"), revision: 3 }));
       return Promise.resolve(json({}));
     }));
@@ -122,7 +122,7 @@ describe("song request components", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlayingRequestId: null }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 3 }));
       if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: [] }));
       return Promise.resolve(json({}));
@@ -140,7 +140,7 @@ describe("song request components", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlayingRequestId: null }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 3 }));
       if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: [] }));
       return Promise.resolve(json({}));
@@ -160,7 +160,7 @@ describe("song request components", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlayingRequestId: null }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
       return Promise.resolve(json({}));
     }));
     renderPanel();
@@ -187,7 +187,7 @@ describe("song request components", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 1, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests, voteOutcomes: [], nowPlaying, nowPlayingRequestId: nowPlaying?.requestId ?? null }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests, voteOutcomes: [], nowPlaying }));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 1 }));
       return Promise.resolve(json({}));
     });
@@ -252,7 +252,7 @@ describe("song request components", () => {
       const url = urlOf(input);
       if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-e2e" }));
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 3, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], nowPlayingRequestId: null, voteOutcomes: [
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], nowPlaying: null, voteOutcomes: [
         { ballotId: "ballot-drawn", state: "drawn", drawnByLot: true, createdAt: "2026-11-15T19:00:00.000Z" },
         { ballotId: "ballot-tie", state: "tie", drawnByLot: false, createdAt: "2026-11-15T18:00:00.000Z" },
       ] }));

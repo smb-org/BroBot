@@ -565,7 +565,6 @@ songRequestsRoutes.get("/requests", async (context) => {
     requests,
     voteOutcomes: await recentSongVoteOutcomes(context.env.DB, channel(context), requestStreamId),
     nowPlaying,
-    nowPlayingRequestId: nowPlaying?.requestId ?? null,
   });
 });
 

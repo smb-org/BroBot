@@ -60,12 +60,11 @@ describe("song request routes", () => {
     expect(currentResponse.status).toBe(200);
     await expect(currentResponse.json()).resolves.toEqual({
       requests: [], voteOutcomes: [], nowPlaying: { requestId: "request-current-fictional", playing: true },
-      nowPlayingRequestId: "request-current-fictional",
     });
 
     const otherResponse = await app.fetch(new Request(`https://brobot.example/channels/${otherChannelId}/requests`), env);
     expect(otherResponse.status).toBe(200);
-    await expect(otherResponse.json()).resolves.toEqual({ requests: [], voteOutcomes: [], nowPlaying: null, nowPlayingRequestId: null });
+    await expect(otherResponse.json()).resolves.toEqual({ requests: [], voteOutcomes: [], nowPlaying: null });
     expect(batch).toHaveBeenCalledTimes(2);
     for (const [statements] of batch.mock.calls) {
       expect(statements.map(({ sql }) => sql)).toEqual([
