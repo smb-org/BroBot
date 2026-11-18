@@ -62,6 +62,9 @@ export const songRequestChatTexts = {
       artist_open_limit: "für diesen Künstler ist die Liste voll",
       request_unavailable: "die Anfrage ist gerade nicht verfügbar",
     } as const,
+    chapterNotEnough: "Dieses Kapitel hat weniger als zwei verfügbare Songs. Ergänze Tracks oder prüfe die Abklingzeit.",
+    recapPlayed: (count: number) => `${String(count)} Song-Wünsche wurden in diesem Stream gespielt.`,
+    recapThanks: (names: string) => ` Danke an ${names}!`,
   },
   en: {
     usage: "Usage: !sr <song, Spotify link, or URI>.",
@@ -112,5 +115,8 @@ export const songRequestChatTexts = {
       artist_open_limit: "the list is full for this artist",
       request_unavailable: "the request is not available right now",
     } as const,
+    chapterNotEnough: "This chapter has fewer than two eligible tracks. Add tracks or check the cooldown.",
+    recapPlayed: (count: number) => `${String(count)} song requests played this stream.`,
+    recapThanks: (names: string) => ` Thanks ${names}!`,
   },
 } as const;

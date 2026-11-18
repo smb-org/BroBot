@@ -876,10 +876,12 @@ export const voteRecord = async (db: D1Database, channelId: string, ballotId: st
   startTrackId: string | null;
   skipThreshold: number | null;
   skipCooldownSeconds: number | null;
+  chapterId: string | null;
+  chapterName: string | null;
 } | null> => {
   const row = await db.prepare(
-    "SELECT candidate_tracks_json, state, request_id, stream_id, round_id, vote_kind, drawn_by_lot, start_track_id, skip_threshold, skip_cooldown_seconds FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ?",
-  ).bind(channelId, ballotId).first<{ candidate_tracks_json: string; state: string; request_id: string | null; stream_id: string | null; round_id: string | null; vote_kind: "song" | "skip"; drawn_by_lot: number; start_track_id: string | null; skip_threshold: number | null; skip_cooldown_seconds: number | null }>();
+    "SELECT candidate_tracks_json, state, request_id, stream_id, round_id, vote_kind, drawn_by_lot, start_track_id, skip_threshold, skip_cooldown_seconds, chapter_id, chapter_name_snapshot FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ?",
+  ).bind(channelId, ballotId).first<{ candidate_tracks_json: string; state: string; request_id: string | null; stream_id: string | null; round_id: string | null; vote_kind: "song" | "skip"; drawn_by_lot: number; start_track_id: string | null; skip_threshold: number | null; skip_cooldown_seconds: number | null; chapter_id: string | null; chapter_name_snapshot: string | null }>();
   if (row === null) return null;
   try {
     const value: unknown = JSON.parse(row.candidate_tracks_json);
@@ -888,6 +890,7 @@ export const voteRecord = async (db: D1Database, channelId: string, ballotId: st
       candidates: value as SongRequestTrack[], state: row.state, requestId: row.request_id, streamId: row.stream_id,
       roundId: row.round_id, voteKind: row.vote_kind, drawnByLot: row.drawn_by_lot === 1, startTrackId: row.start_track_id,
       skipThreshold: row.skip_threshold, skipCooldownSeconds: row.skip_cooldown_seconds,
+      chapterId: row.chapter_id, chapterName: row.chapter_name_snapshot,
     };
   } catch {
     return null;
@@ -977,7 +980,7 @@ export const createNowPlayingSnapshot = async (
   progressMs?: number | null,
   fence?: { activeStreamId: string } | { offlineRoundId: string },
   playing = true,
-): Promise<{ changed: boolean; revision: number; state: Record<string, unknown> | null; committed: boolean }> => {
+): Promise<{ changed: boolean; revision: number; state: Record<string, unknown> | null; committed: boolean; observedRequestId?: string }> => {
   const current = await db.prepare(
     "SELECT revision, track_json, request_id, progress_ms, observed_at FROM song_requests_now_playing WHERE channel_id = ?",
   ).bind(channelId).first<{ revision: number; track_json: string | null; request_id: string | null; progress_ms: number | null; observed_at: string | null }>();
@@ -1105,7 +1108,7 @@ export const createNowPlayingSnapshot = async (
       ...(fence === undefined ? {} : { activeRoundId: roundId }),
       companionStatements: [snapshotWrite],
     });
-    return { changed: committed, revision, state: committed ? state : null, committed };
+    return { changed: committed, revision, state: committed ? state : null, committed, ...(committed ? { observedRequestId: request.requestId } : {}) };
   }
   const result = await snapshotWrite.run();
   const committed = result.meta.changes > 0;

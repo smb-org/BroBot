@@ -422,6 +422,8 @@ const expectedModuleSettings = {
     requestAlertTextEnabled: true,
     skipVote: { enabled: false, threshold: 5, cooldownSeconds: 120 },
     requestAlert: { enabled: true },
+    spotlight: { enabled: false },
+    recap: { chatEnabled: true },
     rules: {
       duplicateEnabled: true,
       songCooldownEnabled: true,

@@ -337,6 +337,17 @@ const invalidatePanelResource = (
     return;
   }
   invalidateModuleActionAvailabilityQueries(queryClient, channelId, moduleId, scheduledQueryRefreshes, resourceRefreshes);
+  if (moduleId === "song_requests" && part === "recap") {
+    // The stream list and each selected stream read share one persisted recap revision.
+    const recapQueries = queryClient.getQueryCache().findAll({ queryKey: dashboardDataKeys.module(channelId, moduleId) });
+    for (const query of recapQueries) {
+      const queryPart = query.queryKey[4];
+      if (queryPart === "recap" || (typeof queryPart === "string" && queryPart.startsWith("recap:"))) {
+        invalidate(queryClient, query.queryKey, scheduledQueryRefreshes, resourceRefreshes, channelId);
+      }
+    }
+    return;
+  }
   if (moduleId === "ads" && part === "schedule") {
     invalidate(queryClient, queryKeys.module(channelId, moduleId, part), scheduledQueryRefreshes, resourceRefreshes, channelId);
     invalidate(queryClient, queryKeys.channel(channelId, "live-cockpit"), scheduledQueryRefreshes, resourceRefreshes, channelId);

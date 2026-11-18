@@ -6,6 +6,8 @@ import { spotifySearchTracks, spotifyTrackById, SpotifyRequestError, type Spotif
 import { spotifyTrackIdFromInput } from "./domain/track";
 import { songVoteLabels } from "./domain/vote-labels";
 import { formatSongRequestTrack } from "./domain/track-display";
+import { drawChapterCandidates } from "./domain/chapter-draw";
+import { songRequestChatTexts } from "./chat-locale";
 import {
   closeOfflineSongRequestRound,
   cleanupSongRequestRound,
@@ -35,13 +37,48 @@ import {
   enqueueSongRequestAlert,
   skipSongTrackThroughChannelObject,
 } from "./service";
-import { songRequestsSettingsSchema } from "./contracts";
+import { songRequestsSettingsSchema, type SongRequestChapterTrack } from "./contracts";
+import {
+  deleteSongRequestChapter,
+  excludedSongRequestChapterTrackIds,
+  listSongRequestChapters,
+  readSongRequestChapter,
+  saveSongRequestChapter,
+  songRequestChapterTrackExclusionPredicate,
+} from "./repository";
+import type { SongRequestChapterDraft } from "./repository";
+import type { SongRequestTrack } from "./adapters/d1";
 
 type RouteContext = Context<ModuleRouteEnvironment>;
 type Body = Record<string, unknown>;
 const bodyFrom = async (request: Request): Promise<Body | null> => {
   try { const value: unknown = await request.json(); return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Body : null; }
   catch { return null; }
+};
+const chapterDraftFrom = (body: Body): SongRequestChapterDraft | null => {
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const rawTracks: unknown = body.tracks;
+  if (name.length === 0 || Array.from(name).length > 40 || !Array.isArray(rawTracks) || rawTracks.length > 20 ||
+      !rawTracks.every((entry) => {
+        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+        const id: unknown = Reflect.get(entry, "id");
+        const title: unknown = Reflect.get(entry, "title");
+        const artists: unknown = Reflect.get(entry, "artists");
+        const coverUrl: unknown = Reflect.get(entry, "coverUrl");
+        let validCover = coverUrl === null;
+        if (typeof coverUrl === "string") {
+          try { validCover = new URL(coverUrl).origin === "https://i.scdn.co"; } catch { validCover = false; }
+        }
+        return typeof id === "string" && /^[A-Za-z0-9]{1,64}$/u.test(id) &&
+          typeof title === "string" && title.trim().length > 0 && Array.from(title).length <= 200 &&
+          Array.isArray(artists) && artists.length <= 20 && artists.every((artist) => typeof artist === "string" && Array.from(artist).length <= 100) && validCover;
+      }) || new Set(rawTracks.flatMap((entry) => typeof entry === "object" && entry !== null ? [Reflect.get(entry, "id") as unknown] : [])).size !== rawTracks.length ||
+      typeof body.offerInCockpit !== "boolean") return null;
+  return {
+    name,
+    tracks: rawTracks as SongRequestChapterTrack[],
+    offerInCockpit: body.offerInCockpit,
+  };
 };
 const channel = (context: RouteContext): string => context.req.param("channelId") ?? "";
 const scheduleAlarmIfEarlier = (
@@ -95,6 +132,18 @@ const streamId = async (context: RouteContext): Promise<string | null> => {
   return row?.state === "online" ? row.stream_id : null;
 };
 
+const requestTrackFromChapter = (track: SongRequestChapterTrack): SongRequestTrack => ({
+  id: track.id,
+  uri: `spotify:track:${track.id}`,
+  title: track.title,
+  artists: track.artists,
+  albumName: null,
+  durationMs: 0,
+  explicit: false,
+  coverUrl: track.coverUrl,
+  spotifyUrl: `https://open.spotify.com/track/${track.id}`,
+});
+
 const currentRequestRound = async (context: RouteContext): Promise<{ streamId: string | null; roundId: string } | null> => {
   const channelId = channel(context);
   const [module, stream] = await Promise.all([
@@ -145,6 +194,104 @@ const routeRefundExists = async (context: RouteContext, requestId: string): Prom
 };
 
 export const songRequestsRoutes = new Hono<ModuleRouteEnvironment>();
+
+songRequestsRoutes.get("/chapters/offered", async (context) => {
+  if (!isModerator(context)) return moderatorDenied(context);
+  return context.json({ chapters: await listSongRequestChapters(context.env.DB, channel(context), true) });
+});
+
+songRequestsRoutes.get("/chapters", async (context) => {
+  if (!isModerator(context)) return moderatorDenied(context);
+  return context.json({ chapters: await listSongRequestChapters(context.env.DB, channel(context)) });
+});
+
+songRequestsRoutes.post("/chapters", async (context) => {
+  if (!isManager(context)) return managerDenied(context);
+  const body = await bodyFrom(context.req.raw);
+  const draft = body === null ? null : chapterDraftFrom(body);
+  if (draft === null) return context.json({ error: "song_request_chapter_invalid" }, 400);
+  const saved = await saveSongRequestChapter(context.env.DB, channel(context), null, null, draft, new Date().toISOString());
+  return saved.status === "saved"
+    ? context.json({ chapter: saved.chapter }, 201)
+    : context.json({ error: "song_request_chapter_conflict" }, 409);
+});
+
+songRequestsRoutes.patch("/chapters/:chapterId", async (context) => {
+  if (!isManager(context)) return managerDenied(context);
+  const body = await bodyFrom(context.req.raw);
+  const draft = body === null ? null : chapterDraftFrom(body);
+  const revision = body?.revision;
+  if (draft === null || !Number.isSafeInteger(revision) || (revision as number) < 1) {
+    return context.json({ error: "song_request_chapter_invalid" }, 400);
+  }
+  const saved = await saveSongRequestChapter(context.env.DB, channel(context), context.req.param("chapterId"), revision as number, draft, new Date().toISOString());
+  if (saved.status !== "saved") {
+    return saved.status === "missing"
+      ? context.json({ error: "song_request_chapter_missing" }, 404)
+      : context.json({ error: "song_request_chapter_conflict" }, 409);
+  }
+  return context.json({ chapter: saved.chapter });
+});
+
+songRequestsRoutes.delete("/chapters/:chapterId", async (context) => {
+  if (!isManager(context)) return managerDenied(context);
+  const body = await bodyFrom(context.req.raw);
+  if (body === null || !Number.isSafeInteger(body.revision) || (body.revision as number) < 1) {
+    return context.json({ error: "song_request_chapter_invalid" }, 400);
+  }
+  const status = await deleteSongRequestChapter(context.env.DB, channel(context), context.req.param("chapterId"), body.revision as number);
+  if (status === "missing") return context.json({ error: "song_request_chapter_missing" }, 404);
+  if (status === "conflict") return context.json({ error: "song_request_chapter_conflict" }, 409);
+  return context.json({ deleted: true });
+});
+
+songRequestsRoutes.get("/recap/streams", async (context) => {
+  if (!isModerator(context)) return moderatorDenied(context);
+  const rows = await context.env.DB.prepare(
+    `SELECT stream_id, MAX(observed_at) AS latest_at, COUNT(*) AS played_count
+       FROM song_requests WHERE channel_id = ? AND stream_id IS NOT NULL AND state = 'observed_playing'
+      GROUP BY stream_id ORDER BY MAX(observed_at) DESC, stream_id DESC`,
+  ).bind(channel(context)).all<{ stream_id: string; latest_at: string; played_count: number }>();
+  const streams = rows.results.map((row) => ({ streamId: row.stream_id, latestAt: row.latest_at, playedCount: row.played_count }));
+  return context.json({ streams, selectedStreamId: streams[0]?.streamId ?? null });
+});
+
+songRequestsRoutes.get("/recap", async (context) => {
+  if (!isModerator(context)) return moderatorDenied(context);
+  const requestedStreamId = context.req.query("streamId");
+  if (requestedStreamId === undefined || !/^[A-Za-z0-9_-]{1,128}$/u.test(requestedStreamId)) {
+    return context.json({ error: "song_request_recap_stream_invalid" }, 400);
+  }
+  const exists = await context.env.DB.prepare(
+    "SELECT 1 AS present FROM song_requests WHERE channel_id = ? AND stream_id = ? AND state = 'observed_playing' LIMIT 1",
+  ).bind(channel(context), requestedStreamId).first<{ present: number }>();
+  if (exists === null) return context.json({ error: "song_request_recap_stream_missing" }, 404);
+  const language = await context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
+    .bind(channel(context)).first<{ language: string }>();
+  const rows = await context.env.DB.prepare(
+    `SELECT request.id AS request_id, request.observed_at, request.title, request.artists_json, request.spotify_url,
+            CASE WHEN request.source = 'mod_vote' THEN COALESCE(vote.chapter_name_snapshot, ?)
+              ELSE COALESCE(NULLIF(request.requester_display_name, ''), NULLIF(request.requester_login, ''), ?) END AS requester
+       FROM song_requests AS request
+       LEFT JOIN song_requests_votes AS vote
+         ON vote.channel_id = request.channel_id AND vote.request_id = request.id AND vote.vote_kind = 'song'
+      WHERE request.channel_id = ? AND request.stream_id = ? AND request.state = 'observed_playing'
+      ORDER BY request.observed_at, request.id`,
+  ).bind(language?.language === "en" ? "Song vote" : "Song-Abstimmung", language?.language === "en" ? "Viewer" : "Zuschauer", channel(context), requestedStreamId)
+    .all<{ request_id: string; observed_at: string; title: string; artists_json: string; spotify_url: string; requester: string }>();
+  return context.json({ streamId: requestedStreamId, requests: rows.results.map((row) => {
+    let artists: unknown = [];
+    try { artists = JSON.parse(row.artists_json) as unknown; } catch { /* Render a damaged cache without artist names. */ }
+    return {
+      requestId: row.request_id,
+      observedAt: row.observed_at,
+      title: row.title,
+      artists: Array.isArray(artists) ? artists.filter((artist): artist is string => typeof artist === "string") : [],
+      spotifyUrl: row.spotify_url,
+      requester: row.requester,
+    };
+  }) });
+});
 
 songRequestsRoutes.get("/connection", async (context) => {
   const channelId = channel(context);
@@ -228,9 +375,22 @@ songRequestsRoutes.post("/vote", async (context) => {
   const requestRound = await currentRequestRound(context);
   if (requestRound === null) return context.json({ error: "stream_offline" }, 409);
   const body = await bodyFrom(context.req.raw);
-  const ids = body?.trackIds;
-  if (!Array.isArray(ids) || ids.length < 2 || ids.length > 5 || !ids.every((id) => typeof id === "string" && /^[A-Za-z0-9]{1,64}$/u.test(id)) || new Set(ids).size !== ids.length) {
-    return context.json({ error: "song_vote_candidates_invalid" }, 400);
+  const chapterId = body?.chapterId;
+  let chapter: Awaited<ReturnType<typeof readSongRequestChapter>> = null;
+  let tracks: SongRequestTrack[] = [];
+  let manualTrackIds: string[] | null = null;
+  if (chapterId !== undefined) {
+    if (typeof chapterId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(chapterId)) {
+      return context.json({ error: "song_vote_chapter_missing" }, 400);
+    }
+    chapter = await readSongRequestChapter(context.env.DB, channel(context), chapterId);
+    if (chapter === null || !chapter.offerInCockpit) return context.json({ error: "song_vote_chapter_missing" }, 404);
+  } else {
+    const ids = body?.trackIds;
+    if (!Array.isArray(ids) || ids.length < 2 || ids.length > 5 || !ids.every((id) => typeof id === "string" && /^[A-Za-z0-9]{1,64}$/u.test(id)) || new Set(ids).size !== ids.length) {
+      return context.json({ error: "song_vote_candidates_invalid" }, 400);
+    }
+    manualTrackIds = ids;
   }
   let accessToken: string | null;
   try { accessToken = await token(context); } catch { return context.json({ error: "spotify_unavailable" }, 502); }
@@ -240,25 +400,72 @@ songRequestsRoutes.post("/vote", async (context) => {
     return context.json({ error: "spotify_not_connected", message: connection.error_message }, 409);
   }
   if (accessToken === null) return context.json({ error: "spotify_reconnect_required" }, 409);
-  let tracks;
-  try { tracks = await Promise.all(ids.map((id) => spotifyTrackById(spotifyEnvironment(context), accessToken, id as string))); }
-  catch (error) {
-    if (error instanceof SpotifyRequestError) await updateConnectionFromRouteError(context, error);
-    return context.json({ error: error instanceof SpotifyRequestError ? error.reason ?? "spotify_track_unavailable" : "spotify_unavailable" }, upstreamStatus(error));
+  if (chapter === null) {
+    try {
+      tracks = await Promise.all((manualTrackIds ?? []).map(async (id) =>
+        songRequestTrackFromSpotify(await spotifyTrackById(spotifyEnvironment(context), accessToken, id))));
+    }
+    catch (error) {
+      if (error instanceof SpotifyRequestError) await updateConnectionFromRouteError(context, error);
+      return context.json({ error: error instanceof SpotifyRequestError ? error.reason ?? "spotify_track_unavailable" : "spotify_unavailable" }, upstreamStatus(error));
+    }
   }
   if (!await accessEnabled(context)) return context.json({ error: "spotify_not_enabled" }, 403);
-  const labels = songVoteLabels(tracks);
-  if (labels.length !== tracks.length) return context.json({ error: "song_vote_candidates_invalid" }, 400);
   const startChatVote = context.get("startChatVote");
   if (startChatVote === undefined) return context.json({ error: "chat_vote_unavailable" }, 503);
   const channelLanguage = await context.env.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
     .bind(channel(context)).first<{ language: string }>();
-  const ballotId = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const mapping = await context.env.DB.prepare(
-    `INSERT INTO song_requests_votes
-       (ballot_id, channel_id, stream_id, round_id, candidate_tracks_json, moderator_user_id, state, created_at)
-     SELECT ?, ?, ?, ?, ?, ?, 'open', ?
+  let chapterExclusion: ReturnType<typeof songRequestChapterTrackExclusionPredicate> | null = null;
+  let chapterCooldownSettings: ReturnType<typeof songRequestsSettingsSchema.parse>["rules"] | null = null;
+  let chapterEligibilityNow = new Date().toISOString();
+  if (chapter !== null) {
+    const currentChapter = await readSongRequestChapter(context.env.DB, channel(context), chapter.id);
+    if (currentChapter === null || !currentChapter.offerInCockpit) return context.json({ error: "song_vote_chapter_missing" }, 404);
+    chapter = currentChapter;
+    const settingsRow = await context.env.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(channel(context)).first<{ settings: string }>();
+    let settings = songRequestsSettingsSchema.parse({});
+    try { settings = songRequestsSettingsSchema.parse(JSON.parse(settingsRow?.settings ?? "{}") as unknown); } catch { /* Use defaults for invalid legacy settings. */ }
+    chapterCooldownSettings = settings.rules;
+    chapterExclusion = songRequestChapterTrackExclusionPredicate(settings.rules);
+    // Read eligibility after token and route I/O so the ballot uses the current request state.
+    const excluded = await excludedSongRequestChapterTrackIds(
+      context.env.DB,
+      channel(context),
+      requestRound.roundId,
+      chapter.tracks,
+      settings.rules,
+      chapterEligibilityNow,
+    );
+    const candidates = drawChapterCandidates(chapter.tracks, excluded).map(requestTrackFromChapter);
+    if (candidates.length < 2) return context.json({
+      error: "song_vote_chapter_not_enough_tracks",
+      message: {
+        de: songRequestChatTexts.de.chapterNotEnough,
+        en: songRequestChatTexts.en.chapterNotEnough,
+      },
+    }, 409);
+    tracks = candidates;
+  }
+  const chapterInsertGuard = chapterExclusion === null ? "" : `
+        AND NOT EXISTS (
+          SELECT 1 FROM json_each(?) AS candidate
+           WHERE ${chapterExclusion.sql}
+        )`;
+  let labels: string[];
+  let ballotId: string;
+  let mapping: { ballot_id: string } | null;
+  let chapterRedraws = 0;
+  for (;;) {
+    labels = songVoteLabels(tracks.map((track) => ({ name: track.title, artists: track.artists.map((name) => ({ name })) })));
+    if (labels.length !== tracks.length) return context.json({ error: "song_vote_candidates_invalid" }, 400);
+    ballotId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    chapterEligibilityNow = now;
+    mapping = await context.env.DB.prepare(
+      `INSERT INTO song_requests_votes
+       (ballot_id, channel_id, stream_id, round_id, candidate_tracks_json, moderator_user_id, state, created_at, chapter_id, chapter_name_snapshot)
+     SELECT ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?
       WHERE EXISTS (SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1)
         AND EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)
         AND ((? IS NOT NULL AND EXISTS (
@@ -270,14 +477,48 @@ songRequestsRoutes.post("/vote", async (context) => {
         ) AND EXISTS (
           SELECT 1 FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1
             AND json_extract(settings, '$.alsoOffline') = 1
-        )))
-     RETURNING ballot_id`,
-  ).bind(ballotId, channel(context), requestRound.streamId, requestRound.roundId,
-    JSON.stringify(tracks.map(songRequestTrackFromSpotify)), context.get("session").userId, now,
-    channel(context), channel(context), requestRound.streamId, channel(context), requestRound.roundId,
-    requestRound.streamId, channel(context), channel(context), requestRound.roundId, channel(context))
-    .first<{ ballot_id: string }>();
-  if (mapping === null) return context.json({ error: "stream_offline" }, 409);
+        )))${chapterInsertGuard}
+       RETURNING ballot_id`,
+    ).bind(ballotId, channel(context), requestRound.streamId, requestRound.roundId,
+      JSON.stringify(tracks), context.get("session").userId, now, chapter?.id ?? null, chapter?.name ?? null,
+      channel(context), channel(context), requestRound.streamId, channel(context), requestRound.roundId,
+      requestRound.streamId, channel(context), channel(context), requestRound.roundId, channel(context),
+      ...(chapterExclusion === null || chapterCooldownSettings === null ? [] : [
+        JSON.stringify(tracks.map(({ id }) => id)),
+        ...chapterExclusion.bindings(channel(context), requestRound.roundId, chapterEligibilityNow),
+      ]))
+      .first<{ ballot_id: string }>();
+    if (mapping !== null) break;
+    if (chapter === null || chapterExclusion === null || chapterCooldownSettings === null) {
+      return context.json({ error: "stream_offline" }, 409);
+    }
+    chapterEligibilityNow = new Date().toISOString();
+    const excluded = await excludedSongRequestChapterTrackIds(
+      context.env.DB,
+      channel(context),
+      requestRound.roundId,
+      chapter.tracks,
+      chapterCooldownSettings,
+      chapterEligibilityNow,
+    );
+    const candidates = drawChapterCandidates(chapter.tracks, excluded).map(requestTrackFromChapter);
+    if (candidates.length < 2) return context.json({
+      error: "song_vote_chapter_not_enough_tracks",
+      message: {
+        de: songRequestChatTexts.de.chapterNotEnough,
+        en: songRequestChatTexts.en.chapterNotEnough,
+      },
+    }, 409);
+    if (chapterRedraws >= 1) return context.json({
+      error: "song_vote_chapter_not_enough_tracks",
+      message: {
+        de: songRequestChatTexts.de.chapterNotEnough,
+        en: songRequestChatTexts.en.chapterNotEnough,
+      },
+    }, 409);
+    tracks = candidates;
+    chapterRedraws += 1;
+  }
   const removeUnstartedMapping = async (): Promise<void> => {
     await context.env.DB.prepare("DELETE FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ? AND state = 'open'")
       .bind(channel(context), ballotId).run();
@@ -302,7 +543,7 @@ songRequestsRoutes.post("/vote", async (context) => {
     await removeUnstartedMapping();
     return context.json({ error: "chat_vote_unavailable" }, 503);
   }
-  return context.json({ ballotId: started.ballotId, tracks: tracks.map(songRequestTrackFromSpotify) }, 201);
+  return context.json({ ballotId: started.ballotId, tracks }, 201);
 });
 
 songRequestsRoutes.post("/skip", async (context) => {

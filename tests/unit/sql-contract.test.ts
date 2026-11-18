@@ -41,6 +41,7 @@ import {
 } from "../../src/modules/votekick/adapters/d1";
 import { entryColumns as pollsEntryColumns, rankSql, runColumns as pollsRunColumns } from "../../src/modules/polls/repository";
 import { blockUsageExistsSql, textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
+import { SONG_REQUEST_CHAPTER_COLUMNS, songRequestChapterTrackExclusionPredicate } from "../../src/modules/song_requests/repository";
 import {
   chatVoteAlarmClosePredicate,
   chatVoteExtensionPredicate,
@@ -226,6 +227,10 @@ const sqlGetFixtures = new Map<string, string>([
   ["textBlockCategorySelectColumns", textBlockCategorySelectColumns],
   ["blockUsageExistsSql", blockUsageExistsSql],
   ["chatVoteSelectColumns", chatVoteSelectColumns],
+  ["SONG_REQUEST_CHAPTER_COLUMNS", SONG_REQUEST_CHAPTER_COLUMNS],
+  ["exclusion.sql", songRequestChapterTrackExclusionPredicate({ songCooldownEnabled: true, songCooldownOncePerRound: false, songCooldownMinutes: 1 }).sql],
+  ["chapterExclusion.sql", songRequestChapterTrackExclusionPredicate({ songCooldownEnabled: true, songCooldownOncePerRound: false, songCooldownMinutes: 1 }).sql],
+  ["chapterInsertGuard", ` AND NOT EXISTS (SELECT 1 FROM json_each(?) AS candidate WHERE ${songRequestChapterTrackExclusionPredicate({ songCooldownEnabled: true, songCooldownOncePerRound: false, songCooldownMinutes: 1 }).sql})`],
   ["chatVoteTemplateSelectColumns", chatVoteTemplateSelectColumns],
   ["readOnlyPredicateSql", chatVoteFinishPredicate("channel-id", "poll-id").sql],
   ["alarmClosePredicate.sql", chatVoteAlarmClosePredicate("channel-id", "poll-id", now, now).sql],
@@ -402,10 +407,10 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(88);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(84);
-      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(180);
-      expect(objects).toHaveLength(352);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(89);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(87);
+      expect(objects.filter((object) => object.type === "trigger")).toHaveLength(183);
+      expect(objects).toHaveLength(359);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),
@@ -417,6 +422,12 @@ describe("SQL contract", () => {
         "checked_at", "eventsub_changed_at",
       ]));
       expect([...tableColumns("overlay_elements")]).toContain("width_px");
+      expect([...tableColumns("song_requests_chapters")]).toEqual(expect.arrayContaining([
+        "channel_id", "id", "name", "tracks_json", "offer_in_cockpit", "revision",
+      ]));
+      expect([...tableColumns("song_requests_votes")]).toEqual(expect.arrayContaining([
+        "chapter_id", "chapter_name_snapshot",
+      ]));
       const songRequestConnectionColumns = [...tableColumns("song_requests_connections")];
       expect(songRequestConnectionColumns).toHaveLength(6);
       expect(songRequestConnectionColumns).toContain("poll_backoff_until");

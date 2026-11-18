@@ -76,6 +76,28 @@ const requestAlertField = {
   },
 };
 
+const spotlightField = {
+  kind: "custom" as const,
+  key: "spotlight" as const,
+  render: (props: SettingsCustomFieldProps<SongRequestsSettings>): ReactElement => {
+    const copy = songRequestsSettingsTexts[languageFrom(props.context)];
+    return <SwitchRow label={copy.spotlightEnabled} description={copy.spotlightHint}
+      checked={props.settings.spotlight.enabled} disabled={props.disabled || props.readOnly}
+      onChange={(enabled) => { props.onChange({ enabled }); }} />;
+  },
+};
+
+const recapField = {
+  kind: "custom" as const,
+  key: "recap" as const,
+  render: (props: SettingsCustomFieldProps<SongRequestsSettings>): ReactElement => {
+    const copy = songRequestsSettingsTexts[languageFrom(props.context)];
+    return <SwitchRow label={copy.recapChatEnabled}
+      checked={props.settings.recap.chatEnabled} disabled={props.disabled || props.readOnly}
+      onChange={(chatEnabled) => { props.onChange({ chatEnabled }); }} />;
+  },
+};
+
 const rulesField = {
   kind: "custom" as const,
   key: "rules" as const,
@@ -142,6 +164,8 @@ const spec: SettingsEditorSpec<SongRequestsSettings> = {
     { id: "rules", icon: "clock-hour-4", fields: [rulesField] },
     { id: "skipVote", icon: "vote", fields: [skipVoteField] },
     { id: "alert", icon: "music", fields: [requestAlertField] },
+    { id: "spotlight", icon: "member", fields: [spotlightField] },
+    { id: "recap", icon: "clock-hour-4", fields: [recapField] },
     { id: "overlay", icon: "tabSettings", fields: [
       { kind: "number", key: "queueOverlayRows", min: 2, max: 20, step: 1 },
       { kind: "text", key: "emptyText", maxLength: 80, optional: true },
@@ -158,7 +182,7 @@ const definition: SettingsEditorDefinition<SongRequestsSettings> = {
   spec,
   locales: songRequestSettingsEditorCatalog.locales,
   layout: "columns",
-  pageColumns: [["admission", "rules"], ["skipVote", "alert", "overlay", "messages"]],
+  pageColumns: [["admission", "rules"], ["skipVote", "alert", "spotlight", "recap", "overlay", "messages"]],
   savePosition: "page-header",
   showTitle: false,
   messageFields: [

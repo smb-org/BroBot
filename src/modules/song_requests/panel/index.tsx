@@ -21,6 +21,8 @@ import type { ModulePanelProperties } from "../../contract";
 import { songRequestsPanelTexts } from "./locale";
 import { formatSongRequestTrack } from "../domain/track-display";
 import { request } from "./service";
+import SongRequestChaptersPage from "./chapters-page";
+import SongRequestRecapPage from "./recap-page";
 import "./panel.css";
 
 interface Track {
@@ -85,7 +87,7 @@ const formatOutcomeTime = (value: string, language: "de" | "en"): string => {
   }).format(date);
 };
 
-export default function SongRequestsPanel({ channelId, language = "de", canManage = false, canOperate = false }: ModulePanelProperties): ReactElement {
+function SongRequestsRequestsPanel({ channelId, language = "de", canManage = false, canOperate = false }: ModulePanelProperties): ReactElement {
   const activeLanguage: "de" | "en" = language === "en" ? "en" : "de";
   const text = songRequestsPanelTexts[activeLanguage];
   const queryClient = useDashboardQueryClient();
@@ -401,4 +403,10 @@ export default function SongRequestsPanel({ channelId, language = "de", canManag
       confirmLabel={text.clearConfirm} cancelLabel={text.cancel} onConfirm={clearList} onCancel={() => { setClearListOpen(false); }}
       pending={pending} danger />
   </div>;
+}
+
+export default function SongRequestsPanel(properties: ModulePanelProperties): ReactElement {
+  if (properties.pageId === "chapters") return <SongRequestChaptersPage key={`${properties.channelId}:chapters`} {...properties} />;
+  if (properties.pageId === "recap") return <SongRequestRecapPage key={`${properties.channelId}:recap`} {...properties} />;
+  return <SongRequestsRequestsPanel key={`${properties.channelId}:requests`} {...properties} />;
 }

@@ -7,6 +7,7 @@ import { canUseFreeSongRequest, isOpenSongRequestState } from "./domain/rules";
 import { songRequestsSettingsForLanguage, songRequestsSettingsSchema, type SongRequestsSettings } from "./contracts";
 import { songRequestChatTexts } from "./chat-locale";
 import { formatSongRequestTrack, songRequestArtistDisplay } from "./domain/track-display";
+import { songRequestRecapMessage } from "./domain/recap";
 import { SONG_REQUEST_TEMPLATE_VARIABLES } from "./contracts/template-variables";
 import {
   admitSongRequest,
@@ -428,7 +429,10 @@ export const enqueueSongRequestAlert = async (
         .bind(context.channelId).first<{ settings: string }>(),
       context.DB.prepare(
         `SELECT request_type, track_id, title, artists_json, album_name, requester_user_id, requester_login, requester_display_name,
-                round_id, created_at, state
+                round_id, created_at, state,
+                (SELECT chapter_name_snapshot FROM song_requests_votes
+                  WHERE channel_id = song_requests.channel_id AND request_id = song_requests.id AND vote_kind = 'song'
+                  ORDER BY created_at DESC LIMIT 1) AS chapter_name
            FROM song_requests WHERE channel_id = ? AND id = ?`,
       ).bind(context.channelId, requestId).first<{
         request_type: "vote" | "bot_points" | "free" | "channel_points";
@@ -442,6 +446,7 @@ export const enqueueSongRequestAlert = async (
         round_id: string | null;
         created_at: string;
         state: string;
+        chapter_name: string | null;
       }>(),
       context.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
         .bind(context.channelId).first<{ language: string }>(),
@@ -480,7 +485,7 @@ export const enqueueSongRequestAlert = async (
     const alertTemplate = request.request_type === "vote" && settings.requestAlertText === defaultAlertText
       ? "{song.type}: {song.track}"
       : settings.requestAlertText;
-    const rendered = renderSongRequestTemplate(alertTemplate, {
+    const renderedTemplate = renderSongRequestTemplate(alertTemplate, {
       user: requester,
       "song.track": formattedTrack,
       "song.artist": artist,
@@ -489,6 +494,7 @@ export const enqueueSongRequestAlert = async (
       "song.position": position?.position ?? 1,
       "song.type": request.request_type === "vote" ? labels.vote : requestType,
     });
+    const rendered = request.chapter_name === null ? renderedTemplate : `${request.chapter_name}: ${formattedTrack}`;
     let avatarUrl: string | undefined;
     if (request.requester_user_id !== null && request.request_type !== "vote" && context.resolveTwitchUserById !== undefined) {
       try { avatarUrl = safeTwitchAvatarUrl((await context.resolveTwitchUserById(request.requester_user_id))?.profileImageUrl); }
@@ -501,6 +507,62 @@ export const enqueueSongRequestAlert = async (
       volumePercent: 0,
     });
   } catch { /* Alerts are cosmetic and never block an approved request. */ }
+};
+
+export const enqueueSongRequestSpotlightAlert = async (
+  context: {
+    DB: D1Database;
+    channelId: string;
+    overlayAlertQueue?: Pick<ModuleOverlayAlertQueueAccess, "enqueue">;
+  },
+  requestId: string,
+): Promise<void> => {
+  const queue = context.overlayAlertQueue;
+  if (queue === undefined) return;
+  try {
+    const [module, request, channel] = await Promise.all([
+      context.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests' AND enabled = 1")
+        .bind(context.channelId).first<{ settings: string }>(),
+      context.DB.prepare(
+        `SELECT source, request_type, title, artists_json, album_name, requester_display_name, requester_login, state
+           FROM song_requests WHERE channel_id = ? AND id = ?`,
+      ).bind(context.channelId, requestId).first<{
+        source: string;
+        request_type: string;
+        title: string;
+        artists_json: string;
+        album_name: string | null;
+        requester_display_name: string | null;
+        requester_login: string | null;
+        state: string;
+      }>(),
+      context.DB.prepare("SELECT language FROM channels WHERE channel_id = ?")
+        .bind(context.channelId).first<{ language: string }>(),
+    ]);
+    if (request?.state !== "observed_playing" || request.source === "mod_vote" || request.request_type === "vote") return;
+    const language = channel?.language === "en" ? "en" : "de";
+    let settings: SongRequestsSettings;
+    try {
+      const raw: unknown = JSON.parse(module?.settings ?? "{}");
+      settings = songRequestsSettingsSchema.parse({
+        ...songRequestsSettingsForLanguage(language),
+        ...(typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {}),
+      });
+    } catch { settings = songRequestsSettingsForLanguage(language); }
+    if (!settings.spotlight.enabled) return;
+    let parsedArtists: unknown = [];
+    try { parsedArtists = JSON.parse(request.artists_json) as unknown; } catch { /* Use an empty artist list for a damaged cache. */ }
+    const artists = Array.isArray(parsedArtists) ? parsedArtists.filter((artist): artist is string => typeof artist === "string") : [];
+    const requester = request.requester_display_name?.trim() || request.requester_login?.trim();
+    if (requester === undefined || requester.length === 0) return;
+    const prefix = language === "en" ? "Requested by" : "Angefragt von";
+    const text = `${prefix} ${requester}: ${formatSongRequestTrack({ title: request.title, artists, albumName: request.album_name })}`;
+    await queue.enqueue(`song-request-spotlight:${requestId}`, {
+      text: text.slice(0, 200),
+      durationSeconds: 5,
+      volumePercent: 0,
+    });
+  } catch { /* Spotlight alerts are cosmetic and never block playback polling. */ }
 };
 
 const requestRoundIsCurrent = async (
@@ -1218,6 +1280,34 @@ export const handleSongRequestDurableAction = async (context: ModuleAlarmContext
   }
 };
 
+export const sendSongRequestStreamRecap = async (
+  context: ModuleExecutionContext,
+  channelId: string,
+  streamId: string,
+  settings: SongRequestsSettings,
+): Promise<void> => {
+  if (!settings.recap.chatEnabled || context.sendChat === undefined) return;
+  const count = await context.DB.prepare(
+    "SELECT COUNT(*) AS count FROM song_requests WHERE channel_id = ? AND stream_id = ? AND state = 'observed_playing'",
+  ).bind(channelId, streamId).first<{ count: number }>();
+  const playedCount = count?.count ?? 0;
+  if (playedCount === 0) return;
+  const requesters = await context.DB.prepare(
+    `SELECT requester_user_id, COALESCE(MAX(NULLIF(requester_display_name, '')), MAX(NULLIF(requester_login, ''))) AS display_name
+       FROM song_requests
+      WHERE channel_id = ? AND stream_id = ? AND state = 'observed_playing'
+        AND source != 'mod_vote' AND requester_user_id IS NOT NULL
+      GROUP BY requester_user_id
+      ORDER BY MIN(observed_at), requester_user_id LIMIT 3`,
+  ).bind(channelId, streamId).all<{ requester_user_id: string; display_name: string | null }>();
+  const language = await context.channelLanguage();
+  const names = requesters.results.flatMap(({ display_name }) => display_name === null ? [] : [display_name]);
+  await context.sendChat(
+    songRequestRecapMessage(songRequestChatTexts[language === "en" ? "en" : "de"], playedCount, names),
+    `song-request-recap:${channelId}:${streamId}`,
+  );
+};
+
 const notifyNowPlaying = async (context: Pick<ModuleAlarmContext, "publishModuleOverlayMessage">, revision: number): Promise<void> => {
   await context.publishModuleOverlayMessage("state_changed", "song_requests.now_playing", { revision });
 };
@@ -1461,6 +1551,9 @@ export const pollSongRequestsPlayback = async (
       isPlaying,
     );
     if (!snapshot.committed || !await playbackCycleIsCurrent(context, roundId)) return;
+    if (snapshot.observedRequestId !== undefined) {
+      await enqueueSongRequestSpotlightAlert(context, snapshot.observedRequestId);
+    }
     await setConnectionState(context, "connected", new Date(now).toISOString());
     await context.DB.prepare(
       `UPDATE song_requests_connections SET poll_failures = 0, poll_backoff_until = NULL
@@ -2005,6 +2098,7 @@ export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSe
       await reconcileStaleSongRequestCharges({ DB: context.DB, channelId: event.channelId, points: context.points }, Date.now(), streamId);
       const cleanup = await cleanupSongRequestRound(context.DB, event.channelId, streamId, event.receivedAt, "stream_ended");
       await retrySongRequestRefunds({ DB: context.DB, channelId: event.channelId, points: context.points }, streamId);
+      await sendSongRequestStreamRecap(context, event.channelId, streamId, settings);
       if (cleanup.changed) actions.push({ kind: "overlay", type: "state_changed", elementKind: "song_requests.now_playing", payload: { revision: cleanup.revision } });
     } else {
       await reconcileStaleSongRequestCharges({ DB: context.DB, channelId: event.channelId, points: context.points }, Date.now());

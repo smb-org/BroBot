@@ -61,6 +61,20 @@ export const songRequestsModule: BotModule<typeof songRequestsSettingsSchema> = 
       keywords: ["songs", "song requests", "spotify", "queue"],
     },
     {
+      id: "chapters",
+      label: { de: songRequestsPanelTexts.de.navigation.chapters.label, en: songRequestsPanelTexts.en.navigation.chapters.label },
+      description: { de: songRequestsPanelTexts.de.navigation.chapters.description, en: songRequestsPanelTexts.en.navigation.chapters.description },
+      iconKind: "music",
+      keywords: ["chapters", "soundtrack", "song vote", "spotify"],
+    },
+    {
+      id: "recap",
+      label: { de: songRequestsPanelTexts.de.navigation.recap.label, en: songRequestsPanelTexts.en.navigation.recap.label },
+      description: { de: songRequestsPanelTexts.de.navigation.recap.description, en: songRequestsPanelTexts.en.navigation.recap.description },
+      iconKind: "data",
+      keywords: ["recap", "played songs", "requests", "spotify"],
+    },
+    {
       id: "settings",
       label: { de: songRequestsPanelTexts.de.navigation.settings.label, en: songRequestsPanelTexts.en.navigation.settings.label },
       description: { de: songRequestsPanelTexts.de.navigation.settings.description, en: songRequestsPanelTexts.en.navigation.settings.description },
@@ -127,6 +141,32 @@ export const songRequestsModule: BotModule<typeof songRequestsSettingsSchema> = 
         await (await import("../../dashboard/api")).startSongRequestVote(channelId, trackIds);
         return { tone: "success", message: { de: songRequestsActionTexts.de.started, en: songRequestsActionTexts.en.started } };
       } catch (error) {
+        if (error instanceof PanelApiError && error.code === "chat_vote_already_open") {
+          return { tone: "error", message: { de: songRequestsActionTexts.de.busy, en: songRequestsActionTexts.en.busy } };
+        }
+        return { tone: "error", message: { de: songRequestsActionTexts.de.error, en: songRequestsActionTexts.en.error } };
+      }
+    },
+  }, {
+    id: "start-song-chapter-vote",
+    name: { de: songRequestsActionTexts.de.chapterName, en: songRequestsActionTexts.en.chapterName },
+    icon: "vote",
+    conditions: ["moduleEnabled"],
+    requiredRole: "operator",
+    content: { presentation: "dialog", requiresReadiness: true, hideSubmit: true, dismissAsClose: true, load: () => import("./panel/chapter-cockpit-action") },
+    errorMessage: { de: songRequestsActionTexts.de.error, en: songRequestsActionTexts.en.error },
+    execute: async ({ channelId, formData }) => {
+      const chapterId = formData.get("chapterId");
+      if (typeof chapterId !== "string" || chapterId.length === 0) {
+        return { tone: "error", message: { de: songRequestsActionTexts.de.error, en: songRequestsActionTexts.en.error } };
+      }
+      try {
+        await (await import("../../dashboard/api")).startSongRequestVote(channelId, [], chapterId);
+        return { tone: "success", message: { de: songRequestsActionTexts.de.chapterStarted, en: songRequestsActionTexts.en.chapterStarted } };
+      } catch (error) {
+        if (error instanceof PanelApiError && error.code === "song_vote_chapter_not_enough_tracks") {
+          return { tone: "error", message: { de: songRequestsActionTexts.de.chapterNotEnough, en: songRequestsActionTexts.en.chapterNotEnough } };
+        }
         if (error instanceof PanelApiError && error.code === "chat_vote_already_open") {
           return { tone: "error", message: { de: songRequestsActionTexts.de.busy, en: songRequestsActionTexts.en.busy } };
         }
