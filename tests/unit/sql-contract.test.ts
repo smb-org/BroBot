@@ -5,7 +5,11 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import { blitzQuestionColumns } from "../../src/modules/blitz_round/adapters/d1";
-import { ACCEPTED_REQUEST_STATES_SQL, SONG_REQUEST_STATISTICS_STREAM_SCOPE_SQL } from "../../src/modules/song_requests/adapters/d1";
+import {
+  ACCEPTED_REQUEST_STATES_SQL,
+  SONG_REQUEST_LIST_FILTER_SQL,
+  SONG_REQUEST_STATISTICS_STREAM_SCOPE_SQL,
+} from "../../src/modules/song_requests/adapters/d1";
 import { moduleCommandCollisionWriteGuard } from "../../src/modules/contracts/module-command-collision";
 import { MODULES } from "../../src/modules/registry";
 import { authorizeModuleMutation } from "../../src/worker/module-authorization";
@@ -253,6 +257,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["ballotGuard"," AND EXISTS (SELECT 1 FROM song_requests_votes WHERE channel_id = ? AND ballot_id = ? AND state = 'open')"],
   ["OPEN_REQUEST_SQL", "state IN ('charging', 'pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')"],
   ["OPEN_OR_PLAYING_REQUEST_SQL", "(state IN ('charging', 'pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown') OR (state = 'removed' AND submitted_at IS NOT NULL))"],
+  ["SONG_REQUEST_LIST_FILTER_SQL", SONG_REQUEST_LIST_FILTER_SQL],
   ["REQUEST_TIME_SQL", "(SELECT at FROM request_time)"],
   ["NOT_AFTER_REQUEST_SQL", "prior.created_at <= ?"],
   ["NOT_AFTER_SUBMISSION_SQL", "prior.submitted_at <= ?"],

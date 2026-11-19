@@ -205,6 +205,37 @@ export const seedE2ESongRequests = (channelId: string, settings: Readonly<Record
   return overlay;
 };
 
+/** Adds a page of fictional requests to a seeded channel for request-list E2E coverage. */
+export const seedE2ESongRequestPages = (channelId: string, openRequestCount: number): void => {
+  const createdAt = new Date();
+  const roundId = `stream-requests-page-${channelId}`;
+  const sqlString = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+  const requests = Array.from({ length: openRequestCount }, (_, index) => ({
+    id: `page-request-${String(index).padStart(2, "0")}`,
+    title: `Page Track ${String(index).padStart(2, "0")}`,
+    state: "pending_review",
+    minutesAgo: index,
+  }));
+  requests.push({ id: "played-request", title: "Played Track", state: "not_observed", minutesAgo: openRequestCount + 1 });
+  const values = requests.map(({ id, title, state, minutesAgo }) => {
+    const requestId = `${channelId}-${id}`;
+    const at = new Date(createdAt.valueOf() - minutesAgo * 60_000).toISOString();
+    return `(${sqlString(requestId)}, ${sqlString(channelId)}, 'points', ${sqlString(requestId)}, ${sqlString(`spotify:track:${requestId}`)}, ${sqlString(title)}, '["Mira Vale"]', 180000, 0, NULL, ${sqlString(`https://open.spotify.com/track/${requestId}`)}, ${sqlString(state)}, ${sqlString(`operation-${requestId}`)}, ${sqlString(roundId)}, ${sqlString(roundId)}, 'free', 0, ${sqlString(at)}, ${sqlString(at)})`;
+  }).join(",\n");
+  const sql = `INSERT INTO song_requests (
+    id, channel_id, source, track_id, track_uri, title, artists_json, duration_ms, explicit, cover_url, spotify_url,
+    state, operation_id, stream_id, round_id, request_type, charged_amount, created_at, updated_at
+  ) VALUES ${values};`;
+  const result = spawnSync("./node_modules/.bin/wrangler", [
+    "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes",
+    "--persist-to", e2eWorkerPersist, "--command", sql,
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
+  });
+  if (result.status !== 0) throw new Error(`Song request page fixture setup failed.\n${result.stdout}\n${result.stderr}`);
+};
+
 /** Seeds an automatic channel-points reward provider and a valid broadcaster token for lifecycle calls. */
 export const seedE2EChannelPointsSongRequests = (
   channelId: string,

@@ -250,6 +250,9 @@ const invalidateModuleActionAvailabilityQueries = (
   }
 };
 
+export const isSongRequestsListResource = (part: unknown): part is string =>
+  part === "requests" || (typeof part === "string" && part.startsWith("requests:"));
+
 const invalidateModuleSettingsQueries = (
   queryClient: QueryClient,
   channelId: string,
@@ -343,6 +346,17 @@ const invalidatePanelResource = (
     for (const query of recapQueries) {
       const queryPart = query.queryKey[4];
       if (queryPart === "recap" || (typeof queryPart === "string" && queryPart.startsWith("recap:"))) {
+        invalidate(queryClient, query.queryKey, scheduledQueryRefreshes, resourceRefreshes, channelId);
+      }
+    }
+    return;
+  }
+  if (moduleId === "song_requests" && part === "requests") {
+    // One requests revision covers every filter and page variant of the request list.
+    const requestQueries = queryClient.getQueryCache().findAll({ queryKey: dashboardDataKeys.module(channelId, moduleId) });
+    for (const query of requestQueries) {
+      const queryPart = query.queryKey[4];
+      if (isSongRequestsListResource(queryPart)) {
         invalidate(queryClient, query.queryKey, scheduledQueryRefreshes, resourceRefreshes, channelId);
       }
     }

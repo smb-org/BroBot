@@ -8,6 +8,7 @@ import {
   e2eWorkerEnvironment,
   e2eWorkerOrigin,
   seedE2EChannelPointsSongRequests,
+  seedE2ESongRequestPages,
   seedE2ESongRequests,
 } from "./worker-fixtures";
 
@@ -105,7 +106,7 @@ test("!sr supports moderated approval and rejection, then automatic submission",
   const approve = await page.request.post(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests/${firstRequestId}/approve`, { headers: apiHeaders });
   expect(approve.status()).toBe(200);
   await expect.poll(async () => {
-    const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests`, { headers: apiHeaders });
+    const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests?filter=all`, { headers: apiHeaders });
     const body = await response.json() as { requests: Array<{ requestId: string; state: string }> };
     return body.requests.find((row) => row.requestId === firstRequestId)?.state;
   }, { timeout: 25_000 }).toBe("submitted");
@@ -123,7 +124,7 @@ test("!sr supports moderated approval and rejection, then automatic submission",
   const reject = await page.request.post(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests/${secondRequestId}/reject`, { headers: apiHeaders });
   expect(reject.status()).toBe(200);
   await expect.poll(async () => {
-    const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests`, { headers: apiHeaders });
+    const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests?filter=all`, { headers: apiHeaders });
     const body = await response.json() as { requests: Array<{ requestId: string; state: string }> };
     return body.requests.find((row) => row.requestId === secondRequestId)?.state;
   }).toBe("rejected");
@@ -137,10 +138,39 @@ test("!sr supports moderated approval and rejection, then automatic submission",
   expect(saved.status()).toBe(200);
   await command("viewer-sr-auto", "silver_viewer", "!sr spotify:track:silvercurrent03");
   await expect.poll(async () => {
-    const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests`, { headers: apiHeaders });
+    const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests?filter=all`, { headers: apiHeaders });
     const body = await response.json() as { requests: Array<{ title: string; state: string }> };
     return body.requests.find((row) => row.title === "Silver Current")?.state;
   }, { timeout: 25_000 }).toBe("submitted");
+});
+
+test("request list pages and filters more than twenty requests", async ({ page }) => {
+  test.setTimeout(90_000);
+  const channelId = `channel-sr-pages-${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+  seedE2ESongRequests(channelId);
+  seedE2ESongRequestPages(channelId, 21);
+  const credentials = createE2ESessionCredentials();
+  await page.context().addCookies([
+    { name: "__Host-brobot_session", value: credentials.cookie, domain: localWorkerHost, path: "/", secure: true, httpOnly: true, sameSite: "Lax" },
+    { name: "__Host-brobot_csrf", value: credentials.csrfToken, domain: localWorkerHost, path: "/", secure: true, httpOnly: true, sameSite: "Lax" },
+  ]);
+
+  await page.goto(`${e2eWorkerOrigin}/channels/${channelId}/modules/song_requests`);
+  await expect(page.getByRole("heading", { name: "Requests in this stream" })).toBeVisible();
+  await expect(page.locator(".list-pagination-footer__count")).toHaveText("21 requests");
+  await expect(page.getByText("Page 1 of 2")).toBeVisible();
+  // Open lists oldest first, so the newest request (Track 00) lands on page 2.
+  await expect(page.locator(".list-row__title", { hasText: "Page Track 20" })).toBeVisible();
+  await expect(page.locator(".list-row__title", { hasText: "Page Track 00" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByText("Page 2 of 2")).toBeVisible();
+  await expect(page.locator(".list-row__title", { hasText: "Page Track 00" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Played" }).click();
+  await expect(page.getByText("Played Track", { exact: true })).toBeVisible();
+  await expect(page.getByText("Page 1 of 1")).toBeVisible();
+  await expect(page.locator(".list-pagination-footer__count")).toHaveText("1 request");
 });
 
 test("channel-point song redemptions stay in the moderated queue and resolve on Twitch", async ({ page }) => {
@@ -264,7 +294,7 @@ test("channel-point song redemptions stay in the moderated queue and resolve on 
     return body.items.find((item) => item.id === approvedId)?.status;
   }, { timeout: 25_000 }).toBe("FULFILLED");
   await expect.poll(async () => {
-    const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests`, { headers: apiHeaders });
+    const response = await page.request.get(`${e2eWorkerOrigin}/api/channels/${channelId}/modules/song_requests/requests?filter=all`, { headers: apiHeaders });
     const body = await response.json() as { requests: Array<{ requestId: string; state: string }> };
     return body.requests.find((request) => request.requestId === approvedRequestId)?.state;
   }, { timeout: 25_000 }).toBe("submitted");

@@ -58,6 +58,43 @@ afterEach(() => {
 });
 
 describe("dashboard realtime messages", () => {
+  it("invalidates every keyed song request query for a requests revision", async () => {
+    const revisionChannel = "song-request-list-revision";
+    const reader = new QueryClient();
+    const keys = [
+      moduleQueryKey(revisionChannel, "song_requests", "requests"),
+      moduleQueryKey(revisionChannel, "song_requests", "requests:open:2"),
+      moduleQueryKey(revisionChannel, "faq", "requests:open:2"),
+    ] as const;
+    for (const key of keys) addQuery(reader, key);
+    const reads = [0, 0, 0];
+    const observers = keys.map((queryKey, index) => new QueryObserver(reader, {
+      queryKey,
+      queryFn: () => {
+        reads[index] = (reads[index] ?? 0) + 1;
+        return Promise.resolve({ ready: true });
+      },
+      staleTime: Infinity,
+    }));
+    const unsubscribers = observers.map((observer) => observer.subscribe(() => undefined));
+    let revision = 0;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      revisions: { "module:song_requests:requests": revision },
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))));
+
+    await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+    revision = 1;
+    await reconcileDashboardPanelResourceRevisions(reader, revisionChannel);
+
+    expect(reads).toEqual([1, 1, 0]);
+    expect(reader.getQueryState(keys[2])?.isInvalidated).toBe(false);
+    unsubscribers.forEach((unsubscribe) => { unsubscribe(); });
+    reader.clear();
+  });
+
   it("ignores legacy module panel hints", () => {
     const result = parseRealtimeMessage(JSON.stringify({
       version: 1,

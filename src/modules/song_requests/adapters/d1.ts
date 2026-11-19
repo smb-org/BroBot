@@ -789,15 +789,53 @@ interface SongRequestNowPlayingSqlRow {
   track_json: string | null;
 }
 
-const prepareRecentSongRequests = (db: D1Database, channelId: string, roundId: string | null): D1PreparedStatement => db.prepare(
-  `SELECT id, source, track_id, track_uri, title, artists_json, album_name, duration_ms, explicit, cover_url, spotify_url,
-          requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason,
-          stream_id, round_id, request_type, charged_amount, channel_points_reward_id, chat_message_id,
-          channel_points_resolution_due, channel_points_resolution_completed, refund_due, submitted_at, created_at, updated_at
+export const SONG_REQUEST_LIST_FILTER_SQL = `AND state != 'charging'
+      AND (
+        (? = 'open' AND (
+          state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')
+          OR (state = 'observed_playing' AND EXISTS (
+            SELECT 1 FROM song_requests_now_playing AS current_track
+             WHERE current_track.channel_id = ? AND current_track.request_id = song_requests.id
+          ))
+        ))
+        OR (? = 'played' AND (
+          state = 'not_observed'
+          OR (state = 'observed_playing' AND NOT EXISTS (
+            SELECT 1 FROM song_requests_now_playing AS current_track
+             WHERE current_track.channel_id = ? AND current_track.request_id = song_requests.id
+          ))
+        ))
+        OR (? = 'all')
+      )`;
+
+const prepareRecentSongRequests = (
+  db: D1Database,
+  channelId: string,
+  roundId: string | null,
+  filter: "open" | "played" | "all" = "all",
+  page = 1,
+  pageSize = 50,
+): D1PreparedStatement => {
+  return db.prepare(
+    `SELECT id, source, track_id, track_uri, title, artists_json, album_name, duration_ms, explicit, cover_url, spotify_url,
+            requester_user_id, requester_login, requester_display_name, state, operation_id, failure_reason,
+            stream_id, round_id, request_type, charged_amount, channel_points_reward_id, chat_message_id,
+            channel_points_resolution_due, channel_points_resolution_completed, refund_due, submitted_at, created_at, updated_at
+       FROM song_requests
+      WHERE channel_id = ? AND round_id IS ? ${SONG_REQUEST_LIST_FILTER_SQL}
+      ORDER BY CASE WHEN ? = 'open' THEN created_at END ASC,
+               CASE WHEN ? != 'open' THEN created_at END DESC,
+               CASE WHEN ? = 'open' THEN id END ASC,
+               CASE WHEN ? != 'open' THEN id END DESC
+      LIMIT ? OFFSET ?`,
+  ).bind(channelId, roundId, filter, channelId, filter, channelId, filter, filter, filter, filter, filter, pageSize, (page - 1) * pageSize);
+};
+
+const prepareRecentSongRequestCount = (db: D1Database, channelId: string, roundId: string | null, filter: "open" | "played" | "all"): D1PreparedStatement => db.prepare(
+  `SELECT COUNT(*) AS total
      FROM song_requests
-    WHERE channel_id = ? AND round_id IS ? AND state != 'charging'
-    ORDER BY created_at DESC, id DESC LIMIT 50`,
-).bind(channelId, roundId);
+    WHERE channel_id = ? AND round_id IS ? ${SONG_REQUEST_LIST_FILTER_SQL}`,
+).bind(channelId, roundId, filter, channelId, filter, channelId, filter);
 
 const nowPlayingFromRow = (row: SongRequestNowPlayingSqlRow | undefined): SongRequestNowPlaying | null => {
   if (row?.request_id == null) return null;
@@ -822,13 +860,18 @@ export const recentSongRequestsAndNowPlaying = async (
   db: D1Database,
   channelId: string,
   roundId: string | null,
-): Promise<{ requests: SongRequestRow[]; nowPlaying: SongRequestNowPlaying | null }> => {
-  const [requestRows, nowPlayingRows] = await db.batch([
-    prepareRecentSongRequests(db, channelId, roundId),
+  filter: "open" | "played" | "all" = "open",
+  page = 1,
+  pageSize = 20,
+): Promise<{ requests: SongRequestRow[]; total: number; nowPlaying: SongRequestNowPlaying | null }> => {
+  const [requestRows, countRow, nowPlayingRows] = await db.batch([
+    prepareRecentSongRequests(db, channelId, roundId, filter, page, pageSize),
+    prepareRecentSongRequestCount(db, channelId, roundId, filter),
     db.prepare("SELECT request_id, track_json FROM song_requests_now_playing WHERE channel_id = ?").bind(channelId),
-  ]) as [D1Result<SongRequestSqlRow>, D1Result<SongRequestNowPlayingSqlRow>];
+  ]) as [D1Result<SongRequestSqlRow>, D1Result<{ total: number }>, D1Result<SongRequestNowPlayingSqlRow>];
   return {
     requests: requestRows.results.map(rowToRequest),
+    total: countRow.results[0]?.total ?? 0,
     nowPlaying: nowPlayingFromRow(nowPlayingRows.results[0]),
   };
 };

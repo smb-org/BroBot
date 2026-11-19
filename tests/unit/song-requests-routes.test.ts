@@ -24,6 +24,45 @@ const spotifyTrack = (id: string) => ({
 });
 const databases: TestD1Database[] = [];
 
+const insertSongRequestFixture = async (
+  database: TestD1Database,
+  channelId: string,
+  roundId: string,
+  requestId: string,
+  state: string,
+  createdAt: string,
+): Promise<void> => {
+  await database.prepare(
+    `INSERT INTO song_requests (
+       id, channel_id, source, track_id, track_uri, title, artists_json, duration_ms, explicit, cover_url, spotify_url,
+       state, operation_id, stream_id, round_id, request_type, charged_amount, created_at, updated_at
+     ) VALUES (?, ?, 'points', ?, ?, ?, '["Mira Vale"]', 180000, 0, NULL, ?, ?, ?, ?, ?, 'free', 0, ?, ?)`,
+  ).bind(
+    requestId,
+    channelId,
+    requestId,
+    `spotify:track:${requestId}`,
+    `Track ${requestId}`,
+    `https://open.spotify.com/track/${requestId}`,
+    state,
+    `operation-${requestId}`,
+    roundId,
+    roundId,
+    createdAt,
+    createdAt,
+  ).run();
+};
+
+const songRequestRouteApp = (): Hono<ModuleRouteEnvironment> => {
+  const app = new Hono<ModuleRouteEnvironment>();
+  app.use("*", async (context, next) => {
+    context.set("channelRole", "operator");
+    await next();
+  });
+  app.route("/channels/:channelId", songRequestsRoutes);
+  return app;
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
   for (const database of databases.splice(0)) database.close();
@@ -59,20 +98,139 @@ describe("song request routes", () => {
     const currentResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests`), env);
     expect(currentResponse.status).toBe(200);
     await expect(currentResponse.json()).resolves.toEqual({
-      requests: [], voteOutcomes: [], nowPlaying: { requestId: "request-current-fictional", playing: true },
+      requests: [], total: 0, filter: "open", page: 1, pageSize: 20, voteOutcomes: [],
+      nowPlaying: { requestId: "request-current-fictional", playing: true },
     });
 
     const otherResponse = await app.fetch(new Request(`https://brobot.example/channels/${otherChannelId}/requests`), env);
     expect(otherResponse.status).toBe(200);
-    await expect(otherResponse.json()).resolves.toEqual({ requests: [], voteOutcomes: [], nowPlaying: null });
+    await expect(otherResponse.json()).resolves.toEqual({
+      requests: [], total: 0, filter: "open", page: 1, pageSize: 20, voteOutcomes: [], nowPlaying: null,
+    });
     expect(batch).toHaveBeenCalledTimes(2);
     for (const [statements] of batch.mock.calls) {
       expect(statements.map(({ sql }) => sql)).toEqual([
         expect.stringContaining("FROM song_requests"),
+        expect.stringContaining("COUNT(*) AS total"),
         expect.stringContaining("FROM song_requests_now_playing WHERE channel_id = ?"),
       ]);
       expect(statements[0]?.sql).toContain("WHERE channel_id = ? AND round_id IS ?");
     }
+  });
+
+  it("filters the active round by request state, includes a paused current request, and orders each filter", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    const otherChannelId = "song-requests-list-other";
+    await insertChannel(database, CHANNEL_ID);
+    await insertChannel(database, otherChannelId);
+    const streamId = "stream-song-request-filters";
+    const baseTime = Date.parse("2026-11-18T18:00:00.000Z");
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, stream_id, started_at)
+       VALUES (?, 'online', ?, 'eventsub', ?, ?)`,
+    ).bind(CHANNEL_ID, new Date(baseTime).toISOString(), streamId, new Date(baseTime).toISOString()).run();
+
+    const fixtureRows = [
+      ["queue-a", "pending_review", 0], ["queue-z", "pending_review", 0],
+      ["approved", "approved", 1], ["submitting", "submitting", 2], ["submitted", "submitted", 3],
+      ["unclear", "outcome_unknown", 4], ["paused-current", "observed_playing", 5],
+      ["played-a", "observed_playing", 7], ["played-z", "observed_playing", 7], ["not-observed", "not_observed", 6],
+      ["rejected", "rejected", 8], ["removed", "removed", 9], ["failed", "failed", 10], ["charging", "charging", 11],
+    ] as const;
+    for (const [requestId, state, minutes] of fixtureRows) {
+      await insertSongRequestFixture(database, CHANNEL_ID, streamId, requestId, state, new Date(baseTime + minutes * 60_000).toISOString());
+    }
+    await insertSongRequestFixture(database, otherChannelId, streamId, "other-channel-row", "pending_review", new Date(baseTime).toISOString());
+    await database.prepare(
+      "INSERT INTO song_requests_now_playing (channel_id, revision, track_json, request_id) VALUES (?, 1, ?, ?)",
+    ).bind(CHANNEL_ID, JSON.stringify({ playing: false }), "paused-current").run();
+
+    const batch = vi.fn((statements: TestPreparedStatement[]) => database.batch(statements));
+    const routeDatabase = {
+      prepare: database.prepare.bind(database),
+      batch,
+    } as unknown as D1Database;
+    const app = songRequestRouteApp();
+    const env = { DB: routeDatabase } as ModuleRouteEnvironment["Bindings"];
+    const responseFor = async (query = ""): Promise<Record<string, unknown>> => {
+      const response = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests${query}`), env);
+      expect(response.status).toBe(200);
+      return await response.json();
+    };
+
+    const open = await responseFor();
+    expect(open).toMatchObject({ filter: "open", total: 7, page: 1, pageSize: 20, nowPlaying: { requestId: "paused-current", playing: false } });
+    expect((open.requests as Array<{ requestId: string }>).map(({ requestId }) => requestId)).toEqual([
+      "queue-a", "queue-z", "approved", "submitting", "submitted", "unclear", "paused-current",
+    ]);
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(batch.mock.calls[0]?.[0]).toHaveLength(3);
+    expect(batch.mock.calls[0]?.[0].map(({ sql }) => sql)).toEqual([
+      expect.stringContaining("FROM song_requests"),
+      expect.stringContaining("COUNT(*) AS total"),
+      expect.stringContaining("FROM song_requests_now_playing WHERE channel_id = ?"),
+    ]);
+
+    const played = await responseFor("?filter=played");
+    expect(played.total).toBe(3);
+    expect((played.requests as Array<{ requestId: string }>).map(({ requestId }) => requestId)).toEqual([
+      "played-z", "played-a", "not-observed",
+    ]);
+    const all = await responseFor("?filter=all");
+    expect(all.total).toBe(13);
+    expect((all.requests as Array<{ requestId: string }>).map(({ requestId }) => requestId)).toEqual([
+      "failed", "removed", "rejected", "charging", "played-z", "played-a", "not-observed", "paused-current",
+      "unclear", "submitted", "submitting", "approved", "queue-z", "queue-a",
+    ].filter((requestId) => requestId !== "charging"));
+  });
+
+  it("serves 20 request rows per page with a total and clamps the page size", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    await insertChannel(database, CHANNEL_ID);
+    const streamId = "stream-song-request-pages";
+    const now = "2026-11-18T18:00:00.000Z";
+    await database.prepare("INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'song_requests', 1, '{}')")
+      .bind(CHANNEL_ID).run();
+    await database.prepare(
+      `INSERT INTO channel_stream_state (channel_id, state, changed_at, source, stream_id, started_at)
+       VALUES (?, 'online', ?, 'eventsub', ?, ?)`,
+    ).bind(CHANNEL_ID, now, streamId, now).run();
+    for (let index = 0; index < 25; index += 1) {
+      const requestId = `page-request-${String(index).padStart(2, "0")}`;
+      await insertSongRequestFixture(database, CHANNEL_ID, streamId, requestId, "pending_review", now);
+    }
+    const app = songRequestRouteApp();
+    const env = { DB: database as unknown as D1Database } as ModuleRouteEnvironment["Bindings"];
+    const firstResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests`), env);
+    const first: { requests: Array<{ requestId: string }>; total: number; pageSize: number } = await firstResponse.json();
+    expect(firstResponse.status).toBe(200);
+    expect(first.requests).toHaveLength(20);
+    expect(first.total).toBe(25);
+    expect(first.pageSize).toBe(20);
+    expect(first.requests[0]?.requestId).toBe("page-request-00");
+
+    const secondResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests?page=2`), env);
+    const second: { requests: Array<{ requestId: string }>; total: number; page: number } = await secondResponse.json();
+    expect(second.requests.map(({ requestId }) => requestId)).toEqual([
+      "page-request-20", "page-request-21", "page-request-22", "page-request-23", "page-request-24",
+    ]);
+    expect(second).toMatchObject({ total: 25, page: 2 });
+
+    const clampedResponse = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests?pageSize=201`), env);
+    await expect(clampedResponse.json()).resolves.toMatchObject({ pageSize: 100, total: 25 });
+  });
+
+  it("rejects an invalid request filter or page", async () => {
+    const app = songRequestRouteApp();
+    const env = { DB: {} as D1Database } as ModuleRouteEnvironment["Bindings"];
+    const invalidFilter = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests?filter=unknown`), env);
+    const invalidPage = await app.fetch(new Request(`https://brobot.example/channels/${CHANNEL_ID}/requests?page=0`), env);
+    expect(invalidFilter.status).toBe(400);
+    expect(invalidPage.status).toBe(400);
   });
 
   it("reports a request as paused and playing again from its now-playing snapshot", async () => {

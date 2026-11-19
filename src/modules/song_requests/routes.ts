@@ -558,12 +558,39 @@ songRequestsRoutes.post("/skip", async (context) => {
 
 songRequestsRoutes.get("/requests", async (context) => {
   if (!isModerator(context)) return moderatorDenied(context);
+  const query = context.req.query();
+  const requestedFilter = query.filter ?? "open";
+  if (requestedFilter !== "open" && requestedFilter !== "played" && requestedFilter !== "all") {
+    return context.json({ error: "song_requests_filter_invalid" }, 400);
+  }
+  if (query.page !== undefined && !/^\d+$/u.test(query.page)) {
+    return context.json({ error: "song_requests_page_invalid" }, 400);
+  }
+  const requestedPage = query.page === undefined ? 1 : Number(query.page);
+  if (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > 1_000_000) {
+    return context.json({ error: "song_requests_page_invalid" }, 400);
+  }
+  if (query.pageSize !== undefined && !/^\d+$/u.test(query.pageSize)) {
+    return context.json({ error: "song_requests_page_size_invalid" }, 400);
+  }
+  const requestedPageSize = query.pageSize === undefined ? 20 : Number(query.pageSize);
+  if (!Number.isSafeInteger(requestedPageSize) || requestedPageSize < 1) {
+    return context.json({ error: "song_requests_page_size_invalid" }, 400);
+  }
+  const pageSize = Math.min(requestedPageSize, 100);
   const current = await currentRequestRound(context);
   const requestStreamId = current?.roundId ?? await latestSongRequestStreamId(context.env.DB, channel(context), await streamId(context));
-  const { requests, nowPlaying } = await recentSongRequestsAndNowPlaying(context.env.DB, channel(context), requestStreamId);
+  const [{ requests, total, nowPlaying }, voteOutcomes] = await Promise.all([
+    recentSongRequestsAndNowPlaying(context.env.DB, channel(context), requestStreamId, requestedFilter, requestedPage, pageSize),
+    recentSongVoteOutcomes(context.env.DB, channel(context), requestStreamId),
+  ]);
   return context.json({
     requests,
-    voteOutcomes: await recentSongVoteOutcomes(context.env.DB, channel(context), requestStreamId),
+    total,
+    filter: requestedFilter,
+    page: requestedPage,
+    pageSize,
+    voteOutcomes,
     nowPlaying,
   });
 });
