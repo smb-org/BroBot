@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement, type SubmitEvent } from "react";
+import { useState, type ReactElement, type SubmitEvent } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import {
@@ -105,6 +105,7 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
   const canViewRequests = canOperate || canManage;
   const [requestFilter, setRequestFilter] = useState<RequestFilter>("open");
   const [requestPage, setRequestPage] = useState(1);
+  const requestsResource = `requests:${requestFilter}:${String(requestPage)}`;
   const connectionQuery = useModuleQuery<Connection>(
     channelId,
     "song_requests",
@@ -114,20 +115,14 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
   const requestsQuery = useModuleQuery<RequestsRead>(
     channelId,
     "song_requests",
-    "requests",
+    requestsResource,
     (signal) => request<RequestsRead>(channelId, `requests?filter=${requestFilter}&page=${String(requestPage)}&pageSize=${String(REQUEST_PAGE_SIZE)}`, "GET", undefined, signal),
-    { enabled: canViewRequests },
+    { enabled: canViewRequests, keepPreviousData: true },
   );
-  const activeRequestQuery = useRef({ filter: requestFilter, page: requestPage });
-  const { refetch: refetchRequests } = requestsQuery;
-  useEffect(() => {
-    if (activeRequestQuery.current.filter === requestFilter && activeRequestQuery.current.page === requestPage) return;
-    activeRequestQuery.current = { filter: requestFilter, page: requestPage };
-    void refetchRequests();
-  }, [requestFilter, requestPage, refetchRequests]);
   // Clamp an emptied page to the last page while rendering (derived state, no effect round trip).
   const settledRequests = requestsQuery.data;
-  if (!requestsQuery.isFetching && settledRequests !== undefined && settledRequests.filter === requestFilter && settledRequests.page === requestPage) {
+  if (!requestsQuery.isFetching && !requestsQuery.isPlaceholderData && settledRequests !== undefined &&
+    settledRequests.filter === requestFilter && settledRequests.page === requestPage) {
     const lastPage = Math.max(1, Math.ceil(settledRequests.total / settledRequests.pageSize));
     if (requestPage > lastPage) setRequestPage(lastPage);
   }
@@ -222,7 +217,7 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
         queryClient,
         channelId,
         "song_requests",
-        "requests",
+        requestsResource,
         () => request(channelId, "vote", "POST", { trackIds: selected.map(({ id }) => id) }),
         { baselineRevision: null, updateCache: (current) => current },
       );
@@ -236,7 +231,7 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
         queryClient,
         channelId,
         "song_requests",
-        "requests",
+        requestsResource,
         () => request(channelId, `requests/${encodeURIComponent(requestId)}/resolve`, "POST", { state }),
         { baselineRevision: null, updateCache: (current) => current },
       );

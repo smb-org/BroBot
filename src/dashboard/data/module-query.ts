@@ -20,6 +20,7 @@ export interface ModuleQueryWriteOptions<Value> {
 
 export interface ModuleQueryOptions<Value> {
   enabled?: boolean;
+  keepPreviousData?: boolean;
   refetchInterval?: number | false | ((query: Query<Value>) => number | false);
 }
 
@@ -145,8 +146,12 @@ export const useModuleQuery = <Value,>(
     ...(options.refetchInterval === undefined ? {} : { refetchInterval: options.refetchInterval }),
     placeholderData: (previousData, previousQuery) => {
       const previousKey = previousQuery?.queryKey;
+      const previousPart = previousKey?.[4];
+      const samePartFamily = options.keepPreviousData === true && typeof previousPart === "string" &&
+        previousPart.split(":", 1)[0] === part.split(":", 1)[0];
       return previousKey?.[0] === "channel" && previousKey[1] === channelId &&
-        previousKey[2] === "module" && previousKey[3] === moduleId && previousKey[4] === part
+        previousKey[2] === "module" && previousKey[3] === moduleId &&
+        (previousKey[4] === part || samePartFamily)
         ? keepPreviousData(previousData)
         : undefined;
     },

@@ -348,6 +348,17 @@ const invalidatePanelResource = (
     }
     return;
   }
+  if (moduleId === "song_requests" && part === "requests") {
+    // One requests revision covers every filter and page variant of the request list.
+    const requestQueries = queryClient.getQueryCache().findAll({ queryKey: dashboardDataKeys.module(channelId, moduleId) });
+    for (const query of requestQueries) {
+      const queryPart = query.queryKey[4];
+      if (queryPart === "requests" || (typeof queryPart === "string" && queryPart.startsWith("requests:"))) {
+        invalidate(queryClient, query.queryKey, scheduledQueryRefreshes, resourceRefreshes, channelId);
+      }
+    }
+    return;
+  }
   if (moduleId === "ads" && part === "schedule") {
     invalidate(queryClient, queryKeys.module(channelId, moduleId, part), scheduledQueryRefreshes, resourceRefreshes, channelId);
     invalidate(queryClient, queryKeys.channel(channelId, "live-cockpit"), scheduledQueryRefreshes, resourceRefreshes, channelId);

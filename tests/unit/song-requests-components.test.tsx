@@ -4,8 +4,9 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
-import { useDashboardQueryClient } from "../../src/dashboard/data";
+import { moduleQueryKey, useDashboardQueryClient } from "../../src/dashboard/data";
 import { refetchModuleQueryData } from "../../src/dashboard/data/module-query";
+import { reconcileDashboardPanelResourceRevisions } from "../../src/dashboard/data/realtime";
 import SongRequestsPanel from "../../src/modules/song_requests/panel";
 import { songRequestsPanelTexts } from "../../src/modules/song_requests/panel/locale";
 import SongRequestsNowPlaying from "../../src/modules/song_requests/overlay/view";
@@ -233,7 +234,7 @@ describe("song request components", () => {
 
     if (captured.client === null) throw new Error("The dashboard query client was not captured.");
     nowPlaying = { requestId: "current-song", playing: false };
-    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests:all:1");
     await waitFor(() => {
       expect(currentRow?.querySelector(".list-row__status")).toHaveTextContent("Paused");
       expect(currentRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--neutral");
@@ -242,14 +243,14 @@ describe("song request components", () => {
     expect(songRequestsPanelTexts.de.states.paused).toBe("Pausiert");
 
     nowPlaying = { requestId: "current-song", playing: true };
-    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests:all:1");
     await waitFor(() => {
       expect(currentRow?.querySelector(".list-row__status")).toHaveTextContent("Now playing");
       expect(currentRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--green");
     });
 
     nowPlaying = { requestId: "earlier-song", playing: true };
-    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests:all:1");
     await waitFor(() => {
       expect(currentRow?.querySelector(".list-row__status")).toHaveTextContent("Played");
       expect(currentRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--neutral");
@@ -348,19 +349,91 @@ describe("song request components", () => {
     expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
 
     if (captured.client === null) throw new Error("The dashboard query client was not captured.");
-    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests:played:2");
     expect(requestCalls.at(-1)).toContain("filter=played");
     expect(requestCalls.at(-1)).toContain("page=2");
     await screen.findByText("Page 2 of 2");
 
     total = 20;
-    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    // A requests revision invalidates every cached page variant, so the clamped page 1 is refetched too.
+    await captured.client.invalidateQueries({ queryKey: ["channel", "channel-fictional", "module", "song_requests"] });
     await waitFor(() => {
       expect(requestCalls.at(-1)).toContain("filter=played");
       expect(requestCalls.at(-1)).toContain("page=1");
       expect(screen.getByText("Page 1 of 1")).toBeInTheDocument();
       expect(countFooter()).toHaveTextContent("20 requests");
     });
+  });
+
+  it("keys request filters and pages, keeps the previous rows while loading, and refreshes the active view on revision", async () => {
+    const requestRow = (requestId: string, title: string) => ({
+      requestId, ...track, title, state: "pending_review", failureReason: null, source: "points", requestType: "free",
+      chargedAmount: 0, requesterDisplayName: "Fictional Viewer", requesterLogin: "fictional_viewer", createdAt: "2026-11-15T19:00:00.000Z",
+    });
+    const releases: { one: ((response: Response) => void) | null; two: ((response: Response) => void) | null } = { one: null, two: null };
+    let requestRevision = 0;
+    let allPageTwoReads = 0;
+    const requestCalls: URL[] = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 1, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
+      if (url.pathname.endsWith("/revisions")) return Promise.resolve(json({ revisions: { "module:song_requests:requests": requestRevision } }));
+      if (url.pathname.endsWith("/requests")) {
+        requestCalls.push(url);
+        const filter = url.searchParams.get("filter") === "all" ? "all" : "open";
+        const page = Number(url.searchParams.get("page") ?? "1");
+        if (filter === "all" && page === 1) {
+          return new Promise<Response>((resolve) => { releases.one = resolve; });
+        }
+        if (filter === "all" && page === 2) {
+          allPageTwoReads += 1;
+          if (allPageTwoReads === 1) return new Promise<Response>((resolve) => { releases.two = resolve; });
+          return Promise.resolve(json(requestsRead([requestRow("all-page-two", "All Second Refreshed")], null, [], "all", 2, 21)));
+        }
+        return Promise.resolve(json(requestsRead([requestRow("open-page-one", "Open First")], null, [], "open", 1, 21)));
+      }
+      return Promise.resolve(json({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const captured: { client: QueryClient | null } = { client: null };
+    render(<DashboardDataProvider><QueryClientCapture onCapture={(client) => { captured.client = client; }}>
+      <SongRequestsPanel channelId="channel-fictional" language="en" canManage canOperate />
+    </QueryClientCapture></DashboardDataProvider>);
+
+    await screen.findByText("Open First", { selector: ".list-row__title" });
+    if (captured.client === null) throw new Error("The dashboard query client was not captured.");
+    await reconcileDashboardPanelResourceRevisions(captured.client, "channel-fictional");
+
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    await waitFor(() => {
+      expect(requestCalls.some((url) => url.searchParams.get("filter") === "all" && url.searchParams.get("page") === "1")).toBe(true);
+    });
+    expect(screen.getByText("Open First", { selector: ".list-row__title" })).toBeInTheDocument();
+    if (releases.one === null) throw new Error("The all-filter request did not start.");
+    releases.one(json(requestsRead([requestRow("all-page-one", "All First")], null, [], "all", 1, 21)));
+    await screen.findByText("All First", { selector: ".list-row__title" });
+    await waitFor(() => expect(screen.queryByText("Open First", { selector: ".list-row__title" })).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => {
+      expect(requestCalls.some((url) => url.searchParams.get("filter") === "all" && url.searchParams.get("page") === "2")).toBe(true);
+    });
+    expect(screen.getByText("All First", { selector: ".list-row__title" })).toBeInTheDocument();
+    if (releases.two === null) throw new Error("The second-page request did not start.");
+    releases.two(json(requestsRead([requestRow("all-page-two", "All Second")], null, [], "all", 2, 21)));
+    await screen.findByText("All Second", { selector: ".list-row__title" });
+    await waitFor(() => expect(screen.queryByText("All First", { selector: ".list-row__title" })).not.toBeInTheDocument());
+    expect(captured.client.getQueryData(moduleQueryKey("channel-fictional", "song_requests", "requests:open:1"))).toMatchObject({ filter: "open", page: 1 });
+    expect(captured.client.getQueryData(moduleQueryKey("channel-fictional", "song_requests", "requests:all:1"))).toMatchObject({ filter: "all", page: 1 });
+    expect(captured.client.getQueryData(moduleQueryKey("channel-fictional", "song_requests", "requests:all:2"))).toMatchObject({ filter: "all", page: 2 });
+
+    requestRevision = 1;
+    await reconcileDashboardPanelResourceRevisions(captured.client, "channel-fictional");
+    expect(requestCalls.at(-1)?.searchParams.get("filter")).toBe("all");
+    expect(requestCalls.at(-1)?.searchParams.get("page")).toBe("2");
+    await screen.findByText("All Second Refreshed", { selector: ".list-row__title" });
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
   });
 
   it("offers removal per request, with the refund choice only for paid submitted requests, behind a confirmation", async () => {
