@@ -250,6 +250,9 @@ const invalidateModuleActionAvailabilityQueries = (
   }
 };
 
+export const isSongRequestsListResource = (part: unknown): part is string =>
+  part === "requests" || (typeof part === "string" && part.startsWith("requests:"));
+
 const invalidateModuleSettingsQueries = (
   queryClient: QueryClient,
   channelId: string,
@@ -353,7 +356,7 @@ const invalidatePanelResource = (
     const requestQueries = queryClient.getQueryCache().findAll({ queryKey: dashboardDataKeys.module(channelId, moduleId) });
     for (const query of requestQueries) {
       const queryPart = query.queryKey[4];
-      if (queryPart === "requests" || (typeof queryPart === "string" && queryPart.startsWith("requests:"))) {
+      if (isSongRequestsListResource(queryPart)) {
         invalidate(queryClient, query.queryKey, scheduledQueryRefreshes, resourceRefreshes, channelId);
       }
     }

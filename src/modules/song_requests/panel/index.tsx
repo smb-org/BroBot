@@ -1,6 +1,7 @@
 import { useState, type ReactElement, type SubmitEvent } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { isSongRequestsListResource } from "../../../dashboard/data/realtime";
 import {
   ActionMenu,
   Badge,
@@ -119,6 +120,12 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
     (signal) => request<RequestsRead>(channelId, `requests?filter=${requestFilter}&page=${String(requestPage)}&pageSize=${String(REQUEST_PAGE_SIZE)}`, "GET", undefined, signal),
     { enabled: canViewRequests, keepPreviousData: true },
   );
+  const invalidateRequestVariants = async (): Promise<void> => {
+    await queryClient.invalidateQueries({
+      queryKey: ["channel", channelId, "module", "song_requests"],
+      predicate: (query) => isSongRequestsListResource(query.queryKey[4]),
+    });
+  };
   // Clamp an emptied page to the last page while rendering (derived state, no effect round trip).
   const settledRequests = requestsQuery.data;
   if (!requestsQuery.isFetching && !requestsQuery.isPlaceholderData && settledRequests !== undefined &&
@@ -221,6 +228,7 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
         () => request(channelId, "vote", "POST", { trackIds: selected.map(({ id }) => id) }),
         { baselineRevision: null, updateCache: (current) => current },
       );
+      await invalidateRequestVariants();
       setSelected([]);
     });
   };
@@ -235,13 +243,14 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
         () => request(channelId, `requests/${encodeURIComponent(requestId)}/resolve`, "POST", { state }),
         { baselineRevision: null, updateCache: (current) => current },
       );
+      await invalidateRequestVariants();
     });
   };
 
   const removeRequest = (requestId: string, refund: boolean): void => {
     void run(async () => {
       await request(channelId, `requests/${encodeURIComponent(requestId)}/remove`, "POST", { refund });
-      await requestsQuery.refetch();
+      await invalidateRequestVariants();
     });
   };
 
@@ -249,7 +258,7 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
     void run(async () => {
       await request(channelId, "clear", "POST");
       setClearListOpen(false);
-      await requestsQuery.refetch();
+      await invalidateRequestVariants();
       notify({ tone: "success", message: text.listCleared });
     });
   };

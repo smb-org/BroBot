@@ -296,7 +296,7 @@ describe("song request components", () => {
     expect(JSON.parse(typeof body === "string" ? body : "{}")).toEqual({ trackIds: ["glassharbor01", "quietatlas02", "silvercurrent03"] });
   });
 
-  it("keeps the selected filter and page on refetch, shows totals, and clamps an empty last page", async () => {
+  it("keeps the selected filter and page on refetch and clamps clear-list results using fresh page-one data", async () => {
     const makeRows = (prefix: string, state: string) => Array.from({ length: 21 }, (_, index) => ({
       requestId: `${prefix}-${String(index).padStart(2, "0")}`,
       ...track,
@@ -316,12 +316,18 @@ describe("song request components", () => {
     const requestCalls: string[] = [];
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
+      if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-clear" }));
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 1, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
+      if (url.pathname.endsWith("/revisions")) return Promise.resolve(json({ revisions: { "module:song_requests:requests": 0 } }));
+      if (url.pathname.endsWith("/clear")) {
+        total = 0;
+        return Promise.resolve(json({ cleared: true }));
+      }
       if (url.pathname.endsWith("/requests")) {
         requestCalls.push(url.search);
         const filter = url.searchParams.get("filter") === "played" ? "played" : "open";
         const page = Number(url.searchParams.get("page") ?? "1");
-        const rows = filter === "played" ? playedRows : openRows;
+        const rows = total === 0 ? [] : filter === "played" ? playedRows : openRows;
         return Promise.resolve(json(requestsRead(rows.slice((page - 1) * 20, page * 20), null, [], filter, page, total)));
       }
       return Promise.resolve(json({}));
@@ -354,15 +360,76 @@ describe("song request components", () => {
     expect(requestCalls.at(-1)).toContain("page=2");
     await screen.findByText("Page 2 of 2");
 
-    total = 20;
-    // A requests revision invalidates every cached page variant, so the clamped page 1 is refetched too.
-    await captured.client.invalidateQueries({ queryKey: ["channel", "channel-fictional", "module", "song_requests"] });
+    fireEvent.click(screen.getByRole("button", { name: "Clear list" }));
+    expect(await screen.findByRole("heading", { name: "Clear the song request list?" })).toBeInTheDocument();
+    const confirmClear = screen.getAllByRole("button", { name: "Clear list" }).at(-1);
+    if (confirmClear === undefined) throw new Error("The clear confirmation button is missing.");
+    fireEvent.click(confirmClear);
     await waitFor(() => {
       expect(requestCalls.at(-1)).toContain("filter=played");
       expect(requestCalls.at(-1)).toContain("page=1");
       expect(screen.getByText("Page 1 of 1")).toBeInTheDocument();
-      expect(countFooter()).toHaveTextContent("20 requests");
+      expect(countFooter()).toHaveTextContent("0 requests");
+      expect(screen.queryByText("Played Track 00", { selector: ".list-row__title" })).not.toBeInTheDocument();
     });
+  });
+
+  it("refetches page one after removing the last request on page two without a revision", async () => {
+    const requests = Array.from({ length: 21 }, (_, index) => ({
+      requestId: `Open-${String(index).padStart(2, "0")}`,
+      ...track,
+      title: `Open Track ${String(index).padStart(2, "0")}`,
+      state: "pending_review",
+      failureReason: null,
+      source: "points",
+      requestType: "free",
+      chargedAmount: 0,
+      requesterDisplayName: "Fictional Viewer",
+      requesterLogin: "fictional_viewer",
+      createdAt: `2026-11-15T19:${String(index % 60).padStart(2, "0")}:00.000Z`,
+    }));
+    let serverRows = requests;
+    const requestCalls: Array<{ url: URL; total: number }> = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-remove-page" }));
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 1, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
+      if (url.pathname.endsWith("/revisions")) return Promise.resolve(json({ revisions: { "module:song_requests:requests": 0 } }));
+      if (url.pathname.endsWith("/requests")) {
+        requestCalls.push({ url, total: serverRows.length });
+        const page = Number(url.searchParams.get("page") ?? "1");
+        return Promise.resolve(json(requestsRead(serverRows.slice((page - 1) * 20, page * 20), null, [], "open", page, serverRows.length)));
+      }
+      if (url.pathname.endsWith("/remove")) {
+        const requestId = decodeURIComponent(url.pathname.split("/").at(-2) ?? "");
+        serverRows = serverRows.filter((row) => row.requestId !== requestId);
+        return Promise.resolve(json({ state: "removed" }));
+      }
+      return Promise.resolve(json({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const captured: { client: QueryClient | null } = { client: null };
+    render(<DashboardDataProvider><QueryClientCapture onCapture={(client) => { captured.client = client; }}>
+      <SongRequestsPanel channelId="channel-fictional" language="en" canManage canOperate />
+    </QueryClientCapture></DashboardDataProvider>);
+
+    await screen.findByText("Open Track 00", { selector: ".list-row__title" });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Open Track 20", { selector: ".list-row__title" });
+    fireEvent.click(screen.getByRole("button", { name: "Actions: Open Track 20" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+
+    await waitFor(() => {
+      expect(requestCalls.some(({ url, total }) => url.searchParams.get("page") === "1" && url.searchParams.get("filter") === "open" && total === 20)).toBe(true);
+      expect(document.querySelector(".list-pagination-footer__count")).toHaveTextContent("20 requests");
+      expect(screen.getByText("Page 1 of 1")).toBeInTheDocument();
+      expect(screen.getByText("Open Track 19", { selector: ".list-row__title" })).toBeInTheDocument();
+      expect(screen.queryByText("Open Track 20", { selector: ".list-row__title" })).not.toBeInTheDocument();
+    });
+    if (captured.client === null) throw new Error("The dashboard query client was not captured.");
+    expect(captured.client.getQueryData(moduleQueryKey("channel-fictional", "song_requests", "requests:open:1"))).toMatchObject({ total: 20, page: 1 });
   });
 
   it("keys request filters and pages, keeps the previous rows while loading, and refreshes the active view on revision", async () => {
