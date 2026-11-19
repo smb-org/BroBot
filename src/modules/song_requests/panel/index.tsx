@@ -1,4 +1,4 @@
-import { useState, type ReactElement, type SubmitEvent } from "react";
+import { useEffect, useRef, useState, type ReactElement, type SubmitEvent } from "react";
 
 import { runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import {
@@ -14,7 +14,9 @@ import {
   Section,
   StatusLed,
   Icon,
+  ListPaginationFooter,
   notify,
+  SegmentChoice,
   type StatusLedState,
 } from "../../../dashboard/ui";
 import type { ModulePanelProperties } from "../../contract";
@@ -68,9 +70,16 @@ interface Connection {
 
 interface RequestsRead {
   requests: RequestRow[];
+  total: number;
+  filter: "open" | "played" | "all";
+  page: number;
+  pageSize: number;
   voteOutcomes: VoteOutcome[];
   nowPlaying: { requestId: string; playing: boolean } | null;
 }
+
+type RequestFilter = RequestsRead["filter"];
+const REQUEST_PAGE_SIZE = 20;
 
 const stateTone = (state: SongRequestState, playback: "playing" | "paused" | null = null): "neutral" | "green" | "amber" | "red" => {
   if (state === "submitted" || (state === "observed_playing" && playback === "playing")) return "green";
@@ -94,6 +103,8 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
   const text = songRequestsPanelTexts[activeLanguage];
   const queryClient = useDashboardQueryClient();
   const canViewRequests = canOperate || canManage;
+  const [requestFilter, setRequestFilter] = useState<RequestFilter>("open");
+  const [requestPage, setRequestPage] = useState(1);
   const connectionQuery = useModuleQuery<Connection>(
     channelId,
     "song_requests",
@@ -104,9 +115,22 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
     channelId,
     "song_requests",
     "requests",
-    (signal) => request<RequestsRead>(channelId, "requests", "GET", undefined, signal),
+    (signal) => request<RequestsRead>(channelId, `requests?filter=${requestFilter}&page=${String(requestPage)}&pageSize=${String(REQUEST_PAGE_SIZE)}`, "GET", undefined, signal),
     { enabled: canViewRequests },
   );
+  const activeRequestQuery = useRef({ filter: requestFilter, page: requestPage });
+  const { refetch: refetchRequests } = requestsQuery;
+  useEffect(() => {
+    if (activeRequestQuery.current.filter === requestFilter && activeRequestQuery.current.page === requestPage) return;
+    activeRequestQuery.current = { filter: requestFilter, page: requestPage };
+    void refetchRequests();
+  }, [requestFilter, requestPage, refetchRequests]);
+  // Clamp an emptied page to the last page while rendering (derived state, no effect round trip).
+  const settledRequests = requestsQuery.data;
+  if (!requestsQuery.isFetching && settledRequests !== undefined && settledRequests.filter === requestFilter && settledRequests.page === requestPage) {
+    const lastPage = Math.max(1, Math.ceil(settledRequests.total / settledRequests.pageSize));
+    if (requestPage > lastPage) setRequestPage(lastPage);
+  }
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
   const [searchState, setSearchState] = useState<"idle" | "loading" | "searched">("idle");
@@ -235,9 +259,13 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
     });
   };
 
-  const requestQueryStatus = requestsQuery.data === undefined
+  const requestPageCount = Math.max(1, Math.ceil((requestData?.total ?? requests.length) / (requestData?.pageSize ?? REQUEST_PAGE_SIZE)));
+  const requestPageNeedsClamp = requestData !== undefined && requestData.filter === requestFilter && requestData.page === requestPage && requestPage > requestPageCount;
+  const requestQueryStatus = requestData === undefined
     ? requestsQuery.isError ? "error" : "loading"
-    : requests.length === 0 ? "empty" : "success";
+    : requestPageNeedsClamp || (requests.length === 0 && (requestData.filter !== requestFilter || requestData.page !== requestPage))
+      ? "loading"
+      : requests.length === 0 ? "empty" : "success";
   const canConnect = canManage && connection?.enabled === true && !connection.hasCredentials;
   const canReconnect = canManage && connection?.enabled === true && connection.hasCredentials;
   const canDisconnect = canManage && connection?.enabled === true && connection.hasCredentials;
@@ -246,7 +274,7 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
   const searchBlocked = !canOperate || (connection?.state !== "connected" && connection?.state !== "no_active_device");
   const voteBlocked = pending || searchBlocked || selected.length < 2 || selected.length > 5;
 
-  return <div className="song-requests-panel">
+  return <div className={`song-requests-panel${canViewRequests ? " song-requests-panel--with-requests" : ""}`}>
     <Section title={text.connection} className="song-requests-panel__connection-section">
       <div className="song-requests-panel__connection-copy">
         <div className="song-requests-panel__connection-status" aria-live="polite">
@@ -264,7 +292,7 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
         : null}
     </Section>
 
-    <Section title={text.search}>
+    <Section title={text.search} className="song-requests-panel__search-section">
       <form className="song-requests-panel__search" onSubmit={(event) => { void submitSearch(event); }}>
         <Field
           label={text.query}
@@ -348,11 +376,44 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
         </div>}
     </Section>
 
-    {canViewRequests ? <Section title={text.recent} headingAction={canOperate ? <Button variant="secondary" disabled={pending} onClick={() => { setClearListOpen(true); }}>{text.clearList}</Button> : null}>
+    {canViewRequests ? <Section
+      title={text.recent}
+      className="song-requests-panel__requests-section"
+      headingAction={canOperate ? <Button variant="secondary" disabled={pending} onClick={() => { setClearListOpen(true); }}>{text.clearList}</Button> : null}
+    >
+      <SegmentChoice
+        label={text.requestFilter}
+        value={requestFilter}
+        onChange={(value) => {
+          setRequestFilter(value);
+          setRequestPage(1);
+        }}
+        size="compact"
+        options={[
+          { value: "open", label: text.requestFilters.open },
+          { value: "played", label: text.requestFilters.played },
+          { value: "all", label: text.requestFilters.all },
+        ]}
+      />
+      <ListPaginationFooter
+        loadedCount={requestData?.total ?? requests.length}
+        loadedLabel={text.requestCount(requestData?.total ?? requests.length)}
+      >
+        <span className="song-requests-panel__page-status">{text.requestPageStatus(requestPage, Math.max(1, Math.ceil((requestData?.total ?? requests.length) / (requestData?.pageSize ?? REQUEST_PAGE_SIZE))))}</span>
+        <Button variant="neutral" size="compact" disabled={requestPage <= 1} onClick={() => { setRequestPage((page) => Math.max(1, page - 1)); }}>
+          {text.previousPage}
+        </Button>
+        <Button
+          variant="neutral"
+          size="compact"
+          disabled={requestPage >= Math.max(1, Math.ceil((requestData?.total ?? requests.length) / (requestData?.pageSize ?? REQUEST_PAGE_SIZE)))}
+          onClick={() => { setRequestPage((page) => page + 1); }}
+        >{text.nextPage}</Button>
+      </ListPaginationFooter>
       <LoadState
         variant="panel-0"
         status={requestQueryStatus}
-        loading={<LoadStateLines rows={3} height={40} />}
+        loading={<LoadStateLines rows={REQUEST_PAGE_SIZE} height={40} />}
         empty={<EmptyState title={text.emptyRequests} description={text.emptyRequestsDescription} />}
         error={<p role="alert">{text.requestLoadError}</p>}
         queryError={{ message: text.requestLoadError, onRetry: () => { void requestsQuery.refetch(); } }}
@@ -401,7 +462,7 @@ function SongRequestsRequestsPanel({ channelId, language = "de", canManage = fal
       </LoadState>
     </Section> : null}
 
-    {canViewRequests ? <Section title={text.recentVotes}>
+    {canViewRequests ? <Section title={text.recentVotes} className="song-requests-panel__votes-section">
       {voteOutcomes.length === 0 ? <EmptyState title={text.emptyVoteOutcomes} description="" /> : <div className="song-requests-panel__outcomes" role="list" aria-label={text.recentVotes}>
         {voteOutcomes.map((outcome) => <div className="song-requests-panel__outcome" role="listitem" key={outcome.ballotId}>
           <Badge tone={outcome.state === "failed" ? "red" : "amber"}>{text.voteOutcomes[outcome.state]}</Badge>

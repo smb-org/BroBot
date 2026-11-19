@@ -39,6 +39,7 @@
   .song-requests-panel__outcomes { display: grid; min-width: 0; }
   .song-requests-panel__outcome { display: flex; min-width: 0; min-height: var(--s8); align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s2); border-bottom: 1px solid var(--line); }
   .song-requests-panel__outcome time { flex: none; color: var(--text-3); }
+  .song-requests-panel__page-status { padding-inline: var(--s2); color: var(--text-2); font-size: 12px; white-space: nowrap; }
   .song-requests-cockpit-action { min-width: 0; }
   .song-requests-cockpit-action { display: grid; gap: var(--s3); }
   .song-requests-cockpit-action__candidates { display: grid; gap: var(--s2); min-width: 0; }
@@ -116,6 +117,28 @@
   @media (max-width: 420px) {
     .song-requests-panel__search-button { width: var(--control-height); min-width: var(--control-height); padding-inline: 0; }
     .song-requests-panel__search-button-label { display: none; }
+  }
+
+  @media (min-width: 1280px) {
+    .song-requests-panel--with-requests {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-areas:
+        "requests connection"
+        "requests search"
+        "requests results"
+        "requests candidate"
+        "requests votes"
+        "requests .";
+      /* The trailing 1fr row absorbs the list height, so the right column keeps its natural row heights. */
+      grid-template-rows: repeat(5, max-content) minmax(0, 1fr);
+      align-items: start;
+    }
+    .song-requests-panel--with-requests .song-requests-panel__connection-section { grid-area: connection; min-width: 0; }
+    .song-requests-panel--with-requests .song-requests-panel__search-section { grid-area: search; min-width: 0; }
+    .song-requests-panel--with-requests .song-requests-panel__results-section { grid-area: results; min-width: 0; }
+    .song-requests-panel--with-requests .song-requests-panel__candidate-section { grid-area: candidate; min-width: 0; }
+    .song-requests-panel--with-requests .song-requests-panel__requests-section { grid-area: requests; align-self: start; min-width: 0; }
+    .song-requests-panel--with-requests .song-requests-panel__votes-section { grid-area: votes; min-width: 0; }
   }
 }
 

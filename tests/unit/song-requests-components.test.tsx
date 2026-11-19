@@ -15,6 +15,14 @@ import { songRequestsSettingsSchema } from "../../src/modules/song_requests/cont
 const track = { id: "glassharbor01", title: "Glass Harbor", artists: ["Mira Vale"], coverUrl: "https://i.scdn.co/image/fictional-cover", spotifyUrl: "https://open.spotify.com/track/glassharbor01" };
 const urlOf = (input: RequestInfo | URL): URL => new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.origin);
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status });
+const requestsRead = (
+  requests: unknown[] = [],
+  nowPlaying: unknown = null,
+  voteOutcomes: unknown[] = [],
+  filter: "open" | "played" | "all" = "open",
+  page = 1,
+  total = requests.length,
+) => ({ requests, total, filter, page, pageSize: 20, voteOutcomes, nowPlaying });
 const settings = (emptyText = "") => songRequestsSettingsSchema.parse({ emptyText });
 const QueryClientCapture = ({ onCapture, children }: { onCapture: (client: QueryClient) => void; children: ReactNode }) => {
   onCapture(useDashboardQueryClient());
@@ -104,7 +112,7 @@ describe("song request components", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled, hasCredentials, slot: enabled ? 2 : null, state, errorMessage: errorMessage ?? null, streamId: null, emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json(requestsRead()));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings("Pick a song"), revision: 3 }));
       return Promise.resolve(json({}));
     }));
@@ -122,7 +130,7 @@ describe("song request components", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json(requestsRead()));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 3 }));
       if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: [] }));
       return Promise.resolve(json({}));
@@ -140,7 +148,7 @@ describe("song request components", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json(requestsRead()));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 3 }));
       if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: [] }));
       return Promise.resolve(json({}));
@@ -160,7 +168,7 @@ describe("song request components", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 2, state: "connected", errorMessage: null, streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], voteOutcomes: [], nowPlaying: null }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json(requestsRead()));
       return Promise.resolve(json({}));
     }));
     renderPanel();
@@ -171,7 +179,7 @@ describe("song request components", () => {
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 
-  it("renders request covers, track titles and attribution, and switches played status after a refetch", async () => {
+  it("defaults to Open, switches filters, and refreshes current and previously played request states", async () => {
     const requests = [
       {
         requestId: "current-song", ...track, state: "observed_playing", failureReason: null, source: "points", requestType: "free", chargedAmount: 0,
@@ -187,7 +195,12 @@ describe("song request components", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
       const url = urlOf(input);
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 1, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests, voteOutcomes: [], nowPlaying }));
+      if (url.pathname.endsWith("/requests")) {
+        const filter = url.searchParams.get("filter") === "all" ? "all" : "open";
+        const page = Number(url.searchParams.get("page") ?? "1");
+        const visibleRequests = filter === "open" ? requests.filter(({ requestId }) => requestId === "current-song") : requests;
+        return Promise.resolve(json(requestsRead(visibleRequests, nowPlaying, [], filter, page)));
+      }
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 1 }));
       return Promise.resolve(json({}));
     });
@@ -199,6 +212,8 @@ describe("song request components", () => {
     </QueryClientCapture></DashboardDataProvider>);
 
     const currentLink = await screen.findByRole("link", { name: /Glass Harbor/u });
+    expect(screen.getByRole("button", { name: "Open" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("link", { name: /Quiet Atlas/u })).not.toBeInTheDocument();
     const currentRow = currentLink.closest('[role="listitem"]');
     expect(currentRow?.querySelector(".list-row__title")).toHaveTextContent("Glass Harbor");
     expect(currentRow?.querySelector(".list-row__description")).toHaveTextContent("Mira Vale · Fictional Viewer");
@@ -206,7 +221,8 @@ describe("song request components", () => {
     expect(currentRow?.querySelector(".list-row__status")).toHaveTextContent("Now playing");
     expect(currentRow?.querySelector(".ui-badge")).toHaveClass("ui-badge--green");
 
-    const earlierLink = screen.getByRole("link", { name: /Quiet Atlas/u });
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    const earlierLink = await screen.findByRole("link", { name: /Quiet Atlas/u });
     const earlierRow = earlierLink.closest('[role="listitem"]');
     expect(earlierRow?.querySelector(".list-row__title")).toHaveTextContent("Quiet Atlas");
     expect(earlierRow?.querySelector(".list-row__description")).toHaveTextContent("Mira Vale · Song vote");
@@ -252,10 +268,10 @@ describe("song request components", () => {
       const url = urlOf(input);
       if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-e2e" }));
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 3, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests: [], nowPlaying: null, voteOutcomes: [
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json(requestsRead([], null, [
         { ballotId: "ballot-drawn", state: "drawn", drawnByLot: true, createdAt: "2026-11-15T19:00:00.000Z" },
         { ballotId: "ballot-tie", state: "tie", drawnByLot: false, createdAt: "2026-11-15T18:00:00.000Z" },
-      ] }));
+      ])));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings("Pick a song"), revision: 3 }));
       if (url.pathname.endsWith("/search")) return Promise.resolve(json({ tracks: searchTracks }));
       if (url.pathname.endsWith("/vote")) return Promise.resolve(json({ ballotId: "ballot-fictional" }, 201));
@@ -279,6 +295,74 @@ describe("song request components", () => {
     expect(JSON.parse(typeof body === "string" ? body : "{}")).toEqual({ trackIds: ["glassharbor01", "quietatlas02", "silvercurrent03"] });
   });
 
+  it("keeps the selected filter and page on refetch, shows totals, and clamps an empty last page", async () => {
+    const makeRows = (prefix: string, state: string) => Array.from({ length: 21 }, (_, index) => ({
+      requestId: `${prefix}-${String(index).padStart(2, "0")}`,
+      ...track,
+      title: `${prefix} Track ${String(index).padStart(2, "0")}`,
+      state,
+      failureReason: null,
+      source: "points",
+      requestType: "free",
+      chargedAmount: 0,
+      requesterDisplayName: "Fictional Viewer",
+      requesterLogin: "fictional_viewer",
+      createdAt: `2026-11-15T19:${String(index % 60).padStart(2, "0")}:00.000Z`,
+    }));
+    const openRows = makeRows("Open", "pending_review");
+    const playedRows = makeRows("Played", "not_observed");
+    let total = 21;
+    const requestCalls: string[] = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = urlOf(input);
+      if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 1, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
+      if (url.pathname.endsWith("/requests")) {
+        requestCalls.push(url.search);
+        const filter = url.searchParams.get("filter") === "played" ? "played" : "open";
+        const page = Number(url.searchParams.get("page") ?? "1");
+        const rows = filter === "played" ? playedRows : openRows;
+        return Promise.resolve(json(requestsRead(rows.slice((page - 1) * 20, page * 20), null, [], filter, page, total)));
+      }
+      return Promise.resolve(json({}));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const captured: { client: QueryClient | null } = { client: null };
+    render(<DashboardDataProvider><QueryClientCapture onCapture={(client) => { captured.client = client; }}>
+      <SongRequestsPanel channelId="channel-fictional" language="en" canManage canOperate />
+    </QueryClientCapture></DashboardDataProvider>);
+
+    const countFooter = (): Element | null => document.querySelector(".list-pagination-footer__count");
+    await waitFor(() => { expect(countFooter()).toHaveTextContent("21 requests"); });
+    expect(screen.getByRole("button", { name: "Open" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Open Track 20", { selector: ".list-row__title" });
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Played" }));
+    await screen.findByText("Played Track 00", { selector: ".list-row__title" });
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Played Track 20", { selector: ".list-row__title" });
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+
+    if (captured.client === null) throw new Error("The dashboard query client was not captured.");
+    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    expect(requestCalls.at(-1)).toContain("filter=played");
+    expect(requestCalls.at(-1)).toContain("page=2");
+    await screen.findByText("Page 2 of 2");
+
+    total = 20;
+    await refetchModuleQueryData(captured.client, "channel-fictional", "song_requests", "requests");
+    await waitFor(() => {
+      expect(requestCalls.at(-1)).toContain("filter=played");
+      expect(requestCalls.at(-1)).toContain("page=1");
+      expect(screen.getByText("Page 1 of 1")).toBeInTheDocument();
+      expect(countFooter()).toHaveTextContent("20 requests");
+    });
+  });
+
   it("offers removal per request, with the refund choice only for paid submitted requests, behind a confirmation", async () => {
     const row = (requestId: string, title: string, state: string, requestType: string, chargedAmount: number) => ({
       requestId, state, title, artists: ["Mira Vale"], coverUrl: null, spotifyUrl: `https://open.spotify.com/track/${requestId}`,
@@ -293,7 +377,7 @@ describe("song request components", () => {
       const url = urlOf(input);
       if (url.pathname === "/api/csrf") return Promise.resolve(json({ token: "csrf-remove" }));
       if (url.pathname.endsWith("/connection")) return Promise.resolve(json({ enabled: true, hasCredentials: true, slot: 1, state: "connected", streamId: "stream-fictional", emptyText: "", pointsEnabled: true }));
-      if (url.pathname.endsWith("/requests")) return Promise.resolve(json({ requests, voteOutcomes: [] }));
+      if (url.pathname.endsWith("/requests")) return Promise.resolve(json(requestsRead(requests)));
       if (url.pathname.endsWith("/settings")) return Promise.resolve(json({ settings: settings(), revision: 1 }));
       return Promise.resolve(json({ state: "removed" }));
     });
