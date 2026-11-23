@@ -163,6 +163,11 @@ const spec: SettingsEditorSpec<SongRequestsSettings> = {
     ] },
     { id: "rules", icon: "clock-hour-4", fields: [rulesField] },
     { id: "skipVote", icon: "vote", fields: [skipVoteField] },
+    { id: "viewerCommands", icon: "tabMessages", fields: [
+      { kind: "switchCard", key: "songCommandEnabled" },
+      { kind: "switchCard", key: "queueCommandEnabled" },
+      { kind: "switchCard", key: "wrongSongCommandEnabled" },
+    ] },
     { id: "alert", icon: "music", fields: [requestAlertField] },
     { id: "spotlight", icon: "member", fields: [spotlightField] },
     { id: "recap", icon: "clock-hour-4", fields: [recapField] },
@@ -182,7 +187,7 @@ const definition: SettingsEditorDefinition<SongRequestsSettings> = {
   spec,
   locales: songRequestSettingsEditorCatalog.locales,
   layout: "columns",
-  pageColumns: [["admission", "rules"], ["skipVote", "alert", "spotlight", "recap", "overlay", "messages"]],
+  pageColumns: [["admission", "rules"], ["skipVote", "viewerCommands", "alert", "spotlight", "recap", "overlay", "messages"]],
   savePosition: "page-header",
   showTitle: false,
   messageFields: [

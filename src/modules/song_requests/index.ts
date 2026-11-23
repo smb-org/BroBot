@@ -23,6 +23,7 @@ import { songRequestsActionTexts } from "./panel/action-locale";
 import { songRequestsPanelTexts } from "./panel/locale";
 import { songRequestQueueSubtitle } from "./panel/queue-action-locale";
 import { requestSongChannelPointsAction } from "./channel-points-action";
+import { songRequestChatTexts } from "./chat-locale";
 
 const queueAvailability: ModuleImmediateActionCondition = {
   query: {
@@ -111,6 +112,24 @@ export const songRequestsModule: BotModule<typeof songRequestsSettingsSchema> = 
     name: "!skip",
     syntax: "!skip",
     description: { de: songRequestsActionTexts.de.skipCommandDescription, en: songRequestsActionTexts.en.skipCommandDescription },
+    minimumChatStatus: "everyone",
+  }, {
+    name: "!song",
+    syntax: "!song",
+    syntaxByLanguage: { de: "!song", en: "!song" },
+    description: { de: songRequestChatTexts.de.songCommandDescription, en: songRequestChatTexts.en.songCommandDescription },
+    minimumChatStatus: "everyone",
+  }, {
+    name: "!queue",
+    syntax: "!queue",
+    syntaxByLanguage: { de: "!queue", en: "!queue" },
+    description: { de: songRequestChatTexts.de.queueCommandDescription, en: songRequestChatTexts.en.queueCommandDescription },
+    minimumChatStatus: "everyone",
+  }, {
+    name: "!wrongsong",
+    syntax: "!wrongsong",
+    syntaxByLanguage: { de: "!wrongsong", en: "!wrongsong" },
+    description: { de: songRequestChatTexts.de.wrongSongCommandDescription, en: songRequestChatTexts.en.wrongSongCommandDescription },
     minimumChatStatus: "everyone",
   }],
   panelIcon: { paths: ["M9 18V5l12-2v13", "M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0", "M21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0"] },

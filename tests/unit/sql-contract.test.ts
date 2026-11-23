@@ -262,6 +262,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["NOT_AFTER_REQUEST_SQL", "prior.created_at <= ?"],
   ["NOT_AFTER_SUBMISSION_SQL", "prior.submitted_at <= ?"],
   ["conditions.join(\" AND \")", "channel_id = ? AND id = ? AND state = ?"],
+  ["requesterGuard", " AND requester_user_id = ?"],
   ["roundFilter", " AND round_id = ?"],
   ["roundFenceSql", " AND EXISTS (SELECT 1 FROM channel_stream_state WHERE channel_id = ? AND state = 'online' AND stream_id = ?)"],
   ["activeRoundGuard", `
