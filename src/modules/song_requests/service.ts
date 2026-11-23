@@ -23,6 +23,9 @@ import {
   finishSkipVoteResult,
   readOfflineSongRequestRound,
   readSongRequest,
+  readLatestSongRequestForViewer,
+  readNewestSongRequestForViewer,
+  readSongRequestViewerQueue,
   clearSongRequestChannelPointResolution,
   songRequestChannelPointResolutionDue,
   markSongRequestRefundDue,
@@ -1091,6 +1094,7 @@ const requestTypeLabel = (type: SongRequestRow["requestType"], language: "de" | 
 const announceSubmitResult = async (context: ModuleAlarmContext, requestId: string): Promise<boolean> => {
   const row = await readSongRequest(context.DB, context.channelId, requestId);
   if (row === null || row.state === "charging" || row.state === "approved" || row.state === "submitting") return false;
+  if (row.failureReason === "viewer_wrong_song") return false;
   const language = await context.channelLanguage();
   const locale = language === "en" ? "en" : "de";
   const moduleRow = await context.DB.prepare("SELECT settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
@@ -1755,6 +1759,125 @@ const chatReply = (event: ModuleEvent, message: string): ModuleResult["actions"]
   ...(typeof event.payload.message_id === "string" ? { replyToMessageId: event.payload.message_id } : {}),
 });
 
+const VIEWER_COMMAND_COOLDOWN_SECONDS = 5;
+type ViewerSongCommand = "song" | "queue" | "wrongsong";
+const isWithdrawableSongRequestState = (state: SongRequestState): state is "pending_review" | "approved" =>
+  state === "pending_review" || state === "approved";
+const emptyModuleResult = (): ModuleResult => ({ actions: [], diagnostics: [] });
+
+const queueReply = (
+  language: "de" | "en",
+  requests: readonly string[],
+): string => {
+  const text = songRequestChatTexts[language];
+  const complete = text.queueRequests(requests.join("; "));
+  if (Array.from(complete).length <= 500) return complete;
+  for (let visible = requests.length - 1; visible >= 0; visible -= 1) {
+    const truncated = text.queueTruncated(requests.slice(0, visible).join("; "), requests.length - visible);
+    if (Array.from(truncated).length <= 500) return truncated;
+  }
+  return text.queueTruncated("", requests.length);
+};
+
+const processViewerSongCommand = async (
+  event: ModuleEvent<SongRequestsSettings>,
+  context: ModuleExecutionContext,
+): Promise<ModuleResult | null> => {
+  const message = typeof event.payload.message === "object" && event.payload.message !== null
+    ? event.payload.message as Record<string, unknown> : null;
+  const commandText = typeof message?.text === "string" ? message.text.trim() : "";
+  const match = /^!(song|queue|wrongsong)$/iu.exec(commandText);
+  if (match === null) return null;
+  const command = match[1]?.toLowerCase() as ViewerSongCommand | undefined;
+  if (command === undefined) return emptyModuleResult();
+  const userId = event.payload.chatter_user_id;
+  const login = event.payload.chatter_user_login;
+  if (typeof userId !== "string" || userId.length === 0 || typeof login !== "string" || login.length === 0 ||
+      await context.botUserId?.() === userId ||
+      typeof event.payload.source_broadcaster_user_id === "string" && event.payload.source_broadcaster_user_id !== event.channelId) {
+    return emptyModuleResult();
+  }
+  const settings = songRequestsSettingsSchema.parse(event.settings);
+  const enabled = command === "song" ? settings.songCommandEnabled
+    : command === "queue" ? settings.queueCommandEnabled : settings.wrongSongCommandEnabled;
+  if (!enabled) return emptyModuleResult();
+
+  const language = await context.channelLanguage();
+  const text = songRequestChatTexts[language === "en" ? "en" : "de"];
+  const reply = (value: string): ModuleResult => ({ actions: [chatReply(event, value)], diagnostics: [] });
+  const claimed = await context.points.claimCooldown(`viewer-command:${command}:${userId}`, VIEWER_COMMAND_COOLDOWN_SECONDS);
+  if (!claimed) return emptyModuleResult();
+
+  if (command === "song") {
+    const snapshot = await context.DB.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")
+      .bind(event.channelId).first<{ track_json: string | null }>();
+    if (snapshot?.track_json == null) return reply(text.songNothingPlaying);
+    let track: Record<string, unknown> | null = null;
+    try {
+      const parsed: unknown = JSON.parse(snapshot.track_json);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) track = parsed as Record<string, unknown>;
+    } catch { /* Invalid legacy snapshots are treated as empty. */ }
+    if (track === null || typeof track.title !== "string" || typeof track.artist !== "string" || typeof track.spotifyUrl !== "string") {
+      return reply(text.songNothingPlaying);
+    }
+    const requester = typeof track.requester === "string" && track.requester.trim().length > 0 ? track.requester : null;
+    return reply(text.songNowPlaying(track.title, track.artist, track.spotifyUrl, requester));
+  }
+
+  if (command === "queue") {
+    const requests = await readSongRequestViewerQueue(context.DB, event.channelId, userId);
+    if (requests.length === 0) return reply(text.queueNoRequests);
+    return reply(queueReply(language === "en" ? "en" : "de", requests.map((request) =>
+      `${String(request.position)}. ${formatSongRequestTrack(request)}`,
+    )));
+  }
+
+  const latest = await readNewestSongRequestForViewer(context.DB, event.channelId, userId);
+  if (latest === null) {
+    const mostRecent = await readLatestSongRequestForViewer(context.DB, event.channelId, userId);
+    return reply(mostRecent === null ? text.wrongSongNoRequest : text.wrongSongCannotWithdraw);
+  }
+  if (!isWithdrawableSongRequestState(latest.state)) return reply(text.wrongSongCannotWithdraw);
+  const now = new Date().toISOString();
+  const withdrawFrom = async (fromState: "pending_review" | "approved"): Promise<boolean> => await transitionRequest(context.DB, {
+    channelId: event.channelId,
+    requestId: latest.requestId,
+    fromState,
+    toState: "rejected",
+    failureReason: "viewer_wrong_song",
+    refundDue: true,
+    expectedRequesterUserId: userId,
+    now,
+  });
+  let changed = await withdrawFrom(latest.state);
+  if (!changed) {
+    const current = await readSongRequest(context.DB, event.channelId, latest.requestId);
+    if (current?.requesterUserId !== userId || !isWithdrawableSongRequestState(current.state)) {
+      return current?.requesterUserId === userId ? reply(text.wrongSongCannotWithdraw) : reply(text.wrongSongNoRequest);
+    }
+    changed = await withdrawFrom(current.state);
+    if (!changed) return reply(text.wrongSongCannotWithdraw);
+  }
+  await context.clearAlarm(`${SONG_REQUESTS_SUBMIT_ALARM_PREFIX}${latest.requestId}`);
+  await scheduleEventAlarmIfEarlier(context,
+    SONG_REQUESTS_LIFECYCLE_HANDLER,
+    "channel-point-resolutions",
+    Date.now() + CHANNEL_POINT_RESOLUTION_RETRY_MS,
+    undefined,
+    null,
+  );
+  await refundRequestId({ DB: context.DB, channelId: event.channelId, points: context.points }, latest.requestId);
+  await flushChannelPointResolutionsFromEvent(context);
+  const request = await readSongRequest(context.DB, event.channelId, latest.requestId);
+  const confirmation = request?.requestType === "bot_points" ? text.wrongSongBotPointsRefunded
+    : request?.requestType === "channel_points" ? text.wrongSongChannelPointsCanceled
+      : text.wrongSongWithdrawn;
+  return {
+    actions: [chatReply(event, confirmation), await queueOverlayChange({ DB: context.DB, channelId: event.channelId })],
+    diagnostics: [],
+  };
+};
+
 const skipCommand = async (
   event: ModuleEvent<SongRequestsSettings>,
   context: ModuleExecutionContext,
@@ -2062,7 +2185,9 @@ const processSongRequestCommand = async (
 export const processSongRequestsEvent = async (event: ModuleEvent<SongRequestsSettings>, context: ModuleExecutionContext): Promise<ModuleResult> => {
   if (event.subscriptionType === "channel.chat.message") {
     const skipResult = await skipCommand(event, context);
-    return skipResult ?? await processSongRequestCommand(event, context);
+    if (skipResult !== null) return skipResult;
+    const viewerCommandResult = await processViewerSongCommand(event, context);
+    return viewerCommandResult ?? await processSongRequestCommand(event, context);
   }
   if (context.streamStateTransitionAccepted !== true) return { actions: [], diagnostics: [] };
   await scheduleEventAlarmIfEarlier(context,
