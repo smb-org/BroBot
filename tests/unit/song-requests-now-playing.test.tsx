@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +10,7 @@ import SongRequestsNowPlaying from "../../src/modules/song_requests/overlay/view
 import { DEFAULT_NOW_PLAYING_CONFIG, parseNowPlayingConfig, parseNowPlayingState } from "../../src/modules/song_requests/overlay/state";
 
 const NOW = Date.parse("2026-11-15T12:00:00.000Z");
+const viewCss = readFileSync(path.resolve(process.cwd(), "src/modules/song_requests/overlay/view.css"), "utf8");
 const state = (trackId: string | null, options: { revision?: number; playing?: boolean; emptyText?: string; album?: string | null } = {}) => ({
   revision: options.revision ?? 1,
   serverNow: new Date(NOW).toISOString(),
@@ -27,7 +30,7 @@ const state = (trackId: string | null, options: { revision?: number; playing?: b
   ...(options.emptyText === undefined ? {} : { emptyText: options.emptyText }),
 });
 
-const renderView = (config: Record<string, unknown>, currentState: ReturnType<typeof state>, editorPreview = false) =>
+const renderView = (config: Record<string, unknown>, currentState: ReturnType<typeof state> | null, editorPreview = false) =>
   render(<SongRequestsNowPlaying config={config} state={currentState} now={NOW} language="en" editorPreview={editorPreview} />);
 
 afterEach(() => {
@@ -156,6 +159,48 @@ describe("song requests now playing view", () => {
     firstView.unmount();
     const reloaded = renderView({ displayMode: "on_change", showDurationSeconds: 2 }, state("quietatlas01", { revision: 2 }));
     expect(reloaded.getByTestId("song-requests-now-playing")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("does not re-show the same track after an invalid state read", () => {
+    const view = renderView({ displayMode: "on_change" }, state("quietatlas01"));
+    const card = view.getByTestId("song-requests-now-playing");
+    expect(card).toHaveAttribute("aria-hidden", "true");
+
+    view.rerender(<SongRequestsNowPlaying config={{ displayMode: "on_change" }} state={null} now={NOW} language="en" />);
+    view.rerender(<SongRequestsNowPlaying config={{ displayMode: "on_change" }} state={state("quietatlas01", { revision: 2 })} now={NOW} language="en" />);
+    expect(card).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("keeps an active timer through an invalid read and shows the next track", () => {
+    vi.useFakeTimers();
+    const view = renderView({ displayMode: "on_change", showDurationSeconds: 3 }, state(null));
+    const card = view.getByTestId("song-requests-now-playing");
+    view.rerender(<SongRequestsNowPlaying config={{ displayMode: "on_change", showDurationSeconds: 3 }} state={state("quietatlas01")} now={NOW} language="en" />);
+    expect(card).not.toHaveAttribute("aria-hidden", "true");
+
+    act(() => { vi.advanceTimersByTime(1_000); });
+    view.rerender(<SongRequestsNowPlaying config={{ displayMode: "on_change", showDurationSeconds: 3 }} state={null} now={NOW} language="en" />);
+    expect(card).not.toHaveAttribute("aria-hidden", "true");
+
+    act(() => { vi.advanceTimersByTime(2_000); });
+    expect(card).toHaveAttribute("aria-hidden", "true");
+    view.rerender(<SongRequestsNowPlaying config={{ displayMode: "on_change", showDurationSeconds: 3 }} state={state("quietatlas02", { revision: 3 })} now={NOW} language="en" />);
+    expect(card).not.toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("uses the first valid snapshot after an unavailable initial state as its baseline", () => {
+    const view = renderView({ displayMode: "on_change" }, null);
+    view.rerender(<SongRequestsNowPlaying config={{ displayMode: "on_change" }} state={state("quietatlas01")} now={NOW} language="en" />);
+    expect(view.getByTestId("song-requests-now-playing")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("disables pointer events on the composition wrapper for a hidden card", () => {
+    const view = render(<div className="brobot-overlay-composition-element">
+      <SongRequestsNowPlaying config={{ displayMode: "playing" }} state={state(null)} now={NOW} language="en" />
+    </div>);
+    const wrapper = view.container.querySelector(".brobot-overlay-composition-element");
+    expect(wrapper?.querySelector(".song-requests-now-playing--hidden")).not.toBeNull();
+    expect(viewCss).toMatch(/\.brobot-overlay-composition-element:has\(>\s*\.song-requests-now-playing--hidden\)\s*\{\s*pointer-events:\s*none;/u);
   });
 
   it("hides on pause and keeps the full box for visible and hidden states", () => {

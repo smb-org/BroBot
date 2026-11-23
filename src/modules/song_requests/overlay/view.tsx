@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type { ModuleOverlayElementProps } from "../../contract";
 import { SONG_REQUESTS_NOW_PLAYING_SIZE } from "./kinds";
 import { nowPlayingTexts } from "./locale";
@@ -11,11 +11,15 @@ const RESERVED_LINE = " ";
 
 export default function SongRequestsNowPlaying({ config: rawConfig, state: rawState, now: initialNow, language = "de", editorPreview = false }: ModuleOverlayElementProps): ReactElement {
   const config = parseNowPlayingConfig(rawConfig) ?? DEFAULT_NOW_PLAYING_CONFIG;
-  const state = parseNowPlayingState(rawState);
+  const parsedState = useMemo(() => parseNowPlayingState(rawState), [rawState]);
+  const [lastValidState, setLastValidState] = useState(parsedState);
+  // A failed read keeps the last valid snapshot so the remembered track and its timer survive.
+  if (parsedState !== null && parsedState !== lastValidState) setLastValidState(parsedState);
+  const state = parsedState ?? lastValidState;
   const track = state?.playing === false ? null : state?.track ?? null;
   const trackId = state?.track?.id ?? null;
   const playing = state?.playing !== false && state?.track !== null && state?.track !== undefined;
-  const previousTrackId = useRef(trackId);
+  const previousTrackId = useRef<string | null | undefined>(undefined);
   const [shownTrackId, setShownTrackId] = useState<string | null>(null);
   const [now, setNow] = useState(() => initialNow);
   const progressDurationMs = track?.durationMs;
@@ -29,10 +33,15 @@ export default function SongRequestsNowPlaying({ config: rawConfig, state: rawSt
   // Pausing ends the timed display; resuming the same track must not show it again.
   if (!playing && shownTrackId !== null) setShownTrackId(null);
   useEffect(() => {
+    if (state === null) return;
+    if (previousTrackId.current === undefined) {
+      previousTrackId.current = trackId;
+      return;
+    }
     if (trackId === previousTrackId.current) return;
     previousTrackId.current = trackId;
     setShownTrackId(config.displayMode === "on_change" && trackId !== null && playing ? trackId : null);
-  }, [config.displayMode, trackId, playing]);
+  }, [config.displayMode, state, trackId, playing]);
   useEffect(() => {
     if (config.displayMode !== "on_change" || !playing || trackId === null || shownTrackId !== trackId) return;
     const timer = window.setTimeout(() => {
