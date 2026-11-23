@@ -1145,7 +1145,7 @@ export const createNowPlayingSnapshot = async (
     id: compact.id,
     title: compact.title,
     artist: compact.artists.join(", "),
-    albumName: compact.albumName,
+    album: compact.albumName,
     durationMs: compact.durationMs,
     progressMs: nextProgress,
     serverNow: now,
@@ -1159,7 +1159,7 @@ export const createNowPlayingSnapshot = async (
     state.durationMs = compact?.durationMs ?? state.durationMs;
     state.progressMs = nextProgress;
     state.serverNow = now;
-    if (compact !== null) state.albumName = compact.albumName;
+    if (compact !== null) state.album = compact.albumName;
     state.playing = playing;
   }
   const serialized = state === null ? null : JSON.stringify(state);

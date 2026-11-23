@@ -1691,7 +1691,7 @@ function OverlayEditorWorkspace({
     canvasFrame.querySelector<HTMLButtonElement>(`[data-preview-handle-key="${nextHandle}"]`)?.focus();
   }, [activeScaleHandle, activeWidthHandle, canvasScale, draft, focusedPreviewHandle, selectedElementBounds]);
 
-  const rendererMarkup = <OverlayCanvas overlay={rendererOverlay} language={language} variables={liveVariables} elementId={null} />;
+  const rendererMarkup = <OverlayCanvas overlay={rendererOverlay} language={language} variables={liveVariables} elementId={null} editorPreview />;
 
   return <ToolPage kind="overlays"
     title={overlayId === "new" ? labels.editorCreateTitle : overlay.name}

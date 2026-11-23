@@ -6,7 +6,7 @@ import { DEFAULT_NOW_PLAYING_CONFIG, mergeNowPlayingRevision, nowPlayingStateJso
 const sample = (now: number): JsonObject => nowPlayingStateJson({
   revision: 1,
   serverNow: new Date(now).toISOString(),
-  track: { id: "fictionaltrack01", title: "Glass Harbor", artist: "Mira Vale", coverUrl: "https://i.scdn.co/image/fictional-cover-one", spotifyUrl: "https://open.spotify.com/track/fictionaltrack01", requester: "Song vote", source: "mod_vote", durationMs: 240000, progressMs: 93000 },
+  track: { id: "fictionaltrack01", title: "Glass Harbor", artist: "Mira Vale", album: "Quiet Water", coverUrl: "https://i.scdn.co/image/fictional-cover-one", spotifyUrl: "https://open.spotify.com/track/fictionaltrack01", requester: "Song vote", source: "mod_vote", durationMs: 240000, progressMs: 93000 },
   playing: true,
 });
 
@@ -20,6 +20,8 @@ export const songRequestsNowPlayingElement: ModuleOverlayElementDefinition = {
   editorAddLabel: { de: nowPlayingTexts.de.name, en: nowPlayingTexts.en.name },
   editorDescription: { de: nowPlayingTexts.de.description, en: nowPlayingTexts.en.description },
   editorModuleLabel: { de: nowPlayingTexts.de.moduleLabel, en: nowPlayingTexts.en.moduleLabel },
+  // The mode selector, reserved duration field, seven switches, and preview action use this fixed editor slot.
+  editorReservedHeight: () => "calc(var(--s10) * 15)",
   initialStateNeedsContext: true,
   reloadStateOnModuleMessages: ["modul.song_requests.state_changed"],
   mergeRealtimeStateOnModuleMessages: ["modul.song_requests.state_changed"],

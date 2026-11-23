@@ -245,6 +245,8 @@ export interface ModuleOverlayElementProps {
   widthPx?: number;
   /** Bearer credential used by overlay elements that fetch protected media. */
   mediaAccessToken?: string;
+  /** Keeps editor sample states visible for elements with transient display modes. */
+  editorPreview?: boolean;
   language?: "de" | "en";
 }
 
