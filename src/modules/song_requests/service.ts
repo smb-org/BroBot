@@ -1806,15 +1806,7 @@ const processViewerSongCommand = async (
   const text = songRequestChatTexts[language === "en" ? "en" : "de"];
   const reply = (value: string): ModuleResult => ({ actions: [chatReply(event, value)], diagnostics: [] });
   const claimed = await context.points.claimCooldown(`viewer-command:${command}:${userId}`, VIEWER_COMMAND_COOLDOWN_SECONDS);
-  if (!claimed) {
-    if (command === "wrongsong") {
-      const latest = await readLatestSongRequestForViewer(context.DB, event.channelId, userId);
-      if (latest !== null && (latest.failureReason === "viewer_wrong_song" || !isWithdrawableSongRequestState(latest.state))) {
-        return reply(text.wrongSongCannotWithdraw);
-      }
-    }
-    return emptyModuleResult();
-  }
+  if (!claimed) return emptyModuleResult();
 
   if (command === "song") {
     const snapshot = await context.DB.prepare("SELECT track_json FROM song_requests_now_playing WHERE channel_id = ?")

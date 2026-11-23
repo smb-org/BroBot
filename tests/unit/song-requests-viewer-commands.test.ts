@@ -292,8 +292,7 @@ describe("song request viewer chat commands", () => {
     expect(operations.has(songRequestRefundOperationId("own-newest"))).toBe(true);
     expect(apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(1);
 
-    expect(replyText(await processSongRequestsEvent(chatEvent("!wrongsong"), context)))
-      .toBe("You can no longer withdraw that song request.");
+    expect((await processSongRequestsEvent(chatEvent("!wrongsong"), context)).actions).toEqual([]);
     expect(apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(1);
   });
 
@@ -361,6 +360,24 @@ describe("song request viewer chat commands", () => {
     expect(replyText(result)).toBe("You can no longer withdraw that song request.");
     expect(await readSongRequest(baseDatabase, CHANNEL_ID, "racing-request")).toMatchObject({ state: "submitting" });
     expect(apply.mock.calls.filter((call) => call[1] === "refund" && call[2].length > 0)).toHaveLength(0);
+  });
+
+  it("keeps !wrongsong replies for non-withdrawable requests behind the cooldown", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    try {
+      const database = await createDatabase();
+      const { points } = createPoints();
+      await seedRequest(database, { requestId: "already-submitted", state: "submitted" });
+      const context = eventContext(database, points);
+      const cannotWithdraw = "You can no longer withdraw that song request.";
+      expect(replyText(await processSongRequestsEvent(chatEvent("!wrongsong"), context))).toBe(cannotWithdraw);
+      expect((await processSongRequestsEvent(chatEvent("!wrongsong"), context)).actions).toEqual([]);
+      vi.advanceTimersByTime(6_000);
+      expect(replyText(await processSongRequestsEvent(chatEvent("!wrongsong"), context))).toBe(cannotWithdraw);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("applies per-user cooldowns, honors disabled settings, and ignores bot or shared-chat messages", async () => {
