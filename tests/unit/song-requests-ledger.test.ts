@@ -255,7 +255,7 @@ describe("song request ledger", () => {
 
     const first = await createNowPlayingSnapshot(database as unknown as D1Database, CHANNEL_ID, STREAM_ID, spotifyTrack, NOW);
     expect(first.changed).toBe(true);
-    expect(first.state).toMatchObject({ title: "Glass Harbor", artist: "Mira Vale", requester: null, source: "mod_vote" });
+    expect(first.state).toMatchObject({ title: "Glass Harbor", artist: "Mira Vale", album: "Quiet Atlas", requester: null, source: "mod_vote" });
     expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "request-first")).toMatchObject({ state: "observed_playing", albumName: "Quiet Atlas" });
     expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "request-second")).toMatchObject({ state: "submitted" });
 
@@ -266,7 +266,7 @@ describe("song request ledger", () => {
     const manual = { ...spotifyTrack, id: "silentmap04", uri: "spotify:track:silentmap04", name: "Silent Map" };
     await createNowPlayingSnapshot(database as unknown as D1Database, CHANNEL_ID, STREAM_ID, manual, "2026-11-15T19:01:00.000Z");
     const duplicateAgain = await createNowPlayingSnapshot(database as unknown as D1Database, CHANNEL_ID, STREAM_ID, spotifyTrack, "2026-11-15T19:02:00.000Z");
-    expect(duplicateAgain.state).toMatchObject({ title: "Glass Harbor", requester: null });
+    expect(duplicateAgain.state).toMatchObject({ title: "Glass Harbor", album: "Quiet Atlas", requester: null });
     expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "request-second")).toMatchObject({ state: "observed_playing" });
     expect(await readSongRequest(database as unknown as D1Database, CHANNEL_ID, "request-old-stream")).toMatchObject({ state: "submitted" });
   });

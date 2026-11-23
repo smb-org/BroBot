@@ -33,9 +33,10 @@ describe("song request now-playing overlay", () => {
       playing: true,
     }} now={now} language="en" />);
 
-    expect(paused).toContain('visibility:hidden');
+    expect(paused).toContain("song-requests-now-playing--hidden");
+    expect(paused).toContain('aria-hidden="true"');
     expect(paused).not.toContain("Glass Harbor");
     expect(resumed).toContain("Glass Harbor");
-    expect(resumed).not.toContain('visibility:hidden');
+    expect(resumed).not.toContain("song-requests-now-playing--hidden");
   });
 });

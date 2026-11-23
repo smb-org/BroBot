@@ -55,14 +55,15 @@ describe("song request components", () => {
     expect(container.querySelector(".song-requests-now-playing__progress")).toHaveTextContent("1:23 / 4:56");
   });
 
-  it("omits the progress row when progress is disabled", () => {
+  it("omits the progress bar when progress is disabled while keeping the time field", () => {
     const { container } = render(<SongRequestsNowPlaying
-      config={{ showCover: true, showRequester: true, showProgress: false }}
+      config={{ showCover: true, showRequester: true, showProgress: false, showTime: true }}
       state={{ revision: 2, serverNow: "2026-11-15T12:00:00.000Z", track: { ...track, artist: "Mira Vale", requester: null, source: "mod_vote" } }}
       now={Date.parse("2026-11-15T12:00:00.000Z")}
       language="en"
     />);
-    expect(container.querySelector(".song-requests-now-playing__progress")).not.toBeInTheDocument();
+    expect(container.querySelector(".song-requests-now-playing__progress-track")).not.toBeInTheDocument();
+    expect(container.querySelector(".song-requests-now-playing__time")).toBeInTheDocument();
   });
 
   it("keeps the idle element reserved and renders its configured empty text", () => {
@@ -85,7 +86,8 @@ describe("song request components", () => {
       language="en"
     />);
     const overlay = container.querySelector(".song-requests-now-playing");
-    expect(overlay).toHaveStyle({ width: "640px", height: "112px", visibility: "hidden" });
+    expect(overlay).toHaveStyle({ width: "640px", height: "112px" });
+    expect(overlay).toHaveClass("song-requests-now-playing--hidden");
     expect(overlay).toHaveAttribute("aria-hidden", "true");
   });
 
