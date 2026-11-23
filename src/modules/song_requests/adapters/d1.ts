@@ -211,6 +211,7 @@ export interface RequestTransition {
   chargedAt?: string;
   expectedUpdatedBefore?: string;
   expectedChargingBefore?: string;
+  expectedRequesterUserId?: string;
   onlyIfOpenBallotId?: string;
   newRequest?: NewSongRequest;
   companionStatements?: readonly D1PreparedStatement[];
@@ -321,6 +322,8 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
       conditions.push("EXISTS (SELECT 1 FROM spotify_channel_access WHERE channel_id = ?)");
       bindings.push(input.channelId, input.activeStreamId, input.channelId, input.channelId);
     }
+    const requesterGuard = input.expectedRequesterUserId === undefined ? "" : " AND requester_user_id = ?";
+    if (input.expectedRequesterUserId !== undefined) bindings.push(input.expectedRequesterUserId);
     transition = db.prepare(
       `UPDATE song_requests SET state = ?, failure_reason = ?, updated_at = ?,
          submitted_at = CASE WHEN ? = 'submitted' THEN ? ELSE submitted_at END,
@@ -338,7 +341,7 @@ export const transitionRequest = async (db: D1Database, input: RequestTransition
            ELSE channel_points_resolution_due END,
          channel_points_resolution_completed = CASE WHEN ? = 1 OR ? IN ('submitted', 'rejected', 'failed', 'removed')
            THEN NULL ELSE channel_points_resolution_completed END
-        WHERE ${conditions.join(" AND ")}
+        WHERE ${conditions.join(" AND ")}${requesterGuard}
        RETURNING id`,
     ).bind(...bindings.slice(0, 9), input.refundDue === true ? 1 : input.refundDue === false ? 0 : null,
       input.refundDue === true ? 1 : input.refundDue === false ? 0 : null,
@@ -690,6 +693,96 @@ export const readSongRequest = async (db: D1Database, channelId: string, request
        FROM song_requests WHERE channel_id = ? AND id = ? LIMIT 1`,
   ).bind(channelId, requestId).first<SongRequestSqlRow>();
   return row === null ? null : rowToRequest(row);
+};
+
+export interface NewestSongRequestForViewer {
+  requestId: string;
+  state: SongRequestState;
+  failureReason: string | null;
+}
+
+export const readNewestSongRequestForViewer = async (
+  db: D1Database,
+  channelId: string,
+  requesterUserId: string,
+): Promise<NewestSongRequestForViewer | null> => {
+  const row = await db.prepare(
+    `SELECT id, state, failure_reason FROM song_requests
+      WHERE channel_id = ? AND requester_user_id = ? AND state IN ('pending_review', 'approved')
+      ORDER BY created_at DESC, id DESC LIMIT 1`,
+  ).bind(channelId, requesterUserId).first<{ id: string; state: SongRequestState; failure_reason: string | null }>();
+  return row === null ? null : { requestId: row.id, state: row.state, failureReason: row.failure_reason };
+};
+
+export const readLatestSongRequestForViewer = async (
+  db: D1Database,
+  channelId: string,
+  requesterUserId: string,
+): Promise<NewestSongRequestForViewer | null> => {
+  const row = await db.prepare(
+    `SELECT id, state, failure_reason FROM song_requests
+      WHERE channel_id = ? AND requester_user_id = ?
+      ORDER BY created_at DESC, id DESC LIMIT 1`,
+  ).bind(channelId, requesterUserId).first<{ id: string; state: SongRequestState; failure_reason: string | null }>();
+  return row === null ? null : { requestId: row.id, state: row.state, failureReason: row.failure_reason };
+};
+
+export interface SongRequestViewerQueueEntry {
+  position: number;
+  title: string;
+  artists: readonly string[];
+  albumName: string | null;
+}
+
+/** Reads a viewer's requests with positions from the same open ledger order as the queue overlay. */
+export const readSongRequestViewerQueue = async (
+  db: D1Database,
+  channelId: string,
+  requesterUserId: string,
+): Promise<SongRequestViewerQueueEntry[]> => {
+  const [module, stream] = await Promise.all([
+    db.prepare("SELECT enabled, settings FROM channel_modules WHERE channel_id = ? AND module_id = 'song_requests'")
+      .bind(channelId).first<{ enabled: number; settings: string }>(),
+    db.prepare("SELECT state, stream_id FROM channel_stream_state WHERE channel_id = ?")
+      .bind(channelId).first<{ state: string; stream_id: string | null }>(),
+  ]);
+  if (module?.enabled !== 1 || stream === null) return [];
+  let roundId: string | null = stream.state === "online" ? stream.stream_id : null;
+  if (roundId === null && stream.state === "offline") {
+    let alsoOffline = false;
+    try {
+      const settings: unknown = JSON.parse(module.settings);
+      alsoOffline = typeof settings === "object" && settings !== null && !Array.isArray(settings) &&
+        (settings as Record<string, unknown>).alsoOffline === true;
+    } catch { /* Invalid settings use the offline-disabled default. */ }
+    if (!alsoOffline) return [];
+    roundId = await readOfflineSongRequestRound(db, channelId);
+  }
+  if (roundId === null) return [];
+  const rows = await db.prepare(
+    `SELECT id, title, artists_json, album_name, position FROM (
+       SELECT id, title, artists_json, album_name, requester_user_id,
+              ROW_NUMBER() OVER (ORDER BY created_at ASC, id ASC) AS position
+         FROM song_requests
+        WHERE channel_id = ? AND round_id = ?
+          AND state IN ('pending_review', 'approved', 'submitting', 'submitted', 'outcome_unknown')
+     ) AS ordered_requests
+      WHERE requester_user_id = ? ORDER BY position`,
+  ).bind(channelId, roundId, requesterUserId).all<{
+    id: string;
+    title: string;
+    artists_json: string;
+    album_name: string | null;
+    position: number;
+  }>();
+  return rows.results.map((row) => {
+    let artists: string[] = [];
+    try {
+      const value: unknown = JSON.parse(row.artists_json);
+      if (Array.isArray(value)) artists = value.filter((artist): artist is string => typeof artist === "string");
+    } catch { /* Invalid legacy artist JSON stays empty. */ }
+    return { position: row.position, title: row.title, artists, albumName: row.album_name };
+  });
 };
 
 export const readSongRequestByOperationId = async (

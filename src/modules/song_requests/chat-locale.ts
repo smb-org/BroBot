@@ -14,6 +14,9 @@ const roleName = (threshold: SongRequestsRoleThreshold, language: Language): str
 
 export const songRequestChatTexts = {
   de: {
+    songCommandDescription: "Zeigt den aktuell laufenden Song.",
+    queueCommandDescription: "Zeigt deine offenen Song-Wünsche und ihre Position.",
+    wrongSongCommandDescription: "Ziehe deinen letzten Song-Wunsch zurück, bevor er in Spotify eingereiht wird.",
     usage: "Verwendung: !sr <Song, Spotify-Link oder URI>.",
     offline: "Song-Wünsche sind offline deaktiviert.",
     spotifySlot: "Spotify ist für diesen Kanal nicht freigeschaltet.",
@@ -26,6 +29,18 @@ export const songRequestChatTexts = {
     roleRequired: (threshold: SongRequestsRoleThreshold) => `Kostenlose Song-Wünsche sind für ${roleName(threshold, "de")} verfügbar.`,
     insufficientPoints: "Du hast nicht genug Bot-Punkte für diesen Song-Wunsch.",
     alreadyRequested: (position: number) => `Bereits angefragt, Position ${String(position)}.`,
+    songNothingPlaying: "Gerade läuft kein Song.",
+    songNowPlaying: (title: string, artist: string, spotifyUrl: string, requester: string | null) =>
+      `Gerade läuft: ${title} – ${artist}. ${spotifyUrl}${requester === null ? "" : ` Angefragt von ${requester}.`}`,
+    queueNoRequests: "Du hast keine offenen Song-Wünsche.",
+    queueRequests: (requests: string) => `Deine offenen Song-Wünsche: ${requests}`,
+    queueTruncated: (requests: string, count: number) =>
+      `Deine offenen Song-Wünsche: ${requests.length === 0 ? "" : `${requests} `}… +${String(count)}`,
+    wrongSongNoRequest: "Du hast keinen Song-Wunsch, den du zurückziehen kannst.",
+    wrongSongCannotWithdraw: "Dieser Song-Wunsch kann nicht mehr zurückgezogen werden.",
+    wrongSongWithdrawn: "Dein letzter Song-Wunsch wurde zurückgezogen.",
+    wrongSongBotPointsRefunded: "Dein letzter Song-Wunsch wurde zurückgezogen. Bot-Punkte wurden erstattet.",
+    wrongSongChannelPointsCanceled: "Dein letzter Song-Wunsch wurde zurückgezogen. Die Kanalpunkte-Einlösung wurde storniert.",
     skipVote: {
       disabled: "Song-Abstimmungen sind deaktiviert.",
       nothingPlaying: "Gerade läuft kein Song.",
@@ -67,6 +82,9 @@ export const songRequestChatTexts = {
     recapThanks: (names: string) => ` Danke an ${names}!`,
   },
   en: {
+    songCommandDescription: "Shows the track that is playing.",
+    queueCommandDescription: "Shows your open song requests and their positions.",
+    wrongSongCommandDescription: "Withdraw your latest song request before it is queued in Spotify.",
     usage: "Usage: !sr <song, Spotify link, or URI>.",
     offline: "Song requests are disabled while the stream is offline.",
     spotifySlot: "Spotify is not enabled for this channel.",
@@ -79,6 +97,18 @@ export const songRequestChatTexts = {
     roleRequired: (threshold: SongRequestsRoleThreshold) => `Free song requests are available to ${roleName(threshold, "en")}.`,
     insufficientPoints: "You do not have enough bot points for this song request.",
     alreadyRequested: (position: number) => `Already requested, position ${String(position)}.`,
+    songNothingPlaying: "No song is playing right now.",
+    songNowPlaying: (title: string, artist: string, spotifyUrl: string, requester: string | null) =>
+      `Now playing: ${title} — ${artist}. ${spotifyUrl}${requester === null ? "" : ` Requested by ${requester}.`}`,
+    queueNoRequests: "You have no open song requests.",
+    queueRequests: (requests: string) => `Your open song requests: ${requests}`,
+    queueTruncated: (requests: string, count: number) =>
+      `Your open song requests: ${requests.length === 0 ? "" : `${requests} `}… +${String(count)}`,
+    wrongSongNoRequest: "You have no song request to withdraw.",
+    wrongSongCannotWithdraw: "You can no longer withdraw that song request.",
+    wrongSongWithdrawn: "Your latest song request was withdrawn.",
+    wrongSongBotPointsRefunded: "Your latest song request was withdrawn. Bot points were refunded.",
+    wrongSongChannelPointsCanceled: "Your latest song request was withdrawn. The Channel Points redemption was canceled.",
     skipVote: {
       disabled: "Song voting is disabled.",
       nothingPlaying: "No song is playing right now.",
