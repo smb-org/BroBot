@@ -473,11 +473,20 @@ export const executeChannelJobClaim = async (options: {
     },
     commit: (write) => store.commit(registration.id, claimToken, write, clock()),
   };
+  const finishExpiredClaim = async (): Promise<"retry" | "superseded"> => {
+    const status = store.status(registration.id);
+    if (status === null) return "superseded";
+    const now = clock();
+    const nextRunAt = now + alarmRetryDelay(registration.retryDelaysMs, status.consecutiveFailures);
+    if (!store.failExpiredClaim(registration.id, claimToken, now, nextRunAt)) return "superseded";
+    await notifyStatus();
+    return "retry";
+  };
   const finishFailure = async (code: ChannelJobErrorCode): Promise<"retry" | "superseded"> => {
     const status = store.status(registration.id);
     if (status === null) return "superseded";
     const nextRunAt = clock() + alarmRetryDelay(registration.retryDelaysMs, status.consecutiveFailures);
-    if (!store.fail(registration.id, claimToken, clock(), code, nextRunAt)) return "superseded";
+    if (!store.fail(registration.id, claimToken, clock(), code, nextRunAt)) return await finishExpiredClaim();
     await notifyStatus();
     return "retry";
   };
@@ -492,19 +501,15 @@ export const executeChannelJobClaim = async (options: {
     runContext.assertCurrent();
     const completedAt = clock();
     const nextRunAt = completedAt + registration.intervalMs;
-    if (!store.succeed(registration.id, claimToken, completedAt, nextRunAt, summaryFromResult(result))) return "superseded";
+    if (!store.succeed(registration.id, claimToken, completedAt, nextRunAt, summaryFromResult(result))) {
+      return await finishExpiredClaim();
+    }
     await options.scheduleNext?.(nextRunAt);
     await notifyStatus();
     return "completed";
   } catch (error: unknown) {
     if (!store.isCurrent(registration.id, claimToken, clock())) {
-      const status = store.status(registration.id);
-      const nextRunAt = clock() + alarmRetryDelay(registration.retryDelaysMs, status?.consecutiveFailures ?? 0);
-      if (store.failExpiredClaim(registration.id, claimToken, clock(), nextRunAt)) {
-        await notifyStatus();
-        return "retry";
-      }
-      return "superseded";
+      return await finishExpiredClaim();
     }
     if (error instanceof SupersededChannelJobRunError) return "superseded";
     return await finishFailure(failureCodeFrom(error));

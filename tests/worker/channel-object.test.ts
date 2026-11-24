@@ -84,6 +84,7 @@ import {
 } from "../../src/modules/chat_voting/contracts";
 import { ChannelObject } from "../../src/worker/durable/ChannelObject";
 import { ballotVoterHash } from "../../src/worker/durable/ballots";
+import { channelJobAlarmKey, type ChannelJobRegistration, type ChannelJobStore } from "../../src/worker/durable/channel-jobs";
 import {
   CHANNEL_HOST_ALARM_HANDLER_KEYS,
   missingAlarmHandlerKeys,
@@ -233,6 +234,7 @@ const objectFor = (
     complete: number;
   }>();
   const eventSubMessageIds = new Map<string, number>();
+  const channelJobRows = new Map<string, Record<string, unknown>>();
   let lastSqlChanges = 0;
   let chatterKey: { key_hex: string; created_at: string } | undefined;
   let failNextChatterDelete = false;
@@ -259,6 +261,7 @@ const objectFor = (
       const rowsBefore = new Map(chatterRows);
       const statisticsBefore = new Map([...statisticsChatWindows].map(([start, row]) => [start, { ...row }]));
       const eventSubBefore = new Map(eventSubMessageIds);
+      const channelJobRowsBefore = new Map([...channelJobRows].map(([jobId, row]) => [jobId, { ...row }]));
       const keyBefore = chatterKey;
       const changesBefore = lastSqlChanges;
       try {
@@ -272,6 +275,8 @@ const objectFor = (
         for (const [start, row] of statisticsBefore) statisticsChatWindows.set(start, row);
         eventSubMessageIds.clear();
         for (const [messageId, receivedAt] of eventSubBefore) eventSubMessageIds.set(messageId, receivedAt);
+        channelJobRows.clear();
+        for (const [jobId, row] of channelJobRowsBefore) channelJobRows.set(jobId, row);
         chatterKey = keyBefore;
         lastSqlChanges = changesBefore;
         throw error;
@@ -284,6 +289,7 @@ const objectFor = (
     failNextChatterDelete: () => { failNextChatterDelete = true; },
   };
   storage.sql.exec.mockImplementation((query: string, ...bindings: unknown[]) => {
+    const normalizedQuery = query.replace(/\s+/gu, " ").trim();
     if (/SELECT EXISTS\(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'game_rounds'\) AS present/iu.test(query)) {
       return { toArray: () => [{ present: 0 }], one: () => ({ present: 0 }) };
     }
@@ -294,6 +300,113 @@ const objectFor = (
       return { toArray: () => [], one: () => undefined };
     }
     if (/^\s*CREATE TRIGGER\b|^\s*DROP TABLE\b|^\s*ALTER TABLE\b/iu.test(query)) {
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^INSERT OR IGNORE INTO channel_jobs_status\b/iu.test(normalizedQuery)) {
+      const [jobId, nextRunAt] = bindings as [string, number];
+      if (!channelJobRows.has(jobId)) {
+        channelJobRows.set(jobId, {
+          job_id: jobId,
+          state: "idle",
+          last_started_at: null,
+          last_success_at: null,
+          next_run_at: nextRunAt,
+          error_code: null,
+          error_text_key: null,
+          consecutive_failures: 0,
+          result_summary: null,
+          paused_at: null,
+          reconcile_needed: 0,
+          claim_token: null,
+          claim_until: null,
+        });
+      }
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^SELECT job_id, state, last_started_at, last_success_at, next_run_at,/iu.test(normalizedQuery)) {
+      const [jobId] = bindings as [string];
+      const row = channelJobRows.get(jobId);
+      return { toArray: () => row === undefined ? [] : [{ ...row }], one: () => row === undefined ? undefined : { ...row } };
+    }
+    if (/^SELECT job_id FROM channel_jobs_status$/iu.test(normalizedQuery)) {
+      const rows = [...channelJobRows.keys()].map((job_id) => ({ job_id }));
+      return { toArray: () => rows, one: () => rows[0] };
+    }
+    if (/^DELETE FROM channel_jobs_status WHERE job_id = \?$/iu.test(normalizedQuery)) {
+      const [jobId] = bindings as [string];
+      channelJobRows.delete(jobId);
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^UPDATE channel_jobs_status SET state = 'running', last_started_at = \?/iu.test(normalizedQuery)) {
+      const [lastStartedAt, claimToken, claimUntil, jobId] = bindings as [number, string, number, string];
+      const row = channelJobRows.get(jobId);
+      if (row !== undefined) Object.assign(row, {
+        state: "running", last_started_at: lastStartedAt, next_run_at: null, claim_token: claimToken, claim_until: claimUntil,
+      });
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^UPDATE channel_jobs_status SET state = 'failed', next_run_at = \?, error_code = 'lease_expired'/iu.test(normalizedQuery)) {
+      const [nextRunAt, jobId, claimToken] = bindings as [number, string, string];
+      const row = channelJobRows.get(jobId);
+      if (row?.state === "running" && row.claim_token === claimToken) Object.assign(row, {
+        state: "failed", next_run_at: nextRunAt, error_code: "lease_expired", error_text_key: "lease_expired",
+        consecutive_failures: Number(row.consecutive_failures) + 1, claim_token: null, claim_until: null,
+      });
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^UPDATE channel_jobs_status SET state = 'failed', error_code = 'lease_expired'/iu.test(normalizedQuery)) {
+      const [jobId] = bindings as [string];
+      const row = channelJobRows.get(jobId);
+      if (row !== undefined) Object.assign(row, {
+        state: "failed", error_code: "lease_expired", error_text_key: "lease_expired",
+        consecutive_failures: Number(row.consecutive_failures) + 1, claim_token: null, claim_until: null,
+      });
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^UPDATE channel_jobs_status SET state = 'failed', next_run_at = \?, error_code = \?/iu.test(normalizedQuery)) {
+      const [nextRunAt, errorCode, errorTextKey, jobId, claimToken] = bindings as [number, string, string, string, string];
+      const row = channelJobRows.get(jobId);
+      if (row !== undefined && row.claim_token === claimToken) Object.assign(row, {
+        state: "failed", next_run_at: nextRunAt, error_code: errorCode, error_text_key: errorTextKey,
+        consecutive_failures: Number(row.consecutive_failures) + 1, claim_token: null, claim_until: null,
+      });
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^UPDATE channel_jobs_status SET state = 'idle', last_success_at = \?/iu.test(normalizedQuery)) {
+      const [lastSuccessAt, nextRunAt, resultSummary, jobId, claimToken] = bindings as [number, number, string | null, string, string];
+      const row = channelJobRows.get(jobId);
+      if (row !== undefined && row.claim_token === claimToken) Object.assign(row, {
+        state: "idle", last_success_at: lastSuccessAt, next_run_at: nextRunAt, error_code: null, error_text_key: null,
+        consecutive_failures: 0, result_summary: resultSummary, reconcile_needed: 0, claim_token: null, claim_until: null,
+      });
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^UPDATE channel_jobs_status SET state = 'paused'/iu.test(normalizedQuery)) {
+      const [now, jobId] = bindings as [number, string];
+      const row = channelJobRows.get(jobId);
+      if (row !== undefined) Object.assign(row, {
+        state: "paused", paused_at: row.paused_at ?? now, next_run_at: null, claim_token: null, claim_until: null,
+      });
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^UPDATE channel_jobs_status SET state = 'idle', paused_at = NULL/iu.test(normalizedQuery)) {
+      const [nextRunAt, jobId] = bindings as [number, string];
+      const row = channelJobRows.get(jobId);
+      if (row?.state === "paused") Object.assign(row, {
+        state: "idle", paused_at: null, next_run_at: nextRunAt, claim_token: null, claim_until: null,
+      });
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^UPDATE channel_jobs_status SET reconcile_needed = 1/iu.test(normalizedQuery)) {
+      const [jobId] = bindings as [string];
+      const row = channelJobRows.get(jobId);
+      if (row?.state === "paused") row.reconcile_needed = 1;
+      return { toArray: () => [], one: () => undefined };
+    }
+    if (/^UPDATE channel_jobs_status SET next_run_at = \?/iu.test(normalizedQuery)) {
+      const [nextRunAt, jobId] = bindings as [number, string];
+      const row = channelJobRows.get(jobId);
+      if (row !== undefined && row.state !== "paused" && row.state !== "running") row.next_run_at = nextRunAt;
       return { toArray: () => [], one: () => undefined };
     }
     if (/^\s*INSERT OR IGNORE INTO statistics_chat_windows\b/iu.test(query)) {
@@ -664,6 +777,8 @@ const objectFor = (
   (object as unknown as { adScheduleOperationQueue: Promise<void> }).adScheduleOperationQueue = Promise.resolve();
   (object as unknown as { belaboxPollQueue: Promise<void> }).belaboxPollQueue = Promise.resolve();
   (object as unknown as { alarmScheduleQueue: Promise<void> }).alarmScheduleQueue = Promise.resolve();
+  (object as unknown as { channelJobScheduleQueue: Promise<void> }).channelJobScheduleQueue = Promise.resolve();
+  (object as unknown as { channelJobStoreInstance: ChannelJobStore | null }).channelJobStoreInstance = null;
   (object as unknown as { pointRoundRecoveryInitialized: boolean }).pointRoundRecoveryInitialized = false;
   (object as unknown as { pointRoundRecoveryInitialization: Promise<void> | null }).pointRoundRecoveryInitialization = null;
   (object as unknown as { timerScheduleInitialization: Promise<void> | null }).timerScheduleInitialization = Promise.resolve();
@@ -4645,5 +4760,194 @@ describe("ChannelObject realtime path", () => {
       expect(timerStateOf(object).timers[config.id]?.lastRunAt).toBeNull();
       expect(timerStateOf(object).timers[config.id]?.plannedOccurrence).not.toBeNull();
     });
+  });
+});
+
+const CHANNEL_JOBS_TEST_MODULE_ID = "channel_jobs_test";
+const CHANNEL_JOBS_TEST_ALARM_KEY = "run";
+const channelJobsTestRegistration: ChannelJobRegistration = {
+  id: `module:${CHANNEL_JOBS_TEST_MODULE_ID}:${CHANNEL_JOBS_TEST_ALARM_KEY}`,
+  handlerKey: `module:${CHANNEL_JOBS_TEST_MODULE_ID}:${CHANNEL_JOBS_TEST_ALARM_KEY}`,
+  intervalMs: 60_000,
+  label: { de: "Test job", en: "Test job" },
+  requiredScopes: [],
+  retryDelaysMs: [1_000],
+};
+
+const channelJobsTestModule = (handle: () => Promise<unknown>): BotModule => ({
+  id: CHANNEL_JOBS_TEST_MODULE_ID,
+  alarms: [{
+    key: CHANNEL_JOBS_TEST_ALARM_KEY,
+    job: {
+      intervalMs: channelJobsTestRegistration.intervalMs,
+      label: channelJobsTestRegistration.label,
+      requiredScopes: channelJobsTestRegistration.requiredScopes,
+    },
+    retryDelaysMs: [1_000],
+    handle: async () => await handle(),
+  }],
+} as unknown as BotModule);
+
+type ChannelJobsTestInternals = {
+  registeredChannelJobs: () => Promise<ChannelJobRegistration[]>;
+  channelJobStore: () => ChannelJobStore;
+  publishChannelJobStatusChanged: () => Promise<void>;
+  alarmHandlers: (modules: readonly BotModule[]) => ReadonlyMap<string, unknown>;
+  dispatchDueAlarmEntries: (now: number, nowIso: string, handlers: ReadonlyMap<string, unknown>) => Promise<void>;
+  claimAlarmEntry: (key: string, entry: unknown) => Promise<unknown>;
+};
+
+describe("ChannelObject channel jobs", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("serializes a stale disabled registration read before activation and pause reconciliation", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-11-24T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const object = objectFor([]);
+    const internals = object as unknown as ChannelJobsTestInternals;
+    let resolveStaleRead!: (registrations: ChannelJobRegistration[]) => void;
+    const staleRegistrationRead = new Promise<ChannelJobRegistration[]>((resolve) => { resolveStaleRead = resolve; });
+    let firstReadStarted = false as boolean;
+    let registrationReadCount = 0;
+    internals.registeredChannelJobs = vi.fn(() => {
+      registrationReadCount += 1;
+      if (!firstReadStarted) {
+        firstReadStarted = true;
+        return staleRegistrationRead;
+      }
+      return Promise.resolve([channelJobsTestRegistration]);
+    });
+    internals.publishChannelJobStatusChanged = vi.fn().mockResolvedValue(undefined);
+    const moduleJobCheck = vi.spyOn(MODULES, "some").mockReturnValue(true);
+    try {
+      const staleList = object.listChannelJobs();
+      while (!firstReadStarted) await Promise.resolve();
+
+      const activation = object.syncChannelJobSchedules();
+      let pauseCompleted = false;
+      const pause = object.pauseChannelJob(channelJobsTestRegistration.id).then((status) => {
+        pauseCompleted = true;
+        return status;
+      });
+      for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+      expect(registrationReadCount).toBe(1);
+      expect(pauseCompleted).toBe(false);
+
+      resolveStaleRead([]);
+      await Promise.all([staleList, activation, pause]);
+
+      expect(internals.channelJobStore().status(channelJobsTestRegistration.id)).toMatchObject({ state: "paused" });
+      const alarmTable = storageOf(object).values.get("channel:alarm_schedule") as Record<string, unknown> | undefined;
+      expect(alarmTable?.[channelJobAlarmKey(channelJobsTestRegistration.id)]).toBeUndefined();
+    } finally {
+      moduleJobCheck.mockRestore();
+    }
+  });
+
+  it("keeps a paused row through disable and re-enable reconciliation", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-11-24T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const object = objectFor([]);
+    const internals = object as unknown as ChannelJobsTestInternals;
+    let enabled = true;
+    internals.registeredChannelJobs = vi.fn(() =>
+      Promise.resolve(enabled ? [channelJobsTestRegistration] : []),
+    );
+    internals.publishChannelJobStatusChanged = vi.fn().mockResolvedValue(undefined);
+    const moduleJobCheck = vi.spyOn(MODULES, "some").mockReturnValue(true);
+    try {
+      await object.pauseChannelJob(channelJobsTestRegistration.id);
+      expect(internals.channelJobStore().status(channelJobsTestRegistration.id)?.state).toBe("paused");
+
+      enabled = false;
+      await object.syncChannelJobSchedules();
+      expect(internals.channelJobStore().status(channelJobsTestRegistration.id)?.state).toBe("paused");
+      await expect(object.listChannelJobs()).resolves.toEqual([]);
+
+      enabled = true;
+      await object.syncChannelJobSchedules();
+      expect(internals.channelJobStore().status(channelJobsTestRegistration.id)?.state).toBe("paused");
+      const reenabledJobs = await object.listChannelJobs();
+      expect(reenabledJobs).toHaveLength(1);
+      expect(reenabledJobs[0]).toMatchObject({
+        id: channelJobsTestRegistration.id,
+        state: "paused",
+      });
+      const alarmTable = storageOf(object).values.get("channel:alarm_schedule") as Record<string, unknown> | undefined;
+      expect(alarmTable?.[channelJobAlarmKey(channelJobsTestRegistration.id)]).toBeUndefined();
+    } finally {
+      moduleJobCheck.mockRestore();
+    }
+  });
+
+  it("retries a failed handler that returns after its lease expires", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-11-24T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const handler = vi.fn(() => {
+      vi.setSystemTime(now + 60_001);
+      return Promise.resolve({ ok: false, code: "unknown" });
+    });
+    const object = objectFor([]);
+    const internals = object as unknown as ChannelJobsTestInternals;
+    internals.publishChannelJobStatusChanged = vi.fn().mockResolvedValue(undefined);
+    const handlers = internals.alarmHandlers([channelJobsTestModule(handler)]);
+    const alarmKey = channelJobAlarmKey(channelJobsTestRegistration.id);
+    storageOf(object).values.set("channel:alarm_schedule", {
+      [alarmKey]: { deadline: now, handler: channelJobsTestRegistration.handlerKey, revision: 1 },
+    });
+
+    await internals.dispatchDueAlarmEntries(now, new Date(now).toISOString(), handlers);
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(internals.channelJobStore().status(channelJobsTestRegistration.id)).toMatchObject({
+      state: "failed",
+      errorCode: "lease_expired",
+      errorTextKey: "lease_expired",
+    });
+    expect(storageOf(object).values.get("channel:alarm_schedule")).toMatchObject({
+      [alarmKey]: { nextAttemptAt: now + 61_001, failures: 1 },
+    });
+    expect(storageOf(object).setAlarm).toHaveBeenLastCalledWith(now + 61_001);
+  });
+
+  it("skips a due paused job and runs it once after resume", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-11-24T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const handler = vi.fn(() => Promise.resolve({ summary: { de: "Reconciled", en: "Reconciled" } }));
+    const object = objectFor([]);
+    const internals = object as unknown as ChannelJobsTestInternals;
+    internals.registeredChannelJobs = vi.fn(() => Promise.resolve([channelJobsTestRegistration]));
+    internals.publishChannelJobStatusChanged = vi.fn().mockResolvedValue(undefined);
+    const moduleJobCheck = vi.spyOn(MODULES, "some").mockReturnValue(true);
+    try {
+      await object.pauseChannelJob(channelJobsTestRegistration.id);
+      const alarmKey = channelJobAlarmKey(channelJobsTestRegistration.id);
+      const handlers = internals.alarmHandlers([channelJobsTestModule(handler)]);
+      storageOf(object).values.set("channel:alarm_schedule", {
+        [alarmKey]: { deadline: now, handler: channelJobsTestRegistration.handlerKey, revision: 1 },
+      });
+
+      const claim = vi.spyOn(internals, "claimAlarmEntry");
+
+      await internals.dispatchDueAlarmEntries(now, new Date(now).toISOString(), handlers);
+      expect(handler).not.toHaveBeenCalled();
+      // The dispatcher itself must skip a paused job; the store guard alone would still claim the alarm.
+      expect(claim).not.toHaveBeenCalled();
+
+      await expect(object.resumeChannelJob(channelJobsTestRegistration.id)).resolves.toBe("scheduled");
+      await internals.dispatchDueAlarmEntries(now, new Date(now).toISOString(), handlers);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(internals.channelJobStore().status(channelJobsTestRegistration.id)).toMatchObject({ state: "idle" });
+    } finally {
+      moduleJobCheck.mockRestore();
+    }
   });
 });

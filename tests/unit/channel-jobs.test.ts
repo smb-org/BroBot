@@ -147,7 +147,7 @@ describe("channel jobs", () => {
     newHandlerDone.resolve({ summary: { de: "aktuelles Ergebnis", en: "current result" } });
     await newRun;
     oldHandlerDone.resolve("late result");
-    await oldRun;
+    await expect(oldRun).resolves.toBe("superseded");
     expect(store.status(registration.id)).toMatchObject({
       state: "idle",
       resultSummary: { de: "aktuelles Ergebnis", en: "current result" },
@@ -155,6 +155,40 @@ describe("channel jobs", () => {
       consecutiveFailures: 0,
     });
   });
+
+  it.each(["failure result", "success result", "thrown error"] as const)(
+    "records lease expiry and retries when a %s returns after expiry without a takeover",
+    async (outcome) => {
+      let now = 1_000;
+      const { store } = storeFor(() => now);
+      store.ensureJob(registration, now);
+      const claimUntil = 5_000;
+      const handle = (): Promise<unknown> => {
+        now = claimUntil;
+        if (outcome === "failure result") return Promise.resolve({ ok: false, code: "unknown" });
+        if (outcome === "thrown error") return Promise.reject(new Error("late handler error"));
+        return Promise.resolve({ summary: { de: "late success", en: "late success" } });
+      };
+
+      const result = await executeChannelJobClaim({
+        store,
+        registration,
+        claimToken: `expired-${outcome}`,
+        claimUntil,
+        now: 1_000,
+        handle,
+      });
+
+      expect(result).toBe("retry");
+      expect(store.status(registration.id)).toMatchObject({
+        state: "failed",
+        nextRunAt: now + (registration.retryDelaysMs?.[0] ?? 1_000),
+        errorCode: "lease_expired",
+        errorTextKey: "lease_expired",
+        consecutiveFailures: 1,
+      });
+    },
+  );
 
   it("skips paused jobs, records deferred event work, and resumes with a full run", async () => {
     let now = 2_000;
