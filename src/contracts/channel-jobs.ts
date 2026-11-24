@@ -15,6 +15,9 @@ export const CHANNEL_JOB_ERROR_TEXTS = {
 
 export type ChannelJobErrorCode = keyof typeof CHANNEL_JOB_ERROR_TEXTS.en;
 
+/** Short localized result text a job handler returns as `{ summary }`. */
+export type ChannelJobSummary = Readonly<Record<"de" | "en", string>>;
+
 export class ChannelJobError extends Error {
   public readonly code: ChannelJobErrorCode;
 

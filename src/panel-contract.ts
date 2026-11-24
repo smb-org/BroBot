@@ -8,7 +8,7 @@ import type {
   IdentityStatus,
 } from "./contracts/values";
 import type { TemplateWarning } from "./template";
-import type { ChannelJobErrorCode } from "./contracts/channel-jobs";
+import type { ChannelJobErrorCode, ChannelJobSummary } from "./contracts/channel-jobs";
 
 type PanelChannelJobState = "idle" | "running" | "paused" | "failed";
 
@@ -24,7 +24,7 @@ export interface PanelChannelJob {
   errorCode: ChannelJobErrorCode | null;
   errorTextKey: ChannelJobErrorCode | null;
   consecutiveFailures: number;
-  resultSummary: string | null;
+  resultSummary: ChannelJobSummary | null;
   pausedAt: number | null;
   reconcileNeeded: boolean;
 }

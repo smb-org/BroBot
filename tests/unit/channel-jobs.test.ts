@@ -121,7 +121,7 @@ describe("channel jobs", () => {
     await new Promise((resolve) => { setTimeout(resolve, 0); });
 
     now = 1_001;
-    const newHandlerDone = deferred<string>();
+    const newHandlerDone = deferred<unknown>();
     const newRun = executeChannelJobClaim({
       store,
       registration,
@@ -144,13 +144,13 @@ describe("channel jobs", () => {
     expect(lateCommit).toBe(false);
     expect(sql.exec<{ value: number }>("SELECT value FROM test_job_writes").toArray()[0]?.value).toBe(0);
 
-    newHandlerDone.resolve("current result");
+    newHandlerDone.resolve({ summary: { de: "aktuelles Ergebnis", en: "current result" } });
     await newRun;
     oldHandlerDone.resolve("late result");
     await oldRun;
     expect(store.status(registration.id)).toMatchObject({
       state: "idle",
-      resultSummary: "current result",
+      resultSummary: { de: "aktuelles Ergebnis", en: "current result" },
       errorCode: null,
       consecutiveFailures: 0,
     });
@@ -190,7 +190,7 @@ describe("channel jobs", () => {
       now,
       handle: () => {
         calls += 1;
-        return Promise.resolve("reconciled");
+        return Promise.resolve({ summary: { de: "abgeglichen", en: "reconciled" } });
       },
     });
 
@@ -199,7 +199,7 @@ describe("channel jobs", () => {
     expect(store.status(registration.id)).toMatchObject({
       state: "idle",
       reconcileNeeded: false,
-      resultSummary: "reconciled",
+      resultSummary: { de: "abgeglichen", en: "reconciled" },
     });
   });
 
@@ -221,14 +221,16 @@ describe("channel jobs", () => {
       claimToken: "success-token",
       claimUntil: 10_000,
       now,
-      handle: () => Promise.resolve("3 roles granted, 1 removed"),
+      handle: () => Promise.resolve({
+        summary: { de: "3 Rollen vergeben, 1 entfernt", en: "3 roles granted, 1 removed" },
+      }),
     });
     expect(success).toBe("completed");
     expect(store.status(registration.id)).toMatchObject({
       state: "idle",
       lastSuccessAt: now,
       nextRunAt: now + registration.intervalMs,
-      resultSummary: "3 roles granted, 1 removed",
+      resultSummary: { de: "3 Rollen vergeben, 1 entfernt", en: "3 roles granted, 1 removed" },
       errorCode: null,
       consecutiveFailures: 0,
     });

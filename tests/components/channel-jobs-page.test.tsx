@@ -62,7 +62,7 @@ describe("channel jobs page", () => {
   it("renders idle, running, paused, and failed status with fixed error copy", async () => {
     setBrowserLanguage("en-US");
     const { container } = renderPage([
-      job({ id: "host:idle", label: { de: "Ready task", en: "Idle task" } }),
+      job({ id: "host:idle", label: { de: "Ready task", en: "Idle task" }, resultSummary: { de: "3 Rollen vergeben", en: "3 roles granted" } }),
       job({ id: "host:running", state: "running", lastStartedAt: 1_799_999_000_000, nextRunAt: null }),
       job({ id: "host:paused", state: "paused", pausedAt: 1_799_998_000_000, nextRunAt: null, reconcileNeeded: true }),
       job({ id: "host:failed", state: "failed", errorCode: "missing_scope", errorTextKey: "missing_scope", consecutiveFailures: 2 }),
@@ -74,7 +74,8 @@ describe("channel jobs page", () => {
     expect(screen.getByLabelText("Ready")).toBeInTheDocument();
     expect(screen.getByLabelText("Running")).toBeInTheDocument();
     expect(screen.getByText(/Paused since/u)).toBeInTheDocument();
-    expect(screen.getByText("Changes will be reconciled on the next run.")).toBeInTheDocument();
+    expect(screen.getByText(/Paused since .* · Changes will be reconciled on the next run\./u)).toBeInTheDocument();
+    expect(screen.getByText("3 roles granted")).toBeInTheDocument();
     expect(screen.getByText(CHANNEL_JOB_ERROR_TEXTS.en.missing_scope)).toBeInTheDocument();
   });
 
@@ -106,7 +107,8 @@ describe("channel jobs page", () => {
 
   it("uses German labels and pauses without an autosave action", async () => {
     setBrowserLanguage("de-DE");
-    renderPage([job()]);
+    renderPage([job({ resultSummary: { de: "3 Rollen vergeben", en: "3 roles granted" } })]);
+    expect(await screen.findByText("3 Rollen vergeben")).toBeInTheDocument();
     const germanLabels = dashboardTexts("de").channelJobs;
     expect(await screen.findByRole("heading", { name: germanLabels.title })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: germanLabels.runNow })).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import { Fragment, useState, type ReactElement } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { CHANNEL_JOB_ERROR_TEXTS } from "../contracts/channel-jobs";
@@ -33,7 +33,11 @@ const ChannelJobCard = ({
   const language = dashboardLanguage();
   const labels = dashboardTexts().channelJobs;
   const errorText = job.errorTextKey === null ? null : CHANNEL_JOB_ERROR_TEXTS[language][job.errorTextKey];
-  const requiredScopes = job.requiredScopes.length === 0 ? "—" : job.requiredScopes.join(", ");
+  const requiredScopes = job.requiredScopes.length === 0
+    ? "—"
+    : job.requiredScopes.map((scope, index) => <Fragment key={scope}>
+      {index > 0 ? ", " : null}<span className="channel-jobs-card__scope">{scope}</span>
+    </Fragment>);
   const nextRun = job.nextRunAt !== null
     ? formatJobTime(job.nextRunAt, language, labels.never)
     : job.state === "paused"
@@ -61,17 +65,17 @@ const ChannelJobCard = ({
       <div><dt>{labels.nextRun}</dt><dd>{nextRun}</dd></div>
       <div><dt>{labels.requiredScopes}</dt><dd>{requiredScopes}</dd></div>
     </dl>
-    <div className="channel-jobs-card__paused-slot" aria-live="polite">
-      {job.state === "paused" ? <p className="channel-jobs-card__paused">
-        {labels.pausedSince}: {formatJobTime(job.pausedAt, language, labels.never)}
-        {job.reconcileNeeded ? <span>{labels.reconcileNeeded}</span> : null}
-      </p> : <span aria-hidden="true">&nbsp;</span>}
-    </div>
-    <div className="channel-jobs-card__reserved-line" aria-live="polite">
-      {errorText === null ? <span aria-hidden="true">&nbsp;</span> : <p className="channel-jobs-card__error"><strong>{labels.error}:</strong> {errorText}</p>}
-    </div>
-    <div className="channel-jobs-card__reserved-line channel-jobs-card__reserved-line--summary">
-      {job.resultSummary === null ? <span aria-hidden="true">&nbsp;</span> : <p><strong>{labels.result}:</strong> {job.resultSummary}</p>}
+    <div className="channel-jobs-card__status-slot" aria-live="polite">
+      {job.state === "paused"
+        ? <p className="channel-jobs-card__paused">
+          {labels.pausedSince} {formatJobTime(job.pausedAt, language, labels.never)}
+          {job.reconcileNeeded ? ` · ${labels.reconcileNeeded}` : ""}
+        </p>
+        : errorText !== null
+          ? <p className="channel-jobs-card__error"><strong>{labels.error}:</strong> {errorText}</p>
+          : job.resultSummary !== null
+            ? <p><strong>{labels.result}:</strong> {job.resultSummary[language]}</p>
+            : null}
     </div>
   </article>;
 };

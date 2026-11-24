@@ -1,5 +1,5 @@
 import type { ModuleLanguage } from "../../modules/contract";
-import { ChannelJobError, type ChannelJobErrorCode } from "../../contracts/channel-jobs";
+import { ChannelJobError, type ChannelJobErrorCode, type ChannelJobSummary } from "../../contracts/channel-jobs";
 
 export { ChannelJobError };
 export type { ChannelJobErrorCode } from "../../contracts/channel-jobs";
@@ -36,7 +36,7 @@ export interface ChannelJobStatus {
   errorCode: ChannelJobErrorCode | null;
   errorTextKey: ChannelJobErrorCode | null;
   consecutiveFailures: number;
-  resultSummary: string | null;
+  resultSummary: ChannelJobSummary | null;
   pausedAt: number | null;
   reconcileNeeded: boolean;
 }
@@ -83,14 +83,27 @@ const isChannelJobErrorCode = (value: unknown): value is ChannelJobErrorCode =>
 const isChannelJobState = (value: unknown): value is ChannelJobState =>
   value === "idle" || value === "running" || value === "paused" || value === "failed";
 
-const summaryText = (value: unknown): string | null => {
-  const candidate = typeof value === "string"
-    ? value
-    : typeof value === "object" && value !== null && !Array.isArray(value) &&
-      typeof Reflect.get(value, "summary") === "string"
-      ? Reflect.get(value, "summary") as string
-      : null;
-  return candidate === null ? null : Array.from(candidate.trim()).slice(0, MAX_CHANNEL_JOB_SUMMARY_LENGTH).join("") || null;
+const boundedSummaryText = (value: unknown): string | null =>
+  typeof value === "string" ? Array.from(value.trim()).slice(0, MAX_CHANNEL_JOB_SUMMARY_LENGTH).join("") || null : null;
+
+/** Reads a localized summary; both languages are required, each bounded in length. */
+const summaryFrom = (value: unknown): ChannelJobSummary | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const de = boundedSummaryText(Reflect.get(value, "de"));
+  const en = boundedSummaryText(Reflect.get(value, "en"));
+  return de === null || en === null ? null : { de, en };
+};
+
+const summaryFromResult = (value: unknown): ChannelJobSummary | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? summaryFrom(Reflect.get(value, "summary")) : null;
+
+const summaryFromStored = (value: string | null): ChannelJobSummary | null => {
+  if (value === null) return null;
+  try {
+    return summaryFrom(JSON.parse(value));
+  } catch {
+    return null;
+  }
 };
 
 const failureCodeFrom = (value: unknown): ChannelJobErrorCode => {
@@ -142,7 +155,7 @@ const statusFromRow = (row: ChannelJobStatusRow | undefined): ChannelJobStatus |
     errorCode: isChannelJobErrorCode(row.error_code) ? row.error_code : null,
     errorTextKey: isChannelJobErrorCode(row.error_text_key) ? row.error_text_key : null,
     consecutiveFailures: Number.isSafeInteger(row.consecutive_failures) ? row.consecutive_failures : 0,
-    resultSummary: row.result_summary,
+    resultSummary: summaryFromStored(row.result_summary),
     pausedAt: row.paused_at,
     reconcileNeeded: row.reconcile_needed === 1,
   };
@@ -294,7 +307,7 @@ export class ChannelJobStore {
     claimToken: string,
     now: number,
     nextRunAt: number,
-    resultSummary: string | null,
+    resultSummary: ChannelJobSummary | null,
   ): boolean {
     return this.storage.transactionSync(() => {
       if (!this.current(jobId, claimToken, now)) return false;
@@ -306,7 +319,7 @@ export class ChannelJobStore {
           WHERE job_id = ? AND claim_token = ?`,
         now,
         nextRunAt,
-        resultSummary,
+        resultSummary === null ? null : JSON.stringify(resultSummary),
         jobId,
         claimToken,
       );
@@ -479,7 +492,7 @@ export const executeChannelJobClaim = async (options: {
     runContext.assertCurrent();
     const completedAt = clock();
     const nextRunAt = completedAt + registration.intervalMs;
-    if (!store.succeed(registration.id, claimToken, completedAt, nextRunAt, summaryText(result))) return "superseded";
+    if (!store.succeed(registration.id, claimToken, completedAt, nextRunAt, summaryFromResult(result))) return "superseded";
     await options.scheduleNext?.(nextRunAt);
     await notifyStatus();
     return "completed";

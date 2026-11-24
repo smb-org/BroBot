@@ -916,7 +916,7 @@ alarms: [{
     job.assertCurrent();
     const changed = await reconcileExternalState(context);
     job.assertCurrent();
-    return { summary: changed.summary };
+    return { summary: { de: changed.summaryDe, en: changed.summaryEn } };
   },
 }],
 ```
@@ -928,8 +928,9 @@ event paths pass to `markReconcileNeeded`. Job handlers use `context.channelJob`
 claim immediately before committing. Event paths call
 `context.markReconcileNeeded(moduleChannelJobId(moduleId, alarmKey))` before changing reconciled state; while a
 job is paused, the host records that reconciliation is due and the event path
-must skip the corresponding write. Returning `{ summary: "…" }` updates the
-bounded status summary. Throw `new ChannelJobError(code)` from the shared
+must skip the corresponding write. Returning `{ summary: { de: "…", en: "…" } }`
+updates the status summary; both languages are required and each is bounded
+to 180 characters. Throw `new ChannelJobError(code)` from the shared
 contracts package, or return `{ ok: false, code }`, to record one of the fixed
 job errors. Host-owned recurring work uses the same registration shape with an
 ID in the `host:` namespace.
