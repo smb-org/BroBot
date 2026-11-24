@@ -4803,6 +4803,61 @@ describe("ChannelObject channel jobs", () => {
     vi.restoreAllMocks();
   });
 
+  it("dispatches a due non-job alarm while channel job reconciliation is locked", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-11-24T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const object = objectFor([]);
+    const internals = object as unknown as ChannelJobsTestInternals;
+    let releaseRegistrationRead!: (registrations: ChannelJobRegistration[]) => void;
+    const registrationRead = new Promise<ChannelJobRegistration[]>((resolve) => {
+      releaseRegistrationRead = resolve;
+    });
+    let registrationReadStarted = false as boolean;
+    internals.registeredChannelJobs = vi.fn(() => {
+      registrationReadStarted = true;
+      return registrationRead;
+    });
+    internals.channelJobStore().ensureJob(channelJobsTestRegistration, now);
+    const handlers = internals.alarmHandlers([channelJobsTestModule(() => Promise.resolve({
+      summary: { de: "Reconciled", en: "Reconciled" },
+    }))]);
+    internals.alarmHandlers = vi.fn(() => handlers);
+    mocks.processAdPrewarning.mockClear();
+    const moduleJobCheck = vi.spyOn(MODULES, "some").mockReturnValue(true);
+    let pendingList: Promise<unknown> | undefined;
+    let alarm: Promise<void> | undefined;
+
+    try {
+      await object.scheduleAdPrewarning(now - 1);
+      const alarmTable = storageOf(object).values.get("channel:alarm_schedule") as Record<string, unknown>;
+      storageOf(object).values.set("channel:alarm_schedule", {
+        ...alarmTable,
+        [channelJobAlarmKey(channelJobsTestRegistration.id)]: {
+          deadline: now - 2,
+          handler: channelJobsTestRegistration.handlerKey,
+          revision: 1,
+        },
+      });
+      pendingList = object.listChannelJobs();
+      for (let turn = 0; turn < 20 && !registrationReadStarted; turn += 1) await Promise.resolve();
+      expect(registrationReadStarted).toBe(true);
+
+      alarm = object.alarm();
+      for (let turn = 0; turn < 100 && !mocks.processAdPrewarning.mock.calls.length; turn += 1) {
+        await Promise.resolve();
+      }
+      expect(mocks.processAdPrewarning).toHaveBeenCalledOnce();
+    } finally {
+      releaseRegistrationRead([]);
+      await Promise.all([
+        ...(pendingList === undefined ? [] : [pendingList]),
+        ...(alarm === undefined ? [] : [alarm]),
+      ]);
+      moduleJobCheck.mockRestore();
+    }
+  });
+
   it("serializes a stale disabled registration read before activation and pause reconciliation", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-11-24T12:00:00.000Z");

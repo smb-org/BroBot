@@ -9784,7 +9784,12 @@ export class ChannelObject extends DurableObject<Env> {
       .filter(([, entry]) => alarmAttemptAt(entry) <= now)
       .filter(([, entry]) => !(entry.deadline <= now && entry.suppressedBy !== undefined &&
         Object.hasOwn(table, entry.suppressedBy)))
-      .sort(([, left], [, right]) => alarmAttemptAt(left) - alarmAttemptAt(right));
+      .sort(([, left], [, right]) => {
+        // Non-job handlers do not take the channel-job schedule lock.
+        const leftIsJob = handlers.get(left.handler)?.job === undefined ? 0 : 1;
+        const rightIsJob = handlers.get(right.handler)?.job === undefined ? 0 : 1;
+        return leftIsJob - rightIsJob || alarmAttemptAt(left) - alarmAttemptAt(right);
+      });
 
     for (const [key, entry] of dueEntries) {
       const registration = handlers.get(entry.handler);
@@ -10840,8 +10845,9 @@ export class ChannelObject extends DurableObject<Env> {
       if (retainedVoteResults.length > 0) {
         await this.reconcileLegacyChatVoteResultDeliveriesFor(retainedVoteResults);
       }
-      await this.syncChannelJobSchedules();
       await this.dispatchDueAlarmEntries(now, nowIso, this.alarmHandlers(MODULES, externalFetchBudget));
+      // Dispatch before registration reconciliation, which can wait on the channel-job schedule lock.
+      await this.syncChannelJobSchedules();
     }, () => this.notifyCommittedPanelResources());
   }
 
