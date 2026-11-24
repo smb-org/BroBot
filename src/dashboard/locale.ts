@@ -1066,6 +1066,7 @@ export interface DashboardTexts {
     setup: string;
     channel: string;
     system: string;
+    channelJobs: string;
     locationWeather: string;
     members: string;
     variables: string;
@@ -1092,6 +1093,35 @@ export interface DashboardTexts {
     moduleOff: string;
     pageErrorTitle: string;
     pageErrorDescription: string;
+  };
+  channelJobs: {
+    title: string;
+    sectionTitle: string;
+    subtitle: string;
+    emptyTitle: string;
+    emptyDescription: string;
+    loadError: string;
+    loading: string;
+    retry: string;
+    actionError: string;
+    runNow: string;
+    pause: string;
+    resume: string;
+    alreadyRunning: string;
+    runScheduled: string;
+    pausedFeedback: string;
+    resumedFeedback: string;
+    lastRun: string;
+    lastSuccess: string;
+    nextRun: string;
+    error: string;
+    result: string;
+    pausedSince: string;
+    reconcileNeeded: string;
+    requiredScopes: string;
+    never: string;
+    afterCurrentRun: string;
+    states: Readonly<Record<"idle" | "running" | "paused" | "failed", string>>;
   };
   testArea: {
     title: string;
@@ -1723,7 +1753,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botPermissionsMissing: (count) => `${count} fehlen`,
     },
     navigation: {
-      mainNavigation: "Hauptnavigation", overview: "Übersicht", live: "Live", setup: "Einrichten", channel: "Kanal", system: "System", locationWeather: "Ort & Wetter",
+      mainNavigation: "Hauptnavigation", overview: "Übersicht", live: "Live", setup: "Einrichten", channel: "Kanal", system: "System", channelJobs: "Hintergrundaufgaben", locationWeather: "Ort & Wetter",
       members: "Mitglieder", variables: "Variablen", module: "Module", audit: "Protokoll", selectChannel: "Kanal auswählen", testArea: "Testbereich",
       accountMenu: "Konto", appearance: "Darstellung", appearanceNightShift: "Nachtschicht", appearanceIndigoNight: "Indigo-Nacht",
       manageModules: "Module verwalten", moduleCategories: { chat: "Chat", participation: "Mitmachen", games: "Spiele", twitch: "Twitch", data: "Daten", stream: "Stream", admin: "Verwaltung" },
@@ -1734,6 +1764,35 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       sidebarSetupHeading: "Einrichten", sidebarSetupDescription: "Alles für deinen Stream.", sidebarSearch: "Alles durchsuchen", moduleOff: "Aus",
       pageErrorTitle: "Dieser Bereich konnte nicht angezeigt werden.",
       pageErrorDescription: "Ein unerwarteter Fehler ist aufgetreten. Lade die Seite neu.",
+    },
+    channelJobs: {
+      title: "Hintergrundaufgaben",
+      sectionTitle: "Registrierte Aufgaben",
+      subtitle: "Status und geplante Läufe für automatische Aufgaben dieses Kanals.",
+      emptyTitle: "Keine Hintergrundaufgaben",
+      emptyDescription: "Für diesen Kanal sind derzeit keine Hintergrundaufgaben registriert.",
+      loadError: "Hintergrundaufgaben konnten nicht geladen werden.",
+      loading: "Aufgaben werden geladen …",
+      retry: "Erneut versuchen",
+      actionError: "Die Aktion konnte nicht ausgeführt werden.",
+      runNow: "Jetzt ausführen",
+      pause: "Pausieren",
+      resume: "Fortsetzen",
+      alreadyRunning: "Diese Aufgabe läuft bereits.",
+      runScheduled: "Der Lauf wurde eingeplant.",
+      pausedFeedback: "Die Aufgabe wurde pausiert.",
+      resumedFeedback: "Die Aufgabe wurde fortgesetzt.",
+      lastRun: "Letzter Lauf",
+      lastSuccess: "Letzter Erfolg",
+      nextRun: "Nächster Lauf",
+      error: "Fehler",
+      result: "Ergebnis",
+      pausedSince: "Pausiert seit",
+      reconcileNeeded: "Änderungen werden beim nächsten Lauf abgeglichen.",
+      requiredScopes: "Benötigte Berechtigungen",
+      never: "Noch nie",
+      afterCurrentRun: "Nach dem aktuellen Lauf",
+      states: { idle: "Bereit", running: "Läuft", paused: "Pausiert", failed: "Fehlgeschlagen" },
     },
     testArea: {
       title: "Testbereich",
@@ -2412,7 +2471,7 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       botPermissionsMissing: (count) => `${count} missing`,
     },
     navigation: {
-      mainNavigation: "Main navigation", overview: "Overview", live: "Live", setup: "Setup", channel: "Channel", system: "System", locationWeather: "Location & weather",
+      mainNavigation: "Main navigation", overview: "Overview", live: "Live", setup: "Setup", channel: "Channel", system: "System", channelJobs: "Background tasks", locationWeather: "Location & weather",
       members: "Members", variables: "Variables", module: "Modules", audit: "Log", selectChannel: "Select channel", testArea: "Test area",
       accountMenu: "Account", appearance: "Appearance", appearanceNightShift: "Night shift", appearanceIndigoNight: "Indigo night",
       manageModules: "Manage modules", moduleCategories: { chat: "Chat", participation: "Participation", games: "Games", twitch: "Twitch", data: "Data", stream: "Stream", admin: "Administration" },
@@ -2423,6 +2482,35 @@ const dashboardTextsCatalog: LocaleCatalog<DashboardTexts> = {
       sidebarSetupHeading: "Setup", sidebarSetupDescription: "Everything for your stream.", sidebarSearch: "Search everything", moduleOff: "Off",
       pageErrorTitle: "This page could not be displayed.",
       pageErrorDescription: "An unexpected error occurred. Reload the page to try again.",
+    },
+    channelJobs: {
+      title: "Background tasks",
+      sectionTitle: "Registered tasks",
+      subtitle: "Status and scheduled runs for this channel’s automatic tasks.",
+      emptyTitle: "No background tasks",
+      emptyDescription: "No background tasks are registered for this channel yet.",
+      loadError: "Background tasks could not be loaded.",
+      loading: "Loading tasks …",
+      retry: "Retry",
+      actionError: "The action could not be completed.",
+      runNow: "Run now",
+      pause: "Pause",
+      resume: "Resume",
+      alreadyRunning: "This task is already running.",
+      runScheduled: "The run was scheduled.",
+      pausedFeedback: "The task was paused.",
+      resumedFeedback: "The task was resumed.",
+      lastRun: "Last run",
+      lastSuccess: "Last success",
+      nextRun: "Next run",
+      error: "Error",
+      result: "Result",
+      pausedSince: "Paused since",
+      reconcileNeeded: "Changes will be reconciled on the next run.",
+      requiredScopes: "Required permissions",
+      never: "Never",
+      afterCurrentRun: "After the current run",
+      states: { idle: "Ready", running: "Running", paused: "Paused", failed: "Failed" },
     },
     testArea: {
       title: "Test area",

@@ -8,6 +8,30 @@ import type {
   IdentityStatus,
 } from "./contracts/values";
 import type { TemplateWarning } from "./template";
+import type { ChannelJobErrorCode, ChannelJobSummary } from "./contracts/channel-jobs";
+
+type PanelChannelJobState = "idle" | "running" | "paused" | "failed";
+
+export interface PanelChannelJob {
+  id: string;
+  intervalMs: number;
+  label: Readonly<Record<"de" | "en", string>>;
+  requiredScopes: readonly string[];
+  state: PanelChannelJobState;
+  lastStartedAt: number | null;
+  lastSuccessAt: number | null;
+  nextRunAt: number | null;
+  errorCode: ChannelJobErrorCode | null;
+  errorTextKey: ChannelJobErrorCode | null;
+  consecutiveFailures: number;
+  resultSummary: ChannelJobSummary | null;
+  pausedAt: number | null;
+  reconcileNeeded: boolean;
+}
+
+export interface PanelChannelJobsResponse {
+  jobs: PanelChannelJob[];
+}
 
 export type PanelTemplateWarning = TemplateWarning;
 

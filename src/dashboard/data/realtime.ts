@@ -311,6 +311,9 @@ const invalidatePanelResource = (
       invalidate(queryClient, queryKeys.module(channelId, "text_commands", "commands"), scheduledQueryRefreshes, resourceRefreshes, channelId);
       invalidateModuleSettingsQueries(queryClient, channelId, scheduledQueryRefreshes, resourceRefreshes);
       return;
+    case "channel.jobs":
+      invalidate(queryClient, queryKeys.channel(channelId, "jobs"), scheduledQueryRefreshes, resourceRefreshes, channelId);
+      return;
     case "channel.overlays":
       invalidate(queryClient, dashboardDataKeys.overlays(channelId), scheduledQueryRefreshes, resourceRefreshes, channelId);
       return;

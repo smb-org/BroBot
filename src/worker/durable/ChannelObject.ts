@@ -60,7 +60,7 @@ import type { SkipTimerOccurrenceResult } from "../../modules/timers/contracts";
 import { mapTimerRow, type TimerRow } from "../../modules/timers/service";
 import { CHAT_VOTING_ALARM_HANDLER, CHAT_VOTING_MODULE_ID } from "../../modules/chat_voting/contracts";
 import { reconcileLegacyChatVoteResultDeliveries as reconcileLegacyChatVoteResultDeliveriesInD1 } from "../../modules/chat_voting/result-delivery-reconciliation";
-import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS } from "../../modules/contract";
+import { OVERLAY_STREAM_DETAILS_CACHE_TTL_MS, moduleChannelJobId } from "../../modules/contract";
 import type {
   ActiveChatterActivity,
   BallotCastResult,
@@ -166,6 +166,20 @@ import {
   type TempVipModuleDisableResult,
   type TempVipOutboxEvent,
 } from "./temp-vips";
+import {
+  alarmRetryDelay,
+  ChannelJobStore,
+  channelJobAlarmKey,
+  executeChannelJobClaim,
+  HOST_CHANNEL_JOBS,
+  reconcilePendingChannelJobScheduleInputs,
+  recordChannelJobScheduleInputsChanged,
+  requestChannelJobRun,
+  type ChannelJobRegistration,
+  type ChannelJobRunContext,
+  type ChannelJobSnapshot,
+  type ChannelJobStatus,
+} from "./channel-jobs";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
 import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
 import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../../modules/ads/overlay/countdown-action";
@@ -496,7 +510,6 @@ const bumpDurablePanelResources = async (
 };
 const AD_COUNTDOWN_REFRESH_BUFFER_MS = 30_000;
 const AD_COUNTDOWN_REFRESH_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
-const ALARM_HANDLER_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
 // The default 60s backoff above would itself burn through the (typically 60s)
 // prewarning lead time on a single retry. A short delay here still lets a
 // transient identity/token failure recover in time; `decideAdPrewarning`'s
@@ -672,6 +685,8 @@ type AlarmScheduleEntry = {
   nextAttemptAt?: number;
   /** A durable lease left behind while the handler is running. */
   claimUntil?: number;
+  /** Unique fence for this exact claim; regenerated whenever the alarm is claimed. */
+  claimToken?: string;
   failures?: number;
   revision?: number;
   ownerRevision?: number;
@@ -738,10 +753,20 @@ type ModuleAlarmPlanFenceRecord = {
   updatedAt: number;
 };
 type AlarmHandlerResult = undefined | "retain" | "retry";
+type AlarmJobRegistration = ChannelJobRegistration & {
+  run: (
+    context: ChannelJobRunContext,
+    key: string,
+    entry: AlarmScheduleEntry,
+    now: number,
+    nowIso: string,
+  ) => Promise<unknown>;
+};
 type AlarmHandler = (key: string, entry: AlarmScheduleEntry, now: number, nowIso: string) => Promise<AlarmHandlerResult>;
 type AlarmHandlerRegistration = {
   handle: AlarmHandler;
   retryDelaysMs?: readonly number[];
+  job?: AlarmJobRegistration;
 };
 
 interface AlarmStorageAccess {
@@ -762,6 +787,7 @@ const validAlarmScheduleEntry = (value: unknown): value is AlarmScheduleEntry =>
   typeof value.handler === "string" && value.handler.length > 0 &&
   (value.nextAttemptAt === undefined || (typeof value.nextAttemptAt === "number" && Number.isFinite(value.nextAttemptAt))) &&
   (value.claimUntil === undefined || (typeof value.claimUntil === "number" && Number.isFinite(value.claimUntil))) &&
+  (value.claimToken === undefined || (typeof value.claimToken === "string" && value.claimToken.length >= 16 && value.claimToken.length <= 128)) &&
   (value.failures === undefined || (typeof value.failures === "number" && Number.isInteger(value.failures) && value.failures >= 0)) &&
   (value.revision === undefined || (typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0)) &&
   (value.ownerRevision === undefined || (typeof value.ownerRevision === "number" && Number.isInteger(value.ownerRevision) && value.ownerRevision >= 0)) &&
@@ -951,6 +977,8 @@ export class ChannelObject extends DurableObject<Env> {
   private statisticsWordCounterPublishQueue: Promise<void> = Promise.resolve();
   private statisticsWordRankingRetryNotBefore = 0;
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
+  private channelJobStoreInstance: ChannelJobStore | null = null;
+  private channelJobScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
   private timerScheduleInputGeneration = 0;
   private timerScheduleInitialization: Promise<void> | null = null;
@@ -978,6 +1006,218 @@ export class ChannelObject extends DurableObject<Env> {
         // The pending snapshot and retry alarm remain durable for the next wake.
       }
     });
+  }
+
+  private channelJobStore(): ChannelJobStore {
+    if (this.channelJobStoreInstance === null) {
+      this.channelJobStoreInstance = new ChannelJobStore(this.ctx.storage);
+    }
+    return this.channelJobStoreInstance;
+  }
+
+  /** Keeps each enabled-module read paired with its complete schedule reconciliation. */
+  private async withChannelJobScheduleLock<Result>(operation: () => Promise<Result>): Promise<Result> {
+    const previous = this.channelJobScheduleQueue;
+    let release!: () => void;
+    this.channelJobScheduleQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
+  private async withRegisteredChannelJobs<Result>(
+    operation: (registrations: readonly ChannelJobRegistration[]) => Result | Promise<Result>,
+  ): Promise<Result> {
+    return await this.withChannelJobScheduleLock(async () => {
+      const registrations = await this.registeredChannelJobs();
+      await this.syncRegisteredChannelJobs(registrations);
+      return await operation(registrations);
+    });
+  }
+
+  private async registeredChannelJobs(): Promise<ChannelJobRegistration[]> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return [];
+    const enabledRows = await this.env.DB.prepare(
+      "SELECT module_id FROM channel_modules WHERE channel_id = ? AND enabled = 1",
+    ).bind(channelId).all<{ module_id: string }>();
+    const enabledModules = new Set(enabledRows.results.map(({ module_id }) => module_id));
+    const moduleJobs = MODULES.flatMap((module) => {
+      if (module.mandatory !== true && !enabledModules.has(module.id)) return [];
+      return (module.alarms ?? []).flatMap((alarm): ChannelJobRegistration[] => alarm.job === undefined ? [] : [{
+        id: moduleChannelJobId(module.id, alarm.key),
+        handlerKey: `module:${module.id}:${alarm.key}`,
+        ...alarm.job,
+        ...(alarm.retryDelaysMs === undefined ? {} : { retryDelaysMs: alarm.retryDelaysMs }),
+      }]);
+    });
+    return [...moduleJobs, ...HOST_CHANNEL_JOBS];
+  }
+
+  private async syncRegisteredChannelJobs(
+    registrations: readonly ChannelJobRegistration[],
+    now = Date.now(),
+  ): Promise<void> {
+    const store = this.channelJobStore();
+    const desiredIds = new Set(registrations.map(({ id }) => id));
+    const desiredAlarmKeys = new Set(registrations.map(({ id }) => channelJobAlarmKey(id)));
+    const table = await this.ensureAlarmScheduleTable();
+    const staleKeys = Object.keys(table).filter((key) => key.startsWith("channel-job:") && !desiredAlarmKeys.has(key));
+    if (staleKeys.length > 0) await this.clearAlarmEntries(staleKeys);
+    for (const registration of registrations) {
+      const status = store.ensureJob(registration, now);
+      const key = channelJobAlarmKey(registration.id);
+      const current = (await this.ensureAlarmScheduleTable())[key];
+      if (status.state === "paused") {
+        if (current !== undefined) await this.clearAlarmEntries([key]);
+        continue;
+      }
+      if (current !== undefined) continue;
+      const deadline = status.state === "running"
+        ? Math.max(now, store.claimUntil(registration.id) ?? now)
+        : status.nextRunAt ?? now + registration.intervalMs;
+      await this.scheduleAlarmEntry(key, registration.handlerKey, deadline);
+    }
+    const removedRows = this.ctx.storage.sql.exec<{ job_id: string }>(
+      "SELECT job_id FROM channel_jobs_status",
+    ).toArray().flatMap(({ job_id }) =>
+      desiredIds.has(job_id) || store.isPaused(job_id) ? [] : [job_id],
+    );
+    for (const jobId of removedRows) store.remove(jobId);
+    await reconcilePendingChannelJobScheduleInputs(
+      this.ctx.storage,
+      store,
+      async () => {
+        await this.publishChannelJobStatusChanged();
+      },
+    );
+    await this.scheduleEarliestAlarm();
+  }
+
+  public async syncChannelJobSchedules(): Promise<void> {
+    // Skips the D1 lookup and SQLite scan on every alarm while no module or host declares a job.
+    if (HOST_CHANNEL_JOBS.length === 0 && !MODULES.some((module) => module.alarms?.some((alarm) => alarm.job !== undefined))) return;
+    await this.withRegisteredChannelJobs(() => undefined);
+  }
+
+  public async listChannelJobs(): Promise<ChannelJobSnapshot[]> {
+    return await this.withRegisteredChannelJobs((registrations) => {
+      const store = this.channelJobStore();
+      return registrations.flatMap((registration) => {
+        const status = store.status(registration.id);
+        return status === null ? [] : [{
+          id: registration.id,
+          intervalMs: registration.intervalMs,
+          label: registration.label,
+          requiredScopes: registration.requiredScopes,
+          state: status.state,
+          lastStartedAt: status.lastStartedAt,
+          lastSuccessAt: status.lastSuccessAt,
+          nextRunAt: status.nextRunAt,
+          errorCode: status.errorCode,
+          errorTextKey: status.errorTextKey,
+          consecutiveFailures: status.consecutiveFailures,
+          resultSummary: status.resultSummary,
+          pausedAt: status.pausedAt,
+          reconcileNeeded: status.reconcileNeeded,
+        }];
+      });
+    });
+  }
+
+  private async scheduleChannelJobNow(registration: ChannelJobRegistration, now = Date.now()): Promise<boolean> {
+    const key = channelJobAlarmKey(registration.id);
+    const scheduled = await this.ctx.storage.transaction(async (transaction) => {
+      const table = await readAlarmScheduleTable(transaction);
+      const current = table[key];
+      if (current?.claimUntil !== undefined && current.claimUntil > now) return false;
+      table[key] = {
+        deadline: now,
+        handler: registration.handlerKey,
+        revision: (current?.revision ?? 0) + 1,
+      };
+      await transaction.put(ALARM_TABLE_KEY, table);
+      return true;
+    });
+    await this.scheduleEarliestAlarm();
+    return scheduled;
+  }
+
+  public async runChannelJobNow(jobId: string): Promise<"scheduled" | "already_running" | "paused" | "not_found"> {
+    return await this.withChannelJobScheduleLock(async () => {
+      const registrations = await this.registeredChannelJobs();
+      const registration = registrations.find((job) => job.id === jobId);
+      if (registration === undefined) return "not_found";
+      await this.syncRegisteredChannelJobs(registrations);
+      if (this.channelJobStore().isPaused(jobId)) return "paused";
+      const now = Date.now();
+      const result = await requestChannelJobRun({
+        readClaim: async () => {
+          const current = (await this.ensureAlarmScheduleTable())[channelJobAlarmKey(jobId)];
+          return current?.claimUntil === undefined ? null : { claimUntil: current.claimUntil };
+        },
+        scheduleNow: async () => await this.scheduleChannelJobNow(registration, now),
+      }, now);
+      if (result === "scheduled") {
+        this.channelJobStore().setNextRunAt(jobId, now);
+        await this.publishChannelJobStatusChanged();
+      }
+      return result;
+    });
+  }
+
+  public async pauseChannelJob(jobId: string): Promise<ChannelJobStatus | null> {
+    return await this.withChannelJobScheduleLock(async () => {
+      const registrations = await this.registeredChannelJobs();
+      if (!registrations.some((job) => job.id === jobId)) return null;
+      await this.syncRegisteredChannelJobs(registrations);
+      const status = this.channelJobStore().pause(jobId);
+      await this.clearAlarmEntries([channelJobAlarmKey(jobId)]);
+      await this.publishChannelJobStatusChanged();
+      return status;
+    });
+  }
+
+  public async resumeChannelJob(jobId: string): Promise<"scheduled" | "already_running" | "not_paused" | "not_found"> {
+    return await this.withChannelJobScheduleLock(async () => {
+      const registrations = await this.registeredChannelJobs();
+      const registration = registrations.find((job) => job.id === jobId);
+      if (registration === undefined) return "not_found";
+      await this.syncRegisteredChannelJobs(registrations);
+      if (!this.channelJobStore().isPaused(jobId)) return "not_paused";
+      this.channelJobStore().resume(jobId);
+      const scheduled = await this.scheduleChannelJobNow(registration);
+      await this.publishChannelJobStatusChanged();
+      return scheduled ? "scheduled" : "already_running";
+    });
+  }
+
+  public async markChannelJobReconcileNeeded(jobId: string): Promise<boolean> {
+    const allowed = this.channelJobStore().markReconcileNeeded(jobId);
+    if (!allowed) await this.publishChannelJobStatusChanged();
+    return allowed;
+  }
+
+  public async publishChannelJobStatusChanged(): Promise<void> {
+    await bumpDurablePanelResources(this.ctx.storage, ["channel.jobs"]);
+    await this.notifyCommittedPanelResources();
+  }
+
+  private async channelJobScopeFailure(requiredScopes: readonly string[]): Promise<"refresh_failed" | "missing_scope" | null> {
+    if (requiredScopes.length === 0) return null;
+    const channelId = this.ownChannelId();
+    if (channelId === null) return "missing_scope";
+    const identity = await this.env.DB.prepare(
+      "SELECT status, reason FROM twitch_login_identity WHERE user_id = ?",
+    ).bind(channelId).first<{ status: string; reason: string | null }>();
+    if (identity?.status === "error" && identity.reason === "refresh_failed") return "refresh_failed";
+    for (const scope of requiredScopes) {
+      if (!await broadcasterHasScope(this.env.DB, channelId, scope)) return "missing_scope";
+    }
+    return null;
   }
 
   /** Atomically reserves one quick-action test message per channel every 30 seconds. */
@@ -4061,6 +4301,7 @@ export class ChannelObject extends DurableObject<Env> {
       const claimed: AlarmScheduleEntry = {
         ...current,
         claimUntil: now + ALARM_HANDLER_RECOVERY_DELAY_MS,
+        claimToken: crypto.randomUUID(),
         revision: (current.revision ?? 0) + 1,
       };
       delete claimed.nextAttemptAt;
@@ -4089,6 +4330,7 @@ export class ChannelObject extends DurableObject<Env> {
       if (JSON.stringify(table[key]) !== JSON.stringify(claimed)) return;
       const entry = { ...claimed };
       delete entry.claimUntil;
+      delete entry.claimToken;
       delete entry.nextAttemptAt;
       const retained: AlarmScheduleEntry = {
         ...entry,
@@ -4107,29 +4349,31 @@ export class ChannelObject extends DurableObject<Env> {
     key: string,
     claimed: AlarmScheduleEntry,
     retryDelaysMs: readonly number[] | undefined,
-  ): Promise<void> {
-    const configuredDelays = retryDelaysMs?.filter((delay) => Number.isFinite(delay) && delay >= 1);
-    const delays = configuredDelays?.length ? configuredDelays : ALARM_HANDLER_RETRY_DELAYS_MS;
+  ): Promise<number | null> {
     const failures = claimed.failures ?? 0;
-    const delay = delays[Math.min(failures, delays.length - 1)];
-    if (delay === undefined || !Number.isFinite(delay) || delay < 1) return;
+    const delay = alarmRetryDelay(retryDelaysMs, failures);
+    const nextAttemptAt = Date.now() + delay;
+    let rescheduled = false as boolean;
     await this.mutateAlarmSchedule(async (table, storage) => {
       const current = table[key];
       if (JSON.stringify(current) !== JSON.stringify(claimed)) return;
       const entry = { ...claimed };
       delete entry.claimUntil;
+      delete entry.claimToken;
       delete entry.nextAttemptAt;
       table[key] = {
         ...entry,
-        nextAttemptAt: Date.now() + delay,
+        nextAttemptAt,
         failures: failures + 1,
         revision: (claimed.revision ?? 0) + 1,
       };
+      rescheduled = true;
       if (LEGACY_ALARM_DEFINITIONS.some((definition) => definition.key === key)) {
         await storage.put(key, alarmAttemptAt(table[key]));
       }
     });
     await this.scheduleEarliestAlarm();
+    return rescheduled ? nextAttemptAt : null;
   }
 
   private moduleAlarmContext(
@@ -4141,6 +4385,8 @@ export class ChannelObject extends DurableObject<Env> {
     alarmPlanSequence?: number,
     sendChatImpl: typeof sendChatMessage = sendChatMessage,
     runningAlarmKey?: string,
+    alarmClaimToken?: string,
+    channelJob?: ChannelJobRunContext,
   ): ModuleAlarmContext {
     const channelId = this.ownChannelId();
     if (channelId === null) throw new Error("Module alarms require a named Durable Object.");
@@ -4157,6 +4403,9 @@ export class ChannelObject extends DurableObject<Env> {
         authorizeManagementMutation: authorizeModuleManagementMutation,
       } : {}),
       channelId,
+      ...(alarmClaimToken === undefined ? {} : { alarmClaimToken }),
+      ...(channelJob === undefined ? {} : { channelJob }),
+      markReconcileNeeded: async (jobId) => await this.markChannelJobReconcileNeeded(jobId),
       ...(moduleId === "song_requests" ? {
         runModuleAlarm: (handlerKey: string, alarmKey: string, invocation?: unknown) => this.runModuleAlarm(
           moduleId, handlerKey, alarmKey, invocation,
@@ -4196,7 +4445,9 @@ export class ChannelObject extends DurableObject<Env> {
           throw new Error("The durable action target is not a declared module dependency.");
         }
         const targetAlarm = target.alarms?.find((alarm) => alarm.key === action.targetHandlerKey);
-        if (targetAlarm === undefined) throw new Error(`Module ${target.id} has no alarm context for durable actions.`);
+        if (targetAlarm === undefined || targetAlarm.job !== undefined) {
+          throw new Error(`Module ${target.id} has no alarm context for durable actions.`);
+        }
         await target.handleDurableAction(
           this.moduleAlarmContext(target.id, targetAlarm, externalFetchBudget),
           action,
@@ -8092,7 +8343,7 @@ export class ChannelObject extends DurableObject<Env> {
     await this.ensurePointRoundRecovery();
     const module = MODULES.find((candidate) => candidate.id === moduleId);
     const registration = module?.alarms?.find((candidate) => candidate.key === handlerKey);
-    if (registration === undefined || alarmKey.length === 0 || alarmKey.length > 256) {
+    if (registration === undefined || registration.job !== undefined || alarmKey.length === 0 || alarmKey.length > 256) {
       throw new Error("Module alarm is unavailable.");
     }
     const execute = () => registration.handle(
@@ -9426,6 +9677,11 @@ export class ChannelObject extends DurableObject<Env> {
             for (const registration of module.alarms ?? []) {
               const onScheduleInputsChanged = registration.onScheduleInputsChanged;
               if (onScheduleInputsChanged === undefined) continue;
+              const jobId = registration.job === undefined ? null : moduleChannelJobId(module.id, registration.key);
+              if (jobId !== null) {
+                await recordChannelJobScheduleInputsChanged(this.ctx.storage, jobId);
+                continue;
+              }
               await this.runModuleAlarmHandler(module.id, registration.key, () => onScheduleInputsChanged(
                 this.moduleAlarmContext(module.id, registration, externalFetchBudget),
                 reason,
@@ -9439,19 +9695,73 @@ export class ChannelObject extends DurableObject<Env> {
       const handler = `module:${moduleId}:${registration.key}`;
       if (handlers.has(handler)) throw new Error(`Duplicate alarm handler ${handler}.`);
       const modulePrefix = `module:${moduleId}:`;
+      const jobId = registration.job === undefined ? null : moduleChannelJobId(moduleId, registration.key);
+      const jobRegistration: AlarmJobRegistration | undefined = registration.job === undefined || jobId === null
+        ? undefined
+        : {
+          id: jobId,
+          handlerKey: handler,
+          ...registration.job,
+          ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
+          run: async (channelJob, _key, entry) => await this.runModuleAlarmHandler(
+            moduleId,
+            registration.key,
+            () => {
+              channelJob.assertCurrent();
+              return registration.handle(
+                this.moduleAlarmContext(
+                  moduleId,
+                  registration,
+                  externalFetchBudget,
+                  entry.streamGeneration,
+                  entry.identity,
+                  entry.planSequence,
+                  undefined,
+                  registration.key,
+                  entry.claimToken,
+                  channelJob,
+                ),
+                registration.key,
+                entry.deadline,
+                entry.ownerRevision,
+              );
+            },
+          ),
+        };
       handlers.set(handler, {
         ...(registration.retryDelaysMs === undefined ? {} : { retryDelaysMs: registration.retryDelaysMs }),
+        ...(jobRegistration === undefined ? {} : { job: jobRegistration }),
         handle: async (key, entry) => {
+          if (jobRegistration !== undefined) return undefined;
           const execute = () => registration.handle(
             this.moduleAlarmContext(moduleId, registration, externalFetchBudget, entry.streamGeneration,
               entry.identity, entry.planSequence, undefined,
-              key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key),
+              key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
+              entry.claimToken),
             key.startsWith(modulePrefix) ? key.slice(modulePrefix.length) : key,
             entry.deadline,
             entry.ownerRevision,
           );
           const result = await this.runModuleAlarmHandler(moduleId, registration.key, execute);
           return result === "retain" || result === "retry" ? result : undefined;
+        },
+      });
+    }
+    for (const hostJob of HOST_CHANNEL_JOBS) {
+      const existing = handlers.get(hostJob.handlerKey);
+      if (existing === undefined) throw new Error(`Host channel job handler ${hostJob.handlerKey} is not registered.`);
+      const { run, ...registration } = hostJob;
+      handlers.set(hostJob.handlerKey, {
+        ...existing,
+        job: {
+          ...registration,
+          run: async (channelJob, key, entry, now, nowIso) => await run(
+            channelJob,
+            key,
+            entry.deadline,
+            now,
+            nowIso,
+          ),
         },
       });
     }
@@ -9477,23 +9787,79 @@ export class ChannelObject extends DurableObject<Env> {
       .filter(([, entry]) => alarmAttemptAt(entry) <= now)
       .filter(([, entry]) => !(entry.deadline <= now && entry.suppressedBy !== undefined &&
         Object.hasOwn(table, entry.suppressedBy)))
-      .sort(([, left], [, right]) => alarmAttemptAt(left) - alarmAttemptAt(right));
+      .sort(([, left], [, right]) => {
+        // Non-job handlers do not take the channel-job schedule lock.
+        const leftIsJob = handlers.get(left.handler)?.job === undefined ? 0 : 1;
+        const rightIsJob = handlers.get(right.handler)?.job === undefined ? 0 : 1;
+        return leftIsJob - rightIsJob || alarmAttemptAt(left) - alarmAttemptAt(right);
+      });
 
     for (const [key, entry] of dueEntries) {
-      const currentTable = await this.ensureAlarmScheduleTable();
-      const currentEntry = currentTable[key];
-      if (currentEntry === undefined || JSON.stringify(currentEntry) !== JSON.stringify(entry) ||
-          alarmAttemptAt(currentEntry) > Date.now()) continue;
-      const claimed = await this.claimAlarmEntry(key, entry);
-      if (claimed === null) continue;
       const registration = handlers.get(entry.handler);
+      let claimed: AlarmScheduleEntry | null;
+      if (registration?.job === undefined) {
+        const currentTable = await this.ensureAlarmScheduleTable();
+        const currentEntry = currentTable[key];
+        if (currentEntry === undefined || JSON.stringify(currentEntry) !== JSON.stringify(entry) ||
+            alarmAttemptAt(currentEntry) > Date.now()) continue;
+        claimed = await this.claimAlarmEntry(key, entry);
+      } else {
+        const jobId = registration.job.id;
+        claimed = await this.withChannelJobScheduleLock(async () => {
+          const currentRegistrations = await this.registeredChannelJobs();
+          if (!currentRegistrations.some((current) => current.id === jobId)) return null;
+          const currentTable = await this.ensureAlarmScheduleTable();
+          const currentEntry = currentTable[key];
+          if (currentEntry === undefined || JSON.stringify(currentEntry) !== JSON.stringify(entry) ||
+              alarmAttemptAt(currentEntry) > Date.now()) return null;
+          if (this.channelJobStore().isPaused(jobId)) {
+            await this.completeAlarmEntry(key, entry);
+            return null;
+          }
+          return await this.claimAlarmEntry(key, entry);
+        });
+      }
+      if (claimed === null) continue;
       if (registration === undefined) {
         console.error(`Alarm handler ${entry.handler} is not registered for ${key}.`);
         await this.rescheduleFailedAlarm(key, claimed, undefined);
         continue;
       }
       try {
-        const result = await registration.handle(key, entry, now, nowIso);
+        const job = registration.job;
+        if (job !== undefined) {
+          const claimToken = claimed.claimToken;
+          const claimUntil = claimed.claimUntil;
+          if (claimToken === undefined || claimUntil === undefined) {
+            await this.rescheduleFailedAlarm(key, claimed, registration.retryDelaysMs);
+            continue;
+          }
+          const jobNow = Date.now();
+          const jobResult = await executeChannelJobClaim({
+            store: this.channelJobStore(),
+            registration: job,
+            claimToken,
+            claimUntil,
+            now: jobNow,
+            scopeFailure: async () => await this.channelJobScopeFailure(job.requiredScopes),
+            handle: async (channelJob) => await job.run(channelJob, key, claimed, jobNow, nowIso),
+            scheduleNext: async (deadline) => {
+              await this.scheduleAlarmEntry(key, claimed.handler, deadline);
+            },
+            onStatusChanged: async () => {
+              await this.publishChannelJobStatusChanged();
+            },
+          });
+          if (jobResult === "retry") {
+            const nextAttemptAt = await this.rescheduleFailedAlarm(key, claimed, registration.retryDelaysMs);
+            if (nextAttemptAt !== null) {
+              this.channelJobStore().setNextRunAt(job.id, nextAttemptAt);
+              await this.publishChannelJobStatusChanged();
+            }
+          } else await this.completeAlarmEntry(key, claimed);
+          continue;
+        }
+        const result = await registration.handle(key, claimed, now, nowIso);
         if (result === "retain") await this.retainAlarmEntry(key, claimed);
         else if (result === "retry") await this.rescheduleFailedAlarm(key, claimed, registration.retryDelaysMs);
         else await this.completeAlarmEntry(key, claimed);
@@ -10485,6 +10851,8 @@ export class ChannelObject extends DurableObject<Env> {
         await this.reconcileLegacyChatVoteResultDeliveriesFor(retainedVoteResults);
       }
       await this.dispatchDueAlarmEntries(now, nowIso, this.alarmHandlers(MODULES, externalFetchBudget));
+      // Dispatch before registration reconciliation, which can wait on the channel-job schedule lock.
+      await this.syncChannelJobSchedules();
     }, () => this.notifyCommittedPanelResources());
   }
 

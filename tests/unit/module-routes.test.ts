@@ -267,6 +267,12 @@ const expectDeniedPatch = async (
   await expect(auditCount(database)).resolves.toBe(0);
 };
 
+/** Channel job registration RPCs that the route calls after every module activation change. */
+const channelJobFakes = {
+  syncChannelJobSchedules: vi.fn(() => Promise.resolve()),
+  publishChannelJobStatusChanged: vi.fn(() => Promise.resolve()),
+};
+
 describe("Module management in the panel", () => {
   let database: TestD1Database;
   let environment: Env;
@@ -1366,7 +1372,7 @@ describe("Module management in the panel", () => {
     environment.CHANNEL = {
       idFromName: vi.fn((channelId: string) => channelId),
       get: vi.fn(() => ({
-        notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()),
+        notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()), ...channelJobFakes,
         setGameModuleGate: setGate,
         cancelOpenGameRounds: cancelOpenRounds,
       })),
@@ -1461,7 +1467,7 @@ describe("Module management in the panel", () => {
       get: vi.fn(() => ({
         setGameModuleGate: vi.fn(() => Promise.resolve({ applied: true })),
         cancelOpenGameRounds: vi.fn(() => Promise.resolve(0)),
-        notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()),
+        notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()), ...channelJobFakes,
       })),
     } as unknown as Env["CHANNEL"];
 
@@ -1560,7 +1566,7 @@ describe("Module management in the panel", () => {
       ...environment,
       CHANNEL: {
         idFromName: vi.fn(() => "channel-object"),
-        get: vi.fn(() => ({ publish, notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()) })),
+        get: vi.fn(() => ({ publish, notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()), ...channelJobFakes })),
       },
     } as unknown as Env;
 
@@ -1606,7 +1612,7 @@ describe("Module management in the panel", () => {
           setGameModuleGate: vi.fn(() => Promise.resolve({ applied: true })),
           cancelOpenGameRounds,
           publish,
-          notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()),
+          notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()), ...channelJobFakes,
         })),
       },
     } as unknown as Env;
@@ -1657,7 +1663,7 @@ describe("Module management in the panel", () => {
       ...environment,
       CHANNEL: {
         idFromName: vi.fn(() => "channel-object"),
-        get: vi.fn(() => ({ publish: () => Promise.resolve(), notifyScheduleInputsChanged })),
+        get: vi.fn(() => ({ publish: () => Promise.resolve(), notifyScheduleInputsChanged, ...channelJobFakes })),
       },
     } as unknown as Env;
 
@@ -1693,7 +1699,7 @@ describe("Module management in the panel", () => {
       ...environment,
       CHANNEL: {
         idFromName: vi.fn(() => "channel-object"),
-        get: vi.fn(() => ({ publish: vi.fn(() => Promise.resolve()), notifyScheduleInputsChanged })),
+        get: vi.fn(() => ({ publish: vi.fn(() => Promise.resolve()), notifyScheduleInputsChanged, ...channelJobFakes })),
       },
     } as unknown as Env;
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -1737,7 +1743,7 @@ describe("Module management in the panel", () => {
       ...environment,
       CHANNEL: {
         idFromName: vi.fn(() => "channel-object"),
-        get: vi.fn(() => ({ publish, notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()) })),
+        get: vi.fn(() => ({ publish, notifyScheduleInputsChanged: vi.fn(() => Promise.resolve()), ...channelJobFakes })),
       },
     } as unknown as Env;
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
