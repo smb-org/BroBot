@@ -36,8 +36,8 @@ Schreibversuche gegen `context.DB` werden zur Laufzeit abgewiesen und als
 
 ### Chatnachrichten verarbeitende Module
 
-Derzeit abonnieren `text_commands`, `faq`, `chat_voting`, `timers` und
-`votekick` `channel.chat.message`. Textbefehle prüfen Namen, Aliase,
+Derzeit abonnieren `text_commands`, `faq`, `chat_voting`, `timers`,
+`votekick` und `discord` `channel.chat.message`. Textbefehle prüfen Namen, Aliase,
 Berechtigungen, Filter und Abklingzeiten und bereiten ihre Antwort oder
 Aktionen vor. FAQ wählt den ersten passenden Eintrag und bereitet dessen
 Antwort vor. Chat-Abstimmungen verarbeiten Start-, Hilfe- und Endbefehle und
@@ -1636,6 +1636,34 @@ ruft die vom Host übergebene Funktion `renderStatisticsSections(scope)` auf.
 - [ ] **Tests:** Domain und Service als Unit-Tests, Routen mit Rollen (Operator darf nicht verwalten), Mandantentrennung über `channelId`. **Bei Secrets zusätzlich Leak-Tests:** ein Sentinel-Wert darf in Logs, Routenantworten, Audits, Ereignisprotokoll und Moduldaten für jeden Ausgang (Erfolg, Fehler, Timeout) nirgends auftauchen (Vorbild: `tests/unit/belabox.test.ts`, `tests/unit/module-secrets.test.ts`). Alarmhandler idempotent und mit überholtem Zustand prüfen.
 - [ ] **Doku:** Fachliche Besonderheiten in diesem Leitfaden, Architekturwirkung in `docs/ARCHITECTURE.md` (verlinken statt wiederholen), Betrieb in `docs/OPERATIONS.md`. Nur Platzhalter und fiktive Logins, keine echten Namen oder Secrets.
 - [ ] **Vor dem Push:** `pnpm run check`.
+
+## Discord-Kontoverknüpfung
+
+Das Modul `discord` registriert den kanalgebundenen Chatbefehl `!discord`. Er
+ist nur aktiv, wenn das Modul für den jeweiligen Kanal eingeschaltet ist. Die
+Verknüpfungsseite unter `/discord/link` ist dagegen global und benötigt keine
+Dashboard-Anmeldung. Sie nutzt ausschließlich die Discord-Berechtigungen
+`identify` und `connections` und speichert nur bestätigte Twitch-Verknüpfungen
+in `discord_links`; Discord-Zugriffstoken werden nicht gespeichert. Die Tabelle
+ist absichtlich nicht kanalgebunden, damit die späteren Rollenabgleiche dieselbe
+Kontoverknüpfung kanalübergreifend verwenden können.
+
+Für spätere Discord-Rollenaktionen liefert `replaceDiscordLink` die bei einer
+Neuverknüpfung ersetzten Konten zurück. `removeDiscordLink` liefert die beim
+Lösen der Verknüpfung entfernte Zeile zurück. Beide Rückgabewerte sind die
+Eintrittspunkte, an denen nachfolgende Teile verwaltete Discord-Rollen entfernen
+können.
+
+## Discord-Modul-Checkliste
+
+- [x] **Contract und Registry:** `discord` registriert sich als normales Modul,
+  ohne `consumes`; `!discord` folgt pro Kanal dem Modulstatus.
+- [x] **Globale Verknüpfung:** `discord_links` erzwingt je eine eindeutige
+  Discord- und Twitch-Identität; OAuth-Zustand ist browsergebunden und einmalig.
+- [x] **Sprachen und öffentliche Seite:** Copy liegt in `de` und `en`; die
+  eigenständige Seite fordert keine Dashboard-Sitzung.
+- [x] **Folgearbeiten:** `replaceDiscordLink` und `removeDiscordLink` geben die
+  betroffenen Linkzeilen für die spätere Rollenbereinigung zurück.
 
 ## Grenzen
 

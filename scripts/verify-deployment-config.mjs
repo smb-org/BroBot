@@ -18,6 +18,8 @@ const deploymentBindings = [
   "PLATFORM_USER_IDS",
   "SPOTIFY_CLIENT_ID",
   "SPOTIFY_CLIENT_SECRET",
+  "DISCORD_CLIENT_ID",
+  "DISCORD_CLIENT_SECRET",
 ];
 const compatibilitySecretAliases = {
   TOKEN_ENCRYPTION_KEYS: ["SESSION_ENCRYPTION_KEYS"],

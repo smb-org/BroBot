@@ -1,0 +1,82 @@
+@layer components.pages {
+  .discord-public {
+    display: grid;
+    min-height: 100vh;
+    place-items: center;
+    padding: clamp(20px, 5vw, 48px);
+    background: var(--color-background);
+    color: var(--color-text);
+    font-family: var(--font-ui);
+  }
+
+  .discord-public__card {
+    display: grid;
+    width: min(100%, 480px);
+    min-height: 530px;
+    grid-template-rows: auto auto 260px auto;
+    align-content: start;
+    gap: 22px;
+    padding: clamp(24px, 6vw, 40px);
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    background: var(--color-rail);
+    box-shadow: var(--shadow-floating);
+  }
+
+  .discord-public__header { display: flex; align-items: center; gap: 14px; }
+  .discord-public__mark {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    flex: none;
+    place-items: center;
+    border: 1px solid var(--color-brand-border);
+    border-radius: 12px;
+    background: var(--color-selection-surface);
+    color: var(--color-brand-text);
+  }
+  .discord-public__eyebrow { margin: 0 0 3px; color: var(--color-text-3); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+  .discord-public h1 { margin: 0; font-size: 22px; font-weight: 650; line-height: 1.2; }
+  .discord-public__intro { max-width: 36ch; margin: 0; color: var(--color-text-2); font-size: 14px; line-height: 1.6; }
+  .discord-public__state { height: 260px; }
+  .discord-public__placeholder { width: 100%; height: 260px; border-radius: 10px; background: var(--color-inspector); }
+  .discord-public__message { display: flex; height: 260px; flex-direction: column; align-items: flex-start; justify-content: flex-start; overflow: auto; }
+  .discord-public__message h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 10px; font-size: 16px; line-height: 1.4; }
+  .discord-public__message p { margin: 0 0 18px; color: var(--color-text-2); font-size: 13px; line-height: 1.6; }
+  .discord-public__status-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 0 4px var(--color-success-surface); }
+  .discord-public__button {
+    display: inline-flex;
+    min-height: 40px;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    padding: 0 15px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .discord-public__button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
+  .discord-public__button:disabled { opacity: .55; cursor: progress; }
+  .discord-public__button--primary { background: var(--color-brand); color: var(--color-brand-on); }
+  .discord-public__button--primary:hover { background: var(--color-brand-hover); }
+  .discord-public__button--neutral { border-color: var(--color-border-strong); background: var(--color-surface); color: var(--color-text-2); }
+  .discord-public__button--neutral:hover { background: var(--color-surface-hover); color: var(--color-text); }
+  .discord-public__details { display: grid; width: 100%; gap: 0; margin: 2px 0 0; }
+  .discord-public__details div { display: grid; grid-template-columns: minmax(92px, .42fr) minmax(0, 1fr); gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--color-border); }
+  .discord-public__details dt { color: var(--color-text-3); font-size: 12px; }
+  .discord-public__details dd { min-width: 0; margin: 0; color: var(--color-text); font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .discord-public__error { min-height: 20px; margin: 10px 0 12px !important; color: var(--color-error-text) !important; font-size: 12px !important; line-height: 20px !important; }
+  .discord-public__error:not([role="alert"]) { color: transparent !important; }
+  .discord-public__footer { min-height: 52px; padding-top: 15px; border-top: 1px solid var(--color-border); color: var(--color-text-3); font-size: 11px; line-height: 1.5; }
+
+  @media (max-width: 480px) {
+    .discord-public { padding: 14px; }
+    .discord-public__card { min-height: 530px; gap: 18px; padding: 24px 20px; }
+    .discord-public h1 { font-size: 20px; }
+    .discord-public__details div { grid-template-columns: 88px minmax(0, 1fr); gap: 10px; }
+  }
+}

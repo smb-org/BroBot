@@ -87,6 +87,9 @@ const iconNames: Readonly<Record<IconName, true>> = {
   coins: true,
   gift: true,
   music: true,
+  link: true,
+  unlink: true,
+  "shield-check": true,
 };
 
 afterEach(cleanup);

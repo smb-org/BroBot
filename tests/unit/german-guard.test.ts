@@ -26,6 +26,7 @@ import { describe, expect, it } from "vitest";
  * additions are reviewed by hand for that.
  */
 const ALLOWLIST: Record<string, string> = {
+  "src/modules/discord/locale.ts": "Bilingual DE/EN Discord linking page and command catalogue; only its German values are German.",
   "src/contracts/channel-jobs.ts": "Bilingual DE/EN channel job error text catalogue; only its German values are German.",
   "src/worker/durable/twitch-ranks.ts": "Bilingual DE/EN Twitch rank job label and summary text; only its German values are German.",
   "src/modules/channel_points/contracts.ts": "Bilingual DE/EN channel-points queue action name and waiting count; only the German values are German.",

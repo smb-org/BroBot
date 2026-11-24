@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Discord verknüpfen</title>
+    <link rel="stylesheet" href="/src/fonts.css" />
+    <style>
+      @layer theme, base, utilities, components;
+      @layer components.base, components.kit, components.pages, components.modules;
+      :root { color-scheme: dark; }
+      html, body, #root { min-height: 100%; margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/modules/discord/main.tsx"></script>
+  </body>
+</html>

@@ -29,6 +29,8 @@ describe("Secret name drift", () => {
       "PLATFORM_USER_IDS",
       "SPOTIFY_CLIENT_ID",
       "SPOTIFY_CLIENT_SECRET",
+      "DISCORD_CLIENT_ID",
+      "DISCORD_CLIENT_SECRET",
     ];
     const config = {
       secrets: { required: [...required] },
@@ -177,6 +179,8 @@ describe("Secret name drift", () => {
       "PLATFORM_USER_IDS=[]",
       "SPOTIFY_CLIENT_ID=client-id",
       "SPOTIFY_CLIENT_SECRET=client-secret",
+      "DISCORD_CLIENT_ID=client-id",
+      "DISCORD_CLIENT_SECRET=client-secret",
       "",
     ].join("\n"));
 

@@ -27,6 +27,7 @@ export default defineConfig({
           input: {
             dashboard: resolve(import.meta.dirname, "index.html"),
             overlay: resolve(import.meta.dirname, "overlay.html"),
+            discord: resolve(import.meta.dirname, "discord.html"),
           },
           plugins: [{
             name: "brobot-overlay-tanstack-boundary",

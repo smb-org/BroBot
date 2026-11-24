@@ -46,6 +46,7 @@ import {
 import { entryColumns as pollsEntryColumns, rankSql, runColumns as pollsRunColumns } from "../../src/modules/polls/repository";
 import { blockUsageExistsSql, textBlockCategorySelectColumns, textBlockSelectColumns } from "../../src/modules/text_library/adapters/d1";
 import { SONG_REQUEST_CHAPTER_COLUMNS, songRequestChapterTrackExclusionPredicate } from "../../src/modules/song_requests/repository";
+import { discordLinkSelectColumns } from "../../src/modules/discord/repository";
 import {
   chatVoteAlarmClosePredicate,
   chatVoteExtensionPredicate,
@@ -232,6 +233,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["blockUsageExistsSql", blockUsageExistsSql],
   ["chatVoteSelectColumns", chatVoteSelectColumns],
   ["SONG_REQUEST_CHAPTER_COLUMNS", SONG_REQUEST_CHAPTER_COLUMNS],
+  ["discordLinkSelectColumns", discordLinkSelectColumns],
   ["exclusion.sql", songRequestChapterTrackExclusionPredicate({ songCooldownEnabled: true, songCooldownOncePerRound: false, songCooldownMinutes: 1 }).sql],
   ["chapterExclusion.sql", songRequestChapterTrackExclusionPredicate({ songCooldownEnabled: true, songCooldownOncePerRound: false, songCooldownMinutes: 1 }).sql],
   ["chapterInsertGuard", ` AND NOT EXISTS (SELECT 1 FROM json_each(?) AS candidate WHERE ${songRequestChapterTrackExclusionPredicate({ songCooldownEnabled: true, songCooldownOncePerRound: false, songCooldownMinutes: 1 }).sql})`],
@@ -413,10 +415,10 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(89);
-      expect(objects.filter((object) => object.type === "index")).toHaveLength(87);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(91);
+      expect(objects.filter((object) => object.type === "index")).toHaveLength(88);
       expect(objects.filter((object) => object.type === "trigger")).toHaveLength(183);
-      expect(objects).toHaveLength(359);
+      expect(objects).toHaveLength(362);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

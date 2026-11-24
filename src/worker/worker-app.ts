@@ -100,6 +100,12 @@ app.get("/overlay.html", (context) => overlayDocument(
   context.env.PUBLIC_ORIGIN,
 ));
 
+app.get("/discord/link", (context) => {
+  // Asking for "/discord" avoids the asset handler's redirect from "/discord.html", which drops the query string.
+  const assetUrl = new URL("/discord", context.req.url);
+  return context.env.ASSETS.fetch(new Request(assetUrl, context.req.raw));
+});
+
 app.all("*", (context) => context.env.ASSETS.fetch(context.req.raw));
 
 export { app };
