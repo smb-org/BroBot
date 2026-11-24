@@ -57,7 +57,8 @@ import {
   revokeOverlayToken,
 } from "./overlay-token-service";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
-import { decryptStoredToken, maintainBotIdentity } from "../bot-maintenance";
+import { maintainBotIdentity } from "../bot-maintenance";
+import { isBroadcasterCredentialUsable } from "./login-token-refresh";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { revokeRealtimeSessionForUser } from "../realtime";
 import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
@@ -680,19 +681,7 @@ authRouter.get("/auth/twitch/callback", async (context) => {
     const expiresAt = new Date(Date.parse(now) + tokens.expiresIn * 1000).toISOString();
     const current = await getLoginIdentity(context.env.DB, identity.userId);
     const encryptionKeys = getTokenEncryptionKeys(context.env);
-    let storedTokenUsable = current !== null && current.status === "connected" &&
-      Date.parse(current.expiresAt) > Date.parse(now);
-    if (storedTokenUsable && current !== null) {
-      try {
-        const [accessToken, refreshToken] = await Promise.all([
-          decryptStoredToken(current.accessTokenCiphertext, encryptionKeys),
-          decryptStoredToken(current.refreshTokenCiphertext, encryptionKeys),
-        ]);
-        storedTokenUsable = accessToken !== null && refreshToken !== null;
-      } catch {
-        storedTokenUsable = false;
-      }
-    }
+    const storedTokenUsable = await isBroadcasterCredentialUsable(current, context.env, now);
     // A plain login preserves scopes only when the current connected credentials are usable.
     const keepStoredToken = storedTokenUsable &&
       !(await broadcasterTokenPreservesEnabledModuleScopes(context.env.DB, identity.userId, tokens.scopes));

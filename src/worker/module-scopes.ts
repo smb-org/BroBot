@@ -42,7 +42,6 @@ interface IdentityScopeRow {
 interface IdentityTokenScopeRow {
   token_scopes_json: string;
   status: string;
-  reason: string | null;
 }
 
 const unique = (scopes: readonly string[]): string[] => [...new Set(scopes)];
@@ -113,12 +112,11 @@ const broadcasterIdentityTokenScopes = async (
   channelId: string,
 ): Promise<string[]> => {
   const row = await db.prepare(
-    `SELECT token_scopes_json, status, reason
+    `SELECT token_scopes_json, status
        FROM twitch_login_identity
       WHERE user_id = ?`,
   ).bind(channelId).first<IdentityTokenScopeRow>();
-  if (row === null || (row.status !== "connected" &&
-      !(row.status === "error" && row.reason === "active_module_scope_missing"))) return [];
+  if (row === null || row.status !== "connected") return [];
   return parseScopes(row.token_scopes_json);
 };
 
@@ -236,7 +234,7 @@ const lostModuleScopes = (
 };
 
 /** Finds scopes a connected token currently holds for an enabled module that a replacement would remove. */
-export const missingEnabledModuleBroadcasterScopes = async (
+const missingEnabledModuleBroadcasterScopes = async (
   db: D1Database,
   userId: string,
   newScopes: readonly string[],

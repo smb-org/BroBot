@@ -224,11 +224,11 @@ describe("withBroadcasterToken", () => {
     }
   });
 
-  it("keeps the stored token and requires re-consent when refresh drops an enabled module scope", async () => {
+  it("stores refreshed credentials when a scope is lost and reports the missing scope to its module", async () => {
     const database = new TestD1Database();
     try {
       const scopes = ["channel:manage:broadcast", "channel:read:ads"];
-      await seedIdentity(database, { expiresAt: "2026-10-23T10:04:00.000Z", scopes });
+      await seedIdentity(database, { expiresAt: "2026-10-23T09:59:00.000Z", scopes });
       await insertChannel(database, CHANNEL_ID);
       await insertMember(database, CHANNEL_ID, CHANNEL_ID, "broadcaster");
       await database.prepare(
@@ -241,17 +241,24 @@ describe("withBroadcasterToken", () => {
       await expect(withBroadcasterToken(
         environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
         { now: () => NOW, fetcher },
-      )).resolves.toMatchObject({ kind: "scope_missing", missing: ["channel:read:ads"] });
+      )).resolves.toEqual({ kind: "ok", value: { value: "done" } });
 
       const after = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
       expect(after).toMatchObject({
-        accessTokenCiphertext: before?.accessTokenCiphertext,
-        refreshTokenCiphertext: before?.refreshTokenCiphertext,
-        tokenScopesJson: JSON.stringify(scopes),
-        status: "error",
-        reason: "active_module_scope_missing",
+        tokenScopesJson: '["channel:manage:broadcast"]',
+        status: "connected",
+        reason: null,
       });
-      expect(call).not.toHaveBeenCalled();
+      expect(after?.accessTokenCiphertext).not.toBe(before?.accessTokenCiphertext);
+      expect(after?.refreshTokenCiphertext).not.toBe(before?.refreshTokenCiphertext);
+      expect(call).toHaveBeenCalledOnce();
+
+      const adsCall = vi.fn(() => Promise.resolve(SUCCESS));
+      await expect(withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, ["channel:read:ads"], adsCall,
+        { now: () => NOW, fetcher },
+      )).resolves.toEqual({ kind: "scope_missing", missing: ["channel:read:ads"] });
+      expect(adsCall).not.toHaveBeenCalled();
     } finally {
       database.close();
     }

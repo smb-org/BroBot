@@ -1,6 +1,5 @@
 import type { HelixResult } from "../../modules/contract";
 import { getLoginIdentity, type LoginIdentityRecord } from "../db/login-identity";
-import { TwitchApiError } from "../bot-maintenance";
 import {
   decryptLoginIdentityAccessToken,
   refreshLoginIdentityTokens,
@@ -68,7 +67,6 @@ const isReplacementIdentity = (
 type RefreshResult =
   | { kind: "refreshed"; identity: LoginIdentityRecord }
   | { kind: "replacement"; identity: LoginIdentityRecord }
-  | { kind: "scope_missing"; missing: string[] }
   | { kind: "revoked" }
   | { kind: "not_connected" }
   | { kind: "failed" };
@@ -103,20 +101,13 @@ const refreshIdentityOnce = async (
     if (refreshed.status === "revoked") return { kind: "revoked" };
     if (refreshed.status !== "connected") return { kind: "not_connected" };
     return { kind: "refreshed", identity: refreshed };
-  } catch (error: unknown) {
+  } catch {
     try {
       if ((await getLoginIdentity(environment.DB, identity.userId))?.status === "revoked") {
         return { kind: "revoked" };
       }
     } catch {
       // Keep the refresh failure result if the state cannot be read back.
-    }
-    if (error instanceof TwitchApiError && error.code === "active_module_scope_missing") {
-      const missing: unknown = Reflect.get(error, "missingModuleScopes");
-      return {
-        kind: "scope_missing",
-        missing: Array.isArray(missing) && missing.every((scope) => typeof scope === "string") ? missing : [],
-      };
     }
     return { kind: "failed" };
   }
@@ -182,7 +173,6 @@ export const withBroadcasterToken = async <Data>(
       const refreshResult = await refreshIdentityOnce(environment, identity, now(), fetcher, dependencies.refreshLease ?? {});
       if (refreshResult.kind === "revoked") return { kind: "revoked", source: "refresh" };
       if (refreshResult.kind === "not_connected") return { kind: "not_connected" };
-      if (refreshResult.kind === "scope_missing") return { kind: "scope_missing", missing: refreshResult.missing };
       if (refreshResult.kind === "failed") return { kind: "refresh_failed" };
       identity = refreshResult.identity;
       const missing = missingScopes(identity, requiredScopes, dependencies.scopeAlternatives);
@@ -218,7 +208,6 @@ export const withBroadcasterToken = async <Data>(
     const refreshResult = await refreshIdentityOnce(environment, identity, now(), fetcher, dependencies.refreshLease ?? {});
     if (refreshResult.kind === "revoked") return { kind: "revoked", source: "refresh" };
     if (refreshResult.kind === "not_connected") return { kind: "not_connected" };
-    if (refreshResult.kind === "scope_missing") return { kind: "scope_missing", missing: refreshResult.missing };
     if (refreshResult.kind === "failed") return { kind: "refresh_failed" };
     identity = refreshResult.identity;
   }

@@ -2,6 +2,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BotModule, ModuleTwitchRankUser } from "../../src/modules/contract";
+import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import {
   TwitchRanksStore,
   applyTwitchRankEventToStore,
@@ -15,10 +16,17 @@ import {
 } from "../../src/worker/durable/twitch-ranks";
 import { helixPages } from "../../src/worker/twitch/helix";
 import type { ChannelJobRunContext } from "../../src/worker/durable/channel-jobs";
-import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
 const databases: DatabaseSync[] = [];
+const RANK_TOKEN_KEYS = JSON.stringify({
+  active: { id: "rank-test", key: testKey(8) },
+  retired: [],
+});
+
+const encryptedRankToken = async (token: string): Promise<string> =>
+  encryptJson({ token }, parseKeyRing(RANK_TOKEN_KEYS));
 
 const storeFor = (options: {
   scheduleConsumerAlarmSync?: (moduleId: string, alarmKey: string, deadline: number) => void;
@@ -151,121 +159,154 @@ describe("Twitch rank storage", () => {
     expect(store.readUserIds("vip")).toEqual(new Set());
   });
 
-  it("records a gap for skipped delivery during token failure and rejects its in-flight snapshot", async () => {
-    const { store, storage } = storeFor();
-    const context = jobContext(storage);
-    const database = new TestD1Database();
-    try {
-      await insertChannel(database, "rank-channel");
-      await insertLoginIdentityAndSession(database, "rank-channel", ["channel:bot", "channel:read:vips"]);
-      await database.prepare(
-        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, '{}')",
-      ).bind("rank-channel", consumer.moduleId).run();
-      await database.prepare(
-        "UPDATE twitch_login_identity SET status = 'error', reason = 'validate_failed' WHERE user_id = ?",
-      ).bind("rank-channel").run();
+  it.each(["identity error", "expired access token", "undecryptable access token"] as const)(
+    "records a gap for rank events with an unusable %s and rejects its in-flight snapshot",
+    async (unusableCredential) => {
+      const { store, storage } = storeFor();
+      const context = jobContext(storage);
+      const database = new TestD1Database();
+      try {
+        await insertChannel(database, "rank-channel");
+        await insertLoginIdentityAndSession(database, "rank-channel", ["channel:bot", "channel:read:vips"]);
+        const accessToken = await encryptedRankToken("rank-access");
+        const refreshToken = await encryptedRankToken("rank-refresh");
+        const expiresAt = unusableCredential === "expired access token"
+          ? new Date(Date.now() - 60_000).toISOString()
+          : new Date(Date.now() + 60 * 60_000).toISOString();
+        await database.prepare(
+          `UPDATE twitch_login_identity
+              SET expires_at = ?, access_token_ciphertext = ?, refresh_token_ciphertext = ?
+            WHERE user_id = ?`,
+        ).bind(
+          expiresAt,
+          unusableCredential === "undecryptable access token" ? "unreadable-ciphertext" : accessToken,
+          refreshToken,
+          "rank-channel",
+        ).run();
+        await database.prepare(
+          "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, '{}')",
+        ).bind("rank-channel", consumer.moduleId).run();
+        if (unusableCredential === "identity error") {
+          await database.prepare(
+            "UPDATE twitch_login_identity SET status = 'error', reason = 'validate_failed' WHERE user_id = ?",
+          ).bind("rank-channel").run();
+        }
 
-      const previousStartedAt = new Date(Date.now() - 2 * 24 * 60 * 60_000).toISOString();
-      expect(store.beginSnapshot(context, "vip", previousStartedAt)).toBe(true);
-      expect(store.applySnapshot(
-        context,
-        "vip",
-        previousStartedAt,
-        new Date(Date.parse(previousStartedAt) + 1_000).toISOString(),
-        [user],
-        [consumer],
-      )).toBe(true);
-      const inFlightStartedAt = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
-      expect(store.beginSnapshot(context, "vip", inFlightStartedAt)).toBe(true);
+        const environment = {
+          DB: database as unknown as D1Database,
+          TOKEN_ENCRYPTION_KEYS: RANK_TOKEN_KEYS,
+        };
 
-      const reconcileNeeded = vi.fn(async () => {});
-      await expect(applyTwitchRankEventToStore(
-        { DB: database as unknown as D1Database },
-        store,
-        "rank-channel",
-        {
-          messageId: "token-error-removal",
-          subscriptionType: "channel.vip.remove",
-          payload: {
-            user_id: user.userId,
-            user_login: user.login,
-            user_name: user.displayName,
-            broadcaster_user_id: "rank-channel",
-            broadcaster_user_login: "fictionalchannel",
-            broadcaster_user_name: "FictionalChannel",
+        const previousStartedAt = new Date(Date.now() - 2 * 24 * 60 * 60_000).toISOString();
+        expect(store.beginSnapshot(context, "vip", previousStartedAt)).toBe(true);
+        expect(store.applySnapshot(
+          context,
+          "vip",
+          previousStartedAt,
+          new Date(Date.parse(previousStartedAt) + 1_000).toISOString(),
+          [user],
+          [consumer],
+        )).toBe(true);
+        const inFlightStartedAt = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+        expect(store.beginSnapshot(context, "vip", inFlightStartedAt)).toBe(true);
+
+        const reconcileNeeded = vi.fn(async () => {});
+        await expect(applyTwitchRankEventToStore(
+          environment,
+          store,
+          "rank-channel",
+          {
+            messageId: "token-error-removal",
+            subscriptionType: "channel.vip.remove",
+            payload: {
+              user_id: user.userId,
+              user_login: user.login,
+              user_name: user.displayName,
+              broadcaster_user_id: "rank-channel",
+              broadcaster_user_login: "fictionalchannel",
+              broadcaster_user_name: "FictionalChannel",
+            },
+            eventAt: new Date(Date.parse(inFlightStartedAt) + 1_000).toISOString(),
           },
-          eventAt: new Date(Date.parse(inFlightStartedAt) + 1_000).toISOString(),
-        },
-        reconcileNeeded,
-        [consumerModule],
-      )).resolves.toMatchObject({ changed: true, ignored: false, duplicate: false });
-      // The applied event itself must leave the gap, before any later skipped delivery does.
-      expect(store.readState("vip").lastTrackingGapAt).not.toBeNull();
-      expect(store.readState("vip").snapshotStatus).toBe("failed");
+          reconcileNeeded,
+          [consumerModule],
+        )).resolves.toMatchObject({ changed: true, ignored: false, duplicate: false });
+        // The applied event itself must leave the gap, before any later skipped delivery does.
+        expect(store.readState("vip").lastTrackingGapAt).not.toBeNull();
+        expect(store.readState("vip").snapshotStatus).toBe("failed");
 
-      await expect(applyTwitchRankEventToStore(
-        { DB: database as unknown as D1Database },
-        store,
-        "rank-channel",
-        {
-          messageId: "malformed-during-token-error",
-          subscriptionType: "channel.vip.remove",
-          payload: {},
-          eventAt: new Date().toISOString(),
-        },
-        reconcileNeeded,
-        [consumerModule],
-      )).resolves.toMatchObject({ ignored: true, duplicate: false });
+        await expect(applyTwitchRankEventToStore(
+          environment,
+          store,
+          "rank-channel",
+          {
+            messageId: "malformed-during-token-error",
+            subscriptionType: "channel.vip.remove",
+            payload: {},
+            eventAt: new Date().toISOString(),
+          },
+          reconcileNeeded,
+          [consumerModule],
+        )).resolves.toMatchObject({ ignored: true, duplicate: false });
 
-      expect(reconcileNeeded).toHaveBeenCalledTimes(2);
-      expect(store.readUserIds("vip")).toEqual(new Set());
-      await database.prepare(
-        "UPDATE twitch_login_identity SET status = 'connected', reason = NULL WHERE user_id = ?",
-      ).bind("rank-channel").run();
-      const gapState = store.readState("vip");
-      expect(gapState.snapshotStatus).toBe("failed");
-      expect(gapState.lastTrackingGapAt).not.toBeNull();
-      expect(() => store.applySnapshot(
-        context,
-        "vip",
-        inFlightStartedAt,
-        new Date(Date.now() + 1_000).toISOString(),
-        [user],
-        [consumer],
-      )).toThrow("twitch_rank_snapshot_superseded");
+        expect(reconcileNeeded).toHaveBeenCalledTimes(2);
+        expect(store.readUserIds("vip")).toEqual(new Set());
+        await database.prepare(
+          `UPDATE twitch_login_identity
+              SET status = 'connected', reason = NULL, expires_at = ?,
+                  access_token_ciphertext = ?, refresh_token_ciphertext = ?
+            WHERE user_id = ?`,
+        ).bind(
+          "2099-09-19T00:00:00.000Z",
+          accessToken,
+          refreshToken,
+          "rank-channel",
+        ).run();
+        const gapState = store.readState("vip");
+        expect(gapState.snapshotStatus).toBe("failed");
+        expect(gapState.lastTrackingGapAt).not.toBeNull();
+        expect(() => store.applySnapshot(
+          context,
+          "vip",
+          inFlightStartedAt,
+          new Date(Date.now() + 1_000).toISOString(),
+          [user],
+          [consumer],
+        )).toThrow("twitch_rank_snapshot_superseded");
 
-      const completeness = {
-        scopeAvailable: true,
-        tokenValid: true,
-        snapshotStatus: gapState.snapshotStatus,
-        lastSuccessAt: gapState.lastSuccessAt,
-        snapshotStartedAt: gapState.snapshotStartedAt,
-        appliedSnapshotStartedAt: gapState.appliedSnapshotStartedAt,
-        lastTrackingGapAt: gapState.lastTrackingGapAt,
-        subscriptionsEnabledSinceSnapshot: true,
-        jobPaused: false,
-        now: Date.now() + 2_000,
-        intervalMs: 60 * 60_000,
-      };
-      expect(twitchRankCompletenessReason(completeness)).toBe("tracking_gap");
+        const completeness = {
+          scopeAvailable: true,
+          tokenValid: true,
+          snapshotStatus: gapState.snapshotStatus,
+          lastSuccessAt: gapState.lastSuccessAt,
+          snapshotStartedAt: gapState.snapshotStartedAt,
+          appliedSnapshotStartedAt: gapState.appliedSnapshotStartedAt,
+          lastTrackingGapAt: gapState.lastTrackingGapAt,
+          subscriptionsEnabledSinceSnapshot: true,
+          jobPaused: false,
+          now: Date.now() + 2_000,
+          intervalMs: 60 * 60_000,
+        };
+        expect(twitchRankCompletenessReason(completeness)).toBe("tracking_gap");
 
-      const afterGap = new Date(Date.parse(gapState.lastTrackingGapAt ?? "") + 1_000).toISOString();
-      expect(store.beginSnapshot(context, "vip", afterGap)).toBe(true);
-      expect(store.applySnapshot(context, "vip", afterGap, new Date(Date.parse(afterGap) + 1_000).toISOString(), [], [consumer])).toBe(true);
-      const recoveredState = store.readState("vip");
-      expect(twitchRankCompletenessReason({
-        ...completeness,
-        snapshotStatus: recoveredState.snapshotStatus,
-        lastSuccessAt: recoveredState.lastSuccessAt,
-        snapshotStartedAt: recoveredState.snapshotStartedAt,
-        appliedSnapshotStartedAt: recoveredState.appliedSnapshotStartedAt,
-        lastTrackingGapAt: recoveredState.lastTrackingGapAt,
-        now: Date.parse(recoveredState.lastSuccessAt ?? ""),
-      })).toBeNull();
-    } finally {
-      database.close();
-    }
-  });
+        const afterGap = new Date(Date.parse(gapState.lastTrackingGapAt ?? "") + 1_000).toISOString();
+        expect(store.beginSnapshot(context, "vip", afterGap)).toBe(true);
+        expect(store.applySnapshot(context, "vip", afterGap, new Date(Date.parse(afterGap) + 1_000).toISOString(), [], [consumer])).toBe(true);
+        const recoveredState = store.readState("vip");
+        expect(twitchRankCompletenessReason({
+          ...completeness,
+          snapshotStatus: recoveredState.snapshotStatus,
+          lastSuccessAt: recoveredState.lastSuccessAt,
+          snapshotStartedAt: recoveredState.snapshotStartedAt,
+          appliedSnapshotStartedAt: recoveredState.appliedSnapshotStartedAt,
+          lastTrackingGapAt: recoveredState.lastTrackingGapAt,
+          now: Date.parse(recoveredState.lastSuccessAt ?? ""),
+        })).toBeNull();
+      } finally {
+        database.close();
+      }
+    },
+  );
 
   it("lets a snapshot supersede an older event delivered while the pages are loading", () => {
     const { store, storage } = storeFor();

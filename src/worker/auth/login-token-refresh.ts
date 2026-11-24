@@ -5,13 +5,11 @@ import {
   getLoginIdentityRefreshState,
   releaseLoginIdentityRefreshLease,
   rotateLoginTokensForUser,
-  setLoginIdentityStatusIfCurrent,
   type LoginIdentityRecord,
 } from "../db/login-identity";
 import { markLoginRevoked } from "../login-revocation";
 import { encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./crypto";
 import { decryptStoredToken, refreshBotToken, TwitchApiError } from "../bot-maintenance";
-import { missingEnabledModuleBroadcasterScopes } from "../module-scopes";
 
 export interface LoginTokenRefreshEnvironment {
   DB: D1Database;
@@ -89,6 +87,45 @@ export const decryptLoginIdentityAccessToken = async (
   identity: LoginIdentityRecord,
   env: LoginTokenRefreshEnvironment,
 ): Promise<string | null> => decryptStoredToken(identity.accessTokenCiphertext, getTokenEncryptionKeys(env));
+
+const parsedIdentityTokenScopes = (identity: LoginIdentityRecord): string[] => {
+  try {
+    const scopes: unknown = JSON.parse(identity.tokenScopesJson);
+    return Array.isArray(scopes) && scopes.every((scope) => typeof scope === "string") ? scopes : [];
+  } catch {
+    return [];
+  }
+};
+
+/** Checks whether stored broadcaster credentials can currently support a scoped operation. */
+export const isBroadcasterCredentialUsable = async (
+  identity: LoginIdentityRecord | null,
+  env: Pick<LoginTokenRefreshEnvironment, "TOKEN_ENCRYPTION_KEYS" | "SESSION_ENCRYPTION_KEYS">,
+  now: string,
+  requiredScopes: readonly string[] = [],
+  scopeAlternatives: readonly (readonly string[])[] = [],
+): Promise<boolean> => {
+  if (identity === null || identity.status !== "connected") return false;
+  // Rank events do not refresh credentials; even a refreshable expired token leaves a tracking gap.
+  const expiresAt = Date.parse(identity.expiresAt);
+  const currentTime = Date.parse(now);
+  if (!Number.isFinite(expiresAt) || !Number.isFinite(currentTime) || expiresAt <= currentTime) return false;
+
+  const grantedScopes = new Set(parsedIdentityTokenScopes(identity));
+  if (requiredScopes.some((scope) => !grantedScopes.has(scope)) ||
+      scopeAlternatives.some((group) => !group.some((scope) => grantedScopes.has(scope)))) return false;
+
+  try {
+    const encryptionKeys = getTokenEncryptionKeys(env);
+    const [accessToken, refreshToken] = await Promise.all([
+      decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys),
+      decryptStoredToken(identity.refreshTokenCiphertext, encryptionKeys),
+    ]);
+    return accessToken !== null && refreshToken !== null;
+  } catch {
+    return false;
+  }
+};
 
 const leaseOwnerMatches = (
   state: Awaited<ReturnType<typeof getLoginIdentityRefreshState>>,
@@ -284,34 +321,6 @@ const refreshLoginIdentityTokensOnce = async (
         releaseLease = false;
         throw new Error("The login token refresh lease changed after invalid_grant.", { cause: error });
       }
-      throw error;
-    }
-
-    const missingModuleScopes = await missingEnabledModuleBroadcasterScopes(env.DB, identity.userId, refreshed.scopes);
-    if (missingModuleScopes.length > 0) {
-      const marked = await setLoginIdentityStatusIfCurrent(
-        env.DB,
-        identity.userId,
-        "error",
-        "active_module_scope_missing",
-        now,
-        identity.accessTokenCiphertext,
-        identity.refreshTokenCiphertext,
-      );
-      if (!marked) {
-        const replacement = await rereadReplacement(env, identity);
-        if (replacement !== null) {
-          releaseLease = true;
-          return replacement;
-        }
-      }
-      releaseLease = true;
-      const error = new TwitchApiError(
-        "The refreshed token is missing a scope used by an enabled module.",
-        400,
-        "active_module_scope_missing",
-      );
-      Object.assign(error, { missingModuleScopes });
       throw error;
     }
 

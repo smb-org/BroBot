@@ -12,7 +12,7 @@ import type { HelixResult } from "../../modules/contract";
 import type { ChannelJobRunContext, HostChannelJobRegistration } from "./channel-jobs";
 import { withBroadcasterToken } from "../auth/broadcaster-token";
 import { getLoginIdentity } from "../db/login-identity";
-import { decryptLoginIdentityAccessToken } from "../auth/login-token-refresh";
+import { isBroadcasterCredentialUsable } from "../auth/login-token-refresh";
 import { listEventSubSubscriptions } from "../db/eventsub-state";
 import { helixRequest, helixPages } from "../twitch/helix";
 
@@ -678,7 +678,7 @@ const parsedTokenScopes = (serialized: string): string[] => {
   }
 };
 
-const rankScopeAvailable =async (
+const rankScopeAvailable = async (
   environment: Pick<Env, "DB">,
   channelId: string,
   rankType: TwitchRankType,
@@ -689,8 +689,26 @@ const rankScopeAvailable =async (
   return TWITCH_RANKS_SCOPE_ALTERNATIVES[rankType].some((scope) => tokenScopes.has(scope));
 };
 
+const rankCredentialUsable = async (
+  environment: Pick<Env, "DB" | "TOKEN_ENCRYPTION_KEYS" | "SESSION_ENCRYPTION_KEYS">,
+  channelId: string,
+  rankType: TwitchRankType,
+): Promise<boolean> => {
+  try {
+    return await isBroadcasterCredentialUsable(
+      await getLoginIdentity(environment.DB, channelId),
+      environment,
+      new Date().toISOString(),
+      [],
+      [TWITCH_RANKS_SCOPE_ALTERNATIVES[rankType]],
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const applyTwitchRankEventToStore = async (
-  environment: Pick<Env, "DB">,
+  environment: Pick<Env, "DB" | "TOKEN_ENCRYPTION_KEYS" | "SESSION_ENCRYPTION_KEYS">,
   store: TwitchRanksStore,
   channelId: string,
   input: {
@@ -715,7 +733,7 @@ export const applyTwitchRankEventToStore = async (
     return { duplicate: gap.duplicate, changed: false, ignored: !gap.duplicate };
   };
   if (event === null) return await recordGap();
-  const trackingUnavailable = !await rankScopeAvailable(environment, channelId, event.rankType);
+  const trackingUnavailable = !await rankCredentialUsable(environment, channelId, event.rankType);
   // Notifications can still update the set without a broadcaster token, while the gap forces a fresh snapshot after recovery.
   const result = store.applyEvent(
     event,
@@ -749,16 +767,14 @@ export const readTwitchRankSnapshot = async (
       return [];
     }
   })();
-  const scopeAvailable = identity?.reason !== "active_module_scope_missing" &&
-    TWITCH_RANKS_SCOPE_ALTERNATIVES[rankType].some((scope) => tokenScopes.includes(scope));
-  let tokenValid = identity !== null && identity.status === "connected" && Date.parse(identity.expiresAt) > now;
-  if (tokenValid && identity !== null) {
-    try {
-      tokenValid = await decryptLoginIdentityAccessToken(identity, environment) !== null;
-    } catch {
-      tokenValid = false;
-    }
-  }
+  const scopeAvailable = TWITCH_RANKS_SCOPE_ALTERNATIVES[rankType].some((scope) => tokenScopes.includes(scope));
+  const tokenValid = await isBroadcasterCredentialUsable(
+    identity,
+    environment,
+    new Date(now).toISOString(),
+    [],
+    [TWITCH_RANKS_SCOPE_ALTERNATIVES[rankType]],
+  );
   const matchingSubscriptions = rankType === "vip"
     ? ["channel.vip.add", "channel.vip.remove"]
     : ["channel.moderator.add", "channel.moderator.remove"];
