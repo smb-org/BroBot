@@ -67,6 +67,7 @@ import {
   listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUser,
   listRequiredBroadcasterScopesForUserAndModule,
+  broadcasterTokenPreservesEnabledModuleScopes,
 } from "../module-scopes";
 import { canManage, type ApiErrorCode } from "../../contracts/values";
 import { findChannelVariable } from "../db/channel-variables";
@@ -679,7 +680,10 @@ authRouter.get("/auth/twitch/callback", async (context) => {
     const expiresAt = new Date(Date.parse(now) + tokens.expiresIn * 1000).toISOString();
     const current = await getLoginIdentity(context.env.DB, identity.userId);
     const encryptionKeys = getTokenEncryptionKeys(context.env);
-    await upsertLoginIdentity(context.env.DB, {
+    // A plain login must not drop a scope an enabled module uses: keep the stored token and still sign in.
+    const keepStoredToken = current !== null &&
+      !await broadcasterTokenPreservesEnabledModuleScopes(context.env.DB, identity.userId, tokens.scopes);
+    if (!keepStoredToken) await upsertLoginIdentity(context.env.DB, {
       userId: identity.userId,
       login: identity.login,
       scopesJson: JSON.stringify(tokens.scopes),

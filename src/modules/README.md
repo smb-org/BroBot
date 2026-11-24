@@ -935,6 +935,40 @@ contracts package, or return `{ ok: false, code }`, to record one of the fixed
 job errors. Host-owned recurring work uses the same registration shape with an
 ID in the `host:` namespace.
 
+### Consuming host-managed Twitch ranks
+
+A module that uses the host's current VIP or moderator list declares the
+resource and the alarm key that reconciles its own derived state. The key must
+name an alarm on the module, and that alarm must also declare a `job` block.
+This activates the host rank EventSub subscriptions and the hourly snapshot
+job only while that consumer is enabled.
+
+```ts
+consumes: ["twitch_ranks"],
+reconcileAlarmKeys: { twitch_ranks: "sync_roles" },
+broadcasterScopeAlternatives: [["channel:read:vips", "channel:manage:vips"], ["moderation:read"]],
+alarms: [{ key: "sync_roles", job: { /* interval, label, requiredScopes */ }, handle }],
+```
+
+Declare only the rank types the module uses in `broadcasterScopeAlternatives`.
+Each inner array is an any-of group; the host requests the smallest alternative
+unless an alternative is already granted or required by another enabled module.
+
+`ModuleAlarmContext.twitchRanks` exposes `getTwitchRanks("vip" | "moderator")`,
+which returns `{ available, complete, reason?, userIds }`. `available: false`
+means the current broadcaster token lacks that rank type's scope. Incomplete
+data also reports a reason; only a complete result is safe for removals.
+`isDirty()` returns `{ dirty, generation }`. After applying that generation to
+the consumer's state, call `markReconciled(generation)` from its fenced job
+handler; the host clears the flag only through the current
+`context.channelJob.commit(...)` transaction. Event changes set the flag and
+schedule the declared alarm in the same ChannelObject transaction.
+
+Rank events and snapshots may race. The host applies events immediately and
+replays events newer than a snapshot's start time over the completed Helix
+pages before publishing the snapshot. A page failure leaves the prior set in
+place and reports the type as incomplete.
+
 **Grenzen:**
 
 - **Der Host wiederholt jede geworfene Ausnahme.** Er klassifiziert keine

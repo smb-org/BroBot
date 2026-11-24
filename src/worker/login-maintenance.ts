@@ -64,6 +64,7 @@ const refreshFailureReason = (error: unknown): string =>
   error instanceof TwitchApiError && error.code !== null ? error.code : "refresh_failed";
 
 const maintainLoginIdentity = async (env: Env, identity: Awaited<ReturnType<typeof listLoginIdentities>>[number], now: string): Promise<void> => {
+  if (identity.status === "error" && identity.reason === "active_module_scope_missing") return;
   const encryptionKeys = getTokenEncryptionKeys(env);
   const accessToken = await decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys);
   const refreshToken = await decryptStoredToken(identity.refreshTokenCiphertext, encryptionKeys);

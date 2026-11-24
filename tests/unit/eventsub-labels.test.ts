@@ -25,6 +25,8 @@ describe("EventSub labels", () => {
     expect(eventSubName("channel.update", "", "en")).toBe("Channel updates");
     expect(eventSubName("channel.vip.remove", "", "en")).toBe("VIP removals");
     expect(eventSubName("channel.vip.remove", "", "de")).toBe("VIP-Entzüge");
+    expect(eventSubName("channel.vip.add", "", "en")).toBe("VIP appointments");
+    expect(eventSubName("channel.moderator.add", "", "de")).toBe("Moderator-Ernennungen");
     expect(eventSubName("channel.future_event", "", "en")).toBe("channel.future_event");
   });
 

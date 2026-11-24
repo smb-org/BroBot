@@ -98,6 +98,10 @@ import type {
   ModuleTempVipRemovedEvent,
   ModuleTempVipResult,
   ModuleTempVipRow,
+  ModuleTwitchRankSnapshot,
+  ModuleTwitchRankType,
+  ModuleTwitchRanksAccess,
+  ModuleChannelJobContext,
   ModuleQuizOverlaySnapshot,
   ModulePointRoundAnnouncement,
   ModulePointRoundResult,
@@ -172,6 +176,7 @@ import {
   channelJobAlarmKey,
   executeChannelJobClaim,
   HOST_CHANNEL_JOBS,
+  hostChannelJobsForEnabledModules,
   reconcilePendingChannelJobScheduleInputs,
   recordChannelJobScheduleInputsChanged,
   requestChannelJobRun,
@@ -179,7 +184,14 @@ import {
   type ChannelJobRunContext,
   type ChannelJobSnapshot,
   type ChannelJobStatus,
+  type HostChannelJobRuntime,
 } from "./channel-jobs";
+import {
+  applyTwitchRankEventToStore,
+  readTwitchRankSnapshot,
+  TwitchRanksStore,
+  TWITCH_RANKS_JOB_ID,
+} from "./twitch-ranks";
 import { getAdSchedule } from "../../modules/ads/adapters/ad-schedule";
 import { writeAdCountdownState } from "../../modules/ads/adapters/countdown-state";
 import { adCountdownStateForSchedule, createAdCountdownOverlayAction } from "../../modules/ads/overlay/countdown-action";
@@ -978,6 +990,7 @@ export class ChannelObject extends DurableObject<Env> {
   private statisticsWordRankingRetryNotBefore = 0;
   private alarmScheduleQueue: Promise<void> = Promise.resolve();
   private channelJobStoreInstance: ChannelJobStore | null = null;
+  private twitchRanksStoreInstance: TwitchRanksStore | null = null;
   private channelJobScheduleQueue: Promise<void> = Promise.resolve();
   private timerScheduleReconciliationQueue: Promise<void> = Promise.resolve();
   private timerScheduleInputGeneration = 0;
@@ -1013,6 +1026,48 @@ export class ChannelObject extends DurableObject<Env> {
       this.channelJobStoreInstance = new ChannelJobStore(this.ctx.storage);
     }
     return this.channelJobStoreInstance;
+  }
+
+  private twitchRanksStore(): TwitchRanksStore {
+    if (this.twitchRanksStoreInstance === null) {
+      this.twitchRanksStoreInstance = new TwitchRanksStore(this.ctx.storage, {
+        scheduleConsumerAlarmSync: (moduleId, alarmKey, deadline) => {
+          this.scheduleModuleAlarmSync(moduleId, alarmKey, deadline);
+        },
+      });
+    }
+    return this.twitchRanksStoreInstance;
+  }
+
+  private scheduleModuleAlarmSync(moduleId: string, alarmKey: string, deadline: number): void {
+    if (!Number.isFinite(deadline)) return;
+    const key = `module:${moduleId}:${alarmKey}`;
+    const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
+    const table = stored === undefined ? {} : { ...stored };
+    const current = table[key];
+    if (current !== undefined && alarmAttemptAt(current) <= deadline) return;
+    table[key] = {
+      deadline,
+      handler: key,
+      revision: (current?.revision ?? 0) + 1,
+    };
+    this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
+  }
+
+  private hostChannelJobRuntime(): HostChannelJobRuntime {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Host channel jobs require a named Durable Object.");
+    return {
+      channelId,
+      environment: this.env,
+      storage: this.ctx.storage,
+      scheduleAlarm: async () => {
+        await this.scheduleEarliestAlarm();
+      },
+      scheduleModuleAlarmSync: (moduleId, alarmKey, deadline) => {
+        this.scheduleModuleAlarmSync(moduleId, alarmKey, deadline);
+      },
+    };
   }
 
   /** Keeps each enabled-module read paired with its complete schedule reconciliation. */
@@ -1054,7 +1109,7 @@ export class ChannelObject extends DurableObject<Env> {
         ...(alarm.retryDelaysMs === undefined ? {} : { retryDelaysMs: alarm.retryDelaysMs }),
       }]);
     });
-    return [...moduleJobs, ...HOST_CHANNEL_JOBS];
+    return [...moduleJobs, ...hostChannelJobsForEnabledModules(HOST_CHANNEL_JOBS, enabledModules, MODULES)];
   }
 
   private async syncRegisteredChannelJobs(
@@ -1099,7 +1154,9 @@ export class ChannelObject extends DurableObject<Env> {
 
   public async syncChannelJobSchedules(): Promise<void> {
     // Skips the D1 lookup and SQLite scan on every alarm while no module or host declares a job.
-    if (HOST_CHANNEL_JOBS.length === 0 && !MODULES.some((module) => module.alarms?.some((alarm) => alarm.job !== undefined))) return;
+    const hostJobPossible = HOST_CHANNEL_JOBS.some(({ resource }) =>
+      resource === undefined || MODULES.some((module) => module.consumes?.includes(resource) === true));
+    if (!hostJobPossible && !MODULES.some((module) => module.alarms?.some((alarm) => alarm.job !== undefined))) return;
     await this.withRegisteredChannelJobs(() => undefined);
   }
 
@@ -1199,6 +1256,54 @@ export class ChannelObject extends DurableObject<Env> {
     const allowed = this.channelJobStore().markReconcileNeeded(jobId);
     if (!allowed) await this.publishChannelJobStatusChanged();
     return allowed;
+  }
+
+  public async applyTwitchRankEvent(input: {
+    messageId: string;
+    subscriptionType: string;
+    payload: Readonly<Record<string, unknown>>;
+    eventAt: string;
+  }): Promise<{ duplicate: boolean; changed: boolean; ignored: boolean }> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Twitch ranks require a named channel Durable Object.");
+    return await applyTwitchRankEventToStore(this.env, this.twitchRanksStore(), channelId, input, async () => {
+      await this.markChannelJobReconcileNeeded(TWITCH_RANKS_JOB_ID);
+      await this.scheduleEarliestAlarm();
+    });
+  }
+
+  public async getTwitchRanks(rankType: ModuleTwitchRankType): Promise<ModuleTwitchRankSnapshot> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) throw new Error("Twitch ranks require a named channel Durable Object.");
+    return await readTwitchRankSnapshot(
+      this.env,
+      this.twitchRanksStore(),
+      channelId,
+      rankType,
+      this.channelJobStore().isPaused(TWITCH_RANKS_JOB_ID),
+    );
+  }
+
+  public async isTwitchRankComplete(rankType: ModuleTwitchRankType): Promise<boolean> {
+    return (await this.getTwitchRanks(rankType)).complete;
+  }
+
+  public isTwitchRankConsumerDirty(moduleId: string): { dirty: boolean; generation: number } {
+    return this.twitchRanksStore().isConsumerDirty(moduleId);
+  }
+
+  private twitchRanksAccess(
+    moduleId: string,
+    channelJob?: ModuleChannelJobContext,
+  ): ModuleTwitchRanksAccess {
+    return {
+      getTwitchRanks: (rankType) => this.getTwitchRanks(rankType),
+      isComplete: async (rankType) => await this.isTwitchRankComplete(rankType),
+      isDirty: () => Promise.resolve(this.isTwitchRankConsumerDirty(moduleId)),
+      markReconciled: (generation) => channelJob === undefined
+        ? false
+        : this.twitchRanksStore().markConsumerReconciled(moduleId, generation, channelJob),
+    };
   }
 
   public async publishChannelJobStatusChanged(): Promise<void> {
@@ -4406,6 +4511,9 @@ export class ChannelObject extends DurableObject<Env> {
       ...(alarmClaimToken === undefined ? {} : { alarmClaimToken }),
       ...(channelJob === undefined ? {} : { channelJob }),
       markReconcileNeeded: async (jobId) => await this.markChannelJobReconcileNeeded(jobId),
+      ...(MODULES.find((module) => module.id === moduleId)?.consumes?.includes("twitch_ranks") === true ? {
+        twitchRanks: this.twitchRanksAccess(moduleId, channelJob),
+      } : {}),
       ...(moduleId === "song_requests" ? {
         runModuleAlarm: (handlerKey: string, alarmKey: string, invocation?: unknown) => this.runModuleAlarm(
           moduleId, handlerKey, alarmKey, invocation,
@@ -9607,6 +9715,8 @@ export class ChannelObject extends DurableObject<Env> {
     externalFetchBudget: ModuleExternalFetchBudget = createModuleExternalFetchBudget(),
   ): Map<string, AlarmHandlerRegistration> {
     const handlers = new Map<string, AlarmHandlerRegistration>([
+      // The channel job runner executes this host job; the alarm handler itself has nothing to do.
+      [TWITCH_RANKS_JOB_ID, { handle: () => Promise.resolve(undefined) }],
       [ACTIVE_CHATTER_EXPIRY_HANDLER, {
         handle: async (_key, entry, now) => {
           await this.expireActiveChatters(entry.deadline, now);
@@ -9761,6 +9871,7 @@ export class ChannelObject extends DurableObject<Env> {
             entry.deadline,
             now,
             nowIso,
+            this.hostChannelJobRuntime(),
           ),
         },
       });

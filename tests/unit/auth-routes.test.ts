@@ -1151,6 +1151,41 @@ describe("auth routes", () => {
     }
   });
 
+  it("does not replace a broadcaster token that drops a scope used by an enabled module", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "kanal-a");
+      await insertLoginIdentityAndSession(database, "kanal-a", [...LOGIN_SCOPES, "channel:read:ads"]);
+      await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('kanal-a', 'ads', 1, '{}')",
+      ).run();
+      const environment = environmentForDatabase(database);
+      const login = await authRouter.fetch(
+        new Request("https://brobot.example/auth/channels/kanal-a/broadcaster-scopes/ads", {
+          headers: { Cookie: await sessionCookieHeaderFor("kanal-a") },
+        }),
+        environment,
+      );
+      fetchWith(tokenResponse(LOGIN_SCOPES), identityResponse("kanal-a", "kanal-a"));
+
+      const response = await authRouter.fetch(callbackRequest(login), environment);
+      const stored = await database.prepare(
+        "SELECT token_scopes_json, access_token_ciphertext FROM twitch_login_identity WHERE user_id = ?",
+      ).bind("kanal-a").first<{ token_scopes_json: string; access_token_ciphertext: string }>();
+
+      // The sign-in itself still succeeds; only the stored token is kept.
+      expect(response.status).toBe(302);
+      expect(response.headers.get("Set-Cookie")).toContain("brobot_session");
+      expect(stored).toEqual({
+        token_scopes_json: JSON.stringify([...LOGIN_SCOPES, "channel:read:ads"]),
+        access_token_ciphertext: "access",
+      });
+    } finally {
+      database.close();
+    }
+  });
+
   it("doesn't adopt a bot identity with a differing Twitch user ID", async () => {
     // Logins can be changed and reassigned. If the bot account gets renamed
     // and someone registers the name that became free, they must not be able

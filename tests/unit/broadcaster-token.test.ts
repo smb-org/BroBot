@@ -7,6 +7,7 @@ import { maintainLoginIdentities } from "../../src/worker/login-maintenance";
 import { getLoginIdentity, setLoginIdentityTokenScopes, upsertLoginIdentity } from "../../src/worker/db/login-identity";
 import { withBroadcasterToken } from "../../src/worker/auth/broadcaster-token";
 import { addChannelVip } from "../../src/worker/twitch/vips";
+import { insertChannel, insertMember } from "./fixtures";
 import { createReadInterleavingDatabase, TestD1Database, type TestPreparedStatement } from "./test-d1";
 
 const CHANNEL_ID = "1000001";
@@ -164,6 +165,41 @@ describe("withBroadcasterToken", () => {
     }
   });
 
+  it.each(["channel:read:vips", "channel:manage:vips"] as const)(
+    "accepts %s as an alternative VIP scope",
+    async (scope) => {
+      const database = new TestD1Database();
+      try {
+        await seedIdentity(database, { scopes: [scope] });
+        const call = vi.fn(() => Promise.resolve(SUCCESS));
+
+        await expect(withBroadcasterToken(
+          environmentFor(database), CHANNEL_ID, [], call,
+          { now: () => NOW, fetcher: vi.fn<typeof fetch>(), scopeAlternatives: [["channel:read:vips", "channel:manage:vips"]] },
+        )).resolves.toEqual({ kind: "ok", value: { value: "done" } });
+        expect(call).toHaveBeenCalledOnce();
+      } finally {
+        database.close();
+      }
+    },
+  );
+
+  it("does not call Helix when none of an any-of scope group is granted", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, { scopes: [] });
+      const call = vi.fn(() => Promise.resolve(SUCCESS));
+
+      await expect(withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, [], call,
+        { now: () => NOW, fetcher: vi.fn<typeof fetch>(), scopeAlternatives: [["channel:read:vips", "channel:manage:vips"]] },
+      )).resolves.toMatchObject({ kind: "scope_missing" });
+      expect(call).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
   it("refreshes a token that expires within the proactive window before calling Helix", async () => {
     const database = new TestD1Database();
     try {
@@ -183,6 +219,39 @@ describe("withBroadcasterToken", () => {
         tokenScopesJson: '["channel:manage:broadcast"]',
       });
       await expect(readRefreshLease(database)).resolves.toEqual({ refresh_lease_owner: null, refresh_lease_until: null });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps the stored token and requires re-consent when refresh drops an enabled module scope", async () => {
+    const database = new TestD1Database();
+    try {
+      const scopes = ["channel:manage:broadcast", "channel:read:ads"];
+      await seedIdentity(database, { expiresAt: "2026-10-23T10:04:00.000Z", scopes });
+      await insertChannel(database, CHANNEL_ID);
+      await insertMember(database, CHANNEL_ID, CHANNEL_ID, "broadcaster");
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'ads', 1, '{}')",
+      ).bind(CHANNEL_ID).run();
+      const before = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(refreshedTokenResponse(["channel:manage:broadcast"]));
+      const call = vi.fn(() => Promise.resolve(SUCCESS));
+
+      await expect(withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        { now: () => NOW, fetcher },
+      )).resolves.toMatchObject({ kind: "scope_missing", missing: ["channel:read:ads"] });
+
+      const after = await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID);
+      expect(after).toMatchObject({
+        accessTokenCiphertext: before?.accessTokenCiphertext,
+        refreshTokenCiphertext: before?.refreshTokenCiphertext,
+        tokenScopesJson: JSON.stringify(scopes),
+        status: "error",
+        reason: "active_module_scope_missing",
+      });
+      expect(call).not.toHaveBeenCalled();
     } finally {
       database.close();
     }

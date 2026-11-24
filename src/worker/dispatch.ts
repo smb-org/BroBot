@@ -39,6 +39,7 @@ import { botAccessTokenFor } from "./twitch/bot-access";
 import { moduleBallots } from "./module-ballots";
 import { modulePoints } from "./module-points";
 import { moduleTempVips } from "./module-temp-vips";
+import { moduleTwitchRanks } from "./module-twitch-ranks";
 import { createModuleSecretAccess, createModuleSecretReadAccess } from "./module-secrets";
 import { recordChannelGameHistory } from "./db/game-search-cache";
 import { broadcasterHasScope } from "./broadcaster-scope";
@@ -817,13 +818,15 @@ export const dispatchEventSubNotification = async (
   if (event.subscriptionType === "channel.vip.remove") {
     const userId = textValue(event.payload.user_id);
     if (userId === null) throw new Error("Temporary VIP removal event has no user id.");
-    const channel = environment.CHANNEL?.get(environment.CHANNEL.idFromName(event.channelId));
-    if (channel === undefined) throw new Error("The channel Durable Object is unavailable.");
-    await channel.handleTempVipRemoved({
-      triggerId: event.triggerId,
-      userId,
-      eventSubTimestamp: event.eventSubTimestamp ?? event.receivedAt,
-    });
+    if (await moduleEnabledForChannel(environment.DB, event.channelId, "temp_vips")) {
+      const channel = environment.CHANNEL?.get(environment.CHANNEL.idFromName(event.channelId));
+      if (channel === undefined) throw new Error("The channel Durable Object is unavailable.");
+      await channel.handleTempVipRemoved({
+        triggerId: event.triggerId,
+        userId,
+        eventSubTimestamp: event.eventSubTimestamp ?? event.receivedAt,
+      });
+    }
     return;
   }
   if (event.subscriptionType === "channel.chat.message") {
@@ -1481,6 +1484,9 @@ export const dispatchEventSubNotification = async (
               (await fetchTwitchUsersById(fetcher, environment as unknown as Env, [userId])).get(userId) ?? null,
             points,
             tempVips: moduleTempVips(environment.CHANNEL, event.channelId),
+            ...(module.consumes?.includes("twitch_ranks") === true ? {
+              twitchRanks: moduleTwitchRanks(environment.CHANNEL, event.channelId, module.id),
+            } : {}),
             ...(moduleChannelNamespace === undefined ? {} : {
               channelPoints: {
                 resolveRedemption: async (operationId, status) => await Promise.resolve<unknown>(moduleChannelNamespace
@@ -1601,6 +1607,9 @@ export const dispatchEventSubNotification = async (
           points: modulePoints(environment.CHANNEL, event.channelId, moduleId),
           ballots: moduleBallots(environment.CHANNEL, event.channelId, moduleId),
           tempVips: moduleTempVips(environment.CHANNEL, event.channelId),
+          ...(MODULES.find((candidate) => candidate.id === moduleId)?.consumes?.includes("twitch_ranks") === true ? {
+            twitchRanks: moduleTwitchRanks(environment.CHANNEL, event.channelId, moduleId),
+          } : {}),
           activeChatters: {
             count: async (windowMs) => {
               if (MODULES.find((candidate) => candidate.id === moduleId)?.needsActiveChatters !== true ||

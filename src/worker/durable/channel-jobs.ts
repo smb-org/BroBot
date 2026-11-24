@@ -1,5 +1,7 @@
 import type { ModuleLanguage } from "../../modules/contract";
 import { ChannelJobError, type ChannelJobErrorCode, type ChannelJobSummary } from "../../contracts/channel-jobs";
+import type { BotModule, ModuleConsumedResource } from "../../modules/contract";
+import { twitchRanksHostJob } from "./twitch-ranks";
 
 export { ChannelJobError };
 export type { ChannelJobErrorCode } from "../../contracts/channel-jobs";
@@ -19,11 +21,38 @@ export interface ChannelJobRegistration extends ChannelJobOptions {
 }
 
 export interface HostChannelJobRegistration extends ChannelJobRegistration {
-  run: (context: ChannelJobRunContext, alarmKey: string, deadline: number, now: number, nowIso: string) => Promise<unknown>;
+  resource?: ModuleConsumedResource;
+  run: (
+    context: ChannelJobRunContext,
+    alarmKey: string,
+    deadline: number,
+    now: number,
+    nowIso: string,
+    runtime: HostChannelJobRuntime,
+  ) => Promise<unknown>;
 }
 
-/** Host jobs are added here with their existing `host:` alarm handler; there are no host jobs yet. */
-export const HOST_CHANNEL_JOBS: readonly HostChannelJobRegistration[] = [];
+export interface HostChannelJobRuntime {
+  channelId: string;
+  environment: Env;
+  storage: DurableObjectStorage;
+  scheduleAlarm: () => Promise<void>;
+  /** Writes a module alarm entry synchronously inside the caller's SQLite transaction. */
+  scheduleModuleAlarmSync: (moduleId: string, alarmKey: string, deadline: number) => void;
+}
+
+export const HOST_CHANNEL_JOBS: readonly HostChannelJobRegistration[] = [twitchRanksHostJob];
+
+export const hostChannelJobsForEnabledModules = (
+  jobs: readonly HostChannelJobRegistration[],
+  enabledModuleIds: ReadonlySet<string>,
+  modules: readonly BotModule[],
+): HostChannelJobRegistration[] => jobs.filter((job) => {
+  const { resource } = job;
+  if (resource === undefined) return true;
+  return modules.some((module) =>
+    (module.mandatory === true || enabledModuleIds.has(module.id)) && module.consumes?.includes(resource) === true);
+});
 
 export const channelJobAlarmKey = (jobId: string): string => `channel-job:${encodeURIComponent(jobId)}`;
 

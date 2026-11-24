@@ -31,7 +31,7 @@ export interface ModuleBroadcasterScopeState {
 }
 
 interface ModuleChannelRow {
-  module_id: string;
+  module_id: string | null;
 }
 
 interface IdentityScopeRow {
@@ -39,12 +39,39 @@ interface IdentityScopeRow {
   status: string;
 }
 
+interface IdentityTokenScopeRow {
+  token_scopes_json: string;
+  status: string;
+}
+
 const unique = (scopes: readonly string[]): string[] => [...new Set(scopes)];
+
+const alternativeGroups = (module: BotModule | undefined): readonly (readonly string[])[] =>
+  module?.broadcasterScopeAlternatives ?? [];
+
+/** Resolves module all-of scopes plus one least-privileged scope from each any-of group. */
+export const resolveBroadcasterScopes = (
+  modules: readonly BotModule[],
+  grantedScopes: readonly string[] = [],
+): string[] => {
+  const granted = new Set(grantedScopes);
+  const required = new Set(modules.flatMap((module) => module.broadcasterScopes ?? []));
+  const resolved = new Set(required);
+  const orderedGroups = modules.flatMap((module) => alternativeGroups(module));
+  for (const group of orderedGroups) {
+    const alternatives = [...new Set(group)].sort((left, right) =>
+      left.length - right.length || left.localeCompare(right));
+    const alreadyAvailable = alternatives.find((scope) => granted.has(scope) || required.has(scope));
+    const selected = alreadyAvailable ?? alternatives[0];
+    if (selected !== undefined) resolved.add(selected);
+  }
+  return [...resolved];
+};
 
 /** Determines the derived full scope set for flagged channels. */
 export const listAllBroadcasterScopes = (): string[] => unique([
   ...LOGIN_SCOPES,
-  ...MODULES.flatMap((module) => declaredScopes(module)),
+  ...resolveBroadcasterScopes(MODULES),
   ...VOLLUMFANG_BROADCASTER_SCOPES,
 ]);
 
@@ -80,14 +107,27 @@ const broadcasterIdentityScopes = async (
   return row?.status === "connected" ? parseScopes(row.scopes_json) : [];
 };
 
+const broadcasterIdentityTokenScopes = async (
+  db: D1Database,
+  channelId: string,
+): Promise<string[]> => {
+  const row = await db.prepare(
+    `SELECT token_scopes_json, status
+       FROM twitch_login_identity
+      WHERE user_id = ?`,
+  ).bind(channelId).first<IdentityTokenScopeRow>();
+  return row !== null && row.status !== "revoked" ? parseScopes(row.token_scopes_json) : [];
+};
+
 export const moduleBroadcasterScopeState = async (
   db: D1Database,
   channelId: string,
   module: BotModule,
 ): Promise<ModuleBroadcasterScopeState> => {
-  const required = declaredScopes(module);
+  const grantedScopes = await broadcasterIdentityScopes(db, channelId);
+  const required = resolveBroadcasterScopes([module], grantedScopes);
   if (required.length === 0) return { required, missing: [] };
-  const granted = new Set(await broadcasterIdentityScopes(db, channelId));
+  const granted = new Set(grantedScopes);
   return { required, missing: required.filter((scope) => !granted.has(scope)) };
 };
 
@@ -102,32 +142,56 @@ export const moduleOptionalBroadcasterScopeState = async (
   return { optional, missingOptional: optional.filter((scope) => !granted.has(scope)) };
 };
 
+const moduleMissingBroadcasterScopes = (
+  module: BotModule,
+  grantedScopes: readonly string[],
+): string[] => {
+  const granted = new Set(grantedScopes);
+  return unique([
+    ...declaredScopes(module).filter((scope) => !granted.has(scope)),
+    ...alternativeGroups(module).flatMap((group) => group.some((scope) => granted.has(scope)) ? [] : group),
+  ]);
+};
+
 export const moduleHasRequiredBroadcasterScopes = (
   module: BotModule,
   grantedScopes: readonly string[],
-): boolean => {
-  const granted = new Set(grantedScopes);
-  return declaredScopes(module).every((scope) => granted.has(scope));
+): boolean => moduleMissingBroadcasterScopes(module, grantedScopes).length === 0;
+
+const enabledModulesForUser = async (
+  db: D1Database,
+  userId: string,
+  registry: readonly BotModule[] = MODULES,
+): Promise<BotModule[]> => {
+  const rows = await db.prepare(
+    `SELECT channel_modules.module_id
+       FROM channel_members
+       LEFT JOIN channel_modules
+         ON channel_modules.channel_id = channel_members.channel_id
+        AND channel_modules.enabled = 1
+      WHERE channel_members.user_id = ?
+        AND channel_members.channel_id = ?
+        AND channel_members.role = ${sqlRole("broadcaster")}
+      ORDER BY channel_modules.module_id`,
+  ).bind(userId, userId).all<ModuleChannelRow>();
+  const enabledIds = new Set(rows.results.flatMap(({ module_id }) => module_id === null ? [] : [module_id]));
+  for (const module of registry) if (module.mandatory === true) enabledIds.add(module.id);
+  return registry.filter((module) => enabledIds.has(module.id));
 };
 
-/** Determines all extra scopes from enabled modules of the user's own broadcaster channels. */
+/** Collects enabled-module scopes, retaining optional scopes currently in use. */
 export const listRequiredBroadcasterScopesForUser = async (
   db: D1Database,
   userId: string,
+  registry: readonly BotModule[] = MODULES,
 ): Promise<string[]> => {
-  const rows = await db.prepare(
-    `SELECT channel_modules.module_id
-       FROM channel_modules
-       JOIN channel_members
-         ON channel_members.channel_id = channel_modules.channel_id
-        AND channel_members.user_id = ?
-        AND channel_members.channel_id = ?
-        AND channel_members.role = ${sqlRole("broadcaster")}
-      WHERE channel_modules.enabled = 1
-      ORDER BY channel_modules.module_id`,
-  ).bind(userId, userId).all<ModuleChannelRow>();
-  const modules = new Map(MODULES.map((module) => [module.id, module]));
-  return unique(rows.results.flatMap((row) => declaredScopes(modules.get(row.module_id))));
+  const modules = await enabledModulesForUser(db, userId, registry);
+  const grantedScopes = await broadcasterIdentityScopes(db, userId);
+  const tokenScopes = new Set(await broadcasterIdentityTokenScopes(db, userId));
+  return unique([
+    ...resolveBroadcasterScopes(modules, grantedScopes),
+    ...modules.flatMap((module) => moduleOptionalBroadcasterScopes(module).filter((scope) => tokenScopes.has(scope))),
+  ]);
 };
 
 /** Adds the requested registry module's scopes to the already-required ones. */
@@ -135,10 +199,44 @@ export const listRequiredBroadcasterScopesForUserAndModule = async (
   db: D1Database,
   userId: string,
   module: BotModule,
-): Promise<string[]> => unique([
-  ...declaredScopes(module),
-  ...moduleOptionalBroadcasterScopes(module),
-  ...await listRequiredBroadcasterScopesForUser(db, userId),
-]);
+): Promise<string[]> => {
+  const modules = await enabledModulesForUser(db, userId);
+  const grantedScopes = await broadcasterIdentityScopes(db, userId);
+  const tokenScopes = new Set(await broadcasterIdentityTokenScopes(db, userId));
+  const activeScopes = unique([
+    ...resolveBroadcasterScopes(modules, grantedScopes),
+    ...modules.flatMap((enabledModule) =>
+      moduleOptionalBroadcasterScopes(enabledModule).filter((scope) => tokenScopes.has(scope))),
+  ]);
+  return unique([
+    ...activeScopes,
+    ...resolveBroadcasterScopes([...modules, module], [...grantedScopes, ...activeScopes]),
+    ...moduleOptionalBroadcasterScopes(module),
+  ]);
+};
 
-export const moduleScopeRequirement = (module: BotModule): string[] => declaredScopes(module);
+export const moduleScopeRequirement = (module: BotModule): string[] => resolveBroadcasterScopes([module]);
+
+/** Finds required or currently used scopes that would be lost from a replacement broadcaster token. */
+export const missingEnabledModuleBroadcasterScopes = async (
+  db: D1Database,
+  userId: string,
+  newScopes: readonly string[],
+  registry: readonly BotModule[] = MODULES,
+): Promise<string[]> => {
+  const modules = await enabledModulesForUser(db, userId, registry);
+  const previousScopes = new Set(await broadcasterIdentityTokenScopes(db, userId));
+  const nextScopes = new Set(newScopes);
+  return unique(modules.flatMap((module) => [
+    ...moduleMissingBroadcasterScopes(module, newScopes),
+    ...moduleOptionalBroadcasterScopes(module).filter((scope) => previousScopes.has(scope) && !nextScopes.has(scope)),
+  ]));
+};
+
+/** Prevents replacing a broadcaster token when it would strand an enabled module's declared or already-used scope. */
+export const broadcasterTokenPreservesEnabledModuleScopes = async (
+  db: D1Database,
+  userId: string,
+  newScopes: readonly string[],
+  registry: readonly BotModule[] = MODULES,
+): Promise<boolean> => (await missingEnabledModuleBroadcasterScopes(db, userId, newScopes, registry)).length === 0;

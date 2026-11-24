@@ -5,11 +5,13 @@ import {
   getLoginIdentityRefreshState,
   releaseLoginIdentityRefreshLease,
   rotateLoginTokensForUser,
+  setLoginIdentityStatusIfCurrent,
   type LoginIdentityRecord,
 } from "../db/login-identity";
 import { markLoginRevoked } from "../login-revocation";
 import { encryptJson, getTokenEncryptionKeys, parseKeyRing } from "./crypto";
 import { decryptStoredToken, refreshBotToken, TwitchApiError } from "../bot-maintenance";
+import { missingEnabledModuleBroadcasterScopes } from "../module-scopes";
 
 export interface LoginTokenRefreshEnvironment {
   DB: D1Database;
@@ -282,6 +284,34 @@ const refreshLoginIdentityTokensOnce = async (
         releaseLease = false;
         throw new Error("The login token refresh lease changed after invalid_grant.", { cause: error });
       }
+      throw error;
+    }
+
+    const missingModuleScopes = await missingEnabledModuleBroadcasterScopes(env.DB, identity.userId, refreshed.scopes);
+    if (missingModuleScopes.length > 0) {
+      const marked = await setLoginIdentityStatusIfCurrent(
+        env.DB,
+        identity.userId,
+        "error",
+        "active_module_scope_missing",
+        now,
+        identity.accessTokenCiphertext,
+        identity.refreshTokenCiphertext,
+      );
+      if (!marked) {
+        const replacement = await rereadReplacement(env, identity);
+        if (replacement !== null) {
+          releaseLease = true;
+          return replacement;
+        }
+      }
+      releaseLease = true;
+      const error = new TwitchApiError(
+        "The refreshed token is missing a scope used by an enabled module.",
+        400,
+        "active_module_scope_missing",
+      );
+      Object.assign(error, { missingModuleScopes });
       throw error;
     }
 

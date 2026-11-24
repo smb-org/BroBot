@@ -1,11 +1,14 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { BotModule } from "../../src/modules/contract";
 import {
   ChannelJobError,
   ChannelJobStore,
   executeChannelJobClaim,
   requestChannelJobRun,
+  hostChannelJobsForEnabledModules,
+  HOST_CHANNEL_JOBS,
   type ChannelJobRegistration,
   type ChannelJobRunContext,
 } from "../../src/worker/durable/channel-jobs";
@@ -63,6 +66,18 @@ afterEach(() => {
 });
 
 describe("channel jobs", () => {
+  it("registers the Twitch rank host job only for an enabled rank consumer", () => {
+    const consumer = { id: "test_rank_consumer", consumes: ["twitch_ranks"] } as const;
+    const rankJob = HOST_CHANNEL_JOBS.find(({ id }) => id === "host:twitch_ranks:reconcile");
+    expect(rankJob).toMatchObject({
+      intervalMs: 60 * 60_000,
+      label: { de: "Twitch-Ränge abgleichen", en: "Sync Twitch ranks" },
+    });
+    expect(hostChannelJobsForEnabledModules(HOST_CHANNEL_JOBS, new Set(), [consumer as unknown as BotModule])).toEqual([]);
+    expect(hostChannelJobsForEnabledModules(HOST_CHANNEL_JOBS, new Set([consumer.id]), [consumer as unknown as BotModule]))
+      .toEqual(HOST_CHANNEL_JOBS);
+  });
+
   it("returns already_running for Run now while the alarm claim is live", async () => {
     const now = 1_000;
     const { store } = storeFor(() => now);

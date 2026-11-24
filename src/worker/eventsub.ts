@@ -326,12 +326,18 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
   const target = notificationTarget(body);
   const moderationAction = target?.subscriptionType === "channel.moderate"
     ? typeof target.payload.action === "string" ? target.payload.action : null : null;
-  const acknowledgeAfterDispatch = target?.subscriptionType === "channel.vip.remove" ||
-    target?.subscriptionType === "channel.moderate" && (moderationAction === "vip" || moderationAction === "unvip");
-  if (target?.subscriptionType === "channel.chat.message") {
-    if (notifierChannelId === null || target.channelId !== notifierChannelId) {
-      return response("Invalid EventSub notification.", 400);
-    }
+  const rankEvent = target?.subscriptionType === "channel.vip.add" || target?.subscriptionType === "channel.vip.remove" ||
+    target?.subscriptionType === "channel.moderator.add" || target?.subscriptionType === "channel.moderator.remove" ||
+    target?.subscriptionType === "channel.moderate" &&
+      (moderationAction === "vip" || moderationAction === "unvip" || moderationAction === "mod" || moderationAction === "unmod");
+  const acknowledgeAfterDispatch = rankEvent;
+  if (target === null || notifierChannelId === null || target.channelId !== notifierChannelId) {
+    return response("Invalid EventSub notification.", 400);
+  }
+  if (rankEvent && target.payload.broadcaster_user_id !== target.channelId) {
+    return response("Invalid EventSub rank notification.", 400);
+  }
+  if (target.subscriptionType === "channel.chat.message") {
     const channel = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(target.channelId));
     const claim = await channel.claimEventSubMessage(messageId, Date.parse(now));
     if (claim === "duplicate") return response(null, 204);
@@ -342,8 +348,13 @@ eventSubRouter.post("/api/twitch/eventsub", async (context) => {
     if (!isNew) return response(null, 204);
   }
 
-  if (target === null || notifierChannelId === null || target.channelId !== notifierChannelId) {
-    return response("Invalid EventSub notification.", 400);
+  if (rankEvent) {
+    await context.env.CHANNEL.get(context.env.CHANNEL.idFromName(target.channelId)).applyTwitchRankEvent({
+      messageId,
+      subscriptionType: target.subscriptionType,
+      payload: target.payload,
+      eventAt: timestamp,
+    });
   }
 
   const dispatchNotification = (): Promise<void> => dispatchEventSubNotification(context.env, {
