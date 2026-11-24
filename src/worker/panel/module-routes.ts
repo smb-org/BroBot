@@ -54,7 +54,7 @@ import { readCachedGameList, readRecentChannelGames, writeCachedGameList, type T
 import { createSimulatedTemplateRenderer, registeredTemplateVariablesForChannel } from "../simulated-template-renderer";
 export { registeredTemplateVariablesForChannel } from "../simulated-template-renderer";
 import { moduleEventTimeOptions, resolveModuleEventTimes } from "../module-event-times";
-import { notifyModuleScheduleInputsChanged, reconcileChannelTimerSchedules } from "../module-schedules";
+import { notifyModuleScheduleInputsChanged, reconcileChannelTimerSchedules, syncChannelJobs } from "../module-schedules";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { moduleBallots } from "../module-ballots";
 import { modulePoints } from "../module-points";
@@ -1306,6 +1306,10 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   } else if ((existing?.enabled === true) !== enabled) {
     await runPostCommitStep(module.id, "schedule_notification", () =>
       notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "activation"));
+  }
+  if ((existing?.enabled === true) !== enabled) {
+    await runPostCommitStep(module.id, "channel_job_schedule", () =>
+      syncChannelJobs(context.env.CHANNEL, channelId));
   }
   const overlayKinds = module.overlayElements?.map(({ kind }) => kind) ?? [];
   if (overlayKinds.length > 0) {

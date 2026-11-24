@@ -21,6 +21,7 @@ export const createModuleActionExecutionContext = (
     secrets: createModuleSecretAccess(environment, channelId, moduleId),
     environment,
     channelId,
+    markReconcileNeeded: (jobId) => object.markChannelJobReconcileNeeded(jobId),
     authorizeMutation: authorizeModuleMutation,
     ballots: moduleBallots(environment.CHANNEL, channelId, moduleId),
     points: modulePoints(environment.CHANNEL, channelId, moduleId),

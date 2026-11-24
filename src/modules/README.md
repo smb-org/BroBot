@@ -897,6 +897,43 @@ alarms: [{
 }],
 ```
 
+For recurring work that needs visible channel status and operator controls,
+add a `job` block to the same alarm declaration. The host assigns the stable
+job ID `module:<moduleId>:<alarmKey>` and stores its status beside the existing
+alarm schedule in the channel Durable Object.
+
+```ts
+alarms: [{
+  key: "reconcile",
+  job: {
+    intervalMs: 60 * 60_000,
+    label: { de: "Reconcile roles", en: "Reconcile roles" },
+    requiredScopes: ["moderation:read:moderators"],
+  },
+  handle: async (context) => {
+    const job = context.channelJob;
+    if (job === undefined) throw new Error("A registered channel job needs its job context.");
+    job.assertCurrent();
+    const changed = await reconcileExternalState(context);
+    job.assertCurrent();
+    return { summary: changed.summary };
+  },
+}],
+```
+
+The `job` fields are `intervalMs`, localized `label` (`de` and `en`), and
+`requiredScopes`. `moduleChannelJobId(moduleId, alarmKey)` builds the stable ID
+event paths pass to `markReconcileNeeded`. Job handlers use `context.channelJob` for `claimToken`,
+`isCurrent()`, `assertCurrent()`, and transactional local `commit(write)`. Every local mutation must use `commit` or check the
+claim immediately before committing. Event paths call
+`context.markReconcileNeeded(moduleChannelJobId(moduleId, alarmKey))` before changing reconciled state; while a
+job is paused, the host records that reconciliation is due and the event path
+must skip the corresponding write. Returning `{ summary: "…" }` updates the
+bounded status summary. Throw `new ChannelJobError(code)` from the shared
+contracts package, or return `{ ok: false, code }`, to record one of the fixed
+job errors. Host-owned recurring work uses the same registration shape with an
+ID in the `host:` namespace.
+
 **Grenzen:**
 
 - **Der Host wiederholt jede geworfene Ausnahme.** Er klassifiziert keine

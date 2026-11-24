@@ -1,5 +1,5 @@
 import {
-  Banknote, BookOpenText, Braces, Clapperboard, Coins, CloudSun, Crown, Database, FlaskConical, Megaphone, MessageCircleQuestion, Music2,
+  Banknote, BookOpenText, Braces, Clapperboard, Coins, CloudSun, Crown, Database, FlaskConical, ListChecks, Megaphone, MessageCircleQuestion, Music2,
   MessageSquareText, Radio, RadioTower, ScrollText, Settings, Settings2, ShieldAlert, Signal, Sword, Timer, Zap,
   ToggleRight, UsersRound, Vote,
 } from "lucide-react";
@@ -21,6 +21,7 @@ const iconByKind: Readonly<Record<string, LucideIcon>> = {
   weather: CloudSun,
   modules: ToggleRight,
   members: UsersRound,
+  "channel-jobs": ListChecks,
   voting: Vote,
   clips: Clapperboard,
   ads: Megaphone,

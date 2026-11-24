@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { dashboardRoutePath, parseDashboardRoute } from "../../src/dashboard/router";
 
-describe("test area module route round trips", () => {
+describe("dashboard route round trips", () => {
   it.each(["text_commands", "faq", "chat_voting", "votekick", "clips"] as const)(
     "preserves the %s module filter and entry id",
     (moduleId) => {
@@ -12,4 +12,11 @@ describe("test area module route round trips", () => {
       expect(parseDashboardRoute(path.pathname, path.search)).toEqual(route);
     },
   );
+
+  it("preserves the channel jobs setup route", () => {
+    const route = { kind: "channel", channelId: "channel-a", section: "channel-jobs" } as const;
+    const path = new URL(dashboardRoutePath(route), "https://example.test");
+
+    expect(parseDashboardRoute(path.pathname, path.search)).toEqual(route);
+  });
 });

@@ -8,6 +8,8 @@ import type {
   PanelChannelOverview,
   PanelChannelLocation,
   PanelChannelControls,
+  PanelChannelJob,
+  PanelChannelJobsResponse,
   PanelChannelsResponse,
   PanelEventsResponse,
   PanelEventChangesResponse,
@@ -461,6 +463,30 @@ export interface PanelChannelLocationResult extends PanelChannelLocation {
 
 export const fetchChannelSettings = (channelId: string, signal?: AbortSignal): Promise<PanelChannelSettings> =>
   requestJson<PanelChannelSettings>(channelPath(channelId, "settings"), requestOptions(signal));
+
+export const fetchChannelJobs = (channelId: string, signal?: AbortSignal): Promise<PanelChannelJobsResponse> =>
+  requestJson<PanelChannelJobsResponse>(channelPath(channelId, "jobs"), requestOptions(signal));
+
+const channelJobPath = (channelId: string, jobId: string, action: "run" | "pause" | "resume"): string =>
+  `${channelPath(channelId, "jobs")}/${encodeURIComponent(jobId)}/${action}`;
+
+export const runChannelJobNow = (
+  channelId: string,
+  jobId: string,
+): Promise<{ result: "scheduled" | "already_running" }> =>
+  requestMutation(channelJobPath(channelId, jobId, "run"), "POST", {});
+
+export const pauseChannelJob = (
+  channelId: string,
+  jobId: string,
+): Promise<{ status: Pick<PanelChannelJob, "state" | "pausedAt" | "reconcileNeeded"> }> =>
+  requestMutation(channelJobPath(channelId, jobId, "pause"), "POST", {});
+
+export const resumeChannelJob = (
+  channelId: string,
+  jobId: string,
+): Promise<{ result: "scheduled" | "already_running" }> =>
+  requestMutation(channelJobPath(channelId, jobId, "resume"), "POST", {});
 
 export const saveChannelTimeZone = (
   channelId: string,

@@ -1459,6 +1459,10 @@ export const dispatchEventSubNotification = async (
             DB: environment.DB,
             environment: environment as unknown as Env,
             channelId: event.channelId,
+            markReconcileNeeded: async (jobId) => environment.CHANNEL === undefined
+              ? true
+              : await environment.CHANNEL.get(environment.CHANNEL.idFromName(event.channelId))
+                .markChannelJobReconcileNeeded(jobId),
             secrets: createModuleSecretAccess(environment, event.channelId, module.id),
             authorizeMutation: authorizeModuleMutation,
             ballots: moduleBallots(environment.CHANNEL, event.channelId, module.id),

@@ -44,6 +44,7 @@ import { overlayRouter } from "./overlay-routes";
 import { overlayAccessRouter } from "./overlay-access-routes";
 import { channelLocationRouter } from "./channel-location-routes";
 import { quickActionRouter } from "./quick-action-routes";
+import { channelJobsRouter } from "./channel-jobs-routes";
 import { twitchUserRouter } from "./twitch-user-routes";
 import { EVENT_TONES, MANAGING_ROLES, canManage, type EventCode, type EventTone } from "../../contracts/values";
 import { auditSubjectUserId, isAuditArea } from "../../dashboard/audit/areas";
@@ -242,6 +243,7 @@ panelRouter.route("/", overlayRouter);
 panelRouter.route("/", overlayAccessRouter);
 panelRouter.route("/", channelLocationRouter);
 panelRouter.route("/", quickActionRouter);
+panelRouter.route("/", channelJobsRouter);
 panelRouter.route("/", twitchUserRouter);
 
 panelRouter.get("/api/channels/:channelId/settings", requireChannelAuthorization(), async (context) => {

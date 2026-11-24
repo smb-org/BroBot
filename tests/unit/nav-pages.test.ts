@@ -125,6 +125,19 @@ describe("dashboard navigation", () => {
     });
   });
 
+  it("adds channel jobs to channel Setup under admin", () => {
+    const groups = navigationFor(MODULES.map(({ id }) => ({ id, enabled: true })));
+    const entry = groups.flatMap(({ entries }) => entries).find(({ pageId }) => pageId === "channel-jobs");
+
+    expect(entry).toMatchObject({
+      category: "admin",
+      area: "setup",
+      label: "Background tasks",
+      route: { kind: "channel", channelId: "channel-a", section: "channel-jobs" },
+      sidebarVisible: true,
+    });
+  });
+
   it("keeps inactive modules out of the sidebar while leaving them searchable", () => {
     const states = MODULES.map(({ id }) => ({ id, enabled: id !== "timers" }));
     const groups = navigationFor(states);

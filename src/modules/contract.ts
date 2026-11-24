@@ -734,6 +734,8 @@ export interface ModuleExecutionContext {
   secrets?: ModuleSecretAccess;
   /** Worker environment used for authenticated host integrations. */
   environment?: Env;
+  /** Event paths call this before reconciliation writes; false records deferred work while the job is paused. */
+  markReconcileNeeded?: (jobId: string) => Promise<boolean>;
   /** Twitch broadcaster ID for the event or redemption being processed. */
   channelId?: string;
   /** Sends chat through the bound module's guarded, idempotent channel output path. */
@@ -916,6 +918,12 @@ export interface ModuleAlarmContext {
   authorizeMutation?: AuthorizeModuleMutation;
   authorizeManagementMutation?: AuthorizeModuleMutation;
   channelId: string;
+  /** Durable token for the exact keyed alarm claim currently being handled. */
+  alarmClaimToken?: string;
+  /** Fenced helpers available to handlers registered with a `job` block. */
+  channelJob?: ModuleChannelJobContext;
+  /** Event paths can record deferred reconciliation while their job is paused. */
+  markReconcileNeeded?: (jobId: string) => Promise<boolean>;
   /** Narrow channel-points resolution operations used by song requests. */
   channelPoints?: ModuleChannelPointsAccess;
   /** Full identity and D1 plan sequence for the alarm currently being handled. */
@@ -1243,6 +1251,8 @@ export interface ResolvedModuleEventTime {
  */
 export interface ModuleAlarmDefinition {
   key: string;
+  /** Registers this keyed alarm as a recurring, visible channel job. */
+  job?: ModuleAlarmJobDefinition;
   /** Milliseconds between retries after consecutive failures. The last delay is reused. */
   retryDelaysMs?: readonly number[];
   handle: (
@@ -1257,6 +1267,24 @@ export interface ModuleAlarmDefinition {
     context: ModuleAlarmContext,
     reason: ModuleScheduleInputChangeReason,
   ) => Promise<void>;
+}
+
+interface ModuleAlarmJobDefinition {
+  intervalMs: number;
+  label: Readonly<Record<ModuleLanguage, string>>;
+  requiredScopes: readonly string[];
+}
+
+/** Stable panel and event-path ID for one module alarm registered as a channel job. */
+export const moduleChannelJobId = (moduleId: string, alarmKey: string): string => `module:${moduleId}:${alarmKey}`;
+
+interface ModuleChannelJobContext {
+  jobId: string;
+  claimToken: string;
+  isCurrent(): boolean;
+  assertCurrent(): void;
+  /** Runs synchronous local SQLite mutations only while this claim still owns the job. */
+  commit(write: (sql: SqlStorage) => void): boolean;
 }
 
 export interface ModulePointRoundResult {

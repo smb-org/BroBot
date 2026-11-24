@@ -136,6 +136,16 @@ const NAV_PAGES: readonly NavPageDefinition[] = [
     requiresChannel: true,
   },
   {
+    id: "channel-jobs",
+    category: "admin",
+    area: "setup",
+    iconKind: "channel-jobs",
+    route: channelRoute("channel-jobs"),
+    label: (texts) => texts.navigation.channelJobs,
+    keywords: ["background tasks", "jobs", "aufgaben", "hintergrundaufgaben", "run now", "pause"],
+    requiresChannel: true,
+  },
+  {
     id: "variables",
     category: "admin",
     area: "setup",
