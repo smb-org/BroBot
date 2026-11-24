@@ -56,7 +56,14 @@ const signedVipRemovalNotification = (messageId: string): Request => {
       type: "channel.vip.remove",
       condition: { broadcaster_user_id: "channel-a" },
     },
-    event: { broadcaster_user_id: "channel-a", user_id: "user-1", user_login: "viewer", user_name: "Viewer" },
+    event: {
+      broadcaster_user_id: "channel-a",
+      broadcaster_user_login: "fictionalchannel",
+      broadcaster_user_name: "FictionalChannel",
+      user_id: "user-1",
+      user_login: "fictionalviewer",
+      user_name: "FictionalViewer",
+    },
   });
   const signature = createHmac("sha256", Buffer.from(secretKey, "ascii"))
     .update(`${messageId}${timestamp}${body}`, "utf8")
@@ -82,9 +89,13 @@ const signedModerationVipNotification = (messageId: string): Request => {
     },
     event: {
       broadcaster_user_id: "channel-a",
+      broadcaster_user_login: "fictionalchannel",
+      broadcaster_user_name: "FictionalChannel",
       moderator_user_id: "moderator-a",
+      moderator_user_login: "fictionalmod",
+      moderator_user_name: "FictionalMod",
       action: "vip",
-      vip: { user_id: "user-1", user_login: "viewer", user_name: "Viewer" },
+      vip: { user_id: "user-1", user_login: "fictionalviewer", user_name: "FictionalViewer" },
     },
   });
   const signature = createHmac("sha256", Buffer.from(secretKey, "ascii"))
@@ -101,6 +112,16 @@ const signedModerationVipNotification = (messageId: string): Request => {
     },
   });
 };
+
+const channelWithRankApply = (applyTwitchRankEvent: (input: {
+  messageId: string;
+  subscriptionType: string;
+  payload: Readonly<Record<string, unknown>>;
+  eventAt: string;
+}) => Promise<unknown>): Env["CHANNEL"] => ({
+  idFromName: (channelId: string) => channelId,
+  get: () => ({ applyTwitchRankEvent, getPanelResourceRevisions: () => Promise.resolve({}) }),
+} as unknown as Env["CHANNEL"]);
 
 describe("EventSub awaited dispatch", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -165,6 +186,7 @@ describe("EventSub awaited dispatch", () => {
     vi.mocked(dispatchEventSubNotification).mockReturnValue(confirmation.promise);
     const environment = {
       DB: database as unknown as D1Database,
+      CHANNEL: channelWithRankApply(() => Promise.resolve({ duplicate: false, changed: true, ignored: false })),
       TWITCH_EVENTSUB_SECRET: secret,
     } as unknown as Env;
     const waitUntil = vi.fn();
@@ -196,6 +218,7 @@ describe("EventSub awaited dispatch", () => {
     vi.mocked(dispatchEventSubNotification).mockRejectedValueOnce(new Error("durable enqueue unavailable"));
     const environment = {
       DB: database as unknown as D1Database,
+      CHANNEL: channelWithRankApply(() => Promise.resolve({ duplicate: false, changed: true, ignored: false })),
       TWITCH_EVENTSUB_SECRET: secret,
     } as unknown as Env;
     const executionContext = { waitUntil: vi.fn() } as unknown as ExecutionContext;
@@ -215,6 +238,52 @@ describe("EventSub awaited dispatch", () => {
     expect(retry.status).toBe(204);
     expect(afterRetry).toEqual({ message_id: "moderation-vip-retry" });
     expect(vi.mocked(dispatchEventSubNotification)).toHaveBeenCalledTimes(2);
+    database.close();
+  });
+
+  it("retries a rank delivery after a failed DO write and records only one successful rank change", async () => {
+    const database = new TestD1Database();
+    let failNextWrite = true;
+    let changes = 0;
+    const appliedMessages = new Set<string>();
+    const applyTwitchRankEvent = vi.fn(({ messageId }: { messageId: string }) => {
+      if (failNextWrite) {
+        failNextWrite = false;
+        return Promise.reject(new Error("rank storage unavailable"));
+      }
+      if (!appliedMessages.has(messageId)) {
+        appliedMessages.add(messageId);
+        changes += 1;
+      }
+      return Promise.resolve({ duplicate: appliedMessages.has(messageId) && changes > 1, changed: true, ignored: false });
+    });
+    const environment = {
+      DB: database as unknown as D1Database,
+      CHANNEL: channelWithRankApply(applyTwitchRankEvent),
+      TWITCH_EVENTSUB_SECRET: secret,
+    } as unknown as Env;
+    const executionContext = { waitUntil: vi.fn() } as unknown as ExecutionContext;
+    vi.mocked(dispatchEventSubNotification).mockClear();
+    vi.mocked(dispatchEventSubNotification).mockResolvedValue(undefined);
+
+    const failed = await eventSubRouter.fetch(signedVipRemovalNotification("rank-write-retry"), environment, executionContext);
+    const beforeRetry = await database.prepare(
+      "SELECT message_id FROM eventsub_messages WHERE message_id = ?",
+    ).bind("rank-write-retry").first<{ message_id: string }>();
+    const retry = await eventSubRouter.fetch(signedVipRemovalNotification("rank-write-retry"), environment, executionContext);
+    const duplicate = await eventSubRouter.fetch(signedVipRemovalNotification("rank-write-retry"), environment, executionContext);
+    const afterRetry = await database.prepare(
+      "SELECT message_id FROM eventsub_messages WHERE message_id = ?",
+    ).bind("rank-write-retry").first<{ message_id: string }>();
+
+    expect(failed.status).toBe(500);
+    expect(beforeRetry).toBeNull();
+    expect(retry.status).toBe(204);
+    expect(duplicate.status).toBe(204);
+    expect(applyTwitchRankEvent).toHaveBeenCalledTimes(2);
+    expect(changes).toBe(1);
+    expect(dispatchEventSubNotification).toHaveBeenCalledOnce();
+    expect(afterRetry).toEqual({ message_id: "rank-write-retry" });
     database.close();
   });
 });

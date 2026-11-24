@@ -27,6 +27,7 @@ import { describe, expect, it } from "vitest";
  */
 const ALLOWLIST: Record<string, string> = {
   "src/contracts/channel-jobs.ts": "Bilingual DE/EN channel job error text catalogue; only its German values are German.",
+  "src/worker/durable/twitch-ranks.ts": "Bilingual DE/EN Twitch rank job label and summary text; only its German values are German.",
   "src/modules/channel_points/contracts.ts": "Bilingual DE/EN channel-points queue action name and waiting count; only the German values are German.",
   "src/modules/channel_points/actions/chat-message.ts": "Bilingual DE/EN channel points chat-action refund text; only its German values are German.",
   "src/modules/channel_points/service.ts": "Bilingual DE/EN channel points redemption history reasons; only its German values are German.",

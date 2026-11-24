@@ -58,6 +58,7 @@ import {
 } from "./overlay-token-service";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { maintainBotIdentity } from "../bot-maintenance";
+import { isBroadcasterCredentialUsable } from "./login-token-refresh";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { revokeRealtimeSessionForUser } from "../realtime";
 import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
@@ -67,6 +68,7 @@ import {
   listAllBroadcasterScopes,
   listRequiredBroadcasterScopesForUser,
   listRequiredBroadcasterScopesForUserAndModule,
+  broadcasterTokenPreservesEnabledModuleScopes,
 } from "../module-scopes";
 import { canManage, type ApiErrorCode } from "../../contracts/values";
 import { findChannelVariable } from "../db/channel-variables";
@@ -679,7 +681,11 @@ authRouter.get("/auth/twitch/callback", async (context) => {
     const expiresAt = new Date(Date.parse(now) + tokens.expiresIn * 1000).toISOString();
     const current = await getLoginIdentity(context.env.DB, identity.userId);
     const encryptionKeys = getTokenEncryptionKeys(context.env);
-    await upsertLoginIdentity(context.env.DB, {
+    const storedTokenUsable = await isBroadcasterCredentialUsable(current, context.env, now);
+    // A plain login preserves scopes only when the current connected credentials are usable.
+    const keepStoredToken = storedTokenUsable &&
+      !(await broadcasterTokenPreservesEnabledModuleScopes(context.env.DB, identity.userId, tokens.scopes));
+    if (!keepStoredToken) await upsertLoginIdentity(context.env.DB, {
       userId: identity.userId,
       login: identity.login,
       scopesJson: JSON.stringify(tokens.scopes),

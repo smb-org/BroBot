@@ -92,6 +92,9 @@ interface EventSubscriptionNames {
   streamStarted: string;
   streamEnded: string;
   vipRemovals: string;
+  vipAdditions: string;
+  moderatorAdditions: string;
+  moderatorRemovals: string;
   polls: string;
   predictions: string;
   channelPointsRewards: string;
@@ -116,6 +119,9 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     streamStarted: "Streamstarts",
     streamEnded: "Streamenden",
     vipRemovals: "VIP-Entzüge",
+    vipAdditions: "VIP-Ernennungen",
+    moderatorAdditions: "Moderator-Ernennungen",
+    moderatorRemovals: "Moderator-Entzüge",
     polls: "Umfragen",
     predictions: "Predictions",
     channelPointsRewards: "Kanalpunkt-Belohnungen",
@@ -138,6 +144,9 @@ const eventSubscriptionNames: LocaleCatalog<EventSubscriptionNames> = {
     streamStarted: "Stream starts",
     streamEnded: "Stream ends",
     vipRemovals: "VIP removals",
+    vipAdditions: "VIP appointments",
+    moderatorAdditions: "Moderator appointments",
+    moderatorRemovals: "Moderator removals",
     polls: "Polls",
     predictions: "Predictions",
     channelPointsRewards: "Channel point rewards",
@@ -167,6 +176,9 @@ export const eventSubName = (
   if (subscriptionType === "channel.ad_break.begin") return texts.adBreaks;
   if (subscriptionType === "channel.update") return texts.channelUpdates;
   if (subscriptionType === "channel.vip.remove") return texts.vipRemovals;
+  if (subscriptionType === "channel.vip.add") return texts.vipAdditions;
+  if (subscriptionType === "channel.moderator.add") return texts.moderatorAdditions;
+  if (subscriptionType === "channel.moderator.remove") return texts.moderatorRemovals;
   if (subscriptionType.startsWith("channel.poll.")) return texts.polls;
   if (subscriptionType.startsWith("channel.prediction.")) return texts.predictions;
   if (subscriptionType.startsWith("channel.channel_points_custom_reward_redemption.")) return texts.channelPointsRedemptions;

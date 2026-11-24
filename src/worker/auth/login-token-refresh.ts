@@ -88,6 +88,45 @@ export const decryptLoginIdentityAccessToken = async (
   env: LoginTokenRefreshEnvironment,
 ): Promise<string | null> => decryptStoredToken(identity.accessTokenCiphertext, getTokenEncryptionKeys(env));
 
+const parsedIdentityTokenScopes = (identity: LoginIdentityRecord): string[] => {
+  try {
+    const scopes: unknown = JSON.parse(identity.tokenScopesJson);
+    return Array.isArray(scopes) && scopes.every((scope) => typeof scope === "string") ? scopes : [];
+  } catch {
+    return [];
+  }
+};
+
+/** Checks whether stored broadcaster credentials can currently support a scoped operation. */
+export const isBroadcasterCredentialUsable = async (
+  identity: LoginIdentityRecord | null,
+  env: Pick<LoginTokenRefreshEnvironment, "TOKEN_ENCRYPTION_KEYS" | "SESSION_ENCRYPTION_KEYS">,
+  now: string,
+  requiredScopes: readonly string[] = [],
+  scopeAlternatives: readonly (readonly string[])[] = [],
+): Promise<boolean> => {
+  if (identity === null || identity.status !== "connected") return false;
+  // Rank events do not refresh credentials; even a refreshable expired token leaves a tracking gap.
+  const expiresAt = Date.parse(identity.expiresAt);
+  const currentTime = Date.parse(now);
+  if (!Number.isFinite(expiresAt) || !Number.isFinite(currentTime) || expiresAt <= currentTime) return false;
+
+  const grantedScopes = new Set(parsedIdentityTokenScopes(identity));
+  if (requiredScopes.some((scope) => !grantedScopes.has(scope)) ||
+      scopeAlternatives.some((group) => !group.some((scope) => grantedScopes.has(scope)))) return false;
+
+  try {
+    const encryptionKeys = getTokenEncryptionKeys(env);
+    const [accessToken, refreshToken] = await Promise.all([
+      decryptStoredToken(identity.accessTokenCiphertext, encryptionKeys),
+      decryptStoredToken(identity.refreshTokenCiphertext, encryptionKeys),
+    ]);
+    return accessToken !== null && refreshToken !== null;
+  } catch {
+    return false;
+  }
+};
+
 const leaseOwnerMatches = (
   state: Awaited<ReturnType<typeof getLoginIdentityRefreshState>>,
   identity: LoginIdentityRecord,

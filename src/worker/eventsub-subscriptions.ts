@@ -1,4 +1,5 @@
 import { MODULES } from "../modules/registry";
+import type { BotModule } from "../modules/contract";
 import { moduleHasRequiredBroadcasterScopes, moduleScopeRequirement } from "./module-scopes";
 import { getAppAccessToken } from "./app-token";
 import { parseKeyRing } from "./auth/crypto";
@@ -142,6 +143,8 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS = [
   moderatorSubscriptionDefinition("channel.shoutout.receive", "1"),
   userSubscriptionDefinition("channel.chat.notification", "1"),
   moderatorSubscriptionDefinition("channel.moderate", "2"),
+  broadcasterSubscriptionDefinition("channel.moderator.add", "1"),
+  broadcasterSubscriptionDefinition("channel.moderator.remove", "1"),
   moderatorSubscriptionDefinition("automod.message.hold", "1"),
   moderatorSubscriptionDefinition("channel.suspicious_user.message", "1"),
   moderatorSubscriptionDefinition("channel.suspicious_user.update", "1"),
@@ -157,6 +160,7 @@ export const EVENTSUB_SUBSCRIPTION_DEFINITIONS = [
   broadcasterSubscriptionDefinition("channel.prediction.progress", "1"),
   broadcasterSubscriptionDefinition("channel.prediction.lock", "1"),
   broadcasterSubscriptionDefinition("channel.prediction.end", "1"),
+  broadcasterSubscriptionDefinition("channel.vip.add", "1"),
   broadcasterSubscriptionDefinition("channel.vip.remove", "1"),
   broadcasterSubscriptionDefinition("stream.online", "1", false),
   broadcasterSubscriptionDefinition("stream.offline", "1", false),
@@ -181,6 +185,18 @@ export interface EventSubTarget {
 
 export const eventSubTargetKey = (target: { channelId: string; subscriptionType: string; variant: string; version: string }): string =>
   `${target.channelId}\u0000${target.subscriptionType}\u0000${target.variant}\u0000${target.version}`;
+
+export const TWITCH_RANK_EVENTSUB_SCOPE_GROUPS = {
+  vip: ["channel:read:vips", "channel:manage:vips"],
+  moderator: ["moderation:read"],
+} as const;
+
+export const TWITCH_RANK_EVENTSUB_TYPES = [
+  "channel.vip.add",
+  "channel.vip.remove",
+  "channel.moderator.add",
+  "channel.moderator.remove",
+] as const satisfies readonly EventSubSubscriptionType[];
 
 export const eventSubDefinitionForCondition = (
   subscriptionType: string,
@@ -261,6 +277,7 @@ const asSubscriptionsPage = (
 export const listDesiredEventSubTargets = async (
   db: D1Database,
   channelId?: string,
+  registry: readonly BotModule[] = MODULES,
 ): Promise<EventSubTarget[]> => {
   const query = `SELECT channel.channel_id, channel_modules.module_id
        , CASE WHEN ${channelBotConsentCondition("channel")} THEN 1 ELSE 0 END AS channel_bot_consent
@@ -281,7 +298,7 @@ export const listDesiredEventSubTargets = async (
   const result = channelId === undefined
     ? await db.prepare(query).all<EventSubTargetRow>()
     : await db.prepare(query).bind(channelId).all<EventSubTargetRow>();
-  const modules = new Map(MODULES.map((module) => [module.id, module]));
+  const modules = new Map(registry.map((module) => [module.id, module]));
   const channels = new Map<string, { row: EventSubTargetRow; moduleIds: Set<string> }>();
   for (const row of result.results) {
     const channel = channels.get(row.channel_id) ?? { row, moduleIds: new Set<string>() };
@@ -292,7 +309,7 @@ export const listDesiredEventSubTargets = async (
   for (const [id, channel] of channels) {
     const row = channel.row;
     const enabledModuleIds = new Set(channel.moduleIds);
-    for (const module of MODULES) {
+    for (const module of registry) {
       if (module.mandatory === true) enabledModuleIds.add(module.id);
     }
     for (const moduleId of enabledModuleIds) {
@@ -301,7 +318,7 @@ export const listDesiredEventSubTargets = async (
       const requiredScopes = moduleScopeRequirement(module);
       const grantedScopes = row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_scopes_json) : [];
       const currentTokenScopes = row.broadcaster_status === "connected" ? parseScopes(row.broadcaster_token_scopes_json) : [];
-      const vipRemovalScopeSatisfied = currentTokenScopes.includes("channel:manage:vips");
+      const vipRemovalScopeSatisfied = TWITCH_RANK_EVENTSUB_SCOPE_GROUPS.vip.some((scope) => currentTokenScopes.includes(scope));
       const moduleScopeSatisfied = requiredScopes.length === 0
         ? row.channel_bot_consent === 1
         : moduleHasRequiredBroadcasterScopes(module, grantedScopes);
@@ -321,6 +338,24 @@ export const listDesiredEventSubTargets = async (
           const target = "requiresModerator" in definition && definition.requiresModerator && row.bot_is_moderator !== 1
             ? { ...baseTarget, deferredReason: "moderator_required" as const }
             : baseTarget;
+          targets.set(eventSubTargetKey(target), target);
+        }
+      }
+      if (module.consumes?.includes("twitch_ranks") === true && row.channel_bot_consent === 1) {
+        for (const subscriptionType of TWITCH_RANK_EVENTSUB_TYPES) {
+          const vipType = subscriptionType === "channel.vip.add" || subscriptionType === "channel.vip.remove";
+          const scopeGroup = vipType
+            ? TWITCH_RANK_EVENTSUB_SCOPE_GROUPS.vip
+            : TWITCH_RANK_EVENTSUB_SCOPE_GROUPS.moderator;
+          if (!scopeGroup.some((scope) => currentTokenScopes.includes(scope))) continue;
+          const definition = EVENTSUB_SUBSCRIPTION_DEFINITIONS.find((candidate) => candidate.subscriptionType === subscriptionType);
+          if (definition === undefined) continue;
+          const target: EventSubTarget = {
+            channelId: id,
+            subscriptionType: definition.subscriptionType,
+            variant: definition.variant,
+            version: definition.version,
+          };
           targets.set(eventSubTargetKey(target), target);
         }
       }
@@ -526,6 +561,7 @@ const adoptRemoteSubscription = async (
   target: EventSubTarget,
   botUserId: string,
   now: string,
+  confirmedAt: () => string,
   appAccessToken: string,
   inventory: EventSubInventoryCache,
 ): Promise<boolean> => {
@@ -545,7 +581,7 @@ const adoptRemoteSubscription = async (
     return false;
   }
   inventory.add(adopted);
-  await mark(env.DB, target, "enabled", null, adopted.id, now, secretId);
+  await mark(env.DB, target, "enabled", null, adopted.id, confirmedAt(), secretId);
   return true;
 };
 
@@ -576,6 +612,7 @@ export const reconcileEventSubSubscriptions = async (
   fetcher: typeof fetch = fetch,
   channelId?: string,
   inventoryCache?: EventSubInventoryCache,
+  confirmedAt: () => string = () => new Date().toISOString(),
 ): Promise<void> => {
   const inventory = inventoryCache ?? createEventSubInventoryCache(fetcher, env.TWITCH_CLIENT_ID);
   const allTargets = await listDesiredEventSubTargets(env.DB, channelId);
@@ -716,7 +753,7 @@ export const reconcileEventSubSubscriptions = async (
       "enabled",
       null,
       subscription.id,
-      now,
+      confirmedAt(),
       state.secretId,
     );
     return true;
@@ -799,7 +836,7 @@ export const reconcileEventSubSubscriptions = async (
           "enabled",
           null,
           subscription.id,
-          now,
+          confirmedAt(),
           state.secretId,
         );
         continue;
@@ -864,14 +901,14 @@ export const reconcileEventSubSubscriptions = async (
       const subscription = await createSubscription(env, target, botUserId, appAccessToken, fetcher);
       inventory.add(subscription);
       if (subscription.status === "enabled") {
-        await mark(env.DB, target, "enabled", null, subscription.id, now, activeSecretId);
+        await mark(env.DB, target, "enabled", null, subscription.id, confirmedAt(), activeSecretId);
       } else {
         await mark(env.DB, target, "missing", "verification_pending", subscription.id, now, activeSecretId);
       }
     } catch (error: unknown) {
       if (isAlreadyExistsConflict(error)) {
         try {
-          await adoptRemoteSubscription(env, target, botUserId, now, appAccessToken, inventory);
+          await adoptRemoteSubscription(env, target, botUserId, now, confirmedAt, appAccessToken, inventory);
         } catch (adoptionError: unknown) {
           await markError(target, adoptionError);
         }

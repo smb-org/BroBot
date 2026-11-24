@@ -10,8 +10,11 @@ import {
   moduleHasRequiredBroadcasterScopes,
   moduleOptionalBroadcasterScopeState,
   moduleOptionalBroadcasterScopes,
+  broadcasterTokenPreservesEnabledModuleScopes,
+  resolveBroadcasterScopes,
   VOLLUMFANG_BROADCASTER_SCOPES,
 } from "../../src/worker/module-scopes";
+import type { BotModule } from "../../src/modules/contract";
 import { getPanelModuleStates } from "../../src/worker/panel/module-repository";
 import { broadcasterHasScope, broadcasterScopesForChannel, broadcasterTokenHasScope } from "../../src/worker/broadcaster-scope";
 import {
@@ -115,6 +118,92 @@ describe("broadcaster scopes", () => {
     ]));
   });
 
+  it("resolves an any-of group to its smallest scope unless a granted or required alternative exists", () => {
+    database = new TestD1Database();
+    const readVipModule = {
+      id: "test_rank_consumer",
+      broadcasterScopeAlternatives: [["channel:read:vips", "channel:manage:vips"]],
+    } as unknown as BotModule;
+    const manageVipModule = {
+      id: "test_manage_vip_consumer",
+      broadcasterScopes: ["channel:manage:vips"],
+    } as unknown as BotModule;
+
+    expect(resolveBroadcasterScopes([readVipModule])).toEqual(["channel:read:vips"]);
+    expect(resolveBroadcasterScopes([readVipModule], ["channel:manage:vips"])).toEqual(["channel:manage:vips"]);
+    expect(resolveBroadcasterScopes([readVipModule, manageVipModule])).toEqual(["channel:manage:vips"]);
+  });
+
+  it("keeps active optional scopes on a replacement token", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "vip-channel");
+    await insertLoginIdentityAndSession(database, "vip-channel", ["channel:bot", "channel:manage:vips"]);
+    await insertMember(database, "vip-channel", "vip-channel", "broadcaster");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'temp_vips', 1, '{}')",
+    ).bind("vip-channel").run();
+
+    await expect(broadcasterTokenPreservesEnabledModuleScopes(asD1(database), "vip-channel", ["channel:bot"]))
+      .resolves.toBe(false);
+    await expect(broadcasterTokenPreservesEnabledModuleScopes(asD1(database), "vip-channel", ["channel:bot", "channel:manage:vips"]))
+      .resolves.toBe(true);
+  });
+
+  it("allows a token that keeps all previously held scopes when module consent was never granted", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "ads-channel");
+    await insertLoginIdentityAndSession(database, "ads-channel", ["channel:bot"]);
+    await insertMember(database, "ads-channel", "ads-channel", "broadcaster");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('ads-channel', 'ads', 1, '{}')",
+    ).run();
+
+    await expect(broadcasterTokenPreservesEnabledModuleScopes(asD1(database), "ads-channel", ["channel:bot"]))
+      .resolves.toBe(true);
+  });
+
+  it("treats any-of scopes as preserved when the new token has a different accepted alternative", async () => {
+    database = new TestD1Database();
+    const rankConsumer = {
+      id: "test_rank_consumer",
+      broadcasterScopeAlternatives: [["channel:read:vips", "channel:manage:vips"]],
+    } as unknown as BotModule;
+    await insertChannel(database, "vip-channel");
+    await insertLoginIdentityAndSession(database, "vip-channel", ["channel:bot", "channel:read:vips"]);
+    await insertMember(database, "vip-channel", "vip-channel", "broadcaster");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('vip-channel', 'test_rank_consumer', 1, '{}')",
+    ).run();
+
+    await expect(broadcasterTokenPreservesEnabledModuleScopes(
+      asD1(database),
+      "vip-channel",
+      ["channel:bot", "channel:manage:vips"],
+      [rankConsumer],
+    )).resolves.toBe(true);
+    await expect(broadcasterTokenPreservesEnabledModuleScopes(
+      asD1(database),
+      "vip-channel",
+      ["channel:bot"],
+      [rankConsumer],
+    )).resolves.toBe(false);
+  });
+
+  it("rejects a replacement token that drops an enabled module's required scope", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "ads-channel");
+    await insertLoginIdentityAndSession(database, "ads-channel", ["channel:bot", "channel:read:ads"]);
+    await insertMember(database, "ads-channel", "ads-channel", "broadcaster");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('ads-channel', 'ads', 1, '{}')",
+    ).run();
+
+    await expect(broadcasterTokenPreservesEnabledModuleScopes(asD1(database), "ads-channel", ["channel:bot"]))
+      .resolves.toBe(false);
+    await expect(broadcasterTokenPreservesEnabledModuleScopes(asD1(database), "ads-channel", ["channel:bot", "channel:read:ads"]))
+      .resolves.toBe(true);
+  });
+
   it("clears the stored scopes on revocation", async () => {
     database = new TestD1Database();
     await upsertLoginIdentity(asD1(database), loginIdentity("user-1", ["channel:bot", "channel:read:ads"]));
@@ -146,6 +235,26 @@ describe("broadcaster scopes", () => {
     ).run();
 
     await expect(listRequiredBroadcasterScopesForUser(asD1(database), "kanal-a")).resolves.toEqual(["channel:read:ads"]);
+  });
+
+  it("unions the consent scopes required by all enabled modules", async () => {
+    database = new TestD1Database();
+    const rankConsumer = {
+      id: "test_rank_consumer",
+      broadcasterScopeAlternatives: [["channel:read:vips", "channel:manage:vips"]],
+    } as unknown as BotModule;
+    await insertChannel(database, "kanal-a");
+    await insertLoginIdentityAndSession(database, "kanal-a", [
+      "channel:bot", "channel:manage:vips", "channel:manage:ads",
+    ]);
+    await insertMember(database, "kanal-a", "kanal-a", "broadcaster");
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings)
+       VALUES ('kanal-a', 'ads', 1, '{}'), ('kanal-a', 'test_rank_consumer', 1, '{}')`,
+    ).run();
+
+    await expect(listRequiredBroadcasterScopesForUser(asD1(database), "kanal-a", [adsModule, rankConsumer]))
+      .resolves.toEqual(["channel:read:ads", "channel:manage:vips", "channel:manage:ads"]);
   });
 
   it("ignores a different channel's module despite the user's broadcaster role", async () => {

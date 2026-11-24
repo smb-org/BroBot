@@ -761,6 +761,8 @@ export interface ModuleExecutionContext {
   points: ModulePointsAccess;
   /** Temporary VIP access bound to the event channel and executing module. */
   tempVips: ModuleTempVipAccess;
+  /** Channel-scoped Twitch rank snapshots for modules declaring `consumes: ["twitch_ranks"]`. */
+  twitchRanks?: ModuleTwitchRanksAccess;
   /** Lazily reads the current channel's public blocked terms with the bot moderator token. */
   readChannelBlockedTerms?: () => Promise<readonly string[] | null>;
   /** Lazily resolves the connected bot identity so modules can ignore its own chat messages. */
@@ -922,6 +924,8 @@ export interface ModuleAlarmContext {
   alarmClaimToken?: string;
   /** Fenced helpers available to handlers registered with a `job` block. */
   channelJob?: ModuleChannelJobContext;
+  /** Channel-scoped Twitch rank snapshots and dirty-state acknowledgement for rank consumers. */
+  twitchRanks?: ModuleTwitchRanksAccess;
   /** Event paths can record deferred reconciliation while their job is paused. */
   markReconcileNeeded?: (jobId: string) => Promise<boolean>;
   /** Narrow channel-points resolution operations used by song requests. */
@@ -1278,7 +1282,7 @@ interface ModuleAlarmJobDefinition {
 /** Stable panel and event-path ID for one module alarm registered as a channel job. */
 export const moduleChannelJobId = (moduleId: string, alarmKey: string): string => `module:${moduleId}:${alarmKey}`;
 
-interface ModuleChannelJobContext {
+export interface ModuleChannelJobContext {
   jobId: string;
   claimToken: string;
   isCurrent(): boolean;
@@ -1620,6 +1624,42 @@ type ModuleTempVipClassification = "unclassified" | "permanent" | "temporary";
 type ModuleTempVipConfirmation = "confirmed" | "awaiting_vip";
 
 export interface ModuleTempVipPerson {
+  userId: string;
+  login: string;
+  displayName: string;
+}
+
+export type ModuleTwitchRankType = "vip" | "moderator";
+
+export type ModuleTwitchRankIncompleteReason =
+  | "missing_scope"
+  | "token_invalid"
+  | "not_synced"
+  | "snapshot_failed"
+  | "tracking_gap"
+  | "stale"
+  | "eventsub_incomplete"
+  | "job_paused";
+
+export interface ModuleTwitchRankSnapshot {
+  /** False means this rank type cannot be used because its broadcaster scope is unavailable. */
+  available: boolean;
+  /** Only complete snapshots are safe to use for removing channel roles. */
+  complete: boolean;
+  reason?: ModuleTwitchRankIncompleteReason;
+  userIds: ReadonlySet<string>;
+}
+
+export interface ModuleTwitchRanksAccess {
+  getTwitchRanks: (rankType: ModuleTwitchRankType) => Promise<ModuleTwitchRankSnapshot>;
+  isComplete: (rankType: ModuleTwitchRankType) => Promise<boolean>;
+  /** True while this consumer has an outstanding rank change to reconcile. */
+  isDirty: () => Promise<{ dirty: boolean; generation: number }>;
+  /** Clears this consumer's dirty flag only while its channel job claim is current. */
+  markReconciled: (generation: number) => boolean;
+}
+
+export interface ModuleTwitchRankUser {
   userId: string;
   login: string;
   displayName: string;
@@ -2721,6 +2761,8 @@ export interface ModuleEvent<Settings = unknown> {
   chatStatus: readonly ModuleChatStatus[] | null;
 }
 
+export type ModuleConsumedResource = "twitch_ranks";
+
 export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   id: string;
   /** Host-catalog category used to place this module in the channel sidebar. */
@@ -2728,6 +2770,10 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   panelIcon?: ModuleIconDescriptor;
   /** Other optional modules that must already be enabled for this module to activate. */
   requiresModules?: readonly string[];
+  /** Host-maintained data consumed by this module, which activates its subscriptions and reconciliation job. */
+  consumes?: readonly ModuleConsumedResource[];
+  /** Alarm keys owned by this module that reconcile each consumed host resource. */
+  reconcileAlarmKeys?: Partial<Record<ModuleConsumedResource, string>>;
   /** Read-only help shown on the module page for commands listened to in chat. */
   chatCommands?: readonly ModuleChatCommandDeclaration[];
   /** Effective command tokens for settings-configurable command modules. */
@@ -2833,6 +2879,8 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   variableReferences?: ModuleVariableReferences;
   /** Broadcaster consent the host verifies before the EventSub subscription. */
   broadcasterScopes?: readonly string[];
+  /** Each group is an any-of requirement; all groups and `broadcasterScopes` remain required. */
+  broadcasterScopeAlternatives?: readonly (readonly string[])[];
   eventSubTypes?: readonly string[];
   /** EventSub types authenticated by the bot token and independent of broadcaster scopes. */
   scopeIndependentEventSubTypes?: readonly string[];

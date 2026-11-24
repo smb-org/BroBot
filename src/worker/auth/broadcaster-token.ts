@@ -19,6 +19,8 @@ export interface BroadcasterTokenDependencies {
   beforeCall?: () => Promise<boolean>;
   refresh?: "allow" | "never";
   refreshLease?: LoginTokenRefreshLeaseOptions;
+  /** Each group is an any-of requirement; all groups and `requiredScopes` remain required. */
+  scopeAlternatives?: readonly (readonly string[])[];
 }
 
 export type BroadcasterTokenResult<Data> =
@@ -41,9 +43,16 @@ const parseTokenScopes = (identity: LoginIdentityRecord): string[] => {
   }
 };
 
-const missingScopes = (identity: LoginIdentityRecord, requiredScopes: readonly string[]): string[] => {
+const missingScopes = (
+  identity: LoginIdentityRecord,
+  requiredScopes: readonly string[],
+  scopeAlternatives: readonly (readonly string[])[] = [],
+): string[] => {
   const granted = new Set(parseTokenScopes(identity));
-  return requiredScopes.filter((scope) => !granted.has(scope));
+  return [...new Set([
+    ...requiredScopes.filter((scope) => !granted.has(scope)),
+    ...scopeAlternatives.flatMap((group) => group.some((scope) => granted.has(scope)) ? [] : group),
+  ])];
 };
 
 const isReplacementIdentity = (
@@ -152,7 +161,7 @@ export const withBroadcasterToken = async <Data>(
   if (identity.status === "revoked") return { kind: "revoked", source: "stored" };
   if (identity.status !== "connected") return { kind: "not_connected" };
 
-  const initiallyMissing = missingScopes(identity, requiredScopes);
+  const initiallyMissing = missingScopes(identity, requiredScopes, dependencies.scopeAlternatives);
   if (initiallyMissing.length > 0) return { kind: "scope_missing", missing: initiallyMissing };
 
   let refreshSpent = false;
@@ -166,7 +175,7 @@ export const withBroadcasterToken = async <Data>(
       if (refreshResult.kind === "not_connected") return { kind: "not_connected" };
       if (refreshResult.kind === "failed") return { kind: "refresh_failed" };
       identity = refreshResult.identity;
-      const missing = missingScopes(identity, requiredScopes);
+      const missing = missingScopes(identity, requiredScopes, dependencies.scopeAlternatives);
       if (missing.length > 0) return { kind: "scope_missing", missing };
     }
   }
@@ -203,7 +212,7 @@ export const withBroadcasterToken = async <Data>(
     identity = refreshResult.identity;
   }
 
-  const missing = missingScopes(identity, requiredScopes);
+  const missing = missingScopes(identity, requiredScopes, dependencies.scopeAlternatives);
   if (missing.length > 0) return { kind: "scope_missing", missing };
   accessToken = await accessTokenFor(identity, environment);
   if (accessToken === null) return { kind: "token_unavailable" };
