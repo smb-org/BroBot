@@ -55,6 +55,11 @@ discordRouter.get("/auth/discord/callback", async (context) => {
   const clearStateCookie = (): void => {
     context.header("Set-Cookie", clearDiscordOAuthStateCookie(), { append: true });
   };
+  // A failed relink must not leave a previously linked viewer signed in.
+  const clearViewerCookies = (): void => {
+    context.header("Set-Cookie", clearDiscordViewerSessionCookie(), { append: true });
+    context.header("Set-Cookie", clearDiscordCsrfCookie(), { append: true });
+  };
   const serializedState = context.req.query("state");
   const now = nowIso();
   const cookieNonce = readCookieValue(context.req.raw.headers.get("Cookie"), DISCORD_OAUTH_STATE_COOKIE);
@@ -81,7 +86,10 @@ discordRouter.get("/auth/discord/callback", async (context) => {
       fetchDiscordConnections(context.env, token.access_token),
     ]);
     const twitch = verifiedTwitchConnection(connections);
-    if (twitch === null) return context.redirect(pageLocation(context.env, "no-twitch"), 302);
+    if (twitch === null) {
+      clearViewerCookies();
+      return context.redirect(pageLocation(context.env, "no-twitch"), 302);
+    }
 
     const linkedAt = nowIso();
     await replaceDiscordLink(context.env.DB, {
@@ -99,6 +107,7 @@ discordRouter.get("/auth/discord/callback", async (context) => {
     context.header("Set-Cookie", discordCsrfCookie(csrfToken), { append: true });
     return context.redirect(pageLocation(context.env, "linked"), 302);
   } catch {
+    clearViewerCookies();
     return context.redirect(pageLocation(context.env, "error"), 302);
   }
 });

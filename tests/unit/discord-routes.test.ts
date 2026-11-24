@@ -128,6 +128,31 @@ describe("Discord link routes", () => {
     await expect(database.prepare("SELECT count(*) AS count FROM discord_links").first()).resolves.toEqual({ count: 0 });
   });
 
+  it("ends the existing viewer session when a relink finds no Twitch connection", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    const environment = createEnvironment(database);
+    await replaceDiscordLink(environment.DB, {
+      discordUserId: "11111111111111111", twitchUserId: "222", discordUsername: "accounta",
+      twitchLogin: "account_a", linkedAt: "2026-11-24T10:00:00.000Z", verifiedAt: "2026-11-24T10:00:00.000Z",
+    });
+    const viewer = createDiscordViewerSession("11111111111111111", new Date().toISOString());
+    const viewerCookie = (await serializeDiscordViewerSession(viewer, SESSION_KEYS)).split(";", 1)[0] ?? "";
+    const started = await startOAuth(environment);
+    vi.stubGlobal("fetch", mockDiscordApi([]).fetcher);
+
+    const callback = await discordRouter.fetch(new Request(
+      `${ORIGIN}/auth/discord/callback?code=fictional-code&state=${encodeURIComponent(started.state)}`,
+      { headers: { Cookie: `${DISCORD_OAUTH_STATE_COOKIE}=${started.nonce}; ${viewerCookie}` } },
+    ), environment);
+
+    expect(callback.headers.get("location")).toBe(`${ORIGIN}/discord/link?discord=no-twitch`);
+    const cookies = callback.headers.get("set-cookie") ?? "";
+    expect(cookies).toMatch(/__Host-brobot_discord_viewer=;[^,]*Max-Age=0/u);
+    expect(cookies).toMatch(/__Host-brobot_discord_csrf=;[^,]*Max-Age=0/u);
+    await expect(getDiscordLink(environment.DB, "11111111111111111")).resolves.toMatchObject({ twitchLogin: "account_a" });
+  });
+
   it("rejects a callback whose state cookie belongs to another browser", async () => {
     const database = new TestD1Database();
     databases.push(database);
