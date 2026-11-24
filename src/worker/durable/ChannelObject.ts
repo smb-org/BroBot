@@ -172,6 +172,8 @@ import {
   channelJobAlarmKey,
   executeChannelJobClaim,
   HOST_CHANNEL_JOBS,
+  reconcilePendingChannelJobScheduleInputs,
+  recordChannelJobScheduleInputsChanged,
   requestChannelJobRun,
   type ChannelJobRegistration,
   type ChannelJobRunContext,
@@ -1085,6 +1087,13 @@ export class ChannelObject extends DurableObject<Env> {
       desiredIds.has(job_id) || store.isPaused(job_id) ? [] : [job_id],
     );
     for (const jobId of removedRows) store.remove(jobId);
+    await reconcilePendingChannelJobScheduleInputs(
+      this.ctx.storage,
+      store,
+      async () => {
+        await this.publishChannelJobStatusChanged();
+      },
+    );
     await this.scheduleEarliestAlarm();
   }
 
@@ -1187,11 +1196,9 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   public async markChannelJobReconcileNeeded(jobId: string): Promise<boolean> {
-    return await this.withChannelJobScheduleLock(async () => {
-      const allowed = this.channelJobStore().markReconcileNeeded(jobId);
-      if (!allowed) await this.publishChannelJobStatusChanged();
-      return allowed;
-    });
+    const allowed = this.channelJobStore().markReconcileNeeded(jobId);
+    if (!allowed) await this.publishChannelJobStatusChanged();
+    return allowed;
   }
 
   public async publishChannelJobStatusChanged(): Promise<void> {
@@ -9672,11 +9679,7 @@ export class ChannelObject extends DurableObject<Env> {
               if (onScheduleInputsChanged === undefined) continue;
               const jobId = registration.job === undefined ? null : moduleChannelJobId(module.id, registration.key);
               if (jobId !== null) {
-                await this.withChannelJobScheduleLock(async () => {
-                  if (!this.channelJobStore().isPaused(jobId)) return;
-                  const marked = this.channelJobStore().markReconcileNeeded(jobId);
-                  if (!marked) await this.publishChannelJobStatusChanged();
-                });
+                await recordChannelJobScheduleInputsChanged(this.ctx.storage, jobId);
                 continue;
               }
               await this.runModuleAlarmHandler(module.id, registration.key, () => onScheduleInputsChanged(
@@ -9803,6 +9806,8 @@ export class ChannelObject extends DurableObject<Env> {
       } else {
         const jobId = registration.job.id;
         claimed = await this.withChannelJobScheduleLock(async () => {
+          const currentRegistrations = await this.registeredChannelJobs();
+          if (!currentRegistrations.some((current) => current.id === jobId)) return null;
           const currentTable = await this.ensureAlarmScheduleTable();
           const currentEntry = currentTable[key];
           if (currentEntry === undefined || JSON.stringify(currentEntry) !== JSON.stringify(entry) ||

@@ -27,6 +27,11 @@ export const HOST_CHANNEL_JOBS: readonly HostChannelJobRegistration[] = [];
 
 export const channelJobAlarmKey = (jobId: string): string => `channel-job:${encodeURIComponent(jobId)}`;
 
+const CHANNEL_JOB_SCHEDULE_INPUT_RECONCILE_PREFIX = "channel-job-schedule-input-reconcile:";
+
+const channelJobScheduleInputReconcileKey = (jobId: string): string =>
+  `${CHANNEL_JOB_SCHEDULE_INPUT_RECONCILE_PREFIX}${encodeURIComponent(jobId)}`;
+
 export interface ChannelJobStatus {
   jobId: string;
   state: ChannelJobState;
@@ -416,6 +421,48 @@ export class ChannelJobStore {
     });
   }
 }
+
+/** Records deferred paused-job bookkeeping without waiting for the channel-job schedule lock. */
+export const recordChannelJobScheduleInputsChanged = async (
+  storage: Pick<DurableObjectStorage, "transaction">,
+  jobId: string,
+): Promise<void> => {
+  const key = channelJobScheduleInputReconcileKey(jobId);
+  await storage.transaction(async (transaction) => {
+    const current = await transaction.get<number>(key);
+    const next = typeof current === "number" && Number.isSafeInteger(current) && current < Number.MAX_SAFE_INTEGER
+      ? current + 1
+      : 1;
+    await transaction.put(key, next);
+  });
+};
+
+/** Applies pending schedule-input bookkeeping from inside the locked reconciliation pass. */
+export const reconcilePendingChannelJobScheduleInputs = async (
+  storage: Pick<DurableObjectStorage, "list" | "transaction">,
+  store: ChannelJobStore,
+  onStatusChanged: () => Promise<void>,
+): Promise<void> => {
+  const pending = await storage.list({ prefix: CHANNEL_JOB_SCHEDULE_INPUT_RECONCILE_PREFIX });
+  const markers = [...pending.entries()];
+  let pausedJobFound = false;
+  for (const [key] of markers) {
+    let jobId: string;
+    try {
+      jobId = decodeURIComponent(key.slice(CHANNEL_JOB_SCHEDULE_INPUT_RECONCILE_PREFIX.length));
+    } catch {
+      continue;
+    }
+    if (!store.markReconcileNeeded(jobId)) pausedJobFound = true;
+  }
+  if (pausedJobFound) await onStatusChanged();
+
+  for (const [key, generation] of markers) {
+    await storage.transaction(async (transaction) => {
+      if (await transaction.get(key) === generation) await transaction.delete(key);
+    });
+  }
+};
 
 export const requestChannelJobRun = async (
   alarm: {

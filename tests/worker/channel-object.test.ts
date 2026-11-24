@@ -87,6 +87,7 @@ import { ballotVoterHash } from "../../src/worker/durable/ballots";
 import { channelJobAlarmKey, type ChannelJobRegistration, type ChannelJobStore } from "../../src/worker/durable/channel-jobs";
 import {
   CHANNEL_HOST_ALARM_HANDLER_KEYS,
+  MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER,
   missingAlarmHandlerKeys,
   moduleAlarmHandlerEntries,
 } from "../../src/worker/durable/module-alarm-registry";
@@ -4785,6 +4786,7 @@ const channelJobsTestModule = (handle: () => Promise<unknown>): BotModule => ({
     },
     retryDelaysMs: [1_000],
     handle: async () => await handle(),
+    onScheduleInputsChanged: () => Promise.resolve(),
   }],
 } as unknown as BotModule);
 
@@ -4803,6 +4805,35 @@ describe("ChannelObject channel jobs", () => {
     vi.restoreAllMocks();
   });
 
+  it("does not run a due job after its module has been disabled", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-11-24T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const handler = vi.fn(() => Promise.resolve({ summary: { de: "Reconciled", en: "Reconciled" } }));
+    const object = objectFor([]);
+    const internals = object as unknown as ChannelJobsTestInternals;
+    internals.registeredChannelJobs = vi.fn(() => Promise.resolve([]));
+    const handlers = internals.alarmHandlers([channelJobsTestModule(handler)]);
+    internals.alarmHandlers = vi.fn(() => handlers);
+    const claim = vi.spyOn(internals, "claimAlarmEntry");
+    const moduleJobCheck = vi.spyOn(MODULES, "some").mockReturnValue(true);
+    const alarmKey = channelJobAlarmKey(channelJobsTestRegistration.id);
+    storageOf(object).values.set("channel:alarm_schedule", {
+      [alarmKey]: { deadline: now, handler: channelJobsTestRegistration.handlerKey, revision: 1 },
+    });
+
+    try {
+      await object.alarm();
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(claim).not.toHaveBeenCalled();
+      const alarmTable = storageOf(object).values.get("channel:alarm_schedule") as Record<string, unknown> | undefined;
+      expect(alarmTable?.[alarmKey]).toBeUndefined();
+    } finally {
+      moduleJobCheck.mockRestore();
+    }
+  });
+
   it("dispatches a due non-job alarm while channel job reconciliation is locked", async () => {
     vi.useFakeTimers();
     const now = Date.parse("2026-11-24T12:00:00.000Z");
@@ -4818,7 +4849,9 @@ describe("ChannelObject channel jobs", () => {
       registrationReadStarted = true;
       return registrationRead;
     });
+    internals.publishChannelJobStatusChanged = vi.fn().mockResolvedValue(undefined);
     internals.channelJobStore().ensureJob(channelJobsTestRegistration, now);
+    internals.channelJobStore().pause(channelJobsTestRegistration.id, now);
     const handlers = internals.alarmHandlers([channelJobsTestModule(() => Promise.resolve({
       summary: { de: "Reconciled", en: "Reconciled" },
     }))]);
@@ -4833,6 +4866,11 @@ describe("ChannelObject channel jobs", () => {
       const alarmTable = storageOf(object).values.get("channel:alarm_schedule") as Record<string, unknown>;
       storageOf(object).values.set("channel:alarm_schedule", {
         ...alarmTable,
+        "host:schedule_inputs_changed:event_times": {
+          deadline: now - 3,
+          handler: MODULE_SCHEDULE_INPUTS_CHANGED_HANDLER,
+          revision: 1,
+        },
         [channelJobAlarmKey(channelJobsTestRegistration.id)]: {
           deadline: now - 2,
           handler: channelJobsTestRegistration.handlerKey,
@@ -4844,7 +4882,7 @@ describe("ChannelObject channel jobs", () => {
       expect(registrationReadStarted).toBe(true);
 
       alarm = object.alarm();
-      for (let turn = 0; turn < 100 && !mocks.processAdPrewarning.mock.calls.length; turn += 1) {
+      for (let turn = 0; turn < 1000 && !mocks.processAdPrewarning.mock.calls.length; turn += 1) {
         await Promise.resolve();
       }
       expect(mocks.processAdPrewarning).toHaveBeenCalledOnce();
@@ -4856,6 +4894,10 @@ describe("ChannelObject channel jobs", () => {
       ]);
       moduleJobCheck.mockRestore();
     }
+    expect(internals.channelJobStore().status(channelJobsTestRegistration.id)).toMatchObject({
+      state: "paused",
+      reconcileNeeded: true,
+    });
   });
 
   it("serializes a stale disabled registration read before activation and pause reconciliation", async () => {
@@ -4951,6 +4993,7 @@ describe("ChannelObject channel jobs", () => {
     const object = objectFor([]);
     const internals = object as unknown as ChannelJobsTestInternals;
     internals.publishChannelJobStatusChanged = vi.fn().mockResolvedValue(undefined);
+    internals.registeredChannelJobs = vi.fn(() => Promise.resolve([channelJobsTestRegistration]));
     const handlers = internals.alarmHandlers([channelJobsTestModule(handler)]);
     const alarmKey = channelJobAlarmKey(channelJobsTestRegistration.id);
     storageOf(object).values.set("channel:alarm_schedule", {
