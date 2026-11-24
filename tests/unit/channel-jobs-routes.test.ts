@@ -32,7 +32,7 @@ const requestFor = async (
   userId: string,
   path: string,
   method = "GET",
-  origin: string | null = "https://brobot.example",
+  csrf = true,
 ): Promise<Request> => {
   const sessionId = `session-${userId}`;
   const sessionCookie = await createSessionCookie({ sessionId }, SESSION_COOKIE_KEYS, SESSION_ENCRYPTION_KEYS);
@@ -40,9 +40,8 @@ const requestFor = async (
   const headers = new Headers({
     Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrfToken}`,
     "Content-Type": "application/json",
-    "X-CSRF-Token": csrfToken,
   });
-  if (origin !== null) headers.set("Origin", origin);
+  if (csrf) headers.set("X-CSRF-Token", csrfToken);
   return new Request(`https://brobot.example${path}`, {
     method,
     headers,
@@ -118,13 +117,13 @@ describe("channel jobs panel routes", () => {
     expect(listChannelJobs).not.toHaveBeenCalled();
   });
 
-  it("rejects a job action without the configured Origin", async () => {
+  it("rejects a job action without a valid CSRF token", async () => {
     const response = await panelRouter.fetch(
-      await requestFor(MEMBER_ID, `/api/channels/${CHANNEL_ID}/jobs/host%3Atest_only/run`, "POST", "https://attacker.example"),
+      await requestFor(MEMBER_ID, `/api/channels/${CHANNEL_ID}/jobs/host%3Atest_only/run`, "POST", false),
       environment,
     );
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({ error: "channel_jobs_origin_invalid" });
+    await expect(response.json()).resolves.toEqual({ error: "csrf_invalid" });
     expect(runChannelJobNow).not.toHaveBeenCalled();
   });
 });

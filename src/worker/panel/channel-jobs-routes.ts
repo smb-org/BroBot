@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { createMiddleware } from "hono/factory";
 
 import type { PanelChannelJob } from "../../panel-contract";
 import { requireChannelAuthorization, type ChannelAuthorizationVariables } from "../auth/guards";
@@ -10,20 +9,6 @@ interface ChannelJobsRouteEnvironment {
 }
 
 export const channelJobsRouter = new Hono<ChannelJobsRouteEnvironment>();
-
-const requireExpectedOrigin = createMiddleware<ChannelJobsRouteEnvironment>(async (context, next) => {
-  const origin = context.req.header("Origin");
-  let expectedOrigin: string | null;
-  try {
-    expectedOrigin = new URL(context.env.PUBLIC_ORIGIN).origin;
-  } catch {
-    expectedOrigin = null;
-  }
-  if (origin === undefined || expectedOrigin === null || origin !== expectedOrigin) {
-    return context.json({ error: "channel_jobs_origin_invalid" }, 403);
-  }
-  await next();
-});
 
 const validJobId = (jobId: string): boolean =>
   jobId.length <= 256 && /^(?:module|host):[A-Za-z0-9_:-]{1,252}$/u.test(jobId);
@@ -44,7 +29,6 @@ channelJobsRouter.get(
 channelJobsRouter.post(
   "/api/channels/:channelId/jobs/:jobId/run",
   requireChannelAuthorization(),
-  requireExpectedOrigin,
   async (context) => {
     const channelId = context.req.param("channelId");
     const jobId = context.req.param("jobId");
@@ -59,7 +43,6 @@ channelJobsRouter.post(
 channelJobsRouter.post(
   "/api/channels/:channelId/jobs/:jobId/pause",
   requireChannelAuthorization(),
-  requireExpectedOrigin,
   async (context) => {
     const channelId = context.req.param("channelId");
     const jobId = context.req.param("jobId");
@@ -73,7 +56,6 @@ channelJobsRouter.post(
 channelJobsRouter.post(
   "/api/channels/:channelId/jobs/:jobId/resume",
   requireChannelAuthorization(),
-  requireExpectedOrigin,
   async (context) => {
     const channelId = context.req.param("channelId");
     const jobId = context.req.param("jobId");
