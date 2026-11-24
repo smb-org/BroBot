@@ -57,7 +57,7 @@ import {
   revokeOverlayToken,
 } from "./overlay-token-service";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
-import { maintainBotIdentity } from "../bot-maintenance";
+import { decryptStoredToken, maintainBotIdentity } from "../bot-maintenance";
 import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { revokeRealtimeSessionForUser } from "../realtime";
 import { closeRealtimeTokenBeforeResponse } from "../realtime-revocation";
@@ -680,9 +680,22 @@ authRouter.get("/auth/twitch/callback", async (context) => {
     const expiresAt = new Date(Date.parse(now) + tokens.expiresIn * 1000).toISOString();
     const current = await getLoginIdentity(context.env.DB, identity.userId);
     const encryptionKeys = getTokenEncryptionKeys(context.env);
-    // A plain login must not drop a scope an enabled module uses: keep the stored token and still sign in.
-    const keepStoredToken = current !== null &&
-      !await broadcasterTokenPreservesEnabledModuleScopes(context.env.DB, identity.userId, tokens.scopes);
+    let storedTokenUsable = current !== null && current.status === "connected" &&
+      Date.parse(current.expiresAt) > Date.parse(now);
+    if (storedTokenUsable && current !== null) {
+      try {
+        const [accessToken, refreshToken] = await Promise.all([
+          decryptStoredToken(current.accessTokenCiphertext, encryptionKeys),
+          decryptStoredToken(current.refreshTokenCiphertext, encryptionKeys),
+        ]);
+        storedTokenUsable = accessToken !== null && refreshToken !== null;
+      } catch {
+        storedTokenUsable = false;
+      }
+    }
+    // A plain login preserves scopes only when the current connected credentials are usable.
+    const keepStoredToken = storedTokenUsable &&
+      !(await broadcasterTokenPreservesEnabledModuleScopes(context.env.DB, identity.userId, tokens.scopes));
     if (!keepStoredToken) await upsertLoginIdentity(context.env.DB, {
       userId: identity.userId,
       login: identity.login,

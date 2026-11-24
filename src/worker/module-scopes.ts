@@ -42,6 +42,7 @@ interface IdentityScopeRow {
 interface IdentityTokenScopeRow {
   token_scopes_json: string;
   status: string;
+  reason: string | null;
 }
 
 const unique = (scopes: readonly string[]): string[] => [...new Set(scopes)];
@@ -112,11 +113,13 @@ const broadcasterIdentityTokenScopes = async (
   channelId: string,
 ): Promise<string[]> => {
   const row = await db.prepare(
-    `SELECT token_scopes_json, status
+    `SELECT token_scopes_json, status, reason
        FROM twitch_login_identity
       WHERE user_id = ?`,
   ).bind(channelId).first<IdentityTokenScopeRow>();
-  return row !== null && row.status !== "revoked" ? parseScopes(row.token_scopes_json) : [];
+  if (row === null || (row.status !== "connected" &&
+      !(row.status === "error" && row.reason === "active_module_scope_missing"))) return [];
+  return parseScopes(row.token_scopes_json);
 };
 
 export const moduleBroadcasterScopeState = async (
@@ -217,7 +220,22 @@ export const listRequiredBroadcasterScopesForUserAndModule = async (
 
 export const moduleScopeRequirement = (module: BotModule): string[] => resolveBroadcasterScopes([module]);
 
-/** Finds required or currently used scopes that would be lost from a replacement broadcaster token. */
+const lostModuleScopes = (
+  module: BotModule,
+  previousScopes: ReadonlySet<string>,
+  newScopes: ReadonlySet<string>,
+): string[] => {
+  const lostRequired = declaredScopes(module).filter((scope) => previousScopes.has(scope) && !newScopes.has(scope));
+  const lostAlternatives = alternativeGroups(module).flatMap((group) => {
+    if (!group.some((scope) => previousScopes.has(scope)) || group.some((scope) => newScopes.has(scope))) return [];
+    return group.filter((scope) => previousScopes.has(scope));
+  });
+  const lostOptional = moduleOptionalBroadcasterScopes(module)
+    .filter((scope) => previousScopes.has(scope) && !newScopes.has(scope));
+  return [...lostRequired, ...lostAlternatives, ...lostOptional];
+};
+
+/** Finds scopes a connected token currently holds for an enabled module that a replacement would remove. */
 export const missingEnabledModuleBroadcasterScopes = async (
   db: D1Database,
   userId: string,
@@ -227,13 +245,10 @@ export const missingEnabledModuleBroadcasterScopes = async (
   const modules = await enabledModulesForUser(db, userId, registry);
   const previousScopes = new Set(await broadcasterIdentityTokenScopes(db, userId));
   const nextScopes = new Set(newScopes);
-  return unique(modules.flatMap((module) => [
-    ...moduleMissingBroadcasterScopes(module, newScopes),
-    ...moduleOptionalBroadcasterScopes(module).filter((scope) => previousScopes.has(scope) && !nextScopes.has(scope)),
-  ]));
+  return unique(modules.flatMap((module) => lostModuleScopes(module, previousScopes, nextScopes)));
 };
 
-/** Prevents replacing a broadcaster token when it would strand an enabled module's declared or already-used scope. */
+/** Prevents replacing a connected broadcaster token when it would drop a scope used by an enabled module. */
 export const broadcasterTokenPreservesEnabledModuleScopes = async (
   db: D1Database,
   userId: string,

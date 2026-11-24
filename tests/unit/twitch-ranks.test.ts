@@ -1,9 +1,10 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ModuleTwitchRankUser } from "../../src/modules/contract";
+import type { BotModule, ModuleTwitchRankUser } from "../../src/modules/contract";
 import {
   TwitchRanksStore,
+  applyTwitchRankEventToStore,
   parseTwitchRankEvent,
   runTwitchRanksReconcile,
   twitchRankCompletenessReason,
@@ -14,14 +15,24 @@ import {
 } from "../../src/worker/durable/twitch-ranks";
 import { helixPages } from "../../src/worker/twitch/helix";
 import type { ChannelJobRunContext } from "../../src/worker/durable/channel-jobs";
+import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
+import { TestD1Database } from "./test-d1";
 
 const databases: DatabaseSync[] = [];
 
 const storeFor = (options: {
   scheduleConsumerAlarmSync?: (moduleId: string, alarmKey: string, deadline: number) => void;
+  legacySyncState?: boolean;
 } = {}): { store: TwitchRanksStore; storage: DurableObjectStorage } => {
   const database = new DatabaseSync(":memory:");
   databases.push(database);
+  if (options.legacySyncState === true) database.exec(`CREATE TABLE twitch_rank_sync_state (
+    rank_type TEXT PRIMARY KEY CHECK (rank_type IN ('vip', 'moderator')),
+    snapshot_status TEXT NOT NULL CHECK (snapshot_status IN ('never', 'running', 'failed', 'success')),
+    snapshot_started_at TEXT,
+    applied_snapshot_started_at TEXT,
+    last_success_at TEXT
+  )`);
   const sql = {
     exec: <Row extends Record<string, unknown>>(query: string, ...values: SQLInputValue[]) => {
       const statement = database.prepare(query);
@@ -61,6 +72,12 @@ const jobContext = (storage: DurableObjectStorage, isCurrent: () => boolean = ()
 });
 
 const consumer = { moduleId: "test_role_consumer", alarmKey: "role_reconcile" } as const;
+const consumerModule = {
+  id: consumer.moduleId,
+  consumes: ["twitch_ranks"],
+  reconcileAlarmKeys: { twitch_ranks: consumer.alarmKey },
+  alarms: [{ key: consumer.alarmKey, job: { handlerKey: "test:role_reconcile" } }],
+} as unknown as BotModule;
 const user: ModuleTwitchRankUser = { userId: "viewer-1", login: "pixelpilot", displayName: "PixelPilot" };
 const seedUser = (
   store: TwitchRanksStore,
@@ -97,6 +114,12 @@ afterEach(() => {
 });
 
 describe("Twitch rank storage", () => {
+  it("adds tracking-gap state to an existing ChannelObject schema", () => {
+    const { store } = storeFor({ legacySyncState: true });
+
+    expect(store.readState("vip").lastTrackingGapAt).toBeNull();
+  });
+
   it("does not ask Helix for data when there are no consumers", async () => {
     const { store, storage } = storeFor();
     const context = jobContext(storage);
@@ -128,6 +151,122 @@ describe("Twitch rank storage", () => {
     expect(store.readUserIds("vip")).toEqual(new Set());
   });
 
+  it("records a gap for skipped delivery during token failure and rejects its in-flight snapshot", async () => {
+    const { store, storage } = storeFor();
+    const context = jobContext(storage);
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "rank-channel");
+      await insertLoginIdentityAndSession(database, "rank-channel", ["channel:bot", "channel:read:vips"]);
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, ?, 1, '{}')",
+      ).bind("rank-channel", consumer.moduleId).run();
+      await database.prepare(
+        "UPDATE twitch_login_identity SET status = 'error', reason = 'validate_failed' WHERE user_id = ?",
+      ).bind("rank-channel").run();
+
+      const previousStartedAt = new Date(Date.now() - 2 * 24 * 60 * 60_000).toISOString();
+      expect(store.beginSnapshot(context, "vip", previousStartedAt)).toBe(true);
+      expect(store.applySnapshot(
+        context,
+        "vip",
+        previousStartedAt,
+        new Date(Date.parse(previousStartedAt) + 1_000).toISOString(),
+        [user],
+        [consumer],
+      )).toBe(true);
+      const inFlightStartedAt = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+      expect(store.beginSnapshot(context, "vip", inFlightStartedAt)).toBe(true);
+
+      const reconcileNeeded = vi.fn(async () => {});
+      await expect(applyTwitchRankEventToStore(
+        { DB: database as unknown as D1Database },
+        store,
+        "rank-channel",
+        {
+          messageId: "token-error-removal",
+          subscriptionType: "channel.vip.remove",
+          payload: {
+            user_id: user.userId,
+            user_login: user.login,
+            user_name: user.displayName,
+            broadcaster_user_id: "rank-channel",
+            broadcaster_user_login: "fictionalchannel",
+            broadcaster_user_name: "FictionalChannel",
+          },
+          eventAt: new Date(Date.parse(inFlightStartedAt) + 1_000).toISOString(),
+        },
+        reconcileNeeded,
+        [consumerModule],
+      )).resolves.toMatchObject({ changed: true, ignored: false, duplicate: false });
+      // The applied event itself must leave the gap, before any later skipped delivery does.
+      expect(store.readState("vip").lastTrackingGapAt).not.toBeNull();
+      expect(store.readState("vip").snapshotStatus).toBe("failed");
+
+      await expect(applyTwitchRankEventToStore(
+        { DB: database as unknown as D1Database },
+        store,
+        "rank-channel",
+        {
+          messageId: "malformed-during-token-error",
+          subscriptionType: "channel.vip.remove",
+          payload: {},
+          eventAt: new Date().toISOString(),
+        },
+        reconcileNeeded,
+        [consumerModule],
+      )).resolves.toMatchObject({ ignored: true, duplicate: false });
+
+      expect(reconcileNeeded).toHaveBeenCalledTimes(2);
+      expect(store.readUserIds("vip")).toEqual(new Set());
+      await database.prepare(
+        "UPDATE twitch_login_identity SET status = 'connected', reason = NULL WHERE user_id = ?",
+      ).bind("rank-channel").run();
+      const gapState = store.readState("vip");
+      expect(gapState.snapshotStatus).toBe("failed");
+      expect(gapState.lastTrackingGapAt).not.toBeNull();
+      expect(() => store.applySnapshot(
+        context,
+        "vip",
+        inFlightStartedAt,
+        new Date(Date.now() + 1_000).toISOString(),
+        [user],
+        [consumer],
+      )).toThrow("twitch_rank_snapshot_superseded");
+
+      const completeness = {
+        scopeAvailable: true,
+        tokenValid: true,
+        snapshotStatus: gapState.snapshotStatus,
+        lastSuccessAt: gapState.lastSuccessAt,
+        snapshotStartedAt: gapState.snapshotStartedAt,
+        appliedSnapshotStartedAt: gapState.appliedSnapshotStartedAt,
+        lastTrackingGapAt: gapState.lastTrackingGapAt,
+        subscriptionsEnabledSinceSnapshot: true,
+        jobPaused: false,
+        now: Date.now() + 2_000,
+        intervalMs: 60 * 60_000,
+      };
+      expect(twitchRankCompletenessReason(completeness)).toBe("tracking_gap");
+
+      const afterGap = new Date(Date.parse(gapState.lastTrackingGapAt ?? "") + 1_000).toISOString();
+      expect(store.beginSnapshot(context, "vip", afterGap)).toBe(true);
+      expect(store.applySnapshot(context, "vip", afterGap, new Date(Date.parse(afterGap) + 1_000).toISOString(), [], [consumer])).toBe(true);
+      const recoveredState = store.readState("vip");
+      expect(twitchRankCompletenessReason({
+        ...completeness,
+        snapshotStatus: recoveredState.snapshotStatus,
+        lastSuccessAt: recoveredState.lastSuccessAt,
+        snapshotStartedAt: recoveredState.snapshotStartedAt,
+        appliedSnapshotStartedAt: recoveredState.appliedSnapshotStartedAt,
+        lastTrackingGapAt: recoveredState.lastTrackingGapAt,
+        now: Date.parse(recoveredState.lastSuccessAt ?? ""),
+      })).toBeNull();
+    } finally {
+      database.close();
+    }
+  });
+
   it("lets a snapshot supersede an older event delivered while the pages are loading", () => {
     const { store, storage } = storeFor();
     const context = jobContext(storage);
@@ -140,15 +279,21 @@ describe("Twitch rank storage", () => {
     expect(store.readUserIds("vip")).toEqual(new Set([user.userId]));
   });
 
-  it("rolls back the rank event and receipt together if consumer alarm scheduling fails, then deduplicates a retry", () => {
+  it("rolls back a rank event, receipt, and gap together if alarm scheduling fails", () => {
     let shouldFail = true;
     const scheduleConsumerAlarmSync = vi.fn(() => {
       if (shouldFail) throw new Error("alarm storage unavailable");
     });
     const { store, storage } = storeFor({ scheduleConsumerAlarmSync });
 
-    expect(() => store.applyEvent(event({ action: "add" }), [consumer])).toThrow("alarm storage unavailable");
+    expect(() => store.applyEvent(
+      event({ action: "add" }),
+      [consumer],
+      Date.now(),
+      "2026-11-24T12:00:01.000Z",
+    )).toThrow("alarm storage unavailable");
     expect(store.readUserIds("vip")).toEqual(new Set());
+    expect(store.readState("vip").lastTrackingGapAt).toBeNull();
     shouldFail = false;
     expect(store.applyEvent(event({ action: "add" }), [consumer]).duplicate).toBe(false);
     expect(store.isConsumerDirty(consumer.moduleId)).toEqual({ dirty: true, generation: 1 });
@@ -234,7 +379,14 @@ describe("Twitch rank storage", () => {
     expect(twitchRankCompletenessReason({ ...complete, tokenValid: false })).toBe("token_invalid");
     expect(twitchRankCompletenessReason({ ...complete, jobPaused: true })).toBe("job_paused");
     expect(twitchRankCompletenessReason({ ...complete, lastSuccessAt: "2026-11-24T09:59:59.999Z" })).toBe("stale");
-    expect(twitchRankSnapshot({ snapshotStatus: "never", snapshotStartedAt: null, lastSuccessAt: null, userIds: new Set([user.userId]) }, {
+    expect(twitchRankSnapshot({
+      snapshotStatus: "never",
+      snapshotStartedAt: null,
+      appliedSnapshotStartedAt: null,
+      lastSuccessAt: null,
+      lastTrackingGapAt: null,
+      userIds: new Set([user.userId]),
+    }, {
       ...complete,
       scopeAvailable: false,
       snapshotStatus: "never",

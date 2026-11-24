@@ -38,7 +38,9 @@ export interface TwitchRankEvent {
 export interface TwitchRankState {
   snapshotStatus: TwitchRankSnapshotStatus;
   snapshotStartedAt: string | null;
+  appliedSnapshotStartedAt: string | null;
   lastSuccessAt: string | null;
+  lastTrackingGapAt: string | null;
   userIds: ReadonlySet<string>;
 }
 
@@ -48,6 +50,8 @@ export interface TwitchRankCompletenessInput {
   snapshotStatus: TwitchRankSnapshotStatus;
   lastSuccessAt: string | null;
   snapshotStartedAt: string | null;
+  appliedSnapshotStartedAt?: string | null;
+  lastTrackingGapAt?: string | null;
   subscriptionsEnabledSinceSnapshot: boolean;
   jobPaused: boolean;
   now: number;
@@ -101,8 +105,13 @@ const ensureTwitchRanksSchema = (sql: SqlStorage): void => {
     snapshot_status TEXT NOT NULL CHECK (snapshot_status IN ('never', 'running', 'failed', 'success')),
     snapshot_started_at TEXT,
     applied_snapshot_started_at TEXT,
-    last_success_at TEXT
+    last_success_at TEXT,
+    last_tracking_gap_at TEXT
   )`);
+  const syncStateColumns = sql.exec<{ name: string }>("PRAGMA table_info(twitch_rank_sync_state)").toArray();
+  if (!syncStateColumns.some(({ name }) => name === "last_tracking_gap_at")) {
+    sql.exec("ALTER TABLE twitch_rank_sync_state ADD COLUMN last_tracking_gap_at TEXT");
+  }
   sql.exec(`CREATE TABLE IF NOT EXISTS twitch_rank_memberships (
     rank_type TEXT NOT NULL CHECK (rank_type IN ('vip', 'moderator')),
     user_id TEXT NOT NULL,
@@ -154,6 +163,7 @@ interface RankSyncRow extends Record<string, string | null> {
   snapshot_started_at: string | null;
   applied_snapshot_started_at: string | null;
   last_success_at: string | null;
+  last_tracking_gap_at: string | null;
 }
 
 interface RankMembershipRow extends Record<string, string | number> {
@@ -176,10 +186,31 @@ interface RankEventRow extends Record<string, string | number> {
 
 const readSyncRow = (sql: SqlStorage, rankType: TwitchRankType): RankSyncRow | undefined =>
   sql.exec<RankSyncRow>(
-    `SELECT rank_type, snapshot_status, snapshot_started_at, applied_snapshot_started_at, last_success_at
+    `SELECT rank_type, snapshot_status, snapshot_started_at, applied_snapshot_started_at, last_success_at,
+            last_tracking_gap_at
        FROM twitch_rank_sync_state WHERE rank_type = ?`,
     rankType,
   ).toArray()[0];
+
+const updateTrackingGap = (sql: SqlStorage, rankType: TwitchRankType, gapAt: string): void => {
+  const state = readSyncRow(sql, rankType);
+  const lastTrackingGapAt = state?.last_tracking_gap_at !== null && state?.last_tracking_gap_at !== undefined &&
+    state.last_tracking_gap_at > gapAt
+    ? state.last_tracking_gap_at
+    : gapAt;
+  sql.exec(
+    `UPDATE twitch_rank_sync_state
+        SET last_tracking_gap_at = ?,
+            snapshot_status = CASE
+              WHEN snapshot_status = 'running' AND snapshot_started_at <= ? THEN 'failed'
+              ELSE snapshot_status
+            END
+      WHERE rank_type = ?`,
+    lastTrackingGapAt,
+    lastTrackingGapAt,
+    rankType,
+  );
+};
 
 const activeUserIds = (sql: SqlStorage, rankType: TwitchRankType): Set<string> => new Set(
   sql.exec<{ user_id: string }>(
@@ -263,7 +294,9 @@ export class TwitchRanksStore {
       return {
         snapshotStatus: row !== undefined && snapshotStatusValue(row.snapshot_status) ? row.snapshot_status : "never",
         snapshotStartedAt: row?.snapshot_started_at ?? null,
+        appliedSnapshotStartedAt: row?.applied_snapshot_started_at ?? null,
         lastSuccessAt: row?.last_success_at ?? null,
+        lastTrackingGapAt: row?.last_tracking_gap_at ?? null,
         userIds: activeUserIds(sql, rankType),
       };
     });
@@ -320,6 +353,9 @@ export class TwitchRanksStore {
       const state = readSyncRow(sql, rankType);
       if (state?.snapshot_status !== "running" || state.snapshot_started_at !== normalizedStart) {
         throw new Error("twitch_rank_snapshot_superseded");
+      }
+      if (state.last_tracking_gap_at !== null && normalizedStart <= state.last_tracking_gap_at) {
+        throw new Error("twitch_rank_snapshot_precedes_tracking_gap");
       }
       const before = activeUserIds(sql, rankType);
       sql.exec(
@@ -385,8 +421,10 @@ export class TwitchRanksStore {
     event: TwitchRankEvent,
     consumers: readonly TwitchRankConsumer[],
     receivedAt = Date.now(),
+    trackingGapAt?: string,
   ): { duplicate: boolean; changed: boolean; ignored: boolean } {
     const normalizedEvent = { ...event, eventAt: canonicalTimestamp(event.eventAt) };
+    const normalizedGapAt = trackingGapAt === undefined ? undefined : canonicalTimestamp(trackingGapAt);
     if (!Number.isSafeInteger(receivedAt)) throw new RangeError("Invalid Twitch rank event receipt time.");
     return this.transaction((sql) => {
       if (consumers.length === 0) return { duplicate: false, changed: false, ignored: true };
@@ -398,6 +436,7 @@ export class TwitchRanksStore {
       );
       const duplicate = sql.exec<{ changes: number }>("SELECT changes() AS changes").one().changes === 0;
       if (duplicate) return { duplicate: true, changed: false, ignored: false };
+      if (normalizedGapAt !== undefined) updateTrackingGap(sql, normalizedEvent.rankType, normalizedGapAt);
       const state = readSyncRow(sql, normalizedEvent.rankType);
       if (state?.snapshot_status === "running" && state.snapshot_started_at !== null &&
           normalizedEvent.eventAt > state.snapshot_started_at) {
@@ -425,6 +464,28 @@ export class TwitchRanksStore {
     });
   }
 
+  public recordTrackingGap(
+    rankType: TwitchRankType,
+    messageId: string,
+    gapAt = new Date().toISOString(),
+    receivedAt = Date.now(),
+  ): { duplicate: boolean } {
+    const normalizedGapAt = canonicalTimestamp(gapAt);
+    if (!Number.isSafeInteger(receivedAt)) throw new RangeError("Invalid Twitch rank event receipt time.");
+    return this.transaction((sql) => {
+      sql.exec("DELETE FROM twitch_rank_event_receipts WHERE received_at < ?", receivedAt - RECEIPT_RETENTION_MS);
+      sql.exec(
+        "INSERT OR IGNORE INTO twitch_rank_event_receipts (message_id, received_at) VALUES (?, ?)",
+        messageId,
+        receivedAt,
+      );
+      const duplicate = sql.exec<{ changes: number }>("SELECT changes() AS changes").one().changes === 0;
+      if (duplicate) return { duplicate: true };
+      updateTrackingGap(sql, rankType, normalizedGapAt);
+      return { duplicate: false };
+    });
+  }
+
   public isConsumerDirty(moduleId: string): { dirty: boolean; generation: number } {
     return this.transaction((sql) => {
       const row = sql.exec<{ dirty: number; generation: number }>(
@@ -448,6 +509,13 @@ export const twitchRankCompletenessReason = (
 ): ModuleTwitchRankIncompleteReason | null => {
   if (!input.scopeAvailable) return "missing_scope";
   if (!input.tokenValid) return "token_invalid";
+  if (input.lastTrackingGapAt !== null && input.lastTrackingGapAt !== undefined) {
+    const gapAt = Date.parse(input.lastTrackingGapAt);
+    const appliedStart = input.appliedSnapshotStartedAt === null || input.appliedSnapshotStartedAt === undefined
+      ? Number.NaN
+      : Date.parse(input.appliedSnapshotStartedAt);
+    if (!Number.isFinite(gapAt) || !Number.isFinite(appliedStart) || appliedStart <= gapAt) return "tracking_gap";
+  }
   if (input.snapshotStatus === "failed") return "snapshot_failed";
   if (input.snapshotStatus !== "success" || input.lastSuccessAt === null || input.snapshotStartedAt === null) {
     return "not_synced";
@@ -537,6 +605,18 @@ export const parseTwitchRankEvent = (
   }
 };
 
+const twitchRankTypeForNotification = (
+  subscriptionType: string,
+  payload: Readonly<Record<string, unknown>>,
+): TwitchRankType | null => {
+  if (subscriptionType === "channel.vip.add" || subscriptionType === "channel.vip.remove") return "vip";
+  if (subscriptionType === "channel.moderator.add" || subscriptionType === "channel.moderator.remove") return "moderator";
+  if (subscriptionType !== "channel.moderate") return null;
+  if (payload.action === "vip" || payload.action === "unvip") return "vip";
+  if (payload.action === "mod" || payload.action === "unmod") return "moderator";
+  return null;
+};
+
 const errorWithCode = (code: "missing_scope" | "refresh_failed"): Error & { code: string } =>
   Object.assign(new Error(code), { code });
 
@@ -620,15 +700,31 @@ export const applyTwitchRankEventToStore = async (
     eventAt: string;
   },
   reconcileNeeded: () => Promise<void>,
+  registry: readonly BotModule[] = MODULES,
 ): Promise<{ duplicate: boolean; changed: boolean; ignored: boolean }> => {
   const event = parseTwitchRankEvent(input.messageId, input.subscriptionType, input.payload, input.eventAt);
-  if (event === null) return { duplicate: false, changed: false, ignored: true };
-  const consumers = await listTwitchRanksConsumers(environment, channelId);
-  if (consumers.length === 0 || !await rankScopeAvailable(environment, channelId, event.rankType)) {
+  const rankType = event?.rankType ?? twitchRankTypeForNotification(input.subscriptionType, input.payload);
+  if (rankType === null) return { duplicate: false, changed: false, ignored: true };
+  const consumers = await listTwitchRanksConsumers(environment, channelId, registry);
+  if (consumers.length === 0) {
     return { duplicate: false, changed: false, ignored: true };
   }
-  const result = store.applyEvent(event, consumers);
-  if (result.changed || result.duplicate) await reconcileNeeded();
+  const recordGap = async (): Promise<{ duplicate: boolean; changed: false; ignored: boolean }> => {
+    const gap = store.recordTrackingGap(rankType, input.messageId);
+    await reconcileNeeded();
+    return { duplicate: gap.duplicate, changed: false, ignored: !gap.duplicate };
+  };
+  if (event === null) return await recordGap();
+  const trackingUnavailable = !await rankScopeAvailable(environment, channelId, event.rankType);
+  // Notifications can still update the set without a broadcaster token, while the gap forces a fresh snapshot after recovery.
+  const result = store.applyEvent(
+    event,
+    consumers,
+    Date.now(),
+    trackingUnavailable ? new Date().toISOString() : undefined,
+  );
+  if (result.ignored && !result.duplicate) return await recordGap();
+  if (trackingUnavailable || result.changed || result.duplicate) await reconcileNeeded();
   return result;
 };
 
@@ -677,6 +773,8 @@ export const readTwitchRankSnapshot = async (
     snapshotStatus: state.snapshotStatus,
     lastSuccessAt: state.lastSuccessAt,
     snapshotStartedAt: state.snapshotStartedAt,
+    appliedSnapshotStartedAt: state.appliedSnapshotStartedAt,
+    lastTrackingGapAt: state.lastTrackingGapAt,
     subscriptionsEnabledSinceSnapshot,
     jobPaused,
     now,

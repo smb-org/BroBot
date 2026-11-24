@@ -9,8 +9,10 @@ import { maintainEventSubSubscriptions } from "../../src/worker/eventsub-subscri
 import { insertChannel, insertLoginIdentityAndSession, insertMember, jsonResponse, testKey as key } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 import { listAllBroadcasterScopes } from "../../src/worker/module-scopes";
+import { getLoginIdentity, setLoginIdentityStatus } from "../../src/worker/db/login-identity";
 
 vi.mock("../../src/worker/bot-maintenance", () => ({
+  decryptStoredToken: vi.fn(() => Promise.resolve("stored-token")),
   maintainBotIdentity: vi.fn(),
 }));
 
@@ -362,6 +364,41 @@ describe("auth routes", () => {
       expect(response.headers.get("location")).toBe("https://brobot.example/");
       expect(await countRows(database, "twitch_login_identity")).toBe(1);
       expect(await countRows(database, "auth_sessions")).toBe(1);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("replaces a revoked owner's token and creates a usable session with an enabled ads module", async () => {
+    const database = new TestD1Database();
+    try {
+      await insertChannel(database, "ads-owner");
+      await insertLoginIdentityAndSession(database, "ads-owner", ["channel:bot", "channel:read:ads"]);
+      await setLoginIdentityStatus(database as unknown as D1Database, "ads-owner", "revoked", "authorization_revoked", freshTimestamp());
+      await insertMember(database, "ads-owner", "ads-owner", "broadcaster");
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('ads-owner', 'ads', 1, '{}')",
+      ).run();
+      const environment = environmentForDatabase(database);
+      const login = await authRouter.fetch(new Request("https://brobot.example/auth/login"), environment);
+      const fetcher = fetchWith(
+        tokenResponse(LOGIN_SCOPES),
+        identityResponse("ads-owner", "ads-owner"),
+      );
+
+      const response = await authRouter.fetch(callbackRequest(login), environment);
+      const identity = await getLoginIdentity(database as unknown as D1Database, "ads-owner");
+      const sessionCookie = /__Host-brobot_session=[^;,\s]+/u.exec(response.headers.get("set-cookie") ?? "")?.[0];
+      const session = sessionCookie === undefined ? null : await getSessionFromRequest(
+        new Request("https://brobot.example/", { headers: { Cookie: sessionCookie } }),
+        environment,
+      );
+
+      expect(response.status).toBe(302);
+      expect(identity).toMatchObject({ status: "connected", tokenScopesJson: JSON.stringify(LOGIN_SCOPES) });
+      expect(identity?.accessTokenCiphertext).not.toBe("access");
+      expect(session).toMatchObject({ userId: "ads-owner", login: "ads-owner" });
       expect(fetcher).toHaveBeenCalledTimes(2);
     } finally {
       database.close();

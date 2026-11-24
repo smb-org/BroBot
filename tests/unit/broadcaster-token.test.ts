@@ -257,6 +257,37 @@ describe("withBroadcasterToken", () => {
     }
   });
 
+  it("accepts a refresh that keeps existing scopes when an enabled module never had consent", async () => {
+    const database = new TestD1Database();
+    try {
+      await seedIdentity(database, {
+        expiresAt: "2026-10-23T10:04:00.000Z",
+        scopes: ["channel:manage:broadcast"],
+      });
+      await insertChannel(database, CHANNEL_ID);
+      await insertMember(database, CHANNEL_ID, CHANNEL_ID, "broadcaster");
+      await database.prepare(
+        "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES (?, 'ads', 1, '{}')",
+      ).bind(CHANNEL_ID).run();
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(refreshedTokenResponse(["channel:manage:broadcast"]));
+      const call = vi.fn(() => Promise.resolve(SUCCESS));
+
+      await expect(withBroadcasterToken(
+        environmentFor(database), CHANNEL_ID, ["channel:manage:broadcast"], call,
+        { now: () => NOW, fetcher },
+      )).resolves.toEqual({ kind: "ok", value: { value: "done" } });
+
+      expect(await getLoginIdentity(database as unknown as D1Database, CHANNEL_ID)).toMatchObject({
+        tokenScopesJson: '["channel:manage:broadcast"]',
+        status: "connected",
+        reason: null,
+      });
+      expect(call).toHaveBeenCalledOnce();
+    } finally {
+      database.close();
+    }
+  });
+
   it("shares one refresh across three concurrent calls for an expiring token", async () => {
     const database = new TestD1Database();
     try {

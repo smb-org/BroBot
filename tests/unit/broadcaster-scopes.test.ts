@@ -149,6 +149,46 @@ describe("broadcaster scopes", () => {
       .resolves.toBe(true);
   });
 
+  it("allows a token that keeps all previously held scopes when module consent was never granted", async () => {
+    database = new TestD1Database();
+    await insertChannel(database, "ads-channel");
+    await insertLoginIdentityAndSession(database, "ads-channel", ["channel:bot"]);
+    await insertMember(database, "ads-channel", "ads-channel", "broadcaster");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('ads-channel', 'ads', 1, '{}')",
+    ).run();
+
+    await expect(broadcasterTokenPreservesEnabledModuleScopes(asD1(database), "ads-channel", ["channel:bot"]))
+      .resolves.toBe(true);
+  });
+
+  it("treats any-of scopes as preserved when the new token has a different accepted alternative", async () => {
+    database = new TestD1Database();
+    const rankConsumer = {
+      id: "test_rank_consumer",
+      broadcasterScopeAlternatives: [["channel:read:vips", "channel:manage:vips"]],
+    } as unknown as BotModule;
+    await insertChannel(database, "vip-channel");
+    await insertLoginIdentityAndSession(database, "vip-channel", ["channel:bot", "channel:read:vips"]);
+    await insertMember(database, "vip-channel", "vip-channel", "broadcaster");
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('vip-channel', 'test_rank_consumer', 1, '{}')",
+    ).run();
+
+    await expect(broadcasterTokenPreservesEnabledModuleScopes(
+      asD1(database),
+      "vip-channel",
+      ["channel:bot", "channel:manage:vips"],
+      [rankConsumer],
+    )).resolves.toBe(true);
+    await expect(broadcasterTokenPreservesEnabledModuleScopes(
+      asD1(database),
+      "vip-channel",
+      ["channel:bot"],
+      [rankConsumer],
+    )).resolves.toBe(false);
+  });
+
   it("rejects a replacement token that drops an enabled module's required scope", async () => {
     database = new TestD1Database();
     await insertChannel(database, "ads-channel");

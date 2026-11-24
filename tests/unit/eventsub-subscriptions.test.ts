@@ -4,7 +4,9 @@ import {
   fetchEventSubSubscriptions,
   listDesiredEventSubTargets,
   maintainEventSubSubscriptions,
+  reconcileEventSubSubscriptions,
 } from "../../src/worker/eventsub-subscriptions";
+import { listEventSubSubscriptions } from "../../src/worker/db/eventsub-state";
 import { encryptJson, parseKeyRing } from "../../src/worker/auth/crypto";
 import { insertChannel, insertLoginIdentityAndSession } from "./fixtures";
 import { TestD1Database } from "./test-d1";
@@ -19,6 +21,13 @@ vi.mock("../../src/modules/registry", async () => {
       { id: "moderation", eventSubTypes: ["channel.moderate"] },
       tempVipsModule,
       { id: "aus", eventSubTypes: ["channel.follow"] },
+      {
+        id: "test_rank_consumer",
+        consumes: ["twitch_ranks"],
+        broadcasterScopeAlternatives: [["channel:read:vips", "channel:manage:vips"]],
+        reconcileAlarmKeys: { twitch_ranks: "role_reconcile" },
+        alarms: [{ key: "role_reconcile", job: { handlerKey: "test:role_reconcile" } }],
+      },
     ],
   };
 });
@@ -268,6 +277,67 @@ describe("EventSub reconciliation", () => {
     await expect(database.prepare(
       "SELECT status, subscription_id FROM eventsub_subscriptions WHERE channel_id = 'kanal-a' AND subscription_type = 'channel.chat.message'",
     ).first()).resolves.toEqual({ status: "enabled", subscription_id: "subscription-1" });
+  });
+
+  it("uses confirmation time for rank subscription transitions and preserves it when unchanged", async () => {
+    await insertChannel(database, "rank-channel");
+    await insertLoginIdentityAndSession(database, "rank-channel", ["channel:bot", "channel:read:vips"]);
+    await database.prepare(
+      "INSERT INTO channel_modules (channel_id, module_id, enabled, settings) VALUES ('rank-channel', 'test_rank_consumer', 1, '{}')",
+    ).run();
+    const remoteSubscriptions = ["channel.vip.add", "channel.vip.remove"].map((type, index) => ({
+      id: `rank-subscription-${String(index + 1)}`,
+      type,
+      version: "1",
+      status: "enabled",
+      condition: { broadcaster_user_id: "rank-channel" },
+      transport: { method: "webhook", callback: "https://brobot.example/api/twitch/eventsub" },
+    }));
+    const createdFetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], pagination: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [remoteSubscriptions[0]] }), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [remoteSubscriptions[1]] }), { status: 202 }));
+    const snapshotStartedAt = "2026-09-19T01:00:01.000Z";
+    const confirmedAt = "2026-09-19T01:00:02.000Z";
+
+    await reconcileEventSubSubscriptions(
+      environment(database),
+      "2026-09-19T01:00:00.000Z",
+      "app-token",
+      "bot-user",
+      createdFetcher,
+      "rank-channel",
+      undefined,
+      () => confirmedAt,
+    );
+
+    const rankStates = async () => (await listEventSubSubscriptions(asD1(database), "rank-channel"))
+      .filter(({ subscriptionType }) => subscriptionType.startsWith("channel.vip."));
+    const enabledStates = await rankStates();
+    expect(enabledStates.map(({ status, updatedAt }) => ({ status, updatedAt }))).toEqual([
+      { status: "enabled", updatedAt: confirmedAt },
+      { status: "enabled", updatedAt: confirmedAt },
+    ]);
+    expect(enabledStates.some(({ updatedAt }) => Date.parse(updatedAt) <= Date.parse(snapshotStartedAt))).toBe(false);
+    expect(enabledStates.every(({ updatedAt }) => Date.parse(updatedAt) <= Date.parse("2026-09-19T01:00:03.000Z"))).toBe(true);
+
+    const unchangedFetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      data: remoteSubscriptions,
+      pagination: {},
+    }), { status: 200 }));
+    await reconcileEventSubSubscriptions(
+      environment(database),
+      "2026-09-19T02:00:00.000Z",
+      "app-token",
+      "bot-user",
+      unchangedFetcher,
+      "rank-channel",
+      undefined,
+      () => "2026-09-19T02:00:01.000Z",
+    );
+
+    await expect(rankStates()).resolves.toEqual(enabledStates);
+    expect(unchangedFetcher).toHaveBeenCalledOnce();
   });
 
   it("fetches the application subscription inventory once for a multi-channel maintenance run", async () => {

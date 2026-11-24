@@ -1636,6 +1636,7 @@ export type ModuleTwitchRankIncompleteReason =
   | "token_invalid"
   | "not_synced"
   | "snapshot_failed"
+  | "tracking_gap"
   | "stale"
   | "eventsub_incomplete"
   | "job_paused";

@@ -561,6 +561,7 @@ const adoptRemoteSubscription = async (
   target: EventSubTarget,
   botUserId: string,
   now: string,
+  confirmedAt: () => string,
   appAccessToken: string,
   inventory: EventSubInventoryCache,
 ): Promise<boolean> => {
@@ -580,7 +581,7 @@ const adoptRemoteSubscription = async (
     return false;
   }
   inventory.add(adopted);
-  await mark(env.DB, target, "enabled", null, adopted.id, now, secretId);
+  await mark(env.DB, target, "enabled", null, adopted.id, confirmedAt(), secretId);
   return true;
 };
 
@@ -611,6 +612,7 @@ export const reconcileEventSubSubscriptions = async (
   fetcher: typeof fetch = fetch,
   channelId?: string,
   inventoryCache?: EventSubInventoryCache,
+  confirmedAt: () => string = () => new Date().toISOString(),
 ): Promise<void> => {
   const inventory = inventoryCache ?? createEventSubInventoryCache(fetcher, env.TWITCH_CLIENT_ID);
   const allTargets = await listDesiredEventSubTargets(env.DB, channelId);
@@ -751,7 +753,7 @@ export const reconcileEventSubSubscriptions = async (
       "enabled",
       null,
       subscription.id,
-      now,
+      confirmedAt(),
       state.secretId,
     );
     return true;
@@ -834,7 +836,7 @@ export const reconcileEventSubSubscriptions = async (
           "enabled",
           null,
           subscription.id,
-          now,
+          confirmedAt(),
           state.secretId,
         );
         continue;
@@ -899,14 +901,14 @@ export const reconcileEventSubSubscriptions = async (
       const subscription = await createSubscription(env, target, botUserId, appAccessToken, fetcher);
       inventory.add(subscription);
       if (subscription.status === "enabled") {
-        await mark(env.DB, target, "enabled", null, subscription.id, now, activeSecretId);
+        await mark(env.DB, target, "enabled", null, subscription.id, confirmedAt(), activeSecretId);
       } else {
         await mark(env.DB, target, "missing", "verification_pending", subscription.id, now, activeSecretId);
       }
     } catch (error: unknown) {
       if (isAlreadyExistsConflict(error)) {
         try {
-          await adoptRemoteSubscription(env, target, botUserId, now, appAccessToken, inventory);
+          await adoptRemoteSubscription(env, target, botUserId, now, confirmedAt, appAccessToken, inventory);
         } catch (adoptionError: unknown) {
           await markError(target, adoptionError);
         }
