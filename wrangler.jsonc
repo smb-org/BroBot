@@ -23,7 +23,7 @@
     "binding": "ASSETS",
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/auth/*", "/ws/*", "/healthz"]
+    "run_worker_first": ["/api/*", "/auth/*", "/ws/*", "/healthz", "/discord/link"]
   },
   "durable_objects": {
     "bindings": [{ "name": "CHANNEL", "class_name": "ChannelObject" }]
@@ -52,7 +52,9 @@
       "OVERLAY_TOKEN_PEPPER",
       "PLATFORM_USER_IDS",
       "SPOTIFY_CLIENT_ID",
-      "SPOTIFY_CLIENT_SECRET"
+      "SPOTIFY_CLIENT_SECRET",
+      "DISCORD_CLIENT_ID",
+      "DISCORD_CLIENT_SECRET"
     ]
   },
   "observability": {
@@ -76,7 +78,7 @@
         "binding": "ASSETS",
         "directory": "./dist/client",
         "not_found_handling": "single-page-application",
-        "run_worker_first": ["/api/*", "/auth/*", "/ws/*", "/healthz", "/overlay", "/overlay.html"]
+        "run_worker_first": ["/api/*", "/auth/*", "/ws/*", "/healthz", "/overlay", "/overlay.html", "/discord/link"]
       },
       "durable_objects": {
         "bindings": [{ "name": "CHANNEL", "class_name": "ChannelObject" }]
@@ -104,7 +106,9 @@
           "OVERLAY_TOKEN_PEPPER",
           "PLATFORM_USER_IDS",
           "SPOTIFY_CLIENT_ID",
-          "SPOTIFY_CLIENT_SECRET"
+          "SPOTIFY_CLIENT_SECRET",
+          "DISCORD_CLIENT_ID",
+          "DISCORD_CLIENT_SECRET"
         ]
       },
       "observability": {
@@ -128,7 +132,7 @@
         "binding": "ASSETS",
         "directory": "./dist/client",
         "not_found_handling": "single-page-application",
-        "run_worker_first": ["/api/*", "/auth/*", "/ws/*", "/healthz", "/overlay", "/overlay.html"]
+        "run_worker_first": ["/api/*", "/auth/*", "/ws/*", "/healthz", "/overlay", "/overlay.html", "/discord/link"]
       },
       "durable_objects": {
         "bindings": [{ "name": "CHANNEL", "class_name": "ChannelObject" }]
@@ -156,7 +160,9 @@
           "OVERLAY_TOKEN_PEPPER",
           "PLATFORM_USER_IDS",
           "SPOTIFY_CLIENT_ID",
-          "SPOTIFY_CLIENT_SECRET"
+          "SPOTIFY_CLIENT_SECRET",
+          "DISCORD_CLIENT_ID",
+          "DISCORD_CLIENT_SECRET"
         ]
       },
       "observability": {

@@ -136,6 +136,8 @@ immer einen Zugang zu einem gespeicherten Overlay.
 | `OVERLAY_TOKEN_PEPPER` | Pepper für die Hashes widerrufbarer Overlay-Tokens | 32 Byte base64url |
 | `SPOTIFY_CLIENT_ID` | Client-ID der zentralen Spotify-Development-App | Zeichenkette aus der Spotify Developer Console |
 | `SPOTIFY_CLIENT_SECRET` | Client-Secret derselben Spotify-App für den Authorization-Code-Austausch | vertrauliche Zeichenkette aus der Spotify Developer Console |
+| `DISCORD_CLIENT_ID` | Client-ID der zentralen Discord-App für die Konto-Verknüpfung (Redirect-URI `${PUBLIC_ORIGIN}/auth/discord/callback`) | Zeichenkette aus dem Discord Developer Portal |
+| `DISCORD_CLIENT_SECRET` | Client-Secret derselben Discord-App für den Authorization-Code-Austausch | vertrauliche Zeichenkette aus dem Discord Developer Portal |
 
 Für lokale Läufe stehen die Namen mit nicht funktionsfähigen Werten in
 `.dev.vars.example`; lokal werden sie in `.dev.vars` gesetzt. Für Staging und
@@ -146,6 +148,10 @@ pnpm exec wrangler secret put SPOTIFY_CLIENT_ID --env staging
 pnpm exec wrangler secret put SPOTIFY_CLIENT_SECRET --env staging
 pnpm exec wrangler secret put SPOTIFY_CLIENT_ID --env production
 pnpm exec wrangler secret put SPOTIFY_CLIENT_SECRET --env production
+pnpm exec wrangler secret put DISCORD_CLIENT_ID --env staging
+pnpm exec wrangler secret put DISCORD_CLIENT_SECRET --env staging
+pnpm exec wrangler secret put DISCORD_CLIENT_ID --env production
+pnpm exec wrangler secret put DISCORD_CLIENT_SECRET --env production
 ```
 
 Diese Worker-Secrets enthalten nur die App-Zugangsdaten. Streamer-Access- und
@@ -226,7 +232,9 @@ for environment in staging production; do
     TOKEN_ENCRYPTION_KEYS \
     OVERLAY_TOKEN_PEPPER \
     SPOTIFY_CLIENT_ID \
-    SPOTIFY_CLIENT_SECRET; do
+    SPOTIFY_CLIENT_SECRET \
+    DISCORD_CLIENT_ID \
+    DISCORD_CLIENT_SECRET; do
     pnpm exec wrangler secret put "$name" --env "$environment"
   done
 done

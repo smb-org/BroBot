@@ -1718,6 +1718,8 @@ describe("panel resource revisions", () => {
         "channel_variable_stream_resets",
         "chat_vote_result_delivery_reconciliation",
         "currency_rate_cache",
+        "discord_links",
+        "discord_oauth_transactions",
         "eventsub_maintenance_locks",
         "eventsub_messages",
         "faq_entry_user_cooldowns",

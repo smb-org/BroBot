@@ -380,6 +380,7 @@ const realtimeForms = {
 };
 
 const expectedModuleSettings = {
+  discord: {},
   duel: duelSettingsForLanguage("de"),
   heist: heistSettingsForLanguage("de"),
   overlay_alerts: {},
@@ -959,6 +960,7 @@ describe("serialized contract shapes", () => {
         "chat_voting",
         "clips",
         "currency",
+        "discord",
         "duel",
         "emote_slots",
         "faq",

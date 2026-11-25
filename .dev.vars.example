@@ -8,3 +8,5 @@ OVERLAY_TOKEN_PEPPER=replace-with-32-byte-base64url-key
 PLATFORM_USER_IDS=[]
 SPOTIFY_CLIENT_ID=local-spotify-client-id
 SPOTIFY_CLIENT_SECRET=local-spotify-client-secret
+DISCORD_CLIENT_ID=local-discord-client-id
+DISCORD_CLIENT_SECRET=local-discord-client-secret

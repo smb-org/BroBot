@@ -7,6 +7,7 @@ import { panelRouter } from "./panel/routes";
 import { realtimeRouter } from "./realtime";
 import { notifyCommittedResources, PANEL_RESOURCE_NOTIFIER_COVERAGE } from "./panel-resources";
 import { serverTimingMiddleware } from "./server-timing";
+import { discordRouter } from "./discord/routes";
 
 export const app = new Hono<{ Bindings: Env }>();
 const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -35,6 +36,7 @@ app.use(PANEL_RESOURCE_NOTIFIER_COVERAGE.platformRoutes, async (context, next) =
   }
 });
 app.route("/", authRouter);
+app.route("/", discordRouter);
 app.route("/", platformRouter);
 app.route("/", panelRouter);
 app.route("/", eventSubRouter);

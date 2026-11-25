@@ -26,6 +26,8 @@ export default defineConfig({
           OVERLAY_TOKEN_PEPPER: testKey(4),
           SPOTIFY_CLIENT_ID: "test-spotify-client-id",
           SPOTIFY_CLIENT_SECRET: "test-spotify-client-secret",
+          DISCORD_CLIENT_ID: "test-discord-client-id",
+          DISCORD_CLIENT_SECRET: "test-discord-client-secret",
           BETREIBER_USER_IDS: "[]",
         },
       },

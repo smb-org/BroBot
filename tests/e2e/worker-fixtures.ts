@@ -19,6 +19,7 @@ const keyRing = (id: string, byte: number): string => JSON.stringify({
 export const e2eWorkerPort = process.env.WORKER_PORT ?? "8787";
 export const e2eWorkerOrigin = `http://127.0.0.1:${e2eWorkerPort}`;
 export const e2eSpotifyMockPort = process.env.SPOTIFY_MOCK_PORT ?? "8791";
+export const e2eDiscordMockPort = process.env.DISCORD_MOCK_PORT ?? "8792";
 export const e2eWorkerPersist = process.env.E2E_WORKER_PERSIST ??
   mkdtempSync(join(tmpdir(), "brobot-e2e-worker-"));
 process.env.E2E_WORKER_PERSIST = e2eWorkerPersist;
@@ -40,6 +41,9 @@ export const e2eWorkerEnvironment: Record<string, string> = {
   PLATFORM_USER_IDS: "[]",
   SPOTIFY_CLIENT_ID: "e2e-spotify-client-id",
   SPOTIFY_CLIENT_SECRET: "e2e-spotify-client-secret",
+  DISCORD_CLIENT_ID: "e2e-discord-client-id",
+  DISCORD_CLIENT_SECRET: "e2e-discord-client-secret",
+  DISCORD_API_BASE: `http://127.0.0.1:${e2eDiscordMockPort}/api/v10`,
   SPOTIFY_API_BASE: `http://127.0.0.1:${e2eSpotifyMockPort}/v1`,
   SPOTIFY_ACCOUNTS_BASE: `http://127.0.0.1:${e2eSpotifyMockPort}`,
   TWITCH_API_BASE: `http://127.0.0.1:${e2eSpotifyMockPort}`,

@@ -2,6 +2,7 @@
   "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
   "entry": [
     "src/overlay/main.tsx",
+    "src/modules/discord/main.tsx",
     "scripts/**/*.{js,mjs,cjs,ts,tsx}",
     "tests/unit/**/*.test.{ts,tsx}",
     "tests/unit/**/*.type-test.{ts,tsx}",
