@@ -11,6 +11,7 @@ interface ChannelJobOptions {
   intervalMs: number;
   label: Readonly<Record<ModuleLanguage, string>>;
   requiredScopes: readonly string[];
+  requiredScopeAlternatives?: readonly (readonly string[])[];
 }
 
 /** Runtime metadata shared by module alarms, host alarms, and test-only jobs. */
@@ -80,6 +81,7 @@ export interface ChannelJobSnapshot extends Omit<ChannelJobStatus, "jobId"> {
   intervalMs: number;
   label: Readonly<Record<ModuleLanguage, string>>;
   requiredScopes: readonly string[];
+  requiredScopeAlternatives?: readonly (readonly string[])[];
 }
 
 export interface ChannelJobRunContext {
@@ -89,6 +91,8 @@ export interface ChannelJobRunContext {
   assertCurrent(): void;
   /** Runs synchronous local SQLite mutations only while this claim still owns the job. */
   commit(write: (sql: SqlStorage) => void): boolean;
+  /** Overrides the recurring interval for bounded continuation or exact retry timing. */
+  scheduleNextAt?(deadline: number): void;
 }
 
 export interface ChannelJobAlarmClaim {
@@ -105,6 +109,7 @@ class SupersededChannelJobRunError extends Error {
 const CHANNEL_JOB_ERROR_CODES: readonly ChannelJobErrorCode[] = [
   "refresh_failed",
   "missing_scope",
+  "discord_token_invalid",
   "lease_expired",
   "unknown",
 ];
@@ -208,6 +213,10 @@ const validateRegistration = (registration: ChannelJobRegistration): void => {
   }
   if (registration.requiredScopes.some((scope) => scope.length === 0 || scope.length > 128)) {
     throw new RangeError("A channel job scope is invalid.");
+  }
+  if (registration.requiredScopeAlternatives?.some((group) => group.length === 0 ||
+      group.some((scope) => scope.length === 0 || scope.length > 128)) === true) {
+    throw new RangeError("A channel job scope alternative is invalid.");
   }
 }
 
@@ -540,6 +549,7 @@ export const executeChannelJobClaim = async (options: {
   await notifyStatus();
 
   const clock = (): number => store.currentTime();
+  let requestedNextRunAt: number | undefined;
   const runContext: ChannelJobRunContext = {
     jobId: registration.id,
     claimToken,
@@ -548,6 +558,9 @@ export const executeChannelJobClaim = async (options: {
       if (!store.isCurrent(registration.id, claimToken, clock())) throw new SupersededChannelJobRunError();
     },
     commit: (write) => store.commit(registration.id, claimToken, write, clock()),
+    scheduleNextAt: (deadline) => {
+      if (Number.isFinite(deadline)) requestedNextRunAt = Math.max(clock(), deadline);
+    },
   };
   const finishExpiredClaim = async (): Promise<"retry" | "superseded"> => {
     const status = store.status(registration.id);
@@ -561,7 +574,7 @@ export const executeChannelJobClaim = async (options: {
   const finishFailure = async (code: ChannelJobErrorCode): Promise<"retry" | "superseded"> => {
     const status = store.status(registration.id);
     if (status === null) return "superseded";
-    const nextRunAt = clock() + alarmRetryDelay(registration.retryDelaysMs, status.consecutiveFailures);
+    const nextRunAt = requestedNextRunAt ?? clock() + alarmRetryDelay(registration.retryDelaysMs, status.consecutiveFailures);
     if (!store.fail(registration.id, claimToken, clock(), code, nextRunAt)) return await finishExpiredClaim();
     await notifyStatus();
     return "retry";
@@ -576,7 +589,7 @@ export const executeChannelJobClaim = async (options: {
     if (codedFailure !== null) return await finishFailure(codedFailure);
     runContext.assertCurrent();
     const completedAt = clock();
-    const nextRunAt = completedAt + registration.intervalMs;
+    const nextRunAt = requestedNextRunAt ?? completedAt + registration.intervalMs;
     if (!store.succeed(registration.id, claimToken, completedAt, nextRunAt, summaryFromResult(result))) {
       return await finishExpiredClaim();
     }

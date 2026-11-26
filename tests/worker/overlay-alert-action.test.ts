@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ updateRedemptionStatus: vi.fn() }));
 vi.mock("../../src/worker/twitch/channel-points", () => ({
+  configuredHelixBase: () => "https://api.twitch.tv",
   updateRedemptionStatus: mocks.updateRedemptionStatus,
   listUnfulfilledRedemptions: vi.fn(),
   listRedemptionsByIds: vi.fn(),

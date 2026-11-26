@@ -1277,7 +1277,7 @@ input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; opacit
 @container dialog-body (max-width: 600px) {
   .ui-dialog__body .inspector-field-row { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 0; }
 }
-.ui-dialog__description, .ui-form-dialog__description, .ui-control-duration-dialog__description { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.ui-dialog__description, .ui-form-dialog__description, .ui-control-duration-dialog__description { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.5; white-space: pre-line; }
 .ui-save-bar { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto; flex: none; align-items: center; gap: var(--s2); width: 100%; min-height: calc(var(--s12) + var(--s4)); padding: 9px 0; }
 .ui-save-bar--persistent { margin-top: auto; border-top: 1px solid var(--line); background: var(--surface-inspector); }
 .ui-save-bar__status { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: visible; color: var(--text-3); font-size: 12px; }

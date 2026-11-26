@@ -42,6 +42,7 @@ export const PANEL_RESOURCE_NOTIFIER_COVERAGE = {
     "/api/platform/channels/:channelId/members",
     "/api/platform/spotify-channels",
     "/api/platform/audit",
+    "/api/platform/discord/token-lock",
     "/auth/login",
     "/auth/channels/:channelId/channel-bot",
     "/auth/channels/:channelId/broadcaster-scopes/:moduleId",

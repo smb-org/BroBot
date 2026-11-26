@@ -380,7 +380,7 @@ const realtimeForms = {
 };
 
 const expectedModuleSettings = {
-  discord: {},
+  discord: { chatHintEnabled: true },
   duel: duelSettingsForLanguage("de"),
   heist: heistSettingsForLanguage("de"),
   overlay_alerts: {},

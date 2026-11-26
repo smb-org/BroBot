@@ -34,7 +34,7 @@ const refreshAfterModuleToggle = async (queryClient: QueryClient, channelId: str
   const channels: QueryFilters = { queryKey: queryKeys.channels(), exact: true };
   const moduleSettings = queryClient.getQueryCache()
     .findAll({ queryKey: ["channel", channelId, "module"] })
-    .filter((query) => query.queryKey[4] === "settings")
+    .filter((query) => query.queryKey[4] === "settings" || query.queryKey[4] === "server")
     .map(({ queryKey }) => ({ queryKey, exact: true }));
   const refreshes = [overview, modules, channels, ...moduleSettings];
   await Promise.all(refreshes.map((filter) => queryClient.cancelQueries(filter)));
@@ -220,6 +220,10 @@ const undoModuleToggle = async (
 ): Promise<void> => {
   try {
     const result = await setChannelModuleEnabled(channelId, moduleId, !enabled, expectedRevision);
+    if ("teardown" in result) {
+      await refreshQuietly(queryClient, channelId, scope, shouldShowToast);
+      return;
+    }
     applyModuleResponse(queryClient, channelId, result.module, result.revision);
     await refreshQuietly(queryClient, channelId, scope, shouldShowToast);
     if (shouldShowToast()) reportActivationFailure(
@@ -241,9 +245,13 @@ export const toggleModuleWithUndo = async (
   enabled: boolean,
   shouldShowToast: () => boolean = () => true,
   expectedRevision?: number,
-): Promise<{ module: PanelModuleState; revision: number }> => {
+): Promise<{ module: PanelModuleState; revision: number } | { deferred: true; remaining: number }> => {
   const result = await setChannelModuleEnabled(channelId, moduleId, enabled, expectedRevision);
   const scope = moduleToggleToastScope(channelId);
+  if ("teardown" in result) {
+    await refreshQuietly(queryClient, channelId, scope, shouldShowToast);
+    return { deferred: true, remaining: result.remaining };
+  }
   applyModuleResponse(queryClient, channelId, result.module, result.revision);
   await refreshQuietly(queryClient, channelId, scope, shouldShowToast);
   if (!shouldShowToast()) return result;

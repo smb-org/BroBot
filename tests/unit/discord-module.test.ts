@@ -21,9 +21,9 @@ const context = {
 } as unknown as ModuleExecutionContext;
 
 describe("Discord module", () => {
-  it("registers without consumed resources and answers !discord with the absolute global page URL", () => {
+  it("registers with the Twitch ranks resource and answers !discord with the absolute global page URL", () => {
     expect(MODULES.find(({ id }) => id === "discord")).toBe(discordModule);
-    expect(discordModule.consumes).toBeUndefined();
+    expect(discordModule.consumes).toEqual(["twitch_ranks"]);
 
     const result = processDiscordMessage(eventFor("!discord"), context);
 

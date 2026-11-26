@@ -1,5 +1,11 @@
 import { writeModuleAudit } from "../module-audit";
-import { getChannelModuleForChannel, updateChannelModuleEnabledStateWithAudit } from "../db/channel-modules";
+import {
+  claimDeferredChannelModuleDisable,
+  completeDeferredChannelModuleDisable,
+  fenceDeferredChannelModuleDisable,
+  getChannelModuleForChannel,
+  updateChannelModuleEnabledStateWithAudit,
+} from "../db/channel-modules";
 import { DurableObject } from "cloudflare:workers";
 
 import type {
@@ -233,6 +239,38 @@ import { secureRandomInteger } from "../template-resolver";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { templateLanguageText } from "../../modules/template-language";
 import { writeModuleDiagnostics } from "../event-log";
+import { runModuleActivationPostCommit, publishModuleActivationOverlays } from "../module-activation";
+import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
+import {
+  beginDiscordReconcileMutation as beginDiscordMutationState,
+  bumpDiscordReconcileRevision,
+  cancelDiscordTeardownBeforeEnable,
+  cacheDiscordRoleCatalog,
+  clearDiscordReconcileMutationBarrier,
+  clearDiscordChatHints,
+  clearDiscordGuildState,
+  clearDiscordLifecycle,
+  clearDiscordMappingLocksForChangedMappings,
+  countDiscordGrants,
+  discordChatHintWasSent,
+  ensureDiscordDurableSchema,
+  readDiscordGrants,
+  readDiscordLifecycle,
+  readDiscordReconcileMutationBarrier,
+  readDiscordMappingLocks,
+  readDiscordMemberState,
+  readDiscordMemberRoleStates,
+  readDiscordRoleCatalog,
+  readDiscordServerLock,
+  recordDiscordChatHint,
+  setDiscordLifecycle,
+  setDiscordServerLock,
+} from "../../modules/discord/durable";
+import { discordMemberRoleStatus, type DiscordLinkedMemberRoleStatus } from "../../modules/discord/reconcile-domain";
+import { previewDiscordMappingsInDurableObject } from "../../modules/discord/reconcile";
+import { getDiscordRoleMappings, getDiscordServerConnection } from "../../modules/discord/repository";
+import { readDiscordBotTokenLock } from "../discord/token-lock";
+import type { DiscordServerRole } from "../../modules/discord/contracts";
 import {
   confirmChannelClipAvailability,
   postConfirmedClipLink,
@@ -397,6 +435,7 @@ const POINTS_ACTIVATION_RECONCILIATION_ALARM_KEY = "points:activation_reconcilia
 const POINTS_ACTIVATION_RECONCILIATION_ALARM_HANDLER = "host:points_activation_reconciliation";
 const POINTS_ACTIVATION_RECONCILIATION_MODULES_KEY = "points:activation_reconciliation_modules";
 const PANEL_DURABLE_REVISIONS_KEY = "channel:panel_resource_revisions";
+const DISCORD_LIFECYCLE_MAY_EXIST_KEY = "discord:lifecycle_may_exist";
 const QUIZ_OVERLAY_SNAPSHOT_KEY = "module:quiz:storage:overlay-snapshot";
 const QUIZ_OVERLAY_RETRY_ALARM_KEY = "module:quiz:overlay-retry";
 const QUIZ_OVERLAY_RETRY_ALARM_HANDLER = "module:quiz:session-control";
@@ -1000,6 +1039,7 @@ export class ChannelObject extends DurableObject<Env> {
   private recentChatterSchemaReady = false;
   private statisticsSchemaReady = false;
   private eventSubMessageIdSchemaReady = false;
+  private discordSchemaReady = false;
   private pointsSchemaReady = false;
   private pointsInitialized = false;
   private pointsInitialization: Promise<void> | null = null;
@@ -1019,6 +1059,24 @@ export class ChannelObject extends DurableObject<Env> {
         // The pending snapshot and retry alarm remain durable for the next wake.
       }
     });
+  }
+
+  private ensureDiscordSchema(): void {
+    if (this.discordSchemaReady) return;
+    ensureDiscordDurableSchema(this.ctx.storage.sql);
+    this.discordSchemaReady = true;
+  }
+
+  private setDiscordLifecycleState(state: Parameters<typeof setDiscordLifecycle>[1]): void {
+    this.ensureDiscordSchema();
+    setDiscordLifecycle(this.ctx.storage.sql, state);
+    this.ctx.storage.kv.put(DISCORD_LIFECYCLE_MAY_EXIST_KEY, true);
+  }
+
+  private clearDiscordLifecycleState(): void {
+    this.ensureDiscordSchema();
+    clearDiscordLifecycle(this.ctx.storage.sql);
+    this.ctx.storage.kv.delete(DISCORD_LIFECYCLE_MAY_EXIST_KEY);
   }
 
   private channelJobStore(): ChannelJobStore {
@@ -1041,14 +1099,19 @@ export class ChannelObject extends DurableObject<Env> {
 
   private scheduleModuleAlarmSync(moduleId: string, alarmKey: string, deadline: number): void {
     if (!Number.isFinite(deadline)) return;
-    const key = `module:${moduleId}:${alarmKey}`;
+    const moduleKey = `module:${moduleId}:${alarmKey}`;
     const stored = this.ctx.storage.kv.get<AlarmScheduleTable>(ALARM_TABLE_KEY);
     const table = stored === undefined ? {} : { ...stored };
+    let key = moduleKey;
+    if (moduleId === "discord" && alarmKey === "reconcile") {
+      key = channelJobAlarmKey(moduleChannelJobId("discord", "reconcile"));
+      Reflect.deleteProperty(table, moduleKey);
+    }
     const current = table[key];
     if (current !== undefined && alarmAttemptAt(current) <= deadline) return;
     table[key] = {
       deadline,
-      handler: key,
+      handler: moduleKey,
       revision: (current?.revision ?? 0) + 1,
     };
     this.ctx.storage.kv.put(ALARM_TABLE_KEY, table);
@@ -1100,8 +1163,19 @@ export class ChannelObject extends DurableObject<Env> {
       "SELECT module_id FROM channel_modules WHERE channel_id = ? AND enabled = 1",
     ).bind(channelId).all<{ module_id: string }>();
     const enabledModules = new Set(enabledRows.results.map(({ module_id }) => module_id));
+    let discordLifecycleRecovery = false;
+    const discordLifecycleMayExist = this.ctx.storage.kv.get(DISCORD_LIFECYCLE_MAY_EXIST_KEY) === true;
+    if (enabledModules.has("discord") || discordLifecycleMayExist) {
+      discordLifecycleRecovery = this.ctx.storage.transactionSync(() => {
+        this.ensureDiscordSchema();
+        const lifecycleMayExist = readDiscordLifecycle(this.ctx.storage.sql) !== null;
+        if (!lifecycleMayExist) this.ctx.storage.kv.delete(DISCORD_LIFECYCLE_MAY_EXIST_KEY);
+        return lifecycleMayExist;
+      });
+    }
     const moduleJobs = MODULES.flatMap((module) => {
-      if (module.mandatory !== true && !enabledModules.has(module.id)) return [];
+      if (module.mandatory !== true && !enabledModules.has(module.id) &&
+          !(module.id === "discord" && discordLifecycleRecovery)) return [];
       return (module.alarms ?? []).flatMap((alarm): ChannelJobRegistration[] => alarm.job === undefined ? [] : [{
         id: moduleChannelJobId(module.id, alarm.key),
         handlerKey: `module:${module.id}:${alarm.key}`,
@@ -1170,6 +1244,7 @@ export class ChannelObject extends DurableObject<Env> {
           intervalMs: registration.intervalMs,
           label: registration.label,
           requiredScopes: registration.requiredScopes,
+          ...(registration.requiredScopeAlternatives === undefined ? {} : { requiredScopeAlternatives: registration.requiredScopeAlternatives }),
           state: status.state,
           lastStartedAt: status.lastStartedAt,
           lastSuccessAt: status.lastSuccessAt,
@@ -1258,6 +1333,560 @@ export class ChannelObject extends DurableObject<Env> {
     return allowed;
   }
 
+  public async markDiscordReconcileNeededAndRun(): Promise<void> {
+    this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      bumpDiscordReconcileRevision(this.ctx.storage.sql);
+    });
+    await this.markChannelJobReconcileNeeded(moduleChannelJobId("discord", "reconcile"));
+    await this.runChannelJobNow(moduleChannelJobId("discord", "reconcile"));
+  }
+
+  public beginDiscordReconcileMutation(blockDuringCleanup = true): Promise<string | null> {
+    return Promise.resolve(this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      if (blockDuringCleanup && readDiscordLifecycle(this.ctx.storage.sql) !== null) return null;
+      const now = Date.now();
+      const current = readDiscordReconcileMutationBarrier(this.ctx.storage.sql);
+      if (current !== null && current.expiresAt > now) return null;
+      if (current !== null) clearDiscordReconcileMutationBarrier(this.ctx.storage.sql, current.token);
+      const token = crypto.randomUUID();
+      if (!beginDiscordMutationState(this.ctx.storage.sql, token, now, 60_000)) return null;
+      return token;
+    }));
+  }
+
+  public async endDiscordReconcileMutation(token: string): Promise<void> {
+    const ended = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      return clearDiscordReconcileMutationBarrier(this.ctx.storage.sql, token);
+    });
+    if (ended) await this.markDiscordReconcileNeededAndRun();
+  }
+
+  public async beginDiscordTeardown(
+    actor: ActorContext,
+    expectedRevision: number,
+  ): Promise<{ deferred: boolean; remaining: number; blocked?: boolean; revision?: number }> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return { deferred: false, remaining: 0 };
+    const mutationToken = await this.beginDiscordReconcileMutation();
+    if (mutationToken === null) return { deferred: false, remaining: 0, blocked: true };
+    try {
+      const [connection, moduleState] = await Promise.all([
+        getDiscordServerConnection(this.env.DB, channelId),
+        getChannelModuleForChannel(this.env.DB, channelId, "discord"),
+      ]);
+      if (moduleState === null || !moduleState.enabled || moduleState.revision !== expectedRevision) {
+        const remaining = this.ctx.storage.transactionSync(() => {
+          this.ensureDiscordSchema();
+          return connection === null ? 0 : countDiscordGrants(this.ctx.storage.sql, connection.guildId);
+        });
+        return { deferred: false, remaining, blocked: true };
+      }
+      const [latestConnection, latestModuleState] = await Promise.all([
+        getDiscordServerConnection(this.env.DB, channelId),
+        getChannelModuleForChannel(this.env.DB, channelId, "discord"),
+      ]);
+      if (latestConnection?.guildId !== connection?.guildId || latestConnection?.connectedAt !== connection?.connectedAt ||
+          latestModuleState === null || !latestModuleState.enabled || latestModuleState.revision !== expectedRevision) {
+        const remaining = this.ctx.storage.transactionSync(() => {
+          this.ensureDiscordSchema();
+          return connection === null ? 0 : countDiscordGrants(this.ctx.storage.sql, connection.guildId);
+        });
+        return { deferred: false, remaining, blocked: true };
+      }
+      const pendingGrantCount = this.ctx.storage.transactionSync(() => {
+        this.ensureDiscordSchema();
+        const barrier = readDiscordReconcileMutationBarrier(this.ctx.storage.sql);
+        if (barrier === null || barrier.token !== mutationToken || barrier.expiresAt <= Date.now() ||
+            readDiscordLifecycle(this.ctx.storage.sql) !== null) return null;
+        return connection === null ? 0 : countDiscordGrants(this.ctx.storage.sql, connection.guildId);
+      });
+      if (pendingGrantCount === null) return { deferred: false, remaining: 0, blocked: true };
+      const claimedRevision = await claimDeferredChannelModuleDisable(
+        this.env.DB,
+        actor,
+        channelId,
+        "discord",
+        expectedRevision,
+        new Date().toISOString(),
+        pendingGrantCount > 0,
+      );
+      if (claimedRevision === null) {
+        const remaining = this.ctx.storage.transactionSync(() => {
+          this.ensureDiscordSchema();
+          return connection === null ? 0 : countDiscordGrants(this.ctx.storage.sql, connection.guildId);
+        });
+        return { deferred: false, remaining, blocked: true };
+      }
+      const guildId = connection?.guildId ?? null;
+      const connectedAt = connection?.connectedAt ?? null;
+      const remaining = this.ctx.storage.transactionSync(() => {
+        this.ensureDiscordSchema();
+        const barrier = readDiscordReconcileMutationBarrier(this.ctx.storage.sql);
+        if (barrier === null || barrier.token !== mutationToken || barrier.expiresAt <= Date.now() ||
+            readDiscordLifecycle(this.ctx.storage.sql) !== null) return null;
+        const count = guildId === null ? 0 : countDiscordGrants(this.ctx.storage.sql, guildId);
+        this.setDiscordLifecycleState({
+          mode: "teardown",
+          startedAt: Date.now(),
+          deferred: count > 0,
+          actorUserId: actor.userId,
+          expectedRevision: claimedRevision,
+          disconnectMemberUserId: null,
+          guildId,
+          connectedAt,
+        });
+        bumpDiscordReconcileRevision(this.ctx.storage.sql);
+        return count;
+      });
+      if (remaining === null) return { deferred: false, remaining: 0, blocked: true };
+      return { deferred: remaining > 0, remaining, revision: claimedRevision };
+    } finally {
+      await this.endDiscordReconcileMutation(mutationToken);
+    }
+  }
+
+  public async beginDiscordDisconnect(
+    expectedGuildId: string,
+    expectedConnectedAt: string,
+  ): Promise<{ deferred: boolean; remaining: number; blocked?: boolean; changed?: boolean }> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return { deferred: false, remaining: 0, changed: true };
+    const connection = await getDiscordServerConnection(this.env.DB, channelId);
+    if (connection === null || connection.guildId !== expectedGuildId || connection.connectedAt !== expectedConnectedAt) {
+      return { deferred: false, remaining: 0, changed: true };
+    }
+    const remaining = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const current = readDiscordLifecycle(this.ctx.storage.sql);
+      const count = countDiscordGrants(this.ctx.storage.sql, connection.guildId);
+      const barrier = readDiscordReconcileMutationBarrier(this.ctx.storage.sql);
+      const now = Date.now();
+      if (barrier !== null && barrier.expiresAt > now) return { count, blocked: true };
+      if (barrier !== null) clearDiscordReconcileMutationBarrier(this.ctx.storage.sql, barrier.token);
+      if (current !== null) return { count, blocked: true };
+      this.setDiscordLifecycleState({
+        mode: "disconnecting",
+        startedAt: now,
+        deferred: count > 0,
+        actorUserId: null,
+        expectedRevision: null,
+        disconnectMemberUserId: null,
+        guildId: connection.guildId,
+        connectedAt: connection.connectedAt,
+      });
+      bumpDiscordReconcileRevision(this.ctx.storage.sql);
+      return { count, blocked: false };
+    });
+    if (remaining.blocked) return { deferred: false, remaining: remaining.count, blocked: true };
+    const latestConnection = await getDiscordServerConnection(this.env.DB, channelId);
+    if (latestConnection === null || latestConnection.guildId !== expectedGuildId || latestConnection.connectedAt !== expectedConnectedAt) {
+      this.ctx.storage.transactionSync(() => {
+        this.ensureDiscordSchema();
+        const lifecycle = readDiscordLifecycle(this.ctx.storage.sql);
+        if (lifecycle?.mode === "disconnecting" && lifecycle.guildId === expectedGuildId && lifecycle.connectedAt === expectedConnectedAt) {
+          this.clearDiscordLifecycleState();
+          bumpDiscordReconcileRevision(this.ctx.storage.sql);
+        }
+      });
+      return { deferred: false, remaining: remaining.count, changed: true };
+    }
+    await this.markChannelJobReconcileNeeded(moduleChannelJobId("discord", "reconcile"));
+    await this.runChannelJobNow(moduleChannelJobId("discord", "reconcile"));
+    return { deferred: remaining.count > 0, remaining: remaining.count };
+  }
+
+  public async finishDiscordImmediateDisable(disabledRevision: number): Promise<void> {
+    const finished = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const lifecycle = readDiscordLifecycle(this.ctx.storage.sql);
+      if (lifecycle?.mode !== "teardown" || lifecycle.deferred !== false ||
+          lifecycle.expectedRevision !== disabledRevision - 1) return null;
+      clearDiscordChatHints(this.ctx.storage.sql);
+      this.clearDiscordLifecycleState();
+      return lifecycle;
+    });
+    const channelId = this.ownChannelId();
+    if (finished !== null && channelId !== null) {
+      const now = new Date().toISOString();
+      await writeModuleDiagnostics(this.env.DB, channelId, "discord", `discord:teardown:finished:${String(finished.startedAt)}:${String(disabledRevision)}`, null,
+        [{ code: "discord.teardown_finished" }], now, true);
+    }
+  }
+
+  public async cancelDiscordTeardown(enabledRevision: number): Promise<void> {
+    const canceled = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const didCancel = cancelDiscordTeardownBeforeEnable(this.ctx.storage.sql, enabledRevision);
+      if (didCancel) this.ctx.storage.kv.delete(DISCORD_LIFECYCLE_MAY_EXIST_KEY);
+      return didCancel;
+    });
+    if (canceled) await this.markDiscordReconcileNeededAndRun();
+  }
+
+  public clearDiscordChatHints(): Promise<void> {
+    this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      clearDiscordChatHints(this.ctx.storage.sql);
+    });
+    return Promise.resolve();
+  }
+
+  public discordChatHintWasSent(twitchUserId: string): Promise<boolean> {
+    return Promise.resolve(this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      return discordChatHintWasSent(this.ctx.storage.sql, twitchUserId);
+    }));
+  }
+
+  public async recordDiscordChatHint(twitchUserId: string, sentAt: number): Promise<void> {
+    const channelId = this.ownChannelId();
+    const inserted = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      return recordDiscordChatHint(this.ctx.storage.sql, twitchUserId, sentAt);
+    });
+    if (!inserted || channelId === null) return;
+    await writeModuleDiagnostics(this.env.DB, channelId, "discord", `discord:hint:${twitchUserId}:${String(sentAt)}`, null,
+      [{ code: "discord.chat_hint_sent", detail: { person: twitchUserId } }], new Date(sentAt).toISOString());
+  }
+
+  public async discordHintEligible(rankType: ModuleTwitchRankType): Promise<boolean> {
+    const channelId = this.ownChannelId();
+    if (channelId === null || await readDiscordBotTokenLock(this.env.DB) !== null) return false;
+    const [connection, mappings] = await Promise.all([
+      getDiscordServerConnection(this.env.DB, channelId),
+      getDiscordRoleMappings(this.env.DB, channelId),
+    ]);
+    if (connection === null || mappings[rankType] === null) return false;
+    return this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const lifecycle = readDiscordLifecycle(this.ctx.storage.sql);
+      if (lifecycle !== null || readDiscordServerLock(this.ctx.storage.sql, connection.guildId) !== null) return false;
+      return !readDiscordMappingLocks(this.ctx.storage.sql, connection.guildId)
+        .some((lock) => lock.rankType === rankType && lock.roleId === mappings[rankType]);
+    });
+  }
+
+  public async cacheDiscordRoleNames(guildId: string, connectedAt: string, roles: readonly DiscordServerRole[]): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const connection = await getDiscordServerConnection(this.env.DB, channelId);
+    if (connection?.guildId !== guildId || connection.connectedAt !== connectedAt) return;
+    this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const lifecycle = readDiscordLifecycle(this.ctx.storage.sql);
+      if (lifecycle !== null) return;
+      cacheDiscordRoleCatalog(this.ctx.storage.sql, roles);
+    });
+  }
+
+  public readDiscordCachedRoles(): Promise<DiscordServerRole[]> {
+    return Promise.resolve(this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      return readDiscordRoleCatalog(this.ctx.storage.sql);
+    }));
+  }
+
+  public async discordMappingsChanged(
+    previous: { vip: string | null; moderator: string | null },
+    next: { vip: string | null; moderator: string | null },
+    roles: readonly DiscordServerRole[] | null,
+  ): Promise<void> {
+    const changed = (previous.vip !== next.vip) || (previous.moderator !== next.moderator);
+    if (!changed) {
+      if (roles !== null) this.ctx.storage.transactionSync(() => {
+        this.ensureDiscordSchema();
+        cacheDiscordRoleCatalog(this.ctx.storage.sql, roles);
+      });
+      await this.markDiscordReconcileNeededAndRun();
+      return;
+    }
+    const channelId = this.ownChannelId();
+    const connection = channelId === null ? null : await getDiscordServerConnection(this.env.DB, channelId);
+    const guildId = connection?.guildId ?? "";
+    const clearedLocks = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      if (roles !== null) cacheDiscordRoleCatalog(this.ctx.storage.sql, roles);
+      return clearDiscordMappingLocksForChangedMappings(this.ctx.storage.sql, guildId, previous, next);
+    });
+    for (const lock of clearedLocks) {
+      if (channelId === null || connection === null) continue;
+      const now = new Date().toISOString();
+      await writeModuleDiagnostics(this.env.DB, channelId, "discord", `discord:mapping_lock:cleared:${lock.rankType}:${lock.roleId}:${now}`, null,
+        [{ code: "discord.mapping_lock_cleared" }], now, true);
+    }
+    await this.markDiscordReconcileNeededAndRun();
+  }
+
+  public async discordChannelState(): Promise<{
+    teardown: boolean;
+    disconnecting: boolean;
+    teardownRemaining: number;
+    ledgerCount: number;
+    locked: boolean;
+    serverLocked: boolean;
+    mappingLocked: boolean;
+    globalTokenLocked: boolean;
+  }> {
+    const channelId = this.ownChannelId();
+    const connection = channelId === null ? null : await getDiscordServerConnection(this.env.DB, channelId);
+    const [local, global] = await Promise.all([
+      Promise.resolve(this.ctx.storage.transactionSync(() => {
+        this.ensureDiscordSchema();
+        const lifecycle = readDiscordLifecycle(this.ctx.storage.sql);
+        const guildId = connection?.guildId ?? "";
+        const serverLocked = connection !== null && readDiscordServerLock(this.ctx.storage.sql, guildId) !== null;
+        const mappingLocked = connection !== null && readDiscordMappingLocks(this.ctx.storage.sql, guildId).length > 0;
+        return {
+          teardown: lifecycle?.mode === "teardown",
+          disconnecting: lifecycle?.mode === "disconnecting",
+          teardownRemaining: lifecycle !== null && connection !== null
+            ? countDiscordGrants(this.ctx.storage.sql, connection.guildId)
+            : 0,
+          ledgerCount: connection === null ? 0 : countDiscordGrants(this.ctx.storage.sql, connection.guildId),
+          serverLocked,
+          mappingLocked,
+        };
+      })),
+      readDiscordBotTokenLock(this.env.DB),
+    ]);
+    return {
+      ...local,
+      locked: local.serverLocked || local.mappingLocked || local.teardown || local.disconnecting || global !== null,
+      globalTokenLocked: global !== null,
+    };
+  }
+
+  public async clearDiscordGuildStateAfterDisconnect(guildId: string, expectedConnectedAt: string): Promise<boolean> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return false;
+    const connection = await getDiscordServerConnection(this.env.DB, channelId);
+    if (connection !== null) return false;
+    return this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const lifecycle = readDiscordLifecycle(this.ctx.storage.sql);
+      if (lifecycle === null) return true;
+      if (lifecycle.mode !== "disconnecting" || lifecycle.guildId !== guildId || lifecycle.connectedAt !== expectedConnectedAt) return false;
+      clearDiscordGuildState(this.ctx.storage.sql, guildId);
+      this.ctx.storage.kv.delete(DISCORD_LIFECYCLE_MAY_EXIST_KEY);
+      return true;
+    });
+  }
+
+  public async cancelImmediateDiscordDisconnect(guildId: string, expectedConnectedAt: string): Promise<void> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return;
+    const connection = await getDiscordServerConnection(this.env.DB, channelId);
+    if (connection?.guildId !== guildId || connection.connectedAt !== expectedConnectedAt) return;
+    const canceled = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const lifecycle = readDiscordLifecycle(this.ctx.storage.sql);
+      if (lifecycle?.mode !== "disconnecting" || lifecycle.deferred !== false ||
+          lifecycle.guildId !== guildId || lifecycle.connectedAt !== expectedConnectedAt) return false;
+      this.clearDiscordLifecycleState();
+      bumpDiscordReconcileRevision(this.ctx.storage.sql);
+      return true;
+    });
+    if (canceled) await this.syncChannelJobSchedules();
+  }
+
+  public async lockDiscordServer(guildId: string, reason: string, expectedConnectedAt: string): Promise<boolean> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return false;
+    const connection = await getDiscordServerConnection(this.env.DB, channelId);
+    if (connection?.guildId !== guildId || connection.connectedAt !== expectedConnectedAt) return false;
+    const now = Date.now();
+    const result = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const lifecycle = readDiscordLifecycle(this.ctx.storage.sql);
+      if (lifecycle !== null) return "stale";
+      const alreadyLocked = readDiscordServerLock(this.ctx.storage.sql, guildId) !== null;
+      if (!alreadyLocked) setDiscordServerLock(this.ctx.storage.sql, { guildId, lockedAt: now, lastProbeAt: now, reason });
+      return alreadyLocked ? "existing" : "set";
+    });
+    if (result === "stale") return false;
+    if (result === "set") {
+      await writeModuleDiagnostics(this.env.DB, channelId, "discord", `discord:server_lock:set:${guildId}:${String(now)}`, null,
+        [{ code: "discord.server_lock_set" }], new Date(now).toISOString(), true);
+    }
+    return true;
+  }
+
+  public async previewDiscordMappings(mappings: { vip: string | null; moderator: string | null }): Promise<{
+    gain: { count: number; roleName: string };
+    lose: Array<{ count: number; roleName: string }>;
+  }> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return { gain: { count: 0, roleName: "" }, lose: [] };
+    return await previewDiscordMappingsInDurableObject({
+      DB: this.env.DB,
+      channelId,
+      twitchRanks: this.twitchRanksAccess("discord"),
+    }, mappings, this.ctx.storage.sql);
+  }
+
+  public async discordMemberRoleStatus(discordUserId: string, twitchUserId: string): Promise<DiscordLinkedMemberRoleStatus> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return "unknown";
+    const [connection, mappings, tokenLock, vip, moderator] = await Promise.all([
+      getDiscordServerConnection(this.env.DB, channelId),
+      getDiscordRoleMappings(this.env.DB, channelId),
+      readDiscordBotTokenLock(this.env.DB),
+      this.getTwitchRanks("vip"),
+      this.getTwitchRanks("moderator"),
+    ]);
+    if (connection === null) return "unknown";
+    const data = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const grants = readDiscordGrants(this.ctx.storage.sql, connection.guildId).filter((grant) =>
+        grant.discordUserId === discordUserId && grant.twitchUserId === twitchUserId);
+      const mappingLocks = readDiscordMappingLocks(this.ctx.storage.sql, connection.guildId);
+      const lifecycle = readDiscordLifecycle(this.ctx.storage.sql);
+      const desired = (mappings.vip !== null && vip.userIds.has(twitchUserId)) ||
+        (mappings.moderator !== null && moderator.userIds.has(twitchUserId));
+      const rankKnown = (mappings.vip === null || vip.complete) && (mappings.moderator === null || moderator.complete);
+      const relevantLocked = lifecycle !== null || readDiscordServerLock(this.ctx.storage.sql, connection.guildId) !== null ||
+        tokenLock !== null || mappingLocks.length > 0;
+      const grantStatus = grants.some(({ status }) => status === "granted")
+        ? "granted" as const
+        : grants.some(({ status }) => status === "pending") ? "pending" as const : null;
+      const notInServer = readDiscordMemberState(this.ctx.storage.sql, connection.guildId, discordUserId) === "not_in_server";
+      const mappedRoleIds = new Set([mappings.vip, mappings.moderator].filter((roleId): roleId is string => roleId !== null));
+      const observed = readDiscordMemberRoleStates(this.ctx.storage.sql, connection.guildId, discordUserId)
+        .filter(({ role_id }) => mappedRoleIds.has(role_id));
+      const observedHasRole = observed.length === 0 ? null : observed.some(({ present }) => present === 1);
+      return { desired, rankKnown, relevantLocked, grantStatus, notInServer, observedHasRole };
+    });
+    return discordMemberRoleStatus({
+      locked: data.relevantLocked,
+      desired: data.desired,
+      rankKnown: data.rankKnown,
+      grantStatus: data.grantStatus,
+      notInServer: data.notInServer,
+      observedHasRole: data.observedHasRole,
+    });
+  }
+
+  private async completeDeferredDiscordDisable(): Promise<boolean> {
+    const channelId = this.ownChannelId();
+    if (channelId === null) return false;
+    const connection = await getDiscordServerConnection(this.env.DB, channelId);
+    const state = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const lifecycle = readDiscordLifecycle(this.ctx.storage.sql);
+      if (lifecycle?.mode !== "teardown" || lifecycle.actorUserId === null || lifecycle.expectedRevision === null) return null;
+      if (connection !== null && countDiscordGrants(this.ctx.storage.sql, connection.guildId) > 0) return null;
+      return lifecycle;
+    });
+    if (state === null) return false;
+    const module = MODULES.find((candidate) => candidate.id === "discord");
+    if (module === undefined) return false;
+    const changedAt = new Date().toISOString();
+    const expectedRevision = state.expectedRevision ?? 0;
+    const moduleState = await getChannelModuleForChannel(this.env.DB, channelId, "discord");
+    if (moduleState === null || (moduleState.enabled && moduleState.revision !== expectedRevision) ||
+        (state.deferred === false && moduleState.enabled)) {
+      await this.cancelDiscordTeardownIfCurrent(state);
+      return false;
+    }
+    let disabled: Awaited<ReturnType<typeof completeDeferredChannelModuleDisable>>;
+    if (!moduleState.enabled) {
+      disabled = { revision: moduleState.revision, lastDisabledRevision: moduleState.lastDisabledRevision };
+    } else {
+      disabled = await completeDeferredChannelModuleDisable(
+        this.env.DB,
+        state.actorUserId ?? "system",
+        channelId,
+        "discord",
+        expectedRevision,
+        changedAt,
+      );
+    }
+    if (disabled === null) return false;
+    const finalized = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const current = readDiscordLifecycle(this.ctx.storage.sql);
+      if (current === null || current.mode !== state.mode || current.startedAt !== state.startedAt ||
+          current.actorUserId !== state.actorUserId || current.expectedRevision !== state.expectedRevision ||
+          current.guildId !== state.guildId || current.connectedAt !== state.connectedAt || current.deferred !== state.deferred) return false;
+      clearDiscordChatHints(this.ctx.storage.sql);
+      this.clearDiscordLifecycleState();
+      this.ctx.storage.sql.exec("DELETE FROM discord_reconcile_runs WHERE state_key = 'channel'");
+      bumpDiscordReconcileRevision(this.ctx.storage.sql);
+      return true;
+    });
+    if (!finalized) return false;
+    const actor: ActorContext = { userId: state.actorUserId ?? "system", sessionId: "deferred-module-disable" };
+    try {
+      await writeModuleDiagnostics(
+        this.env.DB,
+        channelId,
+        "discord",
+        `discord:teardown:finished:${String(state.startedAt)}:${String(disabled.revision)}`,
+        state.actorUserId,
+        [{ code: "discord.teardown_finished" }],
+        changedAt,
+        true,
+      );
+    } catch (error) {
+      console.error("Deferred Discord teardown diagnostic write failed.", {
+        channelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    await runModuleActivationPostCommit({
+      environment: this.env,
+      channelId,
+      module,
+      enabled: false,
+      previousEnabled: true,
+      actor,
+      now: changedAt,
+      revision: disabled.revision,
+      runModuleAlarm: async (handlerKey, alarmKey, invocation) => invocation === undefined
+        ? await this.runModuleAlarm(module.id, handlerKey, alarmKey)
+        : await this.runModuleAlarm(module.id, handlerKey, alarmKey, invocation),
+      operations: {
+        notifyScheduleInputsChanged: async () => { await this.notifyScheduleInputsChanged("activation"); },
+        syncChannelJobs: async () => { await this.syncChannelJobSchedules(); },
+        publishOverlays: async () => { await publishModuleActivationOverlays(this.env, channelId, module); },
+        maintainEventSubSubscriptions: async () => { await maintainEventSubSubscriptions(this.env, changedAt, fetch, channelId); },
+      },
+    });
+    return true;
+  }
+
+  private async cancelDiscordTeardownIfCurrent(expected: NonNullable<ReturnType<typeof readDiscordLifecycle>>): Promise<boolean> {
+    const stillCurrent = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const current = readDiscordLifecycle(this.ctx.storage.sql);
+      return current !== null && current.mode === expected.mode && current.startedAt === expected.startedAt &&
+        current.actorUserId === expected.actorUserId && current.expectedRevision === expected.expectedRevision &&
+        current.guildId === expected.guildId && current.connectedAt === expected.connectedAt &&
+        current.deferred === expected.deferred;
+    });
+    if (!stillCurrent) return false;
+    if (expected.mode === "teardown" && expected.deferred === false && expected.expectedRevision !== null) {
+      const channelId = this.ownChannelId();
+      if (channelId !== null) await fenceDeferredChannelModuleDisable(this.env.DB, channelId, "discord", expected.expectedRevision);
+    }
+    const canceled = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const current = readDiscordLifecycle(this.ctx.storage.sql);
+      if (current === null || current.mode !== expected.mode || current.startedAt !== expected.startedAt ||
+          current.actorUserId !== expected.actorUserId || current.expectedRevision !== expected.expectedRevision ||
+          current.guildId !== expected.guildId || current.connectedAt !== expected.connectedAt ||
+          current.deferred !== expected.deferred) return false;
+      this.clearDiscordLifecycleState();
+      bumpDiscordReconcileRevision(this.ctx.storage.sql);
+      return true;
+    });
+    if (canceled) await this.markDiscordReconcileNeededAndRun();
+    return canceled;
+  }
+
   public async applyTwitchRankEvent(input: {
     messageId: string;
     subscriptionType: string;
@@ -1311,16 +1940,32 @@ export class ChannelObject extends DurableObject<Env> {
     await this.notifyCommittedPanelResources();
   }
 
-  private async channelJobScopeFailure(requiredScopes: readonly string[]): Promise<"refresh_failed" | "missing_scope" | null> {
-    if (requiredScopes.length === 0) return null;
+  private async channelJobScopeFailure(
+    requiredScopes: readonly string[],
+    requiredScopeAlternatives: readonly (readonly string[])[] = [],
+    allowDiscordCleanup = false,
+  ): Promise<"refresh_failed" | "missing_scope" | null> {
+    if (requiredScopes.length === 0 && requiredScopeAlternatives.length === 0) return null;
     const channelId = this.ownChannelId();
     if (channelId === null) return "missing_scope";
+    if (allowDiscordCleanup && this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      return readDiscordLifecycle(this.ctx.storage.sql) !== null ||
+        this.ctx.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM discord_role_grants").one().count > 0;
+    })) return null;
     const identity = await this.env.DB.prepare(
       "SELECT status, reason FROM twitch_login_identity WHERE user_id = ?",
     ).bind(channelId).first<{ status: string; reason: string | null }>();
     if (identity?.status === "error" && identity.reason === "refresh_failed") return "refresh_failed";
     for (const scope of requiredScopes) {
       if (!await broadcasterHasScope(this.env.DB, channelId, scope)) return "missing_scope";
+    }
+    for (const alternatives of requiredScopeAlternatives) {
+      let available = false;
+      for (const scope of alternatives) {
+        if (await broadcasterHasScope(this.env.DB, channelId, scope)) { available = true; break; }
+      }
+      if (!available) return "missing_scope";
     }
     return null;
   }
@@ -4454,10 +5099,11 @@ export class ChannelObject extends DurableObject<Env> {
     key: string,
     claimed: AlarmScheduleEntry,
     retryDelaysMs: readonly number[] | undefined,
+    requestedNextAttemptAt?: number,
   ): Promise<number | null> {
     const failures = claimed.failures ?? 0;
     const delay = alarmRetryDelay(retryDelaysMs, failures);
-    const nextAttemptAt = Date.now() + delay;
+    const nextAttemptAt = requestedNextAttemptAt ?? Date.now() + delay;
     let rescheduled = false as boolean;
     await this.mutateAlarmSchedule(async (table, storage) => {
       const current = table[key];
@@ -4500,8 +5146,11 @@ export class ChannelObject extends DurableObject<Env> {
     const context: ModuleAlarmContext = {
       DB: this.env.DB,
       // Only the channel-points lifecycle needs Worker integrations; the Env is not structured-cloneable over test RPC.
-      ...(moduleId === "channel_points" || moduleId === "song_requests" ? {
+      ...(moduleId === "channel_points" || moduleId === "song_requests" || moduleId === "discord" ? {
         environment: this.env,
+      } : {}),
+      ...(moduleId === "discord" ? {
+        completeDeferredModuleDisable: async () => await this.completeDeferredDiscordDisable(),
       } : {}),
       ...(moduleId === "channel_points" ? {
         authorizeMutation: authorizeModuleMutation,
@@ -9952,7 +10601,11 @@ export class ChannelObject extends DurableObject<Env> {
             claimToken,
             claimUntil,
             now: jobNow,
-            scopeFailure: async () => await this.channelJobScopeFailure(job.requiredScopes),
+            scopeFailure: async () => await this.channelJobScopeFailure(
+              job.requiredScopes,
+              job.requiredScopeAlternatives,
+              job.id === moduleChannelJobId("discord", "reconcile"),
+            ),
             handle: async (channelJob) => await job.run(channelJob, key, claimed, jobNow, nowIso),
             scheduleNext: async (deadline) => {
               await this.scheduleAlarmEntry(key, claimed.handler, deadline);
@@ -9962,7 +10615,8 @@ export class ChannelObject extends DurableObject<Env> {
             },
           });
           if (jobResult === "retry") {
-            const nextAttemptAt = await this.rescheduleFailedAlarm(key, claimed, registration.retryDelaysMs);
+            const requestedNextRunAt = this.channelJobStore().status(job.id)?.nextRunAt ?? undefined;
+            const nextAttemptAt = await this.rescheduleFailedAlarm(key, claimed, registration.retryDelaysMs, requestedNextRunAt);
             if (nextAttemptAt !== null) {
               this.channelJobStore().setNextRunAt(job.id, nextAttemptAt);
               await this.publishChannelJobStatusChanged();

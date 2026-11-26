@@ -26,7 +26,6 @@ import { validateBelaboxStatsUrl } from "../../modules/belabox/domain/stats-url"
 import { resetSampleAfterStatsUrlChangeBestEffort } from "../../modules/belabox/routes";
 import type { PanelModuleState } from "../../panel-contract";
 import type { StreamMarkerResult } from "../../contracts/quick-actions";
-import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { moduleBroadcasterScopeState, moduleOptionalBroadcasterScopeState } from "../module-scopes";
 import { getPanelModuleStates } from "./module-repository";
 import { actorOf, readJsonBody } from "./member-routes";
@@ -46,7 +45,7 @@ import { SYSTEM_TEMPLATE_VARIABLE_LIST } from "../../template-variables";
 import { listChannelVariables } from "../db/channel-variables";
 import { findChannelVariable } from "../db/channel-variables";
 import { measureServerTiming, recordServerTiming, scheduleBackgroundWork } from "../server-timing";
-import { publishOverlayChangedWithResult, publishOverlayHostEvent as publishOverlayHostEventHint, publishRealtimeMessages } from "../realtime";
+import { publishOverlayHostEvent as publishOverlayHostEventHint, publishRealtimeMessages } from "../realtime";
 import { prepareModuleOverlayRealtimeMessage } from "../module-overlay-realtime";
 import { DEFAULT_CHANNEL_TIME_ZONE } from "../../modules/contract";
 import { readChannelLocation } from "../db/channel-settings";
@@ -54,7 +53,7 @@ import { readCachedGameList, readRecentChannelGames, writeCachedGameList, type T
 import { createSimulatedTemplateRenderer, registeredTemplateVariablesForChannel } from "../simulated-template-renderer";
 export { registeredTemplateVariablesForChannel } from "../simulated-template-renderer";
 import { moduleEventTimeOptions, resolveModuleEventTimes } from "../module-event-times";
-import { notifyModuleScheduleInputsChanged, reconcileChannelTimerSchedules, syncChannelJobs } from "../module-schedules";
+import { notifyModuleScheduleInputsChanged, reconcileChannelTimerSchedules } from "../module-schedules";
 import { createModuleExternalFetchBudget } from "../external-fetch-budget";
 import { moduleBallots } from "../module-ballots";
 import { modulePoints } from "../module-points";
@@ -68,6 +67,7 @@ import { liftModerationBan } from "../moderation";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../../modules/contracts/text-block-write-guard";
 import { effectiveEventTemplateDeclarations } from "../../modules/contracts/text-block-validation";
+import { defaultModuleActivationOperations, runModuleActivationPostCommit } from "../module-activation";
 
 interface ModuleRouteEnvironment {
   Bindings: Env;
@@ -929,6 +929,10 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
   const stored = await getChannelModuleForChannel(context.env.DB, channelId, module.id);
   if (stored === null) return context.json({ error: "module_not_configured" }, 404);
   if (module.id === "clips" && !stored.enabled) return context.json({ error: "module_disabled" }, 409);
+  if (module.id === "discord") {
+    const state = await context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId)).discordChannelState();
+    if (state.teardown || state.disconnecting) return context.json({ error: "discord_cleanup_in_progress" }, 409);
+  }
   const body = await readJsonBody(context.req.raw);
   if (body === null || typeof body !== "object" || Array.isArray(body)) return context.json({
     error: "module_settings_invalid",
@@ -1047,20 +1051,30 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId/settings", async 
     }, changedAt);
     dependentMutations = [secretMutation, secretAudit];
   }
-  const changed = await updateChannelModuleSettingsWithAudit(
-    context.env.DB,
-    actorOf(context),
-    channelId,
-    module.id,
-    JSON.stringify(settings.data),
-    `${module.id}.settings_changed`,
-    changedAt,
-    dependentMutations,
-    expectedRevision,
-    blockGuard.references.length === 0 ? undefined : blockGuard,
-    module.id === "clips",
-    commandWriteGuard,
-  );
+  const discordObject = module.id === "discord"
+    ? context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId))
+    : null;
+  const discordMutationToken = discordObject === null ? null : await discordObject.beginDiscordReconcileMutation();
+  if (discordObject !== null && discordMutationToken === null) return context.json({ error: "discord_cleanup_in_progress" }, 409);
+  let changed: boolean;
+  try {
+    changed = await updateChannelModuleSettingsWithAudit(
+      context.env.DB,
+      actorOf(context),
+      channelId,
+      module.id,
+      JSON.stringify(settings.data),
+      `${module.id}.settings_changed`,
+      changedAt,
+      dependentMutations,
+      expectedRevision,
+      blockGuard.references.length === 0 ? undefined : blockGuard,
+      module.id === "clips",
+      commandWriteGuard,
+    );
+  } finally {
+    if (discordObject !== null && discordMutationToken !== null) await discordObject.endDiscordReconcileMutation(discordMutationToken);
+  }
   if (!changed) {
     const collision = await moduleCommandCollision(context.env.DB, channelId, module.id, settings.data);
     if (collision !== null) return context.json({ error: "module_command_collision", command: collision }, 409);
@@ -1133,6 +1147,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
+  let activationRevision = expectedRevision === undefined ? existing?.revision : Number(expectedRevision);
   const initialize = enabled && existing?.initialized !== true;
   const reusedTextCommandName = initialize && module.onEnableCommandTokens?.includes("!befehle") === true
     ? "befehle"
@@ -1208,6 +1223,23 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       now,
     }, channelId) ?? [];
   }
+  if (existing?.enabled === true && !enabled && expectedRevision !== undefined && Number(expectedRevision) !== existing.revision) {
+    return context.json({ error: "module_changed_concurrently" }, 409);
+  }
+  if (existing?.enabled === true && !enabled && module.beforeDisable !== undefined) {
+    const deferred = await module.beforeDisable({
+      DB: context.env.DB,
+      environment: context.env,
+      authorizeMutation: context.get("authorizeManagementMutation"),
+      prepareModuleAudit: context.get("prepareModuleAudit"),
+      actor,
+      now,
+      expectedRevision: activationRevision ?? existing.revision,
+    }, channelId);
+    if (deferred.blocked) return context.json({ error: "module_cleanup_in_progress" }, 409);
+    if (deferred.deferred) return context.json({ enabled: true, teardown: true, remaining: deferred.remaining ?? 0 }, 202);
+    if (deferred.revision !== undefined) activationRevision = deferred.revision;
+  }
   const settings = existing === null ? defaultSettingsJson : existing.settings;
   let revision: number | null;
   let lastDisabledRevision = existing?.lastDisabledRevision ?? null;
@@ -1247,7 +1279,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
         action,
         now,
         dependentMutations,
-        expectedRevision === undefined ? existing.revision : Number(expectedRevision),
+        activationRevision ?? existing.revision,
         initialize,
         atomicStateGuard,
       );
@@ -1304,68 +1336,23 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       });
     }
   }
-  if (module.id === "belabox" && module.settingsChangedAlarm !== undefined) {
-    await runModuleAlarmAfterMutation(
-      context,
-      channelId,
-      module.id,
-      module.settingsChangedAlarm.handlerKey,
-      module.settingsChangedAlarm.alarmKey,
-    );
-  } else if ((existing?.enabled === true) !== enabled) {
-    await runPostCommitStep(module.id, "schedule_notification", () =>
-      notifyModuleScheduleInputsChanged(context.env.CHANNEL, channelId, "activation"));
-  }
-  if ((existing?.enabled === true) !== enabled) {
-    await runPostCommitStep(module.id, "channel_job_schedule", () =>
-      syncChannelJobs(context.env.CHANNEL, channelId));
-  }
-  const overlayKinds = module.overlayElements?.map(({ kind }) => kind) ?? [];
-  if (overlayKinds.length > 0) {
-    const placeholders = overlayKinds.map(() => "?").join(", ");
-    let affectedOverlays: Array<{ overlayId: string; revision: number }> | null = null;
-    try {
-      const result = await context.env.DB.prepare(
-        `SELECT DISTINCT overlay.overlay_id, overlay.revision
-           FROM overlays AS overlay
-           JOIN overlay_elements AS element
-             ON element.channel_id = overlay.channel_id AND element.overlay_id = overlay.overlay_id
-          WHERE overlay.channel_id = ? AND element.kind IN (${placeholders})
-          ORDER BY overlay.overlay_id`,
-      ).bind(channelId, ...overlayKinds).all<{ overlay_id: string; revision: number }>();
-      affectedOverlays = result.results.map(({ overlay_id, revision }) => ({ overlayId: overlay_id, revision }));
-    } catch (error) {
-      logPostCommitFailure(module.id, "overlay_lookup", error);
-    }
-    const overlaysToPublish = affectedOverlays;
-    if (overlaysToPublish !== null) {
-      await runPostCommitStep(module.id, "overlay_publish", async () => {
-        const result = await publishOverlayChangedWithResult(context.env.CHANNEL, channelId, overlaysToPublish);
-        if (!result.ok) throw result.error;
-      });
-    }
-  }
-  let activationResult: unknown;
-  if (module.onActivationChange !== undefined) {
-    const onActivationChange = module.onActivationChange;
-    activationResult = await runPostCommitStep(module.id, "activation_change", async () =>
-      await onActivationChange({
-        DB: context.env.DB,
-        environment: context.env,
-        authorizeMutation: context.get("authorizeManagementMutation"),
-        actor,
-        now,
-        runModuleAlarm: (handlerKey, alarmKey, invocation) => {
-          const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
-          return invocation === undefined
-            ? object.runModuleAlarm(module.id, handlerKey, alarmKey)
-            : object.runModuleAlarm(module.id, handlerKey, alarmKey, invocation);
-        },
-      }, channelId, enabled),
-    );
-  }
-  await runPostCommitStep(module.id, "eventsub_reconciliation", () =>
-    maintainEventSubSubscriptions(context.env, now, fetch, channelId));
+  const activationResult = await runModuleActivationPostCommit({
+    environment: context.env,
+    channelId,
+    module,
+    enabled,
+    previousEnabled: existing?.enabled === true,
+    actor,
+    now,
+    revision,
+    runModuleAlarm: (handlerKey, alarmKey, invocation) => {
+      const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(channelId));
+      return invocation === undefined
+        ? object.runModuleAlarm(module.id, handlerKey, alarmKey)
+        : object.runModuleAlarm(module.id, handlerKey, alarmKey, invocation);
+    },
+    operations: defaultModuleActivationOperations(context.env, channelId, module, now),
+  });
   let updatedModule: PanelModuleState;
   try {
     updatedModule = await moduleStateFor(context.env.DB, channelId, module, enabled, settings);

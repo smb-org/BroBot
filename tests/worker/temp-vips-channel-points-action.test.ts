@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   actionContext: { current: undefined as ModuleExecutionContext | undefined },
 }));
 vi.mock("../../src/worker/twitch/channel-points", () => ({
+  configuredHelixBase: () => "https://api.twitch.tv",
   updateRedemptionStatus: mocks.channelPointsUpdate,
 }));
 vi.mock("../../src/worker/module-action-context", () => ({

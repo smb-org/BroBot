@@ -136,6 +136,11 @@ export interface PlatformTexts {
   spotifyEnabled: string;
   spotifyDisabled: string;
   spotifyLimit: string;
+  discordTokenLock: string;
+  discordTokenLocked: string;
+  discordTokenUnlocked: string;
+  discordTokenProbe: string;
+  discordTokenProbeFailed: string;
   actionLabel: Record<PlatformAction, string>;
 }
 
@@ -217,6 +222,11 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     spotifyEnabled: "Spotify freischalten",
     spotifyDisabled: "Spotify-Freigabe entfernen",
     spotifyLimit: "Alle fünf Spotify-Plätze sind belegt.",
+    discordTokenLock: "Globale Discord-Bot-Verbindung",
+    discordTokenLocked: "Der Discord-Bot-Token ist ungültig. Rollenabgleiche pausieren bis zur Prüfung.",
+    discordTokenUnlocked: "Der Discord-Bot-Token ist gültig.",
+    discordTokenProbe: "Jetzt erneut prüfen",
+    discordTokenProbeFailed: "Discord konnte den Bot-Token nicht bestätigen.",
     actionLabel: {
       "channel.released": "Kanal freigegeben",
       "channel.full_consent_changed": "Vollzustimmung geändert",
@@ -303,6 +313,11 @@ const platformCatalog: LocaleCatalog<PlatformTexts> = {
     spotifyEnabled: "Enable Spotify",
     spotifyDisabled: "Remove Spotify access",
     spotifyLimit: "All five Spotify slots are in use.",
+    discordTokenLock: "Global Discord bot connection",
+    discordTokenLocked: "The Discord bot token is invalid. Role reconciliation is paused until it is checked.",
+    discordTokenUnlocked: "The Discord bot token is valid.",
+    discordTokenProbe: "Check again",
+    discordTokenProbeFailed: "Discord could not confirm the bot token.",
     actionLabel: {
       "channel.released": "Channel released",
       "channel.full_consent_changed": "Full consent changed",

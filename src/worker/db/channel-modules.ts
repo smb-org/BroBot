@@ -74,6 +74,60 @@ export const getChannelModuleForChannel = async (
   moduleId: string,
 ): Promise<ChannelModuleRecord | null> => getChannelModule(db, channelId, moduleId);
 
+/** Claims a deferred disable under the same actor and session guard as activation writes. */
+export const claimDeferredChannelModuleDisable = async (
+  db: D1Database,
+  actor: ActorContext,
+  channelId: string,
+  moduleId: string,
+  expectedRevision: number,
+  changedAt: string,
+  advanceRevision = true,
+): Promise<number | null> => {
+  if (!advanceRevision) {
+    const row = await db.prepare(
+      `SELECT revision FROM channel_modules
+        WHERE channel_id = ? AND module_id = ? AND enabled = 1 AND revision = ?
+          ${actorGuard(MANAGING_ROLES)}`,
+    ).bind(
+      channelId,
+      moduleId,
+      expectedRevision,
+      ...bindActorGuard(actor, channelId, changedAt),
+    ).first<{ revision: number }>();
+    return row?.revision ?? null;
+  }
+  const row = await db.prepare(
+    `UPDATE channel_modules
+        SET revision = revision + 1
+      WHERE channel_id = ? AND module_id = ? AND enabled = 1 AND revision = ?
+        ${actorGuard(MANAGING_ROLES)}
+      RETURNING revision`,
+  ).bind(
+    channelId,
+    moduleId,
+    expectedRevision,
+    ...bindActorGuard(actor, channelId, changedAt),
+  ).first<{ revision: number }>();
+  return row?.revision ?? null;
+};
+
+/** Invalidates an uncommitted empty teardown before releasing its intent. */
+export const fenceDeferredChannelModuleDisable = async (
+  db: D1Database,
+  channelId: string,
+  moduleId: string,
+  expectedRevision: number,
+): Promise<boolean> => {
+  const row = await db.prepare(
+    `UPDATE channel_modules
+        SET revision = revision + 1
+      WHERE channel_id = ? AND module_id = ? AND enabled = 1 AND revision = ?
+      RETURNING revision`,
+  ).bind(channelId, moduleId, expectedRevision).first<{ revision: number }>();
+  return row !== null;
+};
+
 /**
  * The same role threshold as for member changes: only broadcasters and
  * managers may toggle modules, enforced in the mutation's own actorGuard,
@@ -185,6 +239,7 @@ export const updateChannelModuleEnabledStateWithAudit = async (
   expectedRevision?: number,
   markInitialized = false,
   stateGuard?: ChannelModuleStateGuard,
+  allowDeferredCompletion = false,
 ): Promise<{ revision: number; lastDisabledRevision: number | null } | null> => {
   const before = await getChannelModule(db, channelId, moduleId);
   if (before === null) return null;
@@ -201,7 +256,7 @@ export const updateChannelModuleEnabledStateWithAudit = async (
             last_disabled_revision = CASE WHEN ? = 0 THEN revision + 1 ELSE last_disabled_revision END
       WHERE channel_id = ? AND module_id = ? AND revision = ?
         ${stateGuard?.sql ?? ""}
-        ${actorGuard(MANAGING_ROLES)}
+        ${allowDeferredCompletion ? "" : actorGuard(MANAGING_ROLES)}
       RETURNING revision, last_disabled_revision`,
   ).bind(
     after.enabled ? 1 : 0,
@@ -211,7 +266,7 @@ export const updateChannelModuleEnabledStateWithAudit = async (
     moduleId,
     expectedRevision ?? before.revision,
     ...(stateGuard?.values ?? []),
-    ...bindActorGuard(actor, channelId, changedAt),
+    ...(allowDeferredCompletion ? [] : bindActorGuard(actor, channelId, changedAt)),
   );
   const audit = prepareHostModuleAudit(db, actor.userId, changedAt, {
     channelId,
@@ -231,3 +286,27 @@ export const updateChannelModuleEnabledStateWithAudit = async (
     lastDisabledRevision: typeof activation.last_disabled_revision === "number" ? activation.last_disabled_revision : null,
   };
 };
+
+/** Completes a module disable already authorized and audited by its deferred-cleanup request. */
+export const completeDeferredChannelModuleDisable = async (
+  db: D1Database,
+  actorUserId: string,
+  channelId: string,
+  moduleId: string,
+  expectedRevision: number,
+  changedAt: string,
+): Promise<{ revision: number; lastDisabledRevision: number | null } | null> =>
+  await updateChannelModuleEnabledStateWithAudit(
+    db,
+    { userId: actorUserId, sessionId: "deferred-module-disable" },
+    channelId,
+    moduleId,
+    false,
+    "module.disabled",
+    changedAt,
+    [],
+    expectedRevision,
+    false,
+    undefined,
+    true,
+  );

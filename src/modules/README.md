@@ -935,6 +935,10 @@ contracts package, or return `{ ok: false, code }`, to record one of the fixed
 job errors. Host-owned recurring work uses the same registration shape with an
 ID in the `host:` namespace.
 
+A module may use `beforeDisable(context, channelId)` to defer deactivation while
+the same channel job performs required cleanup, then finish through the shared
+host activation path.
+
 ### Consuming host-managed Twitch ranks
 
 A module that uses the host's current VIP or moderator list declares the

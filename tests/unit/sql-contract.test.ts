@@ -183,6 +183,7 @@ const sqlGetFixtures = new Map<string, string>([
   ["lastBroadcasterRoleChangeGuard", lastBroadcasterRoleChangeGuard],
   ["lastBroadcasterGuard", lastBroadcasterGuard],
   ["actorGuard(MANAGING_ROLES)", actorGuard(MANAGING_ROLES)],
+  ["allowDeferredCompletion ? \"\" : actorGuard(MANAGING_ROLES)", actorGuard(MANAGING_ROLES)],
   ["currentGuard.sql", actorGuard(MANAGING_ROLES)],
   ["actorGuard(ANY_MEMBER_ROLES)", actorGuard(ANY_MEMBER_ROLES)],
   ["addedIdGuard", overlayElementIdCollisionGuard(1)],
@@ -415,10 +416,10 @@ describe("SQL contract", () => {
       const objects = database.prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY tbl_name, type DESC, name",
       ).all() as unknown as SchemaObject[];
-      expect(objects.filter((object) => object.type === "table")).toHaveLength(94);
+      expect(objects.filter((object) => object.type === "table")).toHaveLength(95);
       expect(objects.filter((object) => object.type === "index")).toHaveLength(89);
       expect(objects.filter((object) => object.type === "trigger")).toHaveLength(183);
-      expect(objects).toHaveLength(366);
+      expect(objects).toHaveLength(367);
 
       const tableColumns = (table: string): Set<string> => new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(({ name }) => name),

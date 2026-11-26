@@ -4,9 +4,9 @@ import { URL, URLSearchParams } from "node:url";
 
 const port = Number(process.env.DISCORD_MOCK_PORT ?? 8792);
 const discordUser = {
-  id: "80351110224678912",
-  username: "nightowl",
-  global_name: "Night Owl",
+  id: "990000000000000203",
+  username: "pixelpilot",
+  global_name: "Pixel Pilot",
   discriminator: "0",
   avatar: null,
 };
@@ -33,8 +33,8 @@ const roles = [
   { id: "990000000000000104", name: "BroBot", color: 0, hoist: false, icon: null, unicode_emoji: null, position: 5, permissions: "268435456", managed: true, mentionable: false, flags: 0, tags: { bot_id: discordBot.id } },
 ];
 const connections = [{
-  id: "141981764",
-  name: "nightowl_dev",
+  id: "990000000000000301",
+  name: "pixelpilot_e2e",
   type: "twitch",
   verified: true,
   visibility: 0,
@@ -43,6 +43,16 @@ const connections = [{
   two_way_link: false,
   revoked: false,
 }];
+const members = new Map();
+let rateLimitNextApiRequest = false;
+const memberRecord = (userId) => {
+  let member = members.get(userId);
+  if (member === undefined) {
+    member = { roles: new Set(), joined_at: "2026-11-20T18:30:00.000000+00:00" };
+    members.set(userId, member);
+  }
+  return member;
+};
 
 const json = (response, status, value) => {
   response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -62,6 +72,17 @@ const server = createServer((request, response) => {
   if (url.pathname === "/health") {
     response.writeHead(204);
     response.end();
+    return;
+  }
+  if (url.pathname === "/__test/429-once" && request.method === "POST") {
+    rateLimitNextApiRequest = true;
+    json(response, 200, { armed: true });
+    return;
+  }
+  if (url.pathname === "/__test/reset" && request.method === "POST") {
+    members.clear();
+    rateLimitNextApiRequest = false;
+    json(response, 200, { reset: true });
     return;
   }
   if (url.pathname === "/oauth2/authorize" && request.method === "GET") {
@@ -116,6 +137,11 @@ const server = createServer((request, response) => {
     }).catch(() => json(response, 400, { error: "token_request_invalid" }));
     return;
   }
+  if (url.pathname.startsWith("/api/v10/") && rateLimitNextApiRequest) {
+    rateLimitNextApiRequest = false;
+    json(response, 429, { code: 0, message: "rate limited", retry_after: 0.25, global: false });
+    return;
+  }
   if (url.pathname === "/api/v10/users/@me" && request.method === "GET") {
     json(response, 200, request.headers.authorization === "Bot e2e-discord-bot-token" ? discordBot : discordUser);
     return;
@@ -132,16 +158,48 @@ const server = createServer((request, response) => {
     json(response, 200, roles);
     return;
   }
-  if (url.pathname === `/api/v10/guilds/${guildId}/members/${discordBot.id}` && request.method === "GET") {
-    json(response, 200, {
-      user: { id: discordBot.id, username: discordBot.username, bot: true },
-      roles: ["990000000000000104"],
-      joined_at: "2026-11-20T18:00:00.000000+00:00",
-      nick: null,
-      deaf: false,
-      mute: false,
-      flags: 0,
-    });
+  const memberMatch = new RegExp(`^/api/v10/guilds/${guildId}/members/([0-9]{1,20})$`, "u").exec(url.pathname);
+  if (memberMatch !== null && request.method === "GET") {
+    const userId = memberMatch[1];
+    if (userId === discordBot.id) {
+      json(response, 200, {
+        user: { id: discordBot.id, username: discordBot.username, bot: true },
+        roles: ["990000000000000104"],
+        joined_at: "2026-11-20T18:00:00.000000+00:00",
+        nick: null,
+        deaf: false,
+        mute: false,
+        flags: 0,
+      });
+      return;
+    }
+    if (userId === discordUser.id) {
+      const member = memberRecord(userId);
+      json(response, 200, {
+        user: { id: discordUser.id, username: discordUser.username },
+        roles: [...member.roles],
+        joined_at: member.joined_at,
+        nick: null,
+        deaf: false,
+        mute: false,
+        flags: 0,
+      });
+      return;
+    }
+    json(response, 404, { code: 10007, message: "Unknown Member" });
+    return;
+  }
+  const roleMatch = new RegExp(`^/api/v10/guilds/${guildId}/members/([0-9]{1,20})/roles/([0-9]{1,20})$`, "u").exec(url.pathname);
+  if (roleMatch !== null && (request.method === "PUT" || request.method === "DELETE")) {
+    if (roleMatch[1] !== discordUser.id) {
+      json(response, 404, { code: 10007, message: "Unknown Member" });
+      return;
+    }
+    const member = memberRecord(discordUser.id);
+    if (request.method === "PUT") member.roles.add(roleMatch[2]);
+    else member.roles.delete(roleMatch[2]);
+    response.writeHead(204);
+    response.end();
     return;
   }
   json(response, 404, { error: "mock_endpoint_not_found" });

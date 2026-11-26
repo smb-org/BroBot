@@ -230,7 +230,7 @@ describe("Discord server repository", () => {
       channelId: "discord-server-one", guildId: GUILD_ID, connectedBy: "member-one", connectedAt: NOW,
     }, authorization("discord-server-one"));
     expect(first).toBe("connected");
-    await saveDiscordRoleMappings(database as unknown as D1Database, "discord-server-one", GUILD_ID, { vip: "990000000000000102", moderator: null }, NOW, authorization("discord-server-one"));
+    await saveDiscordRoleMappings(database as unknown as D1Database, "discord-server-one", GUILD_ID, NOW, { vip: "990000000000000102", moderator: null }, NOW, authorization("discord-server-one"));
 
     const duplicate = await connectDiscordServer(database as unknown as D1Database, {
       channelId: "discord-server-two", guildId: GUILD_ID, connectedBy: "member-two", connectedAt: NOW,
@@ -242,13 +242,13 @@ describe("Discord server repository", () => {
     await expect(getDiscordRoleMappings(database as unknown as D1Database, "discord-server-one"))
       .resolves.toEqual({ vip: "990000000000000102", moderator: null });
 
-    await disconnectDiscordServer(database as unknown as D1Database, "discord-server-one", authorization("discord-server-one"));
+    await disconnectDiscordServer(database as unknown as D1Database, "discord-server-one", GUILD_ID, NOW, authorization("discord-server-one"));
     await expect(getDiscordServerConnection(database as unknown as D1Database, "discord-server-one")).resolves.toBeNull();
     await expect(getDiscordRoleMappings(database as unknown as D1Database, "discord-server-one"))
       .resolves.toEqual({ vip: null, moderator: null });
   });
 
-  it("replaces a channel's previous server and clears its role mappings", async () => {
+  it("does not replace a connected server before its old grants are cleaned up", async () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, "discord-server-replacement");
@@ -259,16 +259,43 @@ describe("Discord server repository", () => {
     await connectDiscordServer(database as unknown as D1Database, {
       channelId: "discord-server-replacement", guildId: GUILD_ID, connectedBy: "member-one", connectedAt: NOW,
     }, authorization);
-    await saveDiscordRoleMappings(database as unknown as D1Database, "discord-server-replacement", GUILD_ID, {
+    await saveDiscordRoleMappings(database as unknown as D1Database, "discord-server-replacement", GUILD_ID, NOW, {
       vip: "990000000000000102", moderator: null,
     }, NOW, authorization);
 
     await expect(connectDiscordServer(database as unknown as D1Database, {
       channelId: "discord-server-replacement", guildId: "990000000000000109", connectedBy: "member-one", connectedAt: NOW,
-    }, authorization)).resolves.toBe("connected");
+    }, authorization)).resolves.toBe("different_guild");
     await expect(getDiscordServerConnection(database as unknown as D1Database, "discord-server-replacement"))
-      .resolves.toMatchObject({ guildId: "990000000000000109" });
+      .resolves.toMatchObject({ guildId: GUILD_ID });
     await expect(getDiscordRoleMappings(database as unknown as D1Database, "discord-server-replacement"))
+      .resolves.toEqual({ vip: "990000000000000102", moderator: null });
+  });
+
+  it("rejects a mapping save after the same guild reconnects with a new connection identity", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    const channelId = "discord-server-same-guild-reconnect";
+    await insertChannel(database, channelId);
+    await insertMember(database, channelId, "member-one", "manager");
+    await insertLoginIdentityAndSession(database, "member-one");
+    const actor = { userId: "member-one", sessionId: "session-member-one" };
+    const authorization = authorizeModuleManagementMutation(channelId, actor, NOW);
+    const reconnectedAt = "2026-11-26T10:30:00.000Z";
+    await connectDiscordServer(database as unknown as D1Database, {
+      channelId, guildId: GUILD_ID, connectedBy: "member-one", connectedAt: NOW,
+    }, authorization);
+    await database.prepare("DELETE FROM discord_guilds WHERE channel_id = ?").bind(channelId).run();
+    await connectDiscordServer(database as unknown as D1Database, {
+      channelId, guildId: GUILD_ID, connectedBy: "member-one", connectedAt: reconnectedAt,
+    }, authorization);
+
+    await expect(saveDiscordRoleMappings(database as unknown as D1Database, channelId, GUILD_ID, NOW, {
+      vip: "990000000000000102", moderator: null,
+    }, NOW, authorization)).resolves.toBe("connection_changed");
+    await expect(getDiscordServerConnection(database as unknown as D1Database, channelId))
+      .resolves.toMatchObject({ guildId: GUILD_ID, connectedAt: reconnectedAt });
+    await expect(getDiscordRoleMappings(database as unknown as D1Database, channelId))
       .resolves.toEqual({ vip: null, moderator: null });
   });
 });

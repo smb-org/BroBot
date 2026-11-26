@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   sendChat: vi.fn(),
 }));
 vi.mock("../../src/worker/twitch/channel-points", () => ({
+  configuredHelixBase: () => "https://api.twitch.tv",
   createCustomReward: mocks.create,
   updateCustomReward: mocks.update,
   updateRedemptionStatus: mocks.updateRedemptionStatus,

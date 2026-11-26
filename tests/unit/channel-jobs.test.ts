@@ -114,6 +114,30 @@ describe("channel jobs", () => {
     await running;
   });
 
+  it("uses an explicit continuation deadline for bounded work in the same channel job", async () => {
+    const now = 1_000;
+    const { store } = storeFor(() => now);
+    const nextRuns: number[] = [];
+    const result = await executeChannelJobClaim({
+      store,
+      registration,
+      claimToken: "claim-continuation",
+      claimUntil: 10_000,
+      now,
+      handle: (context) => {
+        context.scheduleNextAt?.(1_750);
+        return Promise.resolve({ summary: { de: "Weiter", en: "Continue" } });
+      },
+      scheduleNext: (deadline) => {
+        nextRuns.push(deadline);
+        return Promise.resolve();
+      },
+    });
+
+    expect(result).toBe("completed");
+    expect(nextRuns).toEqual([1_750]);
+  });
+
   it("takes over an expired claim with a new token and discards the old commit", async () => {
     let now = 0;
     const { store, sql } = storeFor(() => now);

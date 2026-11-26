@@ -125,4 +125,15 @@ describe("module toggle response cache", () => {
     queryClient.clear();
   });
 
+  it("keeps deferred Discord teardown out of the completed module response cache", async () => {
+    const queryClient = new QueryClient();
+    vi.mocked(setChannelModuleEnabled).mockResolvedValue({ enabled: true, teardown: true, remaining: 3 });
+
+    const result = await toggleModuleWithUndo(queryClient, "discord-teardown-channel", "discord", false, () => false);
+
+    expect(result).toEqual({ deferred: true, remaining: 3 });
+    expect(queryClient.getQueryData(queryKeys.channel("discord-teardown-channel", "modules"))).toBeUndefined();
+    queryClient.clear();
+  });
+
 });

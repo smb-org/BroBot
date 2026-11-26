@@ -14,6 +14,7 @@ import { withBroadcasterToken } from "../auth/broadcaster-token";
 import { getLoginIdentity } from "../db/login-identity";
 import { isBroadcasterCredentialUsable } from "../auth/login-token-refresh";
 import { listEventSubSubscriptions } from "../db/eventsub-state";
+import { configuredHelixBase } from "../twitch/channel-points";
 import { helixRequest, helixPages } from "../twitch/helix";
 
 export type TwitchRankType = ModuleTwitchRankType;
@@ -827,7 +828,7 @@ const listRankPages = (
   path: "channels/vips" | "moderation/moderators",
 ): Promise<HelixResult<TwitchRankUser[]>> => helixPages<TwitchRankUser>(async (cursor) => {
   const result = await helixRequest({
-    url: `https://api.twitch.tv/helix/${path}`,
+    url: `${configuredHelixBase(environment)}/helix/${path}`,
     clientId: environment.TWITCH_CLIENT_ID,
     accessToken,
     query: {

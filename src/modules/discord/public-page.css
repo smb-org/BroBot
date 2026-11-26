@@ -13,7 +13,7 @@
     display: grid;
     width: min(100%, 480px);
     min-height: 530px;
-    grid-template-rows: auto auto 260px auto;
+    grid-template-rows: auto auto minmax(260px, auto) auto;
     align-content: start;
     gap: 22px;
     padding: clamp(24px, 6vw, 40px);
@@ -38,9 +38,11 @@
   .discord-public__eyebrow { margin: 0 0 3px; color: var(--color-text-3); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
   .discord-public h1 { margin: 0; font-size: 22px; font-weight: 650; line-height: 1.2; }
   .discord-public__intro { max-width: 36ch; margin: 0; color: var(--color-text-2); font-size: 14px; line-height: 1.6; }
-  .discord-public__state { height: 260px; }
-  .discord-public__placeholder { width: 100%; height: 260px; border-radius: 10px; background: var(--color-inspector); }
-  .discord-public__message { display: flex; height: 260px; flex-direction: column; align-items: flex-start; justify-content: flex-start; overflow: auto; }
+  .discord-public__state { min-height: 260px; }
+  .discord-public__placeholders { display: grid; gap: 12px; padding-top: 4px; }
+  .discord-public__placeholder { display: block; width: 100%; height: 42px; border-radius: 10px; background: var(--color-inspector); }
+  .discord-public__placeholder--title { width: 44%; height: 19px; }
+  .discord-public__message { display: flex; min-height: 260px; flex-direction: column; align-items: flex-start; justify-content: flex-start; }
   .discord-public__message h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 10px; font-size: 16px; line-height: 1.4; }
   .discord-public__message p { margin: 0 0 18px; color: var(--color-text-2); font-size: 13px; line-height: 1.6; }
   .discord-public__status-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 0 4px var(--color-success-surface); }
@@ -69,6 +71,12 @@
   .discord-public__details div { display: grid; grid-template-columns: minmax(92px, .42fr) minmax(0, 1fr); gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--color-border); }
   .discord-public__details dt { color: var(--color-text-3); font-size: 12px; }
   .discord-public__details dd { min-width: 0; margin: 0; color: var(--color-text); font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .discord-public__channel-roles { display: grid; width: 100%; gap: 0; margin-top: 18px; }
+  .discord-public__channel-roles h3 { margin: 0 0 5px; color: var(--color-text-3); font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+  .discord-public__channel-role { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+  .discord-public__channel-role > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .discord-public__channel-role small { flex: none; color: var(--color-text-3); font-size: 11px; }
+  .discord-public__channel-role[data-status="has_role"] small { color: var(--color-success); }
   .discord-public__error { min-height: 20px; margin: 10px 0 12px !important; color: var(--color-error-text) !important; font-size: 12px !important; line-height: 20px !important; }
   .discord-public__error:not([role="alert"]) { color: transparent !important; }
   .discord-public__footer { min-height: 52px; padding-top: 15px; border-top: 1px solid var(--color-border); color: var(--color-text-3); font-size: 11px; line-height: 1.5; }

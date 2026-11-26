@@ -3,6 +3,8 @@ import process from "node:process";
 import { URL, URLSearchParams } from "node:url";
 
 const port = Number(process.env.SPOTIFY_MOCK_PORT ?? 8791);
+const rankedChannelId = "discord-reconcile-e2e-ranked";
+const rankedViewer = { user_id: "990000000000000301", user_login: "pixelpilot_e2e", user_name: "Pixel Pilot" };
 const tracks = [
   {
     id: "glassharbor01", uri: "spotify:track:glassharbor01", name: "Glass Harbor", duration_ms: 201000, explicit: false,
@@ -73,6 +75,12 @@ const server = createServer((request, response) => {
   }
   if (url.pathname === "/__test/state" && request.method === "GET") {
     json(response, 200, { currentTrackId: current?.id ?? null, nextRequests });
+    return;
+  }
+  if ((url.pathname === "/helix/channels/vips" || url.pathname === "/helix/moderation/moderators") && request.method === "GET") {
+    const isRankedChannel = url.searchParams.get("broadcaster_id") === rankedChannelId;
+    const data = url.pathname === "/helix/channels/vips" && isRankedChannel ? [rankedViewer] : [];
+    json(response, 200, { data, pagination: {} });
     return;
   }
   if (url.pathname === "/__test/redemptions" && request.method === "GET") {

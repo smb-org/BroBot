@@ -2,12 +2,14 @@ export const CHANNEL_JOB_ERROR_TEXTS = {
   de: {
     refresh_failed: "Die Twitch-Anmeldung ist abgelaufen. Bitte verbinde den Kanal erneut.",
     missing_scope: "Eine benötigte Twitch-Berechtigung fehlt. Bitte verbinde den Kanal erneut.",
+    discord_token_invalid: "Der Discord-Bot-Token ist ungültig. Bitte prüfe die globale Discord-Verbindung.",
     lease_expired: "Der Lauf wurde unterbrochen und von einem neuen Lauf übernommen.",
     unknown: "Die Aufgabe ist fehlgeschlagen. Sie wird automatisch erneut versucht.",
   },
   en: {
     refresh_failed: "The Twitch sign-in expired. Reconnect the channel to continue.",
     missing_scope: "A required Twitch permission is missing. Reconnect the channel to continue.",
+    discord_token_invalid: "The Discord bot token is invalid. Check the global Discord connection.",
     lease_expired: "The run was interrupted and taken over by a new run.",
     unknown: "The job failed. It will be retried automatically.",
   },

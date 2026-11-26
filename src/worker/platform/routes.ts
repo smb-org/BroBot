@@ -33,6 +33,9 @@ import { maintainEventSubSubscriptions } from "../eventsub-subscriptions";
 import { CHANNEL_ROLES, PLATFORM_ASSIGNABLE_ROLES, type ChannelRole } from "../../contracts/values";
 import { auditSubjectUserId } from "../../dashboard/audit/areas";
 import { revokeRealtimeUser } from "../realtime";
+import { probeDiscordBotToken, readDiscordBotTokenLock } from "../discord/token-lock";
+import { listDiscordConnectedChannels } from "../../modules/discord/repository";
+import { writeModuleDiagnostics } from "../event-log";
 
 interface PlatformEnvironment {
   Bindings: Env;
@@ -179,6 +182,34 @@ platformRouter.get("/api/platform", async (context) =>
 
 platformRouter.get("/api/platform/spotify-channels", async (context) =>
   context.json(await listPlatformSpotifyAccess(context.env.DB)));
+
+platformRouter.get("/api/platform/discord/token-lock", async (context) =>
+  context.json({ lock: await readDiscordBotTokenLock(context.env.DB) }));
+
+platformRouter.post("/api/platform/discord/token-lock/probe", async (context) => {
+  const before = await readDiscordBotTokenLock(context.env.DB);
+  const now = nowIso();
+  const result = await probeDiscordBotToken(context.env, context.env.DB, now);
+  const after = await readDiscordBotTokenLock(context.env.DB);
+  const changed = before === null && after !== null || before !== null && after === null;
+  if (changed) {
+    const channels = await listDiscordConnectedChannels(context.env.DB).catch(() => []);
+    const channel = channels[0];
+    if (channel !== undefined) {
+      await writeModuleDiagnostics(
+        context.env.DB,
+        channel.channelId,
+        "discord",
+        `discord:token_lock:${after === null ? "cleared" : "set"}:${now}`,
+        context.get("actor").userId,
+        [{ code: after === null ? "discord.token_lock_cleared" : "discord.token_lock_set" }],
+        now,
+        true,
+      );
+    }
+  }
+  return context.json({ ok: result.ok, lock: after });
+});
 
 platformRouter.patch("/api/platform/spotify-channels/:channelId", async (context) => {
   const body = await readJson(context.req.raw);
