@@ -23,6 +23,17 @@ import "./panel.css";
 
 type DiscordPanelText = (typeof discordCatalog)[keyof typeof discordCatalog];
 type NavigationLabels = ReturnType<typeof dashboardTexts>["module"];
+type ConflictKind = "changed" | "disconnected";
+
+type PanelFeedback = {
+  source: "callback" | "local" | "reload-failed";
+  message: string;
+};
+
+type ConflictReloadState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "failed"; kind: ConflictKind };
 
 interface DiscordCallbackResult {
   key: string;
@@ -76,10 +87,11 @@ interface DiscordMappingsEditorProperties {
   pending: boolean;
   text: DiscordPanelText;
   navigationLabels: NavigationLabels;
+  onUserAction: () => void;
   onSave: (guildId: string, mappings: DiscordRoleMappings) => Promise<MappingSaveResult>;
 }
 
-function DiscordMappingsEditor({ guildId, server, canManage, pending, text, navigationLabels, onSave }: DiscordMappingsEditorProperties): ReactElement {
+function DiscordMappingsEditor({ guildId, server, canManage, pending, text, navigationLabels, onUserAction, onSave }: DiscordMappingsEditorProperties): ReactElement {
   const [draftOriginGuildId] = useState(guildId);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>();
@@ -94,6 +106,7 @@ function DiscordMappingsEditor({ guildId, server, canManage, pending, text, navi
   }, [draft.accept, draftDirty, server.mappings]);
 
   const save = async (): Promise<string | null> => {
+    onUserAction();
     if (!draft.dirty) return null;
     if (!canManage || pending) return text.saveError;
     if (!canSaveForShownGuild) return text.mappingServerChanged;
@@ -144,6 +157,7 @@ function DiscordMappingsEditor({ guildId, server, canManage, pending, text, navi
             label={rankType === "vip" ? text.vipRole : text.moderatorRole}
             value={draft.value[rankType] ?? ""}
             onChange={(roleId) => {
+              onUserAction();
               setSaved(false);
               setSaveError(undefined);
               draft.setValue((current) => ({ ...current, [rankType]: roleId === null || roleId.length === 0 ? null : roleId }));
@@ -170,7 +184,7 @@ function DiscordMappingsEditor({ guildId, server, canManage, pending, text, navi
       savedLabel={text.saved}
       pendingLabel={text.save}
       onSave={() => { void save(); }}
-      onDiscard={() => { draft.reset(); setSaved(false); setSaveError(undefined); }}
+      onDiscard={() => { onUserAction(); draft.reset(); setSaved(false); setSaveError(undefined); }}
     />
     <ConfirmDialog
       opened={guard.confirmOpen}
@@ -195,7 +209,7 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
   const query = useModuleQuery<DiscordServerRead>(channelId, "discord", "server", (signal) => readDiscordServer(channelId, signal));
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [pending, setPending] = useState(false);
-  const [localFeedback, setLocalFeedback] = useState<string | null>(null);
+  const [conflictReload, setConflictReload] = useState<ConflictReloadState>({ status: "idle" });
   const [callbackResult] = useState(() => readCallbackResult(channelId));
   const navigationLabels = dashboardTexts(activeLanguage).module;
   const callbackMessages: Record<string, string> = {
@@ -207,8 +221,34 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
     "server-changed": text.mappingServerChanged,
   };
   const callbackMessage = callbackResult === null ? null : callbackMessages[callbackResult.state] ?? null;
+  const [feedback, setFeedback] = useState<PanelFeedback | null>(() => callbackMessage === null
+    ? null
+    : { source: "callback", message: callbackMessage });
 
   useEffect(() => consumeCallbackResult(callbackResult), [callbackResult]);
+
+  const dismissCallbackFeedback = (): void => {
+    setFeedback((current) => current?.source === "callback" ? null : current);
+  };
+
+  const reloadConflictStatus = async (kind: ConflictKind): Promise<void> => {
+    setConflictReload({ status: "loading" });
+    setFeedback({ source: "local", message: text.mappingStatusReloading });
+    setPending(true);
+    try {
+      await refetchModuleQueryData<DiscordServerRead>(queryClient, channelId, "discord", "server");
+      setConflictReload({ status: "idle" });
+      setFeedback({
+        source: "local",
+        message: kind === "disconnected" ? text.mappingServerDisconnected : text.mappingServerChanged,
+      });
+    } catch {
+      setConflictReload({ status: "failed", kind });
+      setFeedback({ source: "reload-failed", message: text.mappingStatusReloadFailed });
+    } finally {
+      setPending(false);
+    }
+  };
 
   const refresh = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: ["channel", channelId, "module", "discord"] });
@@ -219,11 +259,11 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
     if (!canManage || pending) return { error: text.saveError };
     if (originGuildId !== shownGuildId) {
       const message = shownGuildId === undefined ? text.mappingServerDisconnected : text.mappingServerChanged;
-      setLocalFeedback(message);
+      setFeedback({ source: "local", message });
       return { error: message, fixedMessage: true };
     }
     setPending(true);
-    setLocalFeedback(null);
+    setFeedback(null);
     try {
       const saved = await saveDiscordMappings(channelId, originGuildId, mappings);
       await refresh();
@@ -231,13 +271,9 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
       return { mappings: saved.mappings };
     } catch (error: unknown) {
       if (error instanceof Error && (error.message === "discord_server_changed" || error.message === "discord_server_not_connected")) {
-        try {
-          await refetchModuleQueryData<DiscordServerRead>(queryClient, channelId, "discord", "server");
-        } catch {
-          // The conflict message remains useful even if the follow-up status read also fails.
-        }
-        const message = error.message === "discord_server_not_connected" ? text.mappingServerDisconnected : text.mappingServerChanged;
-        setLocalFeedback(message);
+        const kind: ConflictKind = error.message === "discord_server_not_connected" ? "disconnected" : "changed";
+        await reloadConflictStatus(kind);
+        const message = kind === "disconnected" ? text.mappingServerDisconnected : text.mappingServerChanged;
         return { error: message, fixedMessage: true };
       }
       return { error: text.saveError };
@@ -247,6 +283,7 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
   }
 
   const connect = async (): Promise<void> => {
+    dismissCallbackFeedback();
     setPending(true);
     try {
       const result = await request<{ authorizationUrl: string }>(channelId, "server/oauth/start", "POST");
@@ -259,11 +296,12 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
 
   const disconnect = async (): Promise<void> => {
     if (pending) return;
+    dismissCallbackFeedback();
     setPending(true);
     try {
       await request(channelId, "server/disconnect", "POST");
       setDisconnectOpen(false);
-      setLocalFeedback(text.disconnectSuccess);
+      setFeedback({ source: "local", message: text.disconnectSuccess });
       await refresh();
     } catch {
       notify({ tone: "error", message: text.disconnectError });
@@ -274,6 +312,7 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
 
   const server = query.data;
   const state = server?.state ?? (query.isError ? "could_not_check" : "not_available");
+  const serverActionsDisabled = !canManage || pending || conflictReload.status !== "idle";
 
   if (query.data === undefined && query.isLoading) {
     return <div className="module-stack discord-server-panel"><Section title={text.serverSection}><div className="discord-server-panel__reserved"><span aria-hidden="true">{" "}</span></div></Section></div>;
@@ -282,10 +321,20 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
   return <div className="module-stack discord-server-panel">
     <Section title={text.serverSection}>
       <DiscordServerStatus state={state} language={activeLanguage} />
-      <div className="discord-server-panel__message" role="status" aria-live="polite">{localFeedback ?? callbackMessage ?? " "}</div>
+      <div className="discord-server-panel__message" role="status" aria-live="polite">
+        {feedback?.message ?? " "}
+        {feedback?.source === "reload-failed" && conflictReload.status === "failed"
+          ? <button
+            type="button"
+            className="discord-server-panel__retry"
+            disabled={pending}
+            onClick={() => { void reloadConflictStatus(conflictReload.kind); }}
+          >{text.retry}</button>
+          : null}
+      </div>
       {server === undefined || !server.configured ? null : server.connection === null
         ? <div className="discord-server-panel__actions">
-          <Button variant="primary" icon="link" disabled={!canManage || pending} onClick={() => { void connect(); }}>{text.connectServer}</Button>
+          <Button variant="primary" icon="link" disabled={serverActionsDisabled} onClick={() => { void connect(); }}>{text.connectServer}</Button>
         </div>
         : <>
           <div className="discord-server-panel__guild">
@@ -293,12 +342,12 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
             <span>{server.guildName ?? server.connection.guildId}</span>
           </div>
           <div className="discord-server-panel__actions">
-            <Button variant="secondary" disabled={!canManage || pending} onClick={() => { setDisconnectOpen(true); }}>{text.disconnectServer}</Button>
+            <Button variant="secondary" disabled={serverActionsDisabled} onClick={() => { dismissCallbackFeedback(); setDisconnectOpen(true); }}>{text.disconnectServer}</Button>
           </div>
         </>}
     </Section>
 
-    {server !== undefined && server.configured && server.connection !== null
+    {conflictReload.status === "idle" && server !== undefined && server.configured && server.connection !== null
       ? <DiscordMappingsEditor
         key={server.connection.guildId}
         guildId={server.connection.guildId}
@@ -307,6 +356,7 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
         pending={pending}
         text={text}
         navigationLabels={navigationLabels}
+        onUserAction={dismissCallbackFeedback}
         onSave={saveMappings}
       />
       : null}
@@ -318,7 +368,7 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
       confirmLabel={text.disconnectConfirm}
       cancelLabel={text.cancel}
       danger
-      pending={pending}
+      pending={pending || conflictReload.status !== "idle"}
       onConfirm={() => { void disconnect(); }}
       onCancel={() => { setDisconnectOpen(false); }}
     />

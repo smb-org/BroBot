@@ -57,8 +57,8 @@ describe("Discord server status panel", () => {
     expect(screen.getByRole("status")).toHaveTextContent(expected);
   });
 
-  it("keeps callback feedback pending across local feedback on another channel", async () => {
-    const navigationName = "https://brobot.example/channels/channel-a/modules/discord?discord=connected";
+  it("keeps callback feedback pending across another channel and does not restore it after conflict and save", async () => {
+    const navigationName = "https://brobot.example/channels/channel-a/modules/discord?discord=error";
     vi.spyOn(performance, "getEntriesByType").mockImplementation(() => [
       { name: navigationName } as PerformanceNavigationTiming,
     ]);
@@ -66,7 +66,7 @@ describe("Discord server status panel", () => {
     const otherChannel = renderWithQuery(<UiProvider><DiscordServerPanel channelId="channel-b" language="en" canManage /></UiProvider>);
     await waitFor(() => expect(mocks.readDiscordServer).toHaveBeenCalledWith("channel-b", expect.any(AbortSignal)));
     await screen.findByText("Lantern Harbor");
-    expect(screen.queryByText("Discord server connected", { selector: ".discord-server-panel__message" })).not.toBeInTheDocument();
+    expect(screen.queryByText("The Discord server connection did not finish.", { selector: ".discord-server-panel__message" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Disconnect server" }));
     const disconnectDialog = await screen.findByRole("dialog", { name: "Disconnect Discord server?" });
     fireEvent.click(within(disconnectDialog).getByRole("button", { name: "Disconnect server" }));
@@ -74,12 +74,30 @@ describe("Discord server status panel", () => {
     otherChannel.unmount();
 
     const destination = renderWithQuery(<UiProvider><DiscordServerPanel channelId="channel-a" language="en" canManage /></UiProvider>);
-    expect(await screen.findByText("Discord server connected", { selector: ".discord-server-panel__message" })).toBeInTheDocument();
+    expect(await screen.findByText("The Discord server connection did not finish.", { selector: ".discord-server-panel__message" })).toBeInTheDocument();
+
+    mocks.saveDiscordMappings
+      .mockRejectedValueOnce(new Error("discord_server_changed"))
+      .mockResolvedValueOnce({ mappings: { vip: "990000000000000122", moderator: null } });
+    fireEvent.click(screen.getByRole("combobox", { name: "VIP role" }));
+    clickSelectOption(await screen.findByRole("option", { name: "VIP Crew", hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Server changed. Status reloaded.", {
+      selector: ".discord-server-panel__message",
+    })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "VIP role" }));
+    clickSelectOption(await screen.findByRole("option", { name: "VIP Crew", hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.saveDiscordMappings).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Role mappings saved.", { selector: ".sr-only" })).toBeInTheDocument();
+    const messageSlot = destination.container.querySelector<HTMLElement>(".discord-server-panel__message");
+    expect(messageSlot).not.toBeNull();
+    await waitFor(() => expect(messageSlot?.textContent).not.toContain("The Discord server connection did not finish."));
     destination.unmount();
 
     renderWithQuery(<UiProvider><DiscordServerPanel channelId="channel-a" language="en" canManage /></UiProvider>);
-    await waitFor(() => expect(mocks.readDiscordServer).toHaveBeenCalledTimes(4));
-    expect(screen.queryByText("Discord server connected", { selector: ".discord-server-panel__message" })).not.toBeInTheDocument();
+    expect(screen.queryByText("The Discord server connection did not finish.", { selector: ".discord-server-panel__message" })).not.toBeInTheDocument();
   });
 
   it("confirms before dashboard navigation with an unsaved mapping and discards to proceed", async () => {
@@ -151,4 +169,32 @@ describe("Discord server status panel", () => {
     expect(mocks.saveDiscordMappings).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
+
+  it("blocks mapping saves when a conflict reload fails and retries with fresh mappings", async () => {
+    mocks.readDiscordServer
+      .mockReset()
+      .mockResolvedValueOnce(serverRead("channel-a", "990000000000000121", "990000000000000122"))
+      .mockRejectedValueOnce(new Error("status reload failed"))
+      .mockResolvedValueOnce(serverRead("channel-a", "990000000000000123", "990000000000000124"));
+    mocks.saveDiscordMappings.mockRejectedValue(new Error("discord_server_changed"));
+    renderWithQuery(<UiProvider><DiscordServerPanel channelId="channel-a" language="en" canManage /></UiProvider>);
+    await screen.findByText("Lantern Harbor");
+    fireEvent.click(screen.getByRole("combobox", { name: "VIP role" }));
+    clickSelectOption(await screen.findByRole("option", { name: "No role", hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Could not reload Discord status.", {
+      selector: ".discord-server-panel__message",
+    })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("Moonlit Cove")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "VIP role" })).toHaveTextContent("Moonlit Crew");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(mocks.readDiscordServer).toHaveBeenCalledTimes(3);
+    expect(mocks.saveDiscordMappings).toHaveBeenCalledTimes(1);
+  });
+
 });
