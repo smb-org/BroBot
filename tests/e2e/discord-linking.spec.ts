@@ -12,10 +12,10 @@ test("signs in with Discord, links the verified Twitch account, and unlinks it",
 
   await expect(page.getByRole("heading", { name: "Accounts linked" })).toBeVisible();
   await expect(page).toHaveURL(/\/discord\/link\?discord=linked$/u);
-  await expect(page.getByText("nightowl", { exact: true })).toBeVisible();
-  await expect(page.getByText("@nightowl_dev")).toBeVisible();
+  await expect(page.getByText("pixelpilot", { exact: true })).toBeVisible();
+  await expect(page.getByText("@pixelpilot_e2e")).toBeVisible();
 
   await page.getByRole("button", { name: "Unlink" }).click();
   await expect(page.getByRole("heading", { name: "Sign in with Discord" })).toBeVisible();
-  await expect(page.getByText("nightowl_dev")).toHaveCount(0);
+  await expect(page.getByText("pixelpilot_e2e")).toHaveCount(0);
 });

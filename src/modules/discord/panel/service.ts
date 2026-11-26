@@ -37,6 +37,13 @@ export interface DiscordServerRead {
   roles: DiscordServerRole[];
   rolesAvailable: boolean;
   botHighestRolePosition: number | null;
+  teardown: boolean;
+  disconnecting: boolean;
+  teardownRemaining: number;
+  locked: boolean;
+  globalTokenLocked: boolean;
+  chatHintEnabled: boolean;
+  hintSettingsRevision: number;
 }
 
 export const readDiscordServer = (channelId: string, signal?: AbortSignal): Promise<DiscordServerRead> =>
@@ -44,3 +51,21 @@ export const readDiscordServer = (channelId: string, signal?: AbortSignal): Prom
 
 export const saveDiscordMappings = (channelId: string, guildId: string, mappings: DiscordRoleMappings): Promise<{ mappings: DiscordRoleMappings }> =>
   request<{ mappings: DiscordRoleMappings }>(channelId, "server/mappings", "POST", { guildId, ...mappings });
+
+export interface DiscordMappingPreview {
+  gain: { count: number; roleName: string };
+  lose: { count: number; roleName: string }[];
+}
+
+export const previewDiscordMappings = (channelId: string, guildId: string, mappings: DiscordRoleMappings): Promise<DiscordMappingPreview> =>
+  request<DiscordMappingPreview>(channelId, "server/mappings/preview", "POST", { guildId, ...mappings });
+
+export const saveDiscordChatHint = (channelId: string, chatHintEnabled: boolean, revision: number): Promise<{
+  settings: { chatHintEnabled: boolean };
+  revision: number;
+}> => request(channelId, "settings", "PATCH", { settings: { chatHintEnabled }, revision });
+
+export const readDiscordChatHint = (channelId: string, signal?: AbortSignal): Promise<{
+  settings: { chatHintEnabled: boolean };
+  revision: number;
+}> => request(channelId, "settings", "GET", undefined, signal);

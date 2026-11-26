@@ -9,6 +9,7 @@ import {
   SaveStatus,
   Section,
   Select,
+  SwitchRow,
   notify,
   registerDashboardNavigationGuard,
   useDraft,
@@ -17,7 +18,16 @@ import {
 import type { ModulePanelProperties } from "../../contract";
 import type { DiscordRoleMappings } from "../contracts";
 import { discordCatalog } from "../locale";
-import { request, readDiscordServer, saveDiscordMappings, type DiscordServerRead } from "./service";
+import {
+  previewDiscordMappings,
+  readDiscordChatHint,
+  request,
+  readDiscordServer,
+  saveDiscordChatHint,
+  saveDiscordMappings,
+  type DiscordMappingPreview,
+  type DiscordServerRead,
+} from "./service";
 import { DiscordServerStatus } from "./status";
 import "./panel.css";
 
@@ -85,16 +95,26 @@ interface DiscordMappingsEditorProperties {
   server: DiscordServerRead;
   canManage: boolean;
   pending: boolean;
+  blocked: boolean;
   text: DiscordPanelText;
   navigationLabels: NavigationLabels;
   onUserAction: () => void;
+  onPreview: (guildId: string, mappings: DiscordRoleMappings) => Promise<DiscordMappingPreview>;
   onSave: (guildId: string, mappings: DiscordRoleMappings) => Promise<MappingSaveResult>;
 }
 
-function DiscordMappingsEditor({ guildId, server, canManage, pending, text, navigationLabels, onUserAction, onSave }: DiscordMappingsEditorProperties): ReactElement {
+const previewLine = (
+  text: DiscordPanelText,
+  template: "mappingPreviewGain" | "mappingPreviewLose",
+  entry: { count: number; roleName: string },
+): string => text[template].replace("{count}", String(entry.count)).replace("{role}", entry.roleName);
+
+function DiscordMappingsEditor({ guildId, server, canManage, pending, blocked, text, navigationLabels, onUserAction, onPreview, onSave }: DiscordMappingsEditorProperties): ReactElement {
   const [draftOriginGuildId] = useState(guildId);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>();
+  const [preview, setPreview] = useState<DiscordMappingPreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const draft = useDraft<DiscordRoleMappings>(server.mappings);
   const draftDirty = draft.dirty;
   const roles = server.roles;
@@ -105,13 +125,29 @@ function DiscordMappingsEditor({ guildId, server, canManage, pending, text, navi
     if (!draftDirty) draft.accept(server.mappings);
   }, [draft.accept, draftDirty, server.mappings]);
 
-  const save = async (): Promise<string | null> => {
+  const save = async (confirmed = false): Promise<string | null> => {
     onUserAction();
     if (!draft.dirty) return null;
-    if (!canManage || pending) return text.saveError;
+    if (!canManage || pending || blocked) return text.saveError;
     if (!canSaveForShownGuild) return text.mappingServerChanged;
     setSaveError(undefined);
     setSaved(false);
+    if (!confirmed) {
+      setPreviewing(true);
+      try {
+        const nextPreview = await onPreview(draftOriginGuildId, draft.value);
+        if (nextPreview.gain.count === 0 && nextPreview.lose.every(({ count }) => count === 0)) {
+          return await save(true);
+        }
+        setPreview(nextPreview);
+        return null;
+      } catch {
+        setSaveError(text.saveError);
+        return text.saveError;
+      } finally {
+        setPreviewing(false);
+      }
+    }
     const result = await onSave(draftOriginGuildId, draft.value);
     if ("mappings" in result) {
       draft.accept(result.mappings);
@@ -164,7 +200,7 @@ function DiscordMappingsEditor({ guildId, server, canManage, pending, text, navi
             }}
             options={roleOptions(rankType)}
             placeholder={text.selectRole}
-            disabled={!canManage || pending || !canSaveForShownGuild}
+            disabled={!canManage || pending || blocked || previewing || !canSaveForShownGuild}
             compact
           />
           <div className="discord-server-panel__warning" role="status">{roleTooHigh ? text.roleTooHigh : " "}</div>
@@ -175,10 +211,10 @@ function DiscordMappingsEditor({ guildId, server, canManage, pending, text, navi
     <SaveStatus
       persistent
       dirty={draft.dirty}
-      pending={pending}
+      pending={pending || previewing}
       saved={saved}
       {...(saveError === undefined ? {} : { error: saveError })}
-      saveDisabled={!canManage || !canSaveForShownGuild}
+      saveDisabled={!canManage || blocked || !canSaveForShownGuild}
       saveLabel={text.save}
       discardLabel={text.discard}
       savedLabel={text.saved}
@@ -199,6 +235,101 @@ function DiscordMappingsEditor({ guildId, server, canManage, pending, text, navi
       {...(guard.saveError === undefined ? {} : { error: guard.saveError })}
       danger
     />
+    <ConfirmDialog
+      opened={preview !== null}
+      title={text.mappingPreviewTitle}
+      description={preview === null ? text.mappingPreviewDescription : [
+        text.mappingPreviewDescription,
+        ...(preview.gain.count > 0 ? [previewLine(text, "mappingPreviewGain", preview.gain)] : []),
+        ...preview.lose.filter(({ count }) => count > 0).map((entry) => previewLine(text, "mappingPreviewLose", entry)),
+      ].join("\n")}
+      confirmLabel={text.mappingPreviewConfirm}
+      cancelLabel={text.cancel}
+      pending={pending}
+      onConfirm={() => { setPreview(null); void save(true); }}
+      onCancel={() => { setPreview(null); }}
+    />
+  </Section>;
+}
+
+function DiscordChatHintSettings({
+  channelId, server, canManage, pending, text,
+}: {
+  channelId: string;
+  server: DiscordServerRead;
+  canManage: boolean;
+  pending: boolean;
+  text: DiscordPanelText;
+}): ReactElement {
+  const hintQuery = useModuleQuery(channelId, "discord", "settings", (signal) => readDiscordChatHint(channelId, signal));
+  const currentHint = hintQuery.data?.settings.chatHintEnabled ?? server.chatHintEnabled;
+  const settingsRevision = hintQuery.data?.revision ?? server.hintSettingsRevision;
+  const draft = useDraft({ chatHintEnabled: currentHint });
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | undefined>();
+  const disabled = !canManage || pending || server.teardown || server.disconnecting;
+
+  useEffect(() => {
+    if (!draft.dirty) draft.accept({ chatHintEnabled: currentHint });
+  }, [draft.accept, draft.dirty, currentHint]);
+
+  const save = async (): Promise<void> => {
+    if (!draft.dirty || disabled) return;
+    setSaved(false);
+    setSaveError(undefined);
+    try {
+      const result = await saveDiscordChatHint(channelId, draft.value.chatHintEnabled, settingsRevision);
+      draft.accept(result.settings);
+      setSaved(true);
+      notify({ tone: "success", message: text.chatHintSaved });
+    } catch {
+      setSaveError(text.chatHintSaveError);
+    }
+  };
+
+  return <Section title={text.chatHintSection}>
+    <SwitchRow
+      label={text.chatHintLabel}
+      description={text.chatHintDescription}
+      checked={draft.value.chatHintEnabled}
+      disabled={disabled}
+      pending={pending}
+      onChange={(chatHintEnabled) => { setSaved(false); setSaveError(undefined); draft.setValue({ chatHintEnabled }); }}
+    />
+    <SaveStatus
+      persistent
+      dirty={draft.dirty}
+      pending={pending}
+      saved={saved}
+      {...(saveError === undefined ? {} : { error: saveError })}
+      saveDisabled={disabled}
+      saveLabel={text.save}
+      discardLabel={text.discard}
+      savedLabel={text.chatHintSaved}
+      pendingLabel={text.save}
+      onSave={() => { void save(); }}
+      onDiscard={() => { draft.reset(); setSaved(false); setSaveError(undefined); }}
+    />
+  </Section>;
+}
+
+function DiscordInfoChannelLink({ text }: { text: DiscordPanelText }): ReactElement {
+  const [copied, setCopied] = useState(false);
+  const link = new URL("/discord/link", window.location.origin).toString();
+  const copy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return <Section title={text.linkForInfoChannel}>
+    <p className="discord-server-panel__hint">{text.linkForInfoChannelDescription}</p>
+    <div className="discord-server-panel__info-link">
+      <code>{link}</code>
+      <Button variant="secondary" icon="copy" onClick={() => { void copy(); }}>{copied ? text.copiedLink : text.copyLink}</Button>
+    </div>
   </Section>;
 }
 
@@ -206,7 +337,9 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
   const activeLanguage = language === "en" ? "en" : "de";
   const text = discordCatalog[activeLanguage];
   const queryClient = useDashboardQueryClient();
-  const query = useModuleQuery<DiscordServerRead>(channelId, "discord", "server", (signal) => readDiscordServer(channelId, signal));
+  const query = useModuleQuery<DiscordServerRead>(channelId, "discord", "server", (signal) => readDiscordServer(channelId, signal), {
+    refetchInterval: (current) => current.state.data?.disconnecting === true || current.state.data?.teardown === true ? 1_000 : false,
+  });
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [conflictReload, setConflictReload] = useState<ConflictReloadState>({ status: "idle" });
@@ -282,6 +415,9 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
     }
   }
 
+  const previewMappings = async (originGuildId: string, mappings: DiscordRoleMappings): Promise<DiscordMappingPreview> =>
+    await previewDiscordMappings(channelId, originGuildId, mappings);
+
   const connect = async (): Promise<void> => {
     dismissCallbackFeedback();
     setPending(true);
@@ -299,9 +435,9 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
     dismissCallbackFeedback();
     setPending(true);
     try {
-      await request(channelId, "server/disconnect", "POST");
+      const result = await request<{ disconnecting?: boolean; remaining?: number } | undefined>(channelId, "server/disconnect", "POST");
       setDisconnectOpen(false);
-      setFeedback({ source: "local", message: text.disconnectSuccess });
+      setFeedback(result?.disconnecting === true ? null : { source: "local", message: text.disconnectSuccess });
       await refresh();
     } catch {
       notify({ tone: "error", message: text.disconnectError });
@@ -312,7 +448,12 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
 
   const server = query.data;
   const state = server?.state ?? (query.isError ? "could_not_check" : "not_available");
-  const serverActionsDisabled = !canManage || pending || conflictReload.status !== "idle";
+  const serverActionsDisabled = !canManage || pending || conflictReload.status !== "idle" ||
+    server?.teardown === true || server?.disconnecting === true;
+  const lifecycleMessage = server === undefined ? null
+    : server.teardown ? text.teardownStatus.replace("{count}", String(server.teardownRemaining))
+      : server.disconnecting ? text.disconnectingStatus.replace("{count}", String(server.teardownRemaining))
+        : server.locked || server.globalTokenLocked ? text.lockedStatus : null;
 
   if (query.data === undefined && query.isLoading) {
     return <div className="module-stack discord-server-panel"><Section title={text.serverSection}><div className="discord-server-panel__reserved"><span aria-hidden="true">{" "}</span></div></Section></div>;
@@ -322,7 +463,7 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
     <Section title={text.serverSection}>
       <DiscordServerStatus state={state} language={activeLanguage} />
       <div className="discord-server-panel__message" role="status" aria-live="polite">
-        {feedback?.message ?? " "}
+        {lifecycleMessage ?? feedback?.message ?? " "}
         {feedback?.source === "reload-failed" && conflictReload.status === "failed"
           ? <button
             type="button"
@@ -354,12 +495,19 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
         server={server}
         canManage={canManage}
         pending={pending}
+        blocked={server.teardown || server.disconnecting}
         text={text}
         navigationLabels={navigationLabels}
         onUserAction={dismissCallbackFeedback}
+        onPreview={previewMappings}
         onSave={saveMappings}
       />
       : null}
+
+    {server !== undefined && server.configured
+      ? <DiscordChatHintSettings channelId={channelId} server={server} canManage={canManage} pending={pending} text={text} />
+      : null}
+    <DiscordInfoChannelLink text={text} />
 
     <ConfirmDialog
       opened={disconnectOpen}

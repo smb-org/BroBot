@@ -24,8 +24,8 @@ const REQUIRED_SECRET_NAMES = [
 // update it and /healthz reports a freshly set-up database as broken (503)
 // even though everything is fine. `tests/unit/schema-baseline.test.ts`
 // therefore pins it to the last file in `migrations/`.
-export const LATEST_SCHEMA_MIGRATION = "0103_discord_server_connections.sql";
-export const LATEST_SCHEMA_TABLE = "discord_guilds";
+export const LATEST_SCHEMA_MIGRATION = "0104_discord_bot_token_lock.sql";
+export const LATEST_SCHEMA_TABLE = "discord_bot_token_lock";
 
 const REQUIRED_BINDING_NAMES = ["DB", "CHANNEL", "ASSETS", "CF_VERSION_METADATA"] as const;
 

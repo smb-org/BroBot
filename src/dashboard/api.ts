@@ -300,6 +300,17 @@ export const getPlatformSpotifyAccess = async (): Promise<PanelSpotifyAccessResp
 export const setPlatformSpotifyChannel = (channelId: string, enabled: boolean): Promise<{ enabled: boolean }> =>
   requestMutation(`/api/platform/spotify-channels/${encodeURIComponent(channelId)}`, "PATCH", { enabled });
 
+export interface PlatformDiscordTokenLock {
+  lockedAt: string;
+  lastProbeAt: string;
+}
+
+export const getPlatformDiscordTokenLock = (): Promise<{ lock: PlatformDiscordTokenLock | null }> =>
+  requestJson<{ lock: PlatformDiscordTokenLock | null }>("/api/platform/discord/token-lock");
+
+export const probePlatformDiscordToken = (): Promise<{ ok: boolean; lock: PlatformDiscordTokenLock | null }> =>
+  requestMutation("/api/platform/discord/token-lock/probe", "POST", {});
+
 export const startSongRequestVote = (channelId: string, trackIds: readonly string[], chapterId?: string): Promise<{ ballotId: string }> =>
   requestMutation(`${modulePath(channelId, "song_requests")}/vote`, "POST", chapterId === undefined ? { trackIds } : { chapterId });
 
@@ -657,10 +668,18 @@ export const setChannelModuleEnabled = (
   moduleId: string,
   enabled: boolean,
   expectedRevision?: number,
-): Promise<{ module: PanelModuleState; revision: number; activationResult?: ModuleActivationResult }> => requestMutation<{
+): Promise<{ module: PanelModuleState; revision: number; activationResult?: ModuleActivationResult } | {
+  enabled: true;
+  teardown: true;
+  remaining: number;
+}> => requestMutation<{
   module: PanelModuleState;
   revision: number;
   activationResult?: ModuleActivationResult;
+} | {
+  enabled: true;
+  teardown: true;
+  remaining: number;
 }>(
   modulePath(channelId, moduleId),
   "PATCH",

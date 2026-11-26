@@ -75,6 +75,7 @@ const objectFor = (channelId: string): ChannelObject => {
         }
       }),
       transactionSync: <T>(closure: () => T): T => closure(),
+      sql: { exec: () => ({ toArray: () => [], one: () => undefined }) },
       kv: {
         get: vi.fn((key: string) => values.get(key)),
         put: vi.fn((key: string, value: unknown) => { values.set(key, value); }),

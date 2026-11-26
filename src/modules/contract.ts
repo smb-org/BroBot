@@ -461,11 +461,11 @@ export const ballotChoiceFromMessage = (text: string, optionCount: number): numb
  * Adding a key means adding it here, and whoever adds it sees its neighbours.
  */
 type ModuleDiagnosticDetailKey =
-  | "action" | "allowed" | "arguments" | "art" | "cause" | "count" | "current"
+  | "action" | "allowed" | "arguments" | "art" | "cause" | "count" | "current" | "examples"
   | "currentTier" | "missing"
   | "duration" | "endsAt" | "gifter" | "kind" | "lastAdBreakAt" | "message"
   | "messageId" | "moderator" | "moduleId" | "name" | "outcome" | "person" | "alias"
-  | "reason" | "recipient" | "remainingSeconds" | "requiredTier" | "response"
+  | "reason" | "recipient" | "remainingSeconds" | "requiredTier" | "response" | "granted" | "removed" | "failed" | "skipped"
   | "scheduledAt" | "scheduledFor" | "scope" | "seconds" | "source"
   | "sourceChannelId" | "startedAt" | "status" | "streamState" | "target" | "targetChannelId" | "toLogin" | "variable"
   | "text" | "threshold" | "tier" | "triggerLogin" | "twitchMessage" | "type" | "viewers";
@@ -969,6 +969,8 @@ export interface ModuleAlarmContext {
   quizOverlaySnapshot: ModuleQuizOverlaySnapshotAccess;
   /** Runs one registered module alarm synchronously through the channel Durable Object. */
   runModuleAlarm?: (handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>;
+  /** Completes a previously authorized disable after module-owned cleanup finished. */
+  completeDeferredModuleDisable?: () => Promise<boolean>;
   /** Adds the currently pending account welcome to a threaded game reply. */
   decoratePointWelcome?: (
     action: Extract<ModuleAction, { kind: "chat" }>,
@@ -1277,6 +1279,7 @@ interface ModuleAlarmJobDefinition {
   intervalMs: number;
   label: Readonly<Record<ModuleLanguage, string>>;
   requiredScopes: readonly string[];
+  requiredScopeAlternatives?: readonly (readonly string[])[];
 }
 
 /** Stable panel and event-path ID for one module alarm registered as a channel job. */
@@ -1289,6 +1292,8 @@ export interface ModuleChannelJobContext {
   assertCurrent(): void;
   /** Runs synchronous local SQLite mutations only while this claim still owns the job. */
   commit(write: (sql: SqlStorage) => void): boolean;
+  /** Overrides the recurring interval for a bounded continuation or a provider retry. */
+  scheduleNextAt?(deadline: number): void;
 }
 
 export interface ModulePointRoundResult {
@@ -2249,9 +2254,15 @@ export interface ModuleEnableContext {
   now: string;
 }
 
+interface ModuleBeforeDisableContext extends ModuleEnableContext {
+  environment: Env;
+  expectedRevision: number;
+}
+
 /** Host inputs for a post-commit module activation side effect. */
 type ModuleActivationContext = ModuleEnableContext & {
   environment: Env;
+  revision: number;
   runModuleAlarm: (handlerKey: string, alarmKey: string, invocation?: unknown) => Promise<unknown>;
 };
 export interface ModuleActivationResult {
@@ -2978,6 +2989,11 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
     context: ModuleEnableContext,
     channelId: string,
   ) => readonly D1PreparedStatement[] | undefined | Promise<readonly D1PreparedStatement[] | undefined>;
+  /** Starts module-owned cleanup and defers the shared disable commit while work remains. */
+  beforeDisable?: (
+    context: ModuleBeforeDisableContext,
+    channelId: string,
+  ) => Promise<{ deferred: boolean; remaining?: number; blocked?: boolean }>;
   /** Channel-points actions provided by this module for rewards configured on its page. */
   channelPointsActions?: readonly ChannelPointsActionDefinition[];
   /** Called after the channel_modules enabled flag commits, including retryable post-commit delivery. */

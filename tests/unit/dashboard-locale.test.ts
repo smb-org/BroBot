@@ -241,6 +241,9 @@ describe("dashboard locale", () => {
       "text_commands.argument_invalid", "text_commands.changed_concurrently", "text_commands.variable_update_failed", "template.lookup_unavailable", "template.chat_reference_dropped", "template.deferred_live", "template_parameters_invalid", "votekick.rejected",
       "temp_vips.granted", "temp_vips.extended", "temp_vips.imported", "temp_vips.ended", "temp_vips.released", "temp_vips.removal_failed",
       "temp_vips.classified", "temp_vips.expire_reminder",
+      "discord.chat_hint_sent", "discord.disconnect_finished", "discord.disconnect_given_up", "discord.mapping_changed",
+      "discord.mapping_lock_cleared", "discord.mapping_lock_set", "discord.reconcile.summary", "discord.server_lock_cleared",
+      "discord.server_lock_set", "discord.teardown_finished", "discord.token_lock_cleared", "discord.token_lock_set",
     ];
 
     expect(Object.keys(eventToneEntries).sort((a, b) => a.localeCompare(b))).toEqual([...codes].sort((a, b) => a.localeCompare(b)));

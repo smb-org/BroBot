@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardApp } from "../../src/dashboard/main";
 import { PlatformPage } from "../../src/dashboard/platform";
+import type { PlatformDiscordTokenLock } from "../../src/dashboard/api";
 import type { PanelPlatformChannelOverview, PanelSpotifyAccessResponse } from "../../src/panel-contract";
 import { UiProvider } from "../../src/dashboard/ui";
 import { renderWithQuery as render } from "../query-test-utils";
@@ -42,13 +43,21 @@ const setUpPlatform = (
   audit: { entries: unknown[]; nextCursor: string | null } = { entries: [], nextCursor: null },
   channels: PanelPlatformChannelOverview[] = [channel],
   spotifyAccess: PanelSpotifyAccessResponse = { usedSlots: 0, limit: 5, channels: [] },
+  discordTokenLock: PlatformDiscordTokenLock | null = null,
 ): ReturnType<typeof vi.fn<typeof fetch>> => {
-  const fetcher = vi.fn<typeof fetch>((input) => {
+  const fetcher = vi.fn<typeof fetch>((input, init) => {
     const url = requestUrl(input);
+    const method = init?.method ?? (input instanceof Request ? input.method : "GET");
     if (url.pathname === "/api/channels") return Promise.resolve(response({ channels: [], bot: { status: "connected", reason: null, updatedAt: "2026-09-18T00:00:00.000Z" }, platformAdmin: platform }));
     if (url.pathname === "/api/platform") return Promise.resolve(response({ channels }));
     if (url.pathname === "/api/platform/audit") return Promise.resolve(response(audit));
     if (url.pathname === "/api/platform/spotify-channels") return Promise.resolve(response(spotifyAccess));
+    if (url.pathname === "/api/platform/discord/token-lock" && method === "GET") return Promise.resolve(response({ lock: discordTokenLock }));
+    if (url.pathname === "/api/platform/discord/token-lock/probe" && method === "POST") {
+      discordTokenLock = null;
+      return Promise.resolve(response({ ok: true, lock: null }));
+    }
+    if (url.pathname === "/api/csrf") return Promise.resolve(response({ token: "fictional-platform-csrf" }));
     if (url.pathname === "/api/platform/channels/123/members") return Promise.resolve(response(members));
     return Promise.resolve(response({}, 404));
   });
@@ -117,6 +126,25 @@ describe("Platform level", () => {
     expect(within(counts).getByText("Verwalter: 1")).toBeInTheDocument();
     expect(within(counts).getByText("Bediener: 0")).toBeInTheDocument();
     expect(consentHeader).toHaveAttribute("title", "Vollzustimmung");
+  });
+
+  it("shows the global Discord token lock and lets a platform operator check it again", async () => {
+    const fetcher = setUpPlatform(true, undefined, [channel], undefined, {
+      lockedAt: "2026-11-26T10:00:00.000Z",
+      lastProbeAt: "2026-11-26T10:00:00.000Z",
+    });
+    window.history.replaceState({}, "", "/betreiber");
+
+    render(<DashboardApp />);
+
+    const notice = await screen.findByRole("region", { name: "Globale Discord-Bot-Verbindung" });
+    expect(await within(notice).findByText("Der Discord-Bot-Token ist ungültig. Rollenabgleiche pausieren bis zur Prüfung.")).toBeInTheDocument();
+    fireEvent.click(within(notice).getByRole("button", { name: "Jetzt erneut prüfen" }));
+
+    await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) =>
+      requestUrl(input).pathname === "/api/platform/discord/token-lock/probe" && init?.method === "POST",
+    )).toBe(true));
+    expect(await within(notice).findByText("Der Discord-Bot-Token ist gültig.")).toBeInTheDocument();
   });
 
   it("keeps Spotify slots in the page overview and scopes inspector status to the selected channel", async () => {

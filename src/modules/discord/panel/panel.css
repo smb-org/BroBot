@@ -74,6 +74,22 @@
   color: var(--text-2);
 }
 
+.discord-server-panel__info-link {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.discord-server-panel__info-link code {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 600px) {
   .discord-server-panel .ui-save-bar {
     position: sticky;

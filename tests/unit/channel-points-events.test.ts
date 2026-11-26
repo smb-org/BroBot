@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   deleteCustomReward: vi.fn(),
 }));
 vi.mock("../../src/worker/twitch/channel-points", () => ({
+  configuredHelixBase: () => "https://api.twitch.tv",
   updateRedemptionStatus: mocks.update,
   listUnfulfilledRedemptions: mocks.list,
   listRedemptionsByIds: mocks.listByIds,
@@ -137,6 +138,7 @@ const activationContext = (database: TestD1Database, serialize = false) => {
     authorizeManagementMutation: authorizeModuleManagementMutation,
     actor: { userId: "operator_one" },
     now,
+    revision: 1,
     runModuleAlarm: (handler: string, alarmKey: string, invocation?: unknown) => {
       if (!serialize) return run(handler, alarmKey, invocation);
       const operation = tail.then(() => run(handler, alarmKey, invocation));

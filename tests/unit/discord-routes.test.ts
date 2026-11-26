@@ -10,7 +10,7 @@ import { discordRouter } from "../../src/worker/discord/routes";
 import { getDiscordLink, replaceDiscordLink } from "../../src/modules/discord/repository";
 import { panelRouter } from "../../src/worker/panel/routes";
 import { TestD1Database } from "./test-d1";
-import { testKey } from "./fixtures";
+import { insertChannel, testKey } from "./fixtures";
 
 const ORIGIN = "https://brobot.example";
 const SESSION_KEYS = JSON.stringify({ active: { id: "discord-route-cookie", key: testKey(72) }, retired: [] });
@@ -67,6 +67,7 @@ const mockDiscordApi = (connections: unknown[]) => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   for (const database of databases.splice(0)) database.close();
 });
 
@@ -176,6 +177,74 @@ describe("Discord link routes", () => {
     const response = await discordRouter.fetch(new Request(`${ORIGIN}/api/discord/link`), createEnvironment(database, false));
 
     await expect(response.json()).resolves.toEqual({ configured: false, signedIn: false, link: null });
+  });
+
+  it("returns each linked viewer's connected-channel status from the channel object", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    await insertChannel(database, "discord-status-channel-one", "Amber Harbor");
+    await insertChannel(database, "discord-status-channel-two", "Cinder Bay");
+    for (const [channelId, guildId] of [["discord-status-channel-one", "990000000000000111"], ["discord-status-channel-two", "990000000000000112"]] as const) {
+      await database.prepare("INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)")
+        .bind(channelId, guildId, "2026-11-26T10:00:00.000Z", "fictional-operator").run();
+    }
+    await replaceDiscordLink(database as unknown as D1Database, {
+      discordUserId: "80351110224678912", twitchUserId: "141981764", discordUsername: "nightowl",
+      twitchLogin: "nightowl_dev", linkedAt: "2026-11-26T10:00:00.000Z", verifiedAt: "2026-11-26T10:00:00.000Z",
+    });
+    const viewer = createDiscordViewerSession("80351110224678912", new Date().toISOString());
+    const cookie = (await serializeDiscordViewerSession(viewer, SESSION_KEYS)).split(";", 1)[0] ?? "";
+    const environment = {
+      ...createEnvironment(database),
+      CHANNEL: {
+        idFromName: (name: string) => name,
+        get: (id: string) => ({
+          discordMemberRoleStatus: () => Promise.resolve(id.endsWith("one") ? "has_role" : "pending"),
+        }),
+      },
+    } as unknown as Env;
+
+    const response = await discordRouter.fetch(new Request(`${ORIGIN}/api/discord/link`, {
+      headers: { Cookie: cookie },
+    }), environment);
+
+    await expect(response.json()).resolves.toMatchObject({ channels: [
+      { channelId: "discord-status-channel-one", displayName: "Amber Harbor", status: "has_role" },
+      { channelId: "discord-status-channel-two", displayName: "Cinder Bay", status: "pending" },
+    ] });
+  });
+
+  it("returns unknown when one channel-object status check exceeds three seconds", async () => {
+    vi.useFakeTimers();
+    const database = new TestD1Database();
+    databases.push(database);
+    await insertChannel(database, "discord-status-slow-channel", "Dawn Pier");
+    await database.prepare("INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)")
+      .bind("discord-status-slow-channel", "990000000000000113", "2026-11-26T10:00:00.000Z", "fictional-operator").run();
+    await replaceDiscordLink(database as unknown as D1Database, {
+      discordUserId: "80351110224678912", twitchUserId: "141981764", discordUsername: "nightowl",
+      twitchLogin: "nightowl_dev", linkedAt: "2026-11-26T10:00:00.000Z", verifiedAt: "2026-11-26T10:00:00.000Z",
+    });
+    const viewer = createDiscordViewerSession("80351110224678912", new Date().toISOString());
+    const cookie = (await serializeDiscordViewerSession(viewer, SESSION_KEYS)).split(";", 1)[0] ?? "";
+    const environment = {
+      ...createEnvironment(database),
+      CHANNEL: {
+        idFromName: (name: string) => name,
+        get: () => ({ discordMemberRoleStatus: () => new Promise<string>(() => undefined) }),
+      },
+    } as unknown as Env;
+    const responsePromise = discordRouter.fetch(new Request(`${ORIGIN}/api/discord/link`, {
+      headers: { Cookie: cookie },
+    }), environment);
+    await vi.waitFor(() => { expect(vi.getTimerCount()).toBeGreaterThan(0); });
+    await vi.advanceTimersByTimeAsync(3_000);
+    const response = await responsePromise;
+
+    await expect(response.json()).resolves.toMatchObject({ channels: [
+      { channelId: "discord-status-slow-channel", displayName: "Dawn Pier", status: "unknown" },
+    ] });
+    vi.useRealTimers();
   });
 
   it("requires same-origin CSRF protection to unlink and deletes the row when both checks pass", async () => {

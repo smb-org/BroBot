@@ -130,6 +130,15 @@ Worker mountet registrierte Router kanalbezogen unter
 `channel_modules` eine Zeile für den jeweiligen `channel_id` und `module_id`
 mit `enabled = 1` steht. Dafür ist kein Deploy erforderlich.
 
+### Discord
+
+Das Discord-Modul konsumiert die vom Host verwalteten VIP- und Moderator-Ränge
+und gleicht gewünschte Rollen über einen Kanaljob ab. Nur von BroBot vergebene
+Rollen stehen im Vergabe-Ledger der Channel-DO-SQLite; Fortschritt, Sperren,
+Teardown-Zustände und Hinweis-Deduplizierung liegen ebenfalls dort. Die globale
+Sperre für einen ungültigen Bot-Token liegt in D1. Roh-IDs und Löschregeln sind
+in [Entscheidung 0014](decisions/0014-discord-verknuepfung.md) dokumentiert.
+
 Das Modul `song_requests` kapselt Spotify-HTTP-Aufrufe im Adapter
 `src/modules/song_requests/adapters/spotify.ts`. Die Callback-Route
 `GET /auth/spotify/callback` verwendet den Authorization-Code-Flow mit

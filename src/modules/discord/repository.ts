@@ -10,6 +10,21 @@ export interface DiscordLink {
   verifiedAt: string;
 }
 
+export interface DiscordConnectedChannel {
+  channelId: string;
+  displayName: string;
+}
+
+export const listDiscordConnectedChannels = async (db: D1Database): Promise<DiscordConnectedChannel[]> => {
+  const result = await db.prepare(
+    `SELECT guild.channel_id AS channelId, channel.display_name AS displayName
+       FROM discord_guilds AS guild
+       JOIN channels AS channel ON channel.channel_id = guild.channel_id
+      ORDER BY channel.display_name, guild.channel_id`,
+  ).all<DiscordConnectedChannel>();
+  return result.results;
+};
+
 export const discordLinkSelectColumns = `
   discord_user_id AS discordUserId,
   twitch_user_id AS twitchUserId,
@@ -45,6 +60,10 @@ export const getDiscordLink = async (db: D1Database, discordUserId: string): Pro
   db.prepare(`SELECT ${discordLinkSelectColumns} FROM discord_links WHERE discord_user_id = ?`)
     .bind(discordUserId).first<DiscordLink>();
 
+export const getDiscordLinkByTwitchUserId = async (db: D1Database, twitchUserId: string): Promise<DiscordLink | null> =>
+  db.prepare(`SELECT ${discordLinkSelectColumns} FROM discord_links WHERE twitch_user_id = ?`)
+    .bind(twitchUserId).first<DiscordLink>();
+
 /** Deletes the current link and returns it for the later managed-role removal hook. */
 export const removeDiscordLink = async (db: D1Database, discordUserId: string): Promise<DiscordLink | null> =>
   db.prepare(`DELETE FROM discord_links WHERE discord_user_id = ? RETURNING ${discordLinkSelectColumns}`)
@@ -74,45 +93,30 @@ export const connectDiscordServer = async (
   db: D1Database,
   connection: Pick<DiscordServerConnection, "channelId" | "guildId" | "connectedAt" | "connectedBy">,
   authorization: ModuleMutationAuthorization,
-): Promise<"connected" | "already_connected" | "not_authorized"> => {
+): Promise<"connected" | "already_connected" | "different_guild" | "not_authorized"> => {
   const results = await db.batch([
     db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`).bind(...authorization.values),
     db.prepare(
-      `DELETE FROM discord_role_mappings
-        WHERE channel_id = ?
-          AND EXISTS (
-             SELECT 1 FROM discord_guilds AS existing
-             WHERE existing.channel_id = ? AND existing.guild_id <> ?
-               AND NOT EXISTS (
-                 SELECT 1 FROM discord_guilds AS other
-                  WHERE other.guild_id = ? AND other.channel_id <> ?
-               )
-          ) ${authorization.sql}`,
-    ).bind(connection.channelId, connection.channelId, connection.guildId, connection.guildId, connection.channelId, ...authorization.values),
-    db.prepare(
       `INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by)
        SELECT ?, ?, ?, ? WHERE 1 = 1 ${authorization.sql}
-       ON CONFLICT (channel_id) DO UPDATE SET
-         guild_id = excluded.guild_id,
-         connected_at = excluded.connected_at,
-         connected_by = excluded.connected_by
-       WHERE NOT EXISTS (
-         SELECT 1 FROM discord_guilds AS other
-          WHERE other.guild_id = excluded.guild_id AND other.channel_id <> excluded.channel_id
-       )
+       ON CONFLICT (channel_id) DO NOTHING
        ON CONFLICT (guild_id) DO NOTHING
        RETURNING guild_id AS guildId`,
     ).bind(connection.channelId, connection.guildId, connection.connectedAt, connection.connectedBy, ...authorization.values),
   ]);
   if ((results[0]?.results.length ?? 0) === 0) return "not_authorized";
-  const stored = results[2]?.results[0] as { guildId?: unknown } | undefined;
-  return stored?.guildId === connection.guildId ? "connected" : "already_connected";
+  const inserted = results[1]?.results[0] as { guildId?: unknown } | undefined;
+  if (inserted?.guildId === connection.guildId) return "connected";
+  const existing = await getDiscordServerConnection(db, connection.channelId);
+  if (existing?.guildId === connection.guildId) return "already_connected";
+  return existing === null ? "already_connected" : "different_guild";
 };
 
 export const saveDiscordRoleMappings = async (
   db: D1Database,
   channelId: string,
   expectedGuildId: string,
+  expectedConnectedAt: string,
   mappings: DiscordRoleMappings,
   updatedAt: string,
   authorization: ModuleMutationAuthorization,
@@ -123,18 +127,18 @@ export const saveDiscordRoleMappings = async (
       ? db.prepare(
         `DELETE FROM discord_role_mappings
           WHERE channel_id = ? AND rank_type = ?
-            AND EXISTS (SELECT 1 FROM discord_guilds WHERE channel_id = ? AND guild_id = ?) ${authorization.sql}`,
-      ).bind(channelId, rankType, channelId, expectedGuildId, ...authorization.values)
+            AND EXISTS (SELECT 1 FROM discord_guilds WHERE channel_id = ? AND guild_id = ? AND connected_at = ?) ${authorization.sql}`,
+      ).bind(channelId, rankType, channelId, expectedGuildId, expectedConnectedAt, ...authorization.values)
       : db.prepare(
         `INSERT INTO discord_role_mappings (channel_id, rank_type, role_id, updated_at)
          SELECT ?, ?, ?, ?
-          WHERE EXISTS (SELECT 1 FROM discord_guilds WHERE channel_id = ? AND guild_id = ?) ${authorization.sql}
+          WHERE EXISTS (SELECT 1 FROM discord_guilds WHERE channel_id = ? AND guild_id = ? AND connected_at = ?) ${authorization.sql}
          ON CONFLICT (channel_id, rank_type) DO UPDATE SET role_id = excluded.role_id, updated_at = excluded.updated_at`,
-      ).bind(channelId, rankType, roleId, updatedAt, channelId, expectedGuildId, ...authorization.values);
+      ).bind(channelId, rankType, roleId, updatedAt, channelId, expectedGuildId, expectedConnectedAt, ...authorization.values);
   });
   const results = await db.batch([
-    db.prepare("SELECT 1 AS connected FROM discord_guilds WHERE channel_id = ? AND guild_id = ?")
-      .bind(channelId, expectedGuildId),
+    db.prepare("SELECT 1 AS connected FROM discord_guilds WHERE channel_id = ? AND guild_id = ? AND connected_at = ?")
+      .bind(channelId, expectedGuildId, expectedConnectedAt),
     db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`).bind(...authorization.values),
     ...mappingWrites,
   ]);
@@ -147,12 +151,26 @@ export const saveDiscordRoleMappings = async (
 export const disconnectDiscordServer = async (
   db: D1Database,
   channelId: string,
+  expectedGuildId: string,
+  expectedConnectedAt: string,
   authorization: ModuleMutationAuthorization,
 ): Promise<boolean> => {
-  const [authorized] = await db.batch([
+  const [authorized, disconnected] = await db.batch([
     db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`).bind(...authorization.values),
-    db.prepare(`DELETE FROM discord_guilds WHERE channel_id = ? ${authorization.sql} RETURNING channel_id`)
-      .bind(channelId, ...authorization.values),
+    db.prepare(`DELETE FROM discord_guilds WHERE channel_id = ? AND guild_id = ? AND connected_at = ? ${authorization.sql} RETURNING channel_id`)
+      .bind(channelId, expectedGuildId, expectedConnectedAt, ...authorization.values),
   ]);
-  return (authorized?.results.length ?? 0) > 0;
+  return (authorized?.results.length ?? 0) > 0 && (disconnected?.results.length ?? 0) > 0;
+};
+
+/** Finishes a disconnect already authorized when deferred role cleanup began. */
+export const disconnectDiscordServerAfterDeferredCleanup = async (
+  db: D1Database,
+  channelId: string,
+  expectedGuildId: string,
+  expectedConnectedAt: string,
+): Promise<boolean> => {
+  const result = await db.prepare("DELETE FROM discord_guilds WHERE channel_id = ? AND guild_id = ? AND connected_at = ? RETURNING channel_id")
+    .bind(channelId, expectedGuildId, expectedConnectedAt).all<{ channel_id: string }>();
+  return result.results.length > 0;
 };

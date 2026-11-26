@@ -20,6 +20,8 @@ import {
   getPlatformAudit,
   getPlatformMembers,
   getPlatformOverview,
+  getPlatformDiscordTokenLock,
+  probePlatformDiscordToken,
   getPlatformSpotifyAccess,
   PanelApiError,
   fetchPlatformTwitchUserSuggestions,
@@ -113,6 +115,58 @@ const PlatformMembersLoading = (): ReactElement => {
   return (
     <><LoadStateLines rows={4} height={44} /><span className="sr-only">{texts.loadMembers}</span></>
   );
+};
+
+const DiscordTokenLockNotice = ({ onAuthenticationRequired }: { onAuthenticationRequired: () => void }): ReactElement => {
+  const texts = platformTexts();
+  const [lock, setLock] = useState<Awaited<ReturnType<typeof getPlatformDiscordTokenLock>>["lock"]>(null);
+  const [loading, setLoading] = useState(true);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let aborted = false;
+    const load = async (): Promise<void> => {
+      try {
+        const response = await getPlatformDiscordTokenLock();
+        if (aborted) return;
+        setLock(response.lock);
+        setError(false);
+      } catch (reason: unknown) {
+        if (aborted) return;
+        if (reason instanceof PanelApiError && reason.status === 401) onAuthenticationRequired();
+        setError(true);
+      } finally { if (!aborted) setLoading(false); }
+    };
+    void load();
+    return () => { aborted = true; };
+  }, [onAuthenticationRequired]);
+
+  const checkAgain = async (): Promise<void> => {
+    setChecking(true);
+    setError(false);
+    try {
+      const response = await probePlatformDiscordToken();
+      setLock(response.lock);
+      if (!response.ok) setError(true);
+    } catch (reason: unknown) {
+      setError(true);
+      if (reason instanceof PanelApiError && reason.status === 401) onAuthenticationRequired();
+    } finally { setChecking(false); }
+  };
+
+  return <section className="platform-discord-token-lock" aria-label={texts.discordTokenLock}>
+    <div className="section-heading"><h2>{texts.discordTokenLock}</h2></div>
+    <div className="platform-discord-token-lock__body">
+      <p role="status" aria-live="polite">{loading ? " " : lock === null ? " " : texts.discordTokenLocked}</p>
+      <Button type="button" variant="neutral" disabled={loading || checking || lock === null} onClick={() => { void checkAgain(); }}>
+        {checking ? texts.loadingMore : texts.discordTokenProbe}
+      </Button>
+    </div>
+    <p className="platform-discord-token-lock__feedback" role={error ? "alert" : "status"} aria-live="polite">
+      {error ? texts.discordTokenProbeFailed : lock === null && !loading ? texts.discordTokenUnlocked : " "}
+    </p>
+  </section>;
 };
 
 const ChannelInspector = ({
@@ -737,6 +791,7 @@ export const PlatformPage = ({ onAuthenticationRequired: onAuthenticationRequire
             <ListDetail
               list={
                 <div className="platform-channel-list">
+                  <DiscordTokenLockNotice onAuthenticationRequired={onAuthenticationRequired} />
                   <PlatformSpotifyOverview state={spotifyAccess} onRetry={() => { void loadSpotifyAccess(); }} />
                   <InspectorHeading level="h2" title={texts.channelOverview} />
                   <LoadStateView

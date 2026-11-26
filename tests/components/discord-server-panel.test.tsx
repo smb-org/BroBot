@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   readDiscordServer: vi.fn(),
   saveDiscordMappings: vi.fn(),
+  previewDiscordMappings: vi.fn(),
 }));
 
 vi.mock("../../src/modules/discord/panel/service", () => mocks);
@@ -28,13 +29,28 @@ const serverRead = (channelId: string, guildId = "990000000000000121", vipRole: 
   ],
   rolesAvailable: true,
   botHighestRolePosition: 5,
+  teardown: false,
+  disconnecting: false,
+  teardownRemaining: 0,
+  locked: false,
+  globalTokenLocked: false,
+  chatHintEnabled: true,
+  hintSettingsRevision: 1,
 });
 
 afterEach(cleanup);
 
+/** The role-mapping section comes first; the chat-hint section has its own Save button below it. */
+const mappingSaveButton = (): HTMLElement => {
+  const [button] = screen.getAllByRole("button", { name: "Save" });
+  if (button === undefined) throw new Error("The role-mapping Save button is missing.");
+  return button;
+};
+
 beforeEach(() => {
   mocks.readDiscordServer.mockReset().mockImplementation((channelId: string) => Promise.resolve(serverRead(channelId)));
   mocks.saveDiscordMappings.mockReset().mockResolvedValue({ mappings: { vip: "990000000000000122", moderator: null } });
+  mocks.previewDiscordMappings.mockReset().mockResolvedValue({ gain: { count: 0, roleName: "" }, lose: [] });
   mocks.request.mockReset();
 });
 
@@ -81,14 +97,14 @@ describe("Discord server status panel", () => {
       .mockResolvedValueOnce({ mappings: { vip: "990000000000000122", moderator: null } });
     fireEvent.click(screen.getByRole("combobox", { name: "VIP role" }));
     clickSelectOption(await screen.findByRole("option", { name: "VIP Crew", hidden: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(mappingSaveButton());
     expect(await screen.findByText("Server changed. Status reloaded.", {
       selector: ".discord-server-panel__message",
     })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("combobox", { name: "VIP role" }));
     clickSelectOption(await screen.findByRole("option", { name: "VIP Crew", hidden: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(mappingSaveButton());
     await waitFor(() => expect(mocks.saveDiscordMappings).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("Role mappings saved.", { selector: ".sr-only" })).toBeInTheDocument();
     const messageSlot = destination.container.querySelector<HTMLElement>(".discord-server-panel__message");
@@ -130,7 +146,7 @@ describe("Discord server status panel", () => {
     await screen.findByText("Lantern Harbor");
     fireEvent.click(screen.getByRole("combobox", { name: "VIP role" }));
     clickSelectOption(await screen.findByRole("option", { name: "No role", hidden: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(mappingSaveButton());
 
     expect(await screen.findByText("Server changed. Status reloaded.", {
       selector: ".discord-server-panel__message",
@@ -141,8 +157,8 @@ describe("Discord server status panel", () => {
     expect(mocks.readDiscordServer).toHaveBeenCalledTimes(2);
     expect(await screen.findByText("Moonlit Cove")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "VIP role" })).toHaveTextContent("Moonlit Crew");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(mappingSaveButton()).toBeDisabled();
+    fireEvent.click(mappingSaveButton());
     expect(mocks.saveDiscordMappings).toHaveBeenCalledTimes(1);
   });
 
@@ -160,14 +176,14 @@ describe("Discord server status panel", () => {
     await screen.findByText("Lantern Harbor");
     fireEvent.click(screen.getByRole("combobox", { name: "VIP role" }));
     clickSelectOption(await screen.findByRole("option", { name: "VIP Crew", hidden: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(mappingSaveButton());
 
     expect(await screen.findByText("Server disconnected. Status reloaded.", {
       selector: ".discord-server-panel__message",
     })).toBeInTheDocument();
     expect(await screen.findByText("No Discord server connected")).toBeInTheDocument();
     expect(mocks.saveDiscordMappings).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(1);
   });
 
   it("blocks mapping saves when a conflict reload fails and retries with fresh mappings", async () => {
@@ -181,18 +197,18 @@ describe("Discord server status panel", () => {
     await screen.findByText("Lantern Harbor");
     fireEvent.click(screen.getByRole("combobox", { name: "VIP role" }));
     clickSelectOption(await screen.findByRole("option", { name: "No role", hidden: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(mappingSaveButton());
 
     expect(await screen.findByText("Could not reload Discord status.", {
       selector: ".discord-server-panel__message",
     })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
     expect(await screen.findByText("Moonlit Cove")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "VIP role" })).toHaveTextContent("Moonlit Crew");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(mappingSaveButton()).toBeDisabled();
     expect(mocks.readDiscordServer).toHaveBeenCalledTimes(3);
     expect(mocks.saveDiscordMappings).toHaveBeenCalledTimes(1);
   });

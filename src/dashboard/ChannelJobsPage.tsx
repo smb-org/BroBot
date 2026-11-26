@@ -38,6 +38,10 @@ const ChannelJobCard = ({
     : job.requiredScopes.map((scope, index) => <Fragment key={scope}>
       {index > 0 ? ", " : null}<span className="channel-jobs-card__scope">{scope}</span>
     </Fragment>);
+  const alternativeScopes = job.requiredScopeAlternatives?.map((group, groupIndex) => <Fragment key={`alternative-${String(groupIndex)}`}>
+    {job.requiredScopes.length > 0 || groupIndex > 0 ? ", " : null}
+    {group.map((scope, index) => <Fragment key={scope}>{index > 0 ? " or " : null}<span className="channel-jobs-card__scope">{scope}</span></Fragment>)}
+  </Fragment>);
   const nextRun = job.nextRunAt !== null
     ? formatJobTime(job.nextRunAt, language, labels.never)
     : job.state === "paused"
@@ -63,7 +67,7 @@ const ChannelJobCard = ({
       <div><dt>{labels.lastRun}</dt><dd>{formatJobTime(job.lastStartedAt, language, labels.never)}</dd></div>
       <div><dt>{labels.lastSuccess}</dt><dd>{formatJobTime(job.lastSuccessAt, language, labels.never)}</dd></div>
       <div><dt>{labels.nextRun}</dt><dd>{nextRun}</dd></div>
-      <div><dt>{labels.requiredScopes}</dt><dd>{requiredScopes}</dd></div>
+      <div><dt>{labels.requiredScopes}</dt><dd>{requiredScopes}{alternativeScopes}</dd></div>
     </dl>
     <div className="channel-jobs-card__status-slot" aria-live="polite">
       {job.state === "paused"

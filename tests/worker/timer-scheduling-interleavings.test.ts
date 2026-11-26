@@ -153,6 +153,7 @@ const channelObjectFor = (stream: DurableTimerState["stream"], initialValues?: M
       hook?.();
       return closure();
     },
+    sql: { exec: () => ({ toArray: () => [], one: () => undefined }) },
     kv: {
       get: (key: string): unknown => values.get(key),
       put: (key: string, value: unknown): void => { values.set(key, value); },

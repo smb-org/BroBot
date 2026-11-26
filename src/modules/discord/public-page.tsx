@@ -11,20 +11,41 @@ interface DiscordLinkViewModel {
   linkedAt: string;
 }
 
+type DiscordChannelRoleStatus = "has_role" | "pending" | "not_in_server" | "no_rank" | "locked" | "unknown";
+
+interface DiscordLinkedChannel {
+  channelId: string;
+  displayName: string;
+  status: DiscordChannelRoleStatus;
+}
+
 export type DiscordLinkPageState =
   | { kind: "loading" }
   | { kind: "not_configured" }
   | { kind: "signed_out" }
   | { kind: "no_twitch" }
   | { kind: "error" }
-  | { kind: "linked"; link: DiscordLinkViewModel };
+  | { kind: "linked"; link: DiscordLinkViewModel; channels: readonly DiscordLinkedChannel[] };
 
 interface DiscordLinkResponse {
   configured: boolean;
   signedIn: boolean;
   csrfToken?: string;
   link: DiscordLinkViewModel | null;
+  channels?: DiscordLinkedChannel[];
 }
+
+const channelStatusText = (language: DiscordLanguage, status: DiscordChannelRoleStatus): string => {
+  const text = discordCatalog[language];
+  switch (status) {
+    case "has_role": return text.roleStatusHasRole;
+    case "pending": return text.roleStatusPending;
+    case "not_in_server": return text.roleStatusNotInServer;
+    case "no_rank": return text.roleStatusNoRank;
+    case "locked": return text.roleStatusLocked;
+    case "unknown": return text.roleStatusUnknown;
+  }
+};
 
 const languageForPage = (): DiscordLanguage => {
   const requested = new URLSearchParams(window.location.search).get("lang");
@@ -58,7 +79,12 @@ export const DiscordLinkView = ({ language, state, unlinking = false, unlinkErro
       </header>
       <p className="discord-public__intro">{text.introduction}</p>
       <section className="discord-public__state" aria-live="polite" data-state={state.kind}>
-        {state.kind === "loading" ? <div className="discord-public__placeholder" aria-label={language === "de" ? "Laden" : "Loading"} /> : null}
+        {state.kind === "loading" ? <div className="discord-public__placeholders" aria-label={language === "de" ? "Laden" : "Loading"}>
+          <span className="discord-public__placeholder discord-public__placeholder--title" />
+          <span className="discord-public__placeholder" />
+          <span className="discord-public__placeholder" />
+          <span className="discord-public__placeholder" />
+        </div> : null}
         {state.kind === "not_configured" ? <div className="discord-public__message">
           <h2>{text.notAvailableTitle}</h2>
           <p>{text.notAvailableDescription}</p>
@@ -95,6 +121,13 @@ export const DiscordLinkView = ({ language, state, unlinking = false, unlinkErro
           <button className="discord-public__button discord-public__button--neutral" type="button" disabled={unlinking} onClick={onUnlink}>
             <Icon name="unlink" />{text.unlink}
           </button>
+          <section className="discord-public__channel-roles" aria-label={text.channelRoles}>
+            <h3>{text.channelRoles}</h3>
+            {state.channels.map((channel) => <div className="discord-public__channel-role" key={channel.channelId} data-status={channel.status}>
+              <span title={channel.displayName}>{channel.displayName}</span>
+              <small>{channelStatusText(language, channel.status)}</small>
+            </div>)}
+          </section>
         </div> : null}
       </section>
       <footer className="discord-public__footer">{text.footer}</footer>
@@ -124,7 +157,7 @@ export const DiscordLinkPage = (): ReactElement => {
         }
         if (payload.signedIn && payload.link !== null) {
           setCsrfToken(payload.csrfToken ?? null);
-          setState({ kind: "linked", link: payload.link });
+          setState({ kind: "linked", link: payload.link, channels: payload.channels ?? [] });
           return;
         }
         const status = new URLSearchParams(window.location.search).get("discord");

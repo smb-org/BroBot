@@ -40,6 +40,7 @@ import {
   getDiscordLink,
   removeDiscordLink,
   replaceDiscordLink,
+  listDiscordConnectedChannels,
 } from "../../modules/discord/repository";
 import { DISCORD_LINK_PAGE_PATH } from "../../modules/discord/contracts";
 
@@ -63,6 +64,55 @@ const serverDashboardLocation = (environment: Env, channelId: string, state?: st
   const url = new URL(`/channels/${encodeURIComponent(channelId)}/modules/discord`, environment.PUBLIC_ORIGIN);
   if (state !== undefined) url.searchParams.set("discord", state);
   return url.toString();
+};
+
+interface DiscordChannelObjectRpc {
+  beginDiscordReconcileMutation: (blockDuringCleanup?: boolean) => Promise<string | null>;
+  endDiscordReconcileMutation: (token: string) => Promise<void>;
+  discordChannelState: () => Promise<{ teardown: boolean; disconnecting: boolean }>;
+  discordMemberRoleStatus: (discordUserId: string, twitchUserId: string) => Promise<"has_role" | "pending" | "not_in_server" | "no_rank" | "locked" | "unknown">;
+}
+
+const withConnectedDiscordReconcileBarrier = async <Result>(environment: Env, mutation: () => Promise<Result>): Promise<Result> => {
+  const channels = await listDiscordConnectedChannels(environment.DB);
+  if (channels.length === 0) return await mutation();
+  const started: Array<{ object: DiscordChannelObjectRpc; token: string }> = [];
+  try {
+    for (const { channelId } of channels) {
+      const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(channelId)) as unknown as DiscordChannelObjectRpc;
+      const token = await object.beginDiscordReconcileMutation(false);
+      if (token === null) throw new Error("Discord reconciliation is already being changed.");
+      started.push({ object, token });
+    }
+  } catch (error) {
+    await Promise.all(started.map(async ({ object, token }) => await object.endDiscordReconcileMutation(token).catch(() => undefined)));
+    throw error;
+  }
+  try {
+    return await mutation();
+  } finally {
+    await Promise.all(started.map(async ({ object, token }) => await object.endDiscordReconcileMutation(token).catch(() => undefined)));
+  }
+};
+
+const channelStatusWithinLimit = async (
+  environment: Env,
+  channelId: string,
+  discordUserId: string,
+  twitchUserId: string,
+): Promise<"has_role" | "pending" | "not_in_server" | "no_rank" | "locked" | "unknown"> => {
+  const object = environment.CHANNEL.get(environment.CHANNEL.idFromName(channelId)) as unknown as DiscordChannelObjectRpc;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      object.discordMemberRoleStatus(discordUserId, twitchUserId),
+      new Promise<"unknown">((resolve) => { timeout = setTimeout(() => { resolve("unknown"); }, 3_000); }),
+    ]);
+  } catch {
+    return "unknown";
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 };
 
 discordRouter.get("/auth/discord", async (context) => {
@@ -120,14 +170,14 @@ discordRouter.get("/auth/discord/callback", async (context) => {
     }
 
     const linkedAt = nowIso();
-    await replaceDiscordLink(context.env.DB, {
+    await withConnectedDiscordReconcileBarrier(context.env, async () => await replaceDiscordLink(context.env.DB, {
       discordUserId: user.id,
       twitchUserId: twitch.twitchUserId,
       discordUsername: user.username,
       twitchLogin: twitch.twitchLogin,
       linkedAt,
       verifiedAt: linkedAt,
-    });
+    }));
     const viewer = createDiscordViewerSession(user.id, linkedAt);
     const viewerCookie = await serializeDiscordViewerSession(viewer, context.env.SESSION_COOKIE_KEYS);
     const csrfToken = await createCsrfToken(viewer.sessionId, context.env.SESSION_COOKIE_KEYS, linkedAt);
@@ -183,16 +233,28 @@ discordRouter.get("/auth/discord/server/callback", async (context) => {
       userId: session.userId,
       sessionId: session.sessionId,
     }, connectedAt);
-    const result = await connectDiscordServer(context.env.DB, {
-      channelId: transaction.channelId,
-      guildId: token.guildId,
-      connectedAt,
-      connectedBy: session.userId,
-    }, authorization);
+    let result: Awaited<ReturnType<typeof connectDiscordServer>>;
+    const object = context.env.CHANNEL.get(context.env.CHANNEL.idFromName(transaction.channelId)) as unknown as DiscordChannelObjectRpc;
+    const state = await object.discordChannelState();
+    if (state.teardown || state.disconnecting) {
+      return context.redirect(serverDashboardLocation(context.env, transaction.channelId, "server-changed"), 302);
+    }
+    const mutationToken = await object.beginDiscordReconcileMutation();
+    if (mutationToken === null) return context.redirect(serverDashboardLocation(context.env, transaction.channelId, "server-changed"), 302);
+    try {
+      result = await connectDiscordServer(context.env.DB, {
+        channelId: transaction.channelId,
+        guildId: token.guildId,
+        connectedAt,
+        connectedBy: session.userId,
+      }, authorization);
+    } finally {
+      await object.endDiscordReconcileMutation(mutationToken);
+    }
     return context.redirect(serverDashboardLocation(
       context.env,
       transaction.channelId,
-      result === "connected" ? "connected" : result === "already_connected" ? "already-connected" : "error",
+      result === "connected" ? "connected" : result === "already_connected" ? "already-connected" : result === "different_guild" ? "server-changed" : "error",
     ), 302);
   } catch {
     return context.redirect(serverDashboardLocation(context.env, transaction.channelId, "error"), 302);
@@ -231,6 +293,12 @@ discordRouter.get("/api/discord/link", async (context) => {
     ? existingCsrfToken
     : await createCsrfToken(viewer.sessionId, context.env.SESSION_COOKIE_KEYS, now);
   context.header("Set-Cookie", discordCsrfCookie(csrfToken));
+  const connectedChannels = await listDiscordConnectedChannels(context.env.DB);
+  const channels = await Promise.all(connectedChannels.map(async ({ channelId, displayName }) => ({
+    channelId,
+    displayName,
+    status: await channelStatusWithinLimit(context.env, channelId, link.discordUserId, link.twitchUserId),
+  })));
   return context.json({
     configured: true,
     signedIn: true,
@@ -240,6 +308,7 @@ discordRouter.get("/api/discord/link", async (context) => {
       twitchLogin: link.twitchLogin,
       linkedAt: link.linkedAt,
     },
+    channels,
   });
 });
 
@@ -262,7 +331,7 @@ discordRouter.post("/api/discord/unlink", async (context) => {
       !await verifyCsrfToken(headerToken, viewer.sessionId, context.env.SESSION_COOKIE_KEYS, now)) {
     return context.json({ error: "csrf_invalid" }, 403);
   }
-  await removeDiscordLink(context.env.DB, viewer.discordUserId);
+  await withConnectedDiscordReconcileBarrier(context.env, async () => await removeDiscordLink(context.env.DB, viewer.discordUserId));
   context.header("Set-Cookie", clearDiscordViewerSessionCookie());
   context.header("Set-Cookie", clearDiscordCsrfCookie(), { append: true });
   return context.body(null, 204);

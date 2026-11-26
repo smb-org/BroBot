@@ -185,6 +185,7 @@ export const updateChannelModuleEnabledStateWithAudit = async (
   expectedRevision?: number,
   markInitialized = false,
   stateGuard?: ChannelModuleStateGuard,
+  allowDeferredCompletion = false,
 ): Promise<{ revision: number; lastDisabledRevision: number | null } | null> => {
   const before = await getChannelModule(db, channelId, moduleId);
   if (before === null) return null;
@@ -201,7 +202,7 @@ export const updateChannelModuleEnabledStateWithAudit = async (
             last_disabled_revision = CASE WHEN ? = 0 THEN revision + 1 ELSE last_disabled_revision END
       WHERE channel_id = ? AND module_id = ? AND revision = ?
         ${stateGuard?.sql ?? ""}
-        ${actorGuard(MANAGING_ROLES)}
+        ${allowDeferredCompletion ? "" : actorGuard(MANAGING_ROLES)}
       RETURNING revision, last_disabled_revision`,
   ).bind(
     after.enabled ? 1 : 0,
@@ -211,7 +212,7 @@ export const updateChannelModuleEnabledStateWithAudit = async (
     moduleId,
     expectedRevision ?? before.revision,
     ...(stateGuard?.values ?? []),
-    ...bindActorGuard(actor, channelId, changedAt),
+    ...(allowDeferredCompletion ? [] : bindActorGuard(actor, channelId, changedAt)),
   );
   const audit = prepareHostModuleAudit(db, actor.userId, changedAt, {
     channelId,
@@ -231,3 +232,27 @@ export const updateChannelModuleEnabledStateWithAudit = async (
     lastDisabledRevision: typeof activation.last_disabled_revision === "number" ? activation.last_disabled_revision : null,
   };
 };
+
+/** Completes a module disable already authorized and audited by its deferred-cleanup request. */
+export const completeDeferredChannelModuleDisable = async (
+  db: D1Database,
+  actorUserId: string,
+  channelId: string,
+  moduleId: string,
+  expectedRevision: number,
+  changedAt: string,
+): Promise<{ revision: number; lastDisabledRevision: number | null } | null> =>
+  await updateChannelModuleEnabledStateWithAudit(
+    db,
+    { userId: actorUserId, sessionId: "deferred-module-disable" },
+    channelId,
+    moduleId,
+    false,
+    "module.disabled",
+    changedAt,
+    [],
+    expectedRevision,
+    false,
+    undefined,
+    true,
+  );

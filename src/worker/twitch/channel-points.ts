@@ -57,7 +57,7 @@ declare global {
   }
 }
 
-const configuredHelixBase = (environment: Env): string => {
+export const configuredHelixBase = (environment: Env): string => {
   const fallback = "https://api.twitch.tv";
   if (environment.APP_ENV !== "local" || environment.TWITCH_API_BASE === undefined) return fallback;
   const base = new URL(environment.TWITCH_API_BASE);

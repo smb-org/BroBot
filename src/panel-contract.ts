@@ -17,6 +17,7 @@ export interface PanelChannelJob {
   intervalMs: number;
   label: Readonly<Record<"de" | "en", string>>;
   requiredScopes: readonly string[];
+  requiredScopeAlternatives?: readonly (readonly string[])[];
   state: PanelChannelJobState;
   lastStartedAt: number | null;
   lastSuccessAt: number | null;

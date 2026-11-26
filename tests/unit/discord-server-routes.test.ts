@@ -24,7 +24,7 @@ const ENCRYPTION_KEYS = JSON.stringify({ active: { id: "discord-server-route-enc
 const GUILD_ID = "990000000000000101";
 const databases: TestD1Database[] = [];
 
-const createEnvironment = (database: TestD1Database): Env => ({
+const createEnvironment = (database: TestD1Database, channelObject: Record<string, unknown> = {}): Env => ({
   DB: database as unknown as D1Database,
   PUBLIC_ORIGIN: ORIGIN,
   APP_ENV: "local",
@@ -34,6 +34,26 @@ const createEnvironment = (database: TestD1Database): Env => ({
   DISCORD_CLIENT_SECRET: "fictional-discord-secret",
   DISCORD_BOT_TOKEN: "fictional-discord-bot-token",
   DISCORD_API_BASE: "http://127.0.0.1:8792/api/v10",
+  CHANNEL: {
+    idFromName: (channelId: string) => channelId,
+    get: () => ({
+      discordChannelState: () => Promise.resolve({
+        teardown: false, disconnecting: false, teardownRemaining: 0, ledgerCount: 0,
+        locked: false, serverLocked: false, mappingLocked: false, globalTokenLocked: false,
+      }),
+      cacheDiscordRoleNames: () => Promise.resolve(undefined),
+      readDiscordCachedRoles: () => Promise.resolve([]),
+      discordMappingsChanged: () => Promise.resolve(undefined),
+      beginDiscordReconcileMutation: () => Promise.resolve("fictional-mutation-token"),
+      endDiscordReconcileMutation: () => Promise.resolve(undefined),
+      beginDiscordDisconnect: () => Promise.resolve({ deferred: false, remaining: 0 }),
+      clearDiscordGuildStateAfterDisconnect: () => Promise.resolve(true),
+      cancelImmediateDiscordDisconnect: () => Promise.resolve(undefined),
+      lockDiscordServer: () => Promise.resolve(true),
+      previewDiscordMappings: () => Promise.resolve({ gain: { count: 0, roleName: "" }, lose: [] }),
+      ...channelObject,
+    }),
+  },
 } as unknown as Env);
 
 const memberSession = async (database: TestD1Database, userId: string): Promise<string> => {
@@ -221,6 +241,42 @@ describe("Discord server callback", () => {
     await expect(getDiscordServerConnection(environment.DB, channelId)).resolves.toBeNull();
   });
 
+  it("does not disconnect a replacement connection after a stale disconnect request", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    const channelId = "discord-server-stale-disconnect";
+    const memberId = "discord-server-stale-disconnect-member";
+    const originalConnectedAt = "2026-11-26T10:00:00.000Z";
+    const replacementConnectedAt = "2026-11-26T10:30:00.000Z";
+    await insertChannel(database, channelId);
+    await insertMember(database, channelId, memberId, "manager");
+    await insertLoginIdentityAndSession(database, memberId);
+    await database.prepare(
+      "INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)",
+    ).bind(channelId, GUILD_ID, originalConnectedAt, memberId).run();
+    const environment = createEnvironment(database, {
+      beginDiscordDisconnect: async (guildId: string, connectedAt: string) => {
+        expect(guildId).toBe(GUILD_ID);
+        expect(connectedAt).toBe(originalConnectedAt);
+        await database.prepare("DELETE FROM discord_guilds WHERE channel_id = ?").bind(channelId).run();
+        await database.prepare(
+          "INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)",
+        ).bind(channelId, GUILD_ID, replacementConnectedAt, memberId).run();
+        return { deferred: false, remaining: 0, changed: true };
+      },
+    });
+
+    const response = await protectedServerRoutes(memberId).fetch(new Request(
+      `${ORIGIN}/channels/${channelId}/discord/server/disconnect`,
+      { method: "POST", headers: { Origin: ORIGIN } },
+    ), environment);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "discord_server_changed" });
+    await expect(getDiscordServerConnection(environment.DB, channelId))
+      .resolves.toMatchObject({ guildId: GUILD_ID, connectedAt: replacementConnectedAt });
+  });
+
   it.each([
     { name: "a different member", stateMember: "discord-server-starter", callbackMember: "discord-server-caller", callbackChannel: "discord-server-state-channel", memberChannel: "discord-server-state-channel" },
     { name: "a different channel", stateMember: "discord-server-channel-member", callbackMember: "discord-server-channel-member", callbackChannel: "discord-server-state-channel", memberChannel: "discord-server-other-channel" },
@@ -300,25 +356,27 @@ describe("Discord server callback", () => {
     expect(mappings?.count).toBe(0);
   });
 
-  it("rejects mappings fetched for an old guild when the channel reconnects during the fetch", async () => {
+  it("rejects mappings fetched before the same guild reconnects during the fetch", async () => {
     const database = new TestD1Database();
     databases.push(database);
     const channelId = "discord-server-reconnect-during-mapping-save";
     const memberId = "discord-server-mapping-member";
     const guildA = "990000000000000111";
-    const guildB = "990000000000000112";
+    const reconnectedAt = "2026-11-26T10:30:00.000Z";
+    const connectedAt = "2026-11-26T10:00:00.000Z";
     const selectableRole = "990000000000000113";
     const botRole = "990000000000000114";
     const oldRole = "990000000000000116";
     await insertChannel(database, channelId);
     await insertMember(database, channelId, memberId, "manager");
     await insertLoginIdentityAndSession(database, memberId);
-    const environment = createEnvironment(database);
+    const cacheDiscordRoleNames = vi.fn(() => Promise.resolve(undefined));
+    const environment = createEnvironment(database, { cacheDiscordRoleNames });
     const actor = { userId: memberId, sessionId: `session-${memberId}` };
     await connectDiscordServer(environment.DB, {
-      channelId, guildId: guildA, connectedAt: new Date().toISOString(), connectedBy: memberId,
+      channelId, guildId: guildA, connectedAt, connectedBy: memberId,
     }, authorizeModuleManagementMutation(channelId, actor, new Date().toISOString()));
-    await saveDiscordRoleMappings(environment.DB, channelId, guildA, {
+    await saveDiscordRoleMappings(environment.DB, channelId, guildA, connectedAt, {
       vip: oldRole, moderator: null,
     }, new Date().toISOString(), authorizeModuleManagementMutation(channelId, actor, new Date().toISOString()));
 
@@ -327,8 +385,9 @@ describe("Discord server callback", () => {
       if (url.endsWith("/users/@me")) return Response.json({ id: "990000000000000115", username: "bot_fixture" });
       if (url.endsWith(`/guilds/${guildA}`)) return Response.json({ id: guildA, name: "Guild A" });
       if (url.endsWith(`/guilds/${guildA}/roles`)) {
+        await database.prepare("DELETE FROM discord_guilds WHERE channel_id = ?").bind(channelId).run();
         await connectDiscordServer(environment.DB, {
-          channelId, guildId: guildB, connectedAt: new Date().toISOString(), connectedBy: memberId,
+          channelId, guildId: guildA, connectedAt: reconnectedAt, connectedBy: memberId,
         }, authorizeModuleManagementMutation(channelId, actor, new Date().toISOString()));
         return Response.json([
           { id: guildA, name: "@everyone", position: 0, permissions: "0", managed: false },
@@ -351,7 +410,66 @@ describe("Discord server callback", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ error: "discord_server_changed" });
-    await expect(getDiscordServerConnection(environment.DB, channelId)).resolves.toMatchObject({ guildId: guildB });
+    expect(cacheDiscordRoleNames).not.toHaveBeenCalled();
+    await expect(getDiscordServerConnection(environment.DB, channelId)).resolves.toMatchObject({ guildId: guildA, connectedAt: reconnectedAt });
     await expect(getDiscordRoleMappings(environment.DB, channelId)).resolves.toEqual({ vip: null, moderator: null });
+  });
+
+  it("allows another mapping to change while preserving an unchanged role that Discord deleted", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    const channelId = "discord-server-preserve-deleted-role";
+    const memberId = "discord-server-preserve-member";
+    const guildId = "990000000000000121";
+    const connectedAt = "2026-11-26T10:00:00.000Z";
+    const deletedRole = "990000000000000122";
+    const moderatorRole = "990000000000000123";
+    const botRole = "990000000000000124";
+    const botId = "990000000000000125";
+    await insertChannel(database, channelId);
+    await insertMember(database, channelId, memberId, "manager");
+    await insertLoginIdentityAndSession(database, memberId);
+    const discordMappingsChanged = vi.fn().mockResolvedValue(undefined);
+    const environment = createEnvironment(database, { discordMappingsChanged });
+    const actor = { userId: memberId, sessionId: `session-${memberId}` };
+    await connectDiscordServer(environment.DB, {
+      channelId, guildId, connectedAt, connectedBy: memberId,
+    }, authorizeModuleManagementMutation(channelId, actor, new Date().toISOString()));
+    await saveDiscordRoleMappings(environment.DB, channelId, guildId, connectedAt, {
+      vip: deletedRole, moderator: null,
+    }, new Date().toISOString(), authorizeModuleManagementMutation(channelId, actor, new Date().toISOString()));
+    const respond = (input: RequestInfo | URL): Response => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (url.endsWith("/users/@me")) return Response.json({ id: botId, username: "fixture_bot" });
+      if (url.endsWith(`/guilds/${guildId}`)) return Response.json({ id: guildId, name: "Fixture Harbor" });
+      if (url.endsWith(`/guilds/${guildId}/roles`)) return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: "0", managed: false },
+        { id: moderatorRole, name: "Moderators", position: 1, permissions: "0", managed: false },
+        { id: botRole, name: "BroBot", position: 5, permissions: "268435456", managed: true },
+      ]);
+      if (url.endsWith(`/guilds/${guildId}/members/${botId}`)) {
+        return Response.json({ user: { id: botId }, roles: [botRole] });
+      }
+      return Response.json({ code: 0, message: "Unexpected Discord request" }, { status: 404 });
+    };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input) => Promise.resolve(respond(input))));
+
+    const response = await protectedServerRoutes(memberId).fetch(new Request(
+      `${ORIGIN}/channels/${channelId}/discord/server/mappings`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guildId, vip: deletedRole, moderator: moderatorRole }),
+      },
+    ), environment);
+
+    expect(response.status).toBe(200);
+    await expect(getDiscordRoleMappings(environment.DB, channelId))
+      .resolves.toEqual({ vip: deletedRole, moderator: moderatorRole });
+    expect(discordMappingsChanged).toHaveBeenCalledWith(
+      { vip: deletedRole, moderator: null },
+      { vip: deletedRole, moderator: moderatorRole },
+      expect.any(Array),
+    );
   });
 });

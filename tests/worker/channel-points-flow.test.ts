@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(), list: vi.fn(), listByIds: vi.fn(), manageable: vi.fn(), setEnabled: vi.fn(),
 }));
 vi.mock("../../src/worker/twitch/channel-points", () => ({
+  configuredHelixBase: () => "https://api.twitch.tv",
   updateRedemptionStatus: mocks.update,
   listUnfulfilledRedemptions: mocks.list,
   listRedemptionsByIds: mocks.listByIds,

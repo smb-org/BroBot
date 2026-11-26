@@ -28,6 +28,7 @@ vi.mock("../../src/modules/ads/adapters/ad-schedule", () => ({ getAdSchedule: mo
 vi.mock("../../src/worker/app-token", () => ({ getAppAccessToken: mocks.getAppAccessToken }));
 vi.mock("../../src/worker/twitch/helix", () => ({ helixRequest: mocks.helixRequest }));
 vi.mock("../../src/worker/twitch/channel-points", () => ({
+  configuredHelixBase: () => "https://api.twitch.tv",
   getManageableRewards: mocks.channelPointManageable,
   listUnfulfilledRedemptions: mocks.channelPointList,
   listRedemptionsByIds: mocks.channelPointListByIds,
@@ -654,6 +655,9 @@ const objectFor = (
     }
     if (/^\s*SELECT version FROM statistics_word_schema_version\b/iu.test(query)) {
       return { toArray: () => [{ version: 1 }], one: () => ({ version: 1 }) };
+    }
+    if (/^\s*(?:CREATE (?:TABLE|INDEX) IF NOT EXISTS discord_|PRAGMA table_info\(discord_|SELECT [\s\S]*\bFROM discord_)/iu.test(query)) {
+      return { toArray: () => [], one: () => undefined };
     }
     throw new Error(`Unexpected Durable Object SQL query: ${query}`);
   });
@@ -2202,7 +2206,7 @@ describe("ChannelObject realtime path", () => {
     vi.useFakeTimers();
     const start = Date.parse("2026-09-27T12:00:00.000Z");
     vi.setSystemTime(start);
-    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }), all: vi.fn().mockResolvedValue({ results: [] }) };
     const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
     const storage = storageOf(object);
     await object.recordChatActivity("viewer-1", true);
@@ -2250,7 +2254,7 @@ describe("ChannelObject realtime path", () => {
     vi.useFakeTimers();
     const start = Date.parse("2026-09-27T12:00:00.000Z");
     vi.setSystemTime(start);
-    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }) };
+    const statement = { bind: vi.fn(() => statement), first: vi.fn().mockResolvedValue({ state: "online" }), all: vi.fn().mockResolvedValue({ results: [] }) };
     const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
     const storage = storageOf(object);
     await object.recordChatActivity("viewer-1", true);
@@ -2344,6 +2348,7 @@ describe("ChannelObject realtime path", () => {
       bind: vi.fn(() => statement),
       first: vi.fn().mockResolvedValue({ state: "offline", source: "eventsub", changed_at: startedAt,
         started_at: null, stream_id: null, checked_at: null }),
+      all: vi.fn().mockResolvedValue({ results: [] }),
     };
     const object = objectFor([], { prepare: vi.fn(() => statement) } as unknown as D1Database);
     const storage = storageOf(object);
@@ -4803,6 +4808,33 @@ describe("ChannelObject channel jobs", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("skips Discord schema access when disabled and memoizes it when lifecycle recovery may be needed", async () => {
+    const enabledModules: { results: Array<{ module_id: string }> } = { results: [] };
+    const database = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({ all: vi.fn(() => Promise.resolve(enabledModules)) })),
+      })),
+    } as unknown as D1Database;
+    const object = objectFor([], database, new Map(), "discord-job-registration");
+    const internals = object as unknown as ChannelJobsTestInternals;
+    const schemaCreateCount = (): number => storageOf(object).sql.exec.mock.calls.filter(([query]) =>
+      /CREATE (?:TABLE|INDEX) IF NOT EXISTS discord_/iu.test(query),
+    ).length;
+
+    await internals.registeredChannelJobs();
+    expect(schemaCreateCount()).toBe(0);
+
+    storageOf(object).kv.put("discord:lifecycle_may_exist", true);
+    await internals.registeredChannelJobs();
+    expect(schemaCreateCount()).toBeGreaterThan(0);
+    expect(storageOf(object).kv.get("discord:lifecycle_may_exist")).toBeUndefined();
+    const initializedSchemaCreateCount = schemaCreateCount();
+
+    enabledModules.results = [{ module_id: "discord" }];
+    await internals.registeredChannelJobs();
+    expect(schemaCreateCount()).toBe(initializedSchemaCreateCount);
   });
 
   it("does not run a due job after its module has been disabled", async () => {

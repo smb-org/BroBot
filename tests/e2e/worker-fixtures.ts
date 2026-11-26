@@ -214,8 +214,25 @@ export const seedE2ESongRequests = (channelId: string, settings: Readonly<Record
 export const seedE2EDiscordServer = (channelId: string): void => {
   seedE2EOverlay(channelId);
   const createdAt = new Date().toISOString();
-  const sql = `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision)
+  const accessToken = encryptJson({ token: "fictional-twitch-access-token" }, e2eWorkerEnvironment.TOKEN_ENCRYPTION_KEYS ?? "");
+  const refreshToken = encryptJson({ token: "fictional-twitch-refresh-token" }, e2eWorkerEnvironment.TOKEN_ENCRYPTION_KEYS ?? "");
+  const rankSubscriptionTypes = ["channel.vip.add", "channel.vip.remove", "channel.moderator.add", "channel.moderator.remove"];
+  const rankSubscriptions = rankSubscriptionTypes.map((subscriptionType) =>
+    `('${channelId}', '${subscriptionType}', '', '1', 'e2e-${channelId}-${subscriptionType}', 'e2e-eventsub', 'enabled', NULL, NULL, NULL, '${createdAt}')`,
+  ).join(",\n");
+  // The mock guild is shared; an earlier spec may have left it connected to another channel.
+  const sql = `DELETE FROM discord_guilds WHERE guild_id = '990000000000000101';
+    INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision)
     VALUES ('${channelId}', 'discord', 1, '{}', 1);
+    INSERT OR REPLACE INTO twitch_login_identity
+      (user_id, login, scopes_json, token_scopes_json, access_token_ciphertext, refresh_token_ciphertext,
+       expires_at, status, reason, created_at, updated_at)
+      VALUES ('${channelId}', 'e2e-discord-broadcaster', '["channel:read:vips","moderation:read"]',
+        '["channel:read:vips","moderation:read"]', '${accessToken}', '${refreshToken}',
+        '2099-01-01T00:00:00.000Z', 'connected', NULL, '${createdAt}', '${createdAt}');
+    INSERT OR REPLACE INTO eventsub_subscriptions
+      (channel_id, subscription_type, variant, version, subscription_id, secret_id, status, reason, error_message, error_status, updated_at)
+      VALUES ${rankSubscriptions};
     INSERT OR REPLACE INTO bot_identity
       (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, created_at, updated_at)
       VALUES (1, 'bot-e2e', 'brobot-e2e', '[]', 'test-access', 'test-refresh', '2099-01-01T00:00:00.000Z', '${createdAt}', '${createdAt}');
