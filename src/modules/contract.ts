@@ -2993,7 +2993,7 @@ export type BotModule<SettingsSchema extends z.ZodType = z.ZodType> = {
   beforeDisable?: (
     context: ModuleBeforeDisableContext,
     channelId: string,
-  ) => Promise<{ deferred: boolean; remaining?: number; blocked?: boolean }>;
+  ) => Promise<{ deferred: boolean; remaining?: number; blocked?: boolean; revision?: number }>;
   /** Channel-points actions provided by this module for rewards configured on its page. */
   channelPointsActions?: readonly ChannelPointsActionDefinition[];
   /** Called after the channel_modules enabled flag commits, including retryable post-commit delivery. */

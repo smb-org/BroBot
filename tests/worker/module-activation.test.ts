@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { createSessionCookie } from "../../src/worker/auth/session";
@@ -55,6 +55,8 @@ beforeAll(async () => {
   }
 });
 
+afterEach(() => vi.unstubAllGlobals());
+
 const insertChannel = async (channelId: string): Promise<void> => {
   const now = new Date().toISOString();
   await database.prepare(
@@ -71,6 +73,18 @@ const insertVipRow = (state: DurableObjectState, userId: string): void => {
     userId,
     userId,
     userId,
+  );
+};
+
+const insertDiscordGrant = (state: DurableObjectState, guildId: string, discordUserId: string, twitchUserId: string, roleId: string): void => {
+  state.storage.sql.exec(
+    `INSERT INTO discord_role_grants
+      (guild_id, discord_user_id, role_id, twitch_user_id, joined_at, granted_at, status)
+     VALUES (?, ?, ?, ?, '2026-11-20T18:30:00.000000+00:00', 1795431600000, 'granted')`,
+    guildId,
+    discordUserId,
+    roleId,
+    twitchUserId,
   );
 };
 
@@ -189,6 +203,148 @@ describe("module activation schedule RPCs", () => {
       response_text: "Custom command response",
       kind: "text",
     }]);
+  });
+
+  it("rejects a Discord disable after its session is revoked while the request body is open", async () => {
+    const channelId = `discord-revoked-disable-${crypto.randomUUID()}`;
+    const guildId = "990000000000000101";
+    const discordUserId = "990000000000000201";
+    const twitchUserId = "990000000000000301";
+    const roleId = "990000000000000102";
+    await insertChannel(channelId);
+    const request = await authenticatedRequestFactory(channelId);
+    const now = new Date().toISOString();
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, initialized, revision, settings_revision)
+       VALUES (?, 'discord', 1, '{"chatHintEnabled":true}', 1, 1, 1)`,
+    ).bind(channelId).run();
+    await database.prepare(
+      "INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)",
+    ).bind(channelId, guildId, now, `user-${channelId}`).run();
+    await database.prepare(
+      "INSERT INTO discord_role_mappings (channel_id, rank_type, role_id, updated_at) VALUES (?, 'vip', ?, ?)",
+    ).bind(channelId, roleId, now).run();
+    await database.prepare(
+      `INSERT INTO discord_links
+        (discord_user_id, twitch_user_id, discord_username, twitch_login, linked_at, verified_at)
+       VALUES (?, ?, 'Fictional Viewer', 'fictionalviewer', ?, ?)`,
+    ).bind(discordUserId, twitchUserId, now, now).run();
+    const stub = workerEnvironment.CHANNEL.get(workerEnvironment.CHANNEL.idFromName(channelId));
+    await stub.discordChannelState();
+    await runInDurableObject(stub, (_instance, state) => { insertDiscordGrant(state, guildId, discordUserId, twitchUserId, roleId); });
+
+    const methods: string[] = [];
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input, init) => {
+      const method = input instanceof Request ? input.method : init?.method ?? "GET";
+      methods.push(method);
+      return Promise.resolve(method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : Response.json({ user: { id: discordUserId }, roles: [roleId], joined_at: "2026-11-20T18:30:00.000000+00:00" }));
+    }));
+
+    let signalBodyRead!: () => void;
+    let releaseBody!: () => void;
+    const bodyRead = new Promise<void>((resolve) => { signalBodyRead = resolve; });
+    const bodyGate = new Promise<void>((resolve) => { releaseBody = resolve; });
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        signalBodyRead();
+        return bodyGate.then(() => {
+          controller.enqueue(new TextEncoder().encode(JSON.stringify({ enabled: false, expectedRevision: 1 })));
+          controller.close();
+        });
+      },
+    }, { highWaterMark: 0 });
+    const template = request(`/api/channels/${channelId}/modules/discord`, "PATCH", { enabled: false, expectedRevision: 1 });
+    const delayedRequest = new Request(template.url, {
+      method: template.method,
+      headers: template.headers,
+      body,
+      duplex: "half",
+    } as RequestInit);
+    const responsePromise = panelRouter.fetch(delayedRequest, testEnvironment);
+    await bodyRead;
+    await database.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE session_id = ?")
+      .bind(new Date().toISOString(), `session-${channelId}`).run();
+    releaseBody();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(409);
+    expect(await stub.discordChannelState()).toMatchObject({ teardown: false });
+    await expect(database.prepare(
+      "SELECT enabled, revision FROM channel_modules WHERE channel_id = ? AND module_id = 'discord'",
+    ).bind(channelId).first()).resolves.toEqual({ enabled: 1, revision: 1 });
+    expect(methods.filter((method) => method === "DELETE")).toEqual([]);
+  });
+
+  it("fences an empty Discord teardown canceled before its disable request resumes", async () => {
+    const channelId = `discord-canceled-disable-${crypto.randomUUID()}`;
+    const guildId = "990000000000000104";
+    const connectedAt = "2026-11-26T10:00:00.000Z";
+    const discordUserId = "990000000000000202";
+    const twitchUserId = "990000000000000302";
+    const roleId = "990000000000000103";
+    await insertChannel(channelId);
+    const request = await authenticatedRequestFactory(channelId);
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, initialized, revision, settings_revision)
+       VALUES (?, 'discord', 1, '{"chatHintEnabled":true}', 1, 1, 1)`,
+    ).bind(channelId).run();
+    await database.prepare(
+      "INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)",
+    ).bind(channelId, guildId, connectedAt, `user-${channelId}`).run();
+    const stub = workerEnvironment.CHANNEL.get(workerEnvironment.CHANNEL.idFromName(channelId));
+    await stub.discordChannelState();
+
+    let signalBeginReturned!: () => void;
+    let releaseBegin!: () => void;
+    const beginReturned = new Promise<void>((resolve) => { signalBeginReturned = resolve; });
+    const beginGate = new Promise<void>((resolve) => { releaseBegin = resolve; });
+    const channelNamespace = new Proxy(workerEnvironment.CHANNEL, {
+      get(target, property, receiver) {
+        if (property === "get") return (id: Parameters<typeof workerEnvironment.CHANNEL.get>[0]) => {
+          const channelStub = target.get(id);
+          return new Proxy(channelStub, {
+            get(stubTarget, method, stubReceiver) {
+              if (method === "beginDiscordTeardown") return async (...args: unknown[]) => {
+                const result = await (stubTarget as unknown as {
+                  beginDiscordTeardown: (...values: unknown[]) => Promise<unknown>;
+                }).beginDiscordTeardown(...args);
+                signalBeginReturned();
+                await beginGate;
+                return result;
+              };
+              return Reflect.get(stubTarget, method, stubReceiver) as unknown;
+            },
+          });
+        };
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === "function" ? (value.bind(target) as unknown) : value;
+      },
+    });
+    const delayedEnvironment = { ...testEnvironment, CHANNEL: channelNamespace } as Env;
+    const responsePromise = panelRouter.fetch(
+      request(`/api/channels/${channelId}/modules/discord`, "PATCH", { enabled: false, expectedRevision: 1 }),
+      delayedEnvironment,
+    );
+    await beginReturned;
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE discord_reconcile_state SET started_at = ? WHERE state_key = 'channel'",
+        Date.now() - 60_001,
+      );
+    });
+    await runInDurableObject(stub, (instance) =>
+      (instance as unknown as { completeDeferredDiscordDisable(): Promise<boolean> }).completeDeferredDiscordDisable());
+    await runInDurableObject(stub, (_instance, state) => { insertDiscordGrant(state, guildId, discordUserId, twitchUserId, roleId); });
+    releaseBegin();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(409);
+    await expect(database.prepare(
+      "SELECT enabled, revision FROM channel_modules WHERE channel_id = ? AND module_id = 'discord'",
+    ).bind(channelId).first()).resolves.toEqual({ enabled: 1, revision: 2 });
+    expect(await stub.discordChannelState()).toMatchObject({ teardown: false, ledgerCount: 1 });
   });
 
   it("refuses to disable Temporary VIPs while a VIP is active and allows it once none is (protects=the disable guard asks the real ChannelObject and answers 409 temp_vips_active; fails_when=the module is disabled while a temporary VIP row exists; no_claim=unfinished grant counting, covered by the store tests)", async () => {

@@ -1,5 +1,11 @@
 import { writeModuleAudit } from "../module-audit";
-import { completeDeferredChannelModuleDisable, getChannelModuleForChannel, updateChannelModuleEnabledStateWithAudit } from "../db/channel-modules";
+import {
+  claimDeferredChannelModuleDisable,
+  completeDeferredChannelModuleDisable,
+  fenceDeferredChannelModuleDisable,
+  getChannelModuleForChannel,
+  updateChannelModuleEnabledStateWithAudit,
+} from "../db/channel-modules";
 import { DurableObject } from "cloudflare:workers";
 
 import type {
@@ -1358,7 +1364,10 @@ export class ChannelObject extends DurableObject<Env> {
     if (ended) await this.markDiscordReconcileNeededAndRun();
   }
 
-  public async beginDiscordTeardown(actorUserId: string, expectedRevision: number): Promise<{ deferred: boolean; remaining: number; blocked?: boolean }> {
+  public async beginDiscordTeardown(
+    actor: ActorContext,
+    expectedRevision: number,
+  ): Promise<{ deferred: boolean; remaining: number; blocked?: boolean; revision?: number }> {
     const channelId = this.ownChannelId();
     if (channelId === null) return { deferred: false, remaining: 0 };
     const mutationToken = await this.beginDiscordReconcileMutation();
@@ -1387,6 +1396,30 @@ export class ChannelObject extends DurableObject<Env> {
         });
         return { deferred: false, remaining, blocked: true };
       }
+      const pendingGrantCount = this.ctx.storage.transactionSync(() => {
+        this.ensureDiscordSchema();
+        const barrier = readDiscordReconcileMutationBarrier(this.ctx.storage.sql);
+        if (barrier === null || barrier.token !== mutationToken || barrier.expiresAt <= Date.now() ||
+            readDiscordLifecycle(this.ctx.storage.sql) !== null) return null;
+        return connection === null ? 0 : countDiscordGrants(this.ctx.storage.sql, connection.guildId);
+      });
+      if (pendingGrantCount === null) return { deferred: false, remaining: 0, blocked: true };
+      const claimedRevision = await claimDeferredChannelModuleDisable(
+        this.env.DB,
+        actor,
+        channelId,
+        "discord",
+        expectedRevision,
+        new Date().toISOString(),
+        pendingGrantCount > 0,
+      );
+      if (claimedRevision === null) {
+        const remaining = this.ctx.storage.transactionSync(() => {
+          this.ensureDiscordSchema();
+          return connection === null ? 0 : countDiscordGrants(this.ctx.storage.sql, connection.guildId);
+        });
+        return { deferred: false, remaining, blocked: true };
+      }
       const guildId = connection?.guildId ?? null;
       const connectedAt = connection?.connectedAt ?? null;
       const remaining = this.ctx.storage.transactionSync(() => {
@@ -1399,8 +1432,8 @@ export class ChannelObject extends DurableObject<Env> {
           mode: "teardown",
           startedAt: Date.now(),
           deferred: count > 0,
-          actorUserId,
-          expectedRevision,
+          actorUserId: actor.userId,
+          expectedRevision: claimedRevision,
           disconnectMemberUserId: null,
           guildId,
           connectedAt,
@@ -1409,7 +1442,7 @@ export class ChannelObject extends DurableObject<Env> {
         return count;
       });
       if (remaining === null) return { deferred: false, remaining: 0, blocked: true };
-      return { deferred: remaining > 0, remaining };
+      return { deferred: remaining > 0, remaining, revision: claimedRevision };
     } finally {
       await this.endDiscordReconcileMutation(mutationToken);
     }
@@ -1826,6 +1859,19 @@ export class ChannelObject extends DurableObject<Env> {
   }
 
   private async cancelDiscordTeardownIfCurrent(expected: NonNullable<ReturnType<typeof readDiscordLifecycle>>): Promise<boolean> {
+    const stillCurrent = this.ctx.storage.transactionSync(() => {
+      this.ensureDiscordSchema();
+      const current = readDiscordLifecycle(this.ctx.storage.sql);
+      return current !== null && current.mode === expected.mode && current.startedAt === expected.startedAt &&
+        current.actorUserId === expected.actorUserId && current.expectedRevision === expected.expectedRevision &&
+        current.guildId === expected.guildId && current.connectedAt === expected.connectedAt &&
+        current.deferred === expected.deferred;
+    });
+    if (!stillCurrent) return false;
+    if (expected.mode === "teardown" && expected.deferred === false && expected.expectedRevision !== null) {
+      const channelId = this.ownChannelId();
+      if (channelId !== null) await fenceDeferredChannelModuleDisable(this.env.DB, channelId, "discord", expected.expectedRevision);
+    }
     const canceled = this.ctx.storage.transactionSync(() => {
       this.ensureDiscordSchema();
       const current = readDiscordLifecycle(this.ctx.storage.sql);

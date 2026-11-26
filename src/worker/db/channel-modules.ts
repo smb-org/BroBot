@@ -74,6 +74,60 @@ export const getChannelModuleForChannel = async (
   moduleId: string,
 ): Promise<ChannelModuleRecord | null> => getChannelModule(db, channelId, moduleId);
 
+/** Claims a deferred disable under the same actor and session guard as activation writes. */
+export const claimDeferredChannelModuleDisable = async (
+  db: D1Database,
+  actor: ActorContext,
+  channelId: string,
+  moduleId: string,
+  expectedRevision: number,
+  changedAt: string,
+  advanceRevision = true,
+): Promise<number | null> => {
+  if (!advanceRevision) {
+    const row = await db.prepare(
+      `SELECT revision FROM channel_modules
+        WHERE channel_id = ? AND module_id = ? AND enabled = 1 AND revision = ?
+          ${actorGuard(MANAGING_ROLES)}`,
+    ).bind(
+      channelId,
+      moduleId,
+      expectedRevision,
+      ...bindActorGuard(actor, channelId, changedAt),
+    ).first<{ revision: number }>();
+    return row?.revision ?? null;
+  }
+  const row = await db.prepare(
+    `UPDATE channel_modules
+        SET revision = revision + 1
+      WHERE channel_id = ? AND module_id = ? AND enabled = 1 AND revision = ?
+        ${actorGuard(MANAGING_ROLES)}
+      RETURNING revision`,
+  ).bind(
+    channelId,
+    moduleId,
+    expectedRevision,
+    ...bindActorGuard(actor, channelId, changedAt),
+  ).first<{ revision: number }>();
+  return row?.revision ?? null;
+};
+
+/** Invalidates an uncommitted empty teardown before releasing its intent. */
+export const fenceDeferredChannelModuleDisable = async (
+  db: D1Database,
+  channelId: string,
+  moduleId: string,
+  expectedRevision: number,
+): Promise<boolean> => {
+  const row = await db.prepare(
+    `UPDATE channel_modules
+        SET revision = revision + 1
+      WHERE channel_id = ? AND module_id = ? AND enabled = 1 AND revision = ?
+      RETURNING revision`,
+  ).bind(channelId, moduleId, expectedRevision).first<{ revision: number }>();
+  return row !== null;
+};
+
 /**
  * The same role threshold as for member changes: only broadcasters and
  * managers may toggle modules, enforced in the mutation's own actorGuard,

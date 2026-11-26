@@ -314,10 +314,19 @@ discordServerRoutes.post("/server/disconnect", async (context) => {
   const allowed = await context.env.DB.prepare(`SELECT 1 AS allowed WHERE 1 = 1 ${authorization.sql}`)
     .bind(...authorization.values).first<{ allowed: number }>();
   if (allowed === null) return managerDenied(context);
+  const body = await bodyFrom(context.req.raw);
+  if (body === null || Object.keys(body).some((key) => key !== "guildId" && key !== "connectedAt") ||
+      typeof body.guildId !== "string" || !/^[0-9]{1,20}$/u.test(body.guildId) ||
+      typeof body.connectedAt !== "string" || body.connectedAt.length === 0) {
+    return context.json({ error: "discord_disconnect_invalid" }, 400);
+  }
   const existingConnection = await getDiscordServerConnection(context.env.DB, channel(context));
   if (existingConnection === null) return context.json({ error: "discord_server_not_connected" }, 409);
+  if (existingConnection.guildId !== body.guildId || existingConnection.connectedAt !== body.connectedAt) {
+    return context.json({ error: "discord_server_changed" }, 409);
+  }
   const object = discordObject(context.env, channel(context));
-  const cleanup = await object.beginDiscordDisconnect(existingConnection.guildId, existingConnection.connectedAt);
+  const cleanup = await object.beginDiscordDisconnect(body.guildId, body.connectedAt);
   if (cleanup.changed) return context.json({ error: "discord_server_changed" }, 409);
   if (cleanup.blocked) return context.json({ error: "discord_cleanup_in_progress" }, 409);
   if (cleanup.deferred) return context.json({ disconnecting: true, remaining: cleanup.remaining }, 202);

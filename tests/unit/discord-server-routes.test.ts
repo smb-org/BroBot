@@ -219,9 +219,10 @@ describe("Discord server callback", () => {
     await insertMember(database, channelId, memberId, "manager");
     const sessionCookie = await memberSession(database, memberId);
     const environment = createEnvironment(database);
+    const connectedAt = new Date().toISOString();
     await database.prepare(
       "INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)",
-    ).bind(channelId, GUILD_ID, new Date().toISOString(), memberId).run();
+    ).bind(channelId, GUILD_ID, connectedAt, memberId).run();
     const csrf = await createCsrfToken(`session-${memberId}`, SESSION_KEYS, new Date().toISOString());
     const send = (token: string | null) => moduleRouter.fetch(new Request(
       `${ORIGIN}/api/channels/${channelId}/modules/discord/server/disconnect`,
@@ -230,8 +231,10 @@ describe("Discord server callback", () => {
         headers: {
           Origin: ORIGIN,
           Cookie: `__Host-brobot_session=${sessionCookie}; __Host-brobot_csrf=${csrf}`,
+          "Content-Type": "application/json",
           ...(token === null ? {} : { "X-CSRF-Token": token }),
         },
+        body: JSON.stringify({ guildId: GUILD_ID, connectedAt }),
       },
     ), environment);
 
@@ -253,28 +256,24 @@ describe("Discord server callback", () => {
     await insertLoginIdentityAndSession(database, memberId);
     await database.prepare(
       "INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)",
-    ).bind(channelId, GUILD_ID, originalConnectedAt, memberId).run();
-    const environment = createEnvironment(database, {
-      beginDiscordDisconnect: async (guildId: string, connectedAt: string) => {
-        expect(guildId).toBe(GUILD_ID);
-        expect(connectedAt).toBe(originalConnectedAt);
-        await database.prepare("DELETE FROM discord_guilds WHERE channel_id = ?").bind(channelId).run();
-        await database.prepare(
-          "INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)",
-        ).bind(channelId, GUILD_ID, replacementConnectedAt, memberId).run();
-        return { deferred: false, remaining: 0, changed: true };
-      },
-    });
+    ).bind(channelId, GUILD_ID, replacementConnectedAt, memberId).run();
+    const beginDiscordDisconnect = vi.fn(() => Promise.resolve({ deferred: false, remaining: 0 }));
+    const environment = createEnvironment(database, { beginDiscordDisconnect });
 
     const response = await protectedServerRoutes(memberId).fetch(new Request(
       `${ORIGIN}/channels/${channelId}/discord/server/disconnect`,
-      { method: "POST", headers: { Origin: ORIGIN } },
+      {
+        method: "POST",
+        headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+        body: JSON.stringify({ guildId: GUILD_ID, connectedAt: originalConnectedAt }),
+      },
     ), environment);
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ error: "discord_server_changed" });
     await expect(getDiscordServerConnection(environment.DB, channelId))
       .resolves.toMatchObject({ guildId: GUILD_ID, connectedAt: replacementConnectedAt });
+    expect(beginDiscordDisconnect).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -333,16 +332,21 @@ describe("Discord server callback", () => {
     await insertMember(database, channelId, "discord-server-member", "manager");
     await insertLoginIdentityAndSession(database, "discord-server-member");
     const environment = createEnvironment(database);
+    const connectedAt = new Date().toISOString();
     await database.prepare(
       "INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)",
-    ).bind(channelId, GUILD_ID, new Date().toISOString(), "discord-server-member").run();
+    ).bind(channelId, GUILD_ID, connectedAt, "discord-server-member").run();
     await database.prepare(
       "INSERT INTO discord_role_mappings (channel_id, rank_type, role_id, updated_at) VALUES (?, 'vip', ?, ?)",
     ).bind(channelId, "990000000000000102", new Date().toISOString()).run();
     const app = protectedServerRoutes();
     const send = (origin: string | null) => app.fetch(new Request(
       `${ORIGIN}/channels/${channelId}/discord/server/disconnect`,
-      { method: "POST", headers: origin === null ? {} : { Origin: origin } },
+      {
+        method: "POST",
+        headers: { ...(origin === null ? {} : { Origin: origin }), "Content-Type": "application/json" },
+        body: JSON.stringify({ guildId: GUILD_ID, connectedAt }),
+      },
     ), environment);
 
     expect((await send("https://attacker.example")).status).toBe(403);

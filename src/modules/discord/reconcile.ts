@@ -301,6 +301,28 @@ const desiredRoleWork = async (
   };
 };
 
+const rankRemovalStillApplies = async (
+  context: ModuleAlarmContext,
+  grant: DiscordGrantRecord,
+): Promise<boolean> => {
+  const [mappings, vip, moderator, links] = await Promise.all([
+    getDiscordRoleMappings(context.DB, context.channelId),
+    context.twitchRanks?.getTwitchRanks("vip"),
+    context.twitchRanks?.getTwitchRanks("moderator"),
+    readLinksForIdentities(context.DB, [grant.twitchUserId], [grant.discordUserId]),
+  ]);
+  const ranks = {
+    vip: { complete: vip?.complete === true, userIds: vip?.userIds ?? new Set<string>() },
+    moderator: { complete: moderator?.complete === true, userIds: moderator?.userIds ?? new Set<string>() },
+  } satisfies Record<"vip" | "moderator", DiscordRankMembership>;
+  return discordRoleShouldBeRemoved(
+    grant,
+    links.byDiscordId.get(grant.discordUserId) ?? null,
+    mappings,
+    ranks,
+  );
+};
+
 const discordRequest = async <Result>(
   budget: { used: number },
   action: () => Promise<Result>,
@@ -1032,6 +1054,19 @@ export const discordReconcileAlarm = async (context: ModuleAlarmContext): Promis
         scheduleAt(context, Date.now() + FOLLOW_UP_DELAY_MS);
         saveRun(context, run);
         return { summary: summary(run) };
+      }
+      if (!await rankGenerationIsCurrent(context, run.generation) || !progressControlIsCurrent(context, run.revision)) {
+        clearRun(context);
+        scheduleAt(context, Date.now() + FOLLOW_UP_DELAY_MS);
+        return { summary: summary(run) };
+      }
+      const currentLifecycle = readSql(context, (sql) => readDiscordLifecycle(sql));
+      if (currentLifecycle?.mode !== "teardown" && currentLifecycle?.mode !== "disconnecting" &&
+          !await rankRemovalStillApplies(context, grant)) {
+        run.skipped += 1;
+        run.cursor += 1;
+        saveRun(context, run);
+        continue;
       }
       if (!await rankGenerationIsCurrent(context, run.generation) || !progressControlIsCurrent(context, run.revision)) {
         clearRun(context);

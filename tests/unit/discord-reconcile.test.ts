@@ -246,6 +246,9 @@ const makeHarness = async (options: ReconcileHarnessOptions = {}) => {
       dirty = true;
       generation += 1;
     },
+    setRankCompleteness: (rankType: "vip" | "moderator", complete: boolean) => {
+      rankState[rankType] = { ...rankState[rankType], complete };
+    },
     setManageRoles: (value: boolean) => { roleState.manageRoles = value; },
     setRoleExists: (value: boolean) => { mappedRoleState.exists = value; },
     setJoinedAt: (value: string) => { joinedAt = value; },
@@ -594,6 +597,38 @@ describe("Discord channel job reconciliation", () => {
     await discordReconcileAlarm(harness.context);
     expect(harness.requestCalls).toHaveLength(22);
     expect(countDiscordGrants(harness.sql, GUILD_ID)).toBe(11);
+  });
+
+  it("revalidates rank completeness before a rank-loss delete in a continuation", async () => {
+    const links = Array.from({ length: 11 }, (_, index) => ({
+      discordUserId: `990000000000000${String(300 + index).padStart(3, "0")}`,
+      twitchUserId: `990000000000000${String(400 + index).padStart(3, "0")}`,
+      login: `fictionalviewer${String(index)}`,
+    }));
+    const harness = await makeHarness({ members: links });
+    harness.setRankUsers("vip", [], true);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-26T10:00:00.000Z"));
+    for (const link of links) {
+      insertDiscordPendingGrant(harness.sql, {
+        guildId: GUILD_ID,
+        discordUserId: link.discordUserId,
+        twitchUserId: link.twitchUserId,
+        roleId: VIP_ROLE_ID,
+        joinedAt: "2026-11-20T18:30:00.000000+00:00",
+      });
+      harness.managedRoles.set(link.discordUserId, new Set([VIP_ROLE_ID]));
+    }
+
+    await discordReconcileAlarm(harness.context);
+    expect(harness.requestCalls.filter(({ method }) => method === "DELETE")).toHaveLength(10);
+
+    harness.setRankCompleteness("vip", false);
+    await discordReconcileAlarm(harness.context);
+
+    expect(harness.requestCalls.filter(({ method }) => method === "DELETE")).toHaveLength(10);
+    expect(harness.managedRoles.get(links[10]?.discordUserId ?? "")?.has(VIP_ROLE_ID)).toBe(true);
+    expect(countDiscordGrants(harness.sql, GUILD_ID)).toBe(1);
   });
 
   it("removes unlinked grants without waiting for rank completeness", async () => {

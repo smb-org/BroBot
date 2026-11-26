@@ -24,7 +24,7 @@ const server = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const json = (body: unknown): Promise<Response> => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+const json = (body: unknown, status = 200): Promise<Response> => Promise.resolve(new Response(JSON.stringify(body), { status }));
 const requestHref = (input: RequestInfo | URL): string => typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 
 const renderPanel = (): void => {
@@ -79,12 +79,22 @@ describe("Discord server panel", () => {
   });
 
   it("saves the chat-hint switch explicitly", async () => {
+    let currentSettings = { chatHintEnabled: true };
+    let currentRevision = 1;
+    const writes: Array<{ settings: { chatHintEnabled: boolean }; revision: number }> = [];
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const url = new URL(requestHref(input), window.location.origin);
       if (url.pathname.endsWith("/server")) return json(server());
-      if (url.pathname.endsWith("/settings") && (init?.method ?? "GET") === "GET") return json({ settings: { chatHintEnabled: true }, revision: 1 });
+      if (url.pathname.endsWith("/settings") && (init?.method ?? "GET") === "GET") return json({ settings: currentSettings, revision: currentRevision });
       if (url.pathname === "/api/csrf") return json({ token: "csrf-fictional" });
-      if (url.pathname.endsWith("/settings") && init?.method === "PATCH") return json({ settings: { chatHintEnabled: false }, revision: 2 });
+      if (url.pathname.endsWith("/settings") && init?.method === "PATCH") {
+        const body = JSON.parse(init.body as string) as { settings: { chatHintEnabled: boolean }; revision: number };
+        writes.push(body);
+        if (body.revision !== currentRevision) return json({ error: "module_settings_changed_concurrently" }, 409);
+        currentSettings = body.settings;
+        currentRevision += 1;
+        return json({ settings: currentSettings, revision: currentRevision });
+      }
       throw new Error(`Unexpected request: ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetcher);
@@ -95,7 +105,44 @@ describe("Discord server panel", () => {
     const saveButtons = screen.getAllByRole("button", { name: "Save" });
     fireEvent.click(saveButtons.at(-1) as HTMLButtonElement);
 
-    await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) =>
-      requestHref(input).endsWith("/settings") && init?.method === "PATCH")).toBe(true));
+    await waitFor(() => expect(hint).not.toBeChecked());
+    fireEvent.click(hint);
+    fireEvent.click(screen.getAllByRole("button", { name: "Save" }).at(-1) as HTMLButtonElement);
+
+    await waitFor(() => expect(writes).toHaveLength(2));
+    expect(writes.map(({ revision }) => revision)).toEqual([1, 2]);
+    expect(hint).toBeChecked();
+  });
+
+  it("reloads the fixed status slot after a stale disconnect confirmation", async () => {
+    let serverReads = 0;
+    let disconnectBody: { guildId: string; connectedAt: string } | null = null;
+    const fetcher = vi.fn<typeof fetch>((input, init) => {
+      const url = new URL(requestHref(input), window.location.origin);
+      if (url.pathname.endsWith("/server")) {
+        serverReads += 1;
+        return json(server(serverReads === 1 ? {} : {
+          connection: { channelId: "fictional-channel", guildId: "990000000000000101", connectedAt: "2026-11-24T11:00:00.000Z", connectedBy: "fictional-manager" },
+          guildName: "Replacement Harbor",
+        }));
+      }
+      if (url.pathname.endsWith("/settings")) return json({ settings: { chatHintEnabled: true }, revision: 1 });
+      if (url.pathname === "/api/csrf") return json({ token: "csrf-fictional" });
+      if (url.pathname.endsWith("/server/disconnect") && init?.method === "POST") {
+        disconnectBody = JSON.parse(init.body as string) as { guildId: string; connectedAt: string };
+        return json({ error: "discord_server_changed" }, 409);
+      }
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    renderPanel();
+
+    await screen.findByText("Amber Harbor");
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect server" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Disconnect server" }).at(-1) as HTMLButtonElement);
+
+    expect(await screen.findByText("Server changed. Status reloaded.")).toBeInTheDocument();
+    expect(disconnectBody).toEqual({ guildId: "990000000000000101", connectedAt: "2026-11-24T10:00:00.000Z" });
+    expect(await screen.findByText("Replacement Harbor")).toBeInTheDocument();
   });
 });

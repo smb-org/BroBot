@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from "react";
 
-import { refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { refetchModuleQueryData, runModuleQueryWrite, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
 import { dashboardTexts } from "../../../dashboard/locale";
 import {
   Button,
@@ -264,6 +264,7 @@ function DiscordChatHintSettings({
   const hintQuery = useModuleQuery(channelId, "discord", "settings", (signal) => readDiscordChatHint(channelId, signal));
   const currentHint = hintQuery.data?.settings.chatHintEnabled ?? server.chatHintEnabled;
   const settingsRevision = hintQuery.data?.revision ?? server.hintSettingsRevision;
+  const queryClient = useDashboardQueryClient();
   const draft = useDraft({ chatHintEnabled: currentHint });
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>();
@@ -278,7 +279,17 @@ function DiscordChatHintSettings({
     setSaved(false);
     setSaveError(undefined);
     try {
-      const result = await saveDiscordChatHint(channelId, draft.value.chatHintEnabled, settingsRevision);
+      const result = await runModuleQueryWrite(
+        queryClient,
+        channelId,
+        "discord",
+        "settings",
+        (revision) => saveDiscordChatHint(channelId, draft.value.chatHintEnabled, revision ?? settingsRevision),
+        {
+          baselineRevision: settingsRevision,
+          updateCache: (_current, savedSettings) => savedSettings,
+        },
+      );
       draft.accept(result.settings);
       setSaved(true);
       notify({ tone: "success", message: text.chatHintSaved });
@@ -341,6 +352,7 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
     refetchInterval: (current) => current.state.data?.disconnecting === true || current.state.data?.teardown === true ? 1_000 : false,
   });
   const [disconnectOpen, setDisconnectOpen] = useState(false);
+  const [disconnectTarget, setDisconnectTarget] = useState<{ guildId: string; connectedAt: string } | null>(null);
   const [pending, setPending] = useState(false);
   const [conflictReload, setConflictReload] = useState<ConflictReloadState>({ status: "idle" });
   const [callbackResult] = useState(() => readCallbackResult(channelId));
@@ -432,15 +444,26 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
 
   const disconnect = async (): Promise<void> => {
     if (pending) return;
+    if (disconnectTarget === null) return;
     dismissCallbackFeedback();
     setPending(true);
     try {
-      const result = await request<{ disconnecting?: boolean; remaining?: number } | undefined>(channelId, "server/disconnect", "POST");
+      const result = await request<{ disconnecting?: boolean; remaining?: number } | undefined>(
+        channelId,
+        "server/disconnect",
+        "POST",
+        disconnectTarget,
+      );
       setDisconnectOpen(false);
+      setDisconnectTarget(null);
       setFeedback(result?.disconnecting === true ? null : { source: "local", message: text.disconnectSuccess });
       await refresh();
-    } catch {
-      notify({ tone: "error", message: text.disconnectError });
+    } catch (error: unknown) {
+      if (error instanceof Error && (error.message === "discord_server_changed" || error.message === "discord_server_not_connected")) {
+        setDisconnectOpen(false);
+        setDisconnectTarget(null);
+        await reloadConflictStatus(error.message === "discord_server_not_connected" ? "disconnected" : "changed");
+      } else notify({ tone: "error", message: text.disconnectError });
     } finally {
       setPending(false);
     }
@@ -483,7 +506,13 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
             <span>{server.guildName ?? server.connection.guildId}</span>
           </div>
           <div className="discord-server-panel__actions">
-            <Button variant="secondary" disabled={serverActionsDisabled} onClick={() => { dismissCallbackFeedback(); setDisconnectOpen(true); }}>{text.disconnectServer}</Button>
+            <Button variant="secondary" disabled={serverActionsDisabled} onClick={() => {
+              const connection = server.connection;
+              if (connection === null) return;
+              dismissCallbackFeedback();
+              setDisconnectTarget({ guildId: connection.guildId, connectedAt: connection.connectedAt });
+              setDisconnectOpen(true);
+            }}>{text.disconnectServer}</Button>
           </div>
         </>}
     </Section>
@@ -518,7 +547,7 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
       danger
       pending={pending || conflictReload.status !== "idle"}
       onConfirm={() => { void disconnect(); }}
-      onCancel={() => { setDisconnectOpen(false); }}
+      onCancel={() => { setDisconnectOpen(false); setDisconnectTarget(null); }}
     />
   </div>;
 }

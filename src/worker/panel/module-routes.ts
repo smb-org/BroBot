@@ -1147,6 +1147,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
   const actor = actorOf(context);
 
   const existing = await getChannelModuleForChannel(context.env.DB, channelId, moduleId);
+  let activationRevision = expectedRevision === undefined ? existing?.revision : Number(expectedRevision);
   const initialize = enabled && existing?.initialized !== true;
   const reusedTextCommandName = initialize && module.onEnableCommandTokens?.includes("!befehle") === true
     ? "befehle"
@@ -1233,10 +1234,11 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
       prepareModuleAudit: context.get("prepareModuleAudit"),
       actor,
       now,
-      expectedRevision: expectedRevision === undefined ? existing.revision : Number(expectedRevision),
+      expectedRevision: activationRevision ?? existing.revision,
     }, channelId);
     if (deferred.blocked) return context.json({ error: "module_cleanup_in_progress" }, 409);
     if (deferred.deferred) return context.json({ enabled: true, teardown: true, remaining: deferred.remaining ?? 0 }, 202);
+    if (deferred.revision !== undefined) activationRevision = deferred.revision;
   }
   const settings = existing === null ? defaultSettingsJson : existing.settings;
   let revision: number | null;
@@ -1277,7 +1279,7 @@ moduleRouter.patch("/api/channels/:channelId/modules/:moduleId", async (context)
         action,
         now,
         dependentMutations,
-        expectedRevision === undefined ? existing.revision : Number(expectedRevision),
+        activationRevision ?? existing.revision,
         initialize,
         atomicStateGuard,
       );

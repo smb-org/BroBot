@@ -88,11 +88,14 @@ const handleDiscordEvent = async (event: ModuleEvent<z.output<typeof settingsSch
 };
 
 const discordBeforeDisable = async (
-  context: { environment: Env; actor: { userId: string }; expectedRevision: number },
+  context: { environment: Env; actor: { userId: string; sessionId?: string }; expectedRevision: number },
   channelId: string,
-): Promise<{ deferred: boolean; remaining: number; blocked?: boolean }> => {
+): Promise<{ deferred: boolean; remaining: number; blocked?: boolean; revision?: number }> => {
   const object = context.environment.CHANNEL.get(context.environment.CHANNEL.idFromName(channelId));
-  const result = await object.beginDiscordTeardown(context.actor.userId, context.expectedRevision);
+  const result = await object.beginDiscordTeardown({
+    userId: context.actor.userId,
+    sessionId: context.actor.sessionId ?? "",
+  }, context.expectedRevision);
   if (!result.deferred && !result.blocked) await object.clearDiscordChatHints();
   return result;
 };
