@@ -163,6 +163,27 @@ export const disconnectDiscordServer = async (
   return (authorized?.results.length ?? 0) > 0 && (disconnected?.results.length ?? 0) > 0;
 };
 
+/** Revalidates the caller and exact connection in one guarded connection-row write. */
+export const claimDiscordServerDisconnect = async (
+  db: D1Database,
+  channelId: string,
+  expectedGuildId: string,
+  expectedConnectedAt: string,
+  authorization: ModuleMutationAuthorization,
+): Promise<"claimed" | "not_authorized" | "connection_changed"> => {
+  const [authorized, claimed] = await db.batch([
+    db.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`).bind(...authorization.values),
+    db.prepare(
+      `UPDATE discord_guilds
+          SET connected_at = connected_at
+        WHERE channel_id = ? AND guild_id = ? AND connected_at = ? ${authorization.sql}
+        RETURNING channel_id`,
+    ).bind(channelId, expectedGuildId, expectedConnectedAt, ...authorization.values),
+  ]);
+  if ((authorized?.results.length ?? 0) === 0) return "not_authorized";
+  return (claimed?.results.length ?? 0) > 0 ? "claimed" : "connection_changed";
+};
+
 /** Finishes a disconnect already authorized when deferred role cleanup began. */
 export const disconnectDiscordServerAfterDeferredCleanup = async (
   db: D1Database,

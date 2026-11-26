@@ -277,6 +277,86 @@ describe("module activation schedule RPCs", () => {
     expect(methods.filter((method) => method === "DELETE")).toEqual([]);
   });
 
+  it("rejects a Discord disconnect after management membership is removed while the request body is open", async () => {
+    const channelId = `discord-revoked-disconnect-${crypto.randomUUID()}`;
+    const guildId = "990000000000000111";
+    const discordUserId = "990000000000000211";
+    const twitchUserId = "990000000000000311";
+    const roleId = "990000000000000112";
+    await insertChannel(channelId);
+    const request = await authenticatedRequestFactory(channelId);
+    const connectedAt = new Date().toISOString();
+    await database.prepare(
+      `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, initialized, revision, settings_revision)
+       VALUES (?, 'discord', 1, '{"chatHintEnabled":true}', 1, 1, 1)`,
+    ).bind(channelId).run();
+    await database.prepare(
+      "INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)",
+    ).bind(channelId, guildId, connectedAt, `user-${channelId}`).run();
+    await database.prepare(
+      "INSERT INTO discord_role_mappings (channel_id, rank_type, role_id, updated_at) VALUES (?, 'vip', ?, ?)",
+    ).bind(channelId, roleId, connectedAt).run();
+    await database.prepare(
+      `INSERT INTO discord_links
+        (discord_user_id, twitch_user_id, discord_username, twitch_login, linked_at, verified_at)
+       VALUES (?, ?, 'Fictional Viewer', 'fictionalviewer', ?, ?)`,
+    ).bind(discordUserId, twitchUserId, connectedAt, connectedAt).run();
+    const stub = workerEnvironment.CHANNEL.get(workerEnvironment.CHANNEL.idFromName(channelId));
+    await stub.discordChannelState();
+    await runInDurableObject(stub, (_instance, state) => {
+      insertDiscordGrant(state, guildId, discordUserId, twitchUserId, roleId);
+    });
+
+    const methods: string[] = [];
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>((input, init) => {
+      const method = input instanceof Request ? input.method : init?.method ?? "GET";
+      methods.push(method);
+      return Promise.resolve(method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : Response.json({ user: { id: discordUserId }, roles: [roleId], joined_at: "2026-11-20T18:30:00.000000+00:00" }));
+    }));
+
+    let signalBodyRead!: () => void;
+    let releaseBody!: () => void;
+    const bodyRead = new Promise<void>((resolve) => { signalBodyRead = resolve; });
+    const bodyGate = new Promise<void>((resolve) => { releaseBody = resolve; });
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        signalBodyRead();
+        return bodyGate.then(() => {
+          controller.enqueue(new TextEncoder().encode(JSON.stringify({ guildId, connectedAt })));
+          controller.close();
+        });
+      },
+    }, { highWaterMark: 0 });
+    const template = request(`/api/channels/${channelId}/modules/discord/server/disconnect`, "POST", { guildId, connectedAt });
+    const headers = new Headers(template.headers);
+    headers.set("Origin", new URL(testEnvironment.PUBLIC_ORIGIN).origin);
+    const delayedRequest = new Request(template.url, {
+      method: template.method,
+      headers,
+      body,
+      duplex: "half",
+    } as RequestInit);
+    const responsePromise = panelRouter.fetch(delayedRequest, testEnvironment);
+    await bodyRead;
+    await database.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?")
+      .bind(channelId, `user-${channelId}`).run();
+    releaseBody();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(403);
+    expect(await stub.discordChannelState()).toMatchObject({ disconnecting: false, ledgerCount: 1 });
+    const lifecycleCount = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM discord_reconcile_state WHERE state_key = 'channel'").one().count,
+    );
+    expect(lifecycleCount).toBe(0);
+    await expect(database.prepare(
+      "SELECT guild_id, connected_at FROM discord_guilds WHERE channel_id = ?",
+    ).bind(channelId).first()).resolves.toEqual({ guild_id: guildId, connected_at: connectedAt });
+    expect(methods).toEqual([]);
+  });
+
   it("fences an empty Discord teardown canceled before its disable request resumes", async () => {
     const channelId = `discord-canceled-disable-${crypto.randomUUID()}`;
     const guildId = "990000000000000104";

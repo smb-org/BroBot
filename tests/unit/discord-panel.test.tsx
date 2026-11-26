@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { QueryClient } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
+import { moduleQueryKey, useDashboardQueryClient } from "../../src/dashboard/data";
 import { DashboardDataProvider } from "../../src/dashboard/data/provider";
 import DiscordServerPanel from "../../src/modules/discord/panel";
 import { clickSelectOption } from "../query-test-utils";
@@ -29,6 +32,11 @@ const requestHref = (input: RequestInfo | URL): string => typeof input === "stri
 
 const renderPanel = (): void => {
   render(<DashboardDataProvider><DiscordServerPanel channelId="fictional-channel" language="en" canManage /></DashboardDataProvider>);
+};
+
+const QueryClientCapture = ({ onCapture, children }: { onCapture: (client: QueryClient) => void; children: ReactNode }) => {
+  onCapture(useDashboardQueryClient());
+  return <>{children}</>;
 };
 
 describe("Discord server panel", () => {
@@ -85,7 +93,9 @@ describe("Discord server panel", () => {
     const fetcher = vi.fn<typeof fetch>((input, init) => {
       const url = new URL(requestHref(input), window.location.origin);
       if (url.pathname.endsWith("/server")) return json(server());
-      if (url.pathname.endsWith("/settings") && (init?.method ?? "GET") === "GET") return json({ settings: currentSettings, revision: currentRevision });
+      if (url.pathname.endsWith("/settings") && (init?.method ?? "GET") === "GET") {
+        return writes.length === 0 ? json({ settings: currentSettings, revision: currentRevision }) : json({ error: "status_unavailable" }, 503);
+      }
       if (url.pathname === "/api/csrf") return json({ token: "csrf-fictional" });
       if (url.pathname.endsWith("/settings") && init?.method === "PATCH") {
         const body = JSON.parse(init.body as string) as { settings: { chatHintEnabled: boolean }; revision: number };
@@ -98,18 +108,28 @@ describe("Discord server panel", () => {
       throw new Error(`Unexpected request: ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetcher);
-    renderPanel();
+    const captured: { client: QueryClient | null } = { client: null };
+    render(<DashboardDataProvider><QueryClientCapture onCapture={(client) => { captured.client = client; }}>
+      <DiscordServerPanel channelId="fictional-channel" language="en" canManage />
+    </QueryClientCapture></DashboardDataProvider>);
 
     const hint = await screen.findByRole("switch", { name: "Offer linking for a new rank" });
     fireEvent.click(hint);
     const saveButtons = screen.getAllByRole("button", { name: "Save" });
     fireEvent.click(saveButtons.at(-1) as HTMLButtonElement);
 
-    await waitFor(() => expect(hint).not.toBeChecked());
+    expect(await screen.findByText("Chat hint saved.")).toBeInTheDocument();
+    expect(hint).not.toBeChecked();
+    expect(captured.client?.getQueryData(moduleQueryKey("fictional-channel", "discord", "settings"))).toEqual({
+      settings: { chatHintEnabled: false },
+      revision: 2,
+    });
     fireEvent.click(hint);
     fireEvent.click(screen.getAllByRole("button", { name: "Save" }).at(-1) as HTMLButtonElement);
 
     await waitFor(() => expect(writes).toHaveLength(2));
+    expect(await screen.findByText("Chat hint saved.")).toBeInTheDocument();
+    expect(writes.map(({ settings }) => settings.chatHintEnabled)).toEqual([false, true]);
     expect(writes.map(({ revision }) => revision)).toEqual([1, 2]);
     expect(hint).toBeChecked();
   });

@@ -10,6 +10,7 @@ import {
   type DiscordEnvironment,
 } from "./adapters/discord";
 import {
+  claimDiscordServerDisconnect,
   disconnectDiscordServer,
   getDiscordRoleMappings,
   getDiscordServerConnection,
@@ -303,17 +304,11 @@ discordServerRoutes.post("/server/mappings/preview", async (context) => {
 
 discordServerRoutes.post("/server/disconnect", async (context) => {
   withNoStore(context);
-  if (!isManager(context)) return managerDenied(context);
   const requestOrigin = context.req.header("Origin");
   // The panel guard already verifies the CSRF token for every mutation; the Origin check is the extra layer here.
   if (requestOrigin === undefined || requestOrigin !== new URL(context.env.PUBLIC_ORIGIN).origin) {
     return context.json({ error: "discord_origin_invalid" }, 403);
   }
-  const disconnectedAt = new Date().toISOString();
-  const authorization = context.get("authorizeManagementMutation")(channel(context), context.get("session"), disconnectedAt);
-  const allowed = await context.env.DB.prepare(`SELECT 1 AS allowed WHERE 1 = 1 ${authorization.sql}`)
-    .bind(...authorization.values).first<{ allowed: number }>();
-  if (allowed === null) return managerDenied(context);
   const body = await bodyFrom(context.req.raw);
   if (body === null || Object.keys(body).some((key) => key !== "guildId" && key !== "connectedAt") ||
       typeof body.guildId !== "string" || !/^[0-9]{1,20}$/u.test(body.guildId) ||
@@ -325,6 +320,17 @@ discordServerRoutes.post("/server/disconnect", async (context) => {
   if (existingConnection.guildId !== body.guildId || existingConnection.connectedAt !== body.connectedAt) {
     return context.json({ error: "discord_server_changed" }, 409);
   }
+  const disconnectedAt = new Date().toISOString();
+  const authorization = context.get("authorizeManagementMutation")(channel(context), context.get("actor"), disconnectedAt);
+  const claimed = await claimDiscordServerDisconnect(
+    context.env.DB,
+    channel(context),
+    body.guildId,
+    body.connectedAt,
+    authorization,
+  );
+  if (claimed === "not_authorized") return managerDenied(context);
+  if (claimed === "connection_changed") return context.json({ error: "discord_server_changed" }, 409);
   const object = discordObject(context.env, channel(context));
   const cleanup = await object.beginDiscordDisconnect(body.guildId, body.connectedAt);
   if (cleanup.changed) return context.json({ error: "discord_server_changed" }, 409);

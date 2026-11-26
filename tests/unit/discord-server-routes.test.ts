@@ -112,6 +112,7 @@ const protectedServerRoutes = (memberId = "discord-server-member"): Hono<ModuleR
   app.use("*", async (context, next) => {
     context.set("channelRole", "manager");
     context.set("session", { userId: memberId, sessionId: `session-${memberId}` });
+    context.set("actor", { userId: memberId, sessionId: `session-${memberId}` });
     context.set("authorizeManagementMutation", authorizeModuleManagementMutation);
     await next();
   });
