@@ -17,7 +17,8 @@ import {
   getDiscordRoleMappings,
   saveDiscordRoleMappings,
 } from "../../src/modules/discord/repository";
-import { insertChannel, testKey } from "./fixtures";
+import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
+import { authorizeModuleManagementMutation } from "../../src/worker/module-authorization";
 import { TestD1Database } from "./test-d1";
 
 const ORIGIN = "https://brobot.example";
@@ -86,8 +87,17 @@ describe("Discord server OAuth state", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, "discord-server-one");
+    await insertMember(database, "discord-server-one", "member-one", "manager");
+    await insertLoginIdentityAndSession(database, "member-one");
     const configured = environment(database as unknown as D1Database);
-    const started = await beginDiscordServerOAuth(configured, "discord-server-one", "member-one", `${ORIGIN}/auth/discord/server/callback`, NOW);
+    const started = await beginDiscordServerOAuth(
+      configured,
+      "discord-server-one",
+      "member-one",
+      `${ORIGIN}/auth/discord/server/callback`,
+      NOW,
+      authorizeModuleManagementMutation("discord-server-one", { userId: "member-one", sessionId: "session-member-one" }, NOW),
+    );
     const url = new URL(started.authorizationUrl);
     expect(Object.fromEntries(url.searchParams)).toMatchObject({
       scope: "bot",
@@ -105,6 +115,33 @@ describe("Discord server OAuth state", () => {
     await expect(consumeDiscordServerOAuthTransaction(configured.DB, state, NOW)).resolves.toBeNull();
     await expect(verifyDiscordServerOAuthState(started.state, "another-browser", COOKIE_KEYS, NOW)).resolves.toBeNull();
     await expect(verifyDiscordServerOAuthState(started.state, started.stateNonce, COOKIE_KEYS, started.expiresAt)).resolves.toBeNull();
+  });
+
+  it("does not persist OAuth state after management access is revoked", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    await insertChannel(database, "discord-server-revoked-start");
+    await insertMember(database, "discord-server-revoked-start", "member-one", "manager");
+    await insertLoginIdentityAndSession(database, "member-one");
+    const authorization = authorizeModuleManagementMutation(
+      "discord-server-revoked-start",
+      { userId: "member-one", sessionId: "session-member-one" },
+      NOW,
+    );
+    await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
+      .bind("discord-server-revoked-start", "member-one").run();
+
+    await expect(beginDiscordServerOAuth(
+      environment(database as unknown as D1Database),
+      "discord-server-revoked-start",
+      "member-one",
+      `${ORIGIN}/auth/discord/server/callback`,
+      NOW,
+      authorization,
+    )).rejects.toThrow("current channel management access");
+    const rows = await database.prepare("SELECT count(*) AS count FROM discord_server_oauth_transactions")
+      .first<{ count: number }>();
+    expect(rows?.count).toBe(0);
   });
 });
 
@@ -146,6 +183,32 @@ describe("Discord server adapter", () => {
       .resolves.toMatchObject({ state: "could_not_check" });
   });
 
+  it.each([
+    { name: "Manage Roles", permissions: "268435456" },
+    { name: "Administrator", permissions: "8" },
+  ])("includes @everyone permissions when it grants $name to a bot with no explicit roles", async ({ permissions }) => {
+    const configured = environment({} as D1Database);
+    const everyonePermissions = botApi({
+      botRoleIds: [],
+      roles: [role(GUILD_ID, 0, permissions), role("990000000000000104", 5, "0", true)],
+    });
+
+    await expect(readDiscordGuildState(configured, GUILD_ID, { vip: null, moderator: null }, everyonePermissions.fetcher))
+      .resolves.toMatchObject({ state: "connected", botHighestRolePosition: 0 });
+  });
+
+  it("keeps an explicit bot role above @everyone in the hierarchy calculation", async () => {
+    const configured = environment({} as D1Database);
+    const explicitRole = "990000000000000104";
+    const everyonePermissions = botApi({
+      botRoleIds: [explicitRole],
+      roles: [role(GUILD_ID, 0, "268435456"), role(explicitRole, 5, "0", true)],
+    });
+
+    await expect(readDiscordGuildState(configured, GUILD_ID, { vip: null, moderator: null }, everyonePermissions.fetcher))
+      .resolves.toMatchObject({ state: "connected", botHighestRolePosition: 5 });
+  });
+
   it("excludes @everyone and managed roles from selectable mappings", () => {
     const roles = [role(GUILD_ID, 0), role("990000000000000106", 1), role("990000000000000107", 2, "0", true)];
     expect(discordSelectableRoles(roles, GUILD_ID).map(({ id }) => id)).toEqual(["990000000000000106"]);
@@ -158,15 +221,20 @@ describe("Discord server repository", () => {
     databases.push(database);
     await insertChannel(database, "discord-server-one");
     await insertChannel(database, "discord-server-two");
+    await insertMember(database, "discord-server-one", "member-one", "manager");
+    await insertMember(database, "discord-server-two", "member-one", "manager");
+    await insertLoginIdentityAndSession(database, "member-one");
+    const actor = { userId: "member-one", sessionId: "session-member-one" };
+    const authorization = (channelId: string) => authorizeModuleManagementMutation(channelId, actor, NOW);
     const first = await connectDiscordServer(database as unknown as D1Database, {
       channelId: "discord-server-one", guildId: GUILD_ID, connectedBy: "member-one", connectedAt: NOW,
-    });
+    }, authorization("discord-server-one"));
     expect(first).toBe("connected");
-    await saveDiscordRoleMappings(database as unknown as D1Database, "discord-server-one", { vip: "990000000000000102", moderator: null }, NOW);
+    await saveDiscordRoleMappings(database as unknown as D1Database, "discord-server-one", GUILD_ID, { vip: "990000000000000102", moderator: null }, NOW, authorization("discord-server-one"));
 
     const duplicate = await connectDiscordServer(database as unknown as D1Database, {
       channelId: "discord-server-two", guildId: GUILD_ID, connectedBy: "member-two", connectedAt: NOW,
-    });
+    }, authorization("discord-server-two"));
     expect(duplicate).toBe("already_connected");
     await expect(getDiscordServerConnection(database as unknown as D1Database, "discord-server-one"))
       .resolves.toMatchObject({ guildId: GUILD_ID, connectedBy: "member-one" });
@@ -174,7 +242,7 @@ describe("Discord server repository", () => {
     await expect(getDiscordRoleMappings(database as unknown as D1Database, "discord-server-one"))
       .resolves.toEqual({ vip: "990000000000000102", moderator: null });
 
-    await disconnectDiscordServer(database as unknown as D1Database, "discord-server-one");
+    await disconnectDiscordServer(database as unknown as D1Database, "discord-server-one", authorization("discord-server-one"));
     await expect(getDiscordServerConnection(database as unknown as D1Database, "discord-server-one")).resolves.toBeNull();
     await expect(getDiscordRoleMappings(database as unknown as D1Database, "discord-server-one"))
       .resolves.toEqual({ vip: null, moderator: null });
@@ -184,16 +252,20 @@ describe("Discord server repository", () => {
     const database = new TestD1Database();
     databases.push(database);
     await insertChannel(database, "discord-server-replacement");
+    await insertMember(database, "discord-server-replacement", "member-one", "manager");
+    await insertLoginIdentityAndSession(database, "member-one");
+    const actor = { userId: "member-one", sessionId: "session-member-one" };
+    const authorization = authorizeModuleManagementMutation("discord-server-replacement", actor, NOW);
     await connectDiscordServer(database as unknown as D1Database, {
       channelId: "discord-server-replacement", guildId: GUILD_ID, connectedBy: "member-one", connectedAt: NOW,
-    });
-    await saveDiscordRoleMappings(database as unknown as D1Database, "discord-server-replacement", {
+    }, authorization);
+    await saveDiscordRoleMappings(database as unknown as D1Database, "discord-server-replacement", GUILD_ID, {
       vip: "990000000000000102", moderator: null,
-    }, NOW);
+    }, NOW, authorization);
 
     await expect(connectDiscordServer(database as unknown as D1Database, {
       channelId: "discord-server-replacement", guildId: "990000000000000109", connectedBy: "member-one", connectedAt: NOW,
-    })).resolves.toBe("connected");
+    }, authorization)).resolves.toBe("connected");
     await expect(getDiscordServerConnection(database as unknown as D1Database, "discord-server-replacement"))
       .resolves.toMatchObject({ guildId: "990000000000000109" });
     await expect(getDiscordRoleMappings(database as unknown as D1Database, "discord-server-replacement"))

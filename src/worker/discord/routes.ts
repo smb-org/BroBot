@@ -27,6 +27,7 @@ import {
 } from "../auth/discord-server-oauth";
 import { getSessionFromRequest } from "../auth/session-access";
 import { getChannelMemberForChannel } from "../db/channel-members";
+import { authorizeModuleManagementMutation } from "../module-authorization";
 import {
   exchangeDiscordCode,
   exchangeDiscordServerCode,
@@ -177,16 +178,21 @@ discordRouter.get("/auth/discord/server/callback", async (context) => {
   try {
     const redirectUri = new URL("/auth/discord/server/callback", context.env.PUBLIC_ORIGIN).toString();
     const token = await exchangeDiscordServerCode(context.env, redirectUri, code);
+    const connectedAt = nowIso();
+    const authorization = authorizeModuleManagementMutation(transaction.channelId, {
+      userId: session.userId,
+      sessionId: session.sessionId,
+    }, connectedAt);
     const result = await connectDiscordServer(context.env.DB, {
       channelId: transaction.channelId,
       guildId: token.guildId,
-      connectedAt: nowIso(),
+      connectedAt,
       connectedBy: session.userId,
-    });
+    }, authorization);
     return context.redirect(serverDashboardLocation(
       context.env,
       transaction.channelId,
-      result === "connected" ? "connected" : "already-connected",
+      result === "connected" ? "connected" : result === "already_connected" ? "already-connected" : "error",
     ), 302);
   } catch {
     return context.redirect(serverDashboardLocation(context.env, transaction.channelId, "error"), 302);

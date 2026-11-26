@@ -35,13 +35,16 @@ const bodyFrom = async (request: Request): Promise<RequestBody | null> => {
   }
 };
 
-const parseMappings = (body: RequestBody | null): DiscordRoleMappings | null => {
-  if (body === null || Object.keys(body).some((key) => key !== "vip" && key !== "moderator")) return null;
+const parseMappings = (body: RequestBody | null): { guildId: string; mappings: DiscordRoleMappings } | null => {
+  if (body === null || Object.keys(body).some((key) => key !== "guildId" && key !== "vip" && key !== "moderator")) return null;
+  const guildId = body.guildId;
   const vip = body.vip;
   const moderator = body.moderator;
   const validRole = (value: unknown): value is string | null =>
     value === null || (typeof value === "string" && /^[0-9]{1,20}$/u.test(value));
-  return validRole(vip) && validRole(moderator) ? { vip, moderator } : null;
+  return typeof guildId === "string" && /^[0-9]{1,20}$/u.test(guildId) && validRole(vip) && validRole(moderator)
+    ? { guildId, mappings: { vip, moderator } }
+    : null;
 };
 
 const withNoStore = (context: RouteContext): void => { context.header("Cache-Control", "no-store"); };
@@ -92,19 +95,21 @@ discordServerRoutes.post("/server/oauth/start", async (context) => {
 discordServerRoutes.post("/server/mappings", async (context) => {
   withNoStore(context);
   if (!isManager(context)) return managerDenied(context);
-  const submitted = parseMappings(await bodyFrom(context.req.raw));
-  if (submitted === null) return context.json({ error: "discord_mapping_invalid" }, 400);
+  const parsed = parseMappings(await bodyFrom(context.req.raw));
+  if (parsed === null) return context.json({ error: "discord_mapping_invalid" }, 400);
+  const { guildId, mappings: submitted } = parsed;
   const channelId = channel(context);
   const connection = await getDiscordServerConnection(context.env.DB, channelId);
   if (connection === null) return context.json({ error: "discord_server_not_connected" }, 409);
+  if (connection.guildId !== guildId) return context.json({ error: "discord_server_changed" }, 409);
   const previous = await getDiscordRoleMappings(context.env.DB, channelId);
   const needsRoleList = (Object.keys(submitted) as Array<keyof DiscordRoleMappings>).some((rankType) =>
     submitted[rankType] !== null && submitted[rankType] !== previous[rankType]);
   if (needsRoleList) {
     if (!configured(context.env)) return context.json({ error: "discord_not_available" }, 503);
-    const current = await readDiscordGuildState(context.env, connection.guildId, previous);
+    const current = await readDiscordGuildState(context.env, guildId, previous);
     if (current.guild === null) return context.json({ error: "discord_roles_unavailable" }, 503);
-    const selectable = new Set(discordSelectableRoles(current.roles, connection.guildId).map(({ id }) => id));
+    const selectable = new Set(discordSelectableRoles(current.roles, guildId).map(({ id }) => id));
     for (const rankType of ["vip", "moderator"] as const) {
       const roleId = submitted[rankType];
       if (roleId !== null && roleId !== previous[rankType] && !selectable.has(roleId)) {
@@ -112,7 +117,18 @@ discordServerRoutes.post("/server/mappings", async (context) => {
       }
     }
   }
-  await saveDiscordRoleMappings(context.env.DB, channelId, submitted, new Date().toISOString());
+  const updatedAt = new Date().toISOString();
+  const authorization = context.get("authorizeManagementMutation")(channelId, context.get("session"), updatedAt);
+  const saved = await saveDiscordRoleMappings(
+    context.env.DB,
+    channelId,
+    guildId,
+    submitted,
+    updatedAt,
+    authorization,
+  );
+  if (saved === "connection_changed") return context.json({ error: "discord_server_changed" }, 409);
+  if (saved === "not_authorized") return managerDenied(context);
   return context.json({ mappings: submitted });
 });
 
@@ -124,7 +140,14 @@ discordServerRoutes.post("/server/disconnect", async (context) => {
   if (requestOrigin === undefined || requestOrigin !== new URL(context.env.PUBLIC_ORIGIN).origin) {
     return context.json({ error: "discord_origin_invalid" }, 403);
   }
-  await disconnectDiscordServer(context.env.DB, channel(context));
+  const disconnectedAt = new Date().toISOString();
+  const authorization = context.get("authorizeManagementMutation")(channel(context), context.get("session"), disconnectedAt);
+  const disconnected = await disconnectDiscordServer(
+    context.env.DB,
+    channel(context),
+    authorization,
+  );
+  if (!disconnected) return managerDenied(context);
   return context.body(null, 204);
 });
 

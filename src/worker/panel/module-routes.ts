@@ -414,7 +414,9 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
   context.set("beginDiscordServerOAuth", async (channelId, memberUserId) => {
     if (channelId !== context.req.param("channelId")) throw new Error("Discord server OAuth must use the authorized route channel.");
     const callbackUri = new URL("/auth/discord/server/callback", context.env.PUBLIC_ORIGIN).toString();
-    const transaction = await beginDiscordServerOAuth(context.env, channelId, memberUserId, callbackUri, new Date().toISOString());
+    const now = new Date().toISOString();
+    const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
+    const transaction = await beginDiscordServerOAuth(context.env, channelId, memberUserId, callbackUri, now, authorization);
     return { authorizationUrl: transaction.authorizationUrl, stateCookie: discordServerOAuthStateCookie(transaction.stateNonce) };
   });
   context.set("startChatVote", async (channelId, request) => {

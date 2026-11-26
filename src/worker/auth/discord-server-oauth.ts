@@ -1,4 +1,5 @@
 import { parseKeyRing, signJson, verifyJson } from "./crypto";
+import type { ModuleMutationAuthorization } from "../../modules/contract";
 import {
   discordServerAuthorizationUrl,
   type DiscordEnvironment,
@@ -47,6 +48,7 @@ export const beginDiscordServerOAuth = async (
   memberUserId: string,
   redirectUri: string,
   now: string,
+  authorization: ModuleMutationAuthorization,
 ): Promise<{ authorizationUrl: string; state: string; stateNonce: string; expiresAt: string }> => {
   if (!environment.DISCORD_CLIENT_ID || !environment.DISCORD_CLIENT_SECRET) {
     throw new Error("Discord server OAuth is not configured.");
@@ -55,14 +57,20 @@ export const beginDiscordServerOAuth = async (
   const nonce = randomString(24);
   const expiresAt = new Date(Date.parse(now) + STATE_TTL_MS).toISOString();
   const state = await signJson({ stateId, channelId, memberUserId, nonce, expiresAt }, parseKeyRing(environment.SESSION_COOKIE_KEYS));
-  await environment.DB.batch([
-    environment.DB.prepare("DELETE FROM discord_server_oauth_transactions WHERE expires_at <= ?").bind(now),
+  const results = await environment.DB.batch([
+    environment.DB.prepare(`SELECT 1 AS authorized WHERE 1 = 1 ${authorization.sql}`).bind(...authorization.values),
+    environment.DB.prepare(`DELETE FROM discord_server_oauth_transactions WHERE expires_at <= ? ${authorization.sql}`)
+      .bind(now, ...authorization.values),
     environment.DB.prepare(
       `INSERT INTO discord_server_oauth_transactions
         (state_id, channel_id, member_user_id, nonce_hash, expires_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind(stateId, channelId, memberUserId, await sha256(nonce), expiresAt),
+       SELECT ?, ?, ?, ?, ? WHERE 1 = 1 ${authorization.sql}
+       RETURNING state_id`,
+    ).bind(stateId, channelId, memberUserId, await sha256(nonce), expiresAt, ...authorization.values),
   ]);
+  if ((results[0]?.results.length ?? 0) === 0 || (results[2]?.results.length ?? 0) === 0) {
+    throw new Error("Discord server OAuth requires current channel management access.");
+  }
   return {
     authorizationUrl: discordServerAuthorizationUrl(environment, redirectUri, state),
     state,

@@ -42,5 +42,5 @@ export interface DiscordServerRead {
 export const readDiscordServer = (channelId: string, signal?: AbortSignal): Promise<DiscordServerRead> =>
   request<DiscordServerRead>(channelId, "server", "GET", undefined, signal);
 
-export const saveDiscordMappings = (channelId: string, mappings: DiscordRoleMappings): Promise<{ mappings: DiscordRoleMappings }> =>
-  request<{ mappings: DiscordRoleMappings }>(channelId, "server/mappings", "POST", mappings);
+export const saveDiscordMappings = (channelId: string, guildId: string, mappings: DiscordRoleMappings): Promise<{ mappings: DiscordRoleMappings }> =>
+  request<{ mappings: DiscordRoleMappings }>(channelId, "server/mappings", "POST", { guildId, ...mappings });

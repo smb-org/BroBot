@@ -246,12 +246,16 @@ export const readDiscordGuildState = async (
     if (roles === null) return fallback;
     const botRoleIds = memberValue.roles;
     const botRoles = roles.filter((role) => botRoleIds.includes(role.id));
-    const permissions = botRoles.reduce((total, role) => {
+    const everyoneRole = roles.find((role) => role.id === guildId);
+    const permissionRoles = everyoneRole === undefined ? botRoles : [...botRoles, everyoneRole];
+    const permissions = permissionRoles.reduce((total, role) => {
       try { return total | BigInt(role.permissions); } catch { return total; }
     }, 0n);
     const admin = (permissions & (1n << 3n)) !== 0n;
     const canManageRoles = (permissions & (1n << 28n)) !== 0n;
-    const botHighestRolePosition = botRoles.reduce((highest, role) => Math.max(highest, role.position), -1);
+    const botHighestRolePosition = botRoles
+      .filter((role) => role.id !== guildId)
+      .reduce((highest, role) => Math.max(highest, role.position), 0);
     const mappedRoleIds = [mappings.vip, mappings.moderator].filter((id): id is string => id !== null);
     const mappedRoleTooLow = mappedRoleIds.some((id) => {
       const mappedRole = roles.find((role) => role.id === id);

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 
-import { useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { refetchModuleQueryData, useDashboardQueryClient, useModuleQuery } from "../../../dashboard/data";
+import { dashboardTexts } from "../../../dashboard/locale";
 import {
   Button,
   ConfirmDialog,
@@ -29,11 +30,17 @@ let callbackStateConsumed = false;
  * canonicalizes the address bar before this lazy panel mounts. The navigation entry still
  * carries the URL the page was loaded with; the hint is shown once per page load.
  */
-const readCallbackState = (): string | null => {
+const readCallbackState = (channelId: string): string | null => {
   if (callbackStateConsumed) return null;
   const [navigation] = performance.getEntriesByType("navigation");
-  const search = navigation === undefined ? window.location.search : new URL(navigation.name).search;
-  return new URLSearchParams(search).get("discord");
+  const destination = navigation === undefined ? new URL(window.location.href) : new URL(navigation.name);
+  let destinationChannelId: string | null = null;
+  const match = /^\/channels\/([^/]+)\/modules\/discord$/u.exec(destination.pathname);
+  if (match?.[1] !== undefined) {
+    try { destinationChannelId = decodeURIComponent(match[1]); } catch { destinationChannelId = null; }
+  }
+  if (destinationChannelId !== channelId) return null;
+  return new URLSearchParams(destination.search).get("discord");
 };
 
 function DiscordServerPanel({ channelId, language = "de", canManage = false }: ModulePanelProperties): ReactElement {
@@ -45,13 +52,15 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>();
-  const [callbackState, setCallbackState] = useState<string | null>(readCallbackState);
+  const [callbackState, setCallbackState] = useState<string | null>(() => readCallbackState(channelId));
+  const navigationLabels = dashboardTexts(activeLanguage).module;
   const callbackMessages: Record<string, string> = {
     "already-connected": text.alreadyConnected,
     connected: text.serverConnected,
     error: text.callbackError,
     unavailable: text.serverNotAvailable,
     disconnected: text.disconnectSuccess,
+    "server-changed": text.mappingServerChanged,
   };
   const callbackMessage = callbackState === null ? null : callbackMessages[callbackState] ?? null;
   const draft = useDraft<DiscordRoleMappings>(query.data?.mappings ?? emptyMappings);
@@ -62,25 +71,39 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
     if (query.data !== undefined && !draftDirty) acceptDraft(query.data.mappings);
   }, [acceptDraft, draftDirty, query.data]);
   useEffect(() => registerDashboardNavigationGuard(guard.guardSwitch), [guard.guardSwitch]);
-  useEffect(() => { callbackStateConsumed = true; }, []);
+  useEffect(() => {
+    if (callbackState !== null) callbackStateConsumed = true;
+  }, [callbackState]);
 
   const refresh = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: ["channel", channelId, "module", "discord"] });
   };
 
   async function save(): Promise<string | null> {
-    if (!canManage || !draft.dirty || pending) return null;
+    const expectedGuildId = query.data?.connection?.guildId;
+    if (!canManage || !draft.dirty || pending || expectedGuildId === undefined) return null;
     setPending(true);
     setSaveError(undefined);
     setSaved(false);
     try {
-      const result = await saveDiscordMappings(channelId, draft.value);
+      const result = await saveDiscordMappings(channelId, expectedGuildId, draft.value);
       draft.accept(result.mappings);
       await refresh();
       setSaved(true);
       notify({ tone: "success", message: text.saved });
       return null;
-    } catch {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === "discord_server_changed") {
+        try {
+          await refetchModuleQueryData<DiscordServerRead>(queryClient, channelId, "discord", "server");
+        } catch {
+          // The conflict message remains useful even if the follow-up status read also fails.
+        }
+        setCallbackState("server-changed");
+        setSaveError(undefined);
+        setSaved(false);
+        return text.mappingServerChanged;
+      }
       setSaveError(text.saveError);
       return text.saveError;
     } finally {
@@ -215,6 +238,19 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
       pending={pending}
       onConfirm={() => { void disconnect(); }}
       onCancel={() => { setDisconnectOpen(false); }}
+    />
+    <ConfirmDialog
+      opened={guard.confirmOpen}
+      title={navigationLabels.unsavedChangesTitle}
+      description={navigationLabels.unsavedChangesDescription}
+      confirmLabel={navigationLabels.discardAndSwitch}
+      cancelLabel={navigationLabels.continueEditing}
+      alternative={{ label: navigationLabels.saveAndSwitch, onClick: () => { void guard.saveAndSwitch(); } }}
+      onConfirm={guard.discardAndSwitch}
+      onCancel={guard.continueEditing}
+      pending={guard.saving || pending}
+      {...(guard.saveError === undefined ? {} : { error: guard.saveError })}
+      danger
     />
   </div>;
 }

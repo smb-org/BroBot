@@ -5,10 +5,16 @@ import type { ModuleRouteEnvironment } from "../../src/modules/contract";
 import { discordServerRoutes } from "../../src/modules/discord/routes";
 import { beginDiscordServerOAuth, DISCORD_SERVER_OAUTH_STATE_COOKIE } from "../../src/worker/auth/discord-server-oauth";
 import { createSessionCookie } from "../../src/worker/auth/session";
-import { getDiscordServerConnection } from "../../src/modules/discord/repository";
+import {
+  connectDiscordServer,
+  getDiscordRoleMappings,
+  getDiscordServerConnection,
+  saveDiscordRoleMappings,
+} from "../../src/modules/discord/repository";
 import { discordRouter } from "../../src/worker/discord/routes";
 import { createCsrfToken } from "../../src/worker/auth/csrf";
 import { moduleRouter } from "../../src/worker/panel/module-routes";
+import { authorizeModuleManagementMutation } from "../../src/worker/module-authorization";
 import { insertChannel, insertLoginIdentityAndSession, insertMember, testKey } from "./fixtures";
 import { TestD1Database } from "./test-d1";
 
@@ -35,14 +41,25 @@ const memberSession = async (database: TestD1Database, userId: string): Promise<
   return await createSessionCookie({ sessionId: `session-${userId}` }, SESSION_KEYS, ENCRYPTION_KEYS);
 };
 
-const startServerOAuth = async (environment: Env, channelId: string, memberUserId: string) =>
-  await beginDiscordServerOAuth(
+const startServerOAuth = async (
+  environment: Env,
+  channelId: string,
+  memberUserId: string,
+  authorization = authorizeModuleManagementMutation(channelId, {
+    userId: memberUserId,
+    sessionId: `session-${memberUserId}`,
+  }, new Date().toISOString()),
+) => {
+  const now = new Date().toISOString();
+  return await beginDiscordServerOAuth(
     environment,
     channelId,
     memberUserId,
     `${ORIGIN}/auth/discord/server/callback`,
-    new Date().toISOString(),
+    now,
+    authorization,
   );
+};
 
 const tokenFetcher = (guildId = GUILD_ID) => vi.fn<typeof fetch>(() => Promise.resolve(Response.json({
   access_token: "temporary-bot-invite-token",
@@ -70,11 +87,12 @@ const callback = async (
   { headers: { Cookie: `${DISCORD_SERVER_OAUTH_STATE_COOKIE}=${nonce}; __Host-brobot_session=${sessionCookie}` } },
 ), environment);
 
-const protectedServerRoutes = (): Hono<ModuleRouteEnvironment> => {
+const protectedServerRoutes = (memberId = "discord-server-member"): Hono<ModuleRouteEnvironment> => {
   const app = new Hono<ModuleRouteEnvironment>();
   app.use("*", async (context, next) => {
     context.set("channelRole", "manager");
-    context.set("session", { userId: "discord-server-member", sessionId: "discord-server-session" });
+    context.set("session", { userId: memberId, sessionId: `session-${memberId}` });
+    context.set("authorizeManagementMutation", authorizeModuleManagementMutation);
     await next();
   });
   app.route("/channels/:channelId/discord", discordServerRoutes);
@@ -109,6 +127,38 @@ describe("Discord server callback", () => {
     expect(tables.results.map(({ name }) => name)).not.toContain("discord_server_tokens");
     const connectionColumns = await database.prepare("PRAGMA table_info(discord_guilds)").all<{ name: string }>();
     expect(connectionColumns.results.map(({ name }) => name)).toEqual(["channel_id", "guild_id", "connected_at", "connected_by"]);
+  });
+
+  it("does not connect when the member loses management rights during the token exchange", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    const channelId = "discord-server-demoted-during-callback";
+    const memberId = "discord-server-demoted-member";
+    await insertChannel(database, channelId);
+    await insertMember(database, channelId, memberId, "manager");
+    const sessionCookie = await memberSession(database, memberId);
+    const environment = createEnvironment(database);
+    const started = await startServerOAuth(environment, channelId, memberId);
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      await database.prepare("UPDATE channel_members SET role = 'operator' WHERE channel_id = ? AND user_id = ?")
+        .bind(channelId, memberId).run();
+      return Response.json({
+        access_token: "temporary-bot-invite-token",
+        token_type: "Bearer",
+        expires_in: 604800,
+        scope: "bot",
+        guild: { id: GUILD_ID, name: "Lantern Harbor", roles: [] },
+      });
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await callback(environment, started.state, started.stateNonce, sessionCookie);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toContain("discord=error");
+    expect(response.headers.get("location")).not.toContain("discord=connected");
+    await expect(getDiscordServerConnection(environment.DB, channelId)).resolves.toBeNull();
+    await expect(getDiscordRoleMappings(environment.DB, channelId)).resolves.toEqual({ vip: null, moderator: null });
   });
 
   it("rejects a second channel claiming the same guild without changing the first connection", async () => {
@@ -183,9 +233,17 @@ describe("Discord server callback", () => {
     if (callbackMember !== stateMember || memberChannel !== callbackChannel) {
       await insertMember(database, memberChannel, callbackMember, "manager");
     }
+    if (callbackMember !== stateMember) await insertLoginIdentityAndSession(database, stateMember);
     const sessionCookie = await memberSession(database, callbackMember);
     const environment = createEnvironment(database);
-    const started = await startServerOAuth(environment, callbackChannel, stateMember);
+    const started = await startServerOAuth(
+      environment,
+      callbackChannel,
+      stateMember,
+      memberChannel === callbackChannel
+        ? authorizeModuleManagementMutation(callbackChannel, { userId: stateMember, sessionId: `session-${stateMember}` }, new Date().toISOString())
+        : { sql: "AND 1 = 1", values: [] },
+    );
     const fetcher = tokenFetcher();
     vi.stubGlobal("fetch", fetcher);
 
@@ -216,6 +274,8 @@ describe("Discord server callback", () => {
     databases.push(database);
     const channelId = "discord-server-disconnect";
     await insertChannel(database, channelId);
+    await insertMember(database, channelId, "discord-server-member", "manager");
+    await insertLoginIdentityAndSession(database, "discord-server-member");
     const environment = createEnvironment(database);
     await database.prepare(
       "INSERT INTO discord_guilds (channel_id, guild_id, connected_at, connected_by) VALUES (?, ?, ?, ?)",
@@ -238,5 +298,60 @@ describe("Discord server callback", () => {
     await expect(getDiscordServerConnection(environment.DB, channelId)).resolves.toBeNull();
     const mappings = await database.prepare("SELECT count(*) AS count FROM discord_role_mappings WHERE channel_id = ?").bind(channelId).first<{ count: number }>();
     expect(mappings?.count).toBe(0);
+  });
+
+  it("rejects mappings fetched for an old guild when the channel reconnects during the fetch", async () => {
+    const database = new TestD1Database();
+    databases.push(database);
+    const channelId = "discord-server-reconnect-during-mapping-save";
+    const memberId = "discord-server-mapping-member";
+    const guildA = "990000000000000111";
+    const guildB = "990000000000000112";
+    const selectableRole = "990000000000000113";
+    const botRole = "990000000000000114";
+    const oldRole = "990000000000000116";
+    await insertChannel(database, channelId);
+    await insertMember(database, channelId, memberId, "manager");
+    await insertLoginIdentityAndSession(database, memberId);
+    const environment = createEnvironment(database);
+    const actor = { userId: memberId, sessionId: `session-${memberId}` };
+    await connectDiscordServer(environment.DB, {
+      channelId, guildId: guildA, connectedAt: new Date().toISOString(), connectedBy: memberId,
+    }, authorizeModuleManagementMutation(channelId, actor, new Date().toISOString()));
+    await saveDiscordRoleMappings(environment.DB, channelId, guildA, {
+      vip: oldRole, moderator: null,
+    }, new Date().toISOString(), authorizeModuleManagementMutation(channelId, actor, new Date().toISOString()));
+
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (url.endsWith("/users/@me")) return Response.json({ id: "990000000000000115", username: "bot_fixture" });
+      if (url.endsWith(`/guilds/${guildA}`)) return Response.json({ id: guildA, name: "Guild A" });
+      if (url.endsWith(`/guilds/${guildA}/roles`)) {
+        await connectDiscordServer(environment.DB, {
+          channelId, guildId: guildB, connectedAt: new Date().toISOString(), connectedBy: memberId,
+        }, authorizeModuleManagementMutation(channelId, actor, new Date().toISOString()));
+        return Response.json([
+          { id: guildA, name: "@everyone", position: 0, permissions: "0", managed: false },
+          { id: selectableRole, name: "VIP", position: 1, permissions: "0", managed: false },
+          { id: botRole, name: "BroBot", position: 5, permissions: "268435456", managed: true },
+        ]);
+      }
+      if (url.endsWith(`/guilds/${guildA}/members/990000000000000115`)) {
+        return Response.json({ user: { id: "990000000000000115" }, roles: [botRole] });
+      }
+      return Response.json({ message: "Unexpected Discord request", code: 0 }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await protectedServerRoutes(memberId).fetch(new Request(`${ORIGIN}/channels/${channelId}/discord/server/mappings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ guildId: guildA, vip: selectableRole, moderator: null }),
+    }), environment);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "discord_server_changed" });
+    await expect(getDiscordServerConnection(environment.DB, channelId)).resolves.toMatchObject({ guildId: guildB });
+    await expect(getDiscordRoleMappings(environment.DB, channelId)).resolves.toEqual({ vip: null, moderator: null });
   });
 });
