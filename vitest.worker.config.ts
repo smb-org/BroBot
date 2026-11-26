@@ -28,6 +28,7 @@ export default defineConfig({
           SPOTIFY_CLIENT_SECRET: "test-spotify-client-secret",
           DISCORD_CLIENT_ID: "test-discord-client-id",
           DISCORD_CLIENT_SECRET: "test-discord-client-secret",
+          DISCORD_BOT_TOKEN: "test-discord-bot-token",
           BETREIBER_USER_IDS: "[]",
         },
       },

@@ -13,6 +13,7 @@ const REQUIRED_SECRET_NAMES = [
   "SPOTIFY_CLIENT_SECRET",
   "DISCORD_CLIENT_ID",
   "DISCORD_CLIENT_SECRET",
+  "DISCORD_BOT_TOKEN",
 ] as const;
 
 // Wrangler tracks the applied filenames in d1_migrations. This means the
@@ -23,8 +24,8 @@ const REQUIRED_SECRET_NAMES = [
 // update it and /healthz reports a freshly set-up database as broken (503)
 // even though everything is fine. `tests/unit/schema-baseline.test.ts`
 // therefore pins it to the last file in `migrations/`.
-export const LATEST_SCHEMA_MIGRATION = "0102_discord_account_linking.sql";
-export const LATEST_SCHEMA_TABLE = "discord_links";
+export const LATEST_SCHEMA_MIGRATION = "0103_discord_server_connections.sql";
+export const LATEST_SCHEMA_TABLE = "discord_guilds";
 
 const REQUIRED_BINDING_NAMES = ["DB", "CHANNEL", "ASSETS", "CF_VERSION_METADATA"] as const;
 

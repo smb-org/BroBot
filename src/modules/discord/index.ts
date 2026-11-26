@@ -2,6 +2,7 @@ import type { DryRunEntryReport } from "../../contracts/dry-run";
 import type { BotModule, ModuleDryRunContext, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { DISCORD_COMMAND, DISCORD_LINK_PAGE_PATH, DISCORD_MODULE_ID, discordSettingsSchema } from "./contracts";
 import { discordCatalog } from "./locale";
+import { discordServerRoutes } from "./routes";
 
 const settingsSchema = discordSettingsSchema;
 
@@ -64,4 +65,6 @@ export const discordModule: BotModule<typeof settingsSchema> = {
   eventSubTypes: ["channel.chat.message"],
   dryRunChatMessage: dryRunDiscordMessage,
   handleEvent: (event, context) => Promise.resolve(processDiscordMessage(event, context)),
+  routes: discordServerRoutes,
+  panel: () => import("./panel"),
 };

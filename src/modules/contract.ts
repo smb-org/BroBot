@@ -2676,6 +2676,8 @@ export interface ModuleRouteVariables {
   startChatVote?: (channelId: string, request: ModuleChatVoteStartRequest) => Promise<ModuleChatVoteStartResult>;
   /** Opens a signed Spotify OAuth transaction for the authorized channel; the host owns the signing keys. */
   beginSpotifyOAuth?: (channelId: string, memberUserId: string) => Promise<{ authorizationUrl: string; stateCookie: string }>;
+  /** Opens a signed Discord bot-invite OAuth transaction for the authorized channel; the host owns the signing keys. */
+  beginDiscordServerOAuth?: (channelId: string, memberUserId: string) => Promise<{ authorizationUrl: string; stateCookie: string }>;
   prepareModuleAudit: PrepareModuleAudit;
   writeModuleAudit: WriteModuleAudit;
   listChannelVariables: ModuleChannelVariableAccess["listChannelVariables"];

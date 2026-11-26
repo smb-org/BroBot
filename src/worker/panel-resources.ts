@@ -48,6 +48,7 @@ export const PANEL_RESOURCE_NOTIFIER_COVERAGE = {
     "/auth/bot/login",
     "/auth/discord",
     "/auth/discord/callback",
+    "/auth/discord/server/callback",
     "/api/discord/link",
     "/discord/link",
     "/ws/channels/:channelId",
