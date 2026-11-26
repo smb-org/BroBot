@@ -1,5 +1,5 @@
 .discord-server-panel {
-  --discord-server-message-height: 2rem;
+  --discord-server-message-height: 1.25rem;
 }
 
 .discord-server-panel__status,
@@ -7,7 +7,7 @@
   display: flex;
   align-items: center;
   gap: var(--s2);
-  min-height: 2rem;
+  min-height: var(--s6);
   color: var(--text);
 }
 
@@ -16,16 +16,22 @@
 }
 
 .discord-server-panel__guild {
-  margin-block-start: var(--s3);
   overflow-wrap: anywhere;
 }
 
-.discord-server-panel__message,
-.discord-server-panel__warning {
+.discord-server-panel__message {
   min-height: var(--discord-server-message-height);
-  padding-block: var(--s1);
   color: var(--text-2);
   font-size: 13px;
+  line-height: 1.25rem;
+}
+
+.discord-server-panel__warning {
+  min-height: var(--discord-server-message-height);
+  margin-block-start: var(--s1);
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.25rem;
 }
 
 .discord-server-panel__actions {

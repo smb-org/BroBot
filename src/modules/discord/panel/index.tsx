@@ -182,6 +182,7 @@ function DiscordServerPanel({ channelId, language = "de", canManage = false }: M
               options={roleOptions(rankType)}
               placeholder={text.selectRole}
               disabled={!canManage || pending}
+              compact
             />
             <div className="discord-server-panel__warning" role="status">{roleTooHigh ? text.roleTooHigh : " "}</div>
           </div>;
