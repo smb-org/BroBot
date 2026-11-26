@@ -2,6 +2,7 @@ import type { DryRunEntryReport } from "../../contracts/dry-run";
 import type { BotModule, ModuleDryRunContext, ModuleEvent, ModuleExecutionContext, ModuleResult } from "../contract";
 import { DISCORD_COMMAND, DISCORD_LINK_PAGE_PATH, DISCORD_MODULE_ID, discordSettingsSchema } from "./contracts";
 import { discordCatalog } from "./locale";
+import { discordServerRoutes } from "./routes";
 
 const settingsSchema = discordSettingsSchema;
 
@@ -51,7 +52,7 @@ export const processDiscordMessage = (
 export const discordModule: BotModule<typeof settingsSchema> = {
   id: DISCORD_MODULE_ID,
   navigationCategory: "admin",
-  panelIcon: { paths: ["M16 8a6 6 0 0 1-8 5.66", "M8 16a6 6 0 0 1 8-5.66", "M7 10h.01", "M17 14h.01", "M12 12h.01"] },
+  panelIcon: { paths: ["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z", "M8 9h8", "M8 13h5"] },
   defaultEnabled: false,
   settingsSchema,
   defaultSettings: {},
@@ -64,4 +65,6 @@ export const discordModule: BotModule<typeof settingsSchema> = {
   eventSubTypes: ["channel.chat.message"],
   dryRunChatMessage: dryRunDiscordMessage,
   handleEvent: (event, context) => Promise.resolve(processDiscordMessage(event, context)),
+  routes: discordServerRoutes,
+  panel: () => import("./panel"),
 };

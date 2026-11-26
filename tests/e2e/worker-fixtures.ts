@@ -43,6 +43,7 @@ export const e2eWorkerEnvironment: Record<string, string> = {
   SPOTIFY_CLIENT_SECRET: "e2e-spotify-client-secret",
   DISCORD_CLIENT_ID: "e2e-discord-client-id",
   DISCORD_CLIENT_SECRET: "e2e-discord-client-secret",
+  DISCORD_BOT_TOKEN: "e2e-discord-bot-token",
   DISCORD_API_BASE: `http://127.0.0.1:${e2eDiscordMockPort}/api/v10`,
   SPOTIFY_API_BASE: `http://127.0.0.1:${e2eSpotifyMockPort}/v1`,
   SPOTIFY_ACCOUNTS_BASE: `http://127.0.0.1:${e2eSpotifyMockPort}`,
@@ -207,6 +208,27 @@ export const seedE2ESongRequests = (channelId: string, settings: Readonly<Record
   });
   if (result.status !== 0) throw new Error(`Song request e2e setup failed.\n${result.stdout}\n${result.stderr}`);
   return overlay;
+};
+
+/** Seeds a manager channel with the Discord module available on its module page. */
+export const seedE2EDiscordServer = (channelId: string): void => {
+  seedE2EOverlay(channelId);
+  const createdAt = new Date().toISOString();
+  const sql = `INSERT INTO channel_modules (channel_id, module_id, enabled, settings, revision)
+    VALUES ('${channelId}', 'discord', 1, '{}', 1);
+    INSERT OR REPLACE INTO bot_identity
+      (id, user_id, login, scopes_json, access_token_ciphertext, refresh_token_ciphertext, expires_at, created_at, updated_at)
+      VALUES (1, 'bot-e2e', 'brobot-e2e', '[]', 'test-access', 'test-refresh', '2099-01-01T00:00:00.000Z', '${createdAt}', '${createdAt}');
+    INSERT OR REPLACE INTO bot_identity_status (id, status, reason, updated_at)
+      VALUES (1, 'connected', NULL, '${createdAt}');`;
+  const result = spawnSync("./node_modules/.bin/wrangler", [
+    "--cwd", "dist/brobot_local", "--config", "wrangler.json", "d1", "execute", "DB", "--local", "--yes",
+    "--persist-to", e2eWorkerPersist, "--command", sql,
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, CI: "1", ...e2eWorkerEnvironment },
+  });
+  if (result.status !== 0) throw new Error(`Discord server e2e setup failed.\n${result.stdout}\n${result.stderr}`);
 };
 
 /** Adds a page of fictional requests to a seeded channel for request-list E2E coverage. */

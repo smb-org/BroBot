@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 
+import { canManage } from "../../contracts/values";
 import { createCsrfToken, verifyCsrfToken } from "../auth/csrf";
 import { readCookieValue } from "../auth/session";
 import {
@@ -18,8 +19,28 @@ import {
   serializeDiscordViewerSession,
   verifyDiscordOAuthState,
 } from "../auth/discord-oauth";
-import { exchangeDiscordCode, fetchDiscordConnections, fetchDiscordUser, verifiedTwitchConnection } from "../../modules/discord/adapters/discord";
-import { getDiscordLink, removeDiscordLink, replaceDiscordLink } from "../../modules/discord/repository";
+import {
+  clearDiscordServerOAuthStateCookie,
+  consumeDiscordServerOAuthTransaction,
+  DISCORD_SERVER_OAUTH_STATE_COOKIE,
+  verifyDiscordServerOAuthState,
+} from "../auth/discord-server-oauth";
+import { getSessionFromRequest } from "../auth/session-access";
+import { getChannelMemberForChannel } from "../db/channel-members";
+import { authorizeModuleManagementMutation } from "../module-authorization";
+import {
+  exchangeDiscordCode,
+  exchangeDiscordServerCode,
+  fetchDiscordConnections,
+  fetchDiscordUser,
+  verifiedTwitchConnection,
+} from "../../modules/discord/adapters/discord";
+import {
+  connectDiscordServer,
+  getDiscordLink,
+  removeDiscordLink,
+  replaceDiscordLink,
+} from "../../modules/discord/repository";
 import { DISCORD_LINK_PAGE_PATH } from "../../modules/discord/contracts";
 
 export const discordRouter = new Hono<{ Bindings: Env }>();
@@ -33,8 +54,15 @@ const pageLocation = (environment: Env, state?: string): string => {
 const isConfigured = (environment: Env): boolean =>
   typeof environment.DISCORD_CLIENT_ID === "string" && environment.DISCORD_CLIENT_ID.length > 0 &&
   typeof environment.DISCORD_CLIENT_SECRET === "string" && environment.DISCORD_CLIENT_SECRET.length > 0;
+const isServerConfigured = (environment: Env): boolean => isConfigured(environment) &&
+  typeof environment.DISCORD_BOT_TOKEN === "string" && environment.DISCORD_BOT_TOKEN.length > 0;
 const withNoStore = (context: { header: (name: string, value: string) => unknown }): void => {
   context.header("Cache-Control", "no-store");
+};
+const serverDashboardLocation = (environment: Env, channelId: string, state?: string): string => {
+  const url = new URL(`/channels/${encodeURIComponent(channelId)}/modules/discord`, environment.PUBLIC_ORIGIN);
+  if (state !== undefined) url.searchParams.set("discord", state);
+  return url.toString();
 };
 
 discordRouter.get("/auth/discord", async (context) => {
@@ -109,6 +137,65 @@ discordRouter.get("/auth/discord/callback", async (context) => {
   } catch {
     clearViewerCookies();
     return context.redirect(pageLocation(context.env, "error"), 302);
+  }
+});
+
+discordRouter.get("/auth/discord/server/callback", async (context) => {
+  withNoStore(context);
+  const clearStateCookie = (): void => {
+    context.header("Set-Cookie", clearDiscordServerOAuthStateCookie());
+  };
+  const serializedState = context.req.query("state");
+  const now = nowIso();
+  const cookieNonce = readCookieValue(context.req.raw.headers.get("Cookie"), DISCORD_SERVER_OAUTH_STATE_COOKIE);
+  if (serializedState === undefined) {
+    clearStateCookie();
+    return context.json({ error: "discord_server_oauth_state_missing" }, 400);
+  }
+  const state = await verifyDiscordServerOAuthState(serializedState, cookieNonce, context.env.SESSION_COOKIE_KEYS, now);
+  clearStateCookie();
+  if (state === null) return context.json({ error: "discord_server_oauth_state_invalid" }, 400);
+  const transaction = await consumeDiscordServerOAuthTransaction(context.env.DB, state, now);
+  if (transaction === null) return context.json({ error: "discord_server_oauth_transaction_invalid" }, 400);
+  if (context.req.query("error") !== undefined) {
+    return context.redirect(serverDashboardLocation(context.env, transaction.channelId, "error"), 302);
+  }
+  const code = context.req.query("code");
+  if (code === undefined || code.length === 0) return context.json({ error: "discord_server_oauth_code_missing" }, 400);
+
+  const session = await getSessionFromRequest(context.req.raw, context.env);
+  if (session === null || session.userId !== transaction.memberUserId) {
+    return context.json({ error: "discord_server_oauth_member_mismatch" }, 403);
+  }
+  const member = await getChannelMemberForChannel(context.env.DB, transaction.channelId, session.userId);
+  if (member === null || !canManage(member.role)) {
+    return context.json({ error: "discord_server_oauth_channel_access_denied" }, 403);
+  }
+  if (!isServerConfigured(context.env)) {
+    return context.redirect(serverDashboardLocation(context.env, transaction.channelId, "unavailable"), 302);
+  }
+
+  try {
+    const redirectUri = new URL("/auth/discord/server/callback", context.env.PUBLIC_ORIGIN).toString();
+    const token = await exchangeDiscordServerCode(context.env, redirectUri, code);
+    const connectedAt = nowIso();
+    const authorization = authorizeModuleManagementMutation(transaction.channelId, {
+      userId: session.userId,
+      sessionId: session.sessionId,
+    }, connectedAt);
+    const result = await connectDiscordServer(context.env.DB, {
+      channelId: transaction.channelId,
+      guildId: token.guildId,
+      connectedAt,
+      connectedBy: session.userId,
+    }, authorization);
+    return context.redirect(serverDashboardLocation(
+      context.env,
+      transaction.channelId,
+      result === "connected" ? "connected" : result === "already_connected" ? "already-connected" : "error",
+    ), 302);
+  } catch {
+    return context.redirect(serverDashboardLocation(context.env, transaction.channelId, "error"), 302);
   }
 });
 

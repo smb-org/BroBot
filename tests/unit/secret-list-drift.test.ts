@@ -31,6 +31,7 @@ describe("Secret name drift", () => {
       "SPOTIFY_CLIENT_SECRET",
       "DISCORD_CLIENT_ID",
       "DISCORD_CLIENT_SECRET",
+      "DISCORD_BOT_TOKEN",
     ];
     const config = {
       secrets: { required: [...required] },
@@ -181,6 +182,7 @@ describe("Secret name drift", () => {
       "SPOTIFY_CLIENT_SECRET=client-secret",
       "DISCORD_CLIENT_ID=client-id",
       "DISCORD_CLIENT_SECRET=client-secret",
+      "DISCORD_BOT_TOKEN=bot-token",
       "",
     ].join("\n"));
 

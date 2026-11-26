@@ -63,6 +63,7 @@ import { listChannelVips } from "../twitch/vips";
 import { createModuleSecretAccess } from "../module-secrets";
 import { createModuleActionExecutionContext } from "../module-action-context";
 import { beginSpotifyOAuth, spotifyOAuthStateCookie } from "../auth/spotify-oauth";
+import { beginDiscordServerOAuth, discordServerOAuthStateCookie } from "../auth/discord-server-oauth";
 import { liftModerationBan } from "../moderation";
 import { fetchTwitchUsersById } from "../twitch/user-resolution";
 import { readTextBlockGraphRevision, textBlockWriteGuard } from "../../modules/contracts/text-block-write-guard";
@@ -83,7 +84,7 @@ interface ModuleRouteEnvironment {
     | "tempVips"
     | "botCredentials" | "getUserEmotes" | "getGlobalEmotes"
     | "readChannelBlockedTerms"
-    | "runModuleAlarm" | "scheduleModuleAlarm" | "scheduleModuleAlarmIfEarlier" | "startChatVote" | "beginSpotifyOAuth"
+    | "runModuleAlarm" | "scheduleModuleAlarm" | "scheduleModuleAlarmIfEarlier" | "startChatVote" | "beginSpotifyOAuth" | "beginDiscordServerOAuth"
     | "listTextBlockConditions"
     | "listEventTimeSources" | "resolveEventTimes"
     | "notifyScheduleInputsChanged" | "reconcileTimerSchedules" | "validateTemplateContentMutation"
@@ -409,6 +410,14 @@ moduleRouter.use("/api/channels/:channelId/*", (context, next) => {
     const redirectUri = `${context.env.PUBLIC_ORIGIN.replace(/\/+$/u, "")}/auth/spotify/callback`;
     const transaction = await beginSpotifyOAuth(context.env.DB, context.env, channelId, memberUserId, redirectUri, new Date().toISOString());
     return { authorizationUrl: transaction.authorizationUrl, stateCookie: spotifyOAuthStateCookie(transaction.stateNonce) };
+  });
+  context.set("beginDiscordServerOAuth", async (channelId, memberUserId) => {
+    if (channelId !== context.req.param("channelId")) throw new Error("Discord server OAuth must use the authorized route channel.");
+    const callbackUri = new URL("/auth/discord/server/callback", context.env.PUBLIC_ORIGIN).toString();
+    const now = new Date().toISOString();
+    const authorization = context.get("authorizeManagementMutation")(channelId, context.get("actor"), now);
+    const transaction = await beginDiscordServerOAuth(context.env, channelId, memberUserId, callbackUri, now, authorization);
+    return { authorizationUrl: transaction.authorizationUrl, stateCookie: discordServerOAuthStateCookie(transaction.stateNonce) };
   });
   context.set("startChatVote", async (channelId, request) => {
     if (channelId !== context.req.param("channelId")) throw new Error("Chat vote access must use the authorized route channel.");

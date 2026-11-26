@@ -136,8 +136,9 @@ immer einen Zugang zu einem gespeicherten Overlay.
 | `OVERLAY_TOKEN_PEPPER` | Pepper für die Hashes widerrufbarer Overlay-Tokens | 32 Byte base64url |
 | `SPOTIFY_CLIENT_ID` | Client-ID der zentralen Spotify-Development-App | Zeichenkette aus der Spotify Developer Console |
 | `SPOTIFY_CLIENT_SECRET` | Client-Secret derselben Spotify-App für den Authorization-Code-Austausch | vertrauliche Zeichenkette aus der Spotify Developer Console |
-| `DISCORD_CLIENT_ID` | Client-ID der zentralen Discord-App für die Konto-Verknüpfung (Redirect-URI `${PUBLIC_ORIGIN}/auth/discord/callback`) | Zeichenkette aus dem Discord Developer Portal |
-| `DISCORD_CLIENT_SECRET` | Client-Secret derselben Discord-App für den Authorization-Code-Austausch | vertrauliche Zeichenkette aus dem Discord Developer Portal |
+| `DISCORD_CLIENT_ID` | Client-ID der zentralen Discord-App für Konto-Verknüpfung und Server-Invite (`/auth/discord/callback` und `/auth/discord/server/callback`) | Zeichenkette aus dem Discord Developer Portal |
+| `DISCORD_CLIENT_SECRET` | Client-Secret derselben Discord-App für beide Authorization-Code-Austausche | vertrauliche Zeichenkette aus dem Discord Developer Portal |
+| `DISCORD_BOT_TOKEN` | Bot-Token zum Lesen der verbundenen Server und Rollen | vertraulicher Bot-Token aus dem Discord Developer Portal |
 
 Für lokale Läufe stehen die Namen mit nicht funktionsfähigen Werten in
 `.dev.vars.example`; lokal werden sie in `.dev.vars` gesetzt. Für Staging und
@@ -150,11 +151,14 @@ pnpm exec wrangler secret put SPOTIFY_CLIENT_ID --env production
 pnpm exec wrangler secret put SPOTIFY_CLIENT_SECRET --env production
 pnpm exec wrangler secret put DISCORD_CLIENT_ID --env staging
 pnpm exec wrangler secret put DISCORD_CLIENT_SECRET --env staging
+pnpm exec wrangler secret put DISCORD_BOT_TOKEN --env staging
 pnpm exec wrangler secret put DISCORD_CLIENT_ID --env production
 pnpm exec wrangler secret put DISCORD_CLIENT_SECRET --env production
+pnpm exec wrangler secret put DISCORD_BOT_TOKEN --env production
 ```
 
-Diese Worker-Secrets enthalten nur die App-Zugangsdaten. Streamer-Access- und
+`DISCORD_BOT_TOKEN` bleibt als Worker-Secret hinterlegt und wird ausschließlich
+für Discord-Server- und Rollenabfragen verwendet. Spotify-Streamer-Access- und
 Refresh-Tokens liegen je Kanal im verschlüsselten Modul-Secret `song_requests`;
 sie gehören nicht in die Wrangler-Konfiguration. Die Erneuerung erfolgt nur im
 ChannelObject; Worker-Routen lesen den Access-Token über dessen RPC.
@@ -234,7 +238,8 @@ for environment in staging production; do
     SPOTIFY_CLIENT_ID \
     SPOTIFY_CLIENT_SECRET \
     DISCORD_CLIENT_ID \
-    DISCORD_CLIENT_SECRET; do
+    DISCORD_CLIENT_SECRET \
+    DISCORD_BOT_TOKEN; do
     pnpm exec wrangler secret put "$name" --env "$environment"
   done
 done

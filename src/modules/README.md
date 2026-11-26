@@ -1648,6 +1648,22 @@ in `discord_links`; Discord-Zugriffstoken werden nicht gespeichert. Die Tabelle
 ist absichtlich nicht kanalgebunden, damit die späteren Rollenabgleiche dieselbe
 Kontoverknüpfung kanalübergreifend verwenden können.
 
+Die Dashboard-Seite des Moduls verbindet zusätzlich je Kanal einen Discord-
+Server über einen separaten Bot-Invite-OAuth-Callback. `discord_guilds` hält
+Server-ID, Kanal, Verbindungszeitpunkt und verbindendes Mitglied fest;
+`discord_role_mappings` speichert VIP- und Moderator-Rollen als Discord-Roh-IDs.
+Die Bot-Invite-Tokens werden verworfen. Der Bot-Token ist ein Worker-Secret und
+wird nur für aktuelle Abfragen von Server, Rollen und Bot-Mitgliedschaft
+verwendet. Ein Server kann nur einem Kanal gehören. Eine neue Verbindung mit
+einem anderen Server ersetzt die bisherige Verbindung dieses Kanals und löscht
+deren Zuordnungen. Beim Trennen werden Verbindung und Zuordnungen gelöscht.
+
+Die Rollen werden erst mit „Speichern“ übernommen. `@everyone` und verwaltete
+Rollen stehen nicht zur Auswahl; zu hohe Rollen bleiben speicherbar und werden
+mit einem Hinweis markiert. Subscriber-Rollen kommen aus Discords eigener
+Twitch-Integration. `disconnectDiscordServer` ist der Eintrittspunkt für die
+Rollenbereinigung, die ein späterer Abgleich vor dem Löschen einfügen kann.
+
 Für spätere Discord-Rollenaktionen liefert `replaceDiscordLink` die bei einer
 Neuverknüpfung ersetzten Konten zurück. `removeDiscordLink` liefert die beim
 Lösen der Verknüpfung entfernte Zeile zurück. Beide Rückgabewerte sind die
@@ -1662,6 +1678,8 @@ können.
   Discord- und Twitch-Identität; OAuth-Zustand ist browsergebunden und einmalig.
 - [x] **Sprachen und öffentliche Seite:** Copy liegt in `de` und `en`; die
   eigenständige Seite fordert keine Dashboard-Sitzung.
+- [x] **Server und Rangrollen:** Serververbindungen und explizite VIP-/Moderator-
+  Zuordnungen sind kanalgebunden; der Dashboard-Status wird live geprüft.
 - [x] **Folgearbeiten:** `replaceDiscordLink` und `removeDiscordLink` geben die
   betroffenen Linkzeilen für die spätere Rollenbereinigung zurück.
 
